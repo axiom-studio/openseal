@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -44,34 +43,17 @@ const (
 // ActionCall, so a retry or a crash-resumed execution converges on the same
 // Agent.
 type AgentBuilderActionDispatcher struct {
-	store     KernelStore
-	agents    *kernelagent.Registry
-	teams     *kernelteam.Registry
-	catalog   *skill.Catalog
-	provision AgentProvisioner
-	host      AgentBuilderHost
-	fallback  ActionDispatcher
+	*AgentInstaller
+	fallback ActionDispatcher
 }
 
 // NewAgentBuilderActionDispatcher wraps fallback, which receives every other
-// action. host may be nil: model choices are then refused at proposal time
-// and nothing runs after creation.
-func NewAgentBuilderActionDispatcher(
-	store KernelStore,
-	agents *kernelagent.Registry,
-	teams *kernelteam.Registry,
-	catalog *skill.Catalog,
-	provision AgentProvisioner,
-	host AgentBuilderHost,
-	fallback ActionDispatcher,
-) (*AgentBuilderActionDispatcher, error) {
-	if store == nil || agents == nil || teams == nil || catalog == nil || provision == nil {
-		return nil, errors.New("agent builder dispatcher requires the kernel store, the Agent and Team registries, the Skill catalog and a provisioner")
+// action. Every dispatcher of an Engine shares its one installer.
+func NewAgentBuilderActionDispatcher(installer *AgentInstaller, fallback ActionDispatcher) (*AgentBuilderActionDispatcher, error) {
+	if installer == nil {
+		return nil, errors.New("agent builder dispatcher requires the agent installer")
 	}
-	return &AgentBuilderActionDispatcher{
-		store: store, agents: agents, teams: teams, catalog: catalog,
-		provision: provision, host: host, fallback: fallback,
-	}, nil
+	return &AgentBuilderActionDispatcher{AgentInstaller: installer, fallback: fallback}, nil
 }
 
 func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
@@ -81,7 +63,7 @@ func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input
 		}
 		return d.fallback.DispatchAction(ctx, input)
 	}
-	if d == nil || d.store == nil || input.Call == nil || input.Bound.Binding == nil {
+	if d == nil || d.AgentInstaller == nil || input.Call == nil || input.Bound.Binding == nil {
 		return nil, errors.New("agent builder dispatcher is not configured")
 	}
 	run, err := d.store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
@@ -238,7 +220,6 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input Ac
 		return nil, err
 	}
 	scope := call.Scope
-	reference := agentBuilderScope(scope)
 	var args agentCreateArguments
 	if err := decodeAgentBuilderArguments(input.Arguments, &args); err != nil {
 		return nil, err
@@ -248,54 +229,36 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input Ac
 	if err := validateAgentProfileText(args.agentProfileArguments); err != nil {
 		return nil, err
 	}
-	definitionID := agentBuilderResourceID("agent-definition", scope, call.ID)
-	deploymentID := agentBuilderResourceID("agent-deployment", scope, call.ID)
-	// The name may have been taken while the card waited. This call's own
-	// deployment is excluded so a replay passes.
-	if err := ensureAgentNameAvailable(ctx, d.agents, d.teams, scope, args.DisplayName, deploymentID); err != nil {
-		return nil, fmt.Errorf("%w. Propose create_agent again with another name", err)
-	}
-	space, err := d.createSpace(ctx, scope, args.SpaceID)
-	if err != nil {
-		return nil, err
-	}
 	grants, err := resolveAgentSkillGrants(ctx, d.catalog, args.Skills)
 	if err != nil {
 		return nil, err
 	}
 	approver := approval.DecisionBy.ID
-	definition, err := d.registerAgentBuilderDefinition(ctx, definitionID, args.agentProfileArguments, agentGrantsMaximumRisk("", grants), call.ID, approver)
+	built, err := d.build(ctx, agentBuildInput{
+		Scope:        scope,
+		DefinitionID: agentBuilderResourceID("agent-definition", scope, call.ID),
+		DeploymentID: agentBuilderResourceID("agent-deployment", scope, call.ID),
+		Profile:      args.agentProfileArguments,
+		SpaceID:      args.SpaceID,
+		Grants:       grants,
+		MaximumRisk:  agentGrantsMaximumRisk("", grants),
+		Provenance:   workforce.DefinitionProvenance{Source: agentBuilderProvenanceSource, Reference: call.ID, CreatedBy: approver},
+		Approver:     approver,
+		CallRef:      call.ID,
+		RunID:        run.ID,
+		Reason:       agentBuilderCreateReason,
+	})
+	if errors.Is(err, ErrAgentNameTaken) {
+		return nil, fmt.Errorf("%w. Propose create_agent again with another name", err)
+	}
+	var retry agentBuildRetryable
+	if errors.As(err, &retry) {
+		return nil, fmt.Errorf("%w; propose create_agent again", err)
+	}
 	if err != nil {
 		return nil, err
 	}
-	// The model is the one external step that can fail, so it is prepared
-	// before the deployment exists: a failure leaves no Agent holding the
-	// reviewed name.
-	if err := d.prepareAgentModel(ctx, AgentModelRequest{
-		Scope: reference, DeploymentID: deploymentID, Model: args.Model, OwnerUserID: approver, ActionCallID: call.ID,
-	}); err != nil {
-		return nil, err
-	}
-	deployment, activation, replayed, err := d.createAgentDeployment(ctx, reference, deploymentID, definition, approver)
-	if err != nil {
-		return nil, err
-	}
-	actor := skill.BindingActor{Type: approval.DecisionBy.Type, ID: approver}
-	bindings, conversation, err := d.finishCreatedAgent(ctx, scope, space, deployment, grants, actor)
-	if err != nil {
-		// The failed call ends here, so the half-built Agent is retired and
-		// its name is free for the next proposal.
-		if retireErr := d.retireFailedAgent(ctx, reference, deploymentID, approver); retireErr != nil {
-			return nil, errors.Join(err, fmt.Errorf("retire the unfinished Agent: %w", retireErr))
-		}
-		return nil, fmt.Errorf("%w. The unfinished Agent was removed; propose create_agent again", err)
-	}
-	if d.host != nil {
-		d.host.AfterAgentCreated(ctx, AgentCreated{
-			Scope: scope, DeploymentID: deploymentID, DisplayName: definition.DisplayName, Purpose: definition.Purpose,
-			ActionCallID: call.ID, RunID: run.ID, BillingUserID: approver,
-		})
-	}
+	definition, deploymentID, space := built.definition, built.deployment.ID, built.space
 	connections := make([]map[string]interface{}, 0, len(args.Connections))
 	for _, connection := range args.Connections {
 		connections = append(connections, map[string]interface{}{
@@ -312,213 +275,12 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input Ac
 		// The reviewed profile is already in the conversation; the full
 		// definition and deployment would repeat it and put the definition id
 		// first, which the model mistakes for the Agent's id.
-		"agentId": deploymentID, "deploymentId": deploymentID, "displayName": definition.DisplayName, "replayed": replayed,
-		"activation": activation,
-		"bindings": bindings, "space": map[string]interface{}{"id": space.ID, "name": space.Name},
-		"connections": connections, "chat": map[string]interface{}{"conversationId": conversation.ID},
+		"agentId": deploymentID, "deploymentId": deploymentID, "displayName": definition.DisplayName, "replayed": built.replayed,
+		"activation": built.activation,
+		"bindings":   built.bindings, "space": map[string]interface{}{"id": space.ID, "name": space.Name},
+		"connections": connections, "chat": map[string]interface{}{"conversationId": built.conversation.ID},
 		"message": message,
 	})
-}
-
-// finishCreatedAgent places the committed Agent in the reviewed space, binds
-// the grants and returns its control conversation.
-func (d *AgentBuilderActionDispatcher) finishCreatedAgent(ctx context.Context, scope Scope, space *Space, deployment *kernelagent.AgentDeployment, grants []resolvedAgentSkillGrant, actor skill.BindingActor) ([]interface{}, *Conversation, error) {
-	if err := d.placeAgentInSpace(ctx, scope, space, deployment.ID); err != nil {
-		return nil, nil, err
-	}
-	bindings := make([]interface{}, 0, len(grants))
-	for _, grant := range grants {
-		binding, err := d.grantAgentSkill(ctx, scope, deployment.ID, grant.grant, actor, agentBuilderCreateReason)
-		if err != nil {
-			return nil, nil, err
-		}
-		bindings = append(bindings, secretSafeBindingPreview(binding))
-	}
-	conversation, err := d.provision.EnsureAgentControlConversation(ctx, deployment)
-	if err != nil {
-		return nil, nil, err
-	}
-	return bindings, conversation, nil
-}
-
-// retireFailedAgent retires the deployment a failed create_agent committed.
-func (d *AgentBuilderActionDispatcher) retireFailedAgent(ctx context.Context, reference capability.ScopeReference, deploymentID, approver string) error {
-	current, err := d.agents.GetDeployment(ctx, reference, deploymentID)
-	if err != nil {
-		return err
-	}
-	if current.RolloutStatus == kernelagent.RolloutRetired {
-		return nil
-	}
-	retired := *current
-	retired.RolloutStatus = kernelagent.RolloutRetired
-	_, _, err = d.agents.UpdateDeployment(ctx, &retired, current.Revision, "user", approver, agentBuilderCreateFailedReason)
-	return err
-}
-
-// createSpace resolves the reviewed space at execution. A space deleted
-// while the card waited fails the call.
-func (d *AgentBuilderActionDispatcher) createSpace(ctx context.Context, scope Scope, spaceID string) (*Space, error) {
-	if spaceID == "" {
-		return nil, errors.New("create_agent requires a space")
-	}
-	if spaceID == DefaultSpaceID(scope) {
-		return &Space{ID: spaceID, Scope: scope, Name: DefaultSpaceName, IsDefault: true}, nil
-	}
-	spaces, err := d.provision.ListSpaces(ctx, scope)
-	if err != nil {
-		return nil, err
-	}
-	for _, space := range spaces {
-		if space != nil && space.ID == spaceID {
-			return space, nil
-		}
-	}
-	return nil, fmt.Errorf("space %q no longer exists; propose create_agent again", spaceID)
-}
-
-// registerAgentBuilderDefinition registers the reviewed profile as version
-// 1.0.0 of definitionID, with maximumRisk the ceiling its reviewed grants
-// need. A definition this call already registered counts as success.
-func (d *AgentBuilderActionDispatcher) registerAgentBuilderDefinition(ctx context.Context, definitionID string, profile agentProfileArguments, maximumRisk capability.RiskLevel, callID, approver string) (*kernelagent.AgentDefinition, error) {
-	existing, err := d.agents.GetDefinition(ctx, definitionID, agentBuilderDefinitionVersion)
-	if err == nil && existing != nil {
-		if existing.Provenance.Source != agentBuilderProvenanceSource || existing.Provenance.Reference != callID {
-			return nil, fmt.Errorf("agent definition %s already exists for another change", definitionID)
-		}
-		return existing, nil
-	}
-	if err != nil && !errors.Is(err, kernelagent.ErrDefinitionNotFound) {
-		return nil, err
-	}
-	definition := &kernelagent.AgentDefinition{
-		ID: definitionID, Version: agentBuilderDefinitionVersion,
-		DisplayName: profile.DisplayName, Purpose: profile.Purpose, SystemPrompt: profile.SystemPrompt,
-		Personality: profile.Personality, OperatingPrinciples: append([]string(nil), profile.OperatingPrinciples...),
-		Authority:  kernelagent.AuthorityPolicy{MaximumRisk: maximumRisk, MaxConcurrentRuns: 1},
-		Amendments: workforce.AmendmentPolicy{AgentMayPropose: true},
-		Provenance: workforce.DefinitionProvenance{Source: agentBuilderProvenanceSource, Reference: callID, CreatedBy: approver},
-	}
-	registered, err := d.agents.RegisterDefinition(ctx, definition)
-	if err != nil {
-		// A concurrent attempt of the same call may have registered it.
-		if existing, getErr := d.agents.GetDefinition(ctx, definitionID, agentBuilderDefinitionVersion); getErr == nil && existing != nil &&
-			existing.Provenance.Source == agentBuilderProvenanceSource && existing.Provenance.Reference == callID {
-			return existing, nil
-		}
-		return nil, err
-	}
-	return registered, nil
-}
-
-// createAgentDeployment creates the deployment, or returns the one an
-// earlier attempt of the call created (replayed true).
-func (d *AgentBuilderActionDispatcher) createAgentDeployment(ctx context.Context, reference capability.ScopeReference, deploymentID string, definition *kernelagent.AgentDefinition, approver string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, bool, error) {
-	existing, err := d.agents.GetDeployment(ctx, reference, deploymentID)
-	if err == nil && existing != nil {
-		if existing.RolloutStatus == kernelagent.RolloutRetired {
-			return nil, nil, false, errors.New("this create_agent failed and its Agent was removed; propose create_agent again")
-		}
-		if existing.DefinitionID != definition.ID {
-			return nil, nil, false, fmt.Errorf("agent deployment %s already exists for another definition", deploymentID)
-		}
-		activation, err := d.firstAgentActivation(ctx, reference, deploymentID)
-		return existing, activation, true, err
-	}
-	if err != nil && !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
-		return nil, nil, false, err
-	}
-	deployment, activation, err := d.provision.CreateAgentDeployment(ctx, &kernelagent.AgentDeployment{
-		ID: deploymentID, Scope: reference, DefinitionID: definition.ID, ActiveVersion: definition.Version,
-		RolloutStatus: kernelagent.RolloutActive, Environment: "default",
-		Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 1,
-	}, "user", approver, agentBuilderCreateReason)
-	if err != nil {
-		if deployment == nil {
-			return nil, nil, false, err
-		}
-		// The deployment committed; its control conversation is ensured
-		// again below.
-	}
-	return deployment, activation, false, nil
-}
-
-func (d *AgentBuilderActionDispatcher) firstAgentActivation(ctx context.Context, reference capability.ScopeReference, deploymentID string) (*kernelagent.DefinitionActivation, error) {
-	activations, err := d.agents.ListActivations(ctx, reference, deploymentID)
-	if err != nil {
-		return nil, err
-	}
-	if len(activations) == 0 {
-		return nil, nil
-	}
-	first := activations[0]
-	for _, activation := range activations[1:] {
-		if activation.CreatedAt.Before(first.CreatedAt) {
-			first = activation
-		}
-	}
-	return &first, nil
-}
-
-// placeAgentInSpace adds the Agent to the reviewed space. Outside Default it
-// then leaves Default, where the deployment create placed it.
-func (d *AgentBuilderActionDispatcher) placeAgentInSpace(ctx context.Context, scope Scope, space *Space, deploymentID string) error {
-	if _, _, err := d.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
-		Scope: scope, SpaceID: space.ID, Type: SpaceMemberAgent, MemberID: deploymentID,
-	}); err != nil {
-		return err
-	}
-	defaultSpace := DefaultSpaceID(scope)
-	if space.ID == defaultSpace {
-		return nil
-	}
-	if err := d.provision.DeleteSpaceMember(ctx, scope, defaultSpace, SpaceMemberAgent, deploymentID); err != nil && !errors.Is(err, ErrSpaceNotFound) {
-		return err
-	}
-	return nil
-}
-
-// grantAgentSkill binds one grant under its builder binding id. A binding
-// that already matches the grant (an earlier attempt) is returned as is.
-func (d *AgentBuilderActionDispatcher) grantAgentSkill(ctx context.Context, scope Scope, deploymentID string, grant AgentSkillGrant, actor skill.BindingActor, reason string) (*skill.Binding, error) {
-	reference := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
-	bindingID := agentBuilderBindingID(deploymentID, grant.SkillID)
-	args := skillBindingUpsertArguments{
-		BindingID: bindingID, SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, SourceIdentity: grant.SourceIdentity,
-		AllowedActions: grant.AllowedActions, EnablePrompt: grant.EnablePrompt, MaximumRisk: grant.MaximumRisk, Config: grant.Config,
-	}
-	current, err := d.catalog.GetBinding(ctx, reference, deploymentID, bindingID)
-	if err != nil && !errors.Is(err, skill.ErrBindingNotFound) {
-		return nil, err
-	}
-	candidate := skillBindingCandidate(reference, deploymentID, args, current)
-	if current != nil && !current.Disabled && sameManagedSkillBinding(current, candidate) {
-		return current, nil
-	}
-	var expected int64
-	if current != nil {
-		expected = current.Revision
-	}
-	binding, err := d.catalog.UpsertBinding(ctx, skill.UpsertBindingRequest{
-		Binding: candidate, ExpectedRevision: expected, Actor: actor, Reason: reason,
-	})
-	if errors.Is(err, skill.ErrBindingRevisionConflict) {
-		latest, getErr := d.catalog.GetBinding(ctx, reference, deploymentID, bindingID)
-		if getErr == nil && latest != nil && !latest.Disabled && sameManagedSkillBinding(latest, candidate) {
-			return latest, nil
-		}
-	}
-	return binding, err
-}
-
-func (d *AgentBuilderActionDispatcher) prepareAgentModel(ctx context.Context, request AgentModelRequest) error {
-	if d.host == nil {
-		return nil
-	}
-	if err := d.host.PrepareAgentModel(ctx, request); err != nil {
-		return fmt.Errorf("prepare the Agent's model: %w", err)
-	}
-	return nil
 }
 
 func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
@@ -622,7 +384,7 @@ func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input Ac
 	actor := skill.BindingActor{Type: approval.DecisionBy.Type, ID: approval.DecisionBy.ID}
 	bindings := make([]interface{}, 0, len(grants))
 	for _, grant := range grants {
-		binding, err := d.grantAgentSkill(ctx, scope, deployment.ID, grant.grant, actor, agentBuilderUpdateReason)
+		binding, err := d.grantAgentSkill(ctx, scope, deployment.ID, grant.grant, grant.credentials, actor, agentBuilderUpdateReason)
 		if err != nil {
 			return nil, err
 		}
@@ -675,53 +437,4 @@ func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input Ac
 		result["activation"] = activation
 	}
 	return agentBuilderJSONMap(result)
-}
-
-// activateApprovedAgentVersion registers candidate (unless an earlier
-// attempt did) and activates it as the approving person.
-func (d *AgentBuilderActionDispatcher) activateApprovedAgentVersion(ctx context.Context, reference capability.ScopeReference, deployment *kernelagent.AgentDeployment, candidate *kernelagent.AgentDefinition, approver string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
-	if _, err := d.agents.GetDefinition(ctx, candidate.ID, candidate.Version); errors.Is(err, kernelagent.ErrDefinitionNotFound) {
-		if _, err := d.agents.RegisterDefinition(ctx, candidate); err != nil {
-			return nil, nil, err
-		}
-	} else if err != nil {
-		return nil, nil, err
-	}
-	return d.agents.ActivateDefinition(ctx, reference, deployment.ID, candidate.Version, deployment.Revision, "user", approver, agentBuilderUpdateReason)
-}
-
-func (d *AgentBuilderActionDispatcher) agentActivationTo(ctx context.Context, reference capability.ScopeReference, deploymentID, version string) (*kernelagent.DefinitionActivation, error) {
-	activations, err := d.agents.ListActivations(ctx, reference, deploymentID)
-	if err != nil {
-		return nil, err
-	}
-	for index := len(activations) - 1; index >= 0; index-- {
-		if activations[index].ToVersion == version {
-			activation := activations[index]
-			return &activation, nil
-		}
-	}
-	return nil, nil
-}
-
-// disableAgentSkill disables one binding; an already disabled binding is done.
-func (d *AgentBuilderActionDispatcher) disableAgentSkill(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string, actor skill.BindingActor) error {
-	if strings.HasPrefix(bindingID, "bundled:") {
-		return fmt.Errorf("binding %s is built in and cannot be removed", bindingID)
-	}
-	current, err := d.catalog.GetBinding(ctx, scope, deploymentID, bindingID)
-	if err != nil && !errors.Is(err, skill.ErrBindingNotFound) {
-		return err
-	}
-	if current == nil || current.Disabled {
-		return nil
-	}
-	_, err = d.catalog.DisableBinding(ctx, skill.DisableBindingRequest{
-		Scope: scope, DeploymentID: deploymentID, BindingID: bindingID, ExpectedRevision: current.Revision,
-		Actor: actor, Reason: agentBuilderUpdateReason,
-	})
-	if errors.Is(err, skill.ErrBindingAlreadyDisabled) {
-		return nil
-	}
-	return err
 }

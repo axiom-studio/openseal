@@ -177,6 +177,9 @@ func (v *AgentBuilderActionValidator) runSpaceID(ctx context.Context, run *Agent
 type resolvedAgentSkillGrant struct {
 	grant      AgentSkillGrant
 	definition *skill.Definition
+	// credentials are an account skill's credential references (person
+	// refs); nil for a skill that needs no account.
+	credentials map[string]skill.CredentialReference
 }
 
 type resolvedAgentConnection struct {
@@ -399,6 +402,15 @@ func agentDefinitionPolicyFixed(definition *kernelagent.AgentDefinition) bool {
 	return !definition.Amendments.AgentMayPropose && len(definition.Amendments.AllowedFields) == 0
 }
 
+// agentNameTakenError is ErrAgentNameTaken with the wanted name.
+type agentNameTakenError struct{ name string }
+
+func (e agentNameTakenError) Error() string {
+	return fmt.Sprintf("agent name %q is already used by another Agent or Team; choose a different name", e.name)
+}
+
+func (e agentNameTakenError) Is(target error) bool { return target == ErrAgentNameTaken }
+
 // ensureAgentNameAvailable refuses a name any non-retired Agent or Team in the
 // scope already uses, including ones the requester cannot read. The error
 // says only that the name is taken.
@@ -410,7 +422,7 @@ func ensureAgentNameAvailable(
 	name, exceptDeploymentID string,
 ) error {
 	wanted := normalizedAgentName(name)
-	taken := fmt.Errorf("agent name %q is already used by another Agent or Team; choose a different name", strings.TrimSpace(name))
+	taken := agentNameTakenError{name: strings.TrimSpace(name)}
 	reference := agentBuilderScope(scope)
 	deployments, err := agents.ListDeployments(ctx, kernelagent.AgentDeploymentFilter{
 		Scope: reference, ExcludeStatuses: []kernelagent.RolloutStatus{kernelagent.RolloutRetired},

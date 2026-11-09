@@ -2218,6 +2218,7 @@ type Engine struct {
 	actionValidators              []runtime.ActionProposalValidator
 	agentManagementActions        bool
 	agentBuilderHost              runtime.AgentBuilderHost
+	agentInstaller                *runtime.AgentInstaller
 	agentBuilderCutoverHost       runtime.AgentBuilderCutoverHost
 	runbookManagementActions      bool
 	runManagementActions          bool
