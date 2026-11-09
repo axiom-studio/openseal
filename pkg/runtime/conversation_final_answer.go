@@ -91,13 +91,13 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 	base := map[string]interface{}{"conversationId": conversation.ID, "triggerMessageId": trigger.ID}
 	content := strings.TrimSpace(answer.Answer)
 	guard := d.Guard
-	// 9 (first part). The Run and its governed calls' artifacts.
+	// 9 (first part). The Run and the files its answer hands over.
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
 	artifacts, err := runActionArtifactReferences(ctx, h.sessions, h.actions, run)
 	if err != nil {
 		return FinalDeliveryResult{}, err
 	}
-	references = append(references, artifacts...)
+	references = append(references, handedOverArtifacts(artifacts, answer.Output)...)
 
 	// 3. Failure explanation: always a visible text reply, never a visual.
 	if runExplainingFailure(run) {

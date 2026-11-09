@@ -340,7 +340,9 @@ func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 		f.governed("export", ActionCallStatusSucceeded, map[string]interface{}{"artifactRefs": []interface{}{ref("report-pdf", 1), ref("report-csv", 2)}})
 		f.governed("again", ActionCallStatusSucceeded, map[string]interface{}{"artifactRefs": []interface{}{ref("report-pdf", 1), ref(strings.Repeat("x", 257), 1), ref("zero", 0)}})
 		f.governed("failed", ActionCallStatusFailed, map[string]interface{}{"artifactRefs": []interface{}{ref("failed-file", 1)}})
-		answer, _ := f.finalEntry("Here is the quarterly report.", nil)
+		// The answer hands over the files it names; the Run's others stay in the Library.
+		answer, _ := f.finalEntry("Here is the quarterly report.", map[string]interface{}{
+			finalOutputSummaryKey: "Here is the quarterly report.", finalOutputFilesKey: []interface{}{"report-pdf", "report-csv", "failed-file"}})
 		result := f.mustDeliver(answer, FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 {

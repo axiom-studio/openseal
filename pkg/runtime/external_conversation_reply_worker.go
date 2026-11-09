@@ -300,10 +300,11 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		if !ok {
 			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", ErrInvalidExternalConversation)
 		}
-		artifacts, refErr := runActionArtifactReferences(ctx, w.store, w.store, run)
+		saved, refErr := runActionArtifactReferences(ctx, w.store, w.store, run)
 		if refErr != nil {
 			return nil, refErr
 		}
+		artifacts := handedOverArtifacts(saved, run.Output)
 		current, getErr := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
 		if getErr != nil {
 			return nil, getErr

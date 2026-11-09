@@ -42,8 +42,11 @@ const (
 // Keys of FinalAnswer.Output written by this file. Delivery (CONV-08 /
 // runOutputFinalHandler) reads them through the FinalAnswer accessors below.
 const (
-	finalOutputSummaryKey         = "summary"
-	finalOutputReportKey          = "report"
+	finalOutputSummaryKey = "summary"
+	finalOutputReportKey  = "report"
+	// finalOutputFilesKey lists the ids of the files saved in this Run that
+	// the answer hands over; only those go out with it.
+	finalOutputFilesKey           = "files"
 	finalOutputSilentKey          = "silent"
 	finalOutputBroadcastKey       = "broadcastToChannel"
 	finalOutputReactedKey         = "reacted"
@@ -61,6 +64,7 @@ type finalAnswerArgs struct {
 	BroadcastToChannel bool                 `json:"broadcastToChannel,omitempty"`
 	Report             string               `json:"report,omitempty"`
 	Silent             bool                 `json:"silent,omitempty"`
+	Files              []string             `json:"files,omitempty"`
 }
 
 // finalAnswerKernelFields are the property names the kernel owns, whether or
@@ -68,7 +72,7 @@ type finalAnswerArgs struct {
 // never offered or routed to the publisher.
 var finalAnswerKernelFields = map[string]bool{
 	"answer": true, "appliedSkillRefs": true, "visual": true, "broadcastToChannel": true,
-	"report": true, "silent": true,
+	"report": true, "silent": true, "files": true,
 }
 
 // finalAnswerCall is the decoded call: the strict kernel arguments, which
@@ -153,6 +157,8 @@ func finalFieldOffered(field string, a ControlAuthority) bool {
 		return mode == FinalModeDefault
 	case "silent":
 		return mode == FinalModeSpoken
+	case "files":
+		return mode == FinalModeDefault
 	}
 	return false
 }
@@ -198,6 +204,13 @@ func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
 		properties["report"] = map[string]interface{}{
 			"type":        "string",
 			"description": "The complete human-readable deliverable when it is longer than the answer; shown instead of answer.",
+		}
+	}
+	if finalFieldOffered("files", a) {
+		properties["files"] = map[string]interface{}{
+			"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string"},
+			"description": "Ids of the files this run saved that this answer hands over: the finished result, such as the PDF or the final image. " +
+				"Leave out files made only to build another one (drafts, panels, intermediate images); they stay in the Library and are not shown.",
 		}
 	}
 	if finalFieldOffered("silent", a) {
@@ -496,6 +509,9 @@ func (d *finalAnswerDraft) output(mode FinalAnswerMode) map[string]interface{} {
 	}
 	if d.Args.BroadcastToChannel {
 		output[finalOutputBroadcastKey] = true
+	}
+	if files := handedOverFileIDs(d.Args.Files); len(files) > 0 {
+		output[finalOutputFilesKey] = files
 	}
 	if d.Visual != nil {
 		output[finalOutputVisualKey] = d.Visual
@@ -897,4 +913,42 @@ func cloneVisual(visual *presentation.Visual) *presentation.Visual {
 		return &copy
 	}
 	return &cloned
+}
+
+// handedOverFileIDs trims and deduplicates the answer's file ids.
+func handedOverFileIDs(ids []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// handedOverArtifacts keeps the Run's saved files the final output hands over
+// (its "files"), in the Run's order. A Run's other files stay in the Library.
+func handedOverArtifacts(saved []ConversationReference, output map[string]interface{}) []ConversationReference {
+	wanted := map[string]bool{}
+	switch files := output[finalOutputFilesKey].(type) {
+	case []string:
+		for _, id := range files {
+			wanted[id] = true
+		}
+	case []interface{}:
+		for _, id := range files {
+			if text, ok := id.(string); ok {
+				wanted[strings.TrimSpace(text)] = true
+			}
+		}
+	}
+	var out []ConversationReference
+	for _, ref := range saved {
+		if wanted[ref.ID] {
+			out = append(out, ref)
+		}
+	}
+	return out
 }

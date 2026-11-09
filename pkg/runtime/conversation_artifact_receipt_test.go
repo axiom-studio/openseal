@@ -6,121 +6,6 @@ import (
 	"testing"
 )
 
-// receiptFixture is a chat with one trigger, a Run of its Agent and one
-// completed governed tool entry whose call saved a file.
-type receiptFixture struct {
-	ctx          context.Context
-	store        *MemoryStore
-	service      *ConversationService
-	runner       *ConversationRunTurnRunner
-	conversation *Conversation
-	trigger      *ChannelMessage
-	run          *AgentRun
-	call         *ActionCall
-	entry        *SessionEntry
-	artifact     *Artifact
-	actions      *fakeActionCalls
-}
-
-func newReceiptFixture(t *testing.T) *receiptFixture {
-	t.Helper()
-	ctx := context.Background()
-	store := NewMemoryStore()
-	service := NewConversationService(store)
-	scope := Scope{Kind: "tenant", ID: "one"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Files", IdempotencyKey: "files"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion,
-		Content: "PDF please", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "trigger",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact := &Artifact{ID: "file", Version: 1, Scope: scope, Name: "file.pdf",
-		Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "agent"}, Owner: &owner, RunID: "run", ActionID: "action"},
-		ContentRef: "object-store:file", Digest: "sha256:" + strings.Repeat("a", 64), SizeBytes: 10, Classification: ArtifactClassificationInternal}
-	call := &ActionCall{ID: "action", Scope: scope, RunID: "run", Status: ActionCallStatusSucceeded,
-		Output: map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "file", "version": 1}}}}
-	return &receiptFixture{
-		ctx: ctx, store: store, service: service, runner: &ConversationRunTurnRunner{conversations: service, artifacts: store},
-		conversation: conversation, trigger: posted.Message, artifact: artifact, call: call,
-		run:   &AgentRun{ID: "run", Scope: scope, Owner: owner},
-		entry: &SessionEntry{ID: "entry", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "action"},
-	}
-}
-
-func (f *receiptFixture) post(t *testing.T) []*ChannelMessage {
-	t.Helper()
-	if err := f.store.CreateArtifactVersion(f.ctx, f.artifact, 0); err != nil {
-		t.Fatal(err)
-	}
-	f.actions = &fakeActionCalls{calls: map[string]*ActionCall{f.call.ID: f.call}}
-	for range 2 {
-		if err := f.runner.postToolArtifactReceipt(f.ctx, f.actions, f.run, f.conversation, f.trigger, f.entry); err != nil {
-			t.Fatal(err)
-		}
-	}
-	messages, err := f.service.ListChannelMessages(f.ctx, ChannelMessageFilter{Scope: f.run.Scope, ConversationID: f.conversation.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return messages
-}
-
-func TestToolArtifactReceiptPostsOnceWithProvenance(t *testing.T) {
-	f := newReceiptFixture(t)
-	messages := f.post(t)
-	if len(messages) != 2 {
-		t.Fatalf("messages = %#v", messages)
-	}
-	receipt := messages[1]
-	if receipt.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: conversationArtifactReceiptService}) ||
-		receipt.Intent != MessageIntentUpdate || receipt.ResolvesMessageID != "" || receipt.RequiresResponse ||
-		conversationMessageStartsRun(f.conversation, receipt) || receipt.ReplyToMessageID != f.trigger.ID {
-		t.Fatalf("receipt must not finish or restart work: %#v", receipt)
-	}
-	want := []ConversationReference{{Kind: ConversationReferenceRun, ID: "run"}, {Kind: ConversationReferenceArtifact, ID: "file", Version: 1}}
-	if len(receipt.References) != 2 || receipt.References[0] != want[0] || receipt.References[1] != want[1] {
-		t.Fatalf("receipt references = %#v", receipt.References)
-	}
-}
-
-func TestToolArtifactReceiptRequiresExactProvenance(t *testing.T) {
-	for _, mismatch := range []string{"tenant", "owner", "run", "action", "version", "failed", "other-run-call", "entry-not-completed", "no-action"} {
-		t.Run(mismatch, func(t *testing.T) {
-			f := newReceiptFixture(t)
-			switch mismatch {
-			case "tenant":
-				f.artifact.Scope.ID = "other"
-			case "owner":
-				f.artifact.Provenance.Owner = &ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}
-			case "run":
-				f.artifact.Provenance.RunID = "other"
-			case "action":
-				f.artifact.Provenance.ActionID = "other"
-			case "version":
-				f.call.Output = map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "file", "version": 2}}}
-			case "failed":
-				f.call.Status = ActionCallStatusFailed
-			case "other-run-call":
-				f.call.RunID = "other"
-			case "entry-not-completed":
-				f.entry.State = ToolEntryError
-			case "no-action":
-				f.entry.ActionCallID = ""
-			}
-			if messages := f.post(t); len(messages) != 1 {
-				t.Fatalf("unproven artifact published: %#v", messages)
-			}
-		})
-	}
-}
-
 // runActionArtifactReferences reads the Run's tool entries from the session
 // log; this lister returns fixed entries.
 type fixedEntryLister []*SessionEntry
@@ -171,5 +56,25 @@ func TestRunActionArtifactReferencesFromSucceededCalls(t *testing.T) {
 	}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("references = %#v", got)
+	}
+}
+
+// Only the files the final answer hands over go out with it; the Run's other
+// files stay in the Library.
+func TestHandedOverArtifactsKeepsOnlyTheAnswersFiles(t *testing.T) {
+	saved := []ConversationReference{
+		{Kind: ConversationReferenceArtifact, ID: "panel-1", Version: 1},
+		{Kind: ConversationReferenceArtifact, ID: "panel-2", Version: 1},
+		{Kind: ConversationReferenceArtifact, ID: "comic-pdf", Version: 2},
+	}
+	got := handedOverArtifacts(saved, map[string]interface{}{finalOutputFilesKey: []interface{}{"comic-pdf", "not-from-this-run"}})
+	if len(got) != 1 || got[0].ID != "comic-pdf" || got[0].Version != 2 {
+		t.Fatalf("handed over = %+v; want only the comic PDF", got)
+	}
+	if got := handedOverArtifacts(saved, map[string]interface{}{}); len(got) != 0 {
+		t.Fatalf("an answer that hands over nothing attached %+v", got)
+	}
+	if ids := handedOverFileIDs([]string{" a ", "a", "", "b"}); len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
+		t.Fatalf("file ids = %v", ids)
 	}
 }

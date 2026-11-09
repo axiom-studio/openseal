@@ -105,7 +105,7 @@ func schemaProperties(t *testing.T, schema map[string]interface{}) (map[string]i
 func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 	keys := func(m map[string]interface{}) []string {
 		var out []string
-		for _, field := range []string{"answer", "appliedSkillRefs", "visual", "broadcastToChannel", "report", "silent", "evidenceClaims"} {
+		for _, field := range []string{"answer", "appliedSkillRefs", "visual", "broadcastToChannel", "report", "silent", "evidenceClaims", "files"} {
 			if _, ok := m[field]; ok {
 				out = append(out, field)
 			}
@@ -120,9 +120,9 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 		answerSpoken  bool
 		wantSkillEnum []string
 	}{
-		{"default", ControlAuthority{}, []string{"answer", "report"}, []string{"answer"}, false, nil},
+		{"default", ControlAuthority{}, []string{"answer", "report", "files"}, []string{"answer"}, false, nil},
 		{"chat with skills", ControlAuthority{SkillPromptRefs: []string{"s1", "s2"}, VisualAllowed: true, BroadcastAllowed: true},
-			[]string{"answer", "appliedSkillRefs", "visual", "broadcastToChannel", "report"}, []string{"answer", "appliedSkillRefs"}, false, []string{"s1", "s2"}},
+			[]string{"answer", "appliedSkillRefs", "visual", "broadcastToChannel", "report", "files"}, []string{"answer", "appliedSkillRefs"}, false, []string{"s1", "s2"}},
 		{"spoken", ControlAuthority{FinalMode: FinalModeSpoken}, []string{"answer", "silent"}, []string{"answer", "silent"}, true, nil},
 	}
 	for _, tc := range cases {
