@@ -315,17 +315,39 @@ func WriteContent(args map[string]interface{}) (string, error) {
 	return content, nil
 }
 
-// WrittenMediaType is the media type write_file gives a file: from its
-// name, with text for a name that says nothing. It refuses content too large
+// SniffBytes is how much of a file MachineMediaType looks at.
+const SniffBytes = 512
+
+// MachineMediaType is the media type of a file on a machine: by its name
+// from chatpath's own table (never the host's mime database, which differs
+// from one computer to the next), else text/plain when head, the file's
+// first SniffBytes or fewer, is text, else application/octet-stream. A
+// computer gives it to every file; a chat to a file a command made, and
+// write_file to a file it writes.
+func MachineMediaType(name string, head []byte) string {
+	if known, ok := chatpath.KnownMediaType(name); ok {
+		return known
+	}
+	if len(head) > SniffBytes {
+		head = head[:SniffBytes]
+	}
+	if len(head) == SniffBytes {
+		head = withoutCutRune(head)
+	}
+	if utf8.Valid(head) && bytes.IndexByte(head, 0) < 0 {
+		return "text/plain"
+	}
+	return "application/octet-stream"
+}
+
+// WrittenMediaType is the media type write_file gives a file:
+// MachineMediaType of its name and content. It refuses content too large,
 // and a name of a type that is not text.
 func WrittenMediaType(shown, name, content string) (string, error) {
 	if len(content) > MaximumFileBytes {
 		return "", fmt.Errorf("%w: a written file holds at most %d bytes", ErrInvalidInput, MaximumFileBytes)
 	}
-	mediaType := chatpath.MediaTypeOf(name)
-	if mediaType == "application/octet-stream" {
-		mediaType = "text/plain"
-	}
+	mediaType := MachineMediaType(name, []byte(content[:min(len(content), SniffBytes)]))
 	if !chatpath.Textual(mediaType) {
 		return "", fmt.Errorf("%w: %s is a %s file; write_file writes text files only", ErrInvalidInput, shown, mediaType)
 	}

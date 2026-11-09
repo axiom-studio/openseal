@@ -13,7 +13,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/chatpath"
 	"github.com/axiom-studio/openseal/pkg/computer/bridge"
@@ -132,38 +131,39 @@ func late(ctx context.Context, stopAt time.Time) bool {
 	return ctx.Err() != nil || !stopAt.IsZero() && !time.Now().Before(stopAt)
 }
 
-// sniffBytes is how much of a file with no known type is read to tell text
-// from binary.
-const sniffBytes = 512
-
-// mediaTypeOf is a file's media type from its name. A file whose name says
-// nothing is text/plain when it starts as text, as write_file gives such a
-// file in a chat.
+// mediaTypeOf is a regular file's media type, as every machine gives it
+// (workspace.MachineMediaType): from its name, else from its first bytes.
 func mediaTypeOf(path string) string {
-	mediaType := chatpath.MediaTypeOf(filepath.Base(path))
-	if mediaType != "application/octet-stream" {
-		return mediaType
+	name := filepath.Base(path)
+	if known, ok := chatpath.KnownMediaType(name); ok {
+		return known
 	}
-	file, err := os.Open(path)
+	head, _ := readPrefix(path, workspace.SniffBytes)
+	return workspace.MachineMediaType(name, head)
+}
+
+// openRegular opens a regular file to read without ever blocking: a named
+// pipe, socket or device is refused instead of waiting for a writer.
+func openRegular(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|nonBlocking, 0)
 	if err != nil {
-		return mediaType
+		return nil, err
 	}
-	defer file.Close()
-	head := make([]byte, sniffBytes)
-	n, _ := io.ReadFull(file, head)
-	head = head[:n]
-	for back := 1; back < utf8.UTFMax && back <= len(head); back++ {
-		if at := len(head) - back; utf8.RuneStart(head[at]) {
-			if !utf8.FullRune(head[at:]) {
-				head = head[:at]
-			}
-			break
+	if info, err := file.Stat(); err != nil || !info.Mode().IsRegular() {
+		file.Close()
+		if err == nil {
+			err = errNotRegular
 		}
+		return nil, err
 	}
-	if utf8.Valid(head) && !strings.ContainsRune(string(head), 0) {
-		return "text/plain"
-	}
-	return mediaType
+	return file, nil
+}
+
+var errNotRegular = errors.New("not a regular file")
+
+// notRegular refuses a path that is not a regular file or a directory.
+func notRegular(path string) *bridge.CallError {
+	return callError(bridge.ErrorFailed, path+" is not a regular file.")
 }
 
 // children are a directory's entries in the order of their paths (see
@@ -224,7 +224,7 @@ func (m machine) list(ctx context.Context, args map[string]interface{}) (workspa
 				if !listing.Add(here, workspace.Entry{Type: workspace.EntryDirectory}) {
 					return false
 				}
-			default:
+			case entry.Type().IsRegular():
 				leaf := workspace.Entry{Type: workspace.EntryFile, Size: workspace.FileSize(0), MediaType: mediaTypeOf(path)}
 				if info, err := entry.Info(); err == nil {
 					leaf.Size = workspace.FileSize(info.Size())
@@ -233,6 +233,8 @@ func (m machine) list(ctx context.Context, args map[string]interface{}) (workspa
 					return false
 				}
 			}
+			// A named pipe, socket or device is no file a machine
+			// operation reads, and a chat never holds one: it is left out.
 		}
 		return true
 	}
@@ -253,7 +255,7 @@ func (m machine) read(ctx context.Context, args map[string]interface{}) (workspa
 		return workspace.ReadFileResult{}, workspace.IsADirectory(path)
 	}
 	if !info.Mode().IsRegular() {
-		return workspace.ReadFileResult{}, callError(bridge.ErrorFailed, path+" is not a regular file.")
+		return workspace.ReadFileResult{}, notRegular(path)
 	}
 	result, err := workspace.ReadContent(ctx, path, mediaTypeOf(path), info.Size(), workspace.Integer(args, "maxBytes", workspace.DefaultReadBytes, workspace.MaximumReadBytes),
 		func(limit int64) ([]byte, error) { return readPrefix(path, limit) })
@@ -265,7 +267,7 @@ func (m machine) read(ctx context.Context, args map[string]interface{}) (workspa
 
 // readPrefix reads at most limit bytes from the start of a file.
 func readPrefix(path string, limit int64) ([]byte, error) {
-	file, err := os.Open(path)
+	file, err := openRegular(path)
 	if err != nil {
 		return nil, err
 	}
@@ -346,6 +348,8 @@ func (m machine) write(args map[string]interface{}) (workspace.ChangeResult, err
 	}
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
 		return workspace.ChangeResult{}, workspace.IsADirectory(path)
+	} else if err == nil && !info.Mode().IsRegular() {
+		return workspace.ChangeResult{}, notRegular(path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return workspace.ChangeResult{}, fileError(path, err)
@@ -356,9 +360,10 @@ func (m machine) write(args map[string]interface{}) (workspace.ChangeResult, err
 	return workspace.ChangeResult{Success: true, ChangedPaths: []string{path}}, nil
 }
 
-// writeFile replaces a file's content, keeping its mode when it exists.
+// writeFile replaces a file's content, keeping its mode when it exists. It
+// never blocks on a named pipe that took the file's place.
 func writeFile(path, content string) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|nonBlocking, 0o644)
 	if err != nil {
 		return err
 	}
@@ -385,13 +390,16 @@ func (m machine) edit(args map[string]interface{}) (workspace.ChangeResult, erro
 	if info.IsDir() {
 		return workspace.ChangeResult{}, workspace.IsADirectory(path)
 	}
-	if !info.Mode().IsRegular() || !chatpath.Textual(mediaTypeOf(path)) {
+	if !info.Mode().IsRegular() {
+		return workspace.ChangeResult{}, notRegular(path)
+	}
+	if !chatpath.Textual(mediaTypeOf(path)) {
 		return workspace.ChangeResult{}, workspace.NotText(path)
 	}
 	if info.Size() > workspace.MaximumFileBytes {
 		return workspace.ChangeResult{}, workspace.TooLargeToEdit(path)
 	}
-	data, err := os.ReadFile(path)
+	data, err := readPrefix(path, workspace.MaximumFileBytes+1)
 	if err != nil {
 		return workspace.ChangeResult{}, fileError(path, err)
 	}

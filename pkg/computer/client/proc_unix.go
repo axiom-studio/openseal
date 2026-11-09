@@ -8,6 +8,10 @@ import (
 	"syscall"
 )
 
+// nonBlocking opens a file without waiting: opening a named pipe returns at
+// once instead of blocking until the other end opens it.
+const nonBlocking = syscall.O_NONBLOCK
+
 // shellCommand runs command through a login shell, so the person's PATH
 // applies.
 func shellCommand(ctx context.Context, command string) *exec.Cmd {

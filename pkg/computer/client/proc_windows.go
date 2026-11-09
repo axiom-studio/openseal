@@ -13,6 +13,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// nonBlocking is no flag on Windows, whose folders hold no named pipes.
+const nonBlocking = 0
+
 // shellCommand runs command through PowerShell.
 func shellCommand(ctx context.Context, command string) *exec.Cmd {
 	return exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", command)
