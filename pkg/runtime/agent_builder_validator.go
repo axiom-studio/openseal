@@ -421,36 +421,54 @@ func ensureAgentNameAvailable(
 	scope Scope,
 	name, exceptDeploymentID string,
 ) error {
-	wanted := normalizedAgentName(name)
-	taken := agentNameTakenError{name: strings.TrimSpace(name)}
+	taken, err := takenAgentNames(ctx, agents, teams, scope, exceptDeploymentID)
+	if err != nil {
+		return err
+	}
+	if taken[normalizedAgentName(name)] {
+		return agentNameTakenError{name: strings.TrimSpace(name)}
+	}
+	return nil
+}
+
+// takenAgentNames is the set of normalized names the scope's non-retired
+// Agents (other than exceptDeploymentID) and non-archived Teams use.
+func takenAgentNames(
+	ctx context.Context,
+	agents *kernelagent.Registry,
+	teams *kernelteam.Registry,
+	scope Scope,
+	exceptDeploymentID string,
+) (map[string]bool, error) {
+	taken := map[string]bool{}
 	reference := agentBuilderScope(scope)
 	deployments, err := agents.ListDeployments(ctx, kernelagent.AgentDeploymentFilter{
 		Scope: reference, ExcludeStatuses: []kernelagent.RolloutStatus{kernelagent.RolloutRetired},
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, deployment := range deployments {
 		if deployment == nil || deployment.ID == exceptDeploymentID {
 			continue
 		}
-		if deployment.DisplayName != "" && normalizedAgentName(deployment.DisplayName) == wanted {
-			return taken
+		if deployment.DisplayName != "" {
+			taken[normalizedAgentName(deployment.DisplayName)] = true
 		}
 		definition, err := agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if definition != nil && normalizedAgentName(definition.DisplayName) == wanted {
-			return taken
+		if definition != nil {
+			taken[normalizedAgentName(definition.DisplayName)] = true
 		}
 	}
 	if teams == nil {
-		return nil
+		return taken, nil
 	}
 	teamDeployments, err := teams.ListDeployments(ctx, reference)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, deployment := range teamDeployments {
 		if deployment == nil || deployment.Status == kernelteam.DeploymentArchived {
@@ -458,13 +476,13 @@ func ensureAgentNameAvailable(
 		}
 		definition, err := teams.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if definition != nil && normalizedAgentName(definition.DisplayName) == wanted {
-			return taken
+		if definition != nil {
+			taken[normalizedAgentName(definition.DisplayName)] = true
 		}
 	}
-	return nil
+	return taken, nil
 }
 
 func resolveAgentBuilderSpace(ctx context.Context, spaces *SpaceService, scope Scope, spaceID string) (*Space, error) {
