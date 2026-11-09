@@ -77,7 +77,7 @@ func TestVerifyRejectsIncompleteTerminalPathAndOversizedChildBudget(t *testing.T
 		APIVersion: APIVersion, ID: "delegate", Version: "1", Name: "Delegate",
 		Entrypoints: map[string]string{"manual": "choose"},
 		Triggers: map[string]Trigger{"manual": {
-			Kind: TriggerEvent, EventType: "work.requested", Entrypoint: "manual", ObjectiveID: "work",
+			Kind: TriggerSchedule, Schedule: &Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}, Entrypoint: "manual", ObjectiveID: "work",
 			Budget: &BudgetAllocation{MaxTurns: 2, MaxActions: 10},
 		}},
 		Steps: map[string]Step{

@@ -3,12 +3,10 @@ package openseal
 import (
 	"errors"
 
-	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
 type (
-	RunbookEventMatch                 = runbook.EventMatch
 	RunEventWaitSpec                  = runtime.RunEventWaitSpec
 	RunEventWait                      = runtime.RunEventWait
 	RunEventWaitWorker                = runtime.RunEventWaitWorker

@@ -58,7 +58,7 @@ func TestValidateCallableEntrypointInterfaces(t *testing.T) {
 	}
 }
 
-func TestValidatePortableEventTriggers(t *testing.T) {
+func TestValidateRejectsDefinitionEventTriggers(t *testing.T) {
 	definition := &Definition{
 		APIVersion: APIVersion, ID: "chatbot", Version: "1", Name: "Chatbot",
 		Entrypoints: map[string]string{"on-message": "done"},
@@ -67,18 +67,21 @@ func TestValidatePortableEventTriggers(t *testing.T) {
 		}},
 		Steps: map[string]Step{"done": {Kind: StepEnd, End: &EndStep{}}},
 	}
-	if diagnostics := Validate(definition); len(diagnostics) != 0 {
-		t.Fatalf("diagnostics=%#v", diagnostics)
-	}
-	definition.Triggers["invalid"] = Trigger{Kind: "timer", EventType: "slack_message", Entrypoint: "missing"}
-	diagnostics := Validate(definition)
 	codes := map[string]bool{}
-	for _, diagnostic := range diagnostics {
+	for _, diagnostic := range Validate(definition) {
+		codes[diagnostic.Code] = true
+	}
+	if !codes["trigger.kind_unsupported"] {
+		t.Fatalf("event trigger was accepted: %#v", codes)
+	}
+	definition.Triggers = map[string]Trigger{"invalid": {Kind: "timer", Entrypoint: "missing"}}
+	codes = map[string]bool{}
+	for _, diagnostic := range Validate(definition) {
 		codes[diagnostic.Code] = true
 	}
 	for _, code := range []string{"trigger.kind_unsupported", "trigger.entrypoint_unknown"} {
 		if !codes[code] {
-			t.Fatalf("missing %s in %#v", code, diagnostics)
+			t.Fatalf("missing %s in %#v", code, codes)
 		}
 	}
 }
