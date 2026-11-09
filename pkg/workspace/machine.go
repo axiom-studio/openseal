@@ -113,8 +113,13 @@ func ComputerTarget(argument string, computer map[string]interface{}) MachineTar
 
 // MachineOperation is one machine operation as a target offers it.
 type MachineOperation struct {
-	Op           string
-	Reads        bool
+	Op    string
+	Reads bool
+	// Repeatable says doing the same change again is an ordinary next step,
+	// never a duplicate to suppress: every change, as a chat's host tools
+	// are. Deleting a build folder again after a rebuild, restoring a file's
+	// earlier content or running the tests again after a fix must happen.
+	Repeatable   bool
 	Description  string
 	InputSchema  map[string]interface{}
 	OutputSchema map[string]interface{}
@@ -137,7 +142,7 @@ func MachineOperations(target MachineTarget) []MachineOperation {
 	operations := make([]MachineOperation, 0, len(MachineOps))
 	for _, op := range MachineOps {
 		operations = append(operations, MachineOperation{
-			Op: op, Reads: MachineOpReads(op),
+			Op: op, Reads: MachineOpReads(op), Repeatable: !MachineOpReads(op),
 			Description:  target.description(op),
 			InputSchema:  target.input(op),
 			OutputSchema: machineOutputSchema(op),

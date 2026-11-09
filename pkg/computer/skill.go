@@ -144,9 +144,8 @@ func SkillDefinition() *skill.Definition {
 		if !operation.Reads {
 			action.SideEffect, action.Risk, action.Idempotency = skill.SideEffectWrite, skill.RiskLevelWrite, skill.IdempotencyRequired
 		}
-		// Running the same command again, such as tests after a fix, is an
-		// ordinary next step, not a duplicate.
-		action.Repeatable = operation.Op == RunCommand
+		// The same change again is a next step, as on the secure VM.
+		action.Repeatable = operation.Repeatable
 		actions[operation.Op] = action
 	}
 	return &skill.Definition{
