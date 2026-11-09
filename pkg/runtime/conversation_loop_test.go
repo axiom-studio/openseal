@@ -575,7 +575,10 @@ func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 	})
 }
 
-func TestArtifactReceiptPostedAfterEachGovernedTool(t *testing.T) {
+// A tool that saves files posts nothing: work-in-progress files (panels
+// drawn for a comic) stay in the Library, and the final answer hands over
+// the finished ones.
+func TestNoMessageAfterAGovernedToolSavesFiles(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 		trigger := f.post("trigger", "user-1", "Export both reports.")
 		run := f.startRun(trigger)
@@ -600,22 +603,9 @@ func TestArtifactReceiptPostedAfterEachGovernedTool(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			receipts := f.agentMessages()
-			last := receipts[len(receipts)-1]
-			if last.Sender.ID != conversationArtifactReceiptService || last.ReplyToMessageID != trigger.ID ||
-				len(last.References) != 2 || last.References[1] != (ConversationReference{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: 1}) {
-				t.Fatalf("receipt after %s = %#v", id, last)
-			}
 		}
-		if receipts := f.agentMessages(); len(receipts) != 2 {
-			t.Fatalf("receipts = %#v", receipts)
-		}
-		// Receipts are the session's own messages: the next catch-up skips them.
-		f.prepare(run, binding, 2)
-		for _, entry := range f.path(binding.Session.ID) {
-			if entry.Type == SessionEntryUser && entry.User.MessageID != trigger.ID {
-				t.Fatalf("receipt ingested: %#v", entry.User)
-			}
+		if posted := f.agentMessages(); len(posted) != 0 {
+			t.Fatalf("posted after tools = %#v", posted)
 		}
 	})
 }

@@ -587,12 +587,9 @@ func runCommandParticiple(action string) string {
 	return action + "ed"
 }
 
-// afterToolEntry is the binding's AfterTool (§8.4): a governed call that
-// completed gets its artifact receipt in the chat.
+// afterToolEntry is the binding's AfterTool (§8.4). Files a call saves are
+// not posted as they are made: the final answer hands over the finished ones.
 func (l *conversationLoop) afterToolEntry(ctx context.Context, in StepToolsInput, entry *SessionEntry) error {
 	l.markObserved(ctx, in.Run, in.Session)
-	if entry == nil || entry.ActionCallID == "" {
-		return nil
-	}
-	return l.runner.postToolArtifactReceipt(ctx, l.actions, in.Run, l.conversation, l.trigger, entry)
+	return nil
 }

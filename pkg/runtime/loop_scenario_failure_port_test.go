@@ -427,7 +427,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 					return act("Exporting the report.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "report"}))
 				}},
 				&modelRule{name: "answer", reply: func(stepView) ModelStepResult {
-					return finalAnswer(map[string]any{"answer": "Here is the quarterly report."})
+					return finalAnswer(map[string]any{"answer": "Here is the quarterly report.", "files": []any{"report-pdf", "report-csv"}})
 				}},
 			))
 			f.dispatch.on("lookup", func(ActionDispatchInput) (map[string]interface{}, error) {
