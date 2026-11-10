@@ -217,7 +217,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := map[string]interface{}{"title": "Forecast update", "goal": "Read the current public forecast and summarize it with its source.", "cron": "0 */30 * * * *", "timezone": "Asia/Kolkata", "maximumOccurrences": float64(2),
+	args := map[string]interface{}{"title": "Forecast update", "goal": "Read the current public forecast and summarize it with its source.", "trigger": map[string]interface{}{"schedule": map[string]interface{}{"cron": "0 */30 * * * *", "timezone": "Asia/Kolkata", "maximumOccurrences": float64(2)}},
 		"brief": map[string]interface{}{"summary": "Reads the public forecast every thirty minutes and posts a summary here.", "grants": []interface{}{}}}
 	team := chatRosterTeam(scope, "writer")
 	team.ID = owner.ID

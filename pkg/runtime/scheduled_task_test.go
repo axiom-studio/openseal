@@ -53,7 +53,7 @@ func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ..
 	if err := catalog.Register(ctx, def); err != nil {
 		t.Fatal(err)
 	}
-	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: owner.ID, SkillID: def.ID, SkillVersion: def.Version, AllowedActions: []string{RunbookActionCreateTask, RunbookActionList, RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule}, MaximumRisk: skill.RiskLevelWrite}
+	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: owner.ID, SkillID: def.ID, SkillVersion: def.Version, AllowedActions: []string{RunbookActionCreateTask, RunbookActionList, RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule, RunbookActionEventSources, RunbookActionSendTestEvent}, MaximumRisk: skill.RiskLevelWrite}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
@@ -61,11 +61,26 @@ func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ..
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := map[string]interface{}{"title": "Forecast update", "goal": "Use the browser to read the current public forecast and summarize it with its source.", "cron": "0 */30 * * * *", "timezone": "Asia/Kolkata", "maximumOccurrences": float64(2)}
-	if def.Version == RunbookManagementSkillVersion {
-		args["brief"] = map[string]interface{}{"summary": "Reads the public forecast every thirty minutes and posts a summary here.", "grants": []interface{}{}}
-	}
+	args := map[string]interface{}{"title": "Forecast update", "goal": "Use the browser to read the current public forecast and summarize it with its source.",
+		"trigger": map[string]interface{}{"schedule": map[string]interface{}{"cron": "0 */30 * * * *", "timezone": "Asia/Kolkata", "maximumOccurrences": float64(2)}},
+		"brief":   map[string]interface{}{"summary": "Reads the public forecast every thirty minutes and posts a summary here.", "grants": []interface{}{}}}
 	return run, catalog, bound, args
+}
+
+// withScheduleArgument returns a copy of create_task arguments whose
+// trigger.schedule sets key to value, or drops key when drop is true.
+func withScheduleArgument(args map[string]interface{}, key string, value interface{}, drop bool) map[string]interface{} {
+	result := cloneMap(args)
+	trigger := cloneMap(result["trigger"].(map[string]interface{}))
+	schedule := cloneMap(trigger["schedule"].(map[string]interface{}))
+	if drop {
+		delete(schedule, key)
+	} else {
+		schedule[key] = value
+	}
+	trigger["schedule"] = schedule
+	result["trigger"] = trigger
+	return result
 }
 func dispatchTaskForTest(t *testing.T, store KernelStore, run *AgentRun, bound *skill.BoundAction, args map[string]interface{}, callID string) map[string]interface{} {
 	t.Helper()
@@ -103,10 +118,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 				occurrences, maximum, status := 2, int64(2), RunbookActivationRetired
 				if limit != "bounded" {
 					occurrences, maximum, status = 3, 0, RunbookActivationActive
-					delete(args, "maximumOccurrences")
-					if limit == "null" {
-						args["maximumOccurrences"] = nil
-					}
+					args = withScheduleArgument(args, "maximumOccurrences", nil, limit == "omitted")
 				}
 				if err := catalog.ValidateInput(t.Context(), bound, args); err != nil {
 					t.Fatal(err)
@@ -221,9 +233,9 @@ func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion
 			case "binding":
 				binding.DeploymentID = "foreign"
 			case "cron":
-				a["cron"] = "0 * * * *"
+				a = withScheduleArgument(a, "cron", "0 * * * *", false)
 			case "timezone":
-				a["timezone"] = "Unknown/Zone"
+				a = withScheduleArgument(a, "timezone", "Unknown/Zone", false)
 			case "foreign-input":
 				a["deploymentId"] = "foreign"
 			}
@@ -260,8 +272,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 			}
 			for _, value := range invalid {
 				t.Run(value.name, func(t *testing.T) {
-					candidate := cloneMap(args)
-					candidate["maximumOccurrences"] = value.value
+					candidate := withScheduleArgument(args, "maximumOccurrences", value.value, false)
 					if err := catalog.ValidateInput(t.Context(), bound, candidate); err == nil {
 						t.Fatal("invalid occurrence limit accepted by the tool contract")
 					}
@@ -270,10 +281,15 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 					}
 				})
 			}
-			for _, required := range []string{"title", "goal", "cron", "timezone"} {
+			for _, required := range []string{"title", "goal", "trigger", "brief"} {
 				candidate := cloneMap(args)
 				candidate[required] = nil
 				if err := catalog.ValidateInput(t.Context(), bound, candidate); err == nil {
+					t.Fatalf("required %s became nullable", required)
+				}
+			}
+			for _, required := range []string{"cron", "timezone"} {
+				if err := catalog.ValidateInput(t.Context(), bound, withScheduleArgument(args, required, nil, false)); err == nil {
 					t.Fatalf("required %s became nullable", required)
 				}
 			}
@@ -337,10 +353,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 			store := NewMemoryStore()
 			run, catalog, bound, args := scheduledTaskFixture(t, store)
 			if limit != "bounded" {
-				delete(args, "maximumOccurrences")
-				if limit == "null" {
-					args["maximumOccurrences"] = nil
-				}
+				args = withScheduleArgument(args, "maximumOccurrences", nil, limit == "omitted")
 			}
 			now := time.Now().Add(time.Second)
 			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
