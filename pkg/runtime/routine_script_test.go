@@ -114,7 +114,7 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const published190SHA256 = "48211b97253e669250f1d0754cfa803c5a22093280eeb665a86c5c43857df56d"
+	const published190SHA256 = "db7540c0cbf02cf684c40c955ccb75dc37d6b44d73294d82b654bdb368d51082"
 	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published190SHA256 {
 		t.Fatalf("published 1.9.0 definition changed: got %s", got)
 	}

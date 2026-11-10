@@ -30,9 +30,10 @@ const (
 )
 
 // RoutineEventSourceChecker tells the dispatcher whether a routine's
-// conversation or callback source still exists. Nil skips the check.
+// conversation or callback source, and each channel or chat it names, still
+// exists. Nil skips the check.
 type RoutineEventSourceChecker interface {
-	SourceExists(ctx context.Context, scope Scope, owner ObjectiveOwner, kind RoutineEventKind, sourceRef string) (bool, error)
+	SourceExists(ctx context.Context, subscription RoutineEventSubscription) (bool, error)
 }
 
 // RoutineEventDispatchResult counts what one dispatcher pass did.
@@ -510,8 +511,9 @@ func (d *RoutineEventDispatcher) closeOut(ctx context.Context, scope Scope, acti
 	return d.store.DropRoutineEvents(ctx, scope, activationID, reason)
 }
 
-// CheckRoutineSources pauses conversation and callback routines whose source
-// is gone (source_removed). It runs hourly on the leader.
+// CheckRoutineSources pauses conversation and callback routines whose source,
+// or a channel or chat they name, is gone (source_removed). It runs hourly on
+// the leader.
 func (d *RoutineEventDispatcher) CheckRoutineSources(ctx context.Context) (int, error) {
 	if d == nil || d.store == nil || d.SourceChecker == nil {
 		return 0, nil
@@ -525,7 +527,7 @@ func (d *RoutineEventDispatcher) CheckRoutineSources(ctx context.Context) (int, 
 			return paused, err
 		}
 		for _, subscription := range page {
-			exists, err := d.SourceChecker.SourceExists(ctx, subscription.Scope, subscription.Owner, subscription.Kind, subscription.SourceRef)
+			exists, err := d.SourceChecker.SourceExists(ctx, subscription)
 			if err != nil || exists {
 				continue
 			}

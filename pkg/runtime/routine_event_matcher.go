@@ -296,48 +296,49 @@ func (m *RoutineEventMatcher) ownsSource(ctx context.Context, activation *Runboo
 	return false, nil
 }
 
-// OfferRoutineTestEvent stores one test event for one routine. Only the
-// routine's creator may send it; the filter is skipped for it.
-func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (RoutineEventOffer, error) {
+// OfferRoutineTestEvent stores one test event for one routine and returns
+// its event ID. Only the routine's creator may send it; the filter is skipped
+// for it.
+func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error) {
 	offer := RoutineEventOffer{}
 	if m == nil || m.store == nil {
-		return offer, errors.New("routine event matcher is not configured")
+		return "", offer, errors.New("routine event matcher is not configured")
 	}
 	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
-		return offer, err
+		return "", offer, err
 	}
 	activation, err := m.store.GetRunbookActivation(ctx, scope, strings.TrimSpace(activationID))
 	if err != nil {
-		return offer, err
+		return "", offer, err
 	}
 	if activation == nil {
-		return offer, ErrRunbookActivationNotFound
+		return "", offer, ErrRunbookActivationNotFound
 	}
 	if activation.Task == nil || activation.Task.Event == nil || activation.Trigger.Kind != runbook.TriggerEvent {
-		return offer, ErrRoutineNotEventRoutine
+		return "", offer, ErrRoutineNotEventRoutine
 	}
 	if activation.Status != RunbookActivationActive {
-		return offer, ErrRunbookActivationInactive
+		return "", offer, ErrRunbookActivationInactive
 	}
 	testBy = strings.TrimSpace(testBy)
 	if testBy == "" || testBy != activation.Task.CreatedBy {
-		return offer, ErrRoutineNotCreator
+		return "", offer, ErrRoutineNotCreator
 	}
 	now := m.now().UTC()
 	recent, err := m.store.CountRoutineTestEventsSince(ctx, scope, activation.ID, now.Add(-time.Hour))
 	if err != nil {
-		return offer, err
+		return "", offer, err
 	}
 	if recent >= RoutineTestEventsPerHour {
-		return offer, ErrRoutineTestEventLimit
+		return "", offer, ErrRoutineTestEventLimit
 	}
 	scopePending := -1
 	full, err := m.waitingIsFull(ctx, activation, &scopePending)
 	if err != nil {
-		return offer, err
+		return "", offer, err
 	}
 	if full {
-		return offer, ErrRoutineEventsWaitingIsFull
+		return "", offer, ErrRoutineEventsWaitingIsFull
 	}
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{"test":true}`)
@@ -347,11 +348,11 @@ func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope S
 		OccurredAt: now, Summary: "Test event", Payload: append(json.RawMessage(nil), payload...), Test: true, TestBy: testBy,
 	}
 	if err := event.Validate(); err != nil {
-		return offer, err
+		return "", offer, err
 	}
 	inserted, err := m.store.InsertRoutineEvent(ctx, &RoutineEventRecord{Scope: scope, ActivationID: activation.ID, Event: event, State: RoutineEventPending, ReceivedAt: now})
 	if err != nil {
-		return offer, err
+		return "", offer, err
 	}
 	offer.Matched = 1
 	if inserted {
@@ -360,5 +361,5 @@ func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope S
 	} else {
 		offer.Duplicates = 1
 	}
-	return offer, nil
+	return event.ID, offer, nil
 }

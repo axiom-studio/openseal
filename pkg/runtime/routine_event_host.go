@@ -16,7 +16,8 @@ type RoutineEventOfferer interface {
 	// Listening is an index lookup only: no I/O and no allocation. Producers call it before they build an event.
 	Listening(scope Scope, kind RoutineEventKind, sourceRef string) bool
 	OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (RoutineEventOffer, error)
-	OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (RoutineEventOffer, error)
+	// OfferRoutineTestEvent returns the stored test event's ID.
+	OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error)
 }
 
 // RoutineEventOffer counts what one offer did.

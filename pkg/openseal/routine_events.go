@@ -167,9 +167,10 @@ func (e *Engine) OfferRoutineEvent(ctx context.Context, event *runtime.RoutineEv
 	return e.routineEvents.matcher.OfferRoutineEvent(ctx, event)
 }
 
-// SendRoutineTestEvent stores one test event for a routine. Only the
-// routine's creator may send it (ErrRoutineNotCreator otherwise).
-func (e *Engine) SendRoutineTestEvent(ctx context.Context, scope runtime.Scope, activationID, testBy string, payload json.RawMessage) (runtime.RoutineEventOffer, error) {
+// SendRoutineTestEvent stores one test event for a routine and returns its
+// event ID. Only the routine's creator may send it (ErrRoutineNotCreator
+// otherwise).
+func (e *Engine) SendRoutineTestEvent(ctx context.Context, scope runtime.Scope, activationID, testBy string, payload json.RawMessage) (string, runtime.RoutineEventOffer, error) {
 	return e.routineEvents.matcher.OfferRoutineTestEvent(ctx, scope, activationID, testBy, payload)
 }
 

@@ -81,6 +81,13 @@ type RoutineEvent struct {
 	TestBy     string              `json:"testBy,omitempty"`
 }
 
+// ValidRoutineEventID reports whether id is a routine event ID as the kernel
+// stores it: a plain identifier of at most RoutineEventIDMaxBytes bytes with
+// no surrounding space. Hosts use it to keep a producer's ID unchanged.
+func ValidRoutineEventID(id string) bool {
+	return strings.TrimSpace(id) == id && validOpaqueIdentifier(id, RoutineEventIDMaxBytes)
+}
+
 func routineEventError(format string, args ...interface{}) error {
 	return fmt.Errorf("%w: %s", ErrInvalidRoutineEvent, fmt.Sprintf(format, args...))
 }
@@ -93,7 +100,7 @@ func (e *RoutineEvent) Validate() error {
 	if err := e.Scope.Validate(); err != nil {
 		return routineEventError("scope is required")
 	}
-	if !validOpaqueIdentifier(e.ID, RoutineEventIDMaxBytes) {
+	if !ValidRoutineEventID(e.ID) {
 		return routineEventError("id must be a plain identifier of at most %d bytes", RoutineEventIDMaxBytes)
 	}
 	if !e.Kind.Valid() {

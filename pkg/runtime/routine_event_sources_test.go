@@ -30,9 +30,9 @@ func (o *routineTestOfferer) OfferRoutineEvent(context.Context, *RoutineEvent) (
 	return RoutineEventOffer{}, nil
 }
 
-func (o *routineTestOfferer) OfferRoutineTestEvent(_ context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (RoutineEventOffer, error) {
+func (o *routineTestOfferer) OfferRoutineTestEvent(_ context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error) {
 	o.tests = append(o.tests, routineTestOffer{scope: scope, activationID: activationID, testBy: testBy, payload: payload})
-	return RoutineEventOffer{Matched: 1, Inserted: 1}, nil
+	return "test:fixed", RoutineEventOffer{Matched: 1, Inserted: 1}, nil
 }
 
 // routineGoogleSourcesForTest returns its options whoever asks, so the
@@ -244,18 +244,38 @@ func TestEventSourcesListsConnections(t *testing.T) {
 		kind      RoutineEventKind
 		sourceRef string
 		owner     ObjectiveOwner
+		channels  []string
 		want      bool
 	}{
-		{RoutineEventSlackMessage, f.slackRef, f.run.Owner, true},
-		{RoutineEventTelegramMessage, f.slackRef, f.run.Owner, false},
-		{RoutineEventSlackMessage, f.slackRef, ObjectiveOwner{Type: OwnerTypeAgent, ID: "someone-else"}, false},
-		{RoutineEventGitHub, f.githubRef, f.run.Owner, true},
-		{RoutineEventGitHub, RoutineCallbackSourceRef("reg-approvals"), f.run.Owner, false},
-		{RoutineEventGitHub, RoutineCallbackSourceRef("missing"), f.run.Owner, false},
+		{RoutineEventSlackMessage, f.slackRef, f.run.Owner, nil, true},
+		{RoutineEventSlackMessage, f.slackRef, f.run.Owner, []string{"c1"}, true},
+		{RoutineEventSlackMessage, f.slackRef, f.run.Owner, []string{"C1", "C2"}, false},
+		{RoutineEventTelegramMessage, f.slackRef, f.run.Owner, nil, false},
+		{RoutineEventSlackMessage, f.slackRef, ObjectiveOwner{Type: OwnerTypeAgent, ID: "someone-else"}, nil, false},
+		{RoutineEventGitHub, f.githubRef, f.run.Owner, nil, true},
+		{RoutineEventGitHub, RoutineCallbackSourceRef("reg-approvals"), f.run.Owner, nil, false},
+		{RoutineEventGitHub, RoutineCallbackSourceRef("missing"), f.run.Owner, nil, false},
 	} {
-		got, err := checker.SourceExists(t.Context(), f.run.Scope, check.owner, check.kind, check.sourceRef)
+		subscription := RoutineEventSubscription{Scope: f.run.Scope, Owner: check.owner, Kind: check.kind, SourceRef: check.sourceRef, Channels: check.channels}
+		got, err := checker.SourceExists(t.Context(), subscription)
 		if err != nil || got != check.want {
-			t.Fatalf("SourceExists(%s, %s, %s)=%v, %v", check.kind, check.sourceRef, check.owner.ID, got, err)
+			t.Fatalf("SourceExists(%s, %s, %s, %v)=%v, %v", check.kind, check.sourceRef, check.owner.ID, check.channels, got, err)
 		}
+	}
+}
+
+func TestRoutineEventNamedChannels(t *testing.T) {
+	trigger := &RoutineEventTrigger{Kind: RoutineEventSlackMessage, Filter: []RoutineEventCondition{
+		{Field: "channel", Op: RoutineFilterEquals, Value: "C1"},
+		{Field: "channel", Op: RoutineFilterOneOf, Values: []string{"C1", " C2 "}},
+		{Field: "channel", Op: RoutineFilterEquals, Value: "C3", Not: true},
+		{Field: "channel", Op: RoutineFilterContains, Value: "C4"},
+		{Field: "text", Op: RoutineFilterEquals, Value: "C5"},
+	}}
+	if got := routineEventNamedChannels(trigger); !reflect.DeepEqual(got, []string{"C1", "C2"}) {
+		t.Fatalf("channels=%v", got)
+	}
+	if got := routineEventNamedChannels(&RoutineEventTrigger{Kind: RoutineEventGitHub, Filter: trigger.Filter}); got != nil {
+		t.Fatalf("github channels=%v", got)
 	}
 }

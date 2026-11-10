@@ -168,3 +168,15 @@ func TestRoutineSourceRefs(t *testing.T) {
 		t.Error("slack accepted a non-hex conversation hash")
 	}
 }
+
+func TestValidRoutineEventID(t *testing.T) {
+	for id, want := range map[string]bool{
+		"hs:order-1": true, "github:abc": true, "": false, " hs:x": false, "hs:x ": false,
+		"hs:a/b": false, "hs:a?b": false, "hs:http://x": false, strings.Repeat("x", RoutineEventIDMaxBytes): true,
+		strings.Repeat("x", RoutineEventIDMaxBytes+1): false,
+	} {
+		if got := ValidRoutineEventID(id); got != want {
+			t.Fatalf("ValidRoutineEventID(%q)=%v", id, got)
+		}
+	}
+}

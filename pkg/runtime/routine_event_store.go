@@ -120,6 +120,9 @@ type RoutineEventSubscription struct {
 	Kind         RoutineEventKind
 	SourceRef    string
 	Calendar     *RoutineCalendarTiming
+	// Channels are the Slack channels or Telegram chats the routine names
+	// (E14); each must stay an active endpoint conversation.
+	Channels []string
 }
 
 // RoutineEventStore keeps routine events, their batches and hooks.
@@ -179,6 +182,7 @@ func routineEventSubscriptionOf(activation *RunbookActivation) (RoutineEventSubs
 		copied := *timing
 		subscription.Calendar = &copied
 	}
+	subscription.Channels = routineEventNamedChannels(activation.Task.Event)
 	return subscription, true
 }
 
@@ -201,7 +205,7 @@ func prepareRoutineEventRecord(record *RoutineEventRecord) error {
 	if strings.TrimSpace(record.ActivationID) == "" {
 		return errors.New("routine event record needs its activation")
 	}
-	if !validOpaqueIdentifier(record.Event.ID, RoutineEventIDMaxBytes) {
+	if !ValidRoutineEventID(record.Event.ID) {
 		return errors.New("routine event record needs a valid event ID")
 	}
 	switch record.State {

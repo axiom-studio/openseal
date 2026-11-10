@@ -341,19 +341,31 @@ func NewRoutineEventSourceChecker(store interface{}) RoutineEventSourceChecker {
 	return &routineEventSourceChecker{store: store}
 }
 
-func (c *routineEventSourceChecker) SourceExists(ctx context.Context, scope Scope, owner ObjectiveOwner, kind RoutineEventKind, sourceRef string) (bool, error) {
+func (c *routineEventSourceChecker) SourceExists(ctx context.Context, subscription RoutineEventSubscription) (bool, error) {
 	if c == nil || c.store == nil {
 		return false, errors.New("routine source checker is not configured")
 	}
+	scope, owner, kind, sourceRef := subscription.Scope, subscription.Owner, subscription.Kind, subscription.SourceRef
 	switch kind {
 	case RoutineEventSlackMessage, RoutineEventTelegramMessage:
 		views, err := routineConversationSources(ctx, c.store, scope, owner)
 		if err != nil {
 			return false, err
 		}
-		return slices.ContainsFunc(views, func(view *RoutineEventSourceView) bool {
+		index := slices.IndexFunc(views, func(view *RoutineEventSourceView) bool {
 			return view.Kind == kind && view.Source == sourceRef
-		}), nil
+		})
+		if index < 0 {
+			return false, nil
+		}
+		for _, channel := range subscription.Channels {
+			if !slices.ContainsFunc(views[index].Channels, func(endpoint RoutineEventSourceChannel) bool {
+				return strings.EqualFold(endpoint.ID, channel)
+			}) {
+				return false, nil
+			}
+		}
+		return true, nil
 	case RoutineEventGitHub:
 		callbacks, ok := c.store.(CallbackRegistrationStore)
 		id, prefixed := strings.CutPrefix(sourceRef, routineCallbackSourcePrefix)
@@ -485,6 +497,35 @@ func pinRoutineEventChannels(trigger *RoutineEventTrigger, field string, channel
 		}
 	}
 	return nil
+}
+
+// routineEventNamedChannels lists the channels or chats a Slack or Telegram
+// trigger names in its equals/one_of place conditions, the ones
+// pinRoutineEventChannels checked at create time.
+func routineEventNamedChannels(trigger *RoutineEventTrigger) []string {
+	if trigger == nil {
+		return nil
+	}
+	field := routineEventPlaceField(trigger.Kind)
+	if field == "" {
+		return nil
+	}
+	var channels []string
+	for _, condition := range trigger.Filter {
+		if condition.Field != field || condition.Not || (condition.Op != RoutineFilterEquals && condition.Op != RoutineFilterOneOf) {
+			continue
+		}
+		values := condition.Values
+		if condition.Op == RoutineFilterEquals {
+			values = []string{condition.Value}
+		}
+		for _, value := range values {
+			if value = strings.TrimSpace(value); value != "" && !slices.Contains(channels, value) {
+				channels = append(channels, value)
+			}
+		}
+	}
+	return channels
 }
 
 func cloneRoutineEventConditions(values []RoutineEventCondition) []RoutineEventCondition {

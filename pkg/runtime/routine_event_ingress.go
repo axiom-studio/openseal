@@ -371,7 +371,7 @@ func routineCallbackLabelNames(value interface{}) []string {
 // routineEventIDOf keeps a producer's event ID when it is a valid routine
 // event ID and otherwise uses a stable digest of it.
 func routineEventIDOf(id string) string {
-	if validOpaqueIdentifier(id, RoutineEventIDMaxBytes) {
+	if ValidRoutineEventID(id) {
 		return id
 	}
 	sum := sha256.Sum256([]byte(id))

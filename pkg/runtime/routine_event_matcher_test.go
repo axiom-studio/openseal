@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -470,7 +471,7 @@ func TestRoutineEventStats(t *testing.T) {
 	}
 	h.offer(activation, 3)
 	h.pass()
-	if _, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-1", nil); err != nil {
+	if _, _, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-1", nil); err != nil {
 		t.Fatal(err)
 	}
 	h.offer(activation, 2)
@@ -506,12 +507,12 @@ func TestRoutineEventStats(t *testing.T) {
 func TestRoutineTestEventDoesNotConsumeOccurrence(t *testing.T) {
 	h := newRoutineEventHarness(t)
 	activation := h.routine("once", func(trigger *RoutineEventTrigger) { trigger.MaximumOccurrences = 1 })
-	if _, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-2", nil); !errors.Is(err, ErrRoutineNotCreator) {
+	if _, _, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-2", nil); !errors.Is(err, ErrRoutineNotCreator) {
 		t.Fatalf("non-creator test event err = %v", err)
 	}
-	offer, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-1", nil)
-	if err != nil || offer != (RoutineEventOffer{Matched: 1, Inserted: 1}) {
-		t.Fatalf("test offer=%#v err=%v", offer, err)
+	eventID, offer, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-1", nil)
+	if err != nil || offer != (RoutineEventOffer{Matched: 1, Inserted: 1}) || !strings.HasPrefix(eventID, "test:") || !ValidRoutineEventID(eventID) {
+		t.Fatalf("test offer=%#v id=%q err=%v", offer, eventID, err)
 	}
 	h.pass()
 	runs := h.eventRuns(activation)
@@ -536,15 +537,15 @@ func TestRoutineTestEventDoesNotConsumeOccurrence(t *testing.T) {
 	h2 := newRoutineEventHarness(t)
 	capped := h2.routine("capped", nil)
 	for i := 0; i < RoutineTestEventsPerHour; i++ {
-		if _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, capped.ID, "user-1", json.RawMessage(`{"n":1}`)); err != nil {
+		if _, _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, capped.ID, "user-1", json.RawMessage(`{"n":1}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, capped.ID, "user-1", nil); !errors.Is(err, ErrRoutineTestEventLimit) {
+	if _, _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, capped.ID, "user-1", nil); !errors.Is(err, ErrRoutineTestEventLimit) {
 		t.Fatalf("sixth test event err = %v", err)
 	}
 	h2.advance(time.Hour + time.Minute)
-	if _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, capped.ID, "user-1", nil); err != nil {
+	if _, _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, capped.ID, "user-1", nil); err != nil {
 		t.Fatalf("test event after an hour err = %v", err)
 	}
 }

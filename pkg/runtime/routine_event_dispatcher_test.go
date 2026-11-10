@@ -237,7 +237,7 @@ func TestRoutineTestEventsNeverMixWithReal(t *testing.T) {
 	activation := h.routine("mixed", nil)
 	real := h.offer(activation, 2)
 	for i := 0; i < 2; i++ {
-		if _, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-1", nil); err != nil {
+		if _, _, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-1", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -273,7 +273,7 @@ func TestRoutineTestEventsNeverMixWithReal(t *testing.T) {
 	h2.pass()
 	h2.finishRuns()
 	h2.offer(limited, 1)
-	if _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, limited.ID, "user-1", nil); err != nil {
+	if _, _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, limited.ID, "user-1", nil); err != nil {
 		t.Fatal(err)
 	}
 	result := h2.pass()

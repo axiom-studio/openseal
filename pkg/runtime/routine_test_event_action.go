@@ -36,9 +36,10 @@ func routineTestEventAction() skill.Action {
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]interface{}{
 				"activationId": map[string]interface{}{"type": "string"},
+				"eventId":      map[string]interface{}{"type": "string"},
 				"offered":      map[string]interface{}{"type": "object"},
 			},
-			"required": []interface{}{"activationId", "offered"},
+			"required": []interface{}{"activationId", "eventId", "offered"},
 		},
 	}
 }
@@ -93,9 +94,9 @@ func dispatchRoutineTestEvent(ctx context.Context, store runbookActionStore, eve
 	if err != nil {
 		return nil, err
 	}
-	offered, err := events.offerer.OfferRoutineTestEvent(ctx, a.Scope, a.ID, run.ActingUser, payload)
+	eventID, offered, err := events.offerer.OfferRoutineTestEvent(ctx, a.Scope, a.ID, run.ActingUser, payload)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"activationId": a.ID, "offered": offered}, nil
+	return map[string]interface{}{"activationId": a.ID, "eventId": eventID, "offered": offered}, nil
 }
