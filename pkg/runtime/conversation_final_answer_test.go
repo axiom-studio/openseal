@@ -339,12 +339,12 @@ func TestFinalAnswerSendsBackFilesThatAreNotSavedFileIDs(t *testing.T) {
 		ref := func(id string, version int) map[string]interface{} {
 			return map[string]interface{}{"id": id, "version": version}
 		}
-		f.governed("export", ActionCallStatusSucceeded, map[string]interface{}{"artifactRefs": []interface{}{ref("report-pdf", 1)}})
+		f.governed("export", ActionCallStatusSucceeded, map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "report-pdf", "version": 1, "path": "docs/report.pdf"}}})
 		f.governed("failed", ActionCallStatusFailed, map[string]interface{}{"artifactRefs": []interface{}{ref("failed-file", 1)}})
-		for _, files := range [][]interface{}{{"docs/report.pdf"}, {"report-pdf", "failed-file"}} {
+		for _, files := range [][]interface{}{{"docs/draft.pdf"}, {"docs/report.pdf", "failed-file"}} {
 			answer, _ := f.finalEntry("Here is the report.", map[string]interface{}{finalOutputSummaryKey: "Here is the report.", finalOutputFilesKey: files})
 			result := f.mustDeliver(answer, FinalDeliveryRetryFinal)
-			if !strings.Contains(result.RejectionText, files[len(files)-1].(string)) || !strings.Contains(result.RejectionText, "report-pdf") {
+			if !strings.Contains(result.RejectionText, files[len(files)-1].(string)) || !strings.Contains(result.RejectionText, "docs/report.pdf") {
 				t.Fatalf("files %v: rejection = %q", files, result.RejectionText)
 			}
 		}

@@ -213,7 +213,7 @@ func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
 	if finalFieldOffered("files", a) {
 		properties["files"] = map[string]interface{}{
 			"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string"},
-			"description": "Ids of the files this run saved that this answer hands over (the artifactRefs ids a tool returned, never paths): the finished result, such as the PDF or the final image. " +
+			"description": "The files this run presented that this answer hands over, by path or id: the finished result, such as the PDF or the final image. " +
 				"Leave out files made only to build another one (drafts, panels, intermediate images); they stay in the Library and are not shown.",
 		}
 	}
@@ -1009,10 +1009,10 @@ func handedOverFileIDs(ids []string) []string {
 }
 
 // handedOverArtifacts keeps the Run's saved files the final output hands over
-// (its "files"), in the Run's order. A Run's other files stay in the Library.
-// unknown lists the entries that name no saved file, such as a path given
-// instead of an id.
-func handedOverArtifacts(saved []ConversationReference, output map[string]interface{}) (out []ConversationReference, unknown []string) {
+// (its "files", by id or by the path a tool saved it from), in the Run's
+// order. A Run's other files stay in the Library. unknown lists the entries
+// that name no saved file.
+func handedOverArtifacts(saved []savedArtifact, output map[string]interface{}) (out []ConversationReference, unknown []string) {
 	var wanted []string
 	switch files := output[finalOutputFilesKey].(type) {
 	case []string:
@@ -1024,36 +1024,50 @@ func handedOverArtifacts(saved []ConversationReference, output map[string]interf
 			}
 		}
 	}
-	wanted = handedOverFileIDs(wanted)
-	known := map[string]bool{}
-	for _, ref := range saved {
-		known[ref.ID] = true
-	}
-	want := map[string]bool{}
-	for _, id := range wanted {
-		want[id] = true
-		if !known[id] {
-			unknown = append(unknown, id)
+	chosen := map[int]bool{}
+	for _, name := range handedOverFileIDs(wanted) {
+		found := false
+		for i, file := range saved {
+			if file.Ref.ID == name || file.Path != "" && file.Path == handedOverPath(name) {
+				chosen[i], found = true, true
+			}
+		}
+		if !found {
+			unknown = append(unknown, name)
 		}
 	}
-	for _, ref := range saved {
-		if want[ref.ID] {
-			out = append(out, ref)
+	for i, file := range saved {
+		if chosen[i] {
+			out = append(out, file.Ref)
 		}
 	}
 	return out, unknown
 }
 
+// handedOverPath is a chat path as an answer may write it: "docs/a.pdf",
+// "/docs/a.pdf" or "./docs/a.pdf" all name the same file.
+func handedOverPath(name string) string {
+	name = strings.TrimSpace(name)
+	for strings.HasPrefix(name, "./") {
+		name = name[2:]
+	}
+	return strings.TrimLeft(name, "/")
+}
+
 // unknownHandedOverFilesText sends a final whose files name no saved file
 // back to the model, which otherwise attaches nothing without a word.
-func unknownHandedOverFilesText(unknown []string, saved []ConversationReference) string {
-	ids := make([]string, 0, len(saved))
-	for _, ref := range saved {
-		ids = append(ids, ref.ID)
+func unknownHandedOverFilesText(unknown []string, saved []savedArtifact) string {
+	names := make([]string, 0, len(saved))
+	for _, file := range saved {
+		if file.Path != "" {
+			names = append(names, file.Path)
+		} else {
+			names = append(names, file.Ref.ID)
+		}
 	}
-	if len(ids) == 0 {
-		return fmt.Sprintf("files names %s, but this run saved no files. Save the file first (present on the secure VM), or leave files out.", strings.Join(unknown, ", "))
+	if len(names) == 0 {
+		return fmt.Sprintf("files names %s, but this run handed over no files yet. present the file first, then name it in files, or leave files out.", strings.Join(unknown, ", "))
 	}
-	return fmt.Sprintf("files takes the ids of files this run saved (the artifactRefs ids a tool returned), not paths or names: %s is not one. This run's files: %s.",
-		strings.Join(unknown, ", "), strings.Join(ids, ", "))
+	return fmt.Sprintf("files names %s, which this run did not present. Present it first, or name only files this run presented: %s.",
+		strings.Join(unknown, ", "), strings.Join(names, ", "))
 }

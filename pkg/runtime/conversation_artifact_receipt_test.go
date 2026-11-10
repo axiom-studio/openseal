@@ -54,30 +54,35 @@ func TestRunActionArtifactReferencesFromSucceededCalls(t *testing.T) {
 		{Kind: ConversationReferenceArtifact, ID: "one", Version: 1},
 		{Kind: ConversationReferenceArtifact, ID: "two", Version: 3},
 	}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+	if len(got) != len(want) || got[0].Ref != want[0] || got[1].Ref != want[1] {
 		t.Fatalf("references = %#v", got)
 	}
 }
 
-// Only the files the final answer hands over go out with it; the Run's other
-// files stay in the Library.
+// Only the files the final answer hands over go out with it, named by id or
+// by the path they were presented from; the Run's other files stay in the
+// Library.
 func TestHandedOverArtifactsKeepsOnlyTheAnswersFiles(t *testing.T) {
-	saved := []ConversationReference{
-		{Kind: ConversationReferenceArtifact, ID: "panel-1", Version: 1},
-		{Kind: ConversationReferenceArtifact, ID: "panel-2", Version: 1},
-		{Kind: ConversationReferenceArtifact, ID: "comic-pdf", Version: 2},
+	saved := []savedArtifact{
+		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "panel-1", Version: 1}, Path: "images/panel-1.png"},
+		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "panel-2", Version: 1}, Path: "images/panel-2.png"},
+		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "comic-pdf", Version: 2}, Path: "docs/comic.pdf"},
+		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "chart", Version: 1}},
 	}
-	got, unknown := handedOverArtifacts(saved, map[string]interface{}{finalOutputFilesKey: []interface{}{"comic-pdf", "docs/comic.pdf"}})
-	if len(got) != 1 || got[0].ID != "comic-pdf" || got[0].Version != 2 {
-		t.Fatalf("handed over = %+v; want only the comic PDF", got)
+	for _, files := range [][]interface{}{{"comic-pdf"}, {"docs/comic.pdf"}, {"/docs/comic.pdf"}, {"./docs/comic.pdf", "comic-pdf"}} {
+		got, unknown := handedOverArtifacts(saved, map[string]interface{}{finalOutputFilesKey: files})
+		if len(got) != 1 || got[0].ID != "comic-pdf" || got[0].Version != 2 || len(unknown) != 0 {
+			t.Fatalf("files %v: handed over = %+v, unknown %v; want only the comic PDF", files, got, unknown)
+		}
 	}
-	// A path instead of an id names no saved file: it goes back to the model
-	// rather than silently attaching nothing.
-	if len(unknown) != 1 || unknown[0] != "docs/comic.pdf" {
-		t.Fatalf("unknown = %v; want the path", unknown)
+	// A file the run never presented goes back to the model rather than
+	// silently attaching nothing.
+	got, unknown := handedOverArtifacts(saved, map[string]interface{}{finalOutputFilesKey: []interface{}{"chart", "docs/other.pdf"}})
+	if len(got) != 1 || got[0].ID != "chart" || len(unknown) != 1 || unknown[0] != "docs/other.pdf" {
+		t.Fatalf("handed over = %+v, unknown = %v", got, unknown)
 	}
-	if text := unknownHandedOverFilesText(unknown, saved); !strings.Contains(text, "docs/comic.pdf") || !strings.Contains(text, "comic-pdf") {
-		t.Fatalf("rejection = %q; want the path and the saved ids", text)
+	if text := unknownHandedOverFilesText(unknown, saved); !strings.Contains(text, "docs/other.pdf") || !strings.Contains(text, "docs/comic.pdf") || !strings.Contains(text, "chart") {
+		t.Fatalf("rejection = %q; want the unknown file and the presented ones", text)
 	}
 	if got, unknown := handedOverArtifacts(saved, map[string]interface{}{}); len(got) != 0 || len(unknown) != 0 {
 		t.Fatalf("an answer that hands over nothing attached %+v (unknown %v)", got, unknown)
