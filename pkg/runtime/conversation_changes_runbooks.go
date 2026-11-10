@@ -35,13 +35,36 @@ type ConversationRunbook struct {
 	// finished, paused when either is paused, and active otherwise.
 	Status ConversationRunbookStatus `json:"status"`
 	// Schedule is the cron schedule of a scheduled routine.
-	Schedule  *runbook.Schedule       `json:"schedule,omitempty"`
+	Schedule *runbook.Schedule `json:"schedule,omitempty"`
+	// Trigger says what starts the routine.
+	Trigger *ConversationRunbookTrigger `json:"trigger,omitempty"`
+	// NextRunAt is the next scheduled run of a scheduled routine, or for an
+	// event routine at its hourly limit, when its waiting events run.
 	NextRunAt *time.Time              `json:"nextRunAt,omitempty"`
 	LastRun   *ConversationRunbookRun `json:"lastRun,omitempty"`
+	// LastFiredAt, FiredLast24h, FiredLastHour and Pending count an event
+	// routine's started runs and waiting events (test events not counted
+	// as runs).
+	LastFiredAt   *time.Time `json:"lastFiredAt,omitempty"`
+	FiredLast24h  int        `json:"firedLast24h,omitempty"`
+	FiredLastHour int        `json:"firedLastHour,omitempty"`
+	Pending       int        `json:"pending,omitempty"`
+	// PausedReason says why the system paused the routine.
+	PausedReason RoutinePausedReason `json:"pausedReason,omitempty"`
 	// Revision is the activation's revision.
 	Revision int64 `json:"revision"`
 	// Script is the chat script a script routine runs.
 	Script *ConversationRunbookScript `json:"script,omitempty"`
+}
+
+// ConversationRunbookTrigger is what starts a routine. When is set only for
+// event routines; the client words schedules itself.
+type ConversationRunbookTrigger struct {
+	Kind        runbook.TriggerKind `json:"kind"`
+	EventKind   RoutineEventKind    `json:"eventKind,omitempty"`
+	When        string              `json:"when,omitempty"`
+	SourceLabel string              `json:"sourceLabel,omitempty"`
+	MaxPerHour  int                 `json:"maxPerHour,omitempty"`
 }
 
 // ConversationRunbookScript names the chat file a script routine runs.
@@ -59,8 +82,8 @@ type ConversationRunbookRun struct {
 
 // listConversationRunbooks projects the routines linked to the conversation
 // (Conversation.RunbookActivationIDs, recorded when a routine visual is
-// stored) and the scheduled tasks created from it (Task.ConversationID) that
-// are still active or paused. Linked routines that no longer exist are left
+// stored) and the scheduled and event tasks created from it
+// (Task.ConversationID) that are still active or paused. Linked routines that no longer exist are left
 // out. Every viewer of the conversation's change stream sees them; the
 // routine endpoints authorize any command.
 func (s *ConversationChangeService) listConversationRunbooks(ctx context.Context, conversation *Conversation) ([]*ConversationRunbook, error) {
@@ -81,23 +104,31 @@ func (s *ConversationChangeService) listConversationRunbooks(ctx context.Context
 		activations = append(activations, activation)
 	}
 	owner := conversation.Owner
-	scheduled, err := s.runbooks.ListRunbookActivations(ctx, RunbookActivationFilter{
-		Scope: conversation.Scope, Owner: &owner, TriggerKinds: []runbook.TriggerKind{runbook.TriggerSchedule},
+	tasks, err := s.runbooks.ListRunbookActivations(ctx, RunbookActivationFilter{
+		Scope: conversation.Scope, Owner: &owner, TriggerKinds: []runbook.TriggerKind{runbook.TriggerSchedule, runbook.TriggerEvent},
 		Statuses: []RunbookActivationStatus{RunbookActivationActive, RunbookActivationPaused},
 	})
 	if err != nil {
 		return nil, err
 	}
-	for _, activation := range scheduled {
+	for _, activation := range tasks {
 		if activation != nil && activation.Task != nil && activation.Task.ConversationID == conversation.ID && !seen[activation.ID] {
 			seen[activation.ID] = true
 			activations = append(activations, activation)
 		}
 	}
 	sort.SliceStable(activations, func(i, j int) bool { return activations[i].ID < activations[j].ID })
+	activity, err := s.conversationRoutineEventActivity(ctx, conversation.Scope, activations)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]*ConversationRunbook, 0, len(activations))
 	for _, activation := range activations {
-		projected, err := s.projectConversationRunbook(ctx, activation)
+		var stats *RoutineEventActivity
+		if value, ok := activity[activation.ID]; ok {
+			stats = &value
+		}
+		projected, err := s.projectConversationRunbook(ctx, activation, stats)
 		if err != nil {
 			return nil, err
 		}
@@ -106,11 +137,51 @@ func (s *ConversationChangeService) listConversationRunbooks(ctx context.Context
 	return result, nil
 }
 
-func (s *ConversationChangeService) projectConversationRunbook(ctx context.Context, activation *RunbookActivation) (*ConversationRunbook, error) {
-	projected := &ConversationRunbook{ID: activation.ID, ObjectiveID: activation.ObjectiveID, Revision: activation.Revision, Status: ConversationRunbookActive}
+// conversationRoutineEventActivity reads the run counts of the event
+// routines among activations in one store call; none when there are no event
+// routines or the store keeps no routine events.
+func (s *ConversationChangeService) conversationRoutineEventActivity(ctx context.Context, scope Scope, activations []*RunbookActivation) (map[string]RoutineEventActivity, error) {
+	events, ok := s.portfolio.(RoutineEventStore)
+	if !ok {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(activations))
+	for _, activation := range activations {
+		if activation.Task != nil && activation.Task.Event != nil {
+			ids = append(ids, activation.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return events.RoutineEventActivity(ctx, scope, ids, s.now())
+}
+
+func (s *ConversationChangeService) projectConversationRunbook(ctx context.Context, activation *RunbookActivation, activity *RoutineEventActivity) (*ConversationRunbook, error) {
+	projected := &ConversationRunbook{
+		ID: activation.ID, ObjectiveID: activation.ObjectiveID, Revision: activation.Revision, Status: ConversationRunbookActive,
+		Trigger: &ConversationRunbookTrigger{Kind: activation.Trigger.Kind}, PausedReason: activation.PausedReason,
+	}
 	if activation.Trigger.Schedule != nil {
 		schedule := *activation.Trigger.Schedule
 		projected.Schedule = &schedule
+	}
+	var event *RoutineEventTrigger
+	if activation.Task != nil {
+		event = activation.Task.Event
+	}
+	if event != nil {
+		projected.Trigger.EventKind = event.Kind
+		projected.Trigger.When = DescribeRoutineEventTrigger(event)
+		projected.Trigger.SourceLabel = strings.TrimSpace(event.SourceLabel)
+		projected.Trigger.MaxPerHour = event.MaxPerHour
+	}
+	if activity != nil {
+		if activity.LastFiredAt != nil {
+			fired := *activity.LastFiredAt
+			projected.LastFiredAt = &fired
+		}
+		projected.FiredLast24h, projected.FiredLastHour, projected.Pending = activity.FiredLast24h, activity.FiredLastHour, activity.Pending
 	}
 	objective, err := s.portfolio.GetObjective(ctx, activation.Scope, activation.ObjectiveID)
 	if err != nil && !errors.Is(err, ErrObjectiveNotFound) {
@@ -136,9 +207,13 @@ func (s *ConversationChangeService) projectConversationRunbook(ctx context.Conte
 			projected.Title = strings.TrimSpace(string(runes[:80])) + "…"
 		}
 	}
-	if projected.Status == ConversationRunbookActive && activation.NextRunAt != nil {
-		next := *activation.NextRunAt
-		projected.NextRunAt = &next
+	next := activation.NextRunAt
+	if event != nil && activity != nil {
+		next = activity.NextRunAt
+	}
+	if projected.Status == ConversationRunbookActive && next != nil {
+		value := *next
+		projected.NextRunAt = &value
 	}
 	runs, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Order: AgentRunOrderCreatedDesc, Limit: conversationRunbookRunLookback,
@@ -146,6 +221,8 @@ func (s *ConversationChangeService) projectConversationRunbook(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
+	// Scheduled, on-demand and event (Source event) Runs all carry the
+	// activation ID.
 	for _, run := range runs {
 		if run == nil {
 			continue

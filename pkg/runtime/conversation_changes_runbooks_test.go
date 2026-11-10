@@ -168,3 +168,107 @@ func TestLinkRunbooks(t *testing.T) {
 		t.Fatal("duplicate link validated")
 	}
 }
+
+func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
+	for _, testCase := range interactionChangeStores() {
+		t.Run(testCase.name, func(t *testing.T) {
+			f := newInteractionChangeFixture(t, testCase.store(t))
+			ctx, store, scope := f.ctx, f.store, f.scope
+			owner := f.conversation.Owner
+			now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+			f.changes.now = func() time.Time { return now }
+			objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Order notes", Goal: "Summarize each new order", Status: ObjectiveStatusActive,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			routine := routineEventTestActivation(scope, "shop-orders", now.Add(-2*time.Hour))
+			routine.Owner, routine.ObjectiveID, routine.AssignedAgentID = owner, objective.ID, owner.ID
+			routine.Task.ConversationID, routine.Task.SourceMessageID = f.conversation.ID, f.trigger.ID
+			if err := store.CreateRunbookActivation(ctx, routine); err != nil {
+				t.Fatal(err)
+			}
+			// An event routine from another chat is not shown here.
+			other := routineEventTestActivation(scope, "elsewhere", now.Add(-2*time.Hour))
+			other.Owner, other.ObjectiveID, other.AssignedAgentID = owner, objective.ID, owner.ID
+			other.Task.ConversationID = "other-chat"
+			if err := store.CreateRunbookActivation(ctx, other); err != nil {
+				t.Fatal(err)
+			}
+
+			initial := f.list(t, "")
+			if !initial.RunbooksChanged || runbookIDs(initial.Runbooks) != "shop-orders" {
+				t.Fatalf("initial runbooks = %s changed=%v", runbookIDs(initial.Runbooks), initial.RunbooksChanged)
+			}
+			got := initial.Runbooks[0]
+			wantWhen := DescribeRoutineEventTrigger(routine.Task.Event)
+			if got.Title != "Order notes" || got.Status != ConversationRunbookActive || got.Schedule != nil || got.Trigger == nil ||
+				got.Trigger.Kind != runbook.TriggerEvent || got.Trigger.EventKind != RoutineEventWebhook || got.Trigger.When == "" ||
+				got.Trigger.When != wantWhen || got.Trigger.SourceLabel != "your shop" || got.Trigger.MaxPerHour != 2 ||
+				got.LastFiredAt != nil || got.FiredLast24h != 0 || got.Pending != 0 || got.NextRunAt != nil || got.LastRun != nil {
+				t.Fatalf("new event routine = %#v trigger=%#v", got, got.Trigger)
+			}
+
+			// Two batches start event Runs inside the hour; one more event waits.
+			events := store.(RoutineEventStore)
+			var lastRun *AgentRun
+			for index, ago := range []time.Duration{40 * time.Minute, 10 * time.Minute} {
+				at := now.Add(-ago)
+				event := routineTestEvent(scope, routine, fmt.Sprintf("order-%d", index), at)
+				if _, err := events.InsertRoutineEvent(ctx, &RoutineEventRecord{Scope: scope, ActivationID: routine.ID, Event: event, State: RoutineEventPending, ReceivedAt: at}); err != nil {
+					t.Fatal(err)
+				}
+				batch, err := events.ClaimRoutineEventBatch(ctx, scope, routine.ID, RoutineEventMaxBatchEvents, at)
+				if err != nil || batch == nil {
+					t.Fatalf("claim = %#v, %v", batch, err)
+				}
+				lastRun, err = NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+					Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, Goal: routine.Task.Goal, Source: RunSourceEvent,
+					Context: map[string]interface{}{"runbookActivationId": routine.ID}, IdempotencyKey: batch.ID,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := events.MarkRoutineEventBatchStarted(ctx, scope, batch.ID, lastRun.ID, at); err != nil {
+					t.Fatal(err)
+				}
+			}
+			waiting := routineTestEvent(scope, routine, "order-waiting", now.Add(-time.Minute))
+			if _, err := events.InsertRoutineEvent(ctx, &RoutineEventRecord{Scope: scope, ActivationID: routine.ID, Event: waiting, State: RoutineEventPending, ReceivedAt: now.Add(-time.Minute)}); err != nil {
+				t.Fatal(err)
+			}
+
+			fired := f.list(t, initial.Cursor)
+			if !fired.RunbooksChanged || len(fired.Runbooks) != 1 {
+				t.Fatalf("fired runbooks = %#v changed=%v", fired.Runbooks, fired.RunbooksChanged)
+			}
+			got = fired.Runbooks[0]
+			wantNext := now.Add(-40 * time.Minute).Add(time.Hour)
+			if got.LastFiredAt == nil || !got.LastFiredAt.Equal(now.Add(-10*time.Minute)) || got.FiredLast24h != 2 || got.FiredLastHour != 2 ||
+				got.Pending != 1 || got.NextRunAt == nil || !got.NextRunAt.Equal(wantNext) || got.LastRun == nil || got.LastRun.ID != lastRun.ID {
+				t.Fatalf("fired event routine = %#v", got)
+			}
+			if quiet := f.list(t, fired.Cursor); quiet.RunbooksChanged {
+				t.Fatalf("unchanged event routine reported again: %#v", quiet.Runbooks)
+			}
+
+			// A system pause shows why, and the waiting run time goes away.
+			activations := NewRunbookActivationService(store)
+			activations.now = func() time.Time { return now }
+			current, _ := store.GetRunbookActivation(ctx, scope, routine.ID)
+			if _, err := activations.Update(ctx, scope, routine.ID, UpdateRunbookActivationRequest{
+				ExpectedRevision: current.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedNeedsSignIn,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			paused := f.list(t, fired.Cursor)
+			if !paused.RunbooksChanged || len(paused.Runbooks) != 1 {
+				t.Fatalf("paused runbooks = %#v", paused.Runbooks)
+			}
+			if got := paused.Runbooks[0]; got.Status != ConversationRunbookPaused || got.PausedReason != RoutinePausedNeedsSignIn || got.NextRunAt != nil {
+				t.Fatalf("paused event routine = %#v", got)
+			}
+		})
+	}
+}

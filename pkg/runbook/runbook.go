@@ -59,7 +59,6 @@ func (kind TriggerKind) Valid() bool { return domaincontract.Allows(string(kind)
 // routines on a RunbookActivation.
 type Trigger struct {
 	Kind              TriggerKind       `json:"kind"`
-	EventType         string            `json:"eventType,omitempty"`
 	Schedule          *Schedule         `json:"schedule,omitempty"`
 	Entrypoint        string            `json:"entrypoint"`
 	ObjectiveID       string            `json:"objectiveId,omitempty"`
@@ -71,8 +70,8 @@ type Trigger struct {
 
 func (Trigger) ContractObjectVariants() []domaincontract.ObjectVariant {
 	return []domaincontract.ObjectVariant{
-		{Name: "event", Match: map[string]string{"kind": string(TriggerEvent)}, Required: []string{"eventType"}, Forbidden: []string{"schedule"}},
-		{Name: "schedule", Match: map[string]string{"kind": string(TriggerSchedule)}, Required: []string{"schedule"}, Forbidden: []string{"eventType"}},
+		{Name: "event", Match: map[string]string{"kind": string(TriggerEvent)}, Forbidden: []string{"schedule"}},
+		{Name: "schedule", Match: map[string]string{"kind": string(TriggerSchedule)}, Required: []string{"schedule"}},
 	}
 }
 

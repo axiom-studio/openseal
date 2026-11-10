@@ -63,7 +63,7 @@ func TestValidateRejectsDefinitionEventTriggers(t *testing.T) {
 		APIVersion: APIVersion, ID: "chatbot", Version: "1", Name: "Chatbot",
 		Entrypoints: map[string]string{"on-message": "done"},
 		Triggers: map[string]Trigger{"conversation-message": {
-			Kind: TriggerEvent, EventType: "conversation.message.received", Entrypoint: "on-message", ObjectiveID: "agent:chatbot:respond",
+			Kind: TriggerEvent, Entrypoint: "on-message", ObjectiveID: "agent:chatbot:respond",
 		}},
 		Steps: map[string]Step{"done": {Kind: StepEnd, End: &EndStep{}}},
 	}
@@ -103,14 +103,23 @@ func TestValidatePortableScheduledTriggers(t *testing.T) {
 		t.Fatalf("scheduled trigger diagnostics = %#v", diagnostics)
 	}
 
-	definition.Triggers["daily"] = Trigger{Kind: TriggerSchedule, EventType: "clock.tick", Schedule: &Schedule{Cron: "0 0 0 * *", Timezone: "UTC"}, Entrypoint: "start"}
+	definition.Triggers["daily"] = Trigger{Kind: TriggerSchedule, Schedule: &Schedule{Cron: "0 0 0 * *", Timezone: "UTC"}, Entrypoint: "start"}
 	diagnostics := Validate(definition)
 	codes := map[string]bool{}
 	for _, diagnostic := range diagnostics {
 		codes[diagnostic.Code] = true
 	}
-	if !codes["trigger.shape"] || !codes["trigger.schedule_invalid"] || !codes["trigger.objective_required"] {
+	if !codes["trigger.schedule_invalid"] || !codes["trigger.objective_required"] {
 		t.Fatalf("invalid scheduled trigger diagnostics = %#v", diagnostics)
+	}
+
+	definition.Triggers["daily"] = Trigger{Kind: TriggerSchedule, Entrypoint: "start", ObjectiveID: "useful-participation"}
+	codes = map[string]bool{}
+	for _, diagnostic := range Validate(definition) {
+		codes[diagnostic.Code] = true
+	}
+	if !codes["trigger.shape"] || !codes["trigger.schedule_invalid"] {
+		t.Fatalf("scheduled trigger without a schedule diagnostics = %#v", codes)
 	}
 }
 
