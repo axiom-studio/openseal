@@ -157,8 +157,8 @@ func TestPostgresAgentSessionLogRollback(t *testing.T) {
 			t.Fatalf("table %s survived rollback to 74", table)
 		}
 	}
-	if after := countTables(); after != before-2 {
-		t.Fatalf("tables after rollback = %d; want %d (only the two session tables dropped)", after, before-2)
+	if after, want := countTables(), before-2-len(routineEventsTables); after != want {
+		t.Fatalf("tables after rollback = %d; want %d (only the two session tables and the routine event tables dropped)", after, want)
 	}
 	if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != 74 {
 		t.Fatalf("schema head after rollback = %d, %v; want 74", version, err)
