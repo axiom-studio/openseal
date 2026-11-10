@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/axiom-studio/openseal/pkg/computer/client"
@@ -59,10 +60,11 @@ Usage:
   helloseal-bridge <command> [arguments]
 
 Commands:
-  connect     Pair this computer with HelloSeal and run the bridge in the
-              background (--no-service runs it in this terminal instead)
+  connect     Pair this computer with HelloSeal and run the bridge in this
+              terminal
   start       Run the bridge in this terminal; the background service runs this
-  service     install, uninstall, status or restart the background service
+  service     install, uninstall, status or restart the background service,
+              which keeps the bridge running after you close the terminal
   status      Show which HelloSeal this computer is connected to
   disconnect  Remove this computer from HelloSeal and stop the service
   version     Print version
@@ -76,7 +78,6 @@ func connectCmd(args []string) int {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
 	server := fs.String("server", "", "HelloSeal URL (default: $HELLOSEAL_SERVER, the saved server, or "+client.DefaultServer+")")
 	name := fs.String("name", "", "name shown in HelloSeal (default: this computer's hostname)")
-	noService := fs.Bool("no-service", false, "run the bridge in this terminal instead of installing the background service")
 	fs.Parse(args)
 
 	store, err := client.DefaultStore()
@@ -108,30 +109,33 @@ func connectCmd(args []string) int {
 		return fail(err)
 	}
 	fmt.Printf("Connected %s to %s.\n", config.Name, config.Server)
-	if *noService {
-		return serve(ctx, store, config, os.Stdout)
+	serviceHint(ctx, store, os.Stdout, true)
+	return serve(ctx, store, config, os.Stdout)
+}
+
+// serviceHintFile marks that the person has been told how to run the bridge
+// in the background, so a terminal run says it once, not every time.
+const serviceHintFile = "service-hint-shown"
+
+// serviceHint tells the person, on the bridge's first run in a terminal, how
+// to keep it running after the terminal closes. The bridge runs in the
+// foreground unless they install the service themselves.
+func serviceHint(ctx context.Context, store client.Store, out io.Writer, always bool) {
+	marker := filepath.Join(store.Dir, serviceHintFile)
+	if _, err := os.Stat(marker); err == nil && !always {
+		return
 	}
-	service, err := newService(store)
-	if err == nil {
-		err = service.Install(ctx)
-	}
-	if err != nil {
-		// The person is at a terminal already: run here rather than not at all.
-		var unsupported *client.ErrNoServiceManager
-		if errors.As(err, &unsupported) {
-			fmt.Fprintln(os.Stderr, unsupported.Message)
-		} else {
-			fmt.Fprintf(os.Stderr, "Could not install the background service: %v\n", err)
+	if service, err := newService(store); err == nil {
+		if status, err := service.Status(ctx); err == nil && status.Installed {
+			return
 		}
-		fmt.Fprintln(os.Stderr, "Running the bridge in this terminal instead.")
-		return serve(ctx, store, config, os.Stdout)
 	}
-	fmt.Println("The HelloSeal bridge is running in the background.")
-	for _, note := range service.Notes() {
-		fmt.Println(note)
-	}
-	fmt.Printf("Logs: %s\n", service.Logs())
-	return 0
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, "The bridge runs in this terminal and stops when you close it.")
+	fmt.Fprintln(out, "To keep it running in the background and start it when you log in, press Ctrl+C and run:")
+	fmt.Fprintln(out, "  helloseal-bridge service install")
+	fmt.Fprintln(out, "")
+	_ = os.WriteFile(marker, nil, 0o600)
 }
 
 func newService(store client.Store) (client.ServiceManager, error) {
@@ -231,6 +235,10 @@ func startCmd(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// The service runs start with --log; only a person at a terminal needs the hint.
+	if *logPath == "" {
+		serviceHint(ctx, store, out, false)
+	}
 	return serve(ctx, store, config, out)
 }
 
