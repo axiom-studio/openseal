@@ -66,10 +66,10 @@ func testSkillDefinitionIdentityProbeContract(t *testing.T, store, unrelated ski
 		t.Fatalf("empty store identities = %#v", got)
 	}
 	for _, definition := range []*skill.Definition{
-		skillIdentityProbeDefinition("research", "1.0.0", "clawhub::@zoe/research"),
+		skillIdentityProbeDefinition("research", "1.0.0", "catalog::@zoe/research"),
 		skillIdentityProbeDefinition("research", "1.0.0", ""),
-		skillIdentityProbeDefinition("researcher", "1.0.0", "clawhub::@other/research"),
-		skillIdentityProbeDefinition("research", "1.0.00", "clawhub::@other/research"),
+		skillIdentityProbeDefinition("researcher", "1.0.0", "catalog::@other/research"),
+		skillIdentityProbeDefinition("research", "1.0.00", "catalog::@other/research"),
 	} {
 		if err := writer.Register(ctx, definition); err != nil {
 			t.Fatal(err)
@@ -77,7 +77,7 @@ func testSkillDefinitionIdentityProbeContract(t *testing.T, store, unrelated ski
 	}
 	want := []capability.SkillIdentity{
 		{ID: "research", Version: "1.0.0", SourceIdentity: ""},
-		{ID: "research", Version: "1.0.0", SourceIdentity: "clawhub::@zoe/research"},
+		{ID: "research", Version: "1.0.0", SourceIdentity: "catalog::@zoe/research"},
 	}
 	if got := probe("research", "1.0.0"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("exact identity probe = %#v, want %#v", got, want)
@@ -91,10 +91,10 @@ func testSkillDefinitionIdentityProbeContract(t *testing.T, store, unrelated ski
 	// A different catalog can install a publisher immediately after a probe.
 	// Selection metadata must never cache the former singleton variant set.
 	otherWriter := skill.NewCatalogWithStore(store)
-	if err := otherWriter.Register(ctx, skillIdentityProbeDefinition("research", "1.0.0", "clawhub::@alice/research")); err != nil {
+	if err := otherWriter.Register(ctx, skillIdentityProbeDefinition("research", "1.0.0", "catalog::@alice/research")); err != nil {
 		t.Fatal(err)
 	}
-	want = append(want[:1], capability.SkillIdentity{ID: "research", Version: "1.0.0", SourceIdentity: "clawhub::@alice/research"}, want[1])
+	want = append(want[:1], capability.SkillIdentity{ID: "research", Version: "1.0.0", SourceIdentity: "catalog::@alice/research"}, want[1])
 	got := probe("research", "1.0.0")
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("new publisher identities = %#v, want %#v", got, want)
@@ -128,7 +128,7 @@ func TestSQLiteSkillDefinitionIdentityProbeDoesNotDecodePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	identity := capability.SkillIdentity{ID: "broken", Version: "1", SourceIdentity: "clawhub::@publisher/broken"}
+	identity := capability.SkillIdentity{ID: "broken", Version: "1", SourceIdentity: "catalog::@publisher/broken"}
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO skill_definitions(id, version, source_identity, payload) VALUES(?, ?, ?, ?)`, identity.ID, identity.Version, identity.SourceIdentity, "{malformed immutable payload"); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestSQLiteSkillDefinitionIdentityProbeDoesNotDecodePayload(t *testing.T) {
 
 func TestMemorySkillDefinitionIdentityProbeDoesNotInspectPayload(t *testing.T) {
 	store := NewMemoryStore()
-	identity := capability.SkillIdentity{ID: "broken", Version: "1", SourceIdentity: "clawhub::@publisher/broken"}
+	identity := capability.SkillIdentity{ID: "broken", Version: "1", SourceIdentity: "catalog::@publisher/broken"}
 	// This immutable payload cannot be encoded by the deep-clone hydration
 	// path. The metadata probe must derive its identity from the map key.
 	store.skillDefinitions[memorySkillDefinitionKey(identity.ID, identity.Version, identity.SourceIdentity)] = &skill.Definition{
@@ -188,7 +188,7 @@ func TestMemorySkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t
 		{name: "version", id: "research", version: "1.0.0\x00preview"},
 		{name: "id-and-version", id: "research\x00child", version: "1.0.0\x00preview"},
 	} {
-		for _, source := range []string{"", "clawhub::@publisher/research"} {
+		for _, source := range []string{"", "catalog::@publisher/research"} {
 			name := test.name + "/publisher"
 			if source == "" {
 				name = test.name + "/builtin"
@@ -214,7 +214,7 @@ func TestMemorySkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t
 				if err := skill.NewCatalogWithStore(store).Register(ctx, definition); !errors.Is(err, skill.ErrDefinitionImmutable) {
 					t.Fatalf("exact identity overwrite was allowed: %v", err)
 				}
-				later := skillIdentityProbeDefinition(test.id, test.version, "clawhub::@later/research")
+				later := skillIdentityProbeDefinition(test.id, test.version, "catalog::@later/research")
 				if err := skill.NewCatalogWithStore(store).Register(ctx, later); err != nil {
 					t.Fatal(err)
 				}
@@ -229,7 +229,7 @@ func TestMemorySkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t
 func TestMemorySkillDefinitionIdentityProbeKeepsDelimiterCollisionImmutable(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
-	definition := skillIdentityProbeDefinition("research\x00child", "1.0.0", "clawhub::@publisher/research")
+	definition := skillIdentityProbeDefinition("research\x00child", "1.0.0", "catalog::@publisher/research")
 	if err := skill.NewCatalogWithStore(store).Register(ctx, definition); err != nil {
 		t.Fatal(err)
 	}
@@ -277,12 +277,12 @@ func TestSQLiteSkillDefinitionIdentityProbeSeesReplicaPublisherAndRestart(t *tes
 	if got, err := replica.ListSkillDefinitionIdentities(ctx, "research", "1.0.0"); err != nil || len(got) != 1 || got[0].SourceIdentity != "" {
 		t.Fatalf("replica builtin identity = %#v, %v", got, err)
 	}
-	if err := skill.NewCatalogWithStore(replica).Register(ctx, skillIdentityProbeDefinition("research", "1.0.0", "clawhub::@replica/research")); err != nil {
+	if err := skill.NewCatalogWithStore(replica).Register(ctx, skillIdentityProbeDefinition("research", "1.0.0", "catalog::@replica/research")); err != nil {
 		t.Fatal(err)
 	}
 	want := []capability.SkillIdentity{
 		{ID: "research", Version: "1.0.0"},
-		{ID: "research", Version: "1.0.0", SourceIdentity: "clawhub::@replica/research"},
+		{ID: "research", Version: "1.0.0", SourceIdentity: "catalog::@replica/research"},
 	}
 	if got, err := primary.ListSkillDefinitionIdentities(ctx, "research", "1.0.0"); err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("publisher installed by replica was not immediately visible = %#v, %v", got, err)

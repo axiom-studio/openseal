@@ -31,19 +31,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PATCH /api/v1/runbooks/{id}", s.handleUpdateRunbook)
 	s.mux.HandleFunc("POST /api/v1/runbooks/{id}/runs", s.handleStartRunbook)
 	s.mux.HandleFunc("POST /api/v1/runbooks/schedule-reconciliations", s.handleReconcileRunbookSchedules)
-	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}", s.handleInspectClawHub)
-	s.mux.HandleFunc("GET /api/v1/clawhub/search", s.handleSearchClawHub)
-	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}/versions", s.handleListClawHubVersions)
-	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}/file", s.handleGetClawHubFile)
-	s.mux.HandleFunc("POST /api/v1/clawhub/catalog/{reference}/verify", s.handleVerifyClawHub)
-	s.mux.HandleFunc("POST /api/v1/clawhub/catalog/{reference}/install", s.handleInstallClawHub)
-	s.mux.HandleFunc("GET /api/v1/clawhub/installed", s.handleListInstalledClawHub)
-	s.mux.HandleFunc("POST /api/v1/clawhub/installed/update-all", s.handleUpdateAllClawHub)
-	s.mux.HandleFunc("POST /api/v1/clawhub/installed/{reference}/verify", s.handleVerifyInstalledClawHub)
-	s.mux.HandleFunc("POST /api/v1/clawhub/installed/{reference}/pin", s.handlePinClawHub)
-	s.mux.HandleFunc("POST /api/v1/clawhub/installed/{reference}/unpin", s.handleUnpinClawHub)
-	s.mux.HandleFunc("POST /api/v1/clawhub/installed/{reference}/update", s.handleUpdateClawHub)
-	s.mux.HandleFunc("DELETE /api/v1/clawhub/installed/{reference}", s.handleUninstallClawHub)
 	s.mux.HandleFunc("POST /api/v1/agent-runs", s.handleCreateAgentRun)
 	s.mux.HandleFunc("GET /api/v1/agent-runs", s.handleListAgentRuns)
 	s.mux.HandleFunc("GET /api/v1/agent-runs/admission", s.handleInspectAgentRunAdmission)
@@ -186,20 +173,6 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	}
 	if scope, ok := s.agentBuilderCapabilityScope(r); ok && s.agentBuilderAvailable(r.Context(), scope) {
 		capabilities = append(capabilities, kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID))
-	}
-	if s.clawHub != nil {
-		lifecycle := s.clawHub.ClawHubLifecycleCapabilities()
-		if !s.clawHubMutations {
-			read := lifecycle.Operations[:0]
-			for _, operation := range lifecycle.Operations {
-				switch operation {
-				case "inspect_catalog", "inspect_versions", "inspect_files", "inspect_security", "inspect_installed", "verify", "verify_installed":
-					read = append(read, operation)
-				}
-			}
-			lifecycle.Operations = read
-		}
-		capabilities = append(capabilities, kernelapi.ClawHubLifecycleCapability(lifecycle))
 	}
 	s.respondJSON(w, http.StatusOK, kernelapi.NewCapabilityDocument(capabilities...))
 }

@@ -305,8 +305,7 @@ conversation changes, source checkpoints, ChangeSet application, and artifacts.
 The HTTP server exposes a static route set but constructs its capability
 document from the stores and adapters actually installed. Optional operations
 such as Run creation, action approval resolution, workforce lifecycle
-decisions, artifact content, and ClawHub mutation are
-advertised only when wired.
+decisions, and artifact content are advertised only when wired.
 
 The TUI loads that document before rendering its workspace. It does not
 manufacture permissions, statuses, approval eligibility, or durable state. An
@@ -317,7 +316,7 @@ embedding graphical client must follow the same rule.
 The public facade exposes types and configuration options for persistent
 stores, dynamic worker scopes, turn runners, action policy, approval
 authorization, credential resolvers or leases, action dispatch, Skill discovery,
-ClawHub registries, source artifact storage, conversation coordination, Team
+source artifact storage, conversation coordination, Team
 management, and Skill management.
 
 OpenSeal validates portable semantics and fails closed when a necessary adapter

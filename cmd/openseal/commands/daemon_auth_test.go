@@ -123,8 +123,8 @@ func startDaemonForAuth(t *testing.T, token string) (string, func()) {
 	// developer's shell made `make test` fail on any machine with just
 	// OPENAI_API_KEY exported -- a very common thing to have. With all three
 	// set the failure inverts: the test daemon talks to
-	// the developer's own LLM endpoint. OPENSEAL_SKILLS_DIR and every
-	// other OPENSEAL_* variable leaked the same way.
+	// the developer's own LLM endpoint. Every other OPENSEAL_* variable
+	// leaked the same way.
 	//
 	// These tests are about one thing: whether the daemon applies
 	// OPENSEAL_API_TOKEN. Nothing else from the ambient environment should be

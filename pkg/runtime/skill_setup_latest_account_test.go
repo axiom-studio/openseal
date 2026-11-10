@@ -8,7 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-const latestSetupTestSource = "clawhub::@alice/reddit.reader"
+const latestSetupTestSource = "catalog::@alice/reddit.reader"
 
 type latestSetupTestLocation struct {
 	scope        skill.ScopeReference
@@ -245,7 +245,7 @@ func TestSkillSetupLatestAccountAmbiguityIncludesRetainedVersions(t *testing.T) 
 func TestSkillSetupLatestAccountPublisherCollisionStaysExact(t *testing.T) {
 	f := newLatestSetupTestFixture(t, latestSetupTestSource)
 	alice := f.bindAccount(t, "alice-account", "1.0.0", f.source, f.locations[0], true)
-	otherSource := "clawhub::@bob/reddit.reader"
+	otherSource := "catalog::@bob/reddit.reader"
 	f.registerDefinition(t, "reddit.reader", "1.0.0", otherSource)
 	f.registerDefinition(t, "reddit.reader", "9.0.0", otherSource)
 	bob := f.bindAccount(t, "bob-account", "1.0.0", otherSource, f.locations[0], true)
@@ -341,13 +341,13 @@ func TestSkillSetupLatestAccountRequiredActionsUseExactSelectedVersion(t *testin
 func TestSkillSetupLatestAccountAllowsAdvertisedMarketplaceNamespace(t *testing.T) {
 	f := newLatestSetupTestFixture(t, latestSetupTestSource)
 	const skillID = "openseal.meet.voice"
-	const source = "clawhub::@alice/openseal.meet.voice"
+	const source = "catalog::@alice/openseal.meet.voice"
 	f.registerDefinition(t, skillID, "2.0.0", source)
 	candidate := latestSetupTestCandidate("2.0.0", source)
 	candidate.ID = skillID
 	f.candidates = []skill.DiscoveryCandidate{candidate}
 	for _, tc := range []struct{ id, source string }{
-		{skillID, "clawhub::@bob/openseal.meet.voice"},
+		{skillID, "catalog::@bob/openseal.meet.voice"},
 		{"openseal.unadvertised", source},
 	} {
 		args := f.args("configure", "latest", "")

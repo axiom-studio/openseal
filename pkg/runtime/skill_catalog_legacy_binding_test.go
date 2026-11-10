@@ -17,7 +17,7 @@ func TestCatalogCanDisableLegacyBindingAfterSourceBecomesAmbiguous(t *testing.T)
 	defer store.Close()
 	ctx := context.Background()
 	catalog := skill.NewCatalogWithStore(store)
-	for _, sourceIdentity := range []string{"clawhub::@alice/image", "clawhub::@bob/image"} {
+	for _, sourceIdentity := range []string{"catalog::@alice/image", "catalog::@bob/image"} {
 		definition := &skill.Definition{
 			ID: "image", Version: "1.0.0", Name: "Image", Description: "Render an image.",
 			Source: &skill.SourceProvenance{Identity: sourceIdentity, Format: "openclaw.skill.v1"},

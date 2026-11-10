@@ -3,9 +3,9 @@ package capability
 import "testing"
 
 func TestSkillIdentityEqualityIncludesSourceProvenance(t *testing.T) {
-	selected := NewSkillIdentity(" summarize ", " 1.0.0+source.abc ", " clawhub::@alice/summarize ")
-	same := NewSkillIdentity("summarize", "1.0.0+source.abc", "clawhub::@alice/summarize")
-	foreign := NewSkillIdentity("summarize", "1.0.0+source.abc", "clawhub::@bob/summarize")
+	selected := NewSkillIdentity(" summarize ", " 1.0.0+source.abc ", " catalog::@alice/summarize ")
+	same := NewSkillIdentity("summarize", "1.0.0+source.abc", "catalog::@alice/summarize")
+	foreign := NewSkillIdentity("summarize", "1.0.0+source.abc", "catalog::@bob/summarize")
 	if !selected.Equal(same) || selected.Key() != same.Key() {
 		t.Fatalf("canonical identities differ: %#v %#v", selected, same)
 	}

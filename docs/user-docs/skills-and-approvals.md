@@ -135,47 +135,6 @@ openseal skill validate ./source.yaml
 
 > **The daemon registers neither at startup.** Both definitions are exportable through the CLI but are not registered in the catalog by the daemon — installing them is the operator's decision.
 
-## ClawHub Skill Distribution
-
-ClawHub is the registry from which Skills are discovered, verified, and installed. The daemon wires it at startup against the default registry and a skills directory, and the terminal client surfaces it as the **Marketplace** destination.
-
-| Field | Value |
-|---|---|
-| Default registry | `https://clawhub.ai` |
-| Registry override | `CLAWHUB_REGISTRY` |
-| Skills directory | `OPENSEAL_SKILLS_DIR`, defaulting to `skills/` beside the daemon configuration file |
-
-### Catalog and Lifecycle Operations
-
-Catalog operations inspect a reference before anything is installed: fetch its metadata, list its versions, read an individual file from it, and verify it. Installation compiles the source and records provenance, including the source digest that ties the installed Skill back to the exact bytes that produced it.
-
-| Operation | Description |
-|---|---|
-| Catalog read | Fetch metadata, list versions, read a file, verify a reference |
-| Install | Compile the source and record provenance including the source digest |
-| Verify installed | Re-check installed files against their recorded digest |
-| Pin and unpin | Hold an installed Skill at a version, or release it |
-| Update | Update one installed Skill, or all of them in a batch |
-| Uninstall | Remove an installed Skill |
-
-Read operations are always available once ClawHub is wired. The mutation operations — install, update, pin, unpin, uninstall — are filtered out of the advertised capability unless the host has explicitly granted mutation authority, which the standalone daemon does only under `--standalone-operator`.
-
-### Canonical Error Codes
-
-ClawHub is the only subsystem in OpenSeal with a canonical error-code mapping. Failures are classified into a stable, secret-free code that appears in the JSON body alongside the HTTP status.
-
-| Code | HTTP Status | Description |
-|---|---|---|
-| `pinned` | 409 | The installed Skill is pinned and cannot be changed |
-| `locally_modified` | 409 | The installed files no longer match their recorded digest |
-| `ambiguous_reference` | 409 | The reference matches more than one Skill |
-| `verification_failed` | 422 | Signature or digest verification did not pass |
-| `not_found` | 404 | The reference does not resolve |
-| `canceled` | 502 | The operation was canceled or timed out |
-| `unavailable` | 502 | Any other registry or lifecycle failure |
-
-`unavailable` is the classifier's default branch, so an unrecognized failure is reported as `unavailable` rather than misclassified as something specific. Client code should treat the code as the stable signal and the message as human-readable text.
-
 ## Next Steps
 
 - Declare credential references in [Configuration](configuration.md).

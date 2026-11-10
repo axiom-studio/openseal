@@ -109,7 +109,7 @@ infrastructure outside the local process:
 | --- | --- | --- |
 | Agents, Teams, Work, Channels, evidence | Native kernel and capability API | Same portable contracts with hosted adapters |
 | Composer and governed review | Local model provider for generation; desktop mode for owner review and installation | Host-managed model grants and lifecycle authority |
-| Skills marketplace | ClawHub discovery and verification; install and update with `--standalone-operator` | Host marketplace policy and organization catalogs |
+| Skills | Local Skill definitions and least-privilege deployment bindings | Host marketplace policy and organization catalogs |
 | Credentials | Scope-isolated env/private-file references | Vault/KMS-backed grants, leases, identity, and rotation |
 | Multi-user policy and approvals | Not emulated by the local context | Host identity, authorization, policy evaluation, and audit |
 
@@ -127,8 +127,7 @@ host.
   durable Runs with bounded leases and checkpoints
 - Typed Skill definitions, least-privilege deployment bindings, action
   approvals, credential references, and execution-time secret boundaries
-- OpenClaw/ClawHub source compilation, verified installation, updates, pins,
-  uninstall, provenance, and restart restoration
+- OpenClaw skill source compilation with preserved provenance
 - Agent requests, handoffs, dependency groups, Team channels, participation
   arbitration, cursors, presence, and shared activity
 - Immutable artifact metadata and verified local content storage

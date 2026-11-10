@@ -4,7 +4,7 @@ OpenSeal serves a versioned REST API, executes a deterministic runbook layer def
 
 ## REST Conventions
 
-All routes are served under `/api/v1` from the address in `api.listenAddr`. Responses are JSON. Errors return `{"error": "<message>"}`, except ClawHub lifecycle errors, which add a `code` field carrying a canonical error code.
+All routes are served under `/api/v1` from the address in `api.listenAddr`. Responses are JSON. Errors return `{"error": "<message>"}`.
 
 | Property | Description |
 |---|---|
@@ -150,25 +150,6 @@ Agent deployments carry a direct rollback route; Team deployments do not. Otherw
 | POST | `/api/v1/team-deployments/{id}/skill-bindings/{bindingId}/upgrade` |
 
 The upgrade-plan and upgrade routes are withdrawn from the advertised capability when the configured store does not implement the upgrade contract.
-
-## ClawHub
-
-| Method | Path |
-|---|---|
-| GET | `/api/v1/clawhub/catalog/{reference}` |
-| GET | `/api/v1/clawhub/catalog/{reference}/versions` |
-| GET | `/api/v1/clawhub/catalog/{reference}/file` |
-| POST | `/api/v1/clawhub/catalog/{reference}/verify` |
-| POST | `/api/v1/clawhub/catalog/{reference}/install` |
-| GET | `/api/v1/clawhub/installed` |
-| POST | `/api/v1/clawhub/installed/update-all` |
-| POST | `/api/v1/clawhub/installed/{reference}/verify` |
-| POST | `/api/v1/clawhub/installed/{reference}/pin` |
-| POST | `/api/v1/clawhub/installed/{reference}/unpin` |
-| POST | `/api/v1/clawhub/installed/{reference}/update` |
-| DELETE | `/api/v1/clawhub/installed/{reference}` |
-
-Read operations are always available once ClawHub is wired. Install, update, pin, unpin, and uninstall are filtered out unless mutation authority has been granted. These are the only routes that return a canonical `code` alongside the error message — see [Skills and Approvals](skills-and-approvals.md).
 
 ## Artifacts
 
@@ -367,11 +348,6 @@ PostgreSQL store options: `WithPostgresSchema`, `WithPostgresPool`, `WithPostgre
 | `WithTeamManagementActions` | Expose Team management as Agent actions |
 | `WithRunManagementActions` | Expose Run management as Agent actions |
 | `WithRunbookManagementActions` | Expose runbook management as Agent actions |
-| `WithClawHubRegistry` | Install a ClawHub registry |
-| `WithClawHubRegistrySkillsDirectory` | Install a registry with an on-disk skills directory |
-| `WithClawHubRegistryPreview` | Install a read-only registry |
-| `WithClawHubRegistryClient` | Supply a registry client |
-| `WithClawHubSourceArtifactScope` | Scope retained Skill source artifacts |
 | `WithSkillSourceArtifactStore` | Install a Skill source artifact store |
 | `WithWorkforceAuthoringGenerator` | Install a workforce proposal generator |
 | `WithWorkforceChangeSetReadinessValidators` | Add readiness checks before apply |

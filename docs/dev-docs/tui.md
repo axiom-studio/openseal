@@ -59,8 +59,7 @@ Depending on the connected server, the workspace can expose:
   and presence
 - **Integrations** — capability-advertised conversation gateway registration,
   lifecycle, and connection state supplied by the connected host
-- **Skills** — ClawHub lifecycle, deployment bindings, and model-visible
-  actions
+- **Skills** — deployment bindings and model-visible actions
 - **Activity / Evidence** — canonical audit projection and artifact downloads
 
 ## Guided first-use experience
@@ -134,10 +133,10 @@ Common controls:
 | `?` | Open or close contextual help |
 | `Ctrl+S` | Submit the current composer operation |
 | `↑` / `↓` or `k` / `j` | Select an item or current requirement |
-| `n` | Begin a supported creation or install operation; in Readiness, start the selected active runbook operation |
+| `n` | Begin a supported creation operation; in Readiness, start the selected active runbook operation |
 | `r` | Refresh; in a failed Workforce proposal, prepare a governed retry |
 | `m` | Open the contextual message, refinement, or amendment composer; in Activity, load the next page |
-| `p` | Pause/resume selected Run, Runbook, Agent, or Team; pin/unpin a Skill |
+| `p` | Pause/resume selected Run, Runbook, Agent, or Team |
 | `g` | Guide a selected active Run; in Objectives, reconcile due schedules |
 | `y` / `x` | Approve/accept or reject the selected eligible governed item |
 | `q` / `M` | Request or provide clarification for an Agent request |
@@ -145,7 +144,7 @@ Common controls:
 | `[` / `]` | Move among relevant credential, configuration, amendment, adapter, or Skill choices |
 | `b` | Save selected Workforce placement or begin a Skill binding |
 | `v` | Verify or activate according to section |
-| `u` / `U` | Update selected or all installed ClawHub Skills |
+| `u` | In Objectives, start the selected runbook |
 | `d` | Download selected artifact |
 | `Esc` | Cancel the current composer mode |
 | `Ctrl+C` | Exit without stopping server work |

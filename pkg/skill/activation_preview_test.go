@@ -29,7 +29,7 @@ func TestBindingActivationPreviewIsExactAndSideEffectFree(t *testing.T) {
 		Prompt:    &PromptModule{Instructions: "Read {baseDir}/references/guide.md before writing."},
 		Resources: []capability.Resource{{Path: "references/guide.md", Kind: "file", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 		Source: &capability.SourceProvenance{
-			Identity: "https://clawhub.test::publisher/writer", Format: "openclaw", Registry: "https://clawhub.test", Reference: "publisher/writer", ResolvedVersion: "1.0.0",
+			Identity: "https://registry.test::publisher/writer", Format: "openclaw", Registry: "https://registry.test", Reference: "publisher/writer", ResolvedVersion: "1.0.0",
 			Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}

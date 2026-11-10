@@ -165,40 +165,10 @@ func TestCatalogIndexesBundleResourcesAndStableRevision(t *testing.T) {
 	}
 }
 
-func TestCatalogPreservesInstalledClawHubOriginAndVersion(t *testing.T) {
-	root := t.TempDir()
-	skillDir := filepath.Join(root, "summarize")
-	if err := os.MkdirAll(filepath.Join(skillDir, ".clawhub"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	writeSkill(t, skillDir, "summarize", "Summarize safely.", nil)
-	origin := `{"version":1,"registry":"https://clawhub.ai","slug":"summarize","ownerHandle":"seanford","installedVersion":"0.1.0","fingerprint":"fp-1","archiveSha256":"` + strings.Repeat("a", 64) + `"}`
-	if err := os.WriteFile(filepath.Join(skillDir, ".clawhub", "origin.json"), []byte(origin), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := NewCatalog().Discover(context.Background(), []Root{{ID: "managed", Kind: RootManaged, Path: root}})
-	if err != nil || len(snapshot.Effective) != 1 {
-		t.Fatalf("snapshot = %#v, %v", snapshot, err)
-	}
-	candidate := snapshot.Effective[0]
-	source := candidate.Compilation.Definition.Source
-	if !strings.HasPrefix(candidate.Version, "0.1.0+source."+candidate.Digest[:12]+".origin.") || source == nil || source.Registry != "https://clawhub.ai" || source.Publisher != "seanford" ||
-		source.Reference != "seanford/summarize" || source.ResolvedVersion != "0.1.0" || source.Trust["fingerprint"] != "fp-1" {
-		t.Fatalf("installed origin was not preserved: candidate=%#v source=%#v", candidate, source)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, ".clawhub", "origin.json"), []byte(`{"version":1}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	invalid, err := NewCatalog().Discover(context.Background(), []Root{{ID: "managed", Kind: RootManaged, Path: root}})
-	if err != nil || len(invalid.Effective) != 0 || len(invalid.Diagnostics) != 1 || invalid.Diagnostics[0].Code != "source.origin_invalid" {
-		t.Fatalf("invalid installed origin did not fail closed: %#v, %v", invalid, err)
-	}
-}
-
 func TestCatalogSurfacesUnadaptedExternalSkillWithoutDroppingProvenance(t *testing.T) {
 	root := t.TempDir()
 	directory := filepath.Join(root, "reddit-search")
-	if err := os.MkdirAll(filepath.Join(directory, ".clawhub"), 0o700); err != nil {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	content := `---
@@ -213,18 +183,13 @@ Search Reddit for the requested topic.
 	if err := os.WriteFile(filepath.Join(directory, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	origin := `{"version":1,"registry":"https://clawhub.ai","slug":"reddit-search","ownerHandle":"publisher","installedVersion":"1.0.0","fingerprint":"fp-reddit","archiveSha256":"` + strings.Repeat("b", 64) + `"}`
-	if err := os.WriteFile(filepath.Join(directory, ".clawhub", "origin.json"), []byte(origin), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	snapshot, err := NewCatalog().Discover(context.Background(), []Root{{ID: "managed", Kind: RootManaged, Path: root}})
 	if err != nil || len(snapshot.Effective) != 1 || !hasDiagnostic(snapshot, "needs_action_adapter") {
 		t.Fatalf("unadapted catalog Skill = %#v, %v", snapshot, err)
 	}
 	candidate := snapshot.Effective[0]
 	if candidate.Compilation == nil || candidate.Compilation.Definition.Source == nil ||
-		candidate.Compilation.Definition.Source.Registry != "https://clawhub.ai" || candidate.Compilation.Definition.Source.Reference != "publisher/reddit-search" {
+		candidate.Compilation.Definition.Source.Reference != "managed:managed:reddit-search" {
 		t.Fatalf("source provenance was not retained: %#v", candidate)
 	}
 }

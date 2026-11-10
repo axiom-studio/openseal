@@ -12,7 +12,7 @@ import (
 func TestCatalogBindsSourceVariantsWithoutChangingModelIdentity(t *testing.T) {
 	ctx := context.Background()
 	catalog := NewCatalog()
-	identities := []string{"clawhub::@alice/release", "clawhub::@bob/release"}
+	identities := []string{"catalog::@alice/release", "catalog::@bob/release"}
 	for index, identity := range identities {
 		definition := testSkillDefinition()
 		definition.Source = &SourceProvenance{Identity: identity, Format: "openclaw.skill.v1", Publisher: []string{"alice", "bob"}[index]}
@@ -43,7 +43,7 @@ func TestCatalogBindsSourceVariantsWithoutChangingModelIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range append(identities, "opaque-clawhub") {
+	for _, forbidden := range append(identities, "opaque-catalog") {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("model actions leaked source or credential identity %q: %s", forbidden, encoded)
 		}

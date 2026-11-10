@@ -8,7 +8,6 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
-	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -39,8 +38,6 @@ const (
 	WorkforceExecutionTargetsCapabilityVersion = "1"
 	WorkforceBundlesCapabilityID               = "workforce-bundles"
 	WorkforceBundlesCapabilityVersion          = "1"
-	ClawHubLifecycleCapabilityID               = "clawhub-lifecycle"
-	ClawHubLifecycleCapabilityVersion          = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID               = "agent-definitions"
 	AgentDefinitionsCapabilityVersion          = "8"
 	AgentRequestsCapabilityID                  = "agent-requests"
@@ -302,19 +299,6 @@ type ListAgentBuilderDraftsResponse struct {
 	Drafts []runtime.AgentBuilderDraft `json:"drafts"`
 }
 
-type ClawHubVersionRequest struct {
-	Version string `json:"version,omitempty"`
-	Tag     string `json:"tag,omitempty"`
-}
-type ClawHubPinRequest struct {
-	Reason string `json:"reason"`
-}
-type ClawHubFile struct {
-	Path          string `json:"path"`
-	Size          int    `json:"size"`
-	ContentBase64 string `json:"contentBase64"`
-}
-
 type CreateTeamDeploymentRequest struct {
 	Deployment *kernelteam.Deployment `json:"deployment"`
 	ActorType  string                 `json:"actorType"`
@@ -550,14 +534,6 @@ func AgentTurnsCapability() Capability {
 
 func SkillActionsCapability() Capability {
 	return Capability{ID: SkillActionsCapabilityID, Version: SkillActionsCapabilityVersion, Available: true, Operations: []string{OperationList}}
-}
-
-func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capability {
-	operations := make([]string, 0, len(lifecycle.Operations))
-	for _, operation := range lifecycle.Operations {
-		operations = append(operations, string(operation))
-	}
-	return Capability{ID: ClawHubLifecycleCapabilityID, Version: ClawHubLifecycleCapabilityVersion, Available: len(operations) > 0, Operations: operations}
 }
 
 func Capabilities() CapabilityDocument {

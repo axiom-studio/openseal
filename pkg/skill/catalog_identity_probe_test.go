@@ -117,7 +117,7 @@ func TestCatalogLiveIdentityProbeSeesLaterPublisherImmediately(t *testing.T) {
 				t.Fatal(err)
 			}
 			variant := cloneDefinition(definition)
-			variant.Source = &SourceProvenance{Identity: "clawhub::@another/release", Format: "openclaw.skill.v1"}
+			variant.Source = &SourceProvenance{Identity: "catalog::@another/release", Format: "openclaw.skill.v1"}
 			if err := writer.Register(ctx, variant); err != nil {
 				t.Fatal(err)
 			}

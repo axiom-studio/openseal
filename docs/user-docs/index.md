@@ -31,7 +31,6 @@ The design holds to one rule throughout: the kernel never manufactures authority
 - **Capability discovery** — The daemon computes what it can actually do per request, so clients read the surface rather than assume it. The same kernel runs standalone and mounted inside a larger host.
 - **Prompt-to-workforce authoring** — A prompt compiles into an inspectable, refinable proposal for Agents, Teams, roles, and boundaries. Nothing is created until the proposal is explicitly applied.
 - **Portable workforce bundles** — A signed YAML document moves a complete workforce between deployments, with validate, inspect, compare, preview, and upgrade-plan operations available offline.
-- **Skill distribution through ClawHub** — Skills are discovered, verified, and installed with recorded provenance, including the source digest that ties an installed Skill to the exact bytes that produced it.
 - **Execution-time secret resolution** — Skill definitions name opaque credential references. Values are resolved by a worker for one action call and never enter durable state, capability responses, prompts, or the terminal client.
 - **A thin terminal client** — The workspace renders only what the connected server advertises, owns no authoritative state, and can be closed without stopping durable work.
 - **Deterministic runbooks** — A directed graph of typed HCL nodes executes in one process when an outcome needs to be exact rather than reasoned.
@@ -54,7 +53,7 @@ The design holds to one rule throughout: the kernel never manufactures authority
 | [Core Concepts](concepts.md) | The execution model, capability discovery, scopes, owners, and the two execution paths |
 | [Agents and Teams](agents-and-teams.md) | Definitions, deployments, activation, rollback, the amendment sequence, and agent requests |
 | [Objectives and Runs](objectives-and-runs.md) | The portfolio, the Run lifecycle and its model steps, steering commands, schedules and event routines |
-| [Skills, Actions, and Approvals](skills-and-approvals.md) | Bindings as least privilege, action calls, durable approvals, and ClawHub distribution |
+| [Skills, Actions, and Approvals](skills-and-approvals.md) | Bindings as least privilege, action calls, and durable approvals |
 | [Workforces](workforces.md) | Prompt-to-workforce authoring, change sets, and portable bundles |
 | [Configuration](configuration.md) | The daemon configuration file, the standalone context, credential references, and environment variables |
 | [Security Boundaries](security.md) | What OpenSeal does not provide, the two guardrails, scopes as partitions, and secret handling |

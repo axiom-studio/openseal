@@ -19,8 +19,6 @@ import (
 	"github.com/axiom-studio/openseal/internal/server"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
-	"github.com/axiom-studio/openseal/pkg/skill"
-	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	"go.uber.org/zap"
 )
 
@@ -125,10 +123,6 @@ Options:
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	skillsDir := strings.TrimSpace(os.Getenv("OPENSEAL_SKILLS_DIR"))
-	if skillsDir == "" {
-		skillsDir = filepath.Join(filepath.Dir(*configPath), "skills")
-	}
 	// Converts the change-set drafts migration 76 kept into builder chats at
 	// the first start (D12), seeding the builder where a draft needs it.
 	cutoverHost := &daemon.BuilderCutoverHost{}
@@ -139,8 +133,6 @@ Options:
 		opensealkernel.WithSkillManagementActions(),
 		opensealkernel.WithAgentManagementActions(),
 		opensealkernel.WithTeamManagementActions(),
-		opensealkernel.WithClawHubRegistrySkillsDirectory(clawhub.RegistryURL, clawhub.NewClawHubClient(""), skillsDir, skillsDir),
-		opensealkernel.WithClawHubSourceArtifactScope(skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}),
 	}
 	if *standaloneOperator {
 		engineOptions = append(engineOptions,
@@ -297,7 +289,6 @@ Options:
 		apiServer.SetChannelParticipation(authorize, post)
 	}
 	apiServer.SetReactionProjector(kernel.ReactionProjector())
-	apiServer.SetClawHubLifecycle(kernel, *standaloneOperator)
 	if *standaloneOperator {
 		if !*desktopOperator {
 			apiServer.SetActionApprovalAuthorizer(runtime.EligibleApprovalAuthorizer{})

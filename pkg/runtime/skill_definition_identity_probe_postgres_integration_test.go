@@ -45,11 +45,11 @@ func TestPostgresSkillDefinitionIdentityProbeUsesLiveIndexedMetadata(t *testing.
 	if err != nil || len(before) != 3 {
 		t.Fatalf("replica identities = %#v, %v", before, err)
 	}
-	if err := skill.NewCatalogWithStore(replica).Register(ctx, skillIdentityProbeDefinition("research", "1.0.0", "clawhub::@replica/research")); err != nil {
+	if err := skill.NewCatalogWithStore(replica).Register(ctx, skillIdentityProbeDefinition("research", "1.0.0", "catalog::@replica/research")); err != nil {
 		t.Fatal(err)
 	}
 	after, err := primary.ListSkillDefinitionIdentities(ctx, "research", "1.0.0")
-	if err != nil || len(after) != 4 || after[2].SourceIdentity != "clawhub::@replica/research" {
+	if err != nil || len(after) != 4 || after[2].SourceIdentity != "catalog::@replica/research" {
 		t.Fatalf("publisher installed by replica was not immediately visible = %#v, %v", after, err)
 	}
 
@@ -58,7 +58,7 @@ func TestPostgresSkillDefinitionIdentityProbeUsesLiveIndexedMetadata(t *testing.
 	if _, err := primary.db.ExecContext(ctx, `ALTER TABLE `+primary.table("skill_definitions")+` ALTER COLUMN payload SET STORAGE EXTERNAL`); err != nil {
 		t.Fatal(err)
 	}
-	large := skillIdentityProbeDefinition("research", "1.0.0", "clawhub::@large/research")
+	large := skillIdentityProbeDefinition("research", "1.0.0", "catalog::@large/research")
 	large.Prompt.Instructions = strings.Repeat("Keep the immutable payload outside the metadata read path. ", 512)
 	if err := skill.NewCatalogWithStore(primary).Register(ctx, large); err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestPostgresSkillDefinitionIdentityProbeUsesLiveIndexedMetadata(t *testing.
 	}
 	t.Logf("metadata query plan: %s", payload)
 
-	identity := capability.SkillIdentity{ID: "broken", Version: "1", SourceIdentity: "clawhub::@publisher/broken"}
+	identity := capability.SkillIdentity{ID: "broken", Version: "1", SourceIdentity: "catalog::@publisher/broken"}
 	if _, err := primary.db.ExecContext(ctx, `INSERT INTO `+primary.table("skill_definitions")+`(id, version, source_identity, payload) VALUES($1, $2, $3, '{"id":"broken","version":"1","name":"Broken"}'::jsonb)`, identity.ID, identity.Version, identity.SourceIdentity); err != nil {
 		t.Fatal(err)
 	}

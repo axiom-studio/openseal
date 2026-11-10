@@ -18,8 +18,7 @@ api:
 ```
 
 Only `sqlite` is accepted by the standalone configuration. Relative database,
-artifact, and Skill paths are resolved from the configuration file's directory.
-`OPENSEAL_SKILLS_DIR` overrides the daemon's default `skills` directory.
+and artifact paths are resolved from the configuration file's directory.
 
 The daemon starts one HTTP listener. `api.listenAddr` serves the versioned
 kernel API; use `/api/v1/health` for health checks. Durable schedules are
@@ -32,8 +31,7 @@ including health and capability discovery. It is one shared secret, not a
 multi-user authorization system. `--desktop-operator` requires this token, a
 loopback listener, and a local workspace scope; it provides the desktop's
 local owner review and installation authority. `--standalone-operator` permits
-action approvals, ClawHub mutations, and authoring retry
-and refinement, but not workforce evaluation, approval, or apply.
+action approvals and authoring retry and refinement, but not workforce evaluation, approval, or apply.
 
 ## Standalone context, local Vault, and model-backed authoring
 
@@ -78,8 +76,7 @@ flowchart TB
 ```
 
 For a graceful stop, send `SIGINT` or `SIGTERM`. OpenSeal stops workers and the
-kernel API server. On restart it restores persistent registries and installed
-ClawHub Skills. An expired Run or action lease is reclaimable from its last
+kernel API server. On restart it restores persistent registries. An expired Run or action lease is reclaimable from its last
 durable checkpoint; idempotency keys protect repeated commands and dispatch
 proposals.
 
@@ -175,18 +172,7 @@ go test -race ./pkg/runtime ./pkg/openseal
 
 Live tests make real network or model calls and are excluded from the default
 suite by the `integration` build tag. Configure credentials in the environment,
-never in source files:
-
-The real ClawHub/model acceptance requires an explicit opt-in:
-
-```bash
-export OPENSEAL_RUN_LIVE_E2E=1
-# Optional; defaults to @nubzparmesan/minnow-writing
-export OPENSEAL_E2E_CLAWHUB_SKILL='@owner/skill'
-
-go test -tags=integration ./pkg/openseal \
-  -run TestLiveClawHubSkillModelE2E
-```
+never in source files.
 
 These tests verify that transport credentials are not persisted or exposed.
 They should run against a controlled provider account with bounded spend.

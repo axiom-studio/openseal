@@ -147,7 +147,7 @@ Workforce authoring routes are grouped under
 durable ChangeSet is the normal interactive path because generation,
 refinements, evaluation, decisions, and the apply receipt survive reconnects.
 
-## Skills and ClawHub
+## Skills
 
 | Resource | Routes | Purpose |
 | --- | --- | --- |
@@ -155,11 +155,7 @@ refinements, evaluation, decisions, and the apply receipt survive reconnects.
 | Agent actions | `GET /agent-deployments/{id}/skill-actions` | Read exact model-visible action surface |
 | Agent bindings | `GET /agent-deployments/{id}/skill-bindings`; item `PUT`; item `/disable` | Revisioned least-privilege authority |
 | Team bindings | `GET /team-deployments/{id}/skill-bindings`; item `PUT`; item `/disable` | Team-owned role authority |
-| Catalog inspection | `GET /clawhub/catalog/{reference}` plus `/versions` and `/file` | Inspect registry source |
-| Verification/install | `POST /clawhub/catalog/{reference}/verify` or `/install` | Verify, compile, preview, and install |
-| Installed lifecycle | `GET /clawhub/installed`; update-all; item verify, pin, unpin, update, delete | Govern local installed state |
 
-References such as `@owner/name` must be URL-encoded when placed in a path.
 Mutation routes are omitted from capabilities unless a trusted operator boundary
 enabled them.
 

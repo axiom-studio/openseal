@@ -7,45 +7,27 @@ transport, credential, policy, and provenance contracts.
 
 ```mermaid
 flowchart LR
-    Source[SKILL.md and source files] --> Verify[Acquire, verify, and hash]
-    Verify --> Compile[Compile portable semantics]
+    Source[SKILL.md and source files] --> Hash[Load and hash]
+    Hash --> Compile[Compile portable semantics]
     Compile --> Definition[Source-qualified Skill definition]
     Compile --> Diagnostics[Actionable diagnostics]
-    Definition --> Install[Atomic installed state and lockfile]
-    Install --> Binding[Agent or Team Skill binding]
+    Definition --> Binding[Agent or Team Skill binding]
     Binding --> Activate[Host eligibility snapshot]
     Activate --> Execute[Governed native action]
 ```
 
 The upstream references for this boundary are the current
 [OpenClaw skills specification](https://docs.openclaw.ai/tools/skills) and
-[OpenClaw skills CLI](https://docs.openclaw.ai/cli/skills). Registry operations
-follow the versioned ClawHub API and its `clawhub.skill.verify.v1` verification
-envelope.
+[OpenClaw skills CLI](https://docs.openclaw.ai/cli/skills).
 
-## Use from standalone OpenSeal
+## Use from an embedding host
 
-Start the daemon in trusted loopback operator mode to enable registry
-mutations, then open the Skills workspace:
-
-```bash
-openseal daemon --config ./local.yaml --standalone-operator
-openseal tui --endpoint http://127.0.0.1:8080
-```
-
-Press `s` to open Skills. When the server advertises install authority, press
-`n`, enter an exact registry reference such as `@owner/skill`, and submit with
-`Ctrl+S`. The workspace shows installed state, verification, pins, and the
-deployment bindings separately. Installing a Skill does not authorize an
-Agent: create or edit an exact binding for the selected deployment before its
-prompt or actions can activate.
-
-The REST surface supports catalog detail, cursor-paginated versions, individual
-files, verification, installation, installed-state inspection, update,
-update-all, pin, unpin, installed verification, and uninstall. See the
-[REST API guide](../api.md#skills-and-clawhub). The public Go facade additionally
-exposes cursor-paginated search and explore clients, verified preview, source
-artifact import/export, and the lifecycle methods used by the server.
+OpenSeal does not fetch Skills from a registry. A host supplies source
+directories through the secure source catalog or passes a bundle to the public
+Go facade, which exposes compilation (`CompileOpenClawSkill`), byte-exact export
+(`ExportOpenClawSkill`), and source artifact import/export. A compiled Skill
+does not authorize an Agent: create or edit an exact binding for the selected
+deployment before its prompt or actions can activate.
 
 ## Compatibility guarantees
 
@@ -74,21 +56,15 @@ artifact import/export, and the lifecycle methods used by the server.
 | session skill snapshots | deterministic activation snapshot ID | Stable across restart for equivalent bindings/host capabilities; host revision changes force refresh identity |
 | workspace/project/personal/managed/bundled/plugin/extra roots | secure source catalog | Declared-name conflicts use documented precedence; one grouping level is supported |
 | directory refresh | debounced effective-source watcher | Emits only when the winning skill surface changes; shadowed edits stay quiet |
-| ClawHub search, explore, detail, versions, files, verify, archive | typed registry client | Native |
-| verified preview before installation | secret-free compilation projection plus source, archive, and compilation digests | Native; install can require the exact reviewed receipt |
-| ClawHub install, update, update-all, pin, verify, uninstall | verified atomic installer and lockfile | Native with local-modification and rollback protection |
-| registry slug differing from declared skill name | source reference plus declared definition identity | Supported; registry identity remains provenance |
 | local or Git acquisition | compiler bundle input | Acquisition adapter boundary; compilation semantics are identical |
 | plugins that contribute skills | ordinary discovered skill directories | The skill is compatible; non-skill plugin capabilities remain plugin concerns |
 
 ## Security invariants
 
-Third-party artifacts are untrusted. Registry installs require a passing
-verification result unless an embedding application makes an explicit unsafe
-choice. Archive extraction rejects traversal, symlinks, case-colliding paths,
-oversized files, and oversized archives. Activation and action execution remain
-separate: a verified install does not grant a model permission to invoke a
-skill, resolve a credential, or perform a side effect.
+Third-party artifacts are untrusted. Source loading rejects traversal, unsafe
+symlinks, and oversized files. Activation and action execution remain separate:
+a compiled Skill does not grant a model permission to invoke it, resolve a
+credential, or perform a side effect.
 
 The canonical tool dispatcher materializes only declared input mappings and
 compiler literals. Credential values travel through a separate worker-only
@@ -111,7 +87,7 @@ and test each adapter it enables.
 A successful compilation contains a canonical definition, source provenance,
 an immutable resource index, preserved installer candidates, and a round-trip
 source artifact. Version identity incorporates source, origin, verification
-trust, and process semantics so different registry or local sources cannot
+trust, and process semantics so different sources cannot
 silently collapse into one executable definition.
 
 The compiler lowers deterministic constructs where their semantics are exact:
@@ -126,17 +102,4 @@ The compiler lowers deterministic constructs where their semantics are exact:
 If safe native execution requires a host adapter that is not present, the
 compiled action remains unavailable with an explicit diagnostic. Unknown
 dispatch modes, unsafe paths, ambiguous source mutations, digest mismatches,
-unsupported archives, and semantics that cannot be preserved fail closed.
-
-## Lifecycle and updates
-
-Installation writes to a staging area, verifies the archive and compilation,
-then atomically publishes the installed directory and lockfile. Update compares
-the installed source, verification, and local state; local modifications and
-pins prevent an unreviewed replacement. Update-all reports each result instead
-of hiding partial failures. Uninstall refuses unsafe or referenced removal
-unless the caller uses the explicit governed force contract.
-
-On Engine restart, installed Skills are reverified against their lockfile,
-recompiled, and restored to the source-aware catalog. Existing bindings keep
-their exact source-qualified identity rather than drifting to another variant.
+and semantics that cannot be preserved fail closed.

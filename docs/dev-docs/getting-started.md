@@ -103,8 +103,8 @@ Restart with the local operator surface after stopping the first daemon:
   --standalone-operator
 ```
 
-`--standalone-operator` enables local action approval decisions, ClawHub
-mutations, refinement answers, and generation retry. It requires a loopback listener; the generated default already uses
+`--standalone-operator` enables local action approval decisions,
+refinement answers, and generation retry. It requires a loopback listener; the generated default already uses
 `127.0.0.1:8080`. This flag does not authorize workforce evaluation, approval,
 or Apply. Those steps need the authenticated desktop mode or an embedding host
 with lifecycle authority. Credential placement exposes only the context's
@@ -157,4 +157,4 @@ named data volume.
 - Use every command from the [CLI reference](cli.md).
 - Integrate through the [REST API](api.md).
 - Configure durable deployments using [Operations](operations.md).
-- Import third-party Skills using [OpenClaw compatibility](skills/openclaw-compatibility.md).
+- Compile third-party Skill sources using [OpenClaw compatibility](skills/openclaw-compatibility.md).

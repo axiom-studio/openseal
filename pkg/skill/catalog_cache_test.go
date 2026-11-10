@@ -34,7 +34,7 @@ func (s *countingCatalogStore) ListSkillBindings(ctx context.Context, scope Scop
 
 func cacheTestDefinition(actionCount int) *Definition {
 	definition := testSkillDefinition()
-	definition.Source = &SourceProvenance{Identity: "clawhub::@publisher/release", Format: "openclaw.skill.v1"}
+	definition.Source = &SourceProvenance{Identity: "catalog::@publisher/release", Format: "openclaw.skill.v1"}
 	definition.Prompt = &PromptModule{Instructions: "Use the authorized release operations.", UserInvocable: true}
 	for i := 1; i < actionCount; i++ {
 		action := definition.Actions["deploy"]
@@ -124,7 +124,7 @@ func TestCatalogUnqualifiedLookupSeesPublisherAddedByAnotherCatalog(t *testing.T
 		t.Fatal(err)
 	}
 	variant := cloneDefinition(definition)
-	variant.Source.Identity = "clawhub::@another/release"
+	variant.Source.Identity = "catalog::@another/release"
 	if err := writer.Register(ctx, variant); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestCatalogCachedDefinitionsAndProjectionsAreMutationSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loaded.Source.Identity = "clawhub::@mutated/release"
+	loaded.Source.Identity = "catalog::@mutated/release"
 	loaded.Prompt.Instructions = "mutated"
 	loaded.Actions["deploy"].InputSchema["type"] = "string"
 	actions, err := catalog.ListModelActions(ctx, binding.Scope, binding.DeploymentID)
@@ -283,7 +283,7 @@ func TestCatalogFreshPublisherVariantMustStillValidateItsSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	invalid := cloneDefinition(definition)
-	invalid.Source.Identity = "clawhub::@unvalidated/release"
+	invalid.Source.Identity = "catalog::@unvalidated/release"
 	invalid.Actions["deploy"].InputSchema["$ref"] = "https://example.invalid/schema.json"
 	// A newly encountered persisted variant must pass the same validation as a
 	// cold lookup, even when another publisher's immutable variant is cached.

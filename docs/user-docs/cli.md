@@ -30,7 +30,7 @@ Starts the durable kernel and the versioned API. See [Configuration](configurati
 | `--context` | Path to the standalone context file | `context.yaml` |
 | `--scope` | Durable standalone authoring scope as `kind:id` | `local:default` |
 | `--listen` | Override the configured API address; port `0` selects a free port | configuration value |
-| `--standalone-operator` | Grant local action, ClawHub, and authoring retry/refinement authorities; requires loopback | off |
+| `--standalone-operator` | Grant local action and authoring retry/refinement authorities; requires loopback | off |
 | `--desktop-operator` | Grant authenticated local workspace review and installation; requires loopback, `OPENSEAL_API_TOKEN`, and a local scope | off |
 | `--help` | Print help | — |
 
@@ -89,7 +89,7 @@ Seven destinations are primary. The remainder appear under the **More** row. Eac
 | Evidence | `a` | More |
 | Imports | `B` | More |
 
-Home is always present. Every other destination appears only when its capability is advertised. **Marketplace** appears when any one of the ClawHub, Skill action, or Skill binding capabilities is available.
+Home is always present. Every other destination appears only when its capability is advertised. **Marketplace** appears when either the Skill action or the Skill binding capability is available.
 
 > **Integrations does not appear against the bundled daemon.** That destination is gated on the conversation gateway capability, which the standalone daemon never emits. It is reachable only against an embedding host that composes its own capability document.
 

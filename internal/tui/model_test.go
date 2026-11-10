@@ -24,7 +24,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
-	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	tea "github.com/charmbracelet/bubbletea"
@@ -141,7 +140,6 @@ var (
 	_ client.AgentDefinitionLifecycleClient    = (*fakeKernelClient)(nil)
 	_ client.ExternalConversationGatewayClient = (*fakeKernelClient)(nil)
 	_ client.KernelClient                      = (*fakeChannelKernelClient)(nil)
-	_ client.KernelClient                      = (*fakeClawHubKernelClient)(nil)
 	_ client.SkillBindingClient                = (*fakeKernelClient)(nil)
 )
 
@@ -271,59 +269,6 @@ type fakeChannelKernelClient struct {
 	postRequests               []kernelapi.PostChannelMessageRequest
 	cursor                     *runtime.ConversationCursor
 	cursorAdvances             []kernelapi.AdvanceConversationCursorRequest
-}
-
-type fakeClawHubKernelClient struct {
-	*fakeKernelClient
-	states     []clawhub.InstalledState
-	installs   []clawhub.SkillReference
-	pins       []string
-	updates    []string
-	uninstalls []string
-	updateAll  int
-}
-
-func (f *fakeClawHubKernelClient) InspectClawHubSkill(context.Context, clawhub.SkillReference) (*clawhub.SkillDetail, error) {
-	return &clawhub.SkillDetail{}, nil
-}
-func (f *fakeClawHubKernelClient) ListClawHubSkillVersions(context.Context, clawhub.SkillReference, int, string) (*clawhub.VersionPage, error) {
-	return &clawhub.VersionPage{}, nil
-}
-func (f *fakeClawHubKernelClient) VerifyClawHubSkill(context.Context, clawhub.SkillReference, kernelapi.ClawHubVersionRequest) (*clawhub.Verification, error) {
-	return &clawhub.Verification{OK: true}, nil
-}
-func (f *fakeClawHubKernelClient) ListInstalledClawHubSkills(context.Context) ([]clawhub.InstalledState, error) {
-	return f.states, nil
-}
-func (f *fakeClawHubKernelClient) InstallClawHubSkill(_ context.Context, reference clawhub.SkillReference, _ kernelapi.ClawHubVersionRequest) (*clawhub.LifecycleResult, error) {
-	f.installs = append(f.installs, reference)
-	return &clawhub.LifecycleResult{APIVersion: clawhub.LifecycleAPIVersion, Operation: clawhub.LifecycleInstall, SourceIdentity: "source", Reference: reference, Version: "1.0.0", Outcome: clawhub.LifecycleOutcomeInstalled, Changed: true}, nil
-}
-func (f *fakeClawHubKernelClient) VerifyInstalledClawHubSkill(context.Context, string) (*clawhub.Verification, error) {
-	return &clawhub.Verification{OK: true}, nil
-}
-func (f *fakeClawHubKernelClient) PinClawHubSkill(_ context.Context, reference, reason string) (*clawhub.LifecycleResult, error) {
-	f.pins = append(f.pins, reason)
-	return f.result(reference, clawhub.LifecyclePin, clawhub.LifecycleOutcomePinned), nil
-}
-func (f *fakeClawHubKernelClient) UnpinClawHubSkill(_ context.Context, reference string) (*clawhub.LifecycleResult, error) {
-	return f.result(reference, clawhub.LifecycleUnpin, clawhub.LifecycleOutcomeUnpinned), nil
-}
-func (f *fakeClawHubKernelClient) UpdateClawHubSkill(_ context.Context, reference string) (*clawhub.LifecycleResult, error) {
-	f.updates = append(f.updates, reference)
-	return f.result(reference, clawhub.LifecycleUpdate, clawhub.LifecycleOutcomeUpdated), nil
-}
-func (f *fakeClawHubKernelClient) UpdateAllClawHubSkills(context.Context) (*clawhub.LifecycleBatchResult, error) {
-	f.updateAll++
-	return &clawhub.LifecycleBatchResult{APIVersion: clawhub.LifecycleAPIVersion, Operation: clawhub.LifecycleUpdateAll}, nil
-}
-func (f *fakeClawHubKernelClient) UninstallClawHubSkill(_ context.Context, reference string) (*clawhub.LifecycleResult, error) {
-	f.uninstalls = append(f.uninstalls, reference)
-	return f.result(reference, clawhub.LifecycleUninstall, clawhub.LifecycleOutcomeRemoved), nil
-}
-func (f *fakeClawHubKernelClient) result(reference string, operation clawhub.LifecycleOperation, outcome clawhub.LifecycleOutcome) *clawhub.LifecycleResult {
-	ref, _ := clawhub.ParseSkillReference(reference)
-	return &clawhub.LifecycleResult{APIVersion: clawhub.LifecycleAPIVersion, Operation: operation, SourceIdentity: "source", Reference: ref, Version: "1.0.0", Outcome: outcome, Changed: true}
 }
 
 func (f *fakeChannelKernelClient) CreateConversation(_ context.Context, request kernelapi.CreateConversationRequest, key string) (*runtime.Conversation, error) {
@@ -1875,42 +1820,6 @@ func TestObjectiveAndRunViewsProjectAttemptAndDurationBudgets(t *testing.T) {
 	}
 }
 
-func TestClawHubSkillsUseAdvertisedLifecycleAndTypedConfirmation(t *testing.T) {
-	capability := kernelapi.ClawHubLifecycleCapability(clawhub.CanonicalLifecycleCapability())
-	base := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capability)}
-	fake := &fakeClawHubKernelClient{fakeKernelClient: base, states: []clawhub.InstalledState{{APIVersion: clawhub.LifecycleAPIVersion, SourceIdentity: "source", Reference: clawhub.SkillReference{Owner: "acme", Slug: "research"}, Version: "1.0.0", Verified: true}}}
-	model := newModelWithClient(t, fake)
-	applyCommand(t, model, model.loadCapabilities())
-	if model.section != sectionSkills || !strings.Contains(model.View(), "Skills and authorized actions") || !strings.Contains(model.View(), "@acme/research@1.0.0") {
-		t.Fatalf("Skills surface not rendered:\n%s", model.View())
-	}
-	model.mode = modeSkillInstall
-	model.focusComposerEditor()
-	model.editor.SetValue("@other/publisher")
-	applyCommand(t, model, model.submitClawHubInstall())
-	if len(fake.installs) != 1 || fake.installs[0].Owner != "other" {
-		t.Fatalf("installs=%#v", fake.installs)
-	}
-	model.clawHubSkills = fake.states
-	model.restoreClawHubSelection()
-	model.mode = modeSkillPin
-	model.editor.SetValue("Reviewed production version")
-	applyCommand(t, model, model.submitClawHubPin())
-	if len(fake.pins) != 1 || fake.pins[0] != "Reviewed production version" {
-		t.Fatalf("pins=%#v", fake.pins)
-	}
-	model.mode = modeSkillRemove
-	model.editor.SetValue("remove")
-	if command := model.submitClawHubRemoval(); command != nil {
-		t.Fatal("case-insensitive destructive confirmation was accepted")
-	}
-	model.editor.SetValue("REMOVE")
-	applyCommand(t, model, model.submitClawHubRemoval())
-	if len(fake.uninstalls) != 1 {
-		t.Fatalf("uninstalls=%#v", fake.uninstalls)
-	}
-}
-
 func TestSkillActionsUseOwnerScopedTypedDiscovery(t *testing.T) {
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.SkillActionsCapability()),
@@ -1940,20 +1849,6 @@ func TestSkillActionsRenderTruthfulEmptyState(t *testing.T) {
 	view := model.View()
 	if !strings.Contains(view, "No executable action is bound to this Agent") || strings.Contains(view, "Press n") {
 		t.Fatalf("empty action state is not truthful:\n%s", view)
-	}
-}
-
-func TestClawHubTUIHidesUnadvertisedMutations(t *testing.T) {
-	lifecycle := clawhub.CanonicalLifecycleCapability()
-	lifecycle.Operations = []clawhub.LifecycleOperation{clawhub.LifecycleInspectInstalled}
-	fake := &fakeClawHubKernelClient{fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ClawHubLifecycleCapability(lifecycle))}, states: []clawhub.InstalledState{{SourceIdentity: "source", Reference: clawhub.SkillReference{Slug: "read-only"}, Version: "1"}}}
-	model := newModelWithClient(t, fake)
-	applyCommand(t, model, model.loadCapabilities())
-	view := model.View()
-	for _, control := range []string{"u update", "p pin", "x remove", "n install"} {
-		if strings.Contains(view, control) {
-			t.Fatalf("rendered unadvertised %q:\n%s", control, view)
-		}
 	}
 }
 
@@ -2968,7 +2863,7 @@ func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
 	model.prepareSkillBindingUpgradeComposer()
 	model.editor.SetValue("version: 2\nsource: registry:source")
 	applyCommand(t, model, model.submitSkillBindingUpgradePlan())
-	view := model.renderClawHubSkillsContent(120)
+	view := model.renderSkillsContent(120)
 	for _, expected := range []string{"Reviewed update", "source@1", "source@2", "1 Objective(s)", "historical Runs stay unchanged", "additional governed action", "Explicit approval"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("upgrade review missing %q:\n%s", expected, view)

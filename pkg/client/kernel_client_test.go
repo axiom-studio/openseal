@@ -22,7 +22,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
-	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	"go.uber.org/zap"
@@ -948,41 +947,6 @@ type clientTestResolver struct{}
 
 func (clientTestResolver) Resolve(_ context.Context, request runtime.ArtifactContentResolutionRequest) (runtime.ArtifactContentResolution, error) {
 	return runtime.ArtifactContentResolution{URL: "https://delivery.example/ephemeral", ExpiresAt: time.Now().Add(request.TTL)}, nil
-}
-
-func TestKernelHTTPClientMapsClawHubLifecycleContract(t *testing.T) {
-	requests := make([]string, 0)
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests = append(requests, r.Method+" "+r.URL.EscapedPath())
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/installed"):
-			_ = json.NewEncoder(w).Encode([]clawhub.InstalledState{{APIVersion: clawhub.LifecycleAPIVersion, SourceIdentity: "source", Reference: clawhub.SkillReference{Owner: "acme", Slug: "research"}, Version: "1.0.0"}})
-		case strings.HasSuffix(r.URL.Path, "/update-all"):
-			_ = json.NewEncoder(w).Encode(clawhub.LifecycleBatchResult{APIVersion: clawhub.LifecycleAPIVersion, Operation: clawhub.LifecycleUpdateAll})
-		default:
-			_ = json.NewEncoder(w).Encode(clawhub.LifecycleResult{APIVersion: clawhub.LifecycleAPIVersion, Operation: clawhub.LifecycleInstall, SourceIdentity: "source", Version: "1.0.0", Changed: true})
-		}
-	}))
-	defer api.Close()
-	client := NewKernelHTTPClient(api.URL, api.Client())
-	ctx, reference := context.Background(), clawhub.SkillReference{Owner: "acme", Slug: "research"}
-	if result, err := client.InstallClawHubSkill(ctx, reference, kernelapi.ClawHubVersionRequest{Version: "1.0.0"}); err != nil || !result.Changed {
-		t.Fatalf("install=%#v err=%v", result, err)
-	}
-	if states, err := client.ListInstalledClawHubSkills(ctx); err != nil || len(states) != 1 {
-		t.Fatalf("states=%#v err=%v", states, err)
-	}
-	if _, err := client.PinClawHubSkill(ctx, reference.String(), "reviewed"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.UpdateAllClawHubSkills(ctx); err != nil {
-		t.Fatal(err)
-	}
-	wantPath := "POST /api/v1/clawhub/catalog/@acme%2Fresearch/install"
-	if len(requests) != 4 || requests[0] != wantPath {
-		t.Fatalf("requests=%#v want first %q", requests, wantPath)
-	}
 }
 
 func TestKernelHTTPClientMapsWorkforceBundleContract(t *testing.T) {

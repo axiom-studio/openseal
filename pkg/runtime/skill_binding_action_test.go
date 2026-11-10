@@ -269,7 +269,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 
 	sourced := redditSkillDefinition()
 	sourced.ID = "sourced.reader"
-	sourced.Source = &capability.SourceProvenance{Identity: "clawhub://publisher/reddit@1.0.0", Format: "openclaw"}
+	sourced.Source = &capability.SourceProvenance{Identity: "catalog://publisher/reddit@1.0.0", Format: "openclaw"}
 	if err := catalog.Register(ctx, sourced); err != nil {
 		t.Fatal(err)
 	}

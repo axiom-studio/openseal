@@ -105,13 +105,11 @@ credential scopes (+ desktop scope) → worker scopes → Run workers
 
 | Field | Value |
 |---|---|
-| `OPENSEAL_SKILLS_DIR` | Directory holding installed Skills; defaults to `skills/` beside the configuration file |
 | `OPENSEAL_LLM_BASE_URL` | Workforce authoring model endpoint |
 | `OPENSEAL_LLM_MODEL` | Workforce authoring model name |
 | `OPENSEAL_LLM_CONTEXT_TOKENS` | Model context window in tokens (positive integer, default 128000), used to decide when a Run's session log is compacted |
 | `OPENAI_API_KEY` | Workforce authoring credential |
 | `OPENSEAL_API_TOKEN` | Optional bearer token required on every daemon API route; required by `--desktop-operator` |
-| `CLAWHUB_REGISTRY` | ClawHub registry base URL; defaults to `https://clawhub.ai` |
 | `OPENSEAL_API_URL` | Default endpoint for the terminal client |
 
 ## Daemon Flags
@@ -122,7 +120,7 @@ credential scopes (+ desktop scope) → worker scopes → Run workers
 | `--context` | Path to the standalone context file | `context.yaml` |
 | `--scope` | Durable standalone authoring scope as `kind:id` | `local:default` |
 | `--listen` | Override `api.listenAddr`; port `0` selects a free port | configuration value |
-| `--standalone-operator` | Grant local action, ClawHub, and authoring retry/refinement authorities; requires loopback | off |
+| `--standalone-operator` | Grant local action and authoring retry/refinement authorities; requires loopback | off |
 | `--desktop-operator` | Grant authenticated local workspace review and installation; requires loopback, `OPENSEAL_API_TOKEN`, and a local scope | off |
 | `--help` | Print help | — |
 

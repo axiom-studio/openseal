@@ -63,7 +63,7 @@ openseal daemon [options]
 --context <path>      local Vault/provider context (default context.yaml)
 --scope <kind:id>     standalone authoring scope (default local:default)
 --listen <addr>      override configured API address; port 0 selects a free port
---standalone-operator enable local action, ClawHub, and authoring retry/refinement authority on loopback
+--standalone-operator enable local action and authoring retry/refinement authority on loopback
 --desktop-operator enable authenticated local workspace review and installation
 --help
 ```

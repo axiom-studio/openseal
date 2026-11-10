@@ -64,7 +64,6 @@ Widen the publish spec only together with an authenticating reverse proxy in fro
 |---|---|
 | Action policy | Installs a policy naming a single approver, `user:local` |
 | Approval authorizer | Enables resolving action approvals |
-| ClawHub mutation authority | Enables install, update, pin, unpin, and uninstall |
 | Workforce authoring recovery | Enables generation retry and refinement as `local-operator`; evaluate, approve, and apply remain unavailable |
 
 Running without the flag leaves those mutations unavailable rather than silently self-approving. That is the intended failure mode: absence of an authority produces a `501`, never an assumption.

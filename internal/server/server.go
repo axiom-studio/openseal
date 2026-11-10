@@ -11,7 +11,6 @@ import (
 	"time"
 
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
-	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"go.uber.org/zap"
 )
@@ -31,21 +30,12 @@ type Server struct {
 	mux                      *http.ServeMux
 	httpServer               *http.Server
 	bearerToken              string
-	clawHub                  *opensealkernel.Engine
-	clawHubMutations         bool
 	teamWorkEnabled          bool
 	desktopConversationScope *runtime.Scope
 	agentRunCreation         func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
 	workforceBundles         kernelbundle.InstallationStore
 	workforceBundleActor     string
 	workforceBundleTrust     kernelbundle.TrustPolicy
-}
-
-// SetClawHubLifecycle enables the canonical registry/install engine. Mutation
-// authority is supplied by the host and should only be true at a trusted local
-// operator boundary; read operations remain available otherwise.
-func (s *Server) SetClawHubLifecycle(engine *opensealkernel.Engine, allowMutations bool) {
-	s.clawHub, s.clawHubMutations = engine, allowMutations
 }
 
 // NewServer creates a new API server.

@@ -20,7 +20,7 @@ func TestSQLiteSkillCatalogRestoresSourceQualifiedVariants(t *testing.T) {
 		t.Fatal(err)
 	}
 	catalog := skill.NewCatalogWithStore(store)
-	identities := []string{"clawhub::@alice/research", "clawhub::@bob/research"}
+	identities := []string{"catalog::@alice/research", "catalog::@bob/research"}
 	for _, identity := range identities {
 		definition := &skill.Definition{
 			ID: "research", Version: "1.0.0", Name: "Research",

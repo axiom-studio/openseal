@@ -47,8 +47,8 @@ export OPENAI_API_KEY='...'
 ./openseal daemon --config ./local.yaml --context ./context.yaml --standalone-operator
 ```
 
-`--standalone-operator` adds local action approvals, ClawHub mutations, and
-authoring retry and refinement.
+`--standalone-operator` adds local action approvals and authoring retry
+and refinement.
 Workforce evaluation, approval, and installation require the authenticated
 desktop mode or an embedding host. See [Workforces](workforces.md) and
 [Security](security.md).
@@ -86,7 +86,6 @@ The workspace opens on **Home**. Use the left and right arrow keys to move betwe
 |---|---|
 | Kernel state | `data/openseal.db`, from `storage.path` |
 | Artifact content | `data/artifacts`, from `storage.artifactsPath` |
-| Installed Skills | `skills/`, or the path in `OPENSEAL_SKILLS_DIR` |
 | Daemon configuration | The path given to `--config`, default `daemon.yaml` |
 | Credential references | The path given to `--context`, default `context.yaml` |
 
