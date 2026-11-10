@@ -91,3 +91,37 @@ func TestHandedOverArtifactsKeepsOnlyTheAnswersFiles(t *testing.T) {
 		t.Fatalf("file ids = %v", ids)
 	}
 }
+
+// An app the Agent saved or a file it presented was shown on purpose: it goes
+// out with the answer even when the answer's files do not name it, as its
+// newest version only. Prod runs 30763c84, bd4516b7 and ee3cf649 built an
+// app three times and presented a page, listed nothing, and told the person
+// "the game is above" with nothing above.
+func TestShownAppsAndPresentedFilesGoOutWithoutBeingNamed(t *testing.T) {
+	saved := []savedArtifact{
+		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "app-1", Version: 1}, Shown: true},
+		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "panel", Version: 1}, Path: "images/panel.png"},
+		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "app-1", Version: 2}, Shown: true},
+		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "page", Version: 3}, Path: "pages/game.html", Shown: true},
+	}
+	got, unknown := handedOverArtifacts(saved, map[string]interface{}{})
+	if len(unknown) != 0 || len(got) != 2 || got[0].ID != "app-1" || got[0].Version != 2 || got[1].ID != "page" {
+		t.Fatalf("handed over = %+v, unknown %v; want the app's newest version and the page", got, unknown)
+	}
+	// Naming a shown file as well attaches it once.
+	got, _ = handedOverArtifacts(saved, map[string]interface{}{finalOutputFilesKey: []interface{}{"pages/game.html", "images/panel.png"}})
+	if len(got) != 3 || got[0].ID != "panel" || got[1].ID != "app-1" || got[2].ID != "page" {
+		t.Fatalf("handed over = %+v; want the panel, the app and the page once each", got)
+	}
+	for call, want := range map[*ActionCall]bool{
+		{SkillID: "openseal.builtin", Action: "save_app"}:       true,
+		{SkillID: "openseal.builtin", Action: "present"}:        true,
+		{SkillID: "openseal.computer", Action: "present"}:       true,
+		{SkillID: "openseal.builtin", Action: "generate_image"}: false,
+		{SkillID: "skill-other", Action: "present"}:             false,
+	} {
+		if actionShowsInChat(call) != want {
+			t.Fatalf("%s %s shows in chat = %v, want %v", call.SkillID, call.Action, !want, want)
+		}
+	}
+}

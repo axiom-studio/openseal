@@ -213,8 +213,9 @@ func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
 	if finalFieldOffered("files", a) {
 		properties["files"] = map[string]interface{}{
 			"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string"},
-			"description": "The files this run presented that this answer hands over, by path or id: the finished result, such as the PDF or the final image. " +
-				"Leave out files made only to build another one (drafts, panels, intermediate images); they stay in the Library and are not shown.",
+			"description": "The files this run saved that this answer hands over, by path or id: the finished result, such as the PDF or the final image. " +
+				"Leave out files made only to build another one (drafts, panels, intermediate images); they stay in the Library and are not shown. " +
+				"An app you saved with save_app and files you showed with present go out with the answer already; they need no entry here.",
 		}
 	}
 	if finalFieldOffered("silent", a) {
@@ -1003,9 +1004,11 @@ func handedOverFileIDs(ids []string) []string {
 }
 
 // handedOverArtifacts keeps the Run's saved files the final output hands over
-// (its "files", by id or by the path a tool saved it from), in the Run's
-// order. A Run's other files stay in the Library. unknown lists the entries
-// that name no saved file.
+// (its "files", by id or by the path a tool saved it from) and the ones the
+// Agent showed in the chat itself (save_app, present), in the Run's order.
+// A file saved more than once goes out as its newest version only. A Run's
+// other files stay in the Library. unknown lists the entries that name no
+// saved file.
 func handedOverArtifacts(saved []savedArtifact, output map[string]interface{}) (out []ConversationReference, unknown []string) {
 	var wanted []string
 	switch files := output[finalOutputFilesKey].(type) {
@@ -1018,20 +1021,31 @@ func handedOverArtifacts(saved []savedArtifact, output map[string]interface{}) (
 			}
 		}
 	}
-	chosen := map[int]bool{}
+	chosen := map[string]bool{}
+	for _, file := range saved {
+		if file.Shown {
+			chosen[file.Ref.ID] = true
+		}
+	}
 	for _, name := range handedOverFileIDs(wanted) {
 		found := false
-		for i, file := range saved {
+		for _, file := range saved {
 			if file.Ref.ID == name || file.Path != "" && file.Path == handedOverPath(name) {
-				chosen[i], found = true, true
+				chosen[file.Ref.ID], found = true, true
 			}
 		}
 		if !found {
 			unknown = append(unknown, name)
 		}
 	}
+	newest := map[string]int{}
 	for i, file := range saved {
-		if chosen[i] {
+		if at, ok := newest[file.Ref.ID]; !ok || file.Ref.Version >= saved[at].Ref.Version {
+			newest[file.Ref.ID] = i
+		}
+	}
+	for i, file := range saved {
+		if chosen[file.Ref.ID] && newest[file.Ref.ID] == i {
 			out = append(out, file.Ref)
 		}
 	}

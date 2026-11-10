@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/computer"
 )
 
 const conversationArtifactReceiptService = "openseal.artifact-delivery"
@@ -40,7 +43,9 @@ func runActionArtifactReferences(ctx context.Context, sessions loopSessionEntryL
 		if call == nil || call.RunID != run.ID || call.Status != ActionCallStatusSucceeded {
 			continue
 		}
+		shown := actionShowsInChat(call)
 		for _, ref := range actionCallArtifactReferences(call) {
+			ref.Shown = shown
 			key := fmt.Sprintf("%s\x00%d", ref.Ref.ID, ref.Ref.Version)
 			if _, duplicate := seen[key]; duplicate {
 				continue
@@ -54,9 +59,31 @@ func runActionArtifactReferences(ctx context.Context, sessions loopSessionEntryL
 
 // savedArtifact is a file a tool saved, with the chat path it was saved from
 // when the tool reported one, so an answer can hand it over by either.
+//
+// Shown is set for a file the Agent showed in the chat itself (save_app,
+// present): it goes out with the answer whether or not the answer names it.
 type savedArtifact struct {
-	Ref  ConversationReference
-	Path string
+	Ref   ConversationReference
+	Path  string
+	Shown bool
+}
+
+// actionShowsInChat reports whether call is one whose purpose is to show its
+// files in the conversation: saving an app ("build it and show it live") or
+// presenting files. A model that made one has handed the result over; when
+// the answer had to repeat the id, an answer that did not left the person
+// with "the app is above" and nothing above.
+func actionShowsInChat(call *ActionCall) bool {
+	if call == nil {
+		return false
+	}
+	switch call.SkillID {
+	case builtin.SkillID:
+		return call.Action == builtin.Present || call.Action == builtin.SaveApp
+	case computer.SkillID:
+		return call.Action == computer.Present
+	}
+	return false
 }
 
 // actionCallArtifactReferences parses call.Output["artifactRefs"]: valid
