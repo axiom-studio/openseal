@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 )
@@ -87,7 +88,11 @@ func routineEventSeedEntry(ctx context.Context, store routineEventSeedStore, kee
 			source.Label = activation.Task.Event.SourceLabel
 		}
 	}
-	doc := newRoutineEventSeedDocument(source, batch, records)
+	doc := newRoutineEventSeedDocument(source, batch, records, func(eventID string) {
+		if logger != nil {
+			logger.Warnw("routine event batch names an event the store does not have; the seed leaves it out", "runId", run.ID, "batchId", batch.ID, "eventId", eventID)
+		}
+	})
 
 	content := routineEventSeedContent{events: len(doc.events), test: batch.Test, dropped: batch.Dropped}
 	var dataPart ContentPart
@@ -203,7 +208,8 @@ type routineEventSeedDocument struct {
 
 var routineEventTruncatedPayload = json.RawMessage(`{"truncated":true}`)
 
-func newRoutineEventSeedDocument(source routineEventSeedSource, batch *RoutineEventBatch, records []*RoutineEventRecord) *routineEventSeedDocument {
+// missing is called for each batch event ID that has no record.
+func newRoutineEventSeedDocument(source routineEventSeedSource, batch *RoutineEventBatch, records []*RoutineEventRecord, missing func(eventID string)) *routineEventSeedDocument {
 	byID := make(map[string]*RoutineEventRecord, len(records))
 	for _, record := range records {
 		if record != nil {
@@ -214,6 +220,7 @@ func newRoutineEventSeedDocument(source routineEventSeedSource, batch *RoutineEv
 	for _, id := range batch.EventIDs {
 		record := byID[id]
 		if record == nil {
+			missing(id)
 			continue
 		}
 		event := routineEventSeedEvent{
@@ -278,9 +285,9 @@ func (d *routineEventSeedDocument) reencode(i int) {
 // reduce shortens the document in the fixed order of SPEC §6.2 until it
 // fits limit: (1) payloads become {"truncated": true}, largest first;
 // (2) every field value is cut to 256 bytes; (3) fields are dropped;
-// (4) each event keeps only id, occurredAt and summary. Step 4 is bounded by
-// the batch cap (50 events of at most a 256-byte id and a 280-byte summary),
-// so the result always fits a user entry.
+// (4) each event keeps only id, occurredAt and summary; (5) if escaping still
+// keeps it over limit, each event's summary and then id are cut to an equal
+// share of limit. The result always fits limit.
 func (d *routineEventSeedDocument) reduce(limit int) {
 	if d.size() <= limit {
 		return
@@ -332,4 +339,73 @@ func (d *routineEventSeedDocument) reduce(limit int) {
 		d.events[i] = routineEventSeedEvent{ID: d.events[i].ID, OccurredAt: d.events[i].OccurredAt, Summary: d.events[i].Summary}
 		d.reencode(i)
 	}
+	if d.size() <= limit || len(d.events) == 0 {
+		return
+	}
+	// (5) Escaping can still make step 4 too big: encoding/json writes '<',
+	// '>', '&' and control characters as 6 bytes each, so 50 events of
+	// 256-byte ids and 280-byte summaries can reach about 160 KiB. Give every
+	// event an equal share of the limit and cut its summary, then its id,
+	// to fit that share once escaped.
+	overhead := len(routineEventSeedPrefix) + len(d.source) + len(routineEventSeedMiddle) + len(routineEventSeedSuffix) + len(d.events) - 1
+	share := (limit - overhead) / len(d.events)
+	for i := range d.events {
+		if len(d.encoded[i]) <= share {
+			continue
+		}
+		bare := routineEventSeedEvent{OccurredAt: d.events[i].OccurredAt}
+		budget := share - len(mustMarshalRoutineEventSeed(bare))
+		if budget < 0 {
+			budget = 0
+		}
+		idBudget := jsonEscapedLen(d.events[i].ID)
+		if idBudget > budget/2 {
+			idBudget = budget / 2
+		}
+		d.events[i].ID = cutJSONEscaped(d.events[i].ID, idBudget)
+		d.events[i].Summary = cutJSONEscaped(d.events[i].Summary, budget-jsonEscapedLen(d.events[i].ID))
+		d.reencode(i)
+	}
+}
+
+// jsonEscapedRuneLen is how many bytes encoding/json writes for r inside a
+// string (HTML escaping on, as json.Marshal does).
+func jsonEscapedRuneLen(r rune, size int) int {
+	switch {
+	case r == '"' || r == '\\' || r == '\n' || r == '\r' || r == '\t':
+		return 2
+	case r < 0x20 || r == '<' || r == '>' || r == '&' || r == '\u2028' || r == '\u2029':
+		return 6
+	case r == utf8.RuneError && size == 1:
+		return 6 // invalid byte, written as \ufffd
+	default:
+		return size
+	}
+}
+
+// jsonEscapedLen is the length of s's JSON string body, without quotes.
+func jsonEscapedLen(s string) int {
+	n := 0
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		n += jsonEscapedRuneLen(r, size)
+		i += size
+	}
+	return n
+}
+
+// cutJSONEscaped is the longest prefix of s whose JSON string body is at
+// most budget bytes.
+func cutJSONEscaped(s string, budget int) string {
+	n := 0
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		cost := jsonEscapedRuneLen(r, size)
+		if n+cost > budget {
+			return s[:i]
+		}
+		n += cost
+		i += size
+	}
+	return s
 }

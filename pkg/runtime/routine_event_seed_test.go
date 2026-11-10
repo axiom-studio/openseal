@@ -365,8 +365,8 @@ func TestRoutineEventSeedReductionAlwaysFits(t *testing.T) {
 	doc := &routineEventSeedDocument{source: mustMarshalRoutineEventSeed(routineEventSeedSource{Kind: RoutineEventWebhook, Label: strings.Repeat("<", 160)})}
 	for i := 0; i < 50; i++ {
 		event := routineEventSeedEvent{
-			ID: strings.Repeat("i", 250) + fmt.Sprint(i), OccurredAt: time.Now().UTC(), Subject: strings.Repeat("s", 256),
-			Summary: strings.Repeat("&", 280), Fields: map[string][]string{"payload.a": {strings.Repeat("f", 1024)}},
+			ID: "hs:" + strings.Repeat("&", 250) + fmt.Sprintf("%03d", i), OccurredAt: time.Now().UTC(), Subject: strings.Repeat("s", 256),
+			Summary: strings.Repeat("\x01>", 140), Fields: map[string][]string{"payload.a": {strings.Repeat("f", 1024)}},
 			Payload: json.RawMessage(`{"a":"` + strings.Repeat("p", 200<<10) + `"}`),
 		}
 		doc.events = append(doc.events, event)
@@ -377,10 +377,46 @@ func TestRoutineEventSeedReductionAlwaysFits(t *testing.T) {
 	if !json.Valid(out) {
 		t.Fatal("reduced document is not json")
 	}
-	if len(out) > MaxUserEntryContentBytes-4<<10 {
-		t.Fatalf("worst-case reduced document is %d bytes, over the user entry cap", len(out))
+	if len(out) != doc.size() || len(out) > routineEventInlineMaxBytes {
+		t.Fatalf("worst-case reduced document is %d bytes (size says %d), over %d", len(out), doc.size(), routineEventInlineMaxBytes)
 	}
 	if doc.events[0].Subject != "" || doc.events[0].Fields != nil || doc.events[0].Payload != nil {
 		t.Fatalf("step 4 did not keep only id, occurredAt and summary: %+v", doc.events[0])
+	}
+	if !strings.HasPrefix(doc.events[0].ID, "hs:&") || doc.events[0].Summary == "" {
+		t.Fatalf("step 5 cut the event to nothing: %+v", doc.events[0])
+	}
+}
+
+// A signed webhook sender picks ids and summaries that JSON writes as 6 bytes
+// per character; the entry must still validate.
+func TestRoutineEventSeedEscapedIDsAndSummariesFitEntry(t *testing.T) {
+	run, store := routineEventSeedFixture(50, 8<<10)
+	store.batch.EventIDs = nil
+	for i, record := range store.records {
+		id := "hs:" + strings.Repeat("<", 250) + fmt.Sprintf("%03d", i)
+		record.Event.ID = id
+		record.Event.Summary = strings.Repeat(">", 200) + strings.Repeat("\x02", 80)
+		store.batch.EventIDs = append(store.batch.EventIDs, id)
+	}
+	event := routineEventSeedEventEntry(t, routineEventSeedEntriesFor(t, run, store, nil))
+	part := event.User.Content[1]
+	if part.Type != ContentPartJSON || len(part.Value) > routineEventInlineMaxBytes {
+		t.Fatalf("want inline json of at most 64 KiB, got %s of %d bytes", part.Type, len(part.Value))
+	}
+	if doc := decodeRoutineEventSeed(t, part.Value); len(doc.Events) != 50 {
+		t.Fatalf("want all 50 events, got %d", len(doc.Events))
+	}
+}
+
+func TestRoutineEventSeedSkipsMissingRecord(t *testing.T) {
+	run, store := routineEventSeedFixture(3, 0)
+	store.records = store.records[1:]
+	event := routineEventSeedEventEntry(t, routineEventSeedEntriesFor(t, run, store, nil))
+	if doc := decodeRoutineEventSeed(t, event.User.Content[1].Value); len(doc.Events) != 2 {
+		t.Fatalf("want the 2 stored events, got %d", len(doc.Events))
+	}
+	if !strings.HasPrefix(event.User.Content[0].Text, "A routine started this run because of 2 events") {
+		t.Fatalf("text counts the missing event: %q", event.User.Content[0].Text)
 	}
 }
