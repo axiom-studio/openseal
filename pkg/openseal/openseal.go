@@ -2134,6 +2134,7 @@ type Engine struct {
 	conversationRunScopes         runtime.WorkerScopeSource
 	externalConversations         externalConversationRuntime
 	callbacks                     callbackRuntime
+	routineEvents                 routineEventRuntime
 	conversationChanges           *runtime.ConversationChangeService
 	collaboration                 *runtime.CollaborationService
 	turns                         *runtime.AgentTurnService
@@ -2295,6 +2296,7 @@ func New(opts ...Option) (*Engine, error) {
 	if e.actionPolicy == nil {
 		e.actionPolicy = runtime.ActionPolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
 	}
+	e.buildRoutineEvents()
 	if err := e.rebuildConversationCoordinator(); err != nil {
 		return nil, fmt.Errorf("conversation coordinator configuration: %w", err)
 	}
@@ -2395,6 +2397,9 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 	if e.logger != nil && (builderReport.Converted > 0 || builderReport.Kept > 0 || builderReport.Dropped) {
 		e.logger.Infow("agent builder cutover", "converted", builderReport.Converted, "kept", builderReport.Kept, "dropped", builderReport.Dropped)
+	}
+	if err := e.routineEvents.matcher.RebuildRoutineIndex(ctx); err != nil {
+		return fmt.Errorf("build routine event index: %w", err)
 	}
 	e.applyWorkSignals()
 	if e.conversationRunReconciler != nil {
@@ -2697,6 +2702,7 @@ func (e *Engine) rebuildExternalConversations() error {
 		return nil
 	}
 	e.externalConversations.transport = runtime.NewExternalConversationTransportService(store, e.skills)
+	e.externalConversations.transport.SetRoutineEventOfferer(e.routineEvents.matcher)
 	e.externalConversations.endpoints = runtime.NewExternalConversationEndpointService(store, e.skills)
 	e.externalConversations.gateways = runtime.NewExternalConversationGatewayService(store, e.skills)
 	if e.externalConversations.config == nil && e.externalConversations.scopes == nil && e.externalConversations.host == nil {
@@ -2774,6 +2780,7 @@ func (e *Engine) rebuildCallbacks() error {
 	e.callbacks.registry = runtime.NewCallbackRegistry(store, e.skills)
 	e.callbacks.ingress = runtime.NewCallbackIngressService(store, e.skills, map[string]runtime.CallbackEventConsumer{
 		"approvals": runtime.NewApprovalCallbackConsumer(store, e.externalConversations.transport),
+		"routines":  runtime.NewRoutineCallbackConsumer(e.routineEvents.matcher),
 	})
 	if e.externalConversations.supervisor != nil && e.externalConversations.config != nil {
 		callbackConfig := e.externalConversations.config.Callback
@@ -3074,6 +3081,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 	validator.SetRoutineGrantCatalog(e.skills)
 	validator.SetRoutineOwnerAddresses(e.routineOwnerAddresses)
 	validator.SetChatFiles(e.chatFiles)
+	e.attachRoutineEventValidator(validator)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionPoolSpecs[index].dispatcher)
@@ -3083,6 +3091,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 		dispatcher.SetRoutineTeams(e.teams)
 		dispatcher.SetAcceptedRunExecutionPreparer(e)
 		dispatcher.SetChatFiles(e.chatFiles)
+		e.attachRoutineEventDispatcher(dispatcher)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
@@ -3093,6 +3102,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 		dispatcher.SetRoutineTeams(e.teams)
 		dispatcher.SetAcceptedRunExecutionPreparer(e)
 		dispatcher.SetChatFiles(e.chatFiles)
+		e.attachRoutineEventDispatcher(dispatcher)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil
