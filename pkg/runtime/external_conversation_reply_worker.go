@@ -304,7 +304,7 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		if refErr != nil {
 			return nil, refErr
 		}
-		artifacts := handedOverArtifacts(saved, run.Output)
+		artifacts, _ := handedOverArtifacts(saved, run.Output)
 		current, getErr := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
 		if getErr != nil {
 			return nil, getErr

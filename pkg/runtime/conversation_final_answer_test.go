@@ -332,6 +332,28 @@ func finalDeliveryVisual() *presentation.Visual {
 	}}
 }
 
+// A final whose files name no saved file (a path, or a failed tool's file) goes
+// back to the model: posting it would silently attach nothing.
+func TestFinalAnswerSendsBackFilesThatAreNotSavedFileIDs(t *testing.T) {
+	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
+		ref := func(id string, version int) map[string]interface{} {
+			return map[string]interface{}{"id": id, "version": version}
+		}
+		f.governed("export", ActionCallStatusSucceeded, map[string]interface{}{"artifactRefs": []interface{}{ref("report-pdf", 1)}})
+		f.governed("failed", ActionCallStatusFailed, map[string]interface{}{"artifactRefs": []interface{}{ref("failed-file", 1)}})
+		for _, files := range [][]interface{}{{"docs/report.pdf"}, {"report-pdf", "failed-file"}} {
+			answer, _ := f.finalEntry("Here is the report.", map[string]interface{}{finalOutputSummaryKey: "Here is the report.", finalOutputFilesKey: files})
+			result := f.mustDeliver(answer, FinalDeliveryRetryFinal)
+			if !strings.Contains(result.RejectionText, files[len(files)-1].(string)) || !strings.Contains(result.RejectionText, "report-pdf") {
+				t.Fatalf("files %v: rejection = %q", files, result.RejectionText)
+			}
+		}
+		if answers := f.answers(); len(answers) != 0 {
+			t.Fatalf("posted %#v", answers)
+		}
+	})
+}
+
 func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		ref := func(id string, version int) map[string]interface{} {
@@ -342,7 +364,7 @@ func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 		f.governed("failed", ActionCallStatusFailed, map[string]interface{}{"artifactRefs": []interface{}{ref("failed-file", 1)}})
 		// The answer hands over the files it names; the Run's others stay in the Library.
 		answer, _ := f.finalEntry("Here is the quarterly report.", map[string]interface{}{
-			finalOutputSummaryKey: "Here is the quarterly report.", finalOutputFilesKey: []interface{}{"report-pdf", "report-csv", "failed-file"}})
+			finalOutputSummaryKey: "Here is the quarterly report.", finalOutputFilesKey: []interface{}{"report-pdf", "report-csv"}})
 		result := f.mustDeliver(answer, FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 {

@@ -67,12 +67,20 @@ func TestHandedOverArtifactsKeepsOnlyTheAnswersFiles(t *testing.T) {
 		{Kind: ConversationReferenceArtifact, ID: "panel-2", Version: 1},
 		{Kind: ConversationReferenceArtifact, ID: "comic-pdf", Version: 2},
 	}
-	got := handedOverArtifacts(saved, map[string]interface{}{finalOutputFilesKey: []interface{}{"comic-pdf", "not-from-this-run"}})
+	got, unknown := handedOverArtifacts(saved, map[string]interface{}{finalOutputFilesKey: []interface{}{"comic-pdf", "docs/comic.pdf"}})
 	if len(got) != 1 || got[0].ID != "comic-pdf" || got[0].Version != 2 {
 		t.Fatalf("handed over = %+v; want only the comic PDF", got)
 	}
-	if got := handedOverArtifacts(saved, map[string]interface{}{}); len(got) != 0 {
-		t.Fatalf("an answer that hands over nothing attached %+v", got)
+	// A path instead of an id names no saved file: it goes back to the model
+	// rather than silently attaching nothing.
+	if len(unknown) != 1 || unknown[0] != "docs/comic.pdf" {
+		t.Fatalf("unknown = %v; want the path", unknown)
+	}
+	if text := unknownHandedOverFilesText(unknown, saved); !strings.Contains(text, "docs/comic.pdf") || !strings.Contains(text, "comic-pdf") {
+		t.Fatalf("rejection = %q; want the path and the saved ids", text)
+	}
+	if got, unknown := handedOverArtifacts(saved, map[string]interface{}{}); len(got) != 0 || len(unknown) != 0 {
+		t.Fatalf("an answer that hands over nothing attached %+v (unknown %v)", got, unknown)
 	}
 	if ids := handedOverFileIDs([]string{" a ", "a", "", "b"}); len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
 		t.Fatalf("file ids = %v", ids)

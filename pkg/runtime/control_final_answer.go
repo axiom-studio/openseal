@@ -213,7 +213,7 @@ func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
 	if finalFieldOffered("files", a) {
 		properties["files"] = map[string]interface{}{
 			"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string"},
-			"description": "Ids of the files this run saved that this answer hands over: the finished result, such as the PDF or the final image. " +
+			"description": "Ids of the files this run saved that this answer hands over (the artifactRefs ids a tool returned, never paths): the finished result, such as the PDF or the final image. " +
 				"Leave out files made only to build another one (drafts, panels, intermediate images); they stay in the Library and are not shown.",
 		}
 	}
@@ -1010,25 +1010,50 @@ func handedOverFileIDs(ids []string) []string {
 
 // handedOverArtifacts keeps the Run's saved files the final output hands over
 // (its "files"), in the Run's order. A Run's other files stay in the Library.
-func handedOverArtifacts(saved []ConversationReference, output map[string]interface{}) []ConversationReference {
-	wanted := map[string]bool{}
+// unknown lists the entries that name no saved file, such as a path given
+// instead of an id.
+func handedOverArtifacts(saved []ConversationReference, output map[string]interface{}) (out []ConversationReference, unknown []string) {
+	var wanted []string
 	switch files := output[finalOutputFilesKey].(type) {
 	case []string:
-		for _, id := range files {
-			wanted[id] = true
-		}
+		wanted = files
 	case []interface{}:
 		for _, id := range files {
 			if text, ok := id.(string); ok {
-				wanted[strings.TrimSpace(text)] = true
+				wanted = append(wanted, text)
 			}
 		}
 	}
-	var out []ConversationReference
+	wanted = handedOverFileIDs(wanted)
+	known := map[string]bool{}
 	for _, ref := range saved {
-		if wanted[ref.ID] {
+		known[ref.ID] = true
+	}
+	want := map[string]bool{}
+	for _, id := range wanted {
+		want[id] = true
+		if !known[id] {
+			unknown = append(unknown, id)
+		}
+	}
+	for _, ref := range saved {
+		if want[ref.ID] {
 			out = append(out, ref)
 		}
 	}
-	return out
+	return out, unknown
+}
+
+// unknownHandedOverFilesText sends a final whose files name no saved file
+// back to the model, which otherwise attaches nothing without a word.
+func unknownHandedOverFilesText(unknown []string, saved []ConversationReference) string {
+	ids := make([]string, 0, len(saved))
+	for _, ref := range saved {
+		ids = append(ids, ref.ID)
+	}
+	if len(ids) == 0 {
+		return fmt.Sprintf("files names %s, but this run saved no files. Save the file first (present on the secure VM), or leave files out.", strings.Join(unknown, ", "))
+	}
+	return fmt.Sprintf("files takes the ids of files this run saved (the artifactRefs ids a tool returned), not paths or names: %s is not one. This run's files: %s.",
+		strings.Join(unknown, ", "), strings.Join(ids, ", "))
 }

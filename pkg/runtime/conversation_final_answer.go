@@ -97,7 +97,11 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 	if err != nil {
 		return FinalDeliveryResult{}, err
 	}
-	references = append(references, handedOverArtifacts(artifacts, answer.Output)...)
+	handedOver, unknownFiles := handedOverArtifacts(artifacts, answer.Output)
+	references = append(references, handedOver...)
+	if len(unknownFiles) > 0 && !runExplainingFailure(run) {
+		return FinalDeliveryResult{Kind: FinalDeliveryRetryFinal, RejectionText: unknownHandedOverFilesText(unknownFiles, artifacts)}, nil
+	}
 
 	// 3. Failure explanation: always a visible text reply, never a visual.
 	if runExplainingFailure(run) {
