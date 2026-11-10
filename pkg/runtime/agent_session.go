@@ -179,6 +179,7 @@ func GoalSourceKey(ownerRunID string) string             { return "goal:" + owne
 func FailureNoteSourceKey(runID, stepID string) string   { return "failure-note:" + runID + ":" + stepID }
 func FinalRejectionEntryKey(stepID string) string        { return "final-rejection:" + stepID }
 func TaskPromotedSourceKey(runID string) string          { return "task-promoted:" + runID }
+func RoutineEventEntrySourceKey(runID string) string     { return "routine-event:" + runID }
 
 type SessionEntryType string
 
@@ -338,7 +339,7 @@ const (
 
 type UserEntry struct {
 	Origin           UserEntryOrigin `json:"origin"`
-	GoalKind         string          `json:"goalKind,omitempty"` // goal only: task|fork_branch|decision|review|delegation|routine
+	GoalKind         string          `json:"goalKind,omitempty"` // goal only: task|fork_branch|decision|review|delegation|routine|routine_event
 	Author           SessionAuthor   `json:"author"`
 	Content          []ContentPart   `json:"content"` // first part is text (the formatted message)
 	MessageID        string          `json:"messageId,omitempty"`
@@ -350,6 +351,7 @@ type UserEntry struct {
 
 var userEntryGoalKinds = map[string]bool{
 	"task": true, "fork_branch": true, "decision": true, "review": true, "delegation": true, "routine": true,
+	"routine_event": true,
 }
 
 type ModelStepProvider string
