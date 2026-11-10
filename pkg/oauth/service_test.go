@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ type fixtureProvider struct {
 	revokes      int
 	grant        TokenGrant
 	refreshGrant TokenGrant
+	refreshErr   error
 }
 
 func (p *fixtureProvider) ID() string { return p.id }
@@ -42,6 +44,9 @@ func (p *fixtureProvider) ExchangeCode(_ context.Context, request ProviderCodeEx
 
 func (p *fixtureProvider) RefreshToken(_ context.Context, request ProviderRefreshRequest) (TokenGrant, error) {
 	p.refreshes++
+	if p.refreshErr != nil {
+		return TokenGrant{}, p.refreshErr
+	}
 	if request.Current.RefreshToken == "" {
 		return TokenGrant{}, errors.New("refresh token missing")
 	}
@@ -221,6 +226,47 @@ func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) 
 	}
 	if revoked.Status != ConnectionRevoked || revoked.Revision != 4 || provider.revokes != 1 || !credentials.deleted {
 		t.Fatalf("revoked connection = %#v; provider revokes=%d; deleted=%t", revoked, provider.revokes, credentials.deleted)
+	}
+}
+
+func TestRefreshOfRevokedGrantNeedsSignInAndIsNotRetried(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	provider := &fixtureProvider{id: "google", refreshErr: fmt.Errorf("google said invalid_grant: %w", ErrGrantRevoked)}
+	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
+	service, err := NewService(store, credentials, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	service.newID = func() string { return "lease" }
+	scope := capability.ScopeReference{Kind: "tenant", ID: "tenant-1"}
+	credentials.connection = TokenGrant{AccessToken: "old-access", RefreshToken: "old-refresh"}
+	seed := &Connection{
+		APIVersion: APIVersion, Scope: scope, ID: "google-ana", Kind: "google_access_token",
+		Owner: Owner{Kind: OwnerUser, ID: "11"}, Grant: capability.OAuth2GrantSummary{Provider: "google", Subject: capability.OAuth2SubjectUser, Scopes: []string{"gmail"}},
+		CredentialReference: capability.CredentialReference{Kind: "google_access_token", ID: "connection://tenant/google/ana"},
+		Status:              ConnectionActive, TokenVersion: 1, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.UpsertConnection(ctx, seed, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RefreshConnection(ctx, RefreshConnectionRequest{Scope: scope, ConnectionID: seed.ID, ExpectedRevision: 1}); !errors.Is(err, ErrGrantRevoked) {
+		t.Fatalf("refresh of a revoked grant = %v, want ErrGrantRevoked", err)
+	}
+	failed, err := store.GetConnection(ctx, scope, seed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != ConnectionDegraded || failed.LastErrorCode != RefreshRevokedErrorCode {
+		t.Fatalf("connection after a revoked refresh = %s/%s", failed.Status, failed.LastErrorCode)
+	}
+	// A second refresh does not ask the provider again.
+	if _, err := service.RefreshConnection(ctx, RefreshConnectionRequest{Scope: scope, ConnectionID: seed.ID, ExpectedRevision: failed.Revision}); !errors.Is(err, ErrGrantRevoked) {
+		t.Fatalf("second refresh = %v, want ErrGrantRevoked", err)
+	}
+	if provider.refreshes != 1 {
+		t.Fatalf("provider refreshes = %d, want 1", provider.refreshes)
 	}
 }
 
