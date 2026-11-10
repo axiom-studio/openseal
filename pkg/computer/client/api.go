@@ -20,7 +20,7 @@ import (
 
 // ErrDisconnected means HelloSeal no longer knows this computer: it was
 // disconnected in Settings, or its key no longer matches.
-var ErrDisconnected = errors.New("This computer was disconnected. Run helloseal connect.")
+var ErrDisconnected = errors.New("This computer was disconnected. Run helloseal-bridge connect.")
 
 const (
 	maxCallBytes     = 8 << 20

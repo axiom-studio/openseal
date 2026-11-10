@@ -1,4 +1,4 @@
-// Command helloseal is the HelloSeal bridge: it connects this computer to
+// Command helloseal-bridge is the HelloSeal bridge: it connects this computer to
 // HelloSeal so agents can run commands and use files in the folders you
 // allow. It builds with CGO_ENABLED=0.
 package main
@@ -37,7 +37,7 @@ func run(args []string) int {
 	case "disconnect":
 		return disconnectCmd(args[1:])
 	case "version", "--version", "-v":
-		fmt.Printf("helloseal %s\n", version)
+		fmt.Printf("helloseal-bridge %s\n", version)
 		return 0
 	case "help", "--help", "-h":
 		printUsage()
@@ -50,10 +50,10 @@ func run(args []string) int {
 }
 
 func printUsage() {
-	fmt.Println(`helloseal - connect this computer to HelloSeal
+	fmt.Println(`helloseal-bridge - connect this computer to HelloSeal
 
 Usage:
-  helloseal <command> [arguments]
+  helloseal-bridge <command> [arguments]
 
 Commands:
   connect     Pair this computer with HelloSeal, then start the bridge
@@ -147,7 +147,7 @@ func statusCmd(args []string) int {
 	}
 	config, err := store.Load()
 	if errors.Is(err, client.ErrNotConnected) {
-		fmt.Println("Not connected. Run helloseal connect.")
+		fmt.Println("Not connected. Run helloseal-bridge connect.")
 		return 0
 	}
 	if err != nil {
@@ -180,6 +180,6 @@ func disconnectCmd(args []string) int {
 }
 
 func fail(err error) int {
-	fmt.Fprintln(os.Stderr, "helloseal:", err)
+	fmt.Fprintln(os.Stderr, "helloseal-bridge:", err)
 	return 1
 }

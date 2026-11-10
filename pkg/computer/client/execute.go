@@ -63,7 +63,7 @@ func Execute(ctx context.Context, call bridge.Call) bridge.Result {
 	case workspace.OpRunCommand:
 		output, err = runCommand(ctx, m.allowed, args)
 	default:
-		err = callError(bridge.ErrorFailed, fmt.Sprintf("This version of helloseal cannot run %q. Update it and run helloseal start again.", call.Op))
+		err = callError(bridge.ErrorFailed, fmt.Sprintf("This version of helloseal-bridge cannot run %q. Update it and run helloseal-bridge start again.", call.Op))
 	}
 	if err != nil {
 		return failed(call.ID, asCallError(err))

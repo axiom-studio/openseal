@@ -1,4 +1,4 @@
-// Package bridge is the wire protocol between HelloSeal and the helloseal
+// Package bridge is the wire protocol between HelloSeal and the helloseal-bridge
 // bridge running on a person's computer. The server and the client share it,
 // so it imports nothing beyond the standard library and stays CGO-free.
 //
@@ -119,7 +119,7 @@ type DeviceStartRequest struct {
 	Version string `json:"version"`
 	// PublicKey is the computer's ed25519 public key, standard base64.
 	PublicKey string `json:"publicKey"`
-	// Cwd is where helloseal connect ran; the confirm dialog offers it as
+	// Cwd is where helloseal-bridge connect ran; the confirm dialog offers it as
 	// the first folder.
 	Cwd string `json:"cwd"`
 }

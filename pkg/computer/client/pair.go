@@ -79,7 +79,7 @@ func Pair(ctx context.Context, store Store, options PairOptions) (Config, error)
 		select {
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return Config{}, errors.New("the code expired before it was confirmed; run helloseal connect again")
+				return Config{}, errors.New("the code expired before it was confirmed; run helloseal-bridge connect again")
 			}
 			return Config{}, ctx.Err()
 		case <-time.After(interval):
@@ -107,7 +107,7 @@ func Pair(ctx context.Context, store Store, options PairOptions) (Config, error)
 		case bridge.StatusDenied:
 			return Config{}, errors.New("the code was refused in HelloSeal")
 		case bridge.StatusExpired:
-			return Config{}, errors.New("the code expired before it was confirmed; run helloseal connect again")
+			return Config{}, errors.New("the code expired before it was confirmed; run helloseal-bridge connect again")
 		default:
 			return Config{}, fmt.Errorf("HelloSeal answered an unknown pairing status %q", poll.Status)
 		}

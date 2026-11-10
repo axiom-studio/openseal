@@ -397,10 +397,10 @@ jobs:
       # The HelloSeal bridge rides the same legs. It is CGO-free, so it needs
       # no native toolchain, and the linux leg also builds linux/arm64, which
       # this matrix has no runner for. The archives carry no version in their
-      # name (helloseal_<os>_<arch>) so the install scripts can fetch
+      # name (helloseal-bridge_<os>_<arch>) so the install scripts can fetch
       # releases/latest/download/<name> without knowing the tag. The binary
       # sits at the archive root.
-      - name: Build and package the helloseal bridge
+      - name: Build and package the helloseal-bridge binary
         env:
           CGO_ENABLED: '0'
         run: |
@@ -412,15 +412,15 @@ jobs:
           for TARGET in $TARGETS; do
             OS="${TARGET%/*}"
             ARCH="${TARGET#*/}"
-            STAGE="dist/helloseal_${OS}_${ARCH}"
-            BIN=helloseal
-            if [ "$OS" = "windows" ]; then BIN=helloseal.exe; fi
+            STAGE="dist/helloseal-bridge_${OS}_${ARCH}"
+            BIN=helloseal-bridge
+            if [ "$OS" = "windows" ]; then BIN=helloseal-bridge.exe; fi
             mkdir -p "$STAGE"
-            GOOS="$OS" GOARCH="$ARCH" go build -trimpath -ldflags="-w -s -X main.version=${VERSION}" -o "${STAGE}/${BIN}" ./cmd/helloseal
+            GOOS="$OS" GOARCH="$ARCH" go build -trimpath -ldflags="-w -s -X main.version=${VERSION}" -o "${STAGE}/${BIN}" ./cmd/helloseal-bridge
             cp LICENSE "${STAGE}/"
             if [ "$OS" = "windows" ]; then
               if command -v 7z >/dev/null 2>&1; then
-                (cd "$STAGE" && 7z a -tzip "../helloseal_${OS}_${ARCH}.zip" . >/dev/null)
+                (cd "$STAGE" && 7z a -tzip "../helloseal-bridge_${OS}_${ARCH}.zip" . >/dev/null)
               else
                 powershell -NoProfile -NonInteractive -Command \
                   "Compress-Archive -Path '${STAGE}/*' -DestinationPath '${STAGE}.zip' -Force"
@@ -432,35 +432,35 @@ jobs:
           done
           ls -l dist
 
-      - name: Smoke-test the helloseal bridge
+      - name: Smoke-test the helloseal-bridge binary
         if: ${{ !(matrix.goos == 'windows' && runner.os != 'Windows') }}
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          STAGE="helloseal_${{ matrix.goos }}_${{ matrix.goarch }}"
+          STAGE="helloseal-bridge_${{ matrix.goos }}_${{ matrix.goarch }}"
           mkdir -p "smoke/${STAGE}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             unzip -q "dist/${STAGE}.zip" -d "smoke/${STAGE}" 2>/dev/null \
               || 7z x -y "-osmoke/${STAGE}" "dist/${STAGE}.zip" >/dev/null
-            BIN="smoke/${STAGE}/helloseal.exe"
+            BIN="smoke/${STAGE}/helloseal-bridge.exe"
           else
             tar -xzf "dist/${STAGE}.tar.gz" -C "smoke/${STAGE}"
-            BIN="smoke/${STAGE}/helloseal"
+            BIN="smoke/${STAGE}/helloseal-bridge"
           fi
           OUT="$("$BIN" version)"
           echo "$OUT"
-          [ "$OUT" = "helloseal ${VERSION}" ] || { echo "::error::unexpected helloseal version output: ${OUT}" >&2; exit 1; }
+          [ "$OUT" = "helloseal-bridge ${VERSION}" ] || { echo "::error::unexpected helloseal-bridge version output: ${OUT}" >&2; exit 1; }
           rm -rf smoke
 
-      - name: Upload the helloseal archives to the draft release
+      - name: Upload the helloseal-bridge archives to the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           shopt -s nullglob
-          ARCHIVES=(dist/helloseal_*.tar.gz dist/helloseal_*.zip)
-          [ "${#ARCHIVES[@]}" -gt 0 ] || { echo "::error::no helloseal archive was built" >&2; exit 1; }
+          ARCHIVES=(dist/helloseal-bridge_*.tar.gz dist/helloseal-bridge_*.zip)
+          [ "${#ARCHIVES[@]}" -gt 0 ] || { echo "::error::no helloseal-bridge archive was built" >&2; exit 1; }
           for ARCHIVE in "${ARCHIVES[@]}"; do
             test -s "$ARCHIVE" || { echo "::error::archive ${ARCHIVE} is empty" >&2; exit 1; }
             gh release upload "${GITHUB_REF_NAME}" "$ARCHIVE" --clobber
@@ -1241,7 +1241,7 @@ jobs:
             # installing.md itself calls authoritative.
             echo "- **Desktop app** — macOS \`.dmg\`; Windows \`.msi\` or \`.exe\`; Linux \`.deb\`, \`.rpm\` or \`.AppImage\`. The daemon is bundled; nothing else to install. Where a platform offers more than one, the Installing page in the documentation says which to choose."
             echo "- **Command line** — the \`openseal_${VERSION}_<os>_<arch>\` archive for your platform. The Linux build links glibc and needs **${LINUX_GLIBC_FLOOR} or newer** (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9). On older distributions use the container image, which is self-contained."
-            echo "- **HelloSeal bridge** — the \`helloseal_<os>_<arch>\` archive connects a computer to HelloSeal (\`helloseal connect\`). It is a static binary for Linux, macOS and Windows."
+            echo "- **HelloSeal bridge** — the \`helloseal-bridge_<os>_<arch>\` archive connects a computer to HelloSeal (\`helloseal-bridge connect\`). It is a static binary for Linux, macOS and Windows."
             echo "- **Container** — \`docker pull ${IMAGE}:${VERSION}\`"
             echo
             echo "Built from commit \`${GITHUB_SHA}\`."

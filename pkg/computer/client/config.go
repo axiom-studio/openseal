@@ -1,10 +1,10 @@
-// Package client is the helloseal bridge that runs on a person's computer.
+// Package client is the helloseal-bridge binary that runs on a person's computer.
 // It pairs with HelloSeal through a device-code flow (Pair), then long-polls
 // for calls and answers them (Serve), running commands and reading, writing
 // and listing files only inside the folders the person allowed.
 //
 // It imports only the standard library and pkg/computer/bridge, so the
-// helloseal binary builds with CGO_ENABLED=0 for every platform.
+// helloseal-bridge binary builds with CGO_ENABLED=0 for every platform.
 package client
 
 import (
@@ -34,7 +34,7 @@ const (
 )
 
 // ErrNotConnected is returned when this computer has no saved connection.
-var ErrNotConnected = errors.New("this computer is not connected; run helloseal connect")
+var ErrNotConnected = errors.New("this computer is not connected; run helloseal-bridge connect")
 
 // Config is the saved connection, computer.json.
 type Config struct {

@@ -279,7 +279,7 @@ func TestServeStopsWhenHelloSealForgotTheComputer(t *testing.T) {
 		if !errors.Is(err, ErrDisconnected) {
 			t.Fatalf("status %d: Serve = %v, want ErrDisconnected", status, err)
 		}
-		if err.Error() != "This computer was disconnected. Run helloseal connect." {
+		if err.Error() != "This computer was disconnected. Run helloseal-bridge connect." {
 			t.Fatalf("message = %q", err.Error())
 		}
 	}
