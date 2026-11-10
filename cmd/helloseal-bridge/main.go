@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -36,6 +37,8 @@ func run(args []string) int {
 		return statusCmd(args[1:])
 	case "disconnect":
 		return disconnectCmd(args[1:])
+	case "service":
+		return serviceCmd(args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("helloseal-bridge %s\n", version)
 		return 0
@@ -56,10 +59,12 @@ Usage:
   helloseal-bridge <command> [arguments]
 
 Commands:
-  connect     Pair this computer with HelloSeal, then start the bridge
-  start       Run the bridge so your agents can use this computer
+  connect     Pair this computer with HelloSeal and run the bridge in the
+              background (--no-service runs it in this terminal instead)
+  start       Run the bridge in this terminal; the background service runs this
+  service     install, uninstall, status or restart the background service
   status      Show which HelloSeal this computer is connected to
-  disconnect  Remove this computer from HelloSeal
+  disconnect  Remove this computer from HelloSeal and stop the service
   version     Print version
   help        Print this help message
 
@@ -71,6 +76,7 @@ func connectCmd(args []string) int {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
 	server := fs.String("server", "", "HelloSeal URL (default: $HELLOSEAL_SERVER, the saved server, or "+client.DefaultServer+")")
 	name := fs.String("name", "", "name shown in HelloSeal (default: this computer's hostname)")
+	noService := fs.Bool("no-service", false, "run the bridge in this terminal instead of installing the background service")
 	fs.Parse(args)
 
 	store, err := client.DefaultStore()
@@ -102,35 +108,149 @@ func connectCmd(args []string) int {
 		return fail(err)
 	}
 	fmt.Printf("Connected %s to %s.\n", config.Name, config.Server)
-	return serve(ctx, store, config)
+	if *noService {
+		return serve(ctx, store, config, os.Stdout)
+	}
+	service, err := newService(store)
+	if err == nil {
+		err = service.Install(ctx)
+	}
+	if err != nil {
+		// The person is at a terminal already: run here rather than not at all.
+		var unsupported *client.ErrNoServiceManager
+		if errors.As(err, &unsupported) {
+			fmt.Fprintln(os.Stderr, unsupported.Message)
+		} else {
+			fmt.Fprintf(os.Stderr, "Could not install the background service: %v\n", err)
+		}
+		fmt.Fprintln(os.Stderr, "Running the bridge in this terminal instead.")
+		return serve(ctx, store, config, os.Stdout)
+	}
+	fmt.Println("The HelloSeal bridge is running in the background.")
+	for _, note := range service.Notes() {
+		fmt.Println(note)
+	}
+	fmt.Printf("Logs: %s\n", service.Logs())
+	return 0
 }
 
-func startCmd(args []string) int {
-	fs := flag.NewFlagSet("start", flag.ExitOnError)
-	fs.Parse(args)
+func newService(store client.Store) (client.ServiceManager, error) {
+	options, err := client.DefaultServiceOptions()
+	if err != nil {
+		return nil, err
+	}
+	return client.NewService(options, store), nil
+}
+
+func serviceCmd(args []string) int {
+	usage := "usage: helloseal-bridge service install|uninstall|status|restart"
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, usage)
+		return 1
+	}
 	store, err := client.DefaultStore()
 	if err != nil {
 		return fail(err)
 	}
-	config, err := store.Load()
+	service, err := newService(store)
 	if err != nil {
 		return fail(err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return serve(ctx, store, config)
+	switch args[0] {
+	case "install":
+		if _, err := store.Load(); err != nil {
+			return fail(err)
+		}
+		if err := service.Install(ctx); err != nil {
+			return fail(err)
+		}
+		fmt.Println("The HelloSeal bridge is running in the background.")
+		for _, note := range service.Notes() {
+			fmt.Println(note)
+		}
+		fmt.Printf("Logs: %s\n", service.Logs())
+	case "uninstall":
+		if err := service.Uninstall(ctx); err != nil {
+			return fail(err)
+		}
+		fmt.Println("The background service is removed. Run helloseal-bridge start to run the bridge in a terminal.")
+	case "status":
+		fmt.Println(serviceLine(ctx, service))
+	case "restart":
+		if err := service.Restart(ctx); err != nil {
+			return fail(err)
+		}
+		fmt.Println("Restarted the background service.")
+	default:
+		fmt.Fprintln(os.Stderr, usage)
+		return 1
+	}
+	return 0
 }
 
-func serve(ctx context.Context, store client.Store, config client.Config) int {
-	key, err := store.Key()
+// serviceLine says in one line whether the background service runs.
+func serviceLine(ctx context.Context, service client.ServiceManager) string {
+	status, err := service.Status(ctx)
+	switch {
+	case err != nil:
+		return "Background service: unknown (" + err.Error() + ")"
+	case !status.Installed:
+		return "Background service: not installed (helloseal-bridge service install)"
+	case status.Running:
+		return "Background service: running (" + status.Detail + "). Logs: " + service.Logs()
+	}
+	return "Background service: installed, not running (" + status.Detail + "). Logs: " + service.Logs()
+}
+
+func startCmd(args []string) int {
+	fs := flag.NewFlagSet("start", flag.ExitOnError)
+	logPath := fs.String("log", "", "append the bridge's output to this file (the Windows service, which has no console, uses it)")
+	fs.Parse(args)
+	out := io.Writer(os.Stdout)
+	if *logPath != "" {
+		file, err := os.OpenFile(*logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return fail(err)
+		}
+		defer file.Close()
+		out, os.Stderr = file, file
+	}
+	store, err := client.DefaultStore()
 	if err != nil {
 		return fail(err)
 	}
-	fmt.Printf("HelloSeal bridge running for %s. Press Ctrl+C to stop.\n", config.Name)
-	err = client.Serve(ctx, client.NewAPI(config.Server, config.ComputerID, key), client.ServeOptions{Log: os.Stdout})
+	config, err := store.Load()
+	if errors.Is(err, client.ErrNotConnected) {
+		fmt.Fprintln(os.Stderr, "helloseal-bridge:", err)
+		return client.ExitNotConnected
+	}
+	if err != nil {
+		return fail(err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return serve(ctx, store, config, out)
+}
+
+func serve(ctx context.Context, store client.Store, config client.Config, out io.Writer) int {
+	key, err := store.Key()
+	if errors.Is(err, client.ErrNotConnected) {
+		fmt.Fprintln(os.Stderr, "helloseal-bridge:", err)
+		return client.ExitNotConnected
+	}
+	if err != nil {
+		return fail(err)
+	}
+	fmt.Fprintf(out, "HelloSeal bridge running for %s. Press Ctrl+C to stop.\n", config.Name)
+	err = client.Serve(ctx, client.NewAPI(config.Server, config.ComputerID, key), client.ServeOptions{Log: out})
 	if errors.Is(err, client.ErrDisconnected) {
+		// HelloSeal no longer knows this computer, so its key is useless.
+		// Forgetting it tells the background service to stop restarting.
+		_ = store.Delete()
 		fmt.Fprintln(os.Stderr, client.ErrDisconnected.Error())
-		return 1
+		return client.ExitNotConnected
 	}
 	if err != nil {
 		return fail(err)
@@ -154,6 +274,9 @@ func statusCmd(args []string) int {
 		return fail(err)
 	}
 	fmt.Printf("Connected to %s as %s.\nComputer id: %s\nConfig: %s\n", config.Server, config.Name, config.ComputerID, store.Dir)
+	if service, err := newService(store); err == nil {
+		fmt.Println(serviceLine(context.Background(), service))
+	}
 	return 0
 }
 
@@ -163,6 +286,13 @@ func disconnectCmd(args []string) int {
 	store, err := client.DefaultStore()
 	if err != nil {
 		return fail(err)
+	}
+	// The service goes first, so it cannot restart against a connection
+	// that is going away.
+	if service, err := newService(store); err == nil {
+		if err := service.Uninstall(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "Could not remove the background service: %v\n", err)
+		}
 	}
 	config, err := store.Load()
 	if errors.Is(err, client.ErrNotConnected) {
