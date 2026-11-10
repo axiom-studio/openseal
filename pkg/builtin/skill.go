@@ -13,7 +13,7 @@ import (
 
 const (
 	SkillID                 = "openseal.builtin"
-	SkillVersion            = "2.5.4"
+	SkillVersion            = "2.5.5"
 	ReadAttachment          = "read_attachment"
 	ReadConversationHistory = "read_conversation_history"
 	GenerateProfileImage    = "generate_profile_image"
@@ -77,6 +77,8 @@ func object(required []interface{}, properties map[string]interface{}) map[strin
 
 var artifactRefs = map[string]interface{}{"type": "array", "minItems": 1, "items": object([]interface{}{"id", "version"}, map[string]interface{}{
 	"id": map[string]interface{}{"type": "string"}, "version": map[string]interface{}{"type": "integer", "minimum": 1},
+	// The chat path the file was saved from, for handing it over by path.
+	"path": map[string]interface{}{"type": "string"},
 })}
 
 func SkillDefinition() *skill.Definition {
