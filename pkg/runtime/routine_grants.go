@@ -242,7 +242,7 @@ func routineGrantToolPinned(grant RoutineGrant, tool *skill.BindingTool) bool {
 // arguments, and each grant of an action that posts to a channel is pinned to
 // the destinations the user approved, which its label names. An earlier
 // contract that cannot carry a pin cannot grant those actions at all.
-func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, grants []RoutineGrant) ([]RoutineGrant, error) {
+func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, grants []RoutineGrant, eventRoutine bool) ([]RoutineGrant, error) {
 	if len(grants) == 0 {
 		return grants, nil
 	}
@@ -375,6 +375,9 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 		if len(grant.ToDestinations) > 0 && len(routineActionDestinationKeys(bound.action.InputSchema)) == 0 {
 			return nil, fmt.Errorf("routine grant %s takes no channel, so it cannot be limited to destinations", grant.Action)
 		}
+		if eventRoutine && !routineSendGrantPinned(bound.action, grant) {
+			return nil, ErrRoutineEventSendGrantNotPinned
+		}
 		if grant.Label == "" || approvalNamesIdentifier(grant.Label, bound.skillID, bound.name, grant.Action) {
 			grant.Label = routineGrantCatalogLabel(bound.name, bound.action)
 		}
@@ -456,6 +459,20 @@ func routineActionDestinationKeys(schema map[string]interface{}) []string {
 // in a channel or conversation it takes as an argument.
 func routineActionPostsToDestination(action skill.Action) bool {
 	return action.SideEffect != skill.SideEffectRead && len(routineActionDestinationKeys(action.InputSchema)) > 0
+}
+
+// ErrRoutineEventSendGrantNotPinned refuses a free-recipient send in an event
+// routine's brief (E15): outside events must not choose who it writes to.
+var ErrRoutineEventSendGrantNotPinned = errors.New("An event routine can only send to you or to the channels you name")
+
+// routineSendGrantPinned reports whether a grant of a message-sending action
+// is limited to the owner or to named destinations. Grants of actions that
+// send nothing are always pinned.
+func routineSendGrantPinned(action skill.Action, grant RoutineGrant) bool {
+	if !routineActionHasRecipients(action.InputSchema) && !routineActionPostsToDestination(action) {
+		return true
+	}
+	return grant.ToOwnerOnly || len(grant.ToDestinations) > 0
 }
 
 // routineGrantDestinationLabel makes the approved label name every pinned
@@ -787,7 +804,7 @@ func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
 // resolveRoutineBriefArguments normalizes a proposed create_task brief and
 // fills grant labels from the catalog before the arguments are digested, so
 // the approved arguments carry exactly the brief the user sees.
-func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, arguments map[string]interface{}) error {
+func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, arguments map[string]interface{}, eventRoutine bool) error {
 	var parsed struct {
 		Brief *RoutineBrief `json:"brief"`
 	}
@@ -802,7 +819,7 @@ func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatal
 	if err != nil {
 		return err
 	}
-	if brief.Grants, err = resolveRoutineBriefGrants(ctx, catalog, owners, run, brief.Grants); err != nil {
+	if brief.Grants, err = resolveRoutineBriefGrants(ctx, catalog, owners, run, brief.Grants, eventRoutine); err != nil {
 		return err
 	}
 	arguments["brief"] = routineBriefPreview(brief)

@@ -471,8 +471,13 @@ func resolveOwnedTaskScript(ctx context.Context, store runbookActionStore, files
 func routineScriptChangePreview(ctx context.Context, store runbookActionStore, a *RunbookActivation, script *RoutineScript) (map[string]interface{}, error) {
 	preview := map[string]interface{}{
 		"resourceType": runbookActivationResourceType, "operation": RunbookActionSetScript, "activationId": a.ID,
-		"goal": a.Task.Goal, "schedule": a.Trigger.Schedule, "conversationId": a.Task.ConversationID,
+		"goal": a.Task.Goal, "conversationId": a.Task.ConversationID,
 		"script": routineScriptMap(script), "previousScript": routineScriptMap(a.Task.Script),
+	}
+	if a.Task.Event != nil {
+		preview["event"] = routineEventPreview(a.Task.Event)
+	} else {
+		preview["schedule"] = a.Trigger.Schedule
 	}
 	objective, err := store.GetObjective(ctx, a.Scope, a.ObjectiveID)
 	if err != nil {

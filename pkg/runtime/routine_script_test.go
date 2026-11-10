@@ -102,11 +102,11 @@ func TestRoutineScriptValidation(t *testing.T) {
 	}
 }
 
-// The 1.8.0 definition is immutable once published (it is not yet): any
+// The 1.9.0 definition is immutable once published (it is not yet): any
 // change to its descriptions or schemas after release needs a new version. Its create_task runs saved
-// scripts and documents testing before scheduling.
+// scripts, documents testing before scheduling and starts routines on a schedule or an event.
 func TestRoutineScriptContractVersions(t *testing.T) {
-	if RunbookManagementSkillVersion != "1.8.0" {
+	if RunbookManagementSkillVersion != "1.9.0" {
 		t.Fatalf("version=%s", RunbookManagementSkillVersion)
 	}
 	current := RunbookManagementSkill()
@@ -114,9 +114,17 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const published180SHA256 = "2a531547d90039558b9a1286a7455020b9f8c84d423331abe01c544996790b8f"
-	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published180SHA256 {
-		t.Fatalf("published 1.8.0 definition changed: got %s", got)
+	const published190SHA256 = "48211b97253e669250f1d0754cfa803c5a22093280eeb665a86c5c43857df56d"
+	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published190SHA256 {
+		t.Fatalf("published 1.9.0 definition changed: got %s", got)
+	}
+	for _, action := range []string{RunbookActionCreateTask, RunbookActionEventSources, RunbookActionSendTestEvent, RunbookActionSetScript, RunbookActionList, RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule} {
+		if _, ok := current.Actions[action]; !ok {
+			t.Fatalf("1.9.0 lacks %s", action)
+		}
+	}
+	if len(current.Actions) != 8 || current.Name != "Routines" {
+		t.Fatalf("definition=%s with %d actions", current.Name, len(current.Actions))
 	}
 	create := current.Actions[RunbookActionCreateTask]
 	if _, ok := create.InputSchema["properties"].(map[string]interface{})["script"]; !ok || !strings.Contains(create.Description, "test it in this chat's sandbox with run_command") {

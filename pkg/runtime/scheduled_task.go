@@ -205,16 +205,17 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 // run_command; the kernel pins the script's current version when the
 // routine is proposed.
 func scheduledTaskCreateAction() skill.Action {
-	return skill.Action{Name: RunbookActionCreateTask, Description: "Create and activate a recurring scheduled task when the user requests future or repeated work. The current Agent executes the supplied goal with its authorized tools on each occurrence and posts results to this chat. Use a six-field cron including seconds and an explicit IANA timezone; clarify ambiguous timing. This creates a real routine, not a sleeping chat reply. Tool access and approval requirements still apply on each run." +
+	return skill.Action{Name: RunbookActionCreateTask, Description: "Create and activate a routine when the user wants future, repeated or event-driven work. The current Agent executes the supplied goal with its authorized tools on each occurrence and posts results to this chat. This creates a real routine, not a sleeping chat reply. Tool access and approval requirements still apply on each run." +
+		" To start the work when something happens rather than on a clock, call event_sources first and pass trigger.event with a source from it; prefer an event over a frequent schedule whenever a source exists. Put conditions in filter rather than in goal. Use maximumOccurrences 1 for a one-time follow-up such as 'tell me when Ana replies'. In goal, say what to do with the event; the event itself is given to each run." +
 		" To keep an app's data fresh, pass its appId; each occurrence then saves results to that app with save_app_data." +
 		" The user always approves a brief before the routine is created: always pass brief with a one-sentence summary of what it does and when, deliverTo naming where results go, and grants listing only the actions its runs need to perform without asking (for example web search or page reads and an email to the user). Runs ask in this chat before any other side effect, and actions that always ask, such as paying, cannot be granted." +
 		" To grant a connected app's tool, use that tool's own exact action name from your tools, for example mcp.<connection>.<tool>; the generic action connected tools run through (such as openseal.mcp.call) cannot be granted." +
 		" Each run's result is posted automatically as a new message in the chat or Slack conversation the routine was created from, so never grant a send action to deliver results there. To post to any other channel, grant that sending action (for example skill-slack.slack-send-message) with toDestinations naming each channel, and name it in the label, for example \"Post to #ai-news\"; runs then post there without asking, and anywhere else asks first." +
 		" For work that is the same steps with new data each time (pull data, compute, chart, write a file), make the routine run a saved script instead of redoing the work: first write the script in this chat's files and test it in this chat's sandbox with run_command until it works, then pass script with its path and the exact command that ran it. Approving the brief pins the script as it is then; each run then starts by running that exact version with run_command, and you write the report from its output, so say in goal what to report from the script's results.",
 		Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2}, Review: skill.ActionReviewAlways,
-		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"title", "goal", "cron", "timezone"}, "properties": map[string]interface{}{
+		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"title", "goal", "trigger", "brief"}, "properties": map[string]interface{}{
 			"title": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 240}, "goal": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 16000, "description": "Self-contained work to perform on every occurrence, including the source to use and requested result. Do not include credentials or request another schedule."},
-			"cron": map[string]interface{}{"type": "string", "pattern": `^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+$`, "description": "Six-field cron: seconds minutes hours day-of-month month weekday."}, "timezone": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 100}, "maximumOccurrences": map[string]interface{}{"type": []interface{}{"integer", "null"}, "minimum": 1, "maximum": 1000000, "description": "Omit or supply null for an ongoing routine; supply a positive integer only when the user requested a bounded number of executions."},
+			"trigger": scheduledTaskTriggerSchema(),
 			"appId": map[string]interface{}{
 				"type": "string", "pattern": `^app-[a-f0-9]{64}$`, "description": "Optional app from this chat that each occurrence updates.",
 			},
@@ -258,6 +259,64 @@ func scheduledTaskCreateAction() skill.Action {
 		}}, OutputSchema: scheduledTaskResultSchema(RunbookActionCreateTask)}
 }
 
+// scheduledTaskTriggerSchema is create_task's trigger: exactly one of a
+// schedule or an event.
+func scheduledTaskTriggerSchema() map[string]interface{} {
+	kinds := make([]interface{}, 0, len(RoutineEventKinds))
+	for _, kind := range RoutineEventKinds {
+		kinds = append(kinds, string(kind))
+	}
+	maximumOccurrences := func() map[string]interface{} {
+		return map[string]interface{}{"type": []interface{}{"integer", "null"}, "minimum": 1, "maximum": 1000000, "description": "Omit or supply null for an ongoing routine; supply a positive integer only when the user requested a bounded number of executions."}
+	}
+	return map[string]interface{}{
+		"type": "object", "additionalProperties": false, "minProperties": 1, "maxProperties": 1,
+		"description": "Exactly one of schedule or event.",
+		"properties": map[string]interface{}{
+			"schedule": map[string]interface{}{
+				"type": "object", "additionalProperties": false, "required": []interface{}{"cron", "timezone"},
+				"description": "Run on a clock. Use a six-field cron including seconds and an explicit IANA timezone; clarify ambiguous timing.",
+				"properties": map[string]interface{}{
+					"cron":               map[string]interface{}{"type": "string", "pattern": `^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+$`, "description": "Six-field cron: seconds minutes hours day-of-month month weekday."},
+					"timezone":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 100},
+					"maximumOccurrences": maximumOccurrences(),
+				},
+			},
+			"event": map[string]interface{}{
+				"type": "object", "additionalProperties": false, "required": []interface{}{"kind", "source"},
+				"properties": map[string]interface{}{
+					"kind":   map[string]interface{}{"type": "string", "enum": kinds},
+					"source": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "description": "A source from event_sources. For a webhook use \"new\"."},
+					"filter": map[string]interface{}{
+						"type": "array", "maxItems": RoutineEventMaxConditions,
+						"items": map[string]interface{}{
+							"type": "object", "additionalProperties": false, "required": []interface{}{"field", "op"},
+							"properties": map[string]interface{}{
+								"field":  map[string]interface{}{"type": "string", "maxLength": 256},
+								"op":     map[string]interface{}{"type": "string", "enum": []interface{}{"equals", "contains", "one_of", "glob", "exists"}},
+								"value":  map[string]interface{}{"type": "string", "maxLength": RoutineEventConditionValueMax},
+								"values": map[string]interface{}{"type": "array", "maxItems": RoutineEventConditionMaxValues, "items": map[string]interface{}{"type": "string", "maxLength": RoutineEventConditionValueMax}},
+								"not":    map[string]interface{}{"type": "boolean"},
+								"label":  map[string]interface{}{"type": "string", "maxLength": RoutineEventConditionLabelMax, "description": "Plain words for the person, e.g. \"#support\"."},
+							},
+						},
+					},
+					"calendar": map[string]interface{}{
+						"type": "object", "additionalProperties": false, "required": []interface{}{"on"},
+						"properties": map[string]interface{}{
+							"on":      map[string]interface{}{"type": "string", "enum": []interface{}{RoutineCalendarStartsIn, RoutineCalendarCreated, RoutineCalendarUpdated, RoutineCalendarEnded}},
+							"minutes": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": RoutineCalendarMaxMinutesBefore},
+						},
+					},
+					"includeBots":        map[string]interface{}{"type": "boolean"},
+					"maxPerHour":         map[string]interface{}{"type": "integer", "minimum": 1, "maximum": RoutineEventMaxPerHourLimit, "description": "Most runs per hour; extra events wait and run together. Default 20."},
+					"maximumOccurrences": map[string]interface{}{"type": []interface{}{"integer", "null"}, "minimum": 1, "maximum": 1000000},
+				},
+			},
+		},
+	}
+}
+
 func scheduledTaskListAction() skill.Action {
 	return skill.Action{Name: RunbookActionList, Description: "List routines owned by this Agent or Team, including exact activation IDs, schedules, status, revisions, next occurrence and originating chat. Use these IDs to start, pause, resume, cancel or replace a schedule.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"offset": map[string]interface{}{"type": "integer", "minimum": 0}}}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"activations": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}, "nextOffset": map[string]interface{}{"type": "integer"}}, "required": []interface{}{"activations"}}}
 }
@@ -281,15 +340,43 @@ func scheduledTaskResultSchema(operation string) map[string]interface{} {
 }
 
 type scheduledTaskCreateArguments struct {
-	Title              string         `json:"title"`
-	Goal               string         `json:"goal"`
-	Cron               string         `json:"cron"`
-	Timezone           string         `json:"timezone"`
-	MaximumOccurrences int64          `json:"maximumOccurrences,omitempty"`
-	AppID              string         `json:"appId,omitempty"`
-	Brief              *RoutineBrief  `json:"brief,omitempty"`
-	Script             *RoutineScript `json:"script,omitempty"`
+	Title   string                         `json:"title"`
+	Goal    string                         `json:"goal"`
+	Trigger *scheduledTaskTriggerArguments `json:"trigger"`
+	AppID   string                         `json:"appId,omitempty"`
+	Brief   *RoutineBrief                  `json:"brief,omitempty"`
+	Script  *RoutineScript                 `json:"script,omitempty"`
 }
+
+type scheduledTaskTriggerArguments struct {
+	Schedule *scheduledTaskScheduleArguments `json:"schedule,omitempty"`
+	Event    *scheduledTaskEventArguments    `json:"event,omitempty"`
+}
+
+type scheduledTaskScheduleArguments struct {
+	Cron               string `json:"cron"`
+	Timezone           string `json:"timezone"`
+	MaximumOccurrences *int64 `json:"maximumOccurrences,omitempty"`
+}
+
+type scheduledTaskEventArguments struct {
+	Kind               RoutineEventKind        `json:"kind"`
+	Source             string                  `json:"source"`
+	Filter             []RoutineEventCondition `json:"filter,omitempty"`
+	Calendar           *RoutineCalendarTiming  `json:"calendar,omitempty"`
+	IncludeBots        bool                    `json:"includeBots,omitempty"`
+	MaxPerHour         int                     `json:"maxPerHour,omitempty"`
+	MaximumOccurrences *int64                  `json:"maximumOccurrences,omitempty"`
+}
+
+// scheduledTaskCreatesEventRoutine reports whether create_task arguments
+// ask for an event routine.
+func scheduledTaskCreatesEventRoutine(arguments map[string]interface{}) bool {
+	trigger, _ := arguments["trigger"].(map[string]interface{})
+	_, ok := trigger["event"]
+	return ok
+}
+
 type scheduledTaskStatusArguments struct {
 	ActivationID     string                  `json:"activationId"`
 	ExpectedRevision int64                   `json:"expectedRevision"`
@@ -307,14 +394,21 @@ func decodeScheduledTaskArguments(arguments map[string]interface{}, target inter
 	return d.Decode(target)
 }
 
-func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *AgentRun, args map[string]interface{}) (*scheduledTaskCreateArguments, *ScheduledAgentTask, *runbook.Schedule, error) {
+// resolveScheduledTaskCreate checks create_task arguments and returns the
+// routine's task with its schedule, or with Task.Event set for an event
+// routine (then the schedule is nil). activationID is the routine's ID when
+// it is known (dispatch); a webhook routine's hook is named after it.
+func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, files ChatFileResolver, events routineEventActions, run *AgentRun, activationID string, args map[string]interface{}) (*scheduledTaskCreateArguments, *ScheduledAgentTask, *runbook.Schedule, error) {
 	var a scheduledTaskCreateArguments
 	if err := decodeScheduledTaskArguments(args, &a); err != nil {
 		return nil, nil, nil, err
 	}
-	a.Title, a.Goal, a.Cron, a.Timezone = strings.TrimSpace(a.Title), strings.TrimSpace(a.Goal), strings.TrimSpace(a.Cron), strings.TrimSpace(a.Timezone)
-	if a.Title == "" || len(a.Title) > 240 || a.MaximumOccurrences < 0 || a.MaximumOccurrences > 1000000 {
-		return nil, nil, nil, errors.New("scheduled task title or occurrence limit is invalid")
+	a.Title, a.Goal = strings.TrimSpace(a.Title), strings.TrimSpace(a.Goal)
+	if a.Title == "" || len(a.Title) > 240 {
+		return nil, nil, nil, errors.New("scheduled task title is invalid")
+	}
+	if a.Trigger == nil || (a.Trigger.Schedule == nil) == (a.Trigger.Event == nil) {
+		return nil, nil, nil, errors.New("a routine needs exactly one trigger: schedule or event")
 	}
 	if err := validation.ValidateNoSensitiveInput(a.Title); err != nil {
 		return nil, nil, nil, err
@@ -366,7 +460,29 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 			return nil, nil, nil, err
 		}
 	}
-	schedule := &runbook.Schedule{Cron: a.Cron, Timezone: a.Timezone, MaximumOccurrences: a.MaximumOccurrences}
+	if a.Trigger.Event != nil {
+		if activationID == "" {
+			// Validation before the call exists: the hook ID is only checked
+			// for shape here and named after the real activation at dispatch.
+			activationID = "proposal:" + run.ID
+		}
+		event, err := resolveRoutineEventTrigger(ctx, store, events, run, activationID, a.Trigger.Event)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		task.Event = event
+		if err := task.Validate(); err != nil {
+			return nil, nil, nil, err
+		}
+		return &a, task, nil, nil
+	}
+	schedule := &runbook.Schedule{Cron: strings.TrimSpace(a.Trigger.Schedule.Cron), Timezone: strings.TrimSpace(a.Trigger.Schedule.Timezone)}
+	if limit := a.Trigger.Schedule.MaximumOccurrences; limit != nil {
+		if *limit < 1 || *limit > 1000000 {
+			return nil, nil, nil, errors.New("scheduled task occurrence limit is invalid")
+		}
+		schedule.MaximumOccurrences = *limit
+	}
 	if err := schedule.Validate(); err != nil {
 		return nil, nil, nil, err
 	}
@@ -427,17 +543,22 @@ func routineChangeCreator(a *RunbookActivation, run *AgentRun) string {
 	}
 	return run.ActingUser
 }
-func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams RoutineTeamCatalog, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams RoutineTeamCatalog, events routineEventActions, input ActionProposalValidationInput) (map[string]interface{}, error) {
 	if err := runbookActionOwner(ctx, teams, input.Run, input.Bound); err != nil {
 		return nil, err
 	}
 	switch input.Bound.Action.Name {
 	case RunbookActionCreateTask:
-		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, input.Run, input.Arguments)
+		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, events, input.Run, "", input.Arguments)
 		if err != nil {
 			return nil, err
 		}
-		preview := map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionCreateTask, "title": args.Title, "goal": task.Goal, "schedule": schedule, "conversationId": task.ConversationID}
+		preview := map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionCreateTask, "title": args.Title, "goal": task.Goal, "conversationId": task.ConversationID}
+		if task.Event != nil {
+			preview["event"] = routineEventPreview(task.Event)
+		} else {
+			preview["schedule"] = schedule
+		}
 		if args.Brief != nil {
 			preview["brief"] = routineBriefPreview(args.Brief)
 		}
@@ -455,8 +576,14 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			return nil, err
 		}
 		return routineScriptChangePreview(ctx, store, a, script)
-	case RunbookActionList:
+	case RunbookActionList, RunbookActionEventSources:
 		return nil, nil
+	case RunbookActionSendTestEvent:
+		a, _, err := resolveRoutineTestEvent(ctx, store, events, input.Run, input.Arguments)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSendTestEvent, "activationId": a.ID, "event": routineEventPreview(a.Task.Event)}, nil
 	case RunbookActionSetStatus:
 		args, a, err := resolveOwnedTaskStatus(ctx, store, input.Run, input.Arguments)
 		if err != nil {
@@ -466,7 +593,7 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	}
 	return nil, errors.New("unsupported scheduled task action")
 }
-func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams RoutineTeamCatalog, input ActionDispatchInput) (map[string]interface{}, error) {
+func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams RoutineTeamCatalog, events routineEventActions, input ActionDispatchInput) (map[string]interface{}, error) {
 	run, err := store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil {
 		return nil, err
@@ -497,13 +624,20 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			result["nextOffset"] = args.Offset + 50
 		}
 		return result, nil
+	case RunbookActionEventSources:
+		return dispatchRoutineEventSources(ctx, store, events, run, input.Arguments)
+	case RunbookActionSendTestEvent:
+		return dispatchRoutineTestEvent(ctx, store, events, run, input.Arguments)
 	case RunbookActionCreateTask:
-		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, run, input.Arguments)
-		if err != nil {
-			return nil, err
-		}
 		if input.Call.IdempotencyKey == "" {
 			return nil, errors.New("scheduled task requires action idempotency")
+		}
+		// The ID is known before Create so a webhook routine's hook can be
+		// named after it and made first.
+		activationID := RunbookActivationIDForKey(run.Scope, input.Call.IdempotencyKey)
+		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, events, run, activationID, input.Arguments)
+		if err != nil {
+			return nil, err
 		}
 		if task.Script != nil {
 			// Applying the approved brief approves its script version now.
@@ -514,7 +648,18 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		if err != nil {
 			return nil, err
 		}
-		activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{Scope: run.Scope, Owner: run.Owner, ObjectiveID: objective.Objective.ID, AssignedAgentID: run.AssignedAgentID, Task: task, TriggerID: "schedule", Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: schedule}, MaximumConcurrent: 1, IdempotencyKey: input.Call.IdempotencyKey})
+		request := CreateRunbookActivationRequest{ID: activationID, Scope: run.Scope, Owner: run.Owner, ObjectiveID: objective.Objective.ID, AssignedAgentID: run.AssignedAgentID, Task: task, TriggerID: "schedule", Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: schedule}, MaximumConcurrent: 1, IdempotencyKey: input.Call.IdempotencyKey}
+		if task.Event != nil {
+			request.TriggerID, request.Trigger = "event", runbook.Trigger{Kind: runbook.TriggerEvent}
+			if task.Event.Webhook != nil {
+				// The hook exists before the activation commits; one whose
+				// activation never commits is removed by PruneHooks.
+				if _, err := store.CreateHook(ctx, &Hook{ID: task.Event.Webhook.HookID, Scope: run.Scope, ActivationID: activationID}); err != nil {
+					return nil, err
+				}
+			}
+		}
+		activation, err := NewRunbookActivationService(store).Create(ctx, request)
 		if err != nil {
 			return nil, err
 		}
