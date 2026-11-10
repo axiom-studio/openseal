@@ -182,12 +182,15 @@ outcome matters; one or more versioned Runbooks beneath it say how work is
 performed. Activated Runbook schedule triggers own persisted cursors, cron
 jitter, concurrency, inputs, policy, and deterministic occurrence keys. A due
 trigger creates a bounded Run attributed to both the Objective and the exact
-Runbook activation. Normalized event routing matches active Runbook event
-triggers and applies persisted idempotency keys before creating Runs.
+Runbook activation.
 
-Kubernetes informers, message streams, or other external listeners are host
-adapters that submit normalized events; they are not alternate execution
-engines.
+Event routines are routine activations whose trigger is an event. Producers
+(chat ingress, GitHub callbacks, and host adapters such as webhook ingress and
+Google sync) offer normalized `RoutineEvent`s to the routine event matcher,
+which stores matching events with a dedupe key. A separate dispatcher, run by
+one leader process, starts one bounded Run per batch of events under per-routine
+and per-tenant limits. Producers are not execution engines; they never create
+Runs. See [Event routines](../event-routines.md).
 
 ## Skills and action governance
 

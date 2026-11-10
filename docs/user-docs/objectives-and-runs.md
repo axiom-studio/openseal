@@ -93,18 +93,21 @@ The admission route is the first thing to check when a Run stays `queued`, becau
 
 > **Run creation requires a worker, and the standalone daemon derives workers from configuration.** The `create` operation joins the Agent Runs capability only when a Run dispatcher has been installed, and the standalone daemon installs one only when at least one worker scope has been derived — which requires at least one credential entry in the standalone context, or a model provider configured under `--desktop-operator` (which adds the daemon's own `--scope`). Without either, inspection and lifecycle intervention work but nothing can create new Runs. See [Configuration](configuration.md).
 
-## Events and Scheduling
+## Schedules and Event Routines
 
-Runs can be produced by inbound events as well as by objectives directly. Event source subscriptions describe what is watched; events are posted to the kernel and routed to the subscriptions that match.
+Runs can start from a schedule or from an event as well as from objectives directly. Both are routines: Objective-owned Runbook activations whose trigger is a schedule or an event. Runbook schedules are reconciled through `POST /api/v1/runbooks/schedule-reconciliations`.
 
-| Property | Description |
+Event routines are created in chat through the `openseal.runbooks` Skill. They start when something happens on a source the Agent or Team already uses:
+
+| Source | What starts the routine |
 |---|---|
-| Subscription | A durable description of an external event source |
-| Checkpoint | How far the subscription has consumed its source |
-| Health report | An operational status report for a subscription |
-| Retirement | Explicit withdrawal of a subscription |
+| Slack, Telegram | A message in a named channel or chat of the Agent's connection; direct messages never start routines |
+| GitHub | An event on a repository whose callback registration subscribes the `routines` consumer |
+| Gmail | A new email in the routine creator's own mailbox |
+| Google Calendar | An event created, updated, about to start, or ended in the creator's own calendar |
+| Webhook | A signed request to the routine's own address |
 
-Subscriptions carry their own checkpoints and advance them explicitly, so a restart resumes from the last recorded position rather than replaying from the beginning. Runbook schedules are reconciled through a separate route, `POST /api/v1/runbooks/schedule-reconciliations`.
+Each routine runs at most one Run at a time and at most a set number of times an hour (20 unless the routine says otherwise). Events that arrive meanwhile wait and go into the next run together. Every event-started Run asks for approval before any action the routine's brief did not grant. Event routines need an embedding host that runs the routine event dispatcher; Gmail and Calendar also need the host's Google sync, and webhooks its hook key. The standalone daemon provides none of these today.
 
 Full route listings are in the [API reference](api.md).
 

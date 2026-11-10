@@ -32,7 +32,7 @@ OpenSeal ships two persistent stores and an in-memory store. Only one of them is
 
 ### SQLite
 
-SQLite is opened with write-ahead logging and a five-second busy timeout, and it runs its migrations on open. The migration sequence covers Skills, the portfolio, runbook activations, event-source checkpoints and subscriptions, Agent and Team registries, action credentials, authoring change sets, conversations, callbacks, and installations.
+SQLite is opened with write-ahead logging and a five-second busy timeout, and it runs its migrations on open. The migration sequence covers Skills, the portfolio, runbook activations, routine events and hooks, Agent and Team registries, action credentials, authoring change sets, conversations, callbacks, and installations.
 
 The sequence is not versioned in a table. Every step is idempotent and runs on every open.
 
@@ -61,7 +61,7 @@ Schema version 59 changes the terminal-report queue identity to include the term
 
 External reply delivery remains idempotent per incoming message. Once a reply delivery exists for that message, retrying its Run does not enqueue another external reply; send a fresh message in the external conversation to start a new attempt and receive a new delivery. Local failure replies retain a separate identity for each explicitly retried terminal attempt.
 
-Both stores implement the same kernel contracts — the agent registry, team registry, Skill catalog, conversations, artifacts, event-source subscriptions and checkpoints, and the authoring change-set contracts. A deployment does not lose capabilities by choosing PostgreSQL.
+Both stores implement the same kernel contracts — the agent registry, team registry, Skill catalog, conversations, artifacts, routine events and hooks, and the authoring change-set contracts. A deployment does not lose capabilities by choosing PostgreSQL.
 
 ### Artifact Content
 

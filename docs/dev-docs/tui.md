@@ -52,8 +52,6 @@ Depending on the connected server, the workspace can expose:
 - **Teams** — Team definitions, roster, lifecycle, and governed amendments
 - **Objectives** — desired outcomes with their Runbook methods; schedules
   remain Runbook triggers rather than Objective settings
-- **Sources** — durable event-source subscriptions, connector health, checkpoints,
-  and CAS-protected pause, resume, and retirement
 - **Work** — Runs, lifecycle commands, and guidance
 - **Requests / Approvals** — delegation, handoffs, clarification, completion,
   and exact action decisions
@@ -118,7 +116,6 @@ Section shortcuts work while the list panel is focused:
 | `h` | Agents (readiness) |
 | `T` | Teams |
 | `o` | Goals (objectives) |
-| `S` | Event sources |
 | `I` | Conversation integrations |
 | `s` | Marketplace (Skills) |
 | `w` | Work / Runs |
@@ -140,7 +137,7 @@ Common controls:
 | `n` | Begin a supported creation or install operation; in Readiness, start the selected active runbook operation |
 | `r` | Refresh; in a failed Workforce proposal, prepare a governed retry |
 | `m` | Open the contextual message, refinement, or amendment composer; in Activity, load the next page |
-| `p` | Pause/resume selected Run, Runbook, Agent, Team, or event source; pin/unpin a Skill |
+| `p` | Pause/resume selected Run, Runbook, Agent, or Team; pin/unpin a Skill |
 | `g` | Guide a selected active Run; in Objectives, reconcile due schedules |
 | `y` / `x` | Approve/accept or reject the selected eligible governed item |
 | `q` / `M` | Request or provide clarification for an Agent request |
@@ -168,17 +165,6 @@ Workforce additionally binds the candidate digest and requires an audit reason.
 Credential choices displayed by the TUI are opaque server-authored references.
 Secret values are never entered into the authoring prompt or stored in TUI
 state.
-
-Event-source creation also separates configuration from activation. `n` in
-Sources opens a reviewable `key: value` form. A new subscription is always
-created paused; `p` activates or pauses it at its exact revision, and `x`
-opens an explicit `RETIRE` confirmation without deleting its health or
-checkpoint history. `connector` is
-either `host:<id>[@version]` or
-`skill:<id>@<exact-version>#<action>`; Skill connectors additionally require
-`binding: <id>@<revision>`. `parameters` is a JSON object and must never contain
-credential values. Health reports and checkpoint advancement remain
-connector-owned operations: the TUI observes them but cannot fabricate them.
 
 ## Run execution history
 

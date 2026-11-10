@@ -38,8 +38,7 @@ credential bindings resolved only at an execution boundary.
 An **Agent bundle** is a deterministic, product-neutral snapshot for moving an
 Agent between OpenSeal hosts. It combines the immutable Agent manifest with
 the reviewed deployment policy, exact Skill identities and narrowed action
-policy, logical credential needs, Objective templates, Runbook triggers and
-schedules, logical conversation routes, and normalized provider callback
+policy, logical credential needs, Objective templates, Runbook schedule triggers, logical conversation routes, and normalized provider callback
 subscriptions.
 
 The artifact never contains credential references or values, tenant and
@@ -89,8 +88,9 @@ contain execution machinery.
 
 A **Runbook activation** belongs to one Objective and binds a versioned method
 to an Agent, exact trigger, inputs, policy, budget, and concurrency limit.
-Schedule reconciliation creates idempotent Runs from due Runbook occurrences;
-event routing creates Runs from matching active Runbook event triggers.
+Schedule reconciliation creates idempotent Runs from due Runbook occurrences.
+Chat-created routines can also start on an event (a message, a GitHub event, an
+email, a calendar event or a webhook request); see [Event routines](event-routines.md).
 
 Execution history is derived from the Objective and its Runbook activations,
 so there is one authoritative lineage:
@@ -261,4 +261,4 @@ HCL workflows are optional, process-bounded CLI runbooks. They can be created,
 validated, and run explicitly with the CLI. The daemon does not load, schedule,
 or expose them through hidden APIs. Durable autonomous work uses Agent
 definitions, objectives, Objective-owned Runbook activations, Agent Runs,
-event-source subscriptions, and governed Skills.
+and governed Skills.

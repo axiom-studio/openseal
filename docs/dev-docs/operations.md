@@ -22,9 +22,9 @@ artifact, and Skill paths are resolved from the configuration file's directory.
 `OPENSEAL_SKILLS_DIR` overrides the daemon's default `skills` directory.
 
 The daemon starts one HTTP listener. `api.listenAddr` serves the versioned
-kernel API; use `/api/v1/health` for health checks. Durable schedules and
-external events are configured through Objective-owned Runbook triggers and
-event-source subscriptions. Removed `workflowsDir`, `triggers`, and `webhook` daemon keys are
+kernel API; use `/api/v1/health` for health checks. Durable schedules are
+configured through Objective-owned Runbook triggers; routines that start on
+events are created in chat (see [Event routines](event-routines.md)). Removed `workflowsDir`, `triggers`, and `webhook` daemon keys are
 rejected instead of being silently ignored.
 
 Setting `OPENSEAL_API_TOKEN` requires a bearer token on every API route,
@@ -61,7 +61,7 @@ credential leases instead of the local context.
 
 Standalone mode uses one SQLite store for definitions, deployments, objectives,
 Runs, turns, leases, budgets, actions, approvals, collaboration, conversations,
-activity, artifacts, Skills, ChangeSets, and event-source checkpoints. Artifact bytes are stored separately beneath `artifactsPath` and tied
+activity, artifacts, Skills, ChangeSets, and routine events. Artifact bytes are stored separately beneath `artifactsPath` and tied
 to immutable catalog records by size and digest.
 
 ```mermaid
@@ -138,7 +138,8 @@ embedding host can supply:
 - model and Skill transports
 - sandbox or remote execution
 - artifact content stores and authorized resolvers
-- event publication and external event sources
+- routine event producers (webhook ingress, Google sync), the routine event
+  dispatcher loop and its leader check, and routine index change signals
 
 The host must advertise only operations it has actually wired. Secrets must be
 resolved after authorization and schema validation. Do not log raw provider
