@@ -10,10 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
-const (
-	externalConversationEventType = "conversation.message.received"
-	externalConversationActorID   = "openseal.external-conversation"
-)
+const externalConversationActorID = "openseal.external-conversation"
 
 // ExternalConversationDispatchRequest is the provider-neutral wake contract
 // between durable conversation ingress and a cognitive handler. Implementations

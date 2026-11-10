@@ -48,11 +48,8 @@ const (
 // endpoint's owning Agent or Team. Provider-specific behavior never belongs in
 // the handler.
 type ExternalConversationHandler struct {
-	Kind            ExternalConversationHandlerKind `json:"kind"`
-	ID              string                          `json:"id"`
-	Version         string                          `json:"version,omitempty"`
-	Trigger         string                          `json:"trigger,omitempty"`
-	AssignedAgentID string                          `json:"assignedAgentId,omitempty"`
+	Kind ExternalConversationHandlerKind `json:"kind"`
+	ID   string                          `json:"id"`
 }
 
 func (h ExternalConversationHandler) Validate(owner ObjectiveOwner) error {
@@ -61,13 +58,11 @@ func (h ExternalConversationHandler) Validate(owner ObjectiveOwner) error {
 	}
 	switch h.Kind {
 	case ExternalConversationHandlerAgent:
-		if h.Version != "" || h.Trigger != "" || h.AssignedAgentID != "" ||
-			owner.Type != OwnerTypeAgent || h.ID != owner.ID {
+		if owner.Type != OwnerTypeAgent || h.ID != owner.ID {
 			return fmt.Errorf("%w: Agent handler must identify the endpoint owner", ErrInvalidExternalConversation)
 		}
 	case ExternalConversationHandlerTeam:
-		if h.Version != "" || h.Trigger != "" || h.AssignedAgentID != "" ||
-			owner.Type != OwnerTypeTeam || h.ID != owner.ID {
+		if owner.Type != OwnerTypeTeam || h.ID != owner.ID {
 			return fmt.Errorf("%w: Team handler must identify the endpoint owner", ErrInvalidExternalConversation)
 		}
 	default:
@@ -961,9 +956,6 @@ func normalizeExternalConversationAdapterReference(value ExternalConversationAda
 
 func normalizeExternalConversationHandler(value ExternalConversationHandler) ExternalConversationHandler {
 	value.ID = strings.TrimSpace(value.ID)
-	value.Version = strings.TrimSpace(value.Version)
-	value.Trigger = strings.TrimSpace(value.Trigger)
-	value.AssignedAgentID = strings.TrimSpace(value.AssignedAgentID)
 	return value
 }
 

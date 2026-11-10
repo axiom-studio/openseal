@@ -309,10 +309,7 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		if getErr != nil {
 			return nil, getErr
 		}
-		senderID := strings.TrimSpace(endpoint.Handler.AssignedAgentID)
-		if senderID == "" {
-			senderID = strings.TrimSpace(run.AssignedAgentID)
-		}
+		senderID := strings.TrimSpace(run.AssignedAgentID)
 		if senderID == "" {
 			senderID = endpoint.Owner.ID
 		}
