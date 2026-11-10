@@ -88,6 +88,10 @@ type ActionProposalValidationInput struct {
 	Arguments map[string]interface{}
 	// History reads this Run's governed action calls. nil means none.
 	History RunActionHistory
+	// IdempotencyKey is the proposed call's key, trimmed. A validator may
+	// derive the ID of what the call creates from it (create_task's
+	// activation), so the approval names that resource before it exists.
+	IdempotencyKey string
 }
 
 type ProposeActionRequest struct {
@@ -257,7 +261,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			continue
 		}
 		resolved, handled, resolveErr := resolver.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
-			Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), History: history,
+			Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), History: history, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		})
 		if resolveErr != nil {
 			return nil, proposalValidationError(ctx, ProposalRejectionToolArgumentsInvalid, resolveErr)
@@ -274,7 +278,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		if validator == nil {
 			continue
 		}
-		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), History: history})
+		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), History: history, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey)})
 		if validateErr != nil {
 			return nil, proposalValidationError(ctx, ProposalRejectionNotAdmitted, validateErr)
 		}

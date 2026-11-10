@@ -558,6 +558,12 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			return nil, err
 		}
 		preview := map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionCreateTask, "title": args.Title, "goal": task.Goal, "conversationId": task.ConversationID}
+		if input.IdempotencyKey != "" {
+			// The activation the approved call creates has this ID, so the
+			// decided approval can open the routine (a webhook's address)
+			// without another lookup.
+			preview["activationId"] = RunbookActivationIDForKey(input.Run.Scope, input.IdempotencyKey)
+		}
 		if task.Event != nil {
 			preview["event"] = routineEventPreview(task.Event)
 		} else {
