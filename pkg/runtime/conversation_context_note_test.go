@@ -132,6 +132,27 @@ func TestRunContextSectionsEmittedOnlyWhenChanged(t *testing.T) {
 	})
 }
 
+// A person who works on their own computer by default is told so at the
+// Run's start; switching back to the VM sends the VM line once.
+func TestRunContextNamesTheWorkMachine(t *testing.T) {
+	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
+		runner := f.noteRunner()
+		machine := "Files and commands: the person's computer krypton."
+		runner.config.WorkMachine = func(context.Context, *AgentRun) string { return machine }
+		trigger := f.say("q1", "can you do ls?")
+		run, session := f.open("")
+		first := f.note(runner, f.noteInput(run, session, trigger))
+		if names := runContextSectionNames(t, first); !names[contextSectionWorkMachine] || !strings.Contains(first.Note.Text, machine) {
+			t.Fatalf("first = %v %q", names, first.Note.Text)
+		}
+		machine = ""
+		back := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
+		if !strings.Contains(back.Note.Text, "Files and commands: the chat's secure VM.") {
+			t.Fatalf("back on the VM = %q", back.Note.Text)
+		}
+	})
+}
+
 func TestRunContextReEmittedAfterCompaction(t *testing.T) {
 	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
 		runner := f.noteRunner()

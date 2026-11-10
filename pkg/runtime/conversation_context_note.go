@@ -40,6 +40,7 @@ const (
 	contextSectionReactions         = "reactions"
 	contextSectionPlaces            = "places"
 	contextSectionImageStyle        = "image_style"
+	contextSectionWorkMachine       = "work_machine"
 	contextSectionThreadBackdrop    = "thread_backdrop"
 )
 
@@ -399,6 +400,10 @@ func (r *ConversationRunTurnRunner) conversationContextSections(ctx context.Cont
 			style = "Preferred picture style: " + value + ". generate_image applies it automatically; pass style only to override it for one image when asked."
 		}
 	}
+	machine := ""
+	if r.config.WorkMachine != nil {
+		machine = strings.TrimSpace(r.config.WorkMachine(ctx, in.Run))
+	}
 	backdrop := in.Backdrop
 	if backdrop == nil && in.CatchUp != nil {
 		backdrop = in.CatchUp.Backdrop
@@ -406,6 +411,7 @@ func (r *ConversationRunTurnRunner) conversationContextSections(ctx context.Cont
 	sections = append(sections,
 		conversationContextSection{Name: contextSectionPlaces, Text: places, None: "Places already found in this chat: none."},
 		conversationContextSection{Name: contextSectionImageStyle, Text: style, None: "Preferred picture style: none."},
+		conversationContextSection{Name: contextSectionWorkMachine, Text: machine, None: "Files and commands: the chat's secure VM."},
 		conversationContextSection{Name: contextSectionThreadBackdrop, Always: true, Text: runContextBackdrop(in, backdrop)},
 	)
 	return sections, nil

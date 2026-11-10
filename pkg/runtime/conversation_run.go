@@ -586,6 +586,10 @@ type ConversationRunTurnRunnerConfig struct {
 	// when none is saved. A non-empty style reaches the Agent as imageStyle
 	// in its turn context. Nil leaves it out.
 	ImageStyle func(ctx context.Context, run *AgentRun) string
+	// WorkMachine says where this Run works on files and commands when the
+	// person chose a machine other than the chat's secure VM, such as their own
+	// computer: a sentence or two for the run_context note, "" for the VM.
+	WorkMachine func(ctx context.Context, run *AgentRun) string
 	// Places returns the places find_place already found in the run's chat,
 	// most recent first. They reach the Agent as places in its turn context
 	// (at most MaximumConversationPlaces) so it reuses their ids instead of
