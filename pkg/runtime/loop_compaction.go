@@ -410,7 +410,7 @@ func (c *LoopCompactor) summarizeAndAppend(ctx context.Context, in StepInput, wo
 	if work.trigger == CompactionTriggerOverflow {
 		summary, usage, err = c.summarizeOverflow(ctx, in, work)
 	} else {
-		summary, usage, err = c.summarize(ctx, compactionSummaryRequest(work.step, work.step.Entries))
+		summary, usage, err = c.summarize(ctx, compactionSummaryRequest(work.step))
 		if isContextExceeded(err) {
 			// The full path does not fit even for the summary: skip, and let
 			// the step's own length rejection take the overflow path.
@@ -465,7 +465,7 @@ func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in StepInput, wor
 			entries = append(entries, compactionFoldView(in.Step.ID, calls, summary.text, chunkViews))
 		}
 		entries = append(entries, chunkViews...)
-		result, callUsage, err := c.summarize(ctx, compactionSummaryRequest(work.step, entries))
+		result, callUsage, err := c.summarize(ctx, compactionChunkSummaryRequest(work.step, entries))
 		usage = addModelStepUsage(usage, callUsage)
 		if isContextExceeded(err) {
 			if chunk.split {
@@ -538,14 +538,28 @@ func compactionFoldView(stepID string, fold int, summary string, chunk []Session
 }
 
 // compactionSummaryRequest turns the step's request into a summary request
-// over entries: same identity, System, Tools and Stream.
-func compactionSummaryRequest(step ModelStepRequest, entries []SessionEntryView) ModelStepRequest {
+// over the step's own rendered path: same identity, System, Tools (with their
+// surfaces) and Entries, so the request reads the step's cached prefix and
+// only the summary instruction follows it.
+func compactionSummaryRequest(step ModelStepRequest) ModelStepRequest {
 	req := step
 	req.Purpose = ModelStepPurposeSummary
-	req.Entries = entries
 	req.SummaryInstruction = compactionSummaryInstruction
 	req.MaxOutputTokens = compactionSummaryMaxOutputTokens
 	req.Stream.AnswerPreview = false
+	return req
+}
+
+// compactionChunkSummaryRequest is the summary request over one overflow
+// chunk (entries, a span of the step's path, possibly after a fold view).
+// Surfaced tools keep their surface when its entry is in the chunk; tools
+// surfaced before the chunk (their entry folded or summarized) are callable
+// from the start; tools surfaced after the chunk are left out, since nothing
+// in the chunk can call them. Tool order stays valid: carried, then folded,
+// then surfaced in entry order.
+func compactionChunkSummaryRequest(step ModelStepRequest, entries []SessionEntryView) ModelStepRequest {
+	req := compactionSummaryRequest(step)
+	req.Tools, req.Entries = chunkSurfaces(step.Tools, step.Entries, entries)
 	return req
 }
 
@@ -616,6 +630,7 @@ func (c *LoopCompactor) appendCompaction(ctx context.Context, in StepInput, work
 			FirstKeptEntryID: work.plan.FirstKeptEntryID,
 			TokensBefore:     work.estimate.Tokens,
 			ActionCallIDs:    compactionActionCallIDs(previous, work.plan.Summarized),
+			CarriedTools:     carriedToolsAfter(previous, work.plan.Summarized),
 			Provider:         summary.provider,
 			Model:            summary.model,
 			Trigger:          work.trigger,

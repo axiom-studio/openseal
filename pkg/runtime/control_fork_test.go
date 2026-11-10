@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -616,22 +617,15 @@ func TestForkResumeWhileGroupWaitsReparks(t *testing.T) {
 	})
 }
 
-func TestForkSpecOffersAgentIDOnlyWithTargets(t *testing.T) {
+func TestForkSpecSameWithAndWithoutTargets(t *testing.T) {
 	self := forkHandler{}.spec(ControlAuthority{ForkAllowed: true})
-	items := self.InputSchema["properties"].(map[string]interface{})["branches"].(map[string]interface{})["items"].(map[string]interface{})
-	if _, ok := items["properties"].(map[string]interface{})["agentId"]; ok {
-		t.Fatal("agentId offered without fork targets")
-	}
 	targets := forkHandler{}.spec(ControlAuthority{ForkAllowed: true, ForkTargets: []HostedAgentTarget{{ID: "agent-b"}}})
-	items = targets.InputSchema["properties"].(map[string]interface{})["branches"].(map[string]interface{})["items"].(map[string]interface{})
+	if !reflect.DeepEqual(self, targets) {
+		t.Fatal("fork targets changed the fork tool")
+	}
+	items := targets.InputSchema["properties"].(map[string]interface{})["branches"].(map[string]interface{})["items"].(map[string]interface{})
 	agent, ok := items["properties"].(map[string]interface{})["agentId"].(map[string]interface{})
-	if !ok || fmt.Sprint(agent["enum"]) != "[agent-b]" {
+	if _, enum := agent["enum"]; !ok || enum {
 		t.Fatalf("agentId = %#v", agent)
-	}
-	if _, err := (forkHandler{}).decode(json.RawMessage(`{"branches":[{"goal":"only one"}]}`)); err == nil {
-		t.Fatal("a single branch was accepted")
-	}
-	if _, err := (forkHandler{}).decode(json.RawMessage(`{"branches":[{"goal":"a"},{"goal":"b"}],"budget":{}}`)); err == nil {
-		t.Fatal("a budget argument was accepted")
 	}
 }

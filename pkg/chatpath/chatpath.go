@@ -106,7 +106,15 @@ var mediaTypes = map[string]string{
 	".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 
-// MediaTypeOf guesses a file's media type from its name.
+// KnownMediaType is a file's media type by its name's extension from this
+// package's own table alone, the same on every computer.
+func KnownMediaType(name string) (string, bool) {
+	known, ok := mediaTypes[strings.ToLower(path.Ext(name))]
+	return known, ok
+}
+
+// MediaTypeOf guesses a file's media type from its name: KnownMediaType,
+// else the host's mime database.
 func MediaTypeOf(name string) string {
 	ext := strings.ToLower(path.Ext(name))
 	if known, ok := mediaTypes[ext]; ok {

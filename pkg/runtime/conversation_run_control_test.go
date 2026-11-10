@@ -39,11 +39,12 @@ func TestActiveConversationRunsIncludeNonterminalDescendantAfterCoordinationRoot
 	}
 }
 
-// The chat binding offers the run-control actions only while the chat has
-// active work, and always with the catalog schema: no per-step run id enum
-// (which broke the prompt cache). A run id that is not active work is refused
-// at call time instead (conversation_loop.go checkToolCall).
-func TestConversationRunBindingOffersRunControlOnlyForActiveWork(t *testing.T) {
+// The chat binding offers the run-control actions whether or not the chat
+// has active work, and always with the catalog schema: no per-step run id
+// enum and no tool appearing with work (both broke the prompt cache). A run
+// id that is not active work is refused at call time instead
+// (conversation_loop.go checkToolCall).
+func TestConversationRunBindingOffersRunControlWithAndWithoutActiveWork(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 		definition := RunManagementSkill()
 		cancel := capability.ModelAction{
@@ -58,7 +59,7 @@ func TestConversationRunBindingOffersRunControlOnlyForActiveWork(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(binding.ModelActions) != 1 || binding.ModelActions[0].SkillID != "openseal.objectives" {
+		if len(binding.ModelActions) != 2 || binding.ModelActions[0].SkillID != RunManagementSkillID {
 			t.Fatalf("actions without active work = %#v", binding.ModelActions)
 		}
 		now := time.Now().UTC()

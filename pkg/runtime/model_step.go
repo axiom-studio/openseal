@@ -18,7 +18,10 @@ import (
 // (AssistantEntry, ContentPart, ModelToolCall, AssistantNative, ModelStepUsage,
 // ModelStopReason, ModelStepProvider) live in agent_session.go.
 
-const ModelStepAPIVersion = "openseal.model-step/v1"
+// v2: tools surfaced by a load carry ModelStepTool.Surface and the surfacing
+// tool entry lists them in SessionEntryView.Surfaces; ModelStepSystem no
+// longer carries approval hints.
+const ModelStepAPIVersion = "openseal.model-step/v2"
 
 type ModelStepPurpose string
 
@@ -83,9 +86,6 @@ type ModelStepSystem struct {
 	SkillPrompts      []HostedSkillPrompt `json:"skillPrompts,omitempty"`
 	// Kernel-authored named sections, rendered in the given order.
 	Sections []ModelStepSystemSection `json:"sections,omitempty"`
-	// Trusted hints that select harness guidance. Never model-visible as data.
-	ApprovalMode               ConversationApprovalMode `json:"approvalMode,omitempty"`
-	CanAskConversationQuestion bool                     `json:"canAskConversationQuestion,omitempty"`
 }
 
 type ModelStepSystemSection struct {
@@ -99,7 +99,7 @@ type ModelStepToolGroup string
 const (
 	ModelStepToolHarness ModelStepToolGroup = "harness" // final answer, wait, capability search/load, progress, workspace, child work
 	ModelStepToolCore    ModelStepToolGroup = "core"    // actions fixed at session start
-	ModelStepToolLoaded  ModelStepToolGroup = "loaded"  // capabilities loaded during the session, in load order
+	ModelStepToolLoaded  ModelStepToolGroup = "loaded"  // capabilities loaded during the session: carried, then surfaced in path order
 )
 
 func (g ModelStepToolGroup) rank() int {
@@ -119,9 +119,17 @@ type ModelStepTool struct {
 	Description string                 `json:"description"`
 	InputSchema map[string]interface{} `json:"inputSchema"` // JSON Schema object, type "object"
 	Group       ModelStepToolGroup     `json:"group"`
-	// Capability is the canonical capability id for governed tools. The host
-	// uses it only to pick browser guidance and metrics.
+	// Capability is the action name of a governed tool. The host uses it
+	// only to pick browser guidance and metrics.
 	Capability string `json:"capability,omitempty"`
+	// Surface is the id of the tool entry (a load_capabilities result in
+	// Entries) after which the tool became callable; that entry lists the
+	// tool's name in SessionEntryView.Surfaces. Only loaded tools may set it.
+	// "" means the tool is callable from the first entry: every harness and
+	// core tool, and loaded tools carried over a compaction. Surface is
+	// neutral data: a host may declare a surfaced tool from the start
+	// (append-only tool list) or reveal it at its surfacing entry.
+	Surface string `json:"surface,omitempty"`
 }
 
 type ModelStepStream struct {
@@ -148,6 +156,10 @@ type SessionEntryView struct {
 	Compaction  *CompactionEntryView `json:"compaction,omitempty"`
 	Note        *NoteEntryView       `json:"note,omitempty"`
 	ModelChange *ModelChangeEntry    `json:"modelChange,omitempty"`
+	// Surfaces names, in order, the tools that became callable after this
+	// entry (each listed tool has Surface == this entry's id). Only a
+	// completed tool entry carries it.
+	Surfaces []string `json:"surfaces,omitempty"`
 }
 
 const (
@@ -255,6 +267,9 @@ func (r ModelStepRequest) Validate() error {
 	if err := validateModelStepToolPairing(r.Entries, compacted); err != nil {
 		return err
 	}
+	if err := r.validateSurfaces(); err != nil {
+		return err
+	}
 	if err := r.validateContent(); err != nil {
 		return err
 	}
@@ -328,6 +343,64 @@ func (r ModelStepRequest) validateTools() error {
 	}
 	if r.Stream.FinalAnswerTool != "" && !names[r.Stream.FinalAnswerTool] {
 		return invalidModelStep("stream finalAnswerTool %q is not a listed tool", r.Stream.FinalAnswerTool)
+	}
+	return nil
+}
+
+// validateSurfaces checks the surfaced tools against the entries: only a
+// loaded tool has a Surface, and it names a completed tool entry that lists
+// it; every name an entry lists is a tool with that Surface, listed once; and
+// within the loaded group the tools callable from the start come first, then
+// the surfaced tools in (entry position, index in Surfaces) order.
+func (r ModelStepRequest) validateSurfaces() error {
+	tools := make(map[string]ModelStepTool, len(r.Tools))
+	var surfaced []string
+	for _, tool := range r.Tools {
+		tools[tool.Name] = tool
+		if tool.Surface == "" {
+			if len(surfaced) > 0 && tool.Group == ModelStepToolLoaded {
+				return invalidModelStep("tool %q is callable from the start but follows surfaced tools", tool.Name)
+			}
+			continue
+		}
+		if tool.Group != ModelStepToolLoaded {
+			return invalidModelStep("tool %q (group %s) has a surface; only loaded tools do", tool.Name, tool.Group)
+		}
+		surfaced = append(surfaced, tool.Name)
+	}
+	listed := make(map[string]bool, len(surfaced))
+	var order []string
+	for i := range r.Entries {
+		entry := &r.Entries[i]
+		if len(entry.Surfaces) == 0 {
+			continue
+		}
+		if entry.Type != SessionEntryTool || entry.Tool.State != ToolEntryCompleted {
+			return invalidModelStep("entry %s surfaces tools but is not a completed tool entry", entry.ID)
+		}
+		for _, name := range entry.Surfaces {
+			tool, ok := tools[name]
+			if !ok || tool.Surface != entry.ID {
+				return invalidModelStep("entry %s surfaces %q, which is not a tool with that surface", entry.ID, name)
+			}
+			if listed[name] {
+				return invalidModelStep("tool %q is surfaced twice", name)
+			}
+			listed[name] = true
+			order = append(order, name)
+		}
+	}
+	if len(order) != len(surfaced) {
+		for _, name := range surfaced {
+			if !listed[name] {
+				return invalidModelStep("tool %q surfaces at %q, which lists no such tool", name, tools[name].Surface)
+			}
+		}
+	}
+	for i := range order {
+		if order[i] != surfaced[i] {
+			return invalidModelStep("surfaced tool %q is out of order; surfaced tools follow their entries", surfaced[i])
+		}
 	}
 	return nil
 }

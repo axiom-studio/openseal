@@ -185,8 +185,10 @@ func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
 	if finalFieldOffered("appliedSkillRefs", a) {
 		properties["appliedSkillRefs"] = map[string]interface{}{
 			"type": "array", "uniqueItems": true,
-			"description": "The loaded Skill prompts this answer actually used.",
-			"items":       map[string]interface{}{"type": "string", "enum": append([]string(nil), a.SkillPromptRefs...)},
+			"description": "The references of the Skill prompts this answer actually used.",
+			// No enum: the refs change whenever a Skill is connected, and
+			// finalSkillSelections refuses an unknown ref.
+			"items": map[string]interface{}{"type": "string"},
 		}
 	}
 	if finalFieldOffered("visual", a) {

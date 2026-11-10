@@ -1,7 +1,12 @@
-.PHONY: build test vet licence-inventory third-party-notices desktop-install desktop-dev desktop-build desktop-host-test docker-up docker-down docker-logs
+.PHONY: build helloseal test vet licence-inventory third-party-notices desktop-install desktop-dev desktop-build desktop-host-test docker-up docker-down docker-logs
 
 build:
 	go build -o openseal ./cmd/openseal
+
+# The HelloSeal bridge. CGO-free, so it cross-builds: GOOS=windows make helloseal.
+HELLOSEAL_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+helloseal:
+	CGO_ENABLED=0 go build -trimpath -ldflags="-w -s -X main.version=$(HELLOSEAL_VERSION)" -o helloseal$(if $(filter windows,$(GOOS)),.exe,) ./cmd/helloseal
 
 test:
 	go test ./...

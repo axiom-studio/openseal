@@ -593,3 +593,68 @@ func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
 		t.Fatal("a policy allowed an always-reviewed action without review")
 	}
 }
+
+// A host policy's review floor (a person's "always ask me" setting) makes an
+// ordinary write exactly like a manifest review: always action.
+func TestPolicyReviewFloorParksInSkipAndSurvivesSweep(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	conversation := approvalModeConversation(t, store)
+	service := NewConversationApprovalModeService(store)
+	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip).Conversation
+	approvers := []ApprovalPrincipal{{Type: "user", ID: "owner"}}
+	floor := NewActionCoordinator(store, store, approvalModeCatalog(t), ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "computer asks", Review: skill.ActionReviewAlways,
+			EligibleApprovers: approvers, ApprovalTimeout: ApprovalTimeoutApprove}, nil
+	}))
+
+	arguments := map[string]interface{}{"text": "rm -rf build"}
+	result, err := proposeWithArgumentsForApprovalMode(t, store, floor, conversation.ID, "note", "floor-run", arguments)
+	if err != nil || result.Approval == nil || result.Call.Status != ActionCallStatusWaitingApproval {
+		t.Fatalf("skip mode waived a policy review floor: %#v %v", result, err)
+	}
+	approval := result.Approval
+	if result.Call.Review != skill.ActionReviewAlways || approval.TimeoutDecision != ApprovalTimeoutExpire {
+		t.Fatalf("review floor not persisted: review=%q timeout=%q", result.Call.Review, approval.TimeoutDecision)
+	}
+	shown, _ := approval.ProposedAction["arguments"].(map[string]interface{})
+	if approval.ProposedAction["review"] != "always" || shown["text"] != "rm -rf build" {
+		t.Fatalf("approval card = %#v", approval.ProposedAction)
+	}
+	if len(approval.EligibleApprovers) != 1 || approval.EligibleApprovers[0] != approvers[0] {
+		t.Fatalf("approvers = %#v", approval.EligibleApprovers)
+	}
+	stored, err := store.GetActionCall(ctx, conversation.Scope, result.Call.ID)
+	if err != nil || stored.Review != skill.ActionReviewAlways {
+		t.Fatalf("stored call review = %#v %v", stored, err)
+	}
+
+	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalManual).Conversation
+	swept := setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip)
+	if len(swept.ApprovedApprovalIDs) != 0 {
+		t.Fatalf("skip sweep approved a policy-reviewed call: %#v", swept.ApprovedApprovalIDs)
+	}
+	if pending, _ := store.GetApproval(ctx, conversation.Scope, approval.ID); pending.Status != ApprovalStatusPending {
+		t.Fatalf("policy-reviewed approval = %#v", pending)
+	}
+}
+
+func TestPolicyWithoutReviewFloorKeepsDisposition(t *testing.T) {
+	store := NewMemoryStore()
+	conversation := approvalModeConversation(t, store)
+	service := NewConversationApprovalModeService(store)
+	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip).Conversation
+	allow := NewActionCoordinator(store, store, approvalModeCatalog(t), ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "test"}, nil
+	}))
+	result, err := proposeWithArgumentsForApprovalMode(t, store, allow, conversation.ID, "note", "plain-run", map[string]interface{}{"text": "hi"})
+	if err != nil || result.Approval != nil || result.Call.Status != ActionCallStatusReady || result.Call.Review != "" {
+		t.Fatalf("plain allow = %#v %v", result, err)
+	}
+	invalid := NewActionCoordinator(store, store, approvalModeCatalog(t), ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "test", Review: "sometimes"}, nil
+	}))
+	if _, err := proposeWithArgumentsForApprovalMode(t, store, invalid, conversation.ID, "note", "invalid-run", map[string]interface{}{"text": "hi"}); err == nil {
+		t.Fatal("an unsupported policy review was accepted")
+	}
+}

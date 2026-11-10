@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/chatpath"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 
 	MaximumFiles = 20000
 	// MaximumWriteBytes bounds one text file an Agent writes.
-	MaximumWriteBytes = 4 << 20
+	MaximumWriteBytes = workspace.MaximumFileBytes
 )
 
 // Entry is one file in a snapshot.

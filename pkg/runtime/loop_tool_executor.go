@@ -616,24 +616,17 @@ func (r *stepToolRun) capabilities(ctx context.Context) (*CapabilitySet, error) 
 				return
 			}
 		}
-		var loaded []string
-		if path != nil {
-			loaded = LoadedCapabilityIDs(path.Entries)
-		}
-		r.set = NewCapabilitySet(LoopCapabilityCatalog(r.in.Run, r.binding, r.x.claim), loaded, r.x.claim.CapabilityConfig)
+		r.set = NewPathCapabilitySet(LoopCapabilityCatalog(r.in.Run, r.binding, r.x.claim), path, r.x.claim.CapabilityConfig)
 	})
 	return r.set, r.setErr
 }
 
 // visible reports whether a governed or host tool is callable in this step:
-// always when loading is not deferred; otherwise when pinned or loaded.
+// when it is pinned or loaded.
 func (r *stepToolRun) visible(ctx context.Context, tool resolvedLoopTool) (bool, error) {
 	set, err := r.capabilities(ctx)
 	if err != nil {
 		return false, err
-	}
-	if !set.Deferred() {
-		return true, nil
 	}
 	r.setMu.Lock()
 	defer r.setMu.Unlock()
@@ -711,11 +704,14 @@ func (r *stepToolRun) offerRefusal(ctx context.Context, i int) (*ToolResult, err
 			return notAvailable(), nil
 		}
 	case loopRouteCapability:
+		if !r.binding.Authority.offersCapabilities() {
+			return notAvailable(), nil
+		}
 		set, err := r.capabilities(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if !set.Deferred() || (entry.Tool.Name == SearchCapabilitiesTool && !set.Searching()) {
+		if !set.Offered() {
 			return notAvailable(), nil
 		}
 	case loopRouteHost, loopRouteGoverned:
@@ -889,10 +885,30 @@ func (r *stepToolRun) runCapability(ctx context.Context, i int) error {
 	}
 	var kernel *ToolEntryKernelPatch
 	if len(loaded) > 0 {
-		kernel = &ToolEntryKernelPatch{LoadedCapabilities: loaded}
+		kernel = loadKernelPatch(set, r.binding.ModelActions, loaded)
 	}
 	result := &ToolResult{Status: status, IsError: isError, Content: []ContentPart{{Type: ContentPartJSON, Value: content}}}
 	return r.transition(ctx, i, to, result, nil, "", kernel, true)
+}
+
+// loadKernelPatch freezes what a load made visible on its tool entry: the
+// definition of each new tool exactly as later steps declare it, and the IDs
+// of the instructions and runbooks its result carried.
+func loadKernelPatch(set *CapabilitySet, actions []capability.ModelAction, loaded []string) *ToolEntryKernelPatch {
+	names := LoopGovernedToolNames(actions)
+	patch := &ToolEntryKernelPatch{}
+	for _, id := range loaded {
+		if action, ok := set.actions[id]; ok {
+			patch.SurfacedTools = append(patch.SurfacedTools, surfacedTool(id, governedModelStepTool(action, names[action.Name], ModelStepToolLoaded)))
+			continue
+		}
+		if spec, ok := set.hostTools[id]; ok {
+			patch.SurfacedTools = append(patch.SurfacedTools, surfacedTool(id, hostModelStepTool(spec, ModelStepToolLoaded)))
+			continue
+		}
+		patch.LoadedInstructions = append(patch.LoadedInstructions, id)
+	}
+	return patch
 }
 
 func (r *stepToolRun) controlContext(i int) ControlContext {

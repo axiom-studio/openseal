@@ -65,6 +65,10 @@ func (s *modelProducerTestStore) GetActionCall(context.Context, Scope, string) (
 	return nil, ErrActionNotFound
 }
 
+func (s *modelProducerTestStore) AppendAgentSessionEntries(context.Context, AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+	return nil, errors.New("the test preparer writes no capabilities note")
+}
+
 type modelProducerFixture struct {
 	host     *modelProducerTestHost
 	preparer *modelProducerTestPreparer
@@ -137,7 +141,9 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 	if req.AgentID != "agent-1" || req.DefinitionID != "def-1" {
 		t.Fatalf("agent/definition = %q/%q", req.AgentID, req.DefinitionID)
 	}
-	if len(req.Tools) != 3 || req.Stream.FinalAnswerTool != "turn_final_answer" {
+	// The prepared loaded tool has no load entry on the path, so the
+	// rendered request declares only the harness and core tools.
+	if len(req.Tools) != 2 || req.Stream.FinalAnswerTool != "turn_final_answer" {
 		t.Fatalf("tools = %d, stream = %+v", len(req.Tools), req.Stream)
 	}
 	// Entries are the path rendered from the latest compaction.

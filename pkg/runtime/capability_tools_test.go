@@ -35,8 +35,11 @@ func loadArgs(ids ...string) map[string]interface{} {
 	return map[string]interface{}{"ids": values}
 }
 
+// oneAtATime turns off whole-Skill loads: no sibling fits the budget.
+var oneAtATime = CapabilitySetConfig{SkillLoadBudget: 1}
+
 func TestLoadCapabilitiesLoadsAndNamesTools(t *testing.T) {
-	s := NewCapabilitySet(capabilityCatalogFixture(), nil, CapabilitySetConfig{})
+	s := NewCapabilitySet(capabilityCatalogFixture(), nil, oneAtATime)
 	content, isError, loaded := ExecuteLoadCapabilities(s, loadArgs("action:notion.op1", "action:notion.op1", "action:notion.op2"), capabilityToolName)
 	if isError {
 		t.Fatalf("load failed: %s", content)
@@ -66,9 +69,9 @@ func TestLoadCapabilitiesLoadsAndNamesTools(t *testing.T) {
 	}
 
 	// The next step derives the same set from the completed entry.
-	next := NewCapabilitySet(capabilityCatalogFixture(), LoadedCapabilityIDs([]*SessionEntry{
+	next := NewCapabilitySet(capabilityCatalogFixture(), PathLoadedCapabilityIDs(&AgentSessionPath{Entries: []*SessionEntry{
 		capabilityLoadEntry("e1", "run-1", ToolEntryCompleted, loaded...),
-	}), CapabilitySetConfig{})
+	}}), oneAtATime)
 	if !reflect.DeepEqual(next.IDs(), s.IDs()) {
 		t.Fatalf("next step ids %v != %v", next.IDs(), s.IDs())
 	}
@@ -76,7 +79,7 @@ func TestLoadCapabilitiesLoadsAndNamesTools(t *testing.T) {
 
 func TestLoadCapabilitiesAlreadyLoadedIsNoop(t *testing.T) {
 	catalog := capabilityCatalogFixture()
-	s := NewCapabilitySet(catalog, []string{"action:notion.op1"}, CapabilitySetConfig{})
+	s := NewCapabilitySet(catalog, []string{"action:notion.op1"}, oneAtATime)
 	before := s.IDs()
 	readFile := "workspace:" + workspace.OperationReadFile
 	args := loadArgs("action:notion.op1", readFile)
@@ -159,19 +162,19 @@ func TestLoadCapabilitiesResolvesDiscoveryHandles(t *testing.T) {
 	}
 }
 
-func TestLoadCapabilitiesInstructionsInResultNotSystemPrompt(t *testing.T) {
+func TestLoadCapabilitiesInstructionsInResultNotListing(t *testing.T) {
 	s := NewCapabilitySet(capabilityCatalogFixture(), nil, CapabilitySetConfig{})
-	prefix := s.PromptPrefix()
+	listing := capabilityNoteLines(s.catalogLines())
 	content, isError, _ := ExecuteLoadCapabilities(s, loadArgs("prompt:skill-research-2@1"), capabilityToolName)
 	if isError || !strings.Contains(string(content), "Research instructions 2.") {
 		t.Fatalf("instructions missing from result: %s", content)
 	}
-	if strings.Contains(prefix, "Research instructions 2.") || s.PromptPrefix() != prefix {
-		t.Fatal("loaded instructions must travel in the tool result, not the system prompt")
+	if strings.Contains(listing, "Research instructions 2.") || strings.Contains(capabilityLoadingText, "Research instructions 2.") {
+		t.Fatal("loaded instructions must travel in the tool result only")
 	}
 	next := NewCapabilitySet(capabilityCatalogFixture(), []string{"prompt:skill-research-2@1"}, CapabilitySetConfig{})
-	if next.PromptPrefix() != prefix {
-		t.Fatal("a load changed the next step's prompt prefix")
+	if capabilityNoteLines(next.catalogLines()) != listing {
+		t.Fatal("a load changed the listing")
 	}
 }
 
@@ -216,29 +219,24 @@ func TestLoadCapabilitiesCapsContentAndReportsNotLoaded(t *testing.T) {
 
 func TestLoadCapabilitiesSchemaByteStable(t *testing.T) {
 	const wantSchema = `{"additionalProperties":false,"properties":{"ids":{"items":{"description":"An exact capability ID, including its prefix.","type":"string"},"maxItems":8,"minItems":1,"type":"array","uniqueItems":true}},"required":["ids"],"type":"object"}`
-	for _, searching := range []bool{false, true} {
-		spec := LoadCapabilitiesSpec(searching)
-		encoded, _ := json.Marshal(spec.InputSchema)
-		if string(encoded) != wantSchema {
-			t.Fatalf("load schema = %s", encoded)
-		}
-		if spec.Name != LoadCapabilitiesTool || spec.Group != ModelStepToolHarness || !strings.Contains(spec.Description, "next step") {
-			t.Fatalf("load spec = %+v", spec)
-		}
-		if strings.Contains(spec.Description, "turn") {
-			t.Fatalf("load description still says turn: %q", spec.Description)
-		}
-		first, _ := json.Marshal(spec)
-		second, _ := json.Marshal(LoadCapabilitiesSpec(searching))
-		if string(first) != string(second) {
-			t.Fatal("load spec is not byte-stable")
-		}
+	spec := LoadCapabilitiesSpec()
+	encoded, _ := json.Marshal(spec.InputSchema)
+	if string(encoded) != wantSchema {
+		t.Fatalf("load schema = %s", encoded)
 	}
-	if !strings.Contains(LoadCapabilitiesSpec(true).Description, "search_capabilities") {
-		t.Fatal("search-mode load description must point at search results")
+	if spec.Name != LoadCapabilitiesTool || spec.Group != ModelStepToolHarness || !strings.Contains(spec.Description, "next step") {
+		t.Fatalf("load spec = %+v", spec)
+	}
+	if strings.Contains(spec.Description, "turn") {
+		t.Fatalf("load description still says turn: %q", spec.Description)
+	}
+	first, _ := json.Marshal(spec)
+	second, _ := json.Marshal(LoadCapabilitiesSpec())
+	if string(first) != string(second) {
+		t.Fatal("load spec is not byte-stable")
 	}
 	search := SearchCapabilitiesSpec()
-	encoded, _ := json.Marshal(search.InputSchema)
+	encoded, _ = json.Marshal(search.InputSchema)
 	const wantSearch = `{"additionalProperties":false,"properties":{"limit":{"description":"Maximum results; default 8.","maximum":20,"minimum":1,"type":"integer"},"query":{"description":"A few keywords: the service, the object and the verb.","maxLength":200,"minLength":1,"type":"string"}},"required":["query"],"type":"object"}`
 	if string(encoded) != wantSearch || search.Name != SearchCapabilitiesTool || search.Group != ModelStepToolHarness {
 		t.Fatalf("search spec = %s %+v", encoded, search)

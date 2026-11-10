@@ -73,23 +73,17 @@ func init() {
 	registerControlHandler(ControlToolDelegateReply, delegateReplyHandler{})
 }
 
+// spec carries no Agent list: the eligible Agents are in the capabilities
+// note (capability_note.go), so a new Agent never changes the tool, and the
+// handler resolves agentId against the claim's targets.
 func (delegateHandler) spec(a ControlAuthority) ControlToolSpec {
-	ids := make([]interface{}, 0, len(a.DelegateTargets))
-	var targets strings.Builder
-	for _, target := range a.DelegateTargets {
-		ids = append(ids, target.ID)
-		targets.WriteString("\n- " + target.ID + ": " + strings.TrimSpace(target.DisplayName))
-		if purpose := strings.TrimSpace(target.Purpose); purpose != "" {
-			targets.WriteString(" — " + purpose)
-		}
-	}
 	return ControlToolSpec{
 		Description: "Ask another Agent to do a piece of work and wait for its answer. " +
-			"The Agent sees only the goal and context you give it. Agents:" + targets.String(),
+			"The Agent sees only the goal and context you give it. The Agents you can ask are listed in the capabilities note.",
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"agentId", "goal"},
 			"properties": map[string]interface{}{
-				"agentId": map[string]interface{}{"type": "string", "enum": ids},
+				"agentId": map[string]interface{}{"type": "string", "minLength": 1, "description": "An agentId from the capabilities note."},
 				"goal":    map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumDelegateGoalBytes},
 				"context": map[string]interface{}{"type": "object", "description": "Non-secret data the Agent needs."},
 				"mode": map[string]interface{}{

@@ -475,12 +475,19 @@ type ToolEntry struct {
 	Wait               *ToolEntryWait    `json:"wait,omitempty"`   // set only in awaiting_* states
 	Result             *ToolResult       `json:"result,omitempty"` // set only in terminal states
 	Control            json.RawMessage   `json:"control,omitempty"`
-	LoadedCapabilities []string          `json:"loadedCapabilities,omitempty"`
-	OriginRef          string            `json:"originRef,omitempty"` // "command:<entryId>"
-	PinnedRun          json.RawMessage   `json:"pinnedRun,omitempty"`
-	Directive          json.RawMessage   `json:"directive,omitempty"` // ToolCallDirective (deterministic producers)
-	StartedAt          *time.Time        `json:"startedAt,omitempty"`
-	CompletedAt        *time.Time        `json:"completedAt,omitempty"`
+	// SurfacedTools (load_capabilities only) are the definitions of the tools
+	// the load made callable, frozen as the model first saw them: later
+	// steps of the session declare exactly these bytes, whatever the catalog
+	// says now.
+	SurfacedTools []SurfacedTool `json:"surfacedTools,omitempty"`
+	// LoadedInstructions (load_capabilities only) are the canonical IDs of
+	// the instructions and runbooks whose text the load result carried.
+	LoadedInstructions []string        `json:"loadedInstructions,omitempty"`
+	OriginRef          string          `json:"originRef,omitempty"` // "command:<entryId>"
+	PinnedRun          json.RawMessage `json:"pinnedRun,omitempty"`
+	Directive          json.RawMessage `json:"directive,omitempty"` // ToolCallDirective (deterministic producers)
+	StartedAt          *time.Time      `json:"startedAt,omitempty"`
+	CompletedAt        *time.Time      `json:"completedAt,omitempty"`
 }
 
 type ToolResultStatus string
@@ -514,14 +521,19 @@ type ToolResult struct {
 }
 
 type CompactionEntry struct {
-	Summary          string         `json:"summary"`
-	FirstKeptEntryID string         `json:"firstKeptEntryId,omitempty"` // "" = keep nothing
-	TokensBefore     int64          `json:"tokensBefore"`
-	ActionCallIDs    []string       `json:"actionCallIds,omitempty"`
-	Provider         string         `json:"provider"`
-	Model            string         `json:"model"`
-	Trigger          string         `json:"trigger"` // threshold | overflow
-	Usage            ModelStepUsage `json:"usage"`
+	Summary          string   `json:"summary"`
+	FirstKeptEntryID string   `json:"firstKeptEntryId,omitempty"` // "" = keep nothing
+	TokensBefore     int64    `json:"tokensBefore"`
+	ActionCallIDs    []string `json:"actionCallIds,omitempty"`
+	// CarriedTools are the surfaced tools whose load entries this compaction
+	// summarized away (with the previous compaction's carried tools first),
+	// in their original order. Later steps declare them as loaded tools
+	// callable from the start, so a compaction never withdraws a tool.
+	CarriedTools []SurfacedTool `json:"carriedTools,omitempty"`
+	Provider     string         `json:"provider"`
+	Model        string         `json:"model"`
+	Trigger      string         `json:"trigger"` // threshold | overflow
+	Usage        ModelStepUsage `json:"usage"`
 }
 
 const (
@@ -544,13 +556,18 @@ const (
 	NoteHistoryOmitted     NoteKind = "history_omitted"
 	NoteRateLimitedSource  NoteKind = "rate_limited_source"
 	NoteBrowserWaitingCode NoteKind = "browser_waiting_code"
+	// NoteCapabilities lists what the Agent can load and use: the catalog
+	// (or its directory), delegation targets, operations and the guidance
+	// that depends on them. Appended in full once per compaction window, then
+	// as deltas when the catalog changes (capability_note.go).
+	NoteCapabilities NoteKind = "capabilities"
 )
 
 func (k NoteKind) Valid() bool {
 	switch k {
 	case NoteRunContext, NoteRepeat, NoteHost, NoteFailureExplanation, NoteRunFailed, NoteTaskPromoted,
 		NoteFinalRejection, NoteEventWait, NoteSetupPending, NoteHistoryOmitted, NoteRateLimitedSource,
-		NoteBrowserWaitingCode:
+		NoteBrowserWaitingCode, NoteCapabilities:
 		return true
 	}
 	return false
@@ -1093,7 +1110,8 @@ func cloneSessionEntry(in *SessionEntry) *SessionEntry {
 		tool.Wait = cloneToolEntryWait(in.Tool.Wait)
 		tool.Result = cloneToolResult(in.Tool.Result)
 		tool.Control = cloneRaw(in.Tool.Control)
-		tool.LoadedCapabilities = cloneStrings(in.Tool.LoadedCapabilities)
+		tool.SurfacedTools = cloneSurfacedTools(in.Tool.SurfacedTools)
+		tool.LoadedInstructions = cloneStrings(in.Tool.LoadedInstructions)
 		tool.PinnedRun = cloneRaw(in.Tool.PinnedRun)
 		tool.Directive = cloneRaw(in.Tool.Directive)
 		tool.StartedAt = cloneTimePtr(in.Tool.StartedAt)
@@ -1103,6 +1121,7 @@ func cloneSessionEntry(in *SessionEntry) *SessionEntry {
 	if in.Compaction != nil {
 		compaction := *in.Compaction
 		compaction.ActionCallIDs = cloneStrings(in.Compaction.ActionCallIDs)
+		compaction.CarriedTools = cloneSurfacedTools(in.Compaction.CarriedTools)
 		out.Compaction = &compaction
 	}
 	if in.Note != nil {
@@ -1241,7 +1260,8 @@ type ToolEntryKernelPatch struct {
 	Parked             *bool
 	Guard              *ToolGuardOutcome
 	Control            json.RawMessage
-	LoadedCapabilities []string
+	SurfacedTools      []SurfacedTool
+	LoadedInstructions []string
 	PinnedRun          json.RawMessage
 }
 
@@ -1520,8 +1540,11 @@ func applyToolEntryTransition(current *SessionEntry, req ToolEntryTransitionRequ
 		if patch.Control != nil {
 			next.Tool.Control = cloneRaw(patch.Control)
 		}
-		if patch.LoadedCapabilities != nil {
-			next.Tool.LoadedCapabilities = cloneStrings(patch.LoadedCapabilities)
+		if patch.SurfacedTools != nil {
+			next.Tool.SurfacedTools = cloneSurfacedTools(patch.SurfacedTools)
+		}
+		if patch.LoadedInstructions != nil {
+			next.Tool.LoadedInstructions = cloneStrings(patch.LoadedInstructions)
 		}
 		if patch.PinnedRun != nil {
 			next.Tool.PinnedRun = cloneRaw(patch.PinnedRun)

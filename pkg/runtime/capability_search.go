@@ -11,10 +11,11 @@ import (
 )
 
 // Search-based discovery (section 07 §7.5, ported from Atlas
-// hosted_capability_search.go). Past the catalog budget the stable prompt
-// prefix carries one line per Skill or connected server (capabilityDirectory),
-// and the model finds exact IDs with search_capabilities before loading them
-// with load_capabilities. Search ranks only the claim's authorized catalog; it
+// hosted_capability_search.go). Past the catalog budget the capabilities note
+// carries one line per Skill or connected server instead of every ID, and the
+// model finds exact IDs with search_capabilities before loading them with
+// load_capabilities. Search is offered whenever the catalog is, so the
+// tool list does not change when a catalog crosses the budget. Search ranks only the claim's authorized catalog; it
 // reveals IDs and short descriptions, never schemas, and never authorizes or
 // loads anything.
 
@@ -27,12 +28,10 @@ const (
 	MaxCapabilitySearchesPerRun = 8
 
 	capabilitySearchToolDescription = "Find authorized capabilities that are not loaded yet. Pass a few keywords (service, object, verb); returns up to limit exact capability IDs with short descriptions, best match first. Load the ones you need with load_capabilities. Searching never executes anything."
-
-	capabilitySearchNotOfferedText = "capability search is not offered for this catalog; copy IDs from capabilityCatalog"
 )
 
 // SearchCapabilitiesSpec is the search_capabilities tool definition. It is
-// offered only when the step's CapabilitySet is Searching.
+// offered whenever the Run offers capabilities.
 func SearchCapabilitiesSpec() ModelStepTool {
 	return ModelStepTool{
 		Name:        SearchCapabilitiesTool,
@@ -76,8 +75,8 @@ type capabilitySearchNoMatch struct {
 // before this call (CapabilitySearchesThisRun); past
 // MaxCapabilitySearchesPerRun the call returns search_limit_reached.
 func ExecuteSearchCapabilities(set *CapabilitySet, arguments map[string]interface{}, searchesThisRun int) (content json.RawMessage, isError bool) {
-	if !set.Searching() {
-		return encodeCapabilityContent(capabilitySearchContent{Status: "not_available", Error: capabilitySearchNotOfferedText}), true
+	if set == nil {
+		return encodeCapabilityContent(capabilitySearchContent{Status: "not_available", Error: "capability search is not offered in this Run"}), true
 	}
 	query, limit, err := capabilitySearchArguments(arguments)
 	if err != nil {

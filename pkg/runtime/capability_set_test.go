@@ -50,23 +50,23 @@ func TestPinnedCapabilitySkillIDIsBuiltin(t *testing.T) {
 	}
 }
 
-func TestCapabilitySetSmallCatalogIsNotDeferred(t *testing.T) {
+func TestCapabilitySetSmallCatalogIsDeferred(t *testing.T) {
 	catalog := CapabilityCatalog{
 		Actions:      []capability.ModelAction{{Name: "notion.search", SkillID: "notion", Version: "1"}},
 		SkillPrompts: []HostedSkillPrompt{{SkillID: "notion", Version: "1", Reference: "skill-notion@1"}},
 		HostTools:    HostToolSpecs(workspace.ChatAuthority("chat-1")),
 	}
 	s := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
-	if s.Deferred() || s.Searching() || s.PromptPrefix() != "" {
-		t.Fatalf("small catalog: deferred=%v searching=%v prefix=%q", s.Deferred(), s.Searching(), s.PromptPrefix())
+	if s.Searching() {
+		t.Fatal("a small catalog is listed, not searched")
 	}
-	actions, prompts, hostTools, _ := s.Visible()
-	if len(actions) != 1 || len(prompts) != 1 || len(hostTools) != len(catalog.HostTools) {
-		t.Fatalf("small catalog must be fully visible: %d %d %d", len(actions), len(prompts), len(hostTools))
+	// Only the pinned host tools are visible; the Skill loads like any other.
+	if !s.Loaded("workspace:" + workspace.OperationReadFile) {
+		t.Fatal("pinned host tool not visible")
 	}
-	for _, id := range []string{"action:notion.search", "prompt:skill-notion@1", "workspace:" + workspace.OperationReadFile} {
-		if !s.Loaded(id) {
-			t.Fatalf("%s not visible", id)
+	for _, id := range []string{"action:notion.search", "prompt:skill-notion@1"} {
+		if s.Loaded(id) {
+			t.Fatalf("%s visible without a load", id)
 		}
 	}
 }
@@ -74,9 +74,6 @@ func TestCapabilitySetSmallCatalogIsNotDeferred(t *testing.T) {
 func TestCapabilitySetPinsHostToolsThenBuiltinWithinBudget(t *testing.T) {
 	catalog := capabilityCatalogFixture()
 	s := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
-	if !s.Deferred() {
-		t.Fatal("fixture must be deferred")
-	}
 	var want []string
 	for _, spec := range catalog.HostTools {
 		want = append(want, "workspace:"+spec.Operation)
@@ -149,8 +146,9 @@ func TestCapabilitySetDiscoveryHandlesForLongPromptRefs(t *testing.T) {
 	if short := s.discoveryID("prompt:skill-notion@3"); short != "prompt:skill-notion@3" {
 		t.Fatalf("short reference compacted: %q", short)
 	}
-	if !strings.Contains(s.PromptPrefix(), "\n- "+handle+" — ") || strings.Contains(s.PromptPrefix(), id) {
-		t.Fatal("prompt prefix must list the handle, not the long ID")
+	listing := capabilityNoteLines(s.catalogLines())
+	if !strings.Contains(listing, "\n- "+handle+" — ") || strings.Contains(listing, id) {
+		t.Fatal("the capabilities listing must show the handle, not the long ID")
 	}
 	if got, ok := s.Resolve(handle); !ok || got != id {
 		t.Fatalf("Resolve(handle) = %q, %v", got, ok)
@@ -249,32 +247,45 @@ func TestCapabilitySetFiltersLoadsAbsentFromCatalog(t *testing.T) {
 	}
 }
 
-func TestCapabilityPromptPrefixIndependentOfLoads(t *testing.T) {
+// capabilityNoteLines joins listing items as the note renders them.
+func capabilityNoteLines(items []capabilityNoteItem) string {
+	var b strings.Builder
+	for _, item := range items {
+		b.WriteString("\n" + item.Text)
+	}
+	return b.String()
+}
+
+func TestCapabilityListingIndependentOfLoads(t *testing.T) {
 	catalog := capabilityCatalogFixture()
 	empty := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
 	loaded := NewCapabilitySet(catalog, []string{"action:notion.op3", "prompt:skill-research-0@1"}, CapabilitySetConfig{})
 	if empty.Searching() {
 		t.Fatal("fixture must list the full catalog")
 	}
-	prefix := empty.PromptPrefix()
-	if prefix == "" || prefix != loaded.PromptPrefix() {
-		t.Fatal("prompt prefix depends on loads")
+	listing := capabilityNoteLines(empty.catalogLines())
+	if listing == "" || listing != capabilityNoteLines(loaded.catalogLines()) {
+		t.Fatal("listing depends on loads")
 	}
-	for _, want := range []string{"load_capabilities", "Loaded tools become callable in your next step", "capabilityCatalog",
-		"\n- action:notion.op3 — Notion operation 3", "\n- prompt:skill-notion@3 — Notion: Notion workspace",
+	for _, want := range []string{"\n- action:notion.op3 — Notion operation 3", "\n- prompt:skill-notion@3 — Notion: Notion workspace",
 		"\n- workspace:" + workspace.OperationReadFile + " — " + workspace.OperationReadFile + ": "} {
-		if !strings.Contains(prefix, want) {
-			t.Fatalf("prefix missing %q", want)
+		if !strings.Contains(listing, want) {
+			t.Fatalf("listing missing %q", want)
 		}
 	}
-	for _, banned := range []string{"Use Notion carefully.", "Research instructions", "turn_load_capabilities", "loadedCapabilities", "this same turn", `{"loadCapabilities"`} {
-		if strings.Contains(prefix, banned) {
-			t.Fatalf("prefix contains %q", banned)
+	for _, banned := range []string{"Use Notion carefully.", "Research instructions"} {
+		if strings.Contains(listing, banned) {
+			t.Fatalf("listing contains %q", banned)
+		}
+	}
+	for _, want := range []string{"load_capabilities", "search_capabilities", "Loaded tools become callable in your next step", "capabilities note"} {
+		if !strings.Contains(capabilityLoadingText, want) {
+			t.Fatalf("loading instructions missing %q", want)
 		}
 	}
 }
 
-func TestCapabilityPromptPrefixSearchModeDirectoryBounded(t *testing.T) {
+func TestCapabilityDirectorySearchModeBounded(t *testing.T) {
 	catalog := capabilityCatalogFixture()
 	for server := 0; server < 30; server++ {
 		bindingID := fmt.Sprintf("binding-%02d", server)
@@ -291,28 +302,26 @@ func TestCapabilityPromptPrefixSearchModeDirectoryBounded(t *testing.T) {
 	if !s.Searching() {
 		t.Fatal("more than 64 entries must switch to search mode")
 	}
-	prefix := s.PromptPrefix()
-	for _, want := range []string{"search_capabilities", "load_capabilities", "capabilityDirectory",
-		"\n- mcp.server07 — Server 07 (4 tools, instructions)", "\n- notion — Notion (8 tools, instructions)",
-		"\n- workspace (" + fmt.Sprint(len(catalog.HostTools)) + " tools)", "from search_capabilities results"} {
-		if !strings.Contains(prefix, want) {
-			t.Fatalf("search prefix missing %q", want)
+	directory := capabilityNoteLines(s.directoryLines())
+	for _, want := range []string{"\n- mcp.server07 — Server 07 (4 tools, instructions)", "\n- notion — Notion (8 tools, instructions)",
+		"\n- workspace (" + fmt.Sprint(len(catalog.HostTools)) + " tools)"} {
+		if !strings.Contains(directory, want) {
+			t.Fatalf("directory missing %q", want)
 		}
 	}
-	if strings.Contains(prefix, "action:mcp.server07.tool1") || strings.Contains(prefix, "capabilityCatalog (") {
+	if strings.Contains(directory, "action:mcp.server07.tool1") {
 		t.Fatal("search mode must not list every capability")
 	}
-	if prefix != NewCapabilitySet(catalog, []string{"action:mcp.server03.tool2"}, CapabilitySetConfig{}).PromptPrefix() {
-		t.Fatal("search prefix depends on loads")
+	if directory != capabilityNoteLines(NewCapabilitySet(catalog, []string{"action:mcp.server03.tool2"}, CapabilitySetConfig{}).directoryLines()) {
+		t.Fatal("directory depends on loads")
 	}
 
-	bounded := NewCapabilitySet(catalog, nil, CapabilitySetConfig{SummaryBytes: 300})
-	directory := bounded.PromptPrefix()[strings.Index(bounded.PromptPrefix(), "capabilityDirectory"):]
-	if !strings.Contains(directory, " more; search to find them") {
-		t.Fatalf("directory not bounded: %s", directory)
+	bounded := capabilityNoteLines(NewCapabilitySet(catalog, nil, CapabilitySetConfig{SummaryBytes: 300}).directoryLines())
+	if !strings.Contains(bounded, " more; search to find them") {
+		t.Fatalf("directory not bounded: %s", bounded)
 	}
-	if lines := strings.Count(directory, "\n- "); lines >= len(bounded.capabilityGroups()) {
-		t.Fatalf("directory lists %d of %d groups", lines, len(bounded.capabilityGroups()))
+	if lines := strings.Count(bounded, "\n- "); lines >= len(s.capabilityGroups()) {
+		t.Fatalf("directory lists %d of %d groups", lines, len(s.capabilityGroups()))
 	}
 
 	byBytes := capabilityCatalogFixture()
@@ -321,53 +330,68 @@ func TestCapabilityPromptPrefixSearchModeDirectoryBounded(t *testing.T) {
 	}
 }
 
+// capabilityLoadEntry is a load_capabilities tool entry: action and
+// workspace IDs become frozen tools, other IDs loaded instructions.
 func capabilityLoadEntry(id, runID string, state ToolEntryState, loaded ...string) *SessionEntry {
-	return &SessionEntry{ID: id, RunID: runID, Type: SessionEntryTool, State: state,
-		Tool: &ToolEntry{Name: LoadCapabilitiesTool, LoadedCapabilities: loaded}}
+	tool := &ToolEntry{Name: LoadCapabilitiesTool}
+	for _, capabilityID := range loaded {
+		switch {
+		case strings.HasPrefix(capabilityID, capabilityActionPrefix):
+			name := "action_" + strings.ReplaceAll(strings.TrimPrefix(capabilityID, capabilityActionPrefix), ".", "_")
+			tool.SurfacedTools = append(tool.SurfacedTools, SurfacedTool{Capability: capabilityID, Name: name,
+				Description: "Frozen " + name, InputSchema: map[string]interface{}{"type": "object"}})
+		case strings.HasPrefix(capabilityID, capabilityWorkspacePrefix):
+			name := strings.ReplaceAll(strings.TrimPrefix(capabilityID, capabilityWorkspacePrefix), ".", "_")
+			tool.SurfacedTools = append(tool.SurfacedTools, SurfacedTool{Capability: capabilityID, Name: name,
+				InputSchema: map[string]interface{}{"type": "object"}})
+		default:
+			tool.LoadedInstructions = append(tool.LoadedInstructions, capabilityID)
+		}
+	}
+	return &SessionEntry{ID: id, RunID: runID, Type: SessionEntryTool, State: state, Tool: tool}
 }
 
-func TestLoadedCapabilityIDsFromPathIgnoresErroredAndPreCompactionLoads(t *testing.T) {
-	path := []*SessionEntry{
+func TestPathLoadedCapabilityIDsIgnoresErroredAndPreCompactionLoads(t *testing.T) {
+	entries := []*SessionEntry{
 		capabilityLoadEntry("e1", "run-1", ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0"),
 		capabilityLoadEntry("e2", "run-1", ToolEntryCompleted, "action:notion.op1"),
 		{ID: "e3", RunID: "run-1", Type: SessionEntryUser, User: &UserEntry{}},
 		capabilityLoadEntry("e4", "run-1", ToolEntryError, "action:notion.op2"),
 		capabilityLoadEntry("e5", "run-1", ToolEntryPending, "action:notion.op3"),
-		{ID: "e6", Type: SessionEntryTool, State: ToolEntryCompleted, Tool: &ToolEntry{Name: "search_capabilities", LoadedCapabilities: []string{"action:notion.op4"}}},
+		{ID: "e6", Type: SessionEntryTool, State: ToolEntryCompleted, Tool: &ToolEntry{Name: "search_capabilities",
+			SurfacedTools: []SurfacedTool{{Capability: "action:notion.op4", Name: "action_notion_op4"}}}},
 		capabilityLoadEntry("e7", "run-1", ToolEntryCompleted, "action:notion.op5", "action:notion.op1"),
 	}
-	if got, want := LoadedCapabilityIDs(path), []string{"prompt:skill-notion@3", "action:notion.op0", "action:notion.op1", "action:notion.op5"}; !reflect.DeepEqual(got, want) {
+	if got, want := PathLoadedCapabilityIDs(&AgentSessionPath{Entries: entries}), []string{"prompt:skill-notion@3", "action:notion.op0", "action:notion.op1", "action:notion.op5"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 
-	// A compaction keeps only loads from its kept tail on.
-	compacted := append(append([]*SessionEntry(nil), path...),
-		&SessionEntry{ID: "c1", Type: SessionEntryCompaction, Compaction: &CompactionEntry{Summary: "s", FirstKeptEntryID: "e3"}},
-		capabilityLoadEntry("e8", "run-1", ToolEntryCompleted, "action:notion.op6"))
-	if got, want := LoadedCapabilityIDs(compacted), []string{"action:notion.op5", "action:notion.op1", "action:notion.op6"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("after compaction got %v want %v", got, want)
-	}
-	keepNothing := append(append([]*SessionEntry(nil), path...),
-		&SessionEntry{ID: "c1", Type: SessionEntryCompaction, Compaction: &CompactionEntry{Summary: "s"}})
-	if got := LoadedCapabilityIDs(keepNothing); len(got) != 0 {
-		t.Fatalf("keep-nothing compaction kept loads: %v", got)
-	}
-
-	// The rendered path (store path builder) drops pre-compaction entries itself.
+	// The store path builder drops pre-compaction entries; the compaction
+	// carries the tools of the summarized loads (not their instructions).
 	session := &AgentSession{ID: "s1", NextSequence: 6}
 	segment := []*SessionEntry{
-		withSessionSequence(capabilityLoadEntry("p1", "run-1", ToolEntryCompleted, "action:notion.op0"), "s1", 1),
+		withSessionSequence(capabilityLoadEntry("p1", "run-1", ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0"), "s1", 1),
 		withSessionSequence(capabilityLoadEntry("p2", "run-1", ToolEntryCompleted, "action:notion.op1"), "s1", 2),
-		withSessionSequence(&SessionEntry{ID: "p3", Type: SessionEntryCompaction, Compaction: &CompactionEntry{Summary: "s", FirstKeptEntryID: "p2"}}, "s1", 3),
+		withSessionSequence(&SessionEntry{ID: "p3", Type: SessionEntryCompaction, Compaction: &CompactionEntry{Summary: "s", FirstKeptEntryID: "p2",
+			CarriedTools: carriedToolsAfter(nil, segmentPrefix(1))}}, "s1", 3),
 		withSessionSequence(capabilityLoadEntry("p4", "run-1", ToolEntryCompleted, "action:notion.op2"), "s1", 4),
 	}
 	rendered, err := buildAgentSessionPath([]*AgentSession{session}, [][]*SessionEntry{segment}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := LoadedCapabilityIDs(rendered.Entries), []string{"action:notion.op1", "action:notion.op2"}; !reflect.DeepEqual(got, want) {
+	if got, want := PathCarriedCapabilityIDs(rendered), []string{"action:notion.op0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rendered path carried %v want %v", got, want)
+	}
+	if got, want := PathLoadedCapabilityIDs(rendered), []string{"action:notion.op1", "action:notion.op2"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rendered path got %v want %v", got, want)
 	}
+}
+
+// segmentPrefix is the summarized part of the compaction fixture above.
+func segmentPrefix(n int) []*SessionEntry {
+	entries := []*SessionEntry{capabilityLoadEntry("p1", "run-1", ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0")}
+	return entries[:n]
 }
 
 func withSessionSequence(entry *SessionEntry, sessionID string, sequence int64) *SessionEntry {
@@ -376,7 +400,7 @@ func withSessionSequence(entry *SessionEntry, sessionID string, sequence int64) 
 	return entry
 }
 
-func TestLoadedCapabilityIDsCarryAcrossRunsInSession(t *testing.T) {
+func TestPathLoadedCapabilityIDsCarryAcrossRunsInSession(t *testing.T) {
 	catalog := capabilityCatalogFixture()
 	session := &AgentSession{ID: "conv", NextSequence: 5}
 	segment := []*SessionEntry{
@@ -389,7 +413,7 @@ func TestLoadedCapabilityIDsCarryAcrossRunsInSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loaded := LoadedCapabilityIDs(path.Entries)
+	loaded := PathLoadedCapabilityIDs(path)
 	if want := []string{"prompt:skill-notion@3", "action:notion.op4", "action:notion.op6"}; !reflect.DeepEqual(loaded, want) {
 		t.Fatalf("got %v want %v", loaded, want)
 	}
@@ -399,7 +423,7 @@ func TestLoadedCapabilityIDsCarryAcrossRunsInSession(t *testing.T) {
 	}
 }
 
-func TestLoadedCapabilityIDsChildSessionInheritsParentUpToFork(t *testing.T) {
+func TestPathLoadedCapabilityIDsChildSessionInheritsParentUpToFork(t *testing.T) {
 	parent := &AgentSession{ID: "parent", NextSequence: 4}
 	child := &AgentSession{ID: "child", ParentSessionID: "parent", ForkEntryID: "p-load-1", ForkSequence: 1, NextSequence: 2}
 	parentEntries := []*SessionEntry{
@@ -414,7 +438,7 @@ func TestLoadedCapabilityIDsChildSessionInheritsParentUpToFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := LoadedCapabilityIDs(path.Entries), []string{"action:notion.op0", "action:notion.op3"}; !reflect.DeepEqual(got, want) {
+	if got, want := PathLoadedCapabilityIDs(path), []string{"action:notion.op0", "action:notion.op3"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 }

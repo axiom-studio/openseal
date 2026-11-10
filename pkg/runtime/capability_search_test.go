@@ -140,14 +140,19 @@ func TestSearchCapabilitiesNoMatch(t *testing.T) {
 			t.Fatalf("no match %q = %s", query, content)
 		}
 	}
-	// A catalog that lists everything offers no search.
+	// A catalog that lists everything still offers search, so the tool
+	// list does not change when the catalog crosses the budget.
 	listed := NewCapabilitySet(capabilityCatalogFixture(), nil, CapabilitySetConfig{})
 	if listed.Searching() {
 		t.Fatal("fixture must list its catalog")
 	}
-	content, isError := ExecuteSearchCapabilities(listed, searchArgs("notion"), 0)
-	if !isError || decodeCapabilityContent(t, content)["status"] != "not_available" {
-		t.Fatalf("search without search mode = %s", content)
+	if content, isError := ExecuteSearchCapabilities(listed, searchArgs("notion"), 0); isError {
+		t.Fatalf("search of a listed catalog = %s", content)
+	}
+	// A small catalog is deferred and searchable too.
+	small := NewCapabilitySet(CapabilityCatalog{Actions: capabilityCatalogFixture().Actions[:1]}, nil, CapabilitySetConfig{})
+	if content, isError := ExecuteSearchCapabilities(small, searchArgs("notion"), 0); isError {
+		t.Fatalf("search of a small catalog = %s", content)
 	}
 	if _, isError := ExecuteSearchCapabilities(nil, searchArgs("notion"), 0); !isError {
 		t.Fatal("nil set must refuse search")
