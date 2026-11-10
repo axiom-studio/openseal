@@ -99,3 +99,24 @@ func TestLocalStoreRejectsIntegrityFailuresAndUnsafeReferences(t *testing.T) {
 		}
 	}
 }
+
+// A Space only places bytes in hosts that sort them into folders; the local
+// store keeps one content-addressed pool, so naming a Space changes nothing.
+func TestLocalStoreIgnoresSpacePlacement(t *testing.T) {
+	store, err := NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	plain, err := store.Put(context.Background(), runtime.ArtifactContentWrite{Scope: scope, MediaType: "image/png", Reader: strings.NewReader("icon"), SizeBytes: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	placed, err := store.Put(context.Background(), runtime.ArtifactContentWrite{Scope: scope, MediaType: "image/png", Reader: strings.NewReader("icon"), SizeBytes: 4, Space: "space-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if placed != plain {
+		t.Fatalf("space placement changed the local reference: %#v vs %#v", placed, plain)
+	}
+}
