@@ -285,3 +285,13 @@ func TestBoundToolResultLeavesAMidSizeResultWholeWithoutAFile(t *testing.T) {
 		})
 	}
 }
+
+// The keeper looks the Run up by scope and id; a missing scope made every
+// long computer or connected-app output fail the step.
+func TestToolOutputInvocationCarriesTheRunsScopeAndAgent(t *testing.T) {
+	run := &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "9"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}, AssignedAgentID: "finn"}
+	got := toolOutputInvocation(run, "computer_run_command", "openseal.computer", "run_command", "call-1")
+	if got.RunID != "run-1" || got.Scope.Kind != "tenant" || got.Scope.ID != "9" || got.DeploymentID != "finn" || got.ExecutionDeploymentID != "finn" || got.ActionCallID != "call-1" {
+		t.Fatalf("invocation = %+v", got)
+	}
+}

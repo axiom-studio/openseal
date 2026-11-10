@@ -1082,10 +1082,7 @@ func (r *stepToolRun) applyGoverned(ctx context.Context, i int, outcome Governed
 	}
 	result := outcome.Result
 	if result != nil {
-		bounded, err := BoundToolResult(ctx, r.x.cfg.Output, ToolInvocation{
-			Name: entry.Tool.Name, SkillID: r.tools[i].Action.SkillID, Action: r.tools[i].Action.Action,
-			ActionCallID: outcome.ActionCallID, RunID: r.in.Run.ID,
-		}, *result)
+		bounded, err := BoundToolResult(ctx, r.x.cfg.Output, toolOutputInvocation(r.in.Run, entry.Tool.Name, r.tools[i].Action.SkillID, r.tools[i].Action.Action, outcome.ActionCallID), *result)
 		if err != nil {
 			return err
 		}
@@ -1246,4 +1243,17 @@ func (r *stepToolRun) outcome() StepToolsOutcome {
 		out.Run = r.chain.known
 	}
 	return out
+}
+
+// toolOutputInvocation is the call a long tool output is kept for. The keeper
+// finds the Run, and so its chat, by scope and id: without the scope every
+// output over the inline cap failed with "chat files are unavailable".
+func toolOutputInvocation(run *AgentRun, name, skillID, action, actionCallID string) ToolInvocation {
+	invocation := ToolInvocation{Name: name, SkillID: skillID, Action: action, ActionCallID: actionCallID}
+	if run != nil {
+		invocation.RunID = run.ID
+		invocation.Scope = skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
+		invocation.DeploymentID, invocation.ExecutionDeploymentID = run.Owner.ID, run.AssignedAgentID
+	}
+	return invocation
 }
