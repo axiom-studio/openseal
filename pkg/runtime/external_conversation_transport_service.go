@@ -58,11 +58,20 @@ type EnqueueExternalConversationDeliveryResult struct {
 type ExternalConversationTransportService struct {
 	store    ExternalConversationStore
 	resolver ExternalConversationAdapterResolver
+	routines RoutineEventOfferer
 	now      func() time.Time
 }
 
 func NewExternalConversationTransportService(store ExternalConversationStore, resolver ExternalConversationAdapterResolver) *ExternalConversationTransportService {
 	return &ExternalConversationTransportService{store: store, resolver: resolver, now: time.Now}
+}
+
+// SetRoutineEventOfferer lets verified Slack and Telegram messages start event
+// routines. Set it before ingress starts; nil turns the routine path off.
+func (s *ExternalConversationTransportService) SetRoutineEventOfferer(offerer RoutineEventOfferer) {
+	if s != nil {
+		s.routines = offerer
+	}
 }
 
 // Receive persists one already verified and normalized provider event. Policy

@@ -283,6 +283,10 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationIngr
 	}
 	received := make([]*ReceiveExternalConversationEventResult, 0, len(result.Events))
 	for index := range result.Events {
+		if err := offerConversationRoutineEvent(ctx, s.routines, endpoint.Scope, endpoint.DeploymentID,
+			effectiveEndpoint.Adapter, endpoint.Provider, endpoint.InstallationID, &result.Events[index]); err != nil {
+			return nil, err
+		}
 		persisted, receiveErr := s.Receive(ctx, ReceiveExternalConversationEventRequest{
 			Scope: request.Scope, EndpointID: endpoint.ID, Event: result.Events[index],
 		})
@@ -478,14 +482,32 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 			}
 		}
 	}
+	// A gateway pinned to one tenant installation is itself the connection,
+	// so routines hear its messages before any endpoint lookup or message
+	// selection. Unpinned and platform gateways take their authority from
+	// each mapped endpoint's live binding instead.
+	pinned := gateway.Scope.Kind != "platform" && gateway.InstallationID != ""
 	received := make([]*ReceiveExternalConversationEventResult, 0, len(result.Events))
-	for _, route := range routes {
+	for index := range routes {
+		route := &routes[index]
+		if pinned {
+			if err := offerConversationRoutineEvent(ctx, s.routines, gateway.Scope, gateway.DeploymentID,
+				effectiveGateway.Adapter, gateway.Provider, gateway.InstallationID, &route.event.Event); err != nil {
+				return nil, err
+			}
+		}
 		for _, endpoint := range route.endpoints {
 			persisted, receiveErr := s.Receive(ctx, ReceiveExternalConversationEventRequest{
 				Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: route.event.Event,
 			})
 			if receiveErr != nil {
 				return nil, receiveErr
+			}
+			if !pinned && persisted.Item != nil {
+				if err := offerConversationRoutineEvent(ctx, s.routines, endpoint.Scope, endpoint.DeploymentID,
+					persisted.Item.Adapter, endpoint.Provider, endpoint.InstallationID, &route.event.Event); err != nil {
+					return nil, err
+				}
 			}
 			received = append(received, persisted)
 		}
