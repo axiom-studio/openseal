@@ -428,14 +428,6 @@ func StartRunbookActivationWithExecutionPreparer(ctx context.Context, store Kern
 	if objective.Status != ObjectiveStatusActive || objective.Owner != activation.Owner {
 		return nil, errors.New("Runbook activation requires its active owning Objective")
 	}
-	contextValues := cloneMap(activation.Input)
-	if contextValues == nil {
-		contextValues = make(map[string]interface{})
-	}
-	contextValues["runbookActivationId"] = activation.ID
-	contextValues["runbookDefinitionId"] = activation.DefinitionID
-	contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
-	contextValues["runbookTriggerId"] = activation.TriggerID
 	idempotencyKey := strings.TrimSpace(request.IdempotencyKey)
 	if (activation.Trigger.Reporting != nil || activation.Task != nil) && idempotencyKey == "" {
 		idempotencyKey = "runbook-manual:" + activation.ID + ":" + uuid.NewString()
@@ -444,29 +436,100 @@ func StartRunbookActivationWithExecutionPreparer(ctx context.Context, store Kern
 	if value, ok := store.(ConversationStore); ok {
 		reportingStore = value
 	}
+	result, err := startActivationOccurrence(ctx, store, reportingStore, activation, objective, RunSourceManual, idempotencyKey, nil, request.Actor, request.Visibility, preparer)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// startActivationOccurrence is the one place a routine occurrence Run is
+// created: by the scheduler, by a manual start and by the event dispatcher.
+// Only a definition activation (Task == nil) carries the entrypoint, plan and
+// definition keys; Task occurrences never do.
+func startActivationOccurrence(
+	ctx context.Context,
+	store RunCommandStore,
+	reportingStore ConversationStore,
+	activation *RunbookActivation,
+	objective *Objective,
+	source RunSource,
+	idempotencyKey string,
+	extraContext map[string]interface{},
+	actor ActivityActor,
+	visibility ActivityVisibility,
+	preparer AcceptedRunExecutionPreparer,
+) (*AgentRunCommandResult, error) {
+	contextValues := cloneMap(activation.Input)
+	if contextValues == nil {
+		contextValues = make(map[string]interface{})
+	}
+	for key, value := range extraContext {
+		contextValues[key] = value
+	}
+	contextValues["runbookActivationId"] = activation.ID
+	contextValues["runbookTriggerId"] = activation.TriggerID
+	request := CreateAgentRunRequest{
+		Scope: activation.Scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
+		ActingUser: activationActingUser(activation), ConcurrencyKey: "runbook:" + activation.ID,
+		Goal: activationGoal(activation, objective), Source: source, Priority: objective.Priority, Context: contextValues,
+		Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
+		IdempotencyKey: idempotencyKey, Actor: actor, Visibility: visibility,
+	}
+	if activation.Task == nil {
+		request.Entrypoint = activation.Trigger.Entrypoint
+		request.Plan = runbookActivationPlan(activation)
+		contextValues["runbookDefinitionId"] = activation.DefinitionID
+		contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
+	}
 	var channel *Conversation
 	messageKey := ""
 	if activation.Trigger.Reporting != nil || activation.Task != nil {
 		var err error
-		channel, messageKey, err = prepareActivationReporting(ctx, reportingStore, activation, runIDForIdempotencyKey(scope, idempotencyKey), contextValues)
+		channel, messageKey, err = prepareActivationReporting(ctx, reportingStore, activation, runIDForIdempotencyKey(activation.Scope, idempotencyKey), contextValues)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("prepare Runbook activation %s reporting: %w", activation.ID, err)
 		}
 	}
-	result, err := createAgentRunWithAcceptedExecution(ctx, NewRunCommandService(store), CreateAgentRunRequest{
-		Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
-		ActingUser: activationActingUser(activation), Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
-		Goal: activationGoal(activation, objective), Source: RunSourceManual, Priority: objective.Priority, Context: contextValues,
-		Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
-		IdempotencyKey: idempotencyKey, Actor: request.Actor, Visibility: request.Visibility,
-	}, preparer)
+	created, err := createAgentRunWithAcceptedExecution(ctx, NewRunCommandService(store), request, preparer)
 	if err != nil {
 		return nil, err
 	}
-	if err := projectRunReportingStart(ctx, reportingStore, channel, messageKey, result.Run); err != nil {
-		return nil, err
+	if err := projectRunReportingStart(ctx, reportingStore, channel, messageKey, created.Run); err != nil {
+		return nil, fmt.Errorf("project Runbook activation %s start: %w", activation.ID, err)
 	}
-	return result, nil
+	return created, nil
+}
+
+// activationBackpressured reports whether the activation already has its
+// maximum of non-terminal Runs (default 1). The scheduler and the event
+// dispatcher share this rule.
+func activationBackpressured(ctx context.Context, store interface {
+	ListAgentRuns(context.Context, AgentRunFilter) ([]*AgentRun, error)
+}, activation *RunbookActivation) (bool, error) {
+	maximum := activation.MaximumConcurrent
+	if maximum == 0 {
+		maximum = 1
+	}
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{
+		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID,
+		Statuses: []AgentRunStatus{
+			AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning, AgentRunStatusSleeping,
+			AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent, AgentRunStatusWaitingForApproval,
+			AgentRunStatusWaitingForEvent,
+		},
+		Limit: 500,
+	})
+	if err != nil {
+		return false, err
+	}
+	count := 0
+	for _, run := range runs {
+		if id, _ := run.Context["runbookActivationId"].(string); strings.TrimSpace(id) == activation.ID {
+			count++
+		}
+	}
+	return count >= maximum, nil
 }
 
 // activationActingUser is the person a routine's occurrences act for: the
@@ -591,6 +654,7 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 		}
 		return nil, err
 	}
+	notifyRoutineActivationWrite(ctx, s.store, nil, activation)
 	if err := s.ensureReportingChannel(ctx, activation); err != nil {
 		return nil, err
 	}
@@ -657,6 +721,7 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 	if err := s.store.UpdateRunbookActivation(ctx, next, current.Revision); err != nil {
 		return nil, err
 	}
+	notifyRoutineActivationWrite(ctx, s.store, current, next)
 	if err := s.ensureReportingChannel(ctx, next); err != nil {
 		return nil, err
 	}

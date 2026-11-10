@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
@@ -154,7 +153,7 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 			result.Suspended++
 			continue
 		}
-		backpressured, err := s.backpressured(ctx, activation)
+		backpressured, err := activationBackpressured(ctx, s.store, activation)
 		if err != nil {
 			return result, err
 		}
@@ -162,37 +161,17 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 			result.Backpressured++
 			continue
 		}
-		contextValues := cloneMap(activation.Input)
-		if contextValues == nil {
-			contextValues = map[string]interface{}{}
-		}
 		windowStart, windowEnd, err := activation.Trigger.Schedule.Window(base)
 		if err != nil {
 			return result, fmt.Errorf("Runbook activation %s schedule window: %w", activation.ID, err)
 		}
-		contextValues["scheduledFor"] = activation.NextRunAt.UTC().Format(time.RFC3339Nano)
-		contextValues["scheduleWindowStart"] = windowStart.Format(time.RFC3339Nano)
-		contextValues["scheduleWindowEnd"] = windowEnd.Format(time.RFC3339Nano)
-		contextValues["runbookActivationId"] = activation.ID
-		contextValues["runbookDefinitionId"] = activation.DefinitionID
-		contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
-		contextValues["runbookTriggerId"] = activation.TriggerID
-		channel, messageKey, err := prepareActivationReporting(ctx, s.reportingStore, activation, runID, contextValues)
-		if err != nil {
-			return result, fmt.Errorf("prepare Runbook activation %s reporting: %w", activation.ID, err)
-		}
-		created, err := createAgentRunWithAcceptedExecution(ctx, NewRunCommandService(s.store), CreateAgentRunRequest{
-			Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
-			ActingUser: activationActingUser(activation), Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
-			Goal: activationGoal(activation, objective), Source: RunSourceSchedule, Priority: objective.Priority, Context: contextValues,
-			Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget), IdempotencyKey: idempotencyKey,
-			Actor: ActivityActor{Type: "service", ID: "runbook-scheduler"}, Visibility: runbookScheduleVisibility(activation),
-		}, s.executionPreparer)
+		created, err := startActivationOccurrence(ctx, s.store, s.reportingStore, activation, objective, RunSourceSchedule, idempotencyKey, map[string]interface{}{
+			"scheduledFor":        activation.NextRunAt.UTC().Format(time.RFC3339Nano),
+			"scheduleWindowStart": windowStart.Format(time.RFC3339Nano),
+			"scheduleWindowEnd":   windowEnd.Format(time.RFC3339Nano),
+		}, ActivityActor{Type: "service", ID: "runbook-scheduler"}, runbookScheduleVisibility(activation), s.executionPreparer)
 		if err != nil {
 			return result, fmt.Errorf("schedule Runbook activation %s: %w", activation.ID, err)
-		}
-		if err := projectRunReportingStart(ctx, s.reportingStore, channel, messageKey, created.Run); err != nil {
-			return result, fmt.Errorf("project Runbook activation %s start: %w", activation.ID, err)
 		}
 		if created.Event == nil {
 			result.Replayed++
@@ -246,32 +225,6 @@ func (s *RunbookScheduler) advance(ctx context.Context, activation *RunbookActiv
 	}
 	updated.NextOccurrenceBase, updated.NextRunAt = &nextBase, &nextDue
 	return false, s.store.UpdateRunbookActivation(ctx, updated, activation.Revision)
-}
-
-func (s *RunbookScheduler) backpressured(ctx context.Context, activation *RunbookActivation) (bool, error) {
-	maximum := activation.MaximumConcurrent
-	if maximum == 0 {
-		maximum = 1
-	}
-	runs, err := s.store.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID,
-		Statuses: []AgentRunStatus{
-			AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning, AgentRunStatusSleeping,
-			AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent, AgentRunStatusWaitingForApproval,
-			AgentRunStatusWaitingForEvent,
-		},
-		Limit: 500,
-	})
-	if err != nil {
-		return false, err
-	}
-	count := 0
-	for _, run := range runs {
-		if id, _ := run.Context["runbookActivationId"].(string); strings.TrimSpace(id) == activation.ID {
-			count++
-		}
-	}
-	return count >= maximum, nil
 }
 
 func runbookTriggerKey(activation *RunbookActivation) string {
