@@ -395,6 +395,13 @@ type ArtifactContentWrite struct {
 	// produced it. A host may use it to place bytes; it is never part of the
 	// content reference contract.
 	Owner *ObjectiveOwner
+	// Space is the id of the Space the bytes belong to when the content is
+	// the Space's own, such as its icon, rather than an Agent's or a Team's.
+	// Like Owner it only tells a host where to place the bytes (an object
+	// store keeps each Space's content in its own folder); it is never part
+	// of the content reference contract, and a host that keeps all bytes in
+	// one place may ignore it.
+	Space string
 }
 
 type ArtifactStoredContent struct {
