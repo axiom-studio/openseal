@@ -71,6 +71,10 @@ func (s *Service) RefreshConnection(ctx context.Context, request RefreshConnecti
 		s.releaseRefreshFailure(ctx, claimed, "connection_inactive")
 		return nil, fmt.Errorf("%w: only active or degraded connections can refresh", ErrInvalid)
 	}
+	if claimed.Status == ConnectionDegraded && claimed.LastErrorCode == RefreshRevokedErrorCode {
+		s.releaseRefreshFailure(ctx, claimed, RefreshRevokedErrorCode)
+		return nil, ErrGrantRevoked
+	}
 	provider := s.providers[claimed.Grant.Provider]
 	refreshProvider, ok := provider.(RefreshProvider)
 	if !ok {
@@ -87,6 +91,10 @@ func (s *Service) RefreshConnection(ctx context.Context, request RefreshConnecti
 		Scopes: append([]string(nil), claimed.Grant.Scopes...), Resource: claimed.Grant.Resource,
 	}
 	refreshed, err := refreshProvider.RefreshToken(ctx, ProviderRefreshRequest{Current: current, Requirement: requirement})
+	if errors.Is(err, ErrGrantRevoked) {
+		s.releaseRefreshFailure(ctx, claimed, RefreshRevokedErrorCode)
+		return nil, ErrGrantRevoked
+	}
 	if err != nil {
 		s.releaseRefreshFailure(ctx, claimed, "refresh_failed")
 		return nil, errors.New("OAuth provider token refresh failed")

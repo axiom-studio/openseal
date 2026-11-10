@@ -1379,7 +1379,12 @@ var (
 	ErrOAuthConnectionNotFound = kerneloauth.ErrConnectionNotFound
 	ErrOAuthRefreshInProgress  = kerneloauth.ErrRefreshInProgress
 	ErrOAuthUnsupported        = kerneloauth.ErrUnsupported
+	ErrOAuthGrantRevoked       = kerneloauth.ErrGrantRevoked
 )
+
+// OAuthRefreshRevokedErrorCode marks a degraded connection whose grant the
+// provider revoked: it needs a new sign-in, not a retry.
+const OAuthRefreshRevokedErrorCode = kerneloauth.RefreshRevokedErrorCode
 
 // PersistentKernelStore is the complete durable control-plane contract for an
 // embedded OpenSeal engine. Enterprise adapters implement this interface so

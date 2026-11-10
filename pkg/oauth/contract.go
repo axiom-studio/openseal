@@ -27,7 +27,15 @@ var (
 	ErrConnectionNotFound = errors.New("OAuth connection not found")
 	ErrRefreshInProgress  = errors.New("OAuth connection refresh is already in progress")
 	ErrUnsupported        = errors.New("OAuth provider operation is unsupported")
+	// ErrGrantRevoked: the provider no longer honors the refresh token (the
+	// person revoked the app, or the grant expired). Only a new sign-in
+	// fixes it. A RefreshProvider returns it (wrapped or not) for that case.
+	ErrGrantRevoked = errors.New("OAuth provider revoked the grant; sign in again")
 )
+
+// RefreshRevokedErrorCode is the LastErrorCode of a degraded connection
+// whose grant the provider revoked. Unlike refresh_failed it is not retried.
+const RefreshRevokedErrorCode = "refresh_revoked"
 
 type ConnectionStatus string
 
