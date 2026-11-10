@@ -32,7 +32,7 @@ func terminalFailureMigrationPostgres(t *testing.T) (*PostgresStore, string, str
 
 func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrigger(t *testing.T) {
 	store, dsn, schema := terminalFailureMigrationPostgres(t)
-	now := eventWaitContractEpoch
+	now := runStoreContractEpoch
 	// The conversation exists before the rollback: conversations need the
 	// space schema, which is newer than 58.
 	run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "pg58-lease"}, now)
@@ -78,7 +78,7 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 
 func TestTerminalFailurePostgres59RollbackRejectsMultipleAttemptReceipts(t *testing.T) {
 	store, _, _ := terminalFailureMigrationPostgres(t)
-	now := eventWaitContractEpoch
+	now := runStoreContractEpoch
 	first, _, _ := terminalFailureConversationFixture(t, store, now, false)
 	first = failTerminalConversation(t, store, first, now, "provider_rate_limited")
 	commands := NewRunCommandService(store)
@@ -102,7 +102,7 @@ func TestTerminalFailurePostgres59RollbackRejectsMultipleAttemptReceipts(t *test
 
 func TestTerminalFailurePostgres59RollbackRequiresNewFailureDelivery(t *testing.T) {
 	store, _, _ := terminalFailureMigrationPostgres(t)
-	now := eventWaitContractEpoch
+	now := runStoreContractEpoch
 	run, _, _ := terminalFailureConversationFixture(t, store, now, false)
 	run = failTerminalConversation(t, store, run, now, "provider_rate_limited")
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err == nil || !strings.Contains(err.Error(), "before new conversation failure replies are delivered") {

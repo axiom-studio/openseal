@@ -246,7 +246,7 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 			}
 			return ErrRevisionConflict
 		}
-		return syncSQLiteRunEventWaitConn(ctx, conn, run)
+		return nil
 	})
 }
 

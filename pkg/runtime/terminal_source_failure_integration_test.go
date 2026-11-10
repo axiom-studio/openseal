@@ -126,11 +126,11 @@ func appendSourceStep(t *testing.T, sessions AgentSessionStore, run *AgentRun, s
 func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 	for _, code := range []string{"source_rate_limited", "source_reads_failed", "browser_proxy_authentication_failed", "browser_proxy_unavailable", "file_too_large", "stale rate limit", "recovered rate limit", "raw error"} {
 		t.Run(code, func(t *testing.T) {
-			eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 				store := terminalReportingContractFixture(t, fixture)
 				kernel := fixture.store.(sourceFailureStore)
 				sessions := AgentSessionStore(kernel)
-				now := eventWaitContractEpoch
+				now := runStoreContractEpoch
 				run, trigger := sourceFailureRun(t, kernel, now)
 				kind := code
 				if code == "stale rate limit" || code == "recovered rate limit" || code == "raw error" {

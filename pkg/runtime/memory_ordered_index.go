@@ -95,17 +95,6 @@ func memoryOrderedIndexDelete[K any](node *memoryOrderedIndexNode[K], key K, les
 	return memoryOrderedIndexBalance(node)
 }
 
-func memoryOrderedIndexFirst[K any](node *memoryOrderedIndexNode[K]) (K, bool) {
-	if node == nil {
-		var zero K
-		return zero, false
-	}
-	for node.left != nil {
-		node = node.left
-	}
-	return node.key, true
-}
-
 // before must describe a prefix of the index ordering. after is an exclusive
 // cursor, and limit bounds returned candidates rather than matching mutations.
 func memoryOrderedIndexAfter[K any](root *memoryOrderedIndexNode[K], after *K, before func(K) bool, limit int, less func(K, K) bool) []K {

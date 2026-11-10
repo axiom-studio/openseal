@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -47,24 +46,6 @@ func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 		if err != nil || len(listed) != 1 || listed[0].ID != "team-gateway" {
 			t.Fatalf("%T Team gateways = %#v, %v", store, listed, err)
 		}
-	}
-}
-
-func TestEventWaitMatchesOnlyItsUmbrellaBindingEvents(t *testing.T) {
-	now := time.Now().UTC()
-	scope := Scope{Kind: "tenant", ID: "one"}
-	wait := &RunEventWait{Scope: scope, UmbrellaID: "crew", Spec: RunEventWaitSpec{Key: "initial", Type: "conversation.message.received",
-		Source: RunEventBindingSource("crew", "slack", "conversations"), Subject: "C1", After: now.Add(-time.Minute), Deadline: now.Add(time.Hour)}}
-	receipt := func(deployment string) *RunEventReceipt {
-		return &RunEventReceipt{ReceivedAt: now, Event: EventEnvelope{Scope: scope, Type: "conversation.message.received", Subject: "C1", OccurredAt: now,
-			Source:     RunEventBindingSource(deployment, "slack", "conversations"),
-			Attributes: map[string]interface{}{"deploymentId": deployment, "bindingId": "slack", "adapterId": "conversations"}}}
-	}
-	if !runEventWaitMatches(wait, receipt("crew")) {
-		t.Fatal("a Team wait missed the Team channel's event")
-	}
-	if runEventWaitMatches(wait, receipt("member")) {
-		t.Fatal("a Team wait matched the member's own channel")
 	}
 }
 

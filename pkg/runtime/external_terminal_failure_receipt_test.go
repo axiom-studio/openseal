@@ -11,9 +11,9 @@ import (
 )
 
 func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		first, _, trigger := terminalFailureConversationFixture(t, store, now, false)
 		first = failTerminalConversation(t, store, first, now, "provider_rate_limited")
 		for _, acknowledged := range []bool{false, true} {
@@ -50,7 +50,7 @@ func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testi
 
 func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *testing.T) {
 	store := NewMemoryStore()
-	now := eventWaitContractEpoch
+	now := runStoreContractEpoch
 	run, conversation, trigger := terminalFailureConversationFixture(t, store, now, false)
 	run = failTerminalConversation(t, store, run, now, "provider_rate_limited")
 	if err := projectFailedConversationReply(t.Context(), store, run); err != nil {

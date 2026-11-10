@@ -13,8 +13,7 @@ import (
 
 func TestGatewayAuthorityPinsRejectForeignProviderInstallation(t *testing.T) {
 	ctx := context.Background()
-	memory, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	store := &ingressRunEventStore{MemoryStore: memory}
+	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	service := NewExternalConversationTransportService(store, catalog)
 	gateway := ExternalConversationIngressGateway{
 		Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider,
@@ -36,8 +35,8 @@ func TestGatewayAuthorityPinsRejectForeignProviderInstallation(t *testing.T) {
 		}}
 		result, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway,
 			ExternalConversationPublicIngressRequest{Route: "route", Method: http.MethodPost, Body: []byte(`{}`)}, host)
-		if err != nil || len(result.Received) != 0 || len(store.events) != 0 {
-			t.Fatalf("foreign provider identity was accepted: %#v, %v, observations=%#v", result, err, store.events)
+		if err != nil || len(result.Received) != 0 {
+			t.Fatalf("foreign provider identity was accepted: %#v, %v", result, err)
 		}
 	}
 }
@@ -95,10 +94,9 @@ func TestGatewayAuthorityDerivesOnlyUniqueReviewedExactBinding(t *testing.T) {
 	}
 }
 
-func TestLegacyUnpinnedGatewayDoesNotPublishUnboundObservation(t *testing.T) {
+func TestLegacyUnpinnedGatewayDoesNotAcceptUnboundEvent(t *testing.T) {
 	ctx := context.Background()
-	memory, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	store := &ingressRunEventStore{MemoryStore: memory}
+	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	service := NewExternalConversationTransportService(store, catalog)
 	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK,
 		Events: []ExternalConversationGatewayEvent{{InstallationID: "installation", Address: "unbound-channel", Event: NormalizedExternalConversationEvent{
@@ -109,8 +107,8 @@ func TestLegacyUnpinnedGatewayDoesNotPublishUnboundObservation(t *testing.T) {
 	gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
 	result, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway,
 		ExternalConversationPublicIngressRequest{Route: "route", Method: http.MethodPost, Body: []byte(`{}`)}, host)
-	if err != nil || len(result.Received) != 0 || len(store.events) != 0 {
-		t.Fatalf("legacy gateway inferred installation from provider body: %#v, %v, %#v", result, err, store.events)
+	if err != nil || len(result.Received) != 0 {
+		t.Fatalf("legacy gateway inferred installation from provider body: %#v, %v", result, err)
 	}
 }
 

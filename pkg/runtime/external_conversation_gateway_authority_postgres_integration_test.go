@@ -4,11 +4,31 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testing.T) {
-	store, replica := newPostgresRunEventWaitTestStores(t)
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	schema := "gateway_authority_" + uuid.NewString()[:8]
+	store, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+		_ = store.Close()
+	})
+	replica, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = replica.Close() })
 	ctx := t.Context()
 	memory, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	legacy := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(memory), CreateExternalConversationGatewayRequest{

@@ -395,7 +395,7 @@ func TestSessionEntryIDDeterministicPerSession(t *testing.T) {
 	}
 	if ToolEntryKey("s", "c") != "tool:s:c" || ChannelMessageSourceKey("m") != "message:m" || InterventionSourceKey("i") != "intervention:i" ||
 		RunContextSourceKey("r") != "run-context:r" || GoalSourceKey("r") != "goal:r" || FailureNoteSourceKey("r", "s") != "failure-note:r:s" ||
-		FinalRejectionEntryKey("s") != "final-rejection:s" || EventWaitSourceKey("r", "x") != "event-wait:r:x" || TaskPromotedSourceKey("r") != "task-promoted:r" {
+		FinalRejectionEntryKey("s") != "final-rejection:s" || TaskPromotedSourceKey("r") != "task-promoted:r" {
 		t.Fatal("logical keys differ from SPEC §2.1")
 	}
 	if ConversationAgentSessionID(testSessionScope, "lane") != ConversationAgentSessionID(testSessionScope, "lane") ||

@@ -50,7 +50,7 @@ func runSkillDependencyActivity(run *AgentRun) *ActivityEvent {
 }
 
 func TestRunSkillDependencyPinsQueuedInvocationBeforeFirstActionAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		catalog, scope, _ := runSkillDependencyFixture(t, store)
 		run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
@@ -122,7 +122,7 @@ func TestRunSkillDependencyPinsQueuedInvocationBeforeFirstActionAcrossStores(t *
 }
 
 func TestRunSkillDependencySurvivesPausedContinuationAndDisabledBindingAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		catalog, scope, binding := runSkillDependencyFixture(t, store)
 		run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
@@ -162,7 +162,7 @@ func TestRunSkillDependencySurvivesPausedContinuationAndDisabledBindingAcrossSto
 func TestRunSkillDependencySerializesNewInvocationAndMaintenanceAcrossStores(t *testing.T) {
 	for _, ordering := range []string{"run_first", "gate_first", "concurrent"} {
 		t.Run(ordering, func(t *testing.T) {
-			eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 				store := fixture.store.(KernelStore)
 				_, scope, _ := runSkillDependencyFixture(t, store)
 				var run *AgentRun
@@ -253,7 +253,7 @@ func TestRunSkillDependencySQLiteProjectionMigrationAndMetadataQueries(t *testin
 func TestRunSkillDependencySerializesNewInvocationAndBindingUpgradeAcrossStores(t *testing.T) {
 	for _, ordering := range []string{"run_first", "upgrade_first", "concurrent"} {
 		t.Run(ordering, func(t *testing.T) {
-			eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 				store := fixture.store.(KernelStore)
 				catalog, scope, _ := runSkillDependencyFixture(t, store)
 				service := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
@@ -298,7 +298,7 @@ func TestRunSkillDependencySerializesNewInvocationAndBindingUpgradeAcrossStores(
 }
 
 func TestRunSkillDependencyRejectsNewPinUpdateDuringMaintenanceAtomicallyAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		_, scope, _ := runSkillDependencyFixture(t, store)
 		request := runSkillDependencyRequest(scope)
@@ -331,7 +331,7 @@ func TestRunSkillDependencyRejectsNewPinUpdateDuringMaintenanceAtomicallyAcrossS
 }
 
 func TestRunSkillDependencyRetainsTeamGrantWithoutAssumingAssignedMemberOwnsBindingAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		_, scope, _ := runSkillDependencyFixture(t, store)
 		request := runSkillDependencyRequest(scope)

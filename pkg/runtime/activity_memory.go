@@ -70,15 +70,10 @@ func (s *MemoryStore) CreateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	if err := s.validateMemoryRunSkillDependenciesLocked(run); err != nil {
 		return nil, err
 	}
-	wait, err := s.prepareMemoryRunEventWaitLocked(run)
-	if err != nil {
-		return nil, err
-	}
 	if err := s.allocateMemoryObjectiveRunLocked(run); err != nil {
 		return nil, err
 	}
 	s.saveMemoryAgentRunLocked(key, run)
-	s.syncMemoryRunEventWaitLocked(run, wait)
 	persisted := appendMemoryActivityLocked(s, event)
 	return cloneActivityEvent(persisted), nil
 }
@@ -109,13 +104,8 @@ func (s *MemoryStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	if err := s.validateMemoryRunSkillDependenciesLocked(run); err != nil {
 		return nil, err
 	}
-	wait, err := s.prepareMemoryRunEventWaitLocked(run)
-	if err != nil {
-		return nil, err
-	}
 	persisted := appendMemoryActivityLocked(s, event)
 	s.saveMemoryAgentRunLocked(key, run)
-	s.syncMemoryRunEventWaitLocked(run, wait)
 	return cloneActivityEvent(persisted), nil
 }
 

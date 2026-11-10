@@ -81,9 +81,9 @@ func assertTerminalConversationFailure(t *testing.T, store terminalReportingCont
 }
 
 func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		run, _, trigger := terminalFailureConversationFixture(t, store, now, true)
 		run = failTerminalConversation(t, store, run, now, "cap_lookup_not_available")
 		intent, err := store.GetRunTerminalReport(t.Context(), run.Scope, run.ID, run.Status)
@@ -121,9 +121,9 @@ func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *te
 }
 
 func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		first, _, trigger := terminalFailureConversationFixture(t, store, now, false)
 		first = failTerminalConversation(t, store, first, now, "provider_rate_limited")
 		claims, err := store.ClaimRunTerminalReports(t.Context(), RunTerminalReportingClaim{WorkerID: "old-delivery", Now: now, LeaseDuration: time.Minute, Limit: 1})
@@ -166,8 +166,8 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 
 func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t *testing.T) {
 	store := NewMemoryStore()
-	run, conversation, trigger := terminalFailureConversationFixture(t, store, eventWaitContractEpoch, false)
-	run = failTerminalConversation(t, store, run, eventWaitContractEpoch, "provider_invalid_response")
+	run, conversation, trigger := terminalFailureConversationFixture(t, store, runStoreContractEpoch, false)
+	run = failTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	for _, mutate := range []func(*AgentRun){
 		func(r *AgentRun) { r.Owner.ID = "other-agent" },
 		func(r *AgentRun) { r.AssignedAgentID = "other-agent" },
@@ -237,7 +237,7 @@ func TestTerminalFailureReplyDistinguishesSafeValidationAndBudgetCauses(t *testi
 }
 
 func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		for _, startsThread := range []bool{false, true} {
 			scope := Scope{Kind: "tenant", ID: "canonical-scheduled-failure-" + uuid.NewString()}
@@ -278,8 +278,8 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 
 func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *testing.T) {
 	store := NewMemoryStore()
-	run, conversation, _ := terminalFailureConversationFixture(t, store, eventWaitContractEpoch, false)
-	run = failTerminalConversation(t, store, run, eventWaitContractEpoch, "provider_invalid_response")
+	run, conversation, _ := terminalFailureConversationFixture(t, store, runStoreContractEpoch, false)
+	run = failTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -306,9 +306,9 @@ func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *
 }
 
 func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		run, _, trigger := terminalFailureConversationFixture(t, store, now, false)
 		run = failTerminalConversation(t, store, run, now, "gateway_credits_exhausted")
 		if run.CreditError == nil || run.CreditError.Code != RunCreditErrorWorkspaceCreditsExhausted {
@@ -333,8 +333,8 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 
 func TestFailedConversationReplySkipsServiceWakeWithoutRetry(t *testing.T) {
 	store := NewMemoryStore()
-	run, conversation, _ := terminalFailureConversationFixture(t, store, eventWaitContractEpoch, false)
-	run = failTerminalConversation(t, store, run, eventWaitContractEpoch, "provider_invalid_response")
+	run, conversation, _ := terminalFailureConversationFixture(t, store, runStoreContractEpoch, false)
+	run = failTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)

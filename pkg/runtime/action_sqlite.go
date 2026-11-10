@@ -783,9 +783,6 @@ func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution Acti
 		if affected, _ := result.RowsAffected(); affected != 1 {
 			return nil, ErrRevisionConflict
 		}
-		if err := syncSQLiteRunEventWaitConn(ctx, conn, execution.Run); err != nil {
-			return nil, err
-		}
 	}
 	event := cloneActivityEvent(execution.Event)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
