@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 // The conversation seams of the RunLoop (run-loop section 05 §7, §13 on
@@ -102,7 +100,6 @@ type conversationLoop struct {
 	runner       *ConversationRunTurnRunner
 	conversation *Conversation
 	trigger      *ChannelMessage
-	operations   []HostedRunbookOperation
 	catchUp      *conversationCatchUp
 	sessions     AgentSessionStore
 	actions      conversationLoopActions
@@ -153,18 +150,10 @@ func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, ru
 	if err != nil {
 		return err
 	}
-	active, err := r.activeConversationRuns(ctx, conversation, trigger)
-	if err != nil {
-		return err
-	}
-	if len(active) == 0 {
-		binding.ModelActions = withoutRunManagementActions(binding.ModelActions)
-	}
 	loop := &conversationLoop{
 		runner: r, conversation: conversation, trigger: trigger,
-		operations: cloneHostedRunbookOperations(binding.RunbookOperations),
-		catchUp:    &conversationCatchUp{conversations: r.conversations, runs: r.portfolio, attachments: r.conversationAttachmentReader()},
-		sessions:   stores.Sessions, actions: stores.Actions,
+		catchUp:  &conversationCatchUp{conversations: r.conversations, runs: r.portfolio, attachments: r.conversationAttachmentReader()},
+		sessions: stores.Sessions, actions: stores.Actions,
 	}
 	binding.Session = session
 	binding.Authority = authority.apply(binding.Authority)
@@ -228,20 +217,6 @@ func (r *ConversationRunTurnRunner) conversationAttachmentReader() *conversation
 		return nil
 	}
 	return &conversationAttachmentReader{artifacts: r.artifacts, content: r.config.AttachmentContent}
-}
-
-// withoutRunManagementActions drops the run-control actions: a chat with no
-// active work has nothing they could act on. With active work the catalog
-// schema is kept as it is (no per-step enum) and checkToolCall refuses a run
-// id that is not active work.
-func withoutRunManagementActions(actions []capability.ModelAction) []capability.ModelAction {
-	kept := make([]capability.ModelAction, 0, len(actions))
-	for _, action := range actions {
-		if action.SkillID != RunManagementSkillID {
-			kept = append(kept, action)
-		}
-	}
-	return kept
 }
 
 // BeforeStep is the conversation preparer (§13 StartRun / BeforeStep).
@@ -432,7 +407,7 @@ func (l *conversationLoop) runContextNote(ctx context.Context, in StepInput, vie
 	reverseChannelMessages(recent)
 	note, err := l.runner.conversationRunContextNote(ctx, conversationContextInput{
 		Run: in.Run, Session: in.Session, Sessions: l.sessions, Conversation: l.conversation, Trigger: l.trigger,
-		Viewer: viewer, Recent: recent, CatchUp: catchUp, Operations: l.operations, Step: in.Step.Sequence,
+		Viewer: viewer, Recent: recent, CatchUp: catchUp, Step: in.Step.Sequence,
 	})
 	if err != nil {
 		return nil, err

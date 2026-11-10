@@ -52,6 +52,9 @@ type AgentCreated struct {
 	RunID         string
 	BillingUserID string
 	Updated       bool
+	// InstallKey is the idempotency key of a shared-agent install. Such an
+	// Agent has no RunID; the host keys run-less work (its portrait) on it.
+	InstallKey string
 }
 
 // AgentBuilderCutoverHost converts the retired change-set drafts into

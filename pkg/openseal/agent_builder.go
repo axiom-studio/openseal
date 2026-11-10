@@ -79,15 +79,20 @@ func (e *Engine) configureAgentBuilderActions() error {
 		return err
 	}
 	e.actionValidators = append(e.actionValidators, validator)
+	installer, err := runtime.NewAgentInstaller(e.store, e.agents, e.teams, e.skills, e, e.agentBuilderHost)
+	if err != nil {
+		return err
+	}
+	e.agentInstaller = installer
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewAgentBuilderActionDispatcher(e.store, e.agents, e.teams, e.skills, e, e.agentBuilderHost, e.actionPoolSpecs[index].dispatcher)
+		dispatcher, dispatchErr := runtime.NewAgentBuilderActionDispatcher(installer, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewAgentBuilderActionDispatcher(e.store, e.agents, e.teams, e.skills, e, e.agentBuilderHost, e.actionSupervisorSpecs[index].dispatcher)
+		dispatcher, dispatchErr := runtime.NewAgentBuilderActionDispatcher(installer, e.actionSupervisorSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}

@@ -133,7 +133,7 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 	}
 	base.run = run
 	provision := &agentBuilderTestProvisioner{agents: base.agents, spaces: base.spaces, conversations: NewConversationService(store)}
-	dispatcher, err := NewAgentBuilderActionDispatcher(store, base.agents, base.teams, base.catalog, provision, recorder, nil)
+	dispatcher, err := newTestAgentBuilderDispatcher(store, base.agents, base.teams, base.catalog, provision, recorder, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +627,7 @@ func TestAgentBuilderDispatcherPassesOtherActionsOn(t *testing.T) {
 	fallback := ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"fallback": true}, nil
 	})
-	dispatcher, err := NewAgentBuilderActionDispatcher(f.store, f.agents, f.teams, f.catalog, f.provision, nil, fallback)
+	dispatcher, err := newTestAgentBuilderDispatcher(f.store, f.agents, f.teams, f.catalog, f.provision, nil, fallback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,4 +775,16 @@ func TestAgentBuilderUpdateAgentRaisesAuthorityForAddedSkills(t *testing.T) {
 	if again, _ := f.agents.ListActivations(ctx, f.reference(), "researcher"); len(again) != 2 {
 		t.Fatalf("replay activated again: %#v", again)
 	}
+}
+
+// newTestAgentBuilderDispatcher builds a dispatcher over its own installer.
+func newTestAgentBuilderDispatcher(
+	store KernelStore, agents *kernelagent.Registry, teams *kernelteam.Registry, catalog *skill.Catalog,
+	provision AgentProvisioner, host AgentBuilderHost, fallback ActionDispatcher,
+) (*AgentBuilderActionDispatcher, error) {
+	installer, err := NewAgentInstaller(store, agents, teams, catalog, provision, host)
+	if err != nil {
+		return nil, err
+	}
+	return NewAgentBuilderActionDispatcher(installer, fallback)
 }

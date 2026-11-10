@@ -19,10 +19,18 @@ import (
 // It fills the whole request except MaxOutputTokens, which is the step's
 // output reservation and is set by the ModelStepProducer after it planned the
 // step budget (0 here means no Run limit).
+//
+// Nothing the catalog decides is in System or in a harness or core tool: the
+// listing, the Agents and operations the control tools accept and the
+// catalog-dependent guidance are in the capabilities note
+// (capability_note.go), and loaded tools are frozen on their load entries
+// (capability_surface.go). So System and the harness and core tools stay
+// byte-identical across the steps and Runs of a session while the claim's
+// authority is unchanged.
 
-// loopSectionCapabilities carries CapabilitySet.PromptPrefix, the stable
-// catalog listing of a deferred capability set. It follows the kernel
-// sections of loopKernelSectionOrder and precedes the binding's sections.
+// loopSectionCapabilities carries the static loading instructions of a
+// deferred capability set. It follows the kernel sections of
+// loopKernelSectionOrder and precedes the binding's sections.
 const loopSectionCapabilities = "capabilities"
 
 const loopSectionCapabilitiesTitle = "Capabilities"
@@ -80,11 +88,7 @@ func (p *catalogModelStepPreparer) CapabilitySet(in StepInput) *CapabilitySet {
 			catalog.AgentID = in.Binding.DeploymentID
 		}
 	}
-	var loaded []string
-	if in.Path != nil {
-		loaded = LoadedCapabilityIDs(in.Path.Entries)
-	}
-	return NewCapabilitySet(catalog, loaded, p.config.Capabilities)
+	return NewPathCapabilitySet(catalog, in.Path, p.config.Capabilities)
 }
 
 func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in StepInput) (ModelStepRequest, error) {
@@ -132,25 +136,27 @@ func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in Step
 		return ModelStepRequest{}, err
 	}
 	req.Entries = entries
+	if len(req.Tools) > 0 {
+		req.Tools = applySurfaces(req.Tools, in.Path, req.Entries)
+	}
 	return req, nil
 }
 
-// tools is the SPEC §5.1 list: harness (control tools in their fixed order,
-// capability search/load, host tools in HostToolSpecs order), core (governed
-// actions of the pinned set, sorted by tool name), loaded (in load order).
+// tools is the harness and core part of the SPEC §5.1 list: harness
+// (control tools in their fixed order, capability search/load, pinned host
+// tools in HostToolSpecs order), then core (governed actions of the pinned
+// set, sorted by tool name). The loaded group comes from the session path
+// (applySurfaces): each tool exactly as its load froze it.
 func (p *catalogModelStepPreparer) tools(binding *TurnRunnerBinding, set *CapabilitySet) []ModelStepTool {
-	var harness, core, loaded []ModelStepTool
+	var harness, core []ModelStepTool
 	for _, spec := range p.controls.specs(binding.Authority) {
 		harness = append(harness, spec.ModelStepTool())
 	}
 	if !binding.Authority.offersCapabilities() {
 		return harness
 	}
-	if set.Deferred() {
-		if set.Searching() {
-			harness = append(harness, SearchCapabilitiesSpec())
-		}
-		harness = append(harness, LoadCapabilitiesSpec(set.Searching()))
+	if set.Offered() {
+		harness = append(harness, SearchCapabilitiesSpec(), LoadCapabilitiesSpec())
 	}
 	names := LoopGovernedToolNames(binding.ModelActions)
 	visibleActions, _, visibleHost, _ := set.Visible()
@@ -158,40 +164,18 @@ func (p *catalogModelStepPreparer) tools(binding *TurnRunnerBinding, set *Capabi
 	for _, spec := range visibleHost {
 		visibleHostOps[spec.Operation] = true
 	}
-	pinned := func(id string) bool { return !set.Deferred() || set.Pinned(id) }
 	for _, spec := range p.config.HostTools {
-		if visibleHostOps[spec.Operation] && pinned(capabilityWorkspacePrefix+spec.Operation) {
+		if visibleHostOps[spec.Operation] && set.Pinned(capabilityWorkspacePrefix+spec.Operation) {
 			harness = append(harness, hostModelStepTool(spec, ModelStepToolHarness))
 		}
 	}
-	actionsByID := map[string]capability.ModelAction{}
 	for _, action := range visibleActions {
-		actionsByID[capabilityActionPrefix+action.Name] = action
-	}
-	hostByID := map[string]HostToolSpec{}
-	for _, spec := range visibleHost {
-		hostByID[capabilityWorkspacePrefix+spec.Operation] = spec
-	}
-	for _, id := range set.IDs() {
-		if action, ok := actionsByID[id]; ok {
-			group := ModelStepToolLoaded
-			if pinned(id) {
-				group = ModelStepToolCore
-			}
-			tool := governedModelStepTool(action, names[action.Name], group)
-			if group == ModelStepToolCore {
-				core = append(core, tool)
-			} else {
-				loaded = append(loaded, tool)
-			}
-			continue
-		}
-		if spec, ok := hostByID[id]; ok && !pinned(id) {
-			loaded = append(loaded, hostModelStepTool(spec, ModelStepToolLoaded))
+		if set.Pinned(capabilityActionPrefix + action.Name) {
+			core = append(core, governedModelStepTool(action, names[action.Name], ModelStepToolCore))
 		}
 	}
 	sort.SliceStable(core, func(i, j int) bool { return core[i].Name < core[j].Name })
-	all := append(append(harness, core...), loaded...)
+	all := append(harness, core...)
 	// Names are unique by construction; a clash (a host tool shadowing a
 	// kernel tool) keeps the first, and the later tool answers is_error.
 	seen := map[string]bool{}
@@ -223,12 +207,9 @@ func governedModelStepTool(action capability.ModelAction, name string, group Mod
 
 // system is SPEC §6: persona then the binding's instructions; the Skill
 // prompts visible from the start; the kernel sections in their fixed order,
-// the capability listing, then the binding's sections.
+// the static loading instructions, then the binding's sections.
 func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *CapabilitySet, tools []ModelStepTool) ModelStepSystem {
-	system := ModelStepSystem{
-		ApprovalMode:               binding.Authority.ApprovalMode,
-		CanAskConversationQuestion: binding.Authority.CanAskUser,
-	}
+	var system ModelStepSystem
 	for _, text := range append(append([]string(nil), p.config.AgentInstructions...), binding.Prompt.AgentInstructions...) {
 		if text = strings.TrimSpace(text); text != "" {
 			system.AgentInstructions = append(system.AgentInstructions, text)
@@ -238,7 +219,7 @@ func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *Capab
 	for _, prompt := range prompts {
 		// Loaded instructions arrive in the load result, so the system
 		// prefix stays stable when the model loads.
-		if binding.Authority.offersCapabilities() && (!set.Deferred() || set.Pinned(capabilityPromptPrefix+prompt.Reference)) {
+		if binding.Authority.offersCapabilities() && set.Pinned(capabilityPromptPrefix+prompt.Reference) {
 			system.SkillPrompts = append(system.SkillPrompts, prompt)
 		}
 	}
@@ -248,9 +229,6 @@ func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *Capab
 		offered[tool.Name] = true
 	}
 	texts := map[string]string{}
-	if p.boundSkill(binding) {
-		texts[loopSectionSkillAccess] = loopSkillAccessText
-	}
 	if offered[string(ControlToolReportProgress)] {
 		texts[loopSectionProgressRules] = loopProgressRulesText
 		if binding.Authority.TaskWork {
@@ -269,15 +247,6 @@ func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *Capab
 	if p.config.ImageInput {
 		texts[loopSectionMedia] = loopMediaText
 	}
-	// Write tools may become offered by a load, so the condition reads the
-	// authorized catalog: the section is present from the session's first
-	// step and a load never changes the system text.
-	for _, action := range binding.ModelActions {
-		if binding.Authority.offersCapabilities() && (GovernedToolReviewed(action) || GovernedToolNeedsReviewSummary(action)) {
-			texts[loopSectionReviewSummaries] = loopReviewSummariesText
-			break
-		}
-	}
 	if text := strings.TrimSpace(p.config.RoutineScript); text != "" {
 		texts[loopSectionRoutineScript] = text
 	}
@@ -286,8 +255,8 @@ func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *Capab
 			system.Sections = append(system.Sections, ModelStepSystemSection{ID: id, Title: loopKernelSectionTitles[id], Text: text})
 		}
 	}
-	if prefix := strings.TrimSpace(set.PromptPrefix()); prefix != "" && binding.Authority.offersCapabilities() {
-		system.Sections = append(system.Sections, ModelStepSystemSection{ID: loopSectionCapabilities, Title: loopSectionCapabilitiesTitle, Text: prefix})
+	if binding.Authority.offersCapabilities() && set.Offered() {
+		system.Sections = append(system.Sections, ModelStepSystemSection{ID: loopSectionCapabilities, Title: loopSectionCapabilitiesTitle, Text: capabilityLoadingText})
 	}
 	system.Sections = append(system.Sections, binding.Prompt.Sections...)
 	return system

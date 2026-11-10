@@ -39,30 +39,25 @@ type operationHandler struct{}
 
 func init() { registerControlHandler(ControlToolRunOperation, operationHandler{}) }
 
+// spec carries no operation list: the operations and their input schemas are
+// in the capabilities note, and the handler authorizes the entrypoint.
 func (operationHandler) spec(a ControlAuthority) ControlToolSpec {
-	entrypoints := make([]interface{}, 0, len(a.Operations))
-	var description strings.Builder
-	description.WriteString("Start one of your callable operations as a separate Run; its result comes back to you as this tool's result. Operations:")
-	for _, op := range a.Operations {
-		entrypoints = append(entrypoints, op.Entrypoint)
-		description.WriteString("\n" + operationDescriptionLine(op))
-	}
 	return ControlToolSpec{
-		Description: description.String(),
+		Description: "Start one of your callable operations as a separate Run; its result comes back to you as this tool's result. The operations and their input schemas are listed in the capabilities note.",
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"entrypoint", "arguments"},
 			"properties": map[string]interface{}{
-				"entrypoint": map[string]interface{}{"type": "string", "enum": entrypoints},
+				"entrypoint": map[string]interface{}{"type": "string", "minLength": 1, "description": "An operation entrypoint from the capabilities note."},
 				"arguments": map[string]interface{}{
 					"type":        "object",
-					"description": "Must match the operation's input schema listed in this tool's description.",
+					"description": "Must match the operation's input schema listed in the capabilities note.",
 				},
 			},
 		},
 	}
 }
 
-// operationDescriptionLine is one operation's block of the tool description.
+// operationDescriptionLine is one operation's line of the capabilities note.
 func operationDescriptionLine(op HostedRunbookOperation) string {
 	schema := []byte(`{"type":"object"}`)
 	if len(op.InputSchema) > 0 {

@@ -1,11 +1,12 @@
 package skill
 
-// Skills whose bindings always stand for a connection. pkg/mcp and the
-// runtime own these IDs; they are repeated here because skill cannot import
+// Skills whose bindings always stand for a connection. pkg/mcp, pkg/computer
+// and the runtime own these IDs; they are repeated here because skill cannot import
 // either.
 const (
 	mcpConnectionSkillID        = "openseal.mcp"
 	externalConversationSkillID = "openseal.external-conversation"
+	computerSkillID             = "openseal.computer"
 )
 
 // BindingHoldsConnection reports whether b carries a connection: credentials,
@@ -18,7 +19,8 @@ func BindingHoldsConnection(b *Binding) bool {
 		return false
 	}
 	return len(b.Credentials) > 0 || len(b.Config) > 0 || len(b.EnabledConversationAdapters) > 0 ||
-		len(b.EnabledCallbackAdapters) > 0 || b.SkillID == mcpConnectionSkillID || b.SkillID == externalConversationSkillID
+		len(b.EnabledCallbackAdapters) > 0 || b.SkillID == mcpConnectionSkillID || b.SkillID == externalConversationSkillID ||
+		b.SkillID == computerSkillID
 }
 
 // PersonCredentialReferenceID is the reference ID of a per_person slot: the

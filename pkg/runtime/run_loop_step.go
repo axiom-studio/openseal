@@ -1068,6 +1068,8 @@ func (d *drive) finishStep(ctx context.Context, st *stepState, req FinishAgentTu
 	}
 	req.Usage.InputTokens += st.compaction.InputTokens
 	req.Usage.OutputTokens += st.compaction.OutputTokens
+	req.Usage.CacheReadTokens += st.compaction.CacheReadTokens
+	req.Usage.CacheWriteTokens += st.compaction.CacheWriteTokens
 	req.Usage.Cost += st.compaction.Cost
 	req.Usage.NativeOperations += st.hostCalls
 	req.WorkerID = d.workerID
@@ -1087,6 +1089,8 @@ func (d *drive) finishStep(ctx context.Context, st *stepState, req FinishAgentTu
 func (st *stepState) addCompaction(u ModelStepUsage) {
 	st.compaction.InputTokens += int(u.InputTokens)
 	st.compaction.OutputTokens += int(u.OutputTokens)
+	st.compaction.CacheReadTokens += int(u.CacheReadTokens)
+	st.compaction.CacheWriteTokens += int(u.CacheWriteTokens)
 	if u.Cost > 0 {
 		st.compaction.Cost += u.Cost
 	}

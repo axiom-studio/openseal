@@ -508,6 +508,36 @@ func TestOtherPersonsMessageStartsOwnRunAndInterleavesAfterApprovalPark(t *testi
 	})
 }
 
+// TestRunActionsPresentWithoutActiveWork: a chat with no active work keeps
+// the run-control actions (the tool list does not change when work starts or
+// ends); a call names no active work, so it is refused.
+func TestRunActionsPresentWithoutActiveWork(t *testing.T) {
+	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
+		definition := RunManagementSkill()
+		pause := capability.ModelAction{
+			Name: "openseal_runs__pause", SkillID: RunManagementSkillID, Version: RunManagementSkillVersion,
+			Action: RunActionPause, InputSchema: definition.Actions[RunActionPause].InputSchema,
+		}
+		other := capability.ModelAction{Name: "reports__export", SkillID: "reports", Action: "export"}
+		quiet := f.post("quiet", "user-1", "Hello")
+		idle := f.startRun(quiet)
+		binding := f.bind(idle, &chatLoopProducer{}, pause, other)
+		if len(binding.ModelActions) != 2 || binding.ModelActions[0].Name != pause.Name {
+			t.Fatalf("idle chat actions = %#v", binding.ModelActions)
+		}
+		refusal, err := binding.ToolCheck(f.ctx, StepToolsInput{Run: idle, Binding: binding}, &SessionEntry{
+			Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: "call",
+			Tool: &ToolEntry{Name: pause.Name, Arguments: json.RawMessage(`{"runId":"nope"}`)},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(refusal, "is not active work in this conversation") {
+			t.Fatalf("idle refusal = %q", refusal)
+		}
+	})
+}
+
 func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 		definition := RunManagementSkill()
@@ -518,14 +548,6 @@ func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 		resume := pause
 		resume.Name, resume.Action, resume.InputSchema = "openseal_runs__resume", RunActionResume, definition.Actions[RunActionResume].InputSchema
 		other := capability.ModelAction{Name: "reports__export", SkillID: "reports", Action: "export"}
-
-		// No active work: the run-control actions are not offered at all.
-		quiet := f.post("quiet", "user-1", "Hello")
-		idle := f.startRun(quiet)
-		if binding := f.bind(idle, &chatLoopProducer{}, pause, resume, other); len(binding.ModelActions) != 1 || binding.ModelActions[0].Name != other.Name {
-			t.Fatalf("idle chat actions = %#v", binding.ModelActions)
-		}
-		f.drive(idle, f.bind(idle, &chatLoopProducer{}))
 
 		trigger := f.post("pause", "user-1", "Pause the export.")
 		run := f.startRun(trigger)

@@ -76,7 +76,7 @@ func newOperationCall(t *testing.T, store forkTestStore, setup func(scope Scope,
 	})
 	return &operationCall{
 		t: t, ctx: ctx, store: store, sessions: store, scope: scope, run: claimed, session: opened.Session,
-		exec: &ControlExecutor{Portfolio: store, Sessions: store, Forks: forks, Reporting: reporting},
+		exec:      &ControlExecutor{Portfolio: store, Sessions: store, Forks: forks, Reporting: reporting},
 		authority: ControlAuthority{Operations: []HostedRunbookOperation{operationTestEngage}},
 	}
 }
@@ -427,9 +427,10 @@ func TestRunOperationResumeWhileChildRunsReparks(t *testing.T) {
 	})
 }
 
-func TestRunOperationSpecListsOperationsInOrder(t *testing.T) {
+func TestRunOperationsListedInCapabilitiesNoteInOrder(t *testing.T) {
 	second := HostedRunbookOperation{Entrypoint: "report", Name: "Weekly report", Description: "Summarize the week"}
-	specs := ControlToolSpecs(ControlAuthority{Operations: []HostedRunbookOperation{operationTestEngage, second}})
+	authority := ControlAuthority{Operations: []HostedRunbookOperation{operationTestEngage, second}}
+	specs := ControlToolSpecs(authority)
 	var spec *ControlToolSpec
 	for i := range specs {
 		if specs[i].Name == ControlToolRunOperation {
@@ -441,12 +442,12 @@ func TestRunOperationSpecListsOperationsInOrder(t *testing.T) {
 	}
 	engage := `- engage-now — Engage accounts: Send the reviewed engagement sequence. Input schema: {"additionalProperties":false,"properties":{"account":{"type":"string"}},"required":["account"],"type":"object"}`
 	report := `- report — Weekly report: Summarize the week. Input schema: {"type":"object"}`
-	if !strings.Contains(spec.Description, engage+"\n"+report) {
-		t.Fatalf("description = %s", spec.Description)
+	if listed := capabilityNoteLines(controlTargetItems(authority)); !strings.Contains(listed, engage+"\n"+report) {
+		t.Fatalf("note lines = %s", listed)
 	}
-	enum := spec.InputSchema["properties"].(map[string]interface{})["entrypoint"].(map[string]interface{})["enum"].([]interface{})
-	if len(enum) != 2 || enum[0] != "engage-now" || enum[1] != "report" {
-		t.Fatalf("enum = %v", enum)
+	entrypoint := spec.InputSchema["properties"].(map[string]interface{})["entrypoint"].(map[string]interface{})
+	if _, enum := entrypoint["enum"]; enum || strings.Contains(spec.Description, "engage-now") {
+		t.Fatalf("run_operation lists its operations: %v %s", entrypoint, spec.Description)
 	}
 	for _, s := range ControlToolSpecs(ControlAuthority{}) {
 		if s.Name == ControlToolRunOperation {

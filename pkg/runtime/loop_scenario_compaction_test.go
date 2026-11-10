@@ -387,7 +387,51 @@ func TestLoopLengthRejectionCompactsAndRetriesOnce(t *testing.T) {
 		if n := len(f.steps(run.ID)); n != 4 {
 			t.Fatalf("step rows = %d, want 4", n)
 		}
+		requireCapabilityNotesThroughProducer(t, f, run.ID, requests, compaction)
 	})
+}
+
+// requireCapabilityNotesThroughProducer checks the capabilities note the real
+// ModelStepProducer writes: one full note, the last entry of the first
+// request; none on later steps; one full note again after the compaction
+// summarized the first, the last entry of the retry; never a duplicate.
+func requireCapabilityNotesThroughProducer(t *testing.T, f *loopFixture, runID string, requests []ModelStepRequest, compaction *SessionEntry) {
+	t.Helper()
+	var notes []*SessionEntry
+	for _, entry := range f.entries(runID) {
+		if entry.Type == SessionEntryNote && entry.Note != nil && entry.Note.Kind == NoteCapabilities {
+			notes = append(notes, entry)
+		}
+	}
+	if len(notes) != 2 {
+		t.Fatalf("capabilities notes = %d, want 2 (first step and after the compaction)", len(notes))
+	}
+	for _, note := range notes {
+		if !strings.HasPrefix(note.Note.Text, "<capabilities>") || !strings.Contains(note.Note.Text, "action:") {
+			t.Fatalf("note %s is not a full listing: %q", note.ID, note.Note.Text)
+		}
+	}
+	if notes[0].Sequence > compaction.Sequence || notes[1].Sequence < compaction.Sequence {
+		t.Fatalf("notes at %d and %d around compaction %d", notes[0].Sequence, notes[1].Sequence, compaction.Sequence)
+	}
+	last := func(req ModelStepRequest) string { return req.Entries[len(req.Entries)-1].ID }
+	if got := last(requests[0]); got != notes[0].ID {
+		t.Fatalf("first request ends at %s, want the note %s", got, notes[0].ID)
+	}
+	retry := requests[len(requests)-1]
+	if got := last(retry); got != notes[1].ID {
+		t.Fatalf("retry ends at %s, want the note %s", got, notes[1].ID)
+	}
+	for _, req := range requests[1 : len(requests)-1] {
+		if req.Purpose != ModelStepPurposeStep {
+			continue
+		}
+		for _, view := range req.Entries {
+			if view.Note != nil && view.Note.Kind == string(NoteCapabilities) && view.ID != notes[0].ID {
+				t.Fatalf("step %s sees an extra capabilities note %s", req.StepID, view.ID)
+			}
+		}
+	}
 }
 
 // TestLoopSecondLengthRejectionFailsVisibly: the retry after the overflow

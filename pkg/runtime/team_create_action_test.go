@@ -66,7 +66,7 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 		}
 	}
 	provision := &teamCreateTestProvisioner{agentBuilderTestProvisioner: base.provision, teams: base.teams}
-	dispatcher, err := NewAgentBuilderActionDispatcher(base.store, base.agents, base.teams, base.catalog, provision, base.recorder, nil)
+	dispatcher, err := newTestAgentBuilderDispatcher(base.store, base.agents, base.teams, base.catalog, provision, base.recorder, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

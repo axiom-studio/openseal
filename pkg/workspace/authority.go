@@ -16,7 +16,8 @@ type Authority struct {
 	ConversationID string `json:"conversationId"`
 }
 
-// ChatCommandSeconds bounds one command in a chat's sandbox.
+// ChatCommandSeconds bounds one command on any machine: a chat's sandbox
+// or a person's computer.
 const ChatCommandSeconds = 600
 
 // ChatAuthority grants a turn its chat's files.

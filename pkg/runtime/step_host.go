@@ -281,16 +281,6 @@ func effectiveExternalOperationPolicy(sideEffect capability.SideEffect, policy c
 	return capability.ExternalOperationForbidden
 }
 
-func cloneHostedRunbookOperations(values []HostedRunbookOperation) []HostedRunbookOperation {
-	cloned := make([]HostedRunbookOperation, len(values))
-	for index, value := range values {
-		cloned[index] = value
-		cloned[index].InputSchema = cloneMap(value.InputSchema)
-		cloned[index].OutputSchema = cloneMap(value.OutputSchema)
-	}
-	return cloned
-}
-
 func resolveHostedAgentTarget(reference string, eligible []HostedAgentTarget) (string, error) {
 	reference = strings.TrimSpace(reference)
 	for _, target := range eligible {

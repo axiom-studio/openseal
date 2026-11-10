@@ -48,8 +48,13 @@ type TurnAction struct {
 }
 
 type TurnUsage struct {
-	InputTokens        int     `json:"inputTokens,omitempty"`
-	OutputTokens       int     `json:"outputTokens,omitempty"`
+	InputTokens  int `json:"inputTokens,omitempty"`
+	OutputTokens int `json:"outputTokens,omitempty"`
+	// CacheReadTokens and CacheWriteTokens are the prompt-cache part of
+	// InputTokens as the provider reported it: the regression alarm for
+	// prompt-cache stability.
+	CacheReadTokens    int     `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens   int     `json:"cacheWriteTokens,omitempty"`
 	Cost               float64 `json:"cost,omitempty"`
 	DurationMS         int64   `json:"durationMs,omitempty"`
 	ProviderDurationMS int64   `json:"providerDurationMs,omitempty"`
@@ -58,7 +63,7 @@ type TurnUsage struct {
 }
 
 func (u TurnUsage) Validate() error {
-	if u.InputTokens < 0 || u.OutputTokens < 0 || u.DurationMS < 0 || u.ProviderDurationMS < 0 || u.RepairAttempts < 0 || u.NativeOperations < 0 || u.Cost < 0 || math.IsNaN(u.Cost) || math.IsInf(u.Cost, 0) {
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheReadTokens < 0 || u.CacheWriteTokens < 0 || u.DurationMS < 0 || u.ProviderDurationMS < 0 || u.RepairAttempts < 0 || u.NativeOperations < 0 || u.Cost < 0 || math.IsNaN(u.Cost) || math.IsInf(u.Cost, 0) {
 		return errors.New("turn usage cannot be negative, NaN, or infinite")
 	}
 	return nil

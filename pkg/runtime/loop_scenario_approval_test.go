@@ -618,15 +618,16 @@ func TestLoopReproposalAfterClosedApprovalAsksAgain(t *testing.T) {
 }
 
 // TestLoopApprovalModeIsCarriedOnTheStepRequest replaces
-// conversation_approval_mode_test.go:561,591: the step request carries the
-// conversation's mode, and loosening the mode approves the pending approval
-// and resumes the Run.
+// conversation_approval_mode_test.go:561,591: the per-step capabilities note
+// carries the conversation's mode (never the system prompt), and loosening
+// the mode approves the pending approval and resumes the Run, whose next step
+// sees the new mode as an update.
 func TestLoopApprovalModeIsCarriedOnTheStepRequest(t *testing.T) {
 	eachStore(t, "loop_approval_mode", func(t *testing.T, store KernelStore) {
 		f := newApprovalScenario(t, store)
 		conversation, run := f.parkedApproval()
-		if mode := f.model.calls(ModelStepPurposeStep)[0].System.ApprovalMode; mode != DefaultConversationApprovalMode {
-			t.Fatalf("step approval mode = %q, want %q", mode, DefaultConversationApprovalMode)
+		if note := stepRequestNoteText(f.model.calls(ModelStepPurposeStep)[0], NoteCapabilities); !strings.Contains(note, "Approval mode: auto.") {
+			t.Fatalf("capabilities note lacks the approval mode: %q", note)
 		}
 		modes, ok := f.chats.(ConversationApprovalModeKernelStore)
 		if !ok {
@@ -654,10 +655,28 @@ func TestLoopApprovalModeIsCarriedOnTheStepRequest(t *testing.T) {
 		if f.dispatch.count("update_status") != 1 {
 			t.Fatalf("dispatch = %d", f.dispatch.count("update_status"))
 		}
-		if mode := f.lastStepRequest().req.System.ApprovalMode; mode != ConversationApprovalSkip {
-			t.Fatalf("resumed step approval mode = %q", mode)
+		resumed := f.lastStepRequest().req
+		var latest string
+		for _, entry := range resumed.Entries {
+			if entry.Note != nil && entry.Note.Kind == string(NoteCapabilities) {
+				latest = entry.Note.Text
+			}
+		}
+		if !strings.HasPrefix(latest, "<capabilities_update>") || !strings.Contains(latest, "Approval mode: skip.") {
+			t.Fatalf("resumed step's latest capabilities note = %q", latest)
 		}
 	})
+}
+
+// stepRequestNoteText joins the texts of the request's notes of kind.
+func stepRequestNoteText(req ModelStepRequest, kind NoteKind) string {
+	var texts []string
+	for _, entry := range req.Entries {
+		if entry.Note != nil && entry.Note.Kind == string(kind) {
+			texts = append(texts, entry.Note.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 // TestLoopReviewerGuidanceReachesTheModel ports
