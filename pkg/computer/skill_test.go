@@ -30,11 +30,11 @@ func TestSkillDefinitionRegistersWithPolicies(t *testing.T) {
 	if err := catalog.Register(t.Context(), d); err != nil {
 		t.Fatal(err)
 	}
-	if d.ID != "openseal.computer" || d.Version != "1.0.0" || d.Name != "Computers" || d.Icon != "computer" || d.Category != "integrations" ||
-		d.Transport.Kind != "tool" || d.Transport.Endpoint != SkillID || d.BindingTools != nil || len(d.Actions) != len(Actions()) || len(Actions()) != 9 {
+	if d.ID != "openseal.computer" || d.Version != "1.1.0" || d.Name != "Computers" || d.Icon != "computer" || d.Category != "integrations" ||
+		d.Transport.Kind != "tool" || d.Transport.Endpoint != SkillID || d.BindingTools != nil || len(d.Actions) != len(Actions()) || len(Actions()) != 10 {
 		t.Fatalf("definition = %#v", d)
 	}
-	for _, name := range []string{ListComputers, ListDirectory, ReadFile, SearchFiles} {
+	for _, name := range []string{ListComputers, ListDirectory, ReadFile, SearchFiles, Present} {
 		action := d.Actions[name]
 		if !Reads(name) || action.SideEffect != skill.SideEffectRead || action.Risk != skill.RiskLevelRead || action.AlwaysReview() {
 			t.Errorf("%s must be a read", name)
@@ -45,6 +45,10 @@ func TestSkillDefinitionRegistersWithPolicies(t *testing.T) {
 		if Reads(name) || action.SideEffect != skill.SideEffectWrite || action.Risk != skill.RiskLevelWrite || action.Idempotency != skill.IdempotencyRequired || action.AlwaysReview() {
 			t.Errorf("%s must be a write requiring idempotency; review comes from the host policy", name)
 		}
+	}
+	// present sends up to ten large files; the kernel still waits past the host.
+	if timeout := d.Actions[Present].Timeout.Duration(); timeout != 660*time.Second || timeout <= PresentOpTimeout+DeadlineSlack {
+		t.Fatalf("present timeout = %s", timeout)
 	}
 	if d.Actions[RunCommand].Timeout.Duration() != 660*time.Second || !d.Actions[RunCommand].Repeatable {
 		t.Fatalf("run_command = %#v", d.Actions[RunCommand])
@@ -117,6 +121,7 @@ func TestInputsAndOutputsMatchSchemas(t *testing.T) {
 		DeleteFile:    {"path": "~/notes.md"},
 		MoveFile:      {"path": "~/a.md", "destination": "~/b.md"},
 		RunCommand:    {"computer": "Studio Mac", "command": "git status", "workingDirectory": "~/code/app", "timeoutSeconds": 600},
+		Present:       {"computer": "Studio Mac", "paths": []interface{}{"~/Documents/q3.pdf", "/Users/k/deck.pptx"}},
 	}
 	for action, input := range valid {
 		if err := catalog.ValidateDefinitionInput(t.Context(), d.ID, d.Version, source, action, input); err != nil {
@@ -129,6 +134,16 @@ func TestInputsAndOutputsMatchSchemas(t *testing.T) {
 		ReadFile:      {"path": "~/a", "chat": "c2"},
 		WriteFile:     {"path": "~/a"},
 		MoveFile:      {"path": "~/a"},
+		Present:       {"paths": []interface{}{}},
+	}
+	tooMany := make([]interface{}, 11)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("~/%d.pdf", i)
+	}
+	for _, input := range []map[string]interface{}{{"paths": tooMany}, {"paths": []interface{}{"~/a.pdf", "~/a.pdf"}}, {"path": "~/a.pdf"}} {
+		if err := catalog.ValidateDefinitionInput(t.Context(), d.ID, d.Version, source, Present, input); err == nil {
+			t.Errorf("present accepted %#v", input)
+		}
 	}
 	for action, input := range invalid {
 		if err := catalog.ValidateDefinitionInput(t.Context(), d.ID, d.Version, source, action, input); err == nil {
@@ -150,6 +165,7 @@ func TestInputsAndOutputsMatchSchemas(t *testing.T) {
 		DeleteFile:    workspace.ChangeResult{Success: true, ChangedPaths: []string{"/Users/k/a.md"}},
 		MoveFile:      workspace.ChangeResult{Success: true, ChangedPaths: []string{"/Users/k/a.md", "/Users/k/b.md"}},
 		RunCommand:    workspace.CommandResult{ExitStatus: 1, Stderr: "boom", DurationMs: 12},
+		Present:       map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "file-1", "version": 1, "path": "computers/studio-mac/q3.pdf"}}},
 	}
 	binding := &skill.Binding{ID: "computer"}
 	for action, output := range outputs {

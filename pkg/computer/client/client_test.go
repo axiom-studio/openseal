@@ -35,6 +35,13 @@ type fakeHelloSeal struct {
 	nextPaths  []string
 	// clockAhead sets every answer's Date this far ahead of the real time.
 	clockAhead time.Duration
+	// uploads are the present uploads received, by signed path.
+	uploads map[string]fakeUpload
+}
+
+type fakeUpload struct {
+	body        []byte
+	contentType string
 }
 
 const testComputerID = "c-123"
@@ -118,6 +125,18 @@ func (f *fakeHelloSeal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case bridge.PathDisconnect:
 		w.WriteHeader(http.StatusNoContent)
 	default:
+		if strings.HasPrefix(r.URL.Path, bridge.PathUpload+"/") {
+			// The signature covers the declared digest; it must be the body's.
+			if r.Header.Get(bridge.HeaderContentSHA256) != bridge.BodySHA256(body) || r.ContentLength != int64(len(body)) {
+				f.t.Errorf("upload %s declares %s for a %d-byte body", r.URL.Path, r.Header.Get(bridge.HeaderContentSHA256), len(body))
+			}
+			if f.uploads == nil {
+				f.uploads = map[string]fakeUpload{}
+			}
+			f.uploads[r.URL.Path] = fakeUpload{body: body, contentType: r.Header.Get("Content-Type")}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		http.NotFound(w, r)
 	}
 }

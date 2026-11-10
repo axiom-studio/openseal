@@ -25,7 +25,8 @@ type ServeOptions struct {
 	// Log receives one line per call and per connection problem. Commands,
 	// paths and contents are never logged.
 	Log io.Writer
-	// Execute runs a call; the package Execute when nil.
+	// Execute runs a call; when nil, Present for a present call (sending
+	// its files through the API) and the package Execute for every other.
 	Execute func(context.Context, bridge.Call) bridge.Result
 	// Backoff is the first wait after a failed poll; 1s when zero.
 	Backoff time.Duration
@@ -40,7 +41,12 @@ type ServeOptions struct {
 func Serve(ctx context.Context, api *API, options ServeOptions) error {
 	execute := options.Execute
 	if execute == nil {
-		execute = Execute
+		execute = func(ctx context.Context, call bridge.Call) bridge.Result {
+			if call.Op == bridge.OpPresent {
+				return Present(ctx, call, api)
+			}
+			return Execute(ctx, call)
+		}
 	}
 	log := options.Log
 	if log == nil {

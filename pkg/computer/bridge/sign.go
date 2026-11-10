@@ -35,16 +35,31 @@ var (
 // METHOD "\n" PATH "\n" TIMESTAMP "\n" hex(sha256(body)). path is relative to
 // PathPrefix, such as /next.
 func SigningPayload(method, path, timestamp string, body []byte) []byte {
+	return digestPayload(method, path, timestamp, BodySHA256(body))
+}
+
+func digestPayload(method, path, timestamp, bodySHA256 string) []byte {
+	return []byte(strings.ToUpper(method) + "\n" + path + "\n" + timestamp + "\n" + bodySHA256)
+}
+
+// BodySHA256 is the hex sha256 a signature covers for body.
+func BodySHA256(body []byte) string {
 	sum := sha256.Sum256(body)
-	return []byte(strings.ToUpper(method) + "\n" + path + "\n" + timestamp + "\n" + hex.EncodeToString(sum[:]))
+	return hex.EncodeToString(sum[:])
 }
 
 // Sign sets the signature headers of a request from computerID with key.
 func Sign(header http.Header, key ed25519.PrivateKey, computerID, method, path string, body []byte, now time.Time) {
+	SignDigest(header, key, computerID, method, path, BodySHA256(body), now)
+}
+
+// SignDigest is Sign for a body given by its hex sha256, for an upload
+// streamed from a file rather than held in memory.
+func SignDigest(header http.Header, key ed25519.PrivateKey, computerID, method, path, bodySHA256 string, now time.Time) {
 	timestamp := strconv.FormatInt(now.Unix(), 10)
 	header.Set(HeaderComputer, computerID)
 	header.Set(HeaderTimestamp, timestamp)
-	header.Set(HeaderSignature, base64.StdEncoding.EncodeToString(ed25519.Sign(key, SigningPayload(method, path, timestamp, body))))
+	header.Set(HeaderSignature, base64.StdEncoding.EncodeToString(ed25519.Sign(key, digestPayload(method, path, timestamp, bodySHA256))))
 }
 
 // SignedComputer is the computer a signed request claims to come from; the
@@ -56,6 +71,13 @@ func SignedComputer(header http.Header) string {
 // Verify checks a request's signature against the computer's public key and
 // rejects a timestamp more than MaxClockSkew from now.
 func Verify(header http.Header, key ed25519.PublicKey, method, path string, body []byte, now time.Time) error {
+	return VerifyDigest(header, key, method, path, BodySHA256(body), now, MaxClockSkew)
+}
+
+// VerifyDigest is Verify for a body given by its hex sha256, accepting a
+// timestamp up to maxAge old (and at most MaxClockSkew ahead). An upload
+// checks its signature with it before reading the body (MaxUploadAge).
+func VerifyDigest(header http.Header, key ed25519.PublicKey, method, path, bodySHA256 string, now time.Time, maxAge time.Duration) error {
 	timestamp := strings.TrimSpace(header.Get(HeaderTimestamp))
 	encoded := strings.TrimSpace(header.Get(HeaderSignature))
 	if SignedComputer(header) == "" || timestamp == "" || encoded == "" {
@@ -65,11 +87,11 @@ func Verify(header http.Header, key ed25519.PublicKey, method, path string, body
 	if err != nil {
 		return ErrInvalidSignature
 	}
-	if skew := now.Sub(time.Unix(seconds, 0)); skew > MaxClockSkew || skew < -MaxClockSkew {
+	if age := now.Sub(time.Unix(seconds, 0)); age > maxAge || age < -MaxClockSkew {
 		return ErrStaleTimestamp
 	}
 	signature, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, SigningPayload(method, path, timestamp, body), signature) {
+	if err != nil || len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, digestPayload(method, path, timestamp, bodySHA256), signature) {
 		return ErrInvalidSignature
 	}
 	return nil

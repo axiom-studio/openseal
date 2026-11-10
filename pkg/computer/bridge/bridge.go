@@ -10,6 +10,8 @@ package bridge
 
 import (
 	"encoding/json"
+	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -58,7 +60,57 @@ const (
 	PathNext        = "/next"
 	PathResult      = "/result"
 	PathDisconnect  = "/disconnect"
+	// PathUpload takes one file of a present call; see UploadPath.
+	PathUpload = "/upload"
 )
+
+// OpPresent is the one call that is not a machine operation: it hands files
+// from the computer into the chat. Its Args are {"paths": [...]}; the bridge
+// checks each path, sends each file's bytes with its own signed request to
+// UploadPath, and only then posts the Result, a PresentResult. The bytes
+// never travel in the Result, which HelloSeal keeps as the call's record.
+const OpPresent = "present"
+
+// Limits of a present call.
+const (
+	// MaxPresentFiles is how many files one present call hands over.
+	MaxPresentFiles = 10
+	// MaxPresentBytes bounds one file: enough for a long PDF, a deck or a
+	// photo, and small enough to cross HelloSeal's proxies in one request.
+	MaxPresentBytes = 50 << 20
+	// MaxUploadAge is how old an upload's signature may be when it arrives.
+	// A large file on a slow link takes minutes, longer than MaxClockSkew,
+	// and a replay gains nothing: HelloSeal takes an upload only for its own
+	// call while that call waits, and the same bytes again change nothing.
+	MaxUploadAge = 15 * time.Minute
+)
+
+// HeaderContentSHA256 carries an upload's hex sha256. The signature covers
+// it in place of the body, so HelloSeal checks who sent the file before
+// reading it, and the store refuses bytes that do not match it.
+const HeaderContentSHA256 = "X-Openseal-Content-Sha256"
+
+// UploadPath is the signed path of file index of present call callID, such
+// as /upload/<call>/0. Both are in the path, not the query, so the signature
+// binds the bytes to that call and file.
+func UploadPath(callID string, index int) string {
+	return PathUpload + "/" + url.PathEscape(callID) + "/" + strconv.Itoa(index)
+}
+
+// PresentResult is a present call's result: the files sent, in the order of
+// the call's paths.
+type PresentResult struct {
+	Files []PresentedFile `json:"files"`
+}
+
+// PresentedFile is one file a present call sent. Path is where it is on the
+// computer, after symlinks; HelloSeal names the chat file after the path the
+// model asked for.
+type PresentedFile struct {
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	MediaType string `json:"mediaType"`
+}
 
 type DeviceStartRequest struct {
 	Name    string `json:"name"`
@@ -103,7 +155,7 @@ type Folder struct {
 }
 
 // Call is one action the bridge runs. Op is a machine operation
-// (workspace.MachineOps) and Args its input exactly as the openseal.computer
+// (workspace.MachineOps) or OpPresent, and Args its input exactly as the openseal.computer
 // action got it; the bridge ignores the action's computer argument. Folders
 // are the computer's allowed folders at delivery.
 type Call struct {

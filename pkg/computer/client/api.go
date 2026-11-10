@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -202,15 +204,8 @@ func (a *API) do(ctx context.Context, method, path, query string, in any, signed
 		return err
 	}
 	defer response.Body.Close()
-	a.noteServerTime(response.Header.Get("Date"), a.now())
-	switch {
-	case response.StatusCode == http.StatusNoContent:
-		return errNoContent
-	case signed && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusNotFound):
-		return ErrDisconnected
-	case response.StatusCode < 200 || response.StatusCode > 299:
-		text, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
-		return &StatusError{Status: response.StatusCode, Body: errorMessage(text)}
+	if err := a.answer(response, signed); err != nil {
+		return err
 	}
 	if out == nil {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxResponseBytes))
@@ -224,6 +219,93 @@ func (a *API) do(ctx context.Context, method, path, query string, in any, signed
 		return fmt.Errorf("read HelloSeal's answer: %w", err)
 	}
 	return nil
+}
+
+// answer notes HelloSeal's clock from a response and turns a status the
+// bridge does not take as success into an error.
+func (a *API) answer(response *http.Response, signed bool) error {
+	a.noteServerTime(response.Header.Get("Date"), a.now())
+	switch {
+	case response.StatusCode == http.StatusNoContent:
+		return errNoContent
+	case signed && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusNotFound):
+		return ErrDisconnected
+	case response.StatusCode < 200 || response.StatusCode > 299:
+		text, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+		return &StatusError{Status: response.StatusCode, Body: errorMessage(text)}
+	}
+	return nil
+}
+
+// Upload sends one file of a present call: the raw bytes, signed over their
+// sha256 so HelloSeal checks the sender before reading them. The file is
+// read twice, once to hash it and once to send it, so even the largest file
+// never sits in memory; a file that changes in between is refused. It tries
+// up to three times when the network or HelloSeal fails.
+func (a *API) Upload(ctx context.Context, callID string, index int, path string, size int64, mediaType string) error {
+	file, err := openRegular(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	hasher := sha256.New()
+	if read, err := io.Copy(hasher, io.LimitReader(file, size+1)); err != nil {
+		return err
+	} else if read != size {
+		return errFileChanged
+	}
+	digest := hex.EncodeToString(hasher.Sum(nil))
+	signedPath := bridge.UploadPath(callID, index)
+	if mediaType == "" {
+		mediaType = "application/octet-stream"
+	}
+	// A large file on a slow link takes minutes: the call's deadline bounds
+	// the upload, not the long-poll client's timeout.
+	client := &http.Client{Transport: a.HTTP.Transport}
+	for attempt := 0; attempt < resultAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * time.Second):
+			}
+		}
+		if _, err = file.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		var body io.Reader = http.NoBody
+		if size > 0 {
+			body = io.LimitReader(file, size)
+		}
+		request, buildErr := http.NewRequestWithContext(ctx, http.MethodPost, a.Base+signedPath, body)
+		if buildErr != nil {
+			return buildErr
+		}
+		request.ContentLength = size
+		request.Header.Set("Content-Type", mediaType)
+		request.Header.Set("Accept", "application/json")
+		request.Header.Set(bridge.HeaderContentSHA256, digest)
+		bridge.SignDigest(request.Header, a.Key, a.ComputerID, http.MethodPost, signedPath, digest, a.now())
+		response, sendErr := client.Do(request)
+		if sendErr != nil {
+			err = sendErr
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		err = a.answer(response, true)
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxResponseBytes))
+		response.Body.Close()
+		if err == nil || errors.Is(err, errNoContent) {
+			return nil
+		}
+		var status *StatusError
+		if errors.Is(err, ErrDisconnected) || (errors.As(err, &status) && status.Status < 500) {
+			return err
+		}
+	}
+	return err
 }
 
 // errorMessage pulls a message out of a JSON error body, else returns it.
