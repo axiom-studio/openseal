@@ -16,7 +16,7 @@ import (
 
 type gatewayVerificationStore struct {
 	*MemoryStore
-	routeLookups, received, observations int
+	routeLookups, received int
 }
 
 func (s *gatewayVerificationStore) ListExternalConversationEndpointsByVerifiedRoute(ctx context.Context, route ExternalConversationVerifiedRoute) ([]*ExternalConversationEndpoint, error) {
@@ -27,11 +27,6 @@ func (s *gatewayVerificationStore) ListExternalConversationEndpointsByVerifiedRo
 func (s *gatewayVerificationStore) ReceiveExternalConversationEvent(ctx context.Context, item *ExternalConversationInboxItem) (*ExternalConversationInboxItem, bool, error) {
 	s.received++
 	return s.MemoryStore.ReceiveExternalConversationEvent(ctx, item)
-}
-
-func (s *gatewayVerificationStore) Publish(context.Context, EventEnvelope) (bool, error) {
-	s.observations++
-	return true, nil
 }
 
 type gatewayVerificationHost struct {
@@ -72,7 +67,6 @@ func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *sk
 		t.Fatal(err)
 	}
 	service := NewExternalConversationTransportService(store, catalog)
-	service.SetRunEventObserver(store)
 	return store, catalog, service, registration, endpoint
 }
 
@@ -115,8 +109,8 @@ func TestPausedGatewayVerificationRequiresOptInAndNeverAcceptsEvents(t *testing.
 				host.request.Adapter.Binding.ID != registration.Gateway.Adapter.BindingID || host.request.Adapter.Binding.Revision != registration.Gateway.Adapter.BindingRevision {
 				t.Fatalf("verification lost explicit host authority or exact binding: %#v", host)
 			}
-			if store.routeLookups != 0 || store.received != 0 || store.observations != 0 {
-				t.Fatalf("paused verifier caused intake effects: lookups %d writes %d observations %d", store.routeLookups, store.received, store.observations)
+			if store.routeLookups != 0 || store.received != 0 {
+				t.Fatalf("paused verifier caused intake effects: lookups %d writes %d", store.routeLookups, store.received)
 			}
 			current, err := store.GetExternalConversationGateway(t.Context(), registration.Gateway.Scope, registration.ID)
 			if err != nil || !reflect.DeepEqual(current, registration) {
@@ -165,10 +159,10 @@ func TestGatewayVerificationPreservesActiveIngressAndRejectsUnavailableAuthority
 			host := &gatewayVerificationHost{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []ExternalConversationGatewayEvent{gatewayVerificationMessage()}}}
 			response, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), ExternalConversationPublicIngressRequest{Route: route, Method: http.MethodPost, Body: []byte(`{"type":"event_callback"}`)}, host)
 			if state == "active" {
-				if err != nil || response == nil || len(response.Received) != 1 || !response.Received[0].Accepted || host.verified != 0 || host.normalized != 1 || host.request.VerificationOnly || store.routeLookups != 1 || store.received != 1 || store.observations != 1 {
-					t.Fatalf("normal active intake changed: %#v, %v; host %#v; reads %d writes %d observations %d", response, err, host, store.routeLookups, store.received, store.observations)
+				if err != nil || response == nil || len(response.Received) != 1 || !response.Received[0].Accepted || host.verified != 0 || host.normalized != 1 || host.request.VerificationOnly || store.routeLookups != 1 || store.received != 1 {
+					t.Fatalf("normal active intake changed: %#v, %v; host %#v; reads %d writes %d", response, err, host, store.routeLookups, store.received)
 				}
-			} else if err == nil || response != nil || host.normalized != 0 || host.verified != 0 || store.routeLookups != 0 || store.received != 0 || store.observations != 0 {
+			} else if err == nil || response != nil || host.normalized != 0 || host.verified != 0 || store.routeLookups != 0 || store.received != 0 {
 				t.Fatalf("unavailable authority reached verifier or intake: %#v, %v; host %#v", response, err, host)
 			}
 		})

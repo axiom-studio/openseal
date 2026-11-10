@@ -13,7 +13,7 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	now := eventWaitContractEpoch
+	now := runStoreContractEpoch
 	first, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "upgrade-pending"}, now)
 	first = terminalReportingContractComplete(t, store, first, now)
 	second, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "upgrade-delivered"}, now)

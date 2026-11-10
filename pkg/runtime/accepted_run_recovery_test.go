@@ -11,7 +11,7 @@ import (
 )
 
 func TestAcceptedRunRecoveryPreservesUnprovableLegacyWorkWithoutAutomaticRetriesAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		scope := Scope{Kind: "tenant", ID: "legacy-recovery"}
 		original, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{

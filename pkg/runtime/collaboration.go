@@ -2209,7 +2209,6 @@ func cloneWakeCondition(condition *WakeCondition) *WakeCondition {
 	}
 	cloned := *condition
 	cloned.Predicate = cloneMap(condition.Predicate)
-	cloned.EventWait = cloneRunEventWaitSpec(condition.EventWait)
 	if condition.WakeAt != nil {
 		wakeAt := *condition.WakeAt
 		cloned.WakeAt = &wakeAt

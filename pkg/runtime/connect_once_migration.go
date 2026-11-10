@@ -16,11 +16,10 @@ const connectOnceMigrationVersion int64 = 74
 
 // connectOnceMigration repairs records that migrations 71 to 73 left
 // inconsistent and records the creator of every routine:
-//  1. binding event waits are woken again by the binding they were made for;
-//  2. setup-request copies in action outputs carry the request's umbrella;
-//  3. in-flight Team amendments and change sets carry current digests;
-//  4. conversation gateways name their deployment's kind;
-//  5. routines record the person who created them.
+//  1. setup-request copies in action outputs carry the request's umbrella;
+//  2. in-flight Team amendments and change sets carry current digests;
+//  3. conversation gateways name their deployment's kind;
+//  4. routines record the person who created them.
 //
 // Every step only rewrites a row that differs from its repaired value, so
 // the migration is safe to replay; SQLite replays it on every open.
@@ -35,7 +34,6 @@ func (m connectOnceMigration) run(ctx context.Context) error {
 		name string
 		run  func(context.Context) error
 	}{
-		{"binding event waits", m.repairBindingEventWaits},
 		{"setup request copies", m.repairSetupRequestCopies},
 		{"Team amendments", m.repairTeamAmendments},
 		{"gateway owners", m.repairGatewayOwnerKinds},
@@ -109,50 +107,6 @@ func (m connectOnceMigration) rows(ctx context.Context, query string, args []int
 func jsonValue(value interface{}) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
-}
-
-// repairBindingEventWaits restores the pre-73 match of a parked binding wait:
-// migration 73 moved a Team run's wait to the Team, but its source and
-// selectors still name the binding of the deployment that created it.
-func (m connectOnceMigration) repairBindingEventWaits(ctx context.Context) error {
-	type repair struct{ scopeKind, scopeID, runID, key, umbrella string }
-	var repairs []repair
-	err := m.rows(ctx, `SELECT scope_kind, scope_id, run_id, wait_key, `+m.payloadText("payload")+` FROM `+m.table("run_event_waits")+`
-		WHERE status IN ('pending', 'paused') AND source LIKE 'binding:%'`, nil, func(rows *sql.Rows) error {
-		var item repair
-		var payload string
-		if err := rows.Scan(&item.scopeKind, &item.scopeID, &item.runID, &item.key, &payload); err != nil {
-			return err
-		}
-		var wait RunEventWait
-		if err := json.Unmarshal([]byte(payload), &wait); err != nil {
-			return fmt.Errorf("run %s wait %s: %w", item.runID, item.key, err)
-		}
-		deployment, _ := wait.Spec.Attributes["deploymentId"].(string)
-		binding, _ := wait.Spec.Attributes["bindingId"].(string)
-		adapter, _ := wait.Spec.Attributes["adapterId"].(string)
-		if deployment == "" || binding == "" || adapter == "" || RunEventBindingSource(deployment, binding, adapter) != wait.Spec.Source {
-			slog.Warn("connect-once migration: binding event wait does not name its binding; left unchanged",
-				"scope", item.scopeKind+"/"+item.scopeID, "run", item.runID, "wait", item.key)
-			return nil
-		}
-		if deployment != wait.UmbrellaID {
-			item.umbrella = deployment
-			repairs = append(repairs, item)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	for _, item := range repairs {
-		if _, err := m.db.ExecContext(ctx, `UPDATE `+m.table("run_event_waits")+` SET payload = `+m.setJSON("payload", 1, []string{"umbrellaId"})+`
-			WHERE scope_kind = `+m.placeholder(2)+` AND scope_id = `+m.placeholder(3)+` AND run_id = `+m.placeholder(4)+` AND wait_key = `+m.placeholder(5),
-			jsonValue(item.umbrella), item.scopeKind, item.scopeID, item.runID, item.key); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // repairSetupRequestCopies overwrites the owner, deployment and asking member

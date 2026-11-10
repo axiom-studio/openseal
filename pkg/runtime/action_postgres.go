@@ -742,7 +742,7 @@ func (s *PostgresStore) updateAgentRunTx(ctx context.Context, tx *sql.Tx, run *A
 		string(payload), run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision, run.ActingUser)); err != nil {
 		return err
 	}
-	return s.syncPostgresRunEventWaitTx(ctx, tx, run)
+	return nil
 }
 
 func (s *PostgresStore) insertActivityTx(ctx context.Context, tx *sql.Tx, value *ActivityEvent) (*ActivityEvent, error) {

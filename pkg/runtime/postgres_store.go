@@ -382,20 +382,11 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateWorkspaceSearch(ctx, tx); err != nil {
 		return err
 	}
-	if err := s.migrateRunEventWaits(ctx, tx); err != nil {
-		return fmt.Errorf("run event waits migration: %w", err)
-	}
 	if err := s.migrateExternalConversationGatewayAuthority(ctx, tx); err != nil {
 		return fmt.Errorf("conversation gateway authority migration: %w", err)
 	}
-	if err := s.migrateRunEventRetentionPostgres(ctx, tx); err != nil {
-		return fmt.Errorf("run event retention migration: %w", err)
-	}
 	if err := s.migrateRunTerminalReporting(ctx, tx); err != nil {
 		return fmt.Errorf("terminal run reporting migration: %w", err)
-	}
-	if err := s.migrateRunEventNotificationsPostgres(ctx, tx); err != nil {
-		return fmt.Errorf("run event notification migration: %w", err)
 	}
 	if err := s.migrateDependencyReconciliation(ctx, tx); err != nil {
 		return fmt.Errorf("dependency reconciliation migration: %w", err)
@@ -472,6 +463,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateRoutineEvents(ctx, tx); err != nil {
 		return fmt.Errorf("routine events migration: %w", err)
 	}
+	if err := s.migrateRemoveEventWaits(ctx, tx); err != nil {
+		return fmt.Errorf("event wait removal migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err
@@ -520,12 +514,12 @@ func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query postgre
 	var knownVersions, schemaVersion int64
 	if err := query.QueryRowContext(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE version BETWEEN 1 AND $1 AND version NOT IN (13, 14, 16, 18, 20, 22, 23, 29, 30, 31, 34, 36, 37, 55)),
+			COUNT(*) FILTER (WHERE version BETWEEN 1 AND $1 AND version NOT IN (13, 14, 16, 18, 20, 22, 23, 29, 30, 31, 34, 36, 37, 47, 49, 51, 55)),
 			COALESCE(MAX(version), 0)
 		FROM `+s.table("schema_migrations"), currentPostgresSchemaVersion).Scan(&knownVersions, &schemaVersion); err != nil {
 		return false, 0, err
 	}
-	return knownVersions == currentPostgresSchemaVersion-14, schemaVersion, nil
+	return knownVersions == currentPostgresSchemaVersion-17, schemaVersion, nil
 }
 
 func (s *PostgresStore) recordMigrationOutcome(phase PostgresMigrationPhase, stats PostgresMigrationStats) {

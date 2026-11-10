@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"sync"
-	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -21,23 +20,6 @@ type MemoryStore struct {
 	runTerminalReports                  map[runTerminalReportKey]*RunTerminalReport
 	runTerminalReportLatest             map[runTerminalReportFamily]runTerminalReportKey
 	runTerminalReportQueue              memoryTerminalReportQueue
-	runEventWaits                       map[memoryRunEventWaitKey]*RunEventWait
-	runEventWaitActive                  map[memoryRunEventRunKey]memoryRunEventWaitKey
-	runEventWaitIndex                   map[memoryRunEventSelector]map[memoryRunEventWaitKey]struct{}
-	runEventWaitSelectorOrder           map[memoryRunEventSelector]*memoryOrderedIndexNode[memoryRunEventWaitKey]
-	runEventWaitDueOrder                map[Scope]*memoryOrderedIndexNode[memoryRunEventWaitDueKey]
-	runEventWaitDueKeys                 map[memoryRunEventWaitKey]memoryRunEventWaitDueKey
-	runEventWaitNotifications           map[memoryRunEventReceiptKey]runEventNotification
-	runEventNotificationOrder           map[Scope]*memoryOrderedIndexNode[memoryRunEventNotificationDueKey]
-	runEventWaitScopeWork               map[Scope]time.Time
-	runEventWaitScopeOrder              *memoryOrderedIndexNode[memoryRunEventScopeDueKey]
-	runEventReceipts                    map[memoryRunEventReceiptKey]*RunEventReceipt
-	runEventReceiptIndex                map[memoryRunEventSelector]map[memoryRunEventReceiptKey]struct{}
-	runEventReceiptOrder                *memoryRunEventOrderNode
-	runEventReceiptScopeOrder           map[Scope]*memoryRunEventOrderNode
-	runEventRetentionCursor             *memoryRunEventOrderKey
-	runEventReceiptPruneCursors         map[Scope]*memoryRunEventOrderKey
-	runEventConsumptions                map[memoryRunEventReceiptKey]map[memoryRunEventRunKey]struct{}
 	activity                            map[string][]*ActivityEvent
 	turns                               map[string]map[string]*AgentTurn
 	actions                             map[string]*ActionCall
@@ -119,83 +101,69 @@ type MemoryStore struct {
 // NewMemoryStore creates an in-memory canonical kernel store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		MemoryStore:                 kernelteam.NewMemoryStore(),
-		deploymentIDs:               workforce.NewMemoryDeploymentIDs(),
-		skillSetupRequests:          make(map[string]*SkillSetupRequest),
-		credentialRequests:          make(map[string]*CredentialRequest),
-		objectives:                  make(map[string]*Objective),
-		runbookActivations:          make(map[string]*RunbookActivation),
-		agentRuns:                   make(map[string]*AgentRun),
-		runEventWaits:               make(map[memoryRunEventWaitKey]*RunEventWait),
-		runEventWaitActive:          make(map[memoryRunEventRunKey]memoryRunEventWaitKey),
-		runEventWaitIndex:           make(map[memoryRunEventSelector]map[memoryRunEventWaitKey]struct{}),
-		runEventWaitSelectorOrder:   make(map[memoryRunEventSelector]*memoryOrderedIndexNode[memoryRunEventWaitKey]),
-		runEventWaitDueOrder:        make(map[Scope]*memoryOrderedIndexNode[memoryRunEventWaitDueKey]),
-		runEventWaitDueKeys:         make(map[memoryRunEventWaitKey]memoryRunEventWaitDueKey),
-		runEventWaitNotifications:   make(map[memoryRunEventReceiptKey]runEventNotification),
-		runEventNotificationOrder:   make(map[Scope]*memoryOrderedIndexNode[memoryRunEventNotificationDueKey]),
-		runEventWaitScopeWork:       make(map[Scope]time.Time),
-		runEventReceipts:            make(map[memoryRunEventReceiptKey]*RunEventReceipt),
-		runEventReceiptIndex:        make(map[memoryRunEventSelector]map[memoryRunEventReceiptKey]struct{}),
-		runEventReceiptScopeOrder:   make(map[Scope]*memoryRunEventOrderNode),
-		runEventReceiptPruneCursors: make(map[Scope]*memoryRunEventOrderKey),
-		runEventConsumptions:        make(map[memoryRunEventReceiptKey]map[memoryRunEventRunKey]struct{}),
-		activity:                    make(map[string][]*ActivityEvent),
-		turns:                       make(map[string]map[string]*AgentTurn),
-		actions:                     make(map[string]*ActionCall),
-		skillRuntimeUsage:           make(map[memorySkillRuntimeUsageKey]int),
-		skillRuntimeMaintenance:     make(map[string]*SkillRuntimeMaintenance),
-		skillRuntimeUsageCalls:      make(map[string]memorySkillRuntimeUsageEntry),
-		skillRuntimeReceiptRuns:     make(map[string]map[string]struct{}),
-		approvals:                   make(map[string]*ApprovalCheckpoint),
-		actionKeys:                  make(map[string]string),
-		externalOperationKeys:       make(map[string]string),
-		requests:                    make(map[string]*AgentRequest),
-		requestKeys:                 make(map[string]string),
-		dependencyGroups:            make(map[string]*RunDependencyGroup),
-		dependencyGroupKeys:         make(map[string]string),
-		dependencies:                make(map[string]map[string]*RunDependency),
-		artifacts:                   make(map[string]map[int64]*Artifact),
-		conversations:               make(map[string]*Conversation),
-		spaces:                      make(map[Scope]map[string]*Space),
-		spaceMembers:                make(map[Scope][]*SpaceMember),
-		conversationKeys:            make(map[string]string),
-		channelMessages:             make(map[string][]*ChannelMessage),
-		channelMessageIDs:           make(map[string]*ChannelMessage),
-		channelMessageKeys:          make(map[string]string),
-		participationRounds:         make(map[string]*ParticipationRoundResult),
-		participationKeys:           make(map[string]string),
-		conversationCursors:         make(map[string]*ConversationCursor),
-		conversationPresence:        make(map[string]*ConversationPresence),
-		surfaceInteractions:         make(map[string][]*SurfaceInteraction),
-		embedInstallations:          make(map[string]*EmbedInstallation),
-		embedRoutes:                 make(map[string]string),
-		embedSessions:               make(map[string]*EmbedSession),
-		embedConversationSessions:   make(map[string]string),
-		externalEndpoints:           make(map[string]*ExternalConversationEndpoint),
-		externalGateways:            make(map[string]*ExternalConversationGatewayRegistration),
-		callbackRegistrations:       make(map[string]*CallbackRegistration),
-		callbackEvents:              make(map[string]*CallbackEventReceipt),
-		externalInbox:               make(map[string]*ExternalConversationInboxItem),
-		externalInboxKeys:           make(map[string]string),
-		externalMappings:            make(map[string]*ExternalConversationMapping),
-		externalParticipants:        make(map[string]*ExternalParticipantMapping),
-		externalMessages:            make(map[string]*ExternalMessageMapping),
-		externalDeliveries:          make(map[string]*ExternalConversationDelivery),
-		externalDeliveryKeys:        make(map[string]string),
-		skillDefinitions:            make(map[string]*skill.Definition),
-		skillBindings:               make(map[string]*skill.Binding),
-		skillBindingFloors:          make(map[string]int64),
-		agentSessions:               make(map[string]*AgentSession),
-		agentSessionLanes:           make(map[string]string),
-		agentSessionOwners:          make(map[string]string),
-		agentSessionEntries:         make(map[string][]*SessionEntry),
-		agentSessionEntryIndex:      make(map[string]memorySessionEntryRef),
-		agentSessionSourceKeys:      make(map[string]struct{}),
-		routineEvents:               make(map[memoryRoutineEventKey]*RoutineEventRecord),
-		routineEventBatches:         make(map[memoryRoutineEventBatchKey]*RoutineEventBatch),
-		routineEventActivations:     make(map[RoutineEventSourceKey]map[string]struct{}),
-		hooks:                       make(map[string]*Hook),
+		MemoryStore:               kernelteam.NewMemoryStore(),
+		deploymentIDs:             workforce.NewMemoryDeploymentIDs(),
+		skillSetupRequests:        make(map[string]*SkillSetupRequest),
+		credentialRequests:        make(map[string]*CredentialRequest),
+		objectives:                make(map[string]*Objective),
+		runbookActivations:        make(map[string]*RunbookActivation),
+		agentRuns:                 make(map[string]*AgentRun),
+		activity:                  make(map[string][]*ActivityEvent),
+		turns:                     make(map[string]map[string]*AgentTurn),
+		actions:                   make(map[string]*ActionCall),
+		skillRuntimeUsage:         make(map[memorySkillRuntimeUsageKey]int),
+		skillRuntimeMaintenance:   make(map[string]*SkillRuntimeMaintenance),
+		skillRuntimeUsageCalls:    make(map[string]memorySkillRuntimeUsageEntry),
+		skillRuntimeReceiptRuns:   make(map[string]map[string]struct{}),
+		approvals:                 make(map[string]*ApprovalCheckpoint),
+		actionKeys:                make(map[string]string),
+		externalOperationKeys:     make(map[string]string),
+		requests:                  make(map[string]*AgentRequest),
+		requestKeys:               make(map[string]string),
+		dependencyGroups:          make(map[string]*RunDependencyGroup),
+		dependencyGroupKeys:       make(map[string]string),
+		dependencies:              make(map[string]map[string]*RunDependency),
+		artifacts:                 make(map[string]map[int64]*Artifact),
+		conversations:             make(map[string]*Conversation),
+		spaces:                    make(map[Scope]map[string]*Space),
+		spaceMembers:              make(map[Scope][]*SpaceMember),
+		conversationKeys:          make(map[string]string),
+		channelMessages:           make(map[string][]*ChannelMessage),
+		channelMessageIDs:         make(map[string]*ChannelMessage),
+		channelMessageKeys:        make(map[string]string),
+		participationRounds:       make(map[string]*ParticipationRoundResult),
+		participationKeys:         make(map[string]string),
+		conversationCursors:       make(map[string]*ConversationCursor),
+		conversationPresence:      make(map[string]*ConversationPresence),
+		surfaceInteractions:       make(map[string][]*SurfaceInteraction),
+		embedInstallations:        make(map[string]*EmbedInstallation),
+		embedRoutes:               make(map[string]string),
+		embedSessions:             make(map[string]*EmbedSession),
+		embedConversationSessions: make(map[string]string),
+		externalEndpoints:         make(map[string]*ExternalConversationEndpoint),
+		externalGateways:          make(map[string]*ExternalConversationGatewayRegistration),
+		callbackRegistrations:     make(map[string]*CallbackRegistration),
+		callbackEvents:            make(map[string]*CallbackEventReceipt),
+		externalInbox:             make(map[string]*ExternalConversationInboxItem),
+		externalInboxKeys:         make(map[string]string),
+		externalMappings:          make(map[string]*ExternalConversationMapping),
+		externalParticipants:      make(map[string]*ExternalParticipantMapping),
+		externalMessages:          make(map[string]*ExternalMessageMapping),
+		externalDeliveries:        make(map[string]*ExternalConversationDelivery),
+		externalDeliveryKeys:      make(map[string]string),
+		skillDefinitions:          make(map[string]*skill.Definition),
+		skillBindings:             make(map[string]*skill.Binding),
+		skillBindingFloors:        make(map[string]int64),
+		agentSessions:             make(map[string]*AgentSession),
+		agentSessionLanes:         make(map[string]string),
+		agentSessionOwners:        make(map[string]string),
+		agentSessionEntries:       make(map[string][]*SessionEntry),
+		agentSessionEntryIndex:    make(map[string]memorySessionEntryRef),
+		agentSessionSourceKeys:    make(map[string]struct{}),
+		routineEvents:             make(map[memoryRoutineEventKey]*RoutineEventRecord),
+		routineEventBatches:       make(map[memoryRoutineEventBatchKey]*RoutineEventBatch),
+		routineEventActivations:   make(map[RoutineEventSourceKey]map[string]struct{}),
+		hooks:                     make(map[string]*Hook),
 	}
 }
 

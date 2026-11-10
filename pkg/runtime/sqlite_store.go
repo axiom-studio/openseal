@@ -37,18 +37,6 @@ func migrate(db *sql.DB) error {
 	if err := migrateRunTerminalReportingSQLite(db); err != nil {
 		return err
 	}
-	if err := migrateRunEventWaitsSQLite(db); err != nil {
-		return err
-	}
-	if err := migrateRunEventRetentionSQLite(db); err != nil {
-		return err
-	}
-	if err := migrateScopedRunEventRetentionSQLite(db); err != nil {
-		return err
-	}
-	if err := migrateRunEventNotificationsSQLite(db); err != nil {
-		return err
-	}
 	if err := migrateRunbookActivationsSQLite(db); err != nil {
 		return err
 	}
@@ -56,6 +44,9 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if err := migrateRoutineEventsSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateRemoveEventWaitsSQLite(db); err != nil {
 		return err
 	}
 	if err := migrateAgentRegistry(db); err != nil {

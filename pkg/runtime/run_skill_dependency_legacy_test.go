@@ -64,7 +64,7 @@ func TestLegacyRunSkillDependencyRequiresProvableImmutableMethod(t *testing.T) {
 }
 
 func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		var db *sql.DB
 		var runs, deployments, definitions, dependencies string
 		postgres := false

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 80
+const currentPostgresSchemaVersion int64 = 81
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -38,7 +38,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 	if _, err := s.acquireMigrationLock(ctx, tx); err != nil {
 		return err
 	}
-	// Rolling back 80 keeps the two event index columns of
+	// Rolling back 81 does not restore event waits; rolling back 80 keeps the two event index columns of
 	// runbook_activations; rolling back 79 does not restore event sources; rolling back 78 keeps
 	// the Default space ids; rolling back 77 does not restore kernel Projects;
 	// rolling back 76 drops the cutover drafts and does not restore the
@@ -55,10 +55,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		57: {"conversation_tasks", "conversation_active_runs"},
 		54: {"run_skill_dependencies"},
 		53: {"skill_runtime_maintenance"},
-		51: {"run_event_notifications"},
 		50: {"run_terminal_reports"},
-		49: {"run_event_retention_cursor"},
-		47: {"run_event_wait_scopes", "run_event_consumptions", "run_event_waits", "run_event_inbox"},
 		45: {"skill_setup_requests"},
 		43: {"embed_sessions", "embed_installations"},
 		39: {"callback_events", "callback_registrations"},
@@ -170,11 +167,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		if version == 50 {
 			if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS agent_runs_terminal_reporting ON `+s.table("agent_runs")+`;
 				DROP FUNCTION IF EXISTS `+s.table("enqueue_run_terminal_report")+`()`); err != nil {
-				return err
-			}
-		}
-		if version == 49 {
-			if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+s.table("run_event_inbox_received_idx")); err != nil {
 				return err
 			}
 		}

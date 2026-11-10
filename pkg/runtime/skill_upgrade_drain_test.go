@@ -16,7 +16,7 @@ import (
 )
 
 func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		catalog, proposal, plan := skillUpgradeDrainFixture(t, store)
 		service := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
@@ -113,7 +113,7 @@ func assertSkillUpgradePin(t *testing.T, catalog *skill.Catalog, call *ActionCal
 }
 
 func TestSkillRuntimeUsageScopesAndRetentionAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		catalog, proposal, _ := skillUpgradeDrainFixture(t, store)
 		usage := store.(SkillRuntimeUsageStore)
@@ -272,7 +272,7 @@ func TestSkillUpgradeDrainMigrationProjectsLegacyMetadata(t *testing.T) {
 }
 
 func TestSkillUpgradeDrainProjectsRollingVersionWritesAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		var db *sql.DB
 		actions := "action_calls"
@@ -327,7 +327,7 @@ func TestSkillUpgradeDrainProjectsRollingVersionWritesAcrossStores(t *testing.T)
 func TestSkillUpgradeDrainFencesLegacyWritersAgainstExistingAuthority(t *testing.T) {
 	for _, invalid := range []string{"stale_revision", "stale_version", "disabled", "different_skill"} {
 		t.Run(invalid, func(t *testing.T) {
-			eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 				store := fixture.store.(KernelStore)
 				var db *sql.DB
 				actions := "action_calls"
@@ -484,7 +484,7 @@ func TestSkillUpgradePostgresUsageSQLIsMetadataOnlyAndScoped(t *testing.T) {
 }
 
 func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		scope := Scope{Kind: "tenant", ID: "statuses"}
 		run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Check status metadata", Source: RunSourceManual})

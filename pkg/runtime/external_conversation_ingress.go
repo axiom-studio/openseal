@@ -283,13 +283,6 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationIngr
 	}
 	received := make([]*ReceiveExternalConversationEventResult, 0, len(result.Events))
 	for index := range result.Events {
-		event := result.Events[index]
-		if event.Type != capability.ConversationEventApprovalDecided {
-			if err := publishVerifiedConversationEvent(ctx, s.eventObserver, endpoint.Scope, endpoint.DeploymentID,
-				effectiveEndpoint.Adapter, endpoint.Provider, endpoint.InstallationID, endpoint.ApplicationID, event); err != nil {
-				return nil, err
-			}
-		}
 		persisted, receiveErr := s.Receive(ctx, ReceiveExternalConversationEventRequest{
 			Scope: request.Scope, EndpointID: endpoint.ID, Event: result.Events[index],
 		})
@@ -487,29 +480,12 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 	}
 	received := make([]*ReceiveExternalConversationEventResult, 0, len(result.Events))
 	for _, route := range routes {
-		if route.event.Event.Type != capability.ConversationEventApprovalDecided {
-			if gateway.Scope.Kind != "platform" && gateway.InstallationID != "" {
-				if err := publishVerifiedConversationEvent(ctx, s.eventObserver, gateway.Scope, gateway.DeploymentID,
-					effectiveGateway.Adapter, gateway.Provider, route.event.InstallationID, route.event.ApplicationID, route.event.Event); err != nil {
-					return nil, err
-				}
-			}
-		}
 		for _, endpoint := range route.endpoints {
 			persisted, receiveErr := s.Receive(ctx, ReceiveExternalConversationEventRequest{
 				Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: route.event.Event,
 			})
 			if receiveErr != nil {
 				return nil, receiveErr
-			}
-			if persisted.Item != nil && (gateway.Scope.Kind == "platform" || gateway.InstallationID == "") {
-				// Unpinned/platform gateways derive authority from a mapped
-				// endpoint's revalidated live binding. Disabled or stale target
-				// bindings must never acquire observations through another host.
-				if err := publishVerifiedConversationEvent(ctx, s.eventObserver, endpoint.Scope, endpoint.DeploymentID,
-					persisted.Item.Adapter, endpoint.Provider, route.event.InstallationID, route.event.ApplicationID, route.event.Event); err != nil {
-					return nil, err
-				}
 			}
 			received = append(received, persisted)
 		}

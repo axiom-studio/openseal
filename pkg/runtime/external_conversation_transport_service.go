@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,14 +56,13 @@ type EnqueueExternalConversationDeliveryResult struct {
 }
 
 type ExternalConversationTransportService struct {
-	store         ExternalConversationStore
-	resolver      ExternalConversationAdapterResolver
-	eventObserver VerifiedRunEventObserver
-	now           func() time.Time
+	store    ExternalConversationStore
+	resolver ExternalConversationAdapterResolver
+	now      func() time.Time
 }
 
 func NewExternalConversationTransportService(store ExternalConversationStore, resolver ExternalConversationAdapterResolver) *ExternalConversationTransportService {
-	return &ExternalConversationTransportService{store: store, resolver: resolver, eventObserver: runEventObserverForStore(store), now: time.Now}
+	return &ExternalConversationTransportService{store: store, resolver: resolver, now: time.Now}
 }
 
 // Receive persists one already verified and normalized provider event. Policy
@@ -211,6 +211,22 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 	return resolution, nil
 }
 
+// jsonIntegerBounded refuses numbers whose text or exponent is too large to
+// parse cheaply; no int64 needs more than this.
+func jsonIntegerBounded(number json.Number) bool {
+	data := string(number)
+	if len(data) > 64 {
+		return false
+	}
+	if at := strings.IndexAny(data, "eE"); at >= 0 {
+		exponent, err := strconv.ParseInt(data[at+1:], 10, 32)
+		if err != nil || exponent < -64 || exponent > 64 {
+			return false
+		}
+	}
+	return true
+}
+
 func integerAttribute(value interface{}) (int64, bool) {
 	switch typed := value.(type) {
 	case int:
@@ -220,7 +236,7 @@ func integerAttribute(value interface{}) (int64, bool) {
 	case float64:
 		return int64(typed), typed == float64(int64(typed))
 	case json.Number:
-		if !runEventScalarBounded(typed) {
+		if !jsonIntegerBounded(typed) {
 			return 0, false
 		}
 		value, ok := new(big.Rat).SetString(string(typed))

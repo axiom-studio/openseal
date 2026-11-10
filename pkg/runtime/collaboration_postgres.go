@@ -443,10 +443,7 @@ func (s *PostgresStore) insertPostgresAgentRunTx(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return normalizeRunSkillDependencyError(err)
 	}
-	if wait, err := runEventWaitForRun(run); err != nil || wait == nil {
-		return err
-	}
-	return s.syncPostgresRunEventWaitTx(ctx, tx, run)
+	return nil
 }
 
 func (s *PostgresStore) updatePostgresAgentRunTx(ctx context.Context, tx *sql.Tx, run *AgentRun, expectedRevision int64) error {
@@ -470,5 +467,5 @@ func (s *PostgresStore) updatePostgresAgentRunTx(ctx context.Context, tx *sql.Tx
 	if affected != 1 {
 		return ErrRevisionConflict
 	}
-	return s.syncPostgresRunEventWaitTx(ctx, tx, run)
+	return nil
 }

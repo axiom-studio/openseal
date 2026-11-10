@@ -166,7 +166,7 @@ func taskSetupTargetFollowsReceipt(admitted, current *SkillSetupRequest) bool {
 func isExactTaskSetupWait(run *AgentRun, requestID string) bool {
 	return run.Status == AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
 		run.WakeCondition.Type == ConversationTaskSkillSetupWakeType && run.WakeCondition.Reference == requestID &&
-		run.WakeCondition.WakeAt == nil && run.WakeCondition.EventWait == nil && len(run.WakeCondition.Predicate) == 0
+		run.WakeCondition.WakeAt == nil && len(run.WakeCondition.Predicate) == 0
 }
 
 // ReconcileSkillSetupTask resumes only the exact task waiting for this saved

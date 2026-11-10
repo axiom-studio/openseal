@@ -129,7 +129,7 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 		tc := cases[outcome]
 		for _, threaded := range []bool{false, true} {
 			t.Run(outcome+map[bool]string{false: "/direct", true: "/thread"}[threaded], func(t *testing.T) {
-				eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+				runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 					store := fixture.store.(taskFailureReportingStore)
 					accepted, trigger := admittedFailureReportingTask(t, store, threaded)
 					now := time.Now().UTC()

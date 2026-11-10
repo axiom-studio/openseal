@@ -178,10 +178,7 @@ func RunContextSourceKey(runID string) string            { return "run-context:"
 func GoalSourceKey(ownerRunID string) string             { return "goal:" + ownerRunID }
 func FailureNoteSourceKey(runID, stepID string) string   { return "failure-note:" + runID + ":" + stepID }
 func FinalRejectionEntryKey(stepID string) string        { return "final-rejection:" + stepID }
-func EventWaitSourceKey(runID, reference string) string {
-	return "event-wait:" + runID + ":" + reference
-}
-func TaskPromotedSourceKey(runID string) string { return "task-promoted:" + runID }
+func TaskPromotedSourceKey(runID string) string          { return "task-promoted:" + runID }
 
 type SessionEntryType string
 
@@ -539,7 +536,6 @@ const (
 	NoteRunFailed          NoteKind = "run_failed"
 	NoteTaskPromoted       NoteKind = "task_promoted"
 	NoteFinalRejection     NoteKind = "final_rejection"
-	NoteEventWait          NoteKind = "event_wait"
 	NoteSetupPending       NoteKind = "setup_pending"
 	NoteHistoryOmitted     NoteKind = "history_omitted"
 	NoteRateLimitedSource  NoteKind = "rate_limited_source"
@@ -549,7 +545,7 @@ const (
 func (k NoteKind) Valid() bool {
 	switch k {
 	case NoteRunContext, NoteRepeat, NoteHost, NoteFailureExplanation, NoteRunFailed, NoteTaskPromoted,
-		NoteFinalRejection, NoteEventWait, NoteSetupPending, NoteHistoryOmitted, NoteRateLimitedSource,
+		NoteFinalRejection, NoteSetupPending, NoteHistoryOmitted, NoteRateLimitedSource,
 		NoteBrowserWaitingCode:
 		return true
 	}

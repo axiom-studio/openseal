@@ -10,7 +10,7 @@ import (
 )
 
 func TestSkillReferenceUpgradeMaintenanceRequiresOwnedExactTargetAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		catalog := skill.NewCatalogWithStore(store.(skill.CatalogStore))
 		publisher := "https://skills.invalid/reader"

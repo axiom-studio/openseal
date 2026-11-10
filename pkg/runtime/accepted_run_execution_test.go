@@ -25,7 +25,7 @@ func acceptedMethodFixture(scope Scope) (*kernelagent.AgentDeployment, *kernelag
 }
 
 func TestAcceptedRunExecutionRetainsFutureRunbookActionBeforeFirstCallAcrossStores(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		catalog, scope, binding := runSkillDependencyFixture(t, store)
 		deployment, definition := acceptedMethodFixture(scope)

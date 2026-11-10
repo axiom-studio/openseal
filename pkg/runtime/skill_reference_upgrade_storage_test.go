@@ -23,7 +23,7 @@ func TestSkillReferenceUpgradeStorageContractChangesRequireReviewAcrossStores(t 
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
-			eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 				store := fixture.store.(KernelStore)
 				catalog := skill.NewCatalogWithStore(store.(skill.CatalogStore))
 				group := int64(1000)

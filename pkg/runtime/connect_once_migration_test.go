@@ -18,10 +18,6 @@ import (
 // either SQL store.
 type connectOnceMigrationStore interface {
 	CreateAgentRun(context.Context, *AgentRun) error
-	PublishRunEvent(context.Context, *RunEventReceipt) (bool, error)
-	ClaimRunEventWaits(context.Context, ClaimRunEventWaitsRequest) ([]*RunEventWait, error)
-	ProcessRunEventWait(context.Context, ProcessRunEventWaitRequest) (*RunEventWaitResult, error)
-	GetRunEventWait(context.Context, Scope, string, string) (*RunEventWait, error)
 	ExternalConversationGatewayStore
 }
 
@@ -85,7 +81,7 @@ func (h connectOnceMigrationHarness) payloads(t *testing.T) map[string]string {
 		column = "payload"
 	}
 	result := map[string]string{}
-	for _, table := range []string{"run_event_waits", "action_calls", "team_definition_amendments", "external_conversation_gateways", "runbook_activations"} {
+	for _, table := range []string{"action_calls", "team_definition_amendments", "external_conversation_gateways", "runbook_activations"} {
 		rows, err := h.db().Query(h.query(`SELECT ` + column + ` FROM @` + table))
 		if err != nil {
 			t.Fatal(err)
@@ -133,34 +129,21 @@ func seedConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 	now := connectOnceMigrationNow
 	store := h.store()
 
-	// Step 1: a Team run parked on its member's binding, moved to the Team by 73.
-	waitRun := func(id, deployment string) {
-		run := &AgentRun{ID: id, Scope: scope, RootRunID: id, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member",
-			Goal: "Wait for the reply", Source: RunSourceManual, Status: AgentRunStatusWaitingForEvent, Revision: 1,
-			CreatedAt: now, UpdatedAt: now, AvailableAt: now, QueueEnteredAt: now,
-			WakeCondition: &WakeCondition{Type: "event", EventWait: &RunEventWaitSpec{Key: "reply", Type: "conversation.message.received",
-				Source: RunEventBindingSource(deployment, "slack", "conversations"), Subject: "C1",
-				Attributes: map[string]interface{}{"deploymentId": "member", "bindingId": "slack", "adapterId": "conversations"},
-				After:      now.Add(-time.Minute), Deadline: now.Add(time.Hour)}}}
-		if err := store.CreateAgentRun(ctx, run); err != nil {
-			t.Fatal(err)
-		}
-	}
-	waitRun("waiting", "member")
-	waitRun("unverifiable", "elsewhere")
-	if h.sqlite {
-		h.exec(t, `UPDATE @run_event_waits SET payload = json_set(payload, '$.umbrellaId', 'crew')`)
-	} else {
-		h.exec(t, `UPDATE @run_event_waits SET payload = jsonb_set(payload, '{umbrellaId}', '"crew"')`)
+	// The Team run the action call below belongs to.
+	run := &AgentRun{ID: "waiting", Scope: scope, RootRunID: "waiting", Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member",
+		Goal: "Wait for the reply", Source: RunSourceManual, Status: AgentRunStatusQueued, Revision: 1,
+		CreatedAt: now, UpdatedAt: now, AvailableAt: now, QueueEnteredAt: now}
+	if err := store.CreateAgentRun(ctx, run); err != nil {
+		t.Fatal(err)
 	}
 
-	// Step 2: a setup-request copy that still names the member.
+	// Step 1: a setup-request copy that still names the member.
 	h.exec(t, `INSERT INTO @skill_setup_requests (scope_kind, scope_id, id, deployment_id, conversation_id, status, revision, created_at, payload) VALUES ('tenant','one','setup-1','crew','chat','pending',1,?,?)`,
 		now, `{"id":"setup-1","owner":{"type":"team","id":"crew"},"deploymentId":"crew","agentId":"member","status":"pending","revision":1}`)
 	h.exec(t, `INSERT INTO @action_calls (id, scope_kind, scope_id, run_id, status, available_at, revision, created_at, payload) VALUES ('call-1','tenant','one','waiting','succeeded',?,1,?,?)`,
 		now, now, `{"id":"call-1","output":{"setupRequest":{"id":"setup-1","kind":"setup","owner":{"type":"agent","id":"member"},"deploymentId":"member","agentId":"member"}}}`)
 
-	// Step 3: amendments with digests from before 71.
+	// Step 2: amendments with digests from before 71.
 	h.exec(t, `INSERT INTO @team_definitions (id, version, digest, created_at, payload) VALUES ('crew','1','sha256:base',?,?)`, now, `{"id":"crew","version":"1","digest":"sha256:base"}`)
 	amendment := func(id, status, version string) {
 		h.exec(t, `INSERT INTO @team_definition_amendments (id, scope_kind, scope_id, deployment_id, status, revision, updated_at, payload) VALUES (?,'tenant','one','crew',?,1,?,?)`,
@@ -171,7 +154,7 @@ func seedConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 	amendment("amend-orphan", "evaluating", "9")
 	amendment("amend-done", "activated", "1")
 
-	// Step 4: gateways that 73 marked as Agent-owned.
+	// Step 3: gateways that 73 marked as Agent-owned.
 	gateways := NewExternalConversationGatewayService(store)
 	for _, deployment := range []string{"crew", "ghost"} {
 		gateway := externalConversationGatewayFixture(scope)
@@ -183,7 +166,7 @@ func seedConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 	}
 	h.exec(t, `INSERT INTO @deployment_identities (scope_kind, scope_id, id, kind) VALUES ('tenant','one','crew','team')`)
 
-	// Step 5: routines without a recorded creator.
+	// Step 4: routines without a recorded creator.
 	h.exec(t, `INSERT INTO @conversations (scope_kind, scope_id, id, owner_type, owner_id, status, idempotency_key, last_sequence, revision, created_at, updated_at, payload, space_id) VALUES ('tenant','one','chat','team','crew','active','chat',4,1,?,?,?,'personal')`,
 		now, now, `{"scope":{"kind":"tenant","id":"one"},"id":"chat","owner":{"type":"team","id":"crew"}}`)
 	message := func(id string, sequence int, sender, initiator string) {
@@ -230,14 +213,6 @@ func verifyConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 	scope := Scope{Kind: "tenant", ID: "one"}
 
 	// Step 1.
-	if wait, err := h.store().GetRunEventWait(ctx, scope, "waiting", "reply"); err != nil || wait.UmbrellaID != "member" {
-		t.Fatalf("binding wait = %#v, %v; want umbrella member", wait, err)
-	}
-	if wait, err := h.store().GetRunEventWait(ctx, scope, "unverifiable", "reply"); err != nil || wait.UmbrellaID != "crew" {
-		t.Fatalf("unverifiable wait = %#v, %v; want it left alone", wait, err)
-	}
-
-	// Step 2.
 	call := h.payload(t, "action_calls", `id = 'call-1'`)
 	if owner := pathValue(call, "output", "setupRequest", "owner"); fmt.Sprint(owner) != fmt.Sprint(map[string]interface{}{"type": "team", "id": "crew"}) ||
 		pathValue(call, "output", "setupRequest", "deploymentId") != "crew" || pathValue(call, "output", "setupRequest", "agentId") != "member" ||
@@ -245,7 +220,7 @@ func verifyConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 		t.Fatalf("setup copy = %#v", call["output"])
 	}
 
-	// Step 3.
+	// Step 2.
 	open := h.payload(t, "team_definition_amendments", `id = 'amend-open'`)
 	candidate := open["candidate"].(map[string]interface{})
 	encoded, _ := json.Marshal(candidate)
@@ -266,7 +241,7 @@ func verifyConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 		t.Fatalf("activated amendment rewritten: %#v", done)
 	}
 
-	// Step 4.
+	// Step 3.
 	if gateway, err := h.store().GetExternalConversationGateway(ctx, scope, "gateway-crew"); err != nil || gateway.Gateway.Owner != (ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}) {
 		t.Fatalf("Team gateway = %#v, %v", gateway, err)
 	}
@@ -274,7 +249,7 @@ func verifyConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 		t.Fatalf("gateway without an identity = %#v, %v", gateway, err)
 	}
 
-	// Step 5.
+	// Step 4.
 	for id, want := range map[string]interface{}{
 		"routine-person": "7", "routine-voice": "9", "routine-handoff": "11", "routine-stamped": "5",
 		"routine-agent": nil, "routine-missing": nil,
@@ -286,43 +261,6 @@ func verifyConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 	if task := h.payload(t, "runbook_activations", `id = 'routine-untasked'`)["task"]; task != nil {
 		t.Fatalf("routine without a task gained one: %#v", task)
 	}
-}
-
-// matchRepairedBindingWait shows the repaired wait is woken by its binding.
-func matchRepairedBindingWait(t *testing.T, h connectOnceMigrationHarness) {
-	t.Helper()
-	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "one"}
-	store := h.store()
-	event := EventEnvelope{ID: "reply-1", Scope: scope, Type: "conversation.message.received", Subject: "C1", OccurredAt: connectOnceMigrationNow,
-		Source:     RunEventBindingSource("member", "slack", "conversations"),
-		Attributes: map[string]interface{}{"deploymentId": "member", "bindingId": "slack", "adapterId": "conversations"},
-		Payload:    map[string]interface{}{"text": "Done"}}
-	digest, err := runEventObservationDigest(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.PublishRunEvent(ctx, &RunEventReceipt{Event: event, ReceivedAt: connectOnceMigrationNow, Digest: digest}); err != nil {
-		t.Fatal(err)
-	}
-	waits, err := store.ClaimRunEventWaits(ctx, ClaimRunEventWaitsRequest{Scope: scope, WorkerID: "worker", Now: connectOnceMigrationNow, LeaseDuration: time.Minute, Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, wait := range waits {
-		if wait.RunID != "waiting" {
-			continue
-		}
-		result, err := store.ProcessRunEventWait(ctx, ProcessRunEventWaitRequest{Scope: scope, RunID: wait.RunID, Key: wait.Spec.Key, WorkerID: "worker", Now: connectOnceMigrationNow, LeaseExpiresAt: *wait.LeaseExpiresAt})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result.Wait.Status != RunEventWaitMatched || result.Event == nil || result.Event.ID != "reply-1" {
-			t.Fatalf("repaired wait result = %#v", result)
-		}
-		return
-	}
-	t.Fatalf("repaired wait was not claimed: %#v", waits)
 }
 
 func runConnectOnceMigrationCase(t *testing.T, h connectOnceMigrationHarness, reopen func(t *testing.T)) {
@@ -340,7 +278,6 @@ func runConnectOnceMigrationCase(t *testing.T, h connectOnceMigrationHarness, re
 			t.Fatalf("replay changed %s:\n%s\n%s", key, value, after[key])
 		}
 	}
-	matchRepairedBindingWait(t, h)
 }
 
 func TestSQLiteConnectOnceMigration(t *testing.T) {

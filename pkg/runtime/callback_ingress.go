@@ -208,13 +208,11 @@ type CallbackIngressService struct {
 		CallbackRegistrationStore
 		CallbackEventStore
 	}
-	resolver          CallbackAdapterResolver
-	consumers         map[string]CallbackEventConsumer
-	eventObserver     VerifiedRunEventObserver
-	atomicEventIntake CallbackRunEventIntakeStore
-	now               func() time.Time
-	async             bool
-	wake              func()
+	resolver  CallbackAdapterResolver
+	consumers map[string]CallbackEventConsumer
+	now       func() time.Time
+	async     bool
+	wake      func()
 }
 
 // SetDurableDispatcher makes ingress acknowledgement stop after signature
@@ -236,9 +234,7 @@ func NewCallbackIngressService(store interface {
 	for name, consumer := range consumers {
 		copyConsumers[strings.TrimSpace(name)] = consumer
 	}
-	service := &CallbackIngressService{store: store, resolver: resolver, consumers: copyConsumers, eventObserver: runEventObserverForStore(store), now: time.Now}
-	service.atomicEventIntake, _ = store.(CallbackRunEventIntakeStore)
-	return service
+	return &CallbackIngressService{store: store, resolver: resolver, consumers: copyConsumers, now: time.Now}
 }
 
 func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPublicRequest, host CallbackAdapterHost) (*CallbackIngressResult, error) {
@@ -301,7 +297,7 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 			RegistrationID: registration.ID, RegistrationRevision: registration.Revision, Event: event,
 			Status: CallbackEventPending, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
-		stored, replayed, err := s.receiveVerifiedCallbackEvent(ctx, registration, receipt)
+		stored, replayed, err := s.store.ReceiveCallbackEvent(ctx, receipt)
 		if err != nil {
 			return nil, err
 		}
@@ -353,9 +349,6 @@ func (s *CallbackIngressService) dispatch(ctx context.Context, registration *Cal
 		adapter.Binding.SkillID != ref.SkillID || adapter.Binding.SourceIdentity != ref.SourceIdentity ||
 		adapter.Adapter.Provider != registration.Provider {
 		return fmt.Errorf("%w: current callback binding authority is unavailable", ErrCallbackRegistrationConflict)
-	}
-	if err := publishVerifiedCallbackEvent(ctx, s.eventObserver, registration, event, receivedAt); err != nil {
-		return err
 	}
 	matched := 0
 	for _, subscription := range registration.Subscriptions {

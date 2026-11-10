@@ -16,7 +16,7 @@ type terminalReportingContractStore interface {
 	ConversationStore
 }
 
-func terminalReportingContractFixture(t *testing.T, fixture eventWaitContractFixture) terminalReportingContractStore {
+func terminalReportingContractFixture(t *testing.T, fixture runStoreContractFixture) terminalReportingContractStore {
 	t.Helper()
 	store, ok := fixture.store.(terminalReportingContractStore)
 	if !ok {
@@ -102,9 +102,9 @@ func terminalReportingContractAssertMessage(t *testing.T, store ConversationStor
 }
 
 func TestTerminalRunReportingContractCommitCrashRestartRecovery(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-restart"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		intent, err := store.GetRunTerminalReport(t.Context(), run.Scope, run.ID, run.Status)
@@ -135,9 +135,9 @@ func TestTerminalRunReportingContractCommitCrashRestartRecovery(t *testing.T) {
 }
 
 func TestTerminalRunReportingContractCrashAfterPostBeforeAck(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-ack-crash"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		claims, err := store.ClaimRunTerminalReports(t.Context(), RunTerminalReportingClaim{WorkerID: "dead-worker", Now: now, LeaseDuration: time.Minute, Limit: 1})
@@ -186,9 +186,9 @@ func (s *terminalReportingConflictStore) CommitChannelMessage(ctx context.Contex
 }
 
 func TestTerminalRunReportingContractConflictBackoffAndActiveScopeGate(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-retry"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		conflicted := &terminalReportingConflictStore{terminalReportingContractStore: store, remaining: 2}
@@ -228,9 +228,9 @@ func TestTerminalRunReportingContractConflictBackoffAndActiveScopeGate(t *testin
 }
 
 func TestTerminalRunReportingContractConcurrentFastpathAndDurableRetry(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-concurrent"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		var group sync.WaitGroup
@@ -273,7 +273,7 @@ func TestTerminalRunReportingContractConcurrentFastpathAndDurableRetry(t *testin
 }
 
 func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		cases := []struct {
 			name       string
@@ -296,8 +296,8 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 			{name: "milestones-empty", status: AgentRunStatusCompleted},
 			{name: "trimmed-root", status: AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, mutate: func(r *AgentRun) { r.Context[runReportingContextRootRunID] = "\t\u2000" + r.ID + "\u3000\n" }},
 			{name: "unicode-blank-destination", status: AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *AgentRun) { r.Context[conversationRunContextConversationID] = "\t\u2000\u3000\n" }},
-			{name: "fraction-at-second-boundary", status: AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: eventWaitContractEpoch.Add(999999 * time.Microsecond)},
-			{name: "fraction-with-offset", status: AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: eventWaitContractEpoch.Add(999999 * time.Microsecond).In(time.FixedZone("IST", 19800))},
+			{name: "fraction-at-second-boundary", status: AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreContractEpoch.Add(999999 * time.Microsecond)},
+			{name: "fraction-with-offset", status: AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreContractEpoch.Add(999999 * time.Microsecond).In(time.FixedZone("IST", 19800))},
 		}
 		for _, test := range cases {
 			t.Run(test.name, func(t *testing.T) {
@@ -306,7 +306,7 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 					ID: id, RootRunID: id, Scope: Scope{Kind: "tenant", ID: "report-eligibility"}, Kind: RunKindAgentWork,
 					Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "report-agent"}, AssignedAgentID: "report-agent",
 					Goal: "Report completed work", Source: RunSourceSchedule, Status: test.status, Revision: 1,
-					CreatedAt: eventWaitContractEpoch, UpdatedAt: eventWaitContractEpoch,
+					CreatedAt: runStoreContractEpoch, UpdatedAt: runStoreContractEpoch,
 					Context: map[string]interface{}{runReportingContextRootRunID: id, conversationRunContextConversationID: "original-chat", conversationRunContextTriggerID: "original-message", runReportingContextMilestones: test.milestones},
 				}
 				if test.mutate != nil {
@@ -315,7 +315,7 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 				if !test.at.IsZero() {
 					run.CreatedAt, run.UpdatedAt = test.at, test.at
 				}
-				_, err := store.CreateAgentRunWithEvent(t.Context(), run, &ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: id, EventType: "run.completed", Summary: "Imported durable completion", CreatedAt: eventWaitContractEpoch})
+				_, err := store.CreateAgentRunWithEvent(t.Context(), run, &ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: id, EventType: "run.completed", Summary: "Imported durable completion", CreatedAt: runStoreContractEpoch})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -333,9 +333,9 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 }
 
 func TestTerminalRunReportingContractImmutableSnapshotScopedClaimsAndFencing(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		first, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-first"}, now)
 		second, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-second"}, now)
 		first = terminalReportingContractComplete(t, store, first, now)
@@ -386,9 +386,9 @@ func TestTerminalRunReportingContractImmutableSnapshotScopedClaimsAndFencing(t *
 }
 
 func TestTerminalRunReportingContractFailedTerminalCommitRollsBackIntent(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := eventWaitContractEpoch
+		now := runStoreContractEpoch
 		run, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-atomic-failure"}, now)
 		activity := NewRunActivityService(store, store)
 		activity.now = func() time.Time { return now }
