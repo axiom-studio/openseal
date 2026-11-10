@@ -211,7 +211,7 @@ func (s *MemoryStore) InsertRoutineEvent(_ context.Context, record *RoutineEvent
 	return true, nil
 }
 
-func routineEventWaiting(record *RoutineEventRecord) bool {
+func routineEventPending(record *RoutineEventRecord) bool {
 	return record.State == RoutineEventPending || record.State == RoutineEventBatched
 }
 
@@ -223,7 +223,7 @@ func (s *MemoryStore) CountPendingRoutineEvents(_ context.Context, scope Scope, 
 	defer s.mu.RUnlock()
 	count := 0
 	for key, record := range s.routineEvents {
-		if key.scope == scope && key.activationID == activationID && routineEventWaiting(record) {
+		if key.scope == scope && key.activationID == activationID && routineEventPending(record) {
 			count++
 		}
 	}
@@ -238,7 +238,7 @@ func (s *MemoryStore) CountPendingRoutineEventsInScope(_ context.Context, scope 
 	defer s.mu.RUnlock()
 	count := 0
 	for key, record := range s.routineEvents {
-		if key.scope == scope && routineEventWaiting(record) {
+		if key.scope == scope && routineEventPending(record) {
 			count++
 		}
 	}
@@ -253,7 +253,7 @@ func (s *MemoryStore) ListRoutineEventWork(_ context.Context, scope Scope, limit
 	s.mu.RLock()
 	unique := make(map[string]struct{})
 	for key, record := range s.routineEvents {
-		if key.scope == scope && routineEventWaiting(record) {
+		if key.scope == scope && routineEventPending(record) {
 			unique[key.activationID] = struct{}{}
 		}
 	}
@@ -442,7 +442,7 @@ func (s *MemoryStore) DropRoutineEvents(_ context.Context, scope Scope, activati
 	defer s.mu.Unlock()
 	count := 0
 	for key, record := range s.routineEvents {
-		if key.scope != scope || key.activationID != activationID || !routineEventWaiting(record) {
+		if key.scope != scope || key.activationID != activationID || !routineEventPending(record) {
 			continue
 		}
 		record.State, record.DroppedReason, record.BatchID = RoutineEventDropped, reason, ""
@@ -495,7 +495,7 @@ func (s *MemoryStore) RoutineEventActivity(_ context.Context, scope Scope, activ
 			continue
 		}
 		activity := result[key.activationID]
-		if routineEventWaiting(record) {
+		if routineEventPending(record) {
 			activity.Pending++
 		} else if record.State == RoutineEventDropped && !record.ReceivedAt.Before(dayAgo) {
 			activity.DroppedLast24h++

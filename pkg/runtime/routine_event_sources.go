@@ -25,7 +25,7 @@ const (
 
 var (
 	ErrRoutineEventsUnavailable = errors.New("event routines are not available here")
-	ErrRoutineHooksUnavailable  = errors.New("webhooks are not available here")
+	ErrHooksUnavailable         = errors.New("webhooks are not available here")
 )
 
 // RoutineEventSourceChannel is one conversation of a Slack or Telegram
@@ -407,7 +407,7 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 			return nil, errors.New("a webhook routine's source must be \"new\"")
 		}
 		if !events.hooksAvailable {
-			return nil, ErrRoutineHooksUnavailable
+			return nil, ErrHooksUnavailable
 		}
 		hookID := HookID(run.Scope, activationID)
 		trigger.SourceRef, trigger.SourceLabel, trigger.Webhook = HookSourceRef(hookID), "Webhook", &RoutineWebhook{HookID: hookID}

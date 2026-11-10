@@ -159,7 +159,7 @@ func TestCreateTaskWebhookCreatesHook(t *testing.T) {
 	}
 
 	noHooks := newEventRoutineFixture(t, false)
-	if _, err := noHooks.validate(t, noHooks.run, RunbookActionCreateTask, noHooks.withEvent(map[string]interface{}{"kind": "webhook", "source": "new"})); !errors.Is(err, ErrRoutineHooksUnavailable) {
+	if _, err := noHooks.validate(t, noHooks.run, RunbookActionCreateTask, noHooks.withEvent(map[string]interface{}{"kind": "webhook", "source": "new"})); !errors.Is(err, ErrHooksUnavailable) {
 		t.Fatalf("webhook without hooks: %v", err)
 	}
 }
