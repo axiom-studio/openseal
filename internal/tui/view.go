@@ -961,7 +961,7 @@ func (m *Model) renderObjectiveRunbooks(objectiveID string, width int) []string 
 				trigger = "Invalid schedule"
 			}
 		case runbook.TriggerEvent:
-			trigger = "Event · " + value.Trigger.EventType
+			trigger = "Event"
 		}
 		prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
 		if value.ID == m.selectedRunbook {

@@ -888,7 +888,7 @@ func TestPinnedRunbookPlanPreventsDefinitionAndTriggerDrift(t *testing.T) {
 	definition := &runbook.Definition{
 		ID: "chat", Version: "2",
 		Triggers: map[string]runbook.Trigger{"on-message": {
-			Kind: runbook.TriggerEvent, EventType: externalConversationEventType, Entrypoint: "respond", ObjectiveID: "agent:agent:respond",
+			Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}, Entrypoint: "respond", ObjectiveID: "agent:agent:respond",
 		}},
 	}
 	run := &AgentRun{
