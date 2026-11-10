@@ -329,19 +329,19 @@ func dispatchRoutineEventSources(ctx context.Context, store runbookActionStore, 
 	return map[string]interface{}{"sources": sources}, nil
 }
 
-// RoutineEventSourceChecker tells the dispatcher's hourly source check
-// whether an event routine's Slack, Telegram or GitHub source still exists
-// for its owner. Google and webhook sources are checked elsewhere (the host's
+// routineEventSourceChecker is the store-backed RoutineEventSourceChecker. It
+// tells the dispatcher's hourly source check whether an event routine's Slack,
+// Telegram or GitHub source still exists for its owner. Google and webhook sources are checked elsewhere (the host's
 // sync loop and the hook row), so it reports them as present.
-type RoutineEventSourceChecker struct {
+type routineEventSourceChecker struct {
 	store interface{}
 }
 
-func NewRoutineEventSourceChecker(store interface{}) *RoutineEventSourceChecker {
-	return &RoutineEventSourceChecker{store: store}
+func NewRoutineEventSourceChecker(store interface{}) RoutineEventSourceChecker {
+	return &routineEventSourceChecker{store: store}
 }
 
-func (c *RoutineEventSourceChecker) SourceExists(ctx context.Context, scope Scope, owner ObjectiveOwner, kind RoutineEventKind, sourceRef string) (bool, error) {
+func (c *routineEventSourceChecker) SourceExists(ctx context.Context, scope Scope, owner ObjectiveOwner, kind RoutineEventKind, sourceRef string) (bool, error) {
 	if c == nil || c.store == nil {
 		return false, errors.New("routine source checker is not configured")
 	}
