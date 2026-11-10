@@ -567,6 +567,9 @@ type RunbookActivationService struct {
 		PortfolioStore
 	}
 	now func() time.Time
+	// routineSources is the host's Google catalog, which the resume of a
+	// Gmail or Calendar routine checks the creator's sign-in against.
+	routineSources RoutineEventSourceCatalog
 }
 
 func NewRunbookActivationService(store interface {
@@ -574,6 +577,14 @@ func NewRunbookActivationService(store interface {
 	PortfolioStore
 }) *RunbookActivationService {
 	return &RunbookActivationService{store: store, now: time.Now}
+}
+
+// WithRoutineEventSources sets the host's Google catalog for the source
+// check a resume runs. Without one a Gmail or Calendar routine cannot be
+// resumed (needs_sign_in).
+func (s *RunbookActivationService) WithRoutineEventSources(catalog RoutineEventSourceCatalog) *RunbookActivationService {
+	s.routineSources = catalog
+	return s
 }
 
 func (s *RunbookActivationService) Create(ctx context.Context, request CreateRunbookActivationRequest) (*RunbookActivation, error) {
@@ -720,6 +731,13 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 			return nil, err
 		}
 		return cloneRunbookActivation(current), nil
+	}
+	// A resume re-runs the source check first, so a routine whose source is
+	// gone stays paused instead of coming back deaf.
+	if current.Status == RunbookActivationPaused && request.Status == RunbookActivationActive {
+		if err := checkRoutineResumeSource(ctx, s.store, s.routineSources, current, request.CreatedBy); err != nil {
+			return nil, err
+		}
 	}
 	next := cloneRunbookActivation(current)
 	next.Status = request.Status

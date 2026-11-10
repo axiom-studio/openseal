@@ -699,7 +699,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		if args.Status == RunbookActivationActive {
 			update.CreatedBy = routineChangeCreator(owned, run)
 		}
-		activation, err := NewRunbookActivationService(store).Update(ctx, run.Scope, current.ID, update)
+		activation, err := NewRunbookActivationService(store).WithRoutineEventSources(events.sources).Update(ctx, run.Scope, current.ID, update)
 		if err != nil {
 			return nil, err
 		}

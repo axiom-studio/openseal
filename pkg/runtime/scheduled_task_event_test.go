@@ -295,3 +295,105 @@ func TestSendTestEventRejectsNonCreator(t *testing.T) {
 		t.Fatalf("without an offerer: %v", err)
 	}
 }
+
+// setRoutineStatus runs set_status the way a chat does.
+func (f *eventRoutineFixture) setRoutineStatus(t *testing.T, activationID string, status RunbookActivationStatus, callID string) (*RunbookActivation, error) {
+	t.Helper()
+	current, err := f.store.GetRunbookActivation(t.Context(), f.run.Scope, activationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.dispatch(t, f.run, RunbookActionSetStatus, map[string]interface{}{
+		"activationId": activationID, "expectedRevision": float64(current.Revision), "status": string(status), "reason": "test",
+	}, callID)
+	if err != nil {
+		return nil, err
+	}
+	return result["activation"].(*RunbookActivation), nil
+}
+
+func (f *eventRoutineFixture) setEndpointStatus(t *testing.T, id string, status ExternalConversationEndpointStatus) {
+	t.Helper()
+	endpoint, err := f.store.GetExternalConversationEndpoint(t.Context(), f.run.Scope, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := *endpoint
+	next.Status, next.Revision = status, endpoint.Revision+1
+	if err := f.store.UpdateExternalConversationEndpoint(t.Context(), &next, endpoint.Revision); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func resumeRefusedWith(t *testing.T, err error, reason RoutinePausedReason) {
+	t.Helper()
+	var refused *RoutineSourceUnavailableError
+	if !errors.Is(err, ErrRoutineSourceUnavailable) || !errors.As(err, &refused) || refused.Reason != reason ||
+		!strings.Contains(err.Error(), string(reason)) {
+		t.Fatalf("resume error = %v, want %s", err, reason)
+	}
+}
+
+func TestResumeEventRoutineRechecksSource(t *testing.T) {
+	f := newEventRoutineFixture(t, true)
+	created, err := f.dispatch(t, f.run, RunbookActionCreateTask, f.withEvent(f.slackEvent("C1")), "create-slack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slack := created["activation"].(*RunbookActivation)
+	if _, err := f.setRoutineStatus(t, slack.ID, RunbookActivationPaused, "pause-slack"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The named channel's endpoint is gone: the connection alone is not enough.
+	f.setEndpointStatus(t, "ep-support", ExternalConversationEndpointPaused)
+	_, err = f.setRoutineStatus(t, slack.ID, RunbookActivationActive, "resume-slack-gone")
+	resumeRefusedWith(t, err, RoutinePausedSourceRemoved)
+	// Every caller of the service gets the same check.
+	current, _ := f.store.GetRunbookActivation(t.Context(), f.run.Scope, slack.ID)
+	_, err = NewRunbookActivationService(f.store).Update(t.Context(), f.run.Scope, slack.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: RunbookActivationActive})
+	resumeRefusedWith(t, err, RoutinePausedSourceRemoved)
+	if stored, _ := f.store.GetRunbookActivation(t.Context(), f.run.Scope, slack.ID); stored.Status != RunbookActivationPaused || stored.Revision != current.Revision {
+		t.Fatalf("refused resume changed the routine: %#v", stored)
+	}
+	f.setEndpointStatus(t, "ep-support", ExternalConversationEndpointActive)
+	if resumed, err := f.setRoutineStatus(t, slack.ID, RunbookActivationActive, "resume-slack"); err != nil || resumed.Status != RunbookActivationActive {
+		t.Fatalf("resume with the channel back = %#v, %v", resumed, err)
+	}
+
+	created, err = f.dispatch(t, f.run, RunbookActionCreateTask, f.withEvent(map[string]interface{}{"kind": "gmail.message", "source": RoutineGoogleSourceRef("user", "g-user")}), "create-gmail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gmail := created["activation"].(*RunbookActivation)
+	if _, err := f.setRoutineStatus(t, gmail.ID, RunbookActivationPaused, "pause-gmail"); err != nil {
+		t.Fatal(err)
+	}
+	// The creator's Google sign-in is gone from the host's catalog.
+	f.dispatcher.SetRoutineEvents(f.offerer, routineGoogleSourcesForTest{
+		{Kind: RoutineEventGmailMessage, Source: RoutineGoogleSourceRef("user", "g-user"), Label: "your Gmail", Available: false, Reason: RoutineEventSourceNeedsSignIn, SkillID: "google"},
+	}, true)
+	_, err = f.setRoutineStatus(t, gmail.ID, RunbookActivationActive, "resume-gmail-signed-out")
+	resumeRefusedWith(t, err, RoutinePausedNeedsSignIn)
+	// A host without a Google catalog cannot vouch for the sign-in either.
+	current, _ = f.store.GetRunbookActivation(t.Context(), f.run.Scope, gmail.ID)
+	_, err = NewRunbookActivationService(f.store).Update(t.Context(), f.run.Scope, gmail.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: RunbookActivationActive})
+	resumeRefusedWith(t, err, RoutinePausedNeedsSignIn)
+	f.dispatcher.SetRoutineEvents(f.offerer, f.google, true)
+	if resumed, err := f.setRoutineStatus(t, gmail.ID, RunbookActivationActive, "resume-gmail"); err != nil || resumed.Status != RunbookActivationActive {
+		t.Fatalf("resume with the sign-in back = %#v, %v", resumed, err)
+	}
+
+	// A webhook routine has no outside source to check.
+	created, err = f.dispatch(t, f.run, RunbookActionCreateTask, f.withEvent(map[string]interface{}{"kind": "webhook", "source": "new"}), "create-webhook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook := created["activation"].(*RunbookActivation)
+	if _, err := f.setRoutineStatus(t, hook.ID, RunbookActivationPaused, "pause-hook"); err != nil {
+		t.Fatal(err)
+	}
+	if resumed, err := f.setRoutineStatus(t, hook.ID, RunbookActivationActive, "resume-hook"); err != nil || resumed.Status != RunbookActivationActive {
+		t.Fatalf("webhook resume = %#v, %v", resumed, err)
+	}
+}

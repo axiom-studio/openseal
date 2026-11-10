@@ -145,7 +145,9 @@ func (h *routineEventHarness) get(activation *RunbookActivation) *RunbookActivat
 func (h *routineEventHarness) setStatus(activation *RunbookActivation, status RunbookActivationStatus) *RunbookActivation {
 	h.t.Helper()
 	current := h.get(activation)
-	updated, err := NewRunbookActivationService(h.store).Update(h.ctx, h.scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: status})
+	// The creator stays signed in to Google, so a resume passes its source check.
+	signedIn := routineGoogleSourcesForTest{{Kind: current.Task.Event.Kind, Source: current.Task.Event.SourceRef, Available: true}}
+	updated, err := NewRunbookActivationService(h.store).WithRoutineEventSources(signedIn).Update(h.ctx, h.scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: status})
 	if err != nil {
 		h.t.Fatal(err)
 	}

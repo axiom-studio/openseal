@@ -3627,7 +3627,8 @@ func (e *Engine) ListRunbookActivations(ctx context.Context, filter runtime.Runb
 }
 
 func (e *Engine) UpdateRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string, req runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
-	return runtime.NewRunbookActivationService(e.store).Update(ctx, scope, activationID, req)
+	// A resume re-runs the routine's source check with the host's Google catalog.
+	return runtime.NewRunbookActivationService(e.store).WithRoutineEventSources(e.routineEvents.sources).Update(ctx, scope, activationID, req)
 }
 
 func (e *Engine) StartRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string, req runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {

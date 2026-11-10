@@ -139,6 +139,10 @@ func (s *Server) respondRunbookError(w http.ResponseWriter, err error) {
 		s.respondError(w, http.StatusConflict, err.Error())
 		return
 	}
+	if errors.Is(err, runtime.ErrRoutineSourceUnavailable) {
+		s.respondError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if errors.Is(err, runtime.ErrRunbookActivationInactive) {
 		s.respondError(w, http.StatusConflict, err.Error())
 		return

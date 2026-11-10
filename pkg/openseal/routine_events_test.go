@@ -3,6 +3,7 @@ package openseal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -172,6 +173,13 @@ func TestEngineRoutineEventEndToEnd(t *testing.T) {
 	}
 }
 
+// routineGoogleSignIns is a host Google catalog that lists these sources.
+type routineGoogleSignIns []RoutineEventSourceOption
+
+func (c routineGoogleSignIns) ListRoutineEventSources(context.Context, Scope, ObjectiveOwner, string) ([]RoutineEventSourceOption, error) {
+	return append([]RoutineEventSourceOption(nil), c...), nil
+}
+
 func TestEngineRoutineCreateListensAtOnce(t *testing.T) {
 	engine, err := New(WithStore(runtime.NewMemoryStore()))
 	if err != nil {
@@ -182,10 +190,17 @@ func TestEngineRoutineCreateListensAtOnce(t *testing.T) {
 	if !f.listening(activation) {
 		t.Fatal("created routine is not listening")
 	}
-	f.setStatus(activation, RunbookActivationPaused)
+	pausedRoutine := f.setStatus(activation, RunbookActivationPaused)
 	if f.listening(activation) {
 		t.Fatal("paused routine is still listening")
 	}
+	// Without the creator's Google sign-in the resume is refused.
+	_, err = engine.UpdateRunbookActivation(f.ctx, f.scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: pausedRoutine.Revision, Status: RunbookActivationActive})
+	var refused *RoutineSourceUnavailableError
+	if !errors.As(err, &refused) || refused.Reason != RoutinePausedNeedsSignIn {
+		t.Fatalf("resume without a sign-in: %v", err)
+	}
+	engine.SetRoutineEventSourceCatalog(routineGoogleSignIns{{Kind: RoutineEventGmailMessage, Source: activation.Task.Event.SourceRef, Available: true}})
 	f.setStatus(activation, RunbookActivationActive)
 	if !f.listening(activation) {
 		t.Fatal("resumed routine is not listening")

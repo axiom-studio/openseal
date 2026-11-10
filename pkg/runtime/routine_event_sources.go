@@ -26,7 +26,69 @@ const (
 var (
 	ErrRoutineEventsUnavailable = errors.New("event routines are not available here")
 	ErrHooksUnavailable         = errors.New("webhooks are not available here")
+	// ErrRoutineSourceUnavailable is what a refused resume matches; the
+	// error itself is a *RoutineSourceUnavailableError with the reason.
+	ErrRoutineSourceUnavailable = errors.New("the routine's event source is not available")
 )
+
+// RoutineSourceUnavailableError refuses the resume of an event routine whose
+// source is gone. Reason is the code the hourly check would pause it with:
+// source_removed for a Slack, Telegram or GitHub source (the connection, a
+// named channel's endpoint or the registration is gone), needs_sign_in for a
+// Gmail or Calendar routine without its creator's Google sign-in.
+type RoutineSourceUnavailableError struct {
+	Reason RoutinePausedReason
+}
+
+func (e *RoutineSourceUnavailableError) Error() string {
+	if e.Reason == RoutinePausedNeedsSignIn {
+		return "the routine cannot be resumed (needs_sign_in): the Google sign-in of the person who created it is missing; they need to sign in to Google again first"
+	}
+	return "the routine cannot be resumed (source_removed): its connection, channel or repository is no longer set up for this Agent or Team"
+}
+
+func (e *RoutineSourceUnavailableError) Is(target error) bool {
+	return target == ErrRoutineSourceUnavailable
+}
+
+// checkRoutineResumeSource is the source check a resume runs before an event
+// routine is active again: the hourly check for Slack, Telegram (including
+// each named channel) and GitHub, and the creator's own Google sign-in in
+// the host's catalog for Gmail and Calendar. Webhook routines have no
+// outside source. resumedBy stands in for a routine with no creator yet.
+func checkRoutineResumeSource(ctx context.Context, store interface{}, google RoutineEventSourceCatalog, activation *RunbookActivation, resumedBy string) error {
+	subscription, ok := routineEventSubscriptionOf(activation)
+	if !ok {
+		return nil
+	}
+	switch subscription.Kind {
+	case RoutineEventWebhook:
+		return nil
+	case RoutineEventGmailMessage, RoutineEventCalendar:
+		user := subscription.CreatedBy
+		if user == "" {
+			user = strings.TrimSpace(resumedBy)
+		}
+		views, err := routineGoogleSources(ctx, google, subscription.Scope, subscription.Owner, user)
+		if err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(views, func(view *RoutineEventSourceView) bool {
+			return view.Available && view.Kind == subscription.Kind && view.Source == subscription.SourceRef
+		}) {
+			return &RoutineSourceUnavailableError{Reason: RoutinePausedNeedsSignIn}
+		}
+		return nil
+	}
+	exists, err := NewRoutineEventSourceChecker(store).SourceExists(ctx, subscription)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return &RoutineSourceUnavailableError{Reason: RoutinePausedSourceRemoved}
+	}
+	return nil
+}
 
 // RoutineEventSourceChannel is one conversation of a Slack or Telegram
 // connection that the umbrella has an active endpoint in. Only these can be

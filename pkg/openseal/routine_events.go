@@ -33,6 +33,8 @@ type (
 	RoutineEventDispatchResult = runtime.RoutineEventDispatchResult
 	RoutineEventFileKeeper     = runtime.RoutineEventFileKeeper
 	Hook                       = runtime.Hook
+
+	RoutineSourceUnavailableError = runtime.RoutineSourceUnavailableError
 )
 
 const (
@@ -71,6 +73,7 @@ var (
 	ErrRoutineEventsWaitingIsFull = runtime.ErrRoutineEventsWaitingIsFull
 	ErrRoutineEventBatchNotFound  = runtime.ErrRoutineEventBatchNotFound
 	ErrRoutineEventsUnavailable   = runtime.ErrRoutineEventsUnavailable
+	ErrRoutineSourceUnavailable   = runtime.ErrRoutineSourceUnavailable
 )
 
 var (
@@ -276,8 +279,9 @@ func (e *Engine) PauseRoutinesForSource(ctx context.Context, scope runtime.Scope
 	return e.routineEvents.dispatcher.PauseRoutinesForSource(ctx, scope, kind, sourceRef, reason)
 }
 
-// PauseRoutine pauses one event routine for a system reason and drops its
-// waiting events.
+// PauseRoutine pauses one event routine for a system reason. It only writes
+// the status and nudges the dispatcher, which drops the waiting events on
+// its next pass (the close-out).
 func (e *Engine) PauseRoutine(ctx context.Context, scope runtime.Scope, activationID string, reason runtime.RoutinePausedReason) error {
 	_, err := e.routineEvents.dispatcher.PauseRoutine(ctx, scope, activationID, reason)
 	return err
