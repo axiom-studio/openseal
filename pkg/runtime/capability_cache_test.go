@@ -244,8 +244,9 @@ func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
 	if mustJSON(t, finalAnswerSchema(one)) != mustJSON(t, finalAnswerSchema(two)) || finalAnswerDescription(one) != finalAnswerDescription(two) {
 		t.Fatal("the final answer tool changes with the Skill refs")
 	}
-	if _, rejection := finalSkillSelections([]string{"skill-gone@1"}, two.SkillPromptRefs); rejection == nil {
-		t.Fatal("an unknown ref was accepted")
+	if selections, rejection := finalSkillSelections([]string{"skill-gone@1"}, two.SkillPromptRefs); rejection != nil || len(selections) != 2 ||
+		selections[0].Disposition != HostedSkillNotApplied || selections[1].Disposition != HostedSkillNotApplied {
+		t.Fatalf("an unknown ref must be left out: %#v %v", selections, rejection)
 	}
 	// Delegate, fork and operation tools carry no target list either.
 	targets := ControlAuthority{AgentID: "agent-1", ForkAllowed: true,

@@ -313,8 +313,11 @@ func (finalAnswerHandler) run(ctx context.Context, x *ControlExecutor, cc Contro
 	return x.acceptFinalAnswer(ctx, cc, draft)
 }
 
-// checkFinalAnswerFields: every present field must be offered on this claim
-// and every required field present. It returns the decoder-style message, or "".
+// checkFinalAnswerFields: every present kernel field must be offered on this
+// claim and every required field present. It returns the decoder-style
+// message, or "". A key that is neither a kernel field nor a host extension
+// (a model adding "tone") is dropped instead: refusing it throws away a whole
+// written answer to have the model write it again.
 func checkFinalAnswerFields(call *finalAnswerCall, cc ControlContext) string {
 	var unknown []string
 	for key := range call.Present {
@@ -329,7 +332,7 @@ func checkFinalAnswerFields(call *finalAnswerCall, cc ControlContext) string {
 	extensions := finalOutputFieldNames(cc.Run, publisher)
 	for key := range call.Extra {
 		if _, ok := extensions[key]; !ok {
-			unknown = append(unknown, key)
+			delete(call.Extra, key)
 		}
 	}
 	if len(unknown) > 0 {
@@ -552,12 +555,12 @@ func (d *finalAnswerDraft) output(mode FinalAnswerMode) map[string]interface{} {
 // finalSkillSelections builds the dispositions of the offered prompt Skills
 // (cortex hostedNativeFinalOutcome rule): each offered ref is applied when
 // cited, otherwise not applied; duplicates and unknown refs are refused.
+// A ref cited twice counts once, and a ref that names no Skill prompt loaded in
+// this Run is left out: the citations are bookkeeping about the answer, and
+// refusing them throws away a whole written answer to have it written again.
 func finalSkillSelections(applied, offered []string) ([]HostedSkillSelection, *finalAnswerRejection) {
 	cited := make(map[string]bool, len(applied))
 	for _, ref := range applied {
-		if cited[ref] {
-			return nil, &finalAnswerRejection{Code: finalSkillIdentityCode, Message: fmt.Sprintf("appliedSkillRefs lists %q twice.", ref)}
-		}
 		cited[ref] = true
 	}
 	selections := make([]HostedSkillSelection, 0, len(offered))
@@ -568,15 +571,6 @@ func finalSkillSelections(applied, offered []string) ([]HostedSkillSelection, *f
 			delete(cited, ref)
 		}
 		selections = append(selections, selection)
-	}
-	if len(cited) > 0 {
-		unknown := make([]string, 0, len(cited))
-		for ref := range cited {
-			unknown = append(unknown, ref)
-		}
-		sort.Strings(unknown)
-		return nil, &finalAnswerRejection{Code: finalSkillIdentityCode,
-			Message: fmt.Sprintf("appliedSkillRefs cites %q, which is not a Skill prompt loaded in this run.", unknown[0])}
 	}
 	return selections, nil
 }

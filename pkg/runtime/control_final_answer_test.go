@@ -406,8 +406,19 @@ func TestFinalAnswerSkillSelections(t *testing.T) {
 	)
 	authority := ControlAuthority{SkillPromptRefs: []string{"s1", "s2"}}
 	requireRejected(t, f, f.settleFinal("missing", authority), "missing", controlArgumentsInvalidCode)
-	requireRejected(t, f, f.settleFinal("dup", authority), "dup", finalSkillIdentityCode)
-	requireRejected(t, f, f.settleFinal("unknown", authority), "unknown", finalSkillIdentityCode)
+	// A ref cited twice counts once; a ref no loaded Skill has is left out.
+	for _, id := range []string{"dup", "unknown"} {
+		got := requireFinal(t, f.settleFinal(id, authority))
+		applied := 0
+		for _, selection := range got.Output["skillSelections"].([]HostedSkillSelection) {
+			if selection.Disposition == HostedSkillApplied {
+				applied++
+			}
+		}
+		if want := map[string]int{"dup": 1, "unknown": 0}[id]; applied != want {
+			t.Fatalf("%s: applied = %d, want %d", id, applied, want)
+		}
+	}
 	final := requireFinal(t, f.settleFinal("ok", authority))
 	want := []HostedSkillSelection{
 		{SkillRef: "s1", Disposition: HostedSkillNotApplied, Summary: "Not used in this answer."},
@@ -582,7 +593,11 @@ func TestFinalOutputPublisherValidatesExtensionFields(t *testing.T) {
 		}
 		return result
 	}
-	requireRejected(t, f, settle("unknown"), "unknown", controlArgumentsInvalidCode)
+	// A field nobody offers is dropped, not refused: the answer stands.
+	requireFinal(t, settle("unknown"))
+	if len(publisher.validated) != 0 {
+		t.Fatalf("a dropped field reached the publisher: %#v", publisher.validated)
+	}
 	publisher.reject = errors.New("generatedFiles[0].name must end in .txt")
 	value := requireRejected(t, f, settle("rejected"), "rejected", finalOutputInvalidCode)
 	if value["message"] != "generatedFiles[0].name must end in .txt" {
@@ -616,9 +631,11 @@ func TestFinalOutputPublisherValidatesExtensionFields(t *testing.T) {
 	if base := ControlModelStepTools(ControlAuthority{}); base[0].InputSchema["properties"].(map[string]interface{})["generatedFiles"] != nil {
 		t.Fatal("WithFinalOutputProperties changed the base tool")
 	}
-	// Extension fields without a publisher are refused as unknown.
+	// Extension fields without a publisher are dropped as unknown.
 	g := newFinalFixture(t, finalCall("final", `{"answer":"x","generatedFiles":[]}`))
-	requireRejected(t, g, g.settleFinal("final", ControlAuthority{}), "final", controlArgumentsInvalidCode)
+	if dropped := requireFinal(t, g.settleFinal("final", ControlAuthority{})); dropped.Output["generatedFiles"] != nil {
+		t.Fatalf("an unknown field reached the output: %#v", dropped.Output)
+	}
 }
 
 func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {

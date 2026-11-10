@@ -477,7 +477,7 @@ func TestRunLoopParkReplanSupersededByMessage(t *testing.T) {
 func TestRunLoopFinalToolRejectedThreeTimesFails(t *testing.T) {
 	eachStore(t, "rl_final_rejected", func(t *testing.T, store KernelStore) {
 		f := newLoopFixture(t, store, withRules(&modelRule{name: "bad final", reply: func(stepView) ModelStepResult {
-			return finalAnswer(map[string]any{"answer": "Done.", "bogus": true})
+			return finalAnswer(map[string]any{"answer": 42})
 		}}))
 		run := f.startRun(RunKindAgentWork, "Answer badly")
 		exit, failed := f.runClaim(run.ID)
