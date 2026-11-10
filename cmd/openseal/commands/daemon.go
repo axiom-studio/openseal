@@ -240,9 +240,13 @@ Options:
 	if err := resolver.Bind(kernel, contentStore, sugar); err != nil {
 		sugar.Fatalf("configure the run loop: %v", err)
 	}
+	// Event routines: no webhooks and no Google sources on the desktop.
+	daemon.ConfigureRoutineEvents(kernel)
 	if err := kernel.Start(ctx); err != nil {
 		sugar.Fatalf("start OpenSeal kernel: %v", err)
 	}
+	// The daemon is the only process, so its dispatcher always leads.
+	stopRoutineEvents := daemon.StartRoutineEventDispatcher(ctx, kernel)
 	if err := daemon.SeedBuilderAgent(ctx, kernel, scope); err != nil {
 		sugar.Fatalf("seed the builder agent: %v", err)
 	}
@@ -326,6 +330,7 @@ Options:
 	sig := <-sigCh
 	sugar.Infow("shutting down", "signal", sig)
 
+	stopRoutineEvents()
 	kernel.Stop()
 	apiServer.Shutdown(ctx)
 }
