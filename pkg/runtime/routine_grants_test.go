@@ -42,6 +42,10 @@ func routineGrantFixture(t *testing.T) *routineGrantFixtureState {
 		Actions: map[string]skill.Action{
 			"send": {Name: "send", Description: "Send an email from your account. Supports attachments.", Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationOptional,
 				InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"to": recipients, "cc": recipients, "subject": map[string]interface{}{"type": "string"}, "body": map[string]interface{}{"type": "string"}}}},
+			"chat": {Name: "chat", Description: "Post to a chat.", Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationOptional,
+				InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"chatId": map[string]interface{}{"type": "string"}, "text": map[string]interface{}{"type": "string"}}}},
+			"raw": {Name: "raw", Description: "Send a raw message.", Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationOptional,
+				InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"body": map[string]interface{}{"type": "object"}}}},
 			"search": {Name: "search", Description: "Search the web.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}},
 			"note":   {Name: "note", Description: "Write a note", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationForbidden, InputSchema: map[string]interface{}{"type": "object"}},
 			"pay": {Name: "pay", Description: "Pay for the checkout", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways, Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationForbidden,
@@ -51,7 +55,7 @@ func routineGrantFixture(t *testing.T) *routineGrantFixtureState {
 	if err := catalog.Register(t.Context(), mail); err != nil {
 		t.Fatal(err)
 	}
-	if err := catalog.Bind(t.Context(), &skill.Binding{ID: "mail-binding", Revision: 1, Scope: bound.Binding.Scope, DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", AllowedActions: []string{"send", "search", "note", "pay"}, MaximumRisk: skill.RiskLevelExternal}); err != nil {
+	if err := catalog.Bind(t.Context(), &skill.Binding{ID: "mail-binding", Revision: 1, Scope: bound.Binding.Scope, DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", AllowedActions: []string{"send", "chat", "raw", "search", "note", "pay"}, MaximumRisk: skill.RiskLevelExternal}); err != nil {
 		t.Fatal(err)
 	}
 	validator, err := NewRunbookActionValidator(store)

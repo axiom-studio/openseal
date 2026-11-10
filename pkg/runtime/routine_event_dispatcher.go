@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
@@ -27,6 +28,9 @@ const (
 	routineHookPruneGrace           = time.Hour
 	routineEventIdempotencyPrefix   = "routine-event:"
 	routineEventDispatchWorkLimit   = 200
+	// routineEventMinPassGap is the least time between two dispatcher
+	// passes, so a stream of matched events coalesces into one pass a second.
+	routineEventMinPassGap = time.Second
 )
 
 // RoutineEventSourceChecker tells the dispatcher whether a routine's
@@ -84,6 +88,13 @@ type RoutineEventDispatcher struct {
 	// skips the check.
 	SourceChecker RoutineEventSourceChecker
 	now           func() time.Time
+	minPassGap    time.Duration
+
+	// workCursors keeps, per scope, the last routine a capped pass examined;
+	// the next pass starts after it, so routines that sort late get the
+	// freed slots in turn.
+	cursorMu    sync.Mutex
+	workCursors map[Scope]string
 
 	lastRebuild     time.Time
 	lastSourceCheck time.Time
@@ -92,7 +103,7 @@ type RoutineEventDispatcher struct {
 
 // NewRoutineEventDispatcher builds a dispatcher on the matcher's store.
 func NewRoutineEventDispatcher(store KernelStore, matcher *RoutineEventMatcher) *RoutineEventDispatcher {
-	dispatcher := &RoutineEventDispatcher{store: store, matcher: matcher, now: time.Now}
+	dispatcher := &RoutineEventDispatcher{store: store, matcher: matcher, now: time.Now, minPassGap: routineEventMinPassGap, workCursors: map[Scope]string{}}
 	if reportingStore, ok := store.(ConversationStore); ok {
 		dispatcher.reportingStore = reportingStore
 	}
@@ -113,7 +124,8 @@ func (d *RoutineEventDispatcher) tenantRunCap() int {
 }
 
 // Run is the dispatcher loop: it wakes on the matcher's nudge and on a
-// ticker. Every process keeps its index fresh (rebuild at start and every 15
+// ticker, at most once per minPassGap, so a stream of inserts coalesces.
+// Every process keeps its index fresh (rebuild at start and every 15
 // minutes); only a process for which leads returns true (nil = always)
 // starts Runs and does the hourly source check and daily prune.
 func (d *RoutineEventDispatcher) Run(ctx context.Context, interval time.Duration, leads func() bool) error {
@@ -128,11 +140,21 @@ func (d *RoutineEventDispatcher) Run(ctx context.Context, interval time.Duration
 	nudges := d.matcher.Nudges()
 	for {
 		d.pass(ctx, leads)
+		last := time.Now()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
 		case <-nudges:
+		}
+		if wait := d.minPassGap - time.Since(last); wait > 0 {
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
 		}
 	}
 }
@@ -161,15 +183,17 @@ func (d *RoutineEventDispatcher) pass(ctx context.Context, leads func() bool) {
 	}
 }
 
-// ReconcileAll runs one dispatch pass over every scope with routines.
+// ReconcileAll runs one dispatch pass over every scope with waiting events.
+// One query finds those scopes, so idle tenants cost nothing.
 func (d *RoutineEventDispatcher) ReconcileAll(ctx context.Context, limitPerScope int) (*RoutineEventDispatchResult, error) {
 	if d == nil || d.store == nil {
 		return nil, errors.New("routine event dispatcher is not configured")
 	}
-	scopes, err := d.store.ListRunbookActivationScopes(ctx)
+	scopes, err := d.store.ListRoutineEventWorkScopes(ctx)
 	if err != nil {
 		return nil, err
 	}
+	d.keepWorkCursors(scopes)
 	total := &RoutineEventDispatchResult{Scopes: len(scopes)}
 	queueDepth := 0
 	var firstErr error
@@ -211,7 +235,7 @@ func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope Scope
 	if limit <= 0 || limit > routineEventSubscriptionPageLimit {
 		limit = routineEventDispatchWorkLimit
 	}
-	ids, err := d.store.ListRoutineEventWork(ctx, scope, limit)
+	ids, err := d.routineEventWork(ctx, scope, limit)
 	if err != nil || len(ids) == 0 {
 		return result, 0, err
 	}
@@ -226,6 +250,7 @@ func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope Scope
 	}
 	pass := &routineEventScopePass{activeRuns: active}
 	var firstErr error
+	examined := ""
 	for index, id := range ids {
 		if !pass.capped && pass.activeRuns >= d.tenantRunCap() {
 			pass.capped = true
@@ -238,6 +263,7 @@ func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope Scope
 			break
 		}
 		result.Examined++
+		examined = id
 		if err := d.dispatchActivation(ctx, scope, id, pass, result); err != nil {
 			// One routine's failure stays local: the routines sorted after
 			// it still start. It is retried on the next tick.
@@ -247,7 +273,66 @@ func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope Scope
 			}
 		}
 	}
+	d.advanceWorkCursor(scope, examined, pass.capped || len(ids) >= limit)
 	return result, depth, firstErr
+}
+
+// routineEventWork lists the scope's routines with waiting events, starting
+// after the scope's cursor and wrapping around to the start.
+func (d *RoutineEventDispatcher) routineEventWork(ctx context.Context, scope Scope, limit int) ([]string, error) {
+	d.cursorMu.Lock()
+	after := d.workCursors[scope]
+	d.cursorMu.Unlock()
+	ids, err := d.store.ListRoutineEventWork(ctx, scope, after, limit)
+	if err != nil || after == "" || len(ids) >= limit {
+		return ids, err
+	}
+	head, err := d.store.ListRoutineEventWork(ctx, scope, "", limit-len(ids))
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range head {
+		if id > after {
+			break
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// advanceWorkCursor moves the scope's cursor past the last routine examined
+// when the pass left work unexamined (tenant cap or list limit); otherwise
+// every routine had its turn and the next pass starts from the beginning.
+func (d *RoutineEventDispatcher) advanceWorkCursor(scope Scope, examined string, unfinished bool) {
+	d.cursorMu.Lock()
+	defer d.cursorMu.Unlock()
+	switch {
+	case !unfinished:
+		delete(d.workCursors, scope)
+	case examined != "":
+		if d.workCursors == nil {
+			d.workCursors = map[Scope]string{}
+		}
+		d.workCursors[scope] = examined
+	}
+}
+
+// keepWorkCursors forgets the cursors of scopes that no longer have work.
+func (d *RoutineEventDispatcher) keepWorkCursors(scopes []Scope) {
+	d.cursorMu.Lock()
+	defer d.cursorMu.Unlock()
+	if len(d.workCursors) == 0 {
+		return
+	}
+	keep := make(map[Scope]bool, len(scopes))
+	for _, scope := range scopes {
+		keep[scope] = true
+	}
+	for scope := range d.workCursors {
+		if !keep[scope] {
+			delete(d.workCursors, scope)
+		}
+	}
 }
 
 func routineEventIdempotencyKey(batchID string) string {
@@ -459,7 +544,7 @@ func (d *RoutineEventDispatcher) hourlyLimitReached(ctx context.Context, activat
 
 func (d *RoutineEventDispatcher) retire(ctx context.Context, activation *RunbookActivation, result *RoutineEventDispatchResult) error {
 	_, err := NewRunbookActivationService(d.store).Update(ctx, activation.Scope, activation.ID, UpdateRunbookActivationRequest{
-		ExpectedRevision: activation.Revision, Status: RunbookActivationRetired,
+		ExpectedRevision: activation.Revision, Status: RunbookActivationRetired, Exhausted: true,
 	})
 	if errors.Is(err, ErrRunbookActivationRevision) {
 		return nil
@@ -570,18 +655,8 @@ func (d *RoutineEventDispatcher) PruneRoutineEventData(ctx context.Context) (int
 			break
 		}
 	}
-	scopes, err := d.store.ListRunbookActivationScopes(ctx)
-	if err != nil {
-		return removed, err
-	}
-	for _, scope := range scopes {
-		count, err := d.store.PruneHooks(ctx, scope, now.Add(-routineHookPruneGrace))
-		removed += count
-		if err != nil {
-			return removed, err
-		}
-	}
-	return removed, nil
+	count, err := d.store.PruneHooks(ctx, now.Add(-routineHookPruneGrace))
+	return removed + count, err
 }
 
 // routineEventBatchHeader is the "what started it" line: one event's

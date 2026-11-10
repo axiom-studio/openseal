@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -469,4 +470,174 @@ func (p failingRoutineExecutionPreparer) PrepareAcceptedRunExecution(_ context.C
 		return errors.New("execution preparation failed")
 	}
 	return nil
+}
+
+// pauseRun sets a Run to paused, as budget exhaustion or recovery does.
+func (h *routineEventHarness) pauseRun(run *AgentRun) {
+	h.t.Helper()
+	current, err := h.store.GetAgentRun(h.ctx, h.scope, run.ID)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	updated := cloneAgentRun(current)
+	updated.Status, updated.Revision, updated.UpdatedAt = AgentRunStatusPaused, current.Revision+1, h.now
+	event := &ActivityEvent{
+		ID: "pause-" + run.ID, Scope: h.scope, EventType: "run.status_changed", Severity: ActivitySeverityInfo, AgentID: run.AssignedAgentID, RunID: run.ID,
+		Actor: ActivityActor{Type: "worker", ID: "test"}, Summary: "Paused", Visibility: ActivityVisibilityScope, CreatedAt: h.now,
+	}
+	if _, err := h.store.UpdateAgentRunWithEvent(h.ctx, updated, current.Revision, event, nil); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func TestRoutineEventCallableOnlyWhenExhausted(t *testing.T) {
+	h := newRoutineEventHarness(t)
+	once := h.routine("once-callable", func(trigger *RoutineEventTrigger) { trigger.MaximumOccurrences = 1 })
+	h.offer(once, 1)
+	h.pass()
+	exhausted := h.get(once)
+	if exhausted.Status != RunbookActivationRetired || !exhausted.Exhausted || !exhausted.Callable() {
+		t.Fatalf("exhausted routine: status=%s exhausted=%v callable=%v", exhausted.Status, exhausted.Exhausted, exhausted.Callable())
+	}
+	// A routine the person cancelled is not callable, even with a ceiling.
+	for _, mutate := range []func(*RoutineEventTrigger){nil, func(trigger *RoutineEventTrigger) { trigger.MaximumOccurrences = 5 }} {
+		cancelled := h.setStatus(h.routine(fmt.Sprintf("cancelled-%v", mutate != nil), mutate), RunbookActivationRetired)
+		if cancelled.Exhausted || cancelled.Callable() {
+			t.Fatalf("cancelled routine is callable: %#v", cancelled)
+		}
+	}
+	active := h.routine("not-exhausted", nil)
+	if _, err := NewRunbookActivationService(h.store).Update(h.ctx, h.scope, active.ID, UpdateRunbookActivationRequest{
+		ExpectedRevision: active.Revision, Status: RunbookActivationPaused, Exhausted: true,
+	}); err == nil {
+		t.Fatal("a paused routine was marked exhausted")
+	}
+}
+
+func TestRoutineEventPausedRunBackpressures(t *testing.T) {
+	h := newRoutineEventHarness(t)
+	activation := h.routine("paused-run", nil)
+	h.offer(activation, 1)
+	if result := h.pass(); result.Started != 1 {
+		t.Fatalf("first pass = %#v", result)
+	}
+	h.pauseRun(h.eventRuns(activation)[0])
+	h.offer(activation, 1)
+	if result := h.pass(); result.Started != 0 || result.Waiting != 1 {
+		t.Fatalf("pass with a paused run = %#v", result)
+	}
+	if runs := h.eventRuns(activation); len(runs) != 1 {
+		t.Fatalf("runs = %d, want 1 while the first is paused", len(runs))
+	}
+}
+
+func TestRoutineEventTenantCapRotatesRoutines(t *testing.T) {
+	h := newRoutineEventHarness(t)
+	h.dispatcher.TenantRunCap = 2
+	routines := make([]*RunbookActivation, 0, 4)
+	for i := 0; i < 4; i++ {
+		activation := h.routine(fmt.Sprintf("rot%02d", i), nil)
+		h.offer(activation, 1)
+		routines = append(routines, activation)
+	}
+	if result := h.pass(); result.Started != 2 {
+		t.Fatalf("first pass = %#v", result)
+	}
+	first := []*RunbookActivation{}
+	for _, activation := range routines {
+		if len(h.eventRuns(activation)) == 1 {
+			first = append(first, activation)
+		}
+	}
+	if len(first) != 2 {
+		t.Fatalf("%d routines started in the first pass", len(first))
+	}
+	// The first two are busy again before the next pass: the slots freed go
+	// to the two that waited, not back to the routines that sort first.
+	h.finishRuns()
+	for _, activation := range first {
+		h.offer(activation, 1)
+	}
+	if result := h.pass(); result.Started != 2 {
+		t.Fatalf("second pass = %#v", result)
+	}
+	for _, activation := range routines {
+		if runs := h.eventRuns(activation); len(runs) != 1 {
+			t.Fatalf("routine %s has %d runs after two passes", activation.ID, len(runs))
+		}
+	}
+	h.finishRuns()
+	if result := h.pass(); result.Started != 2 {
+		t.Fatalf("third pass = %#v", result)
+	}
+	for _, activation := range first {
+		if len(h.eventRuns(activation)) != 2 {
+			t.Fatal("the routines that waited a turn did not start next")
+		}
+	}
+}
+
+func TestRoutineEventDispatcherVisitsOnlyScopesWithWork(t *testing.T) {
+	h := newRoutineEventHarness(t)
+	h.routine("idle", nil)
+	if result := h.pass(); result.Scopes != 0 || result.Examined != 0 {
+		t.Fatalf("idle pass = %#v", result)
+	}
+}
+
+func TestPauseRoutineLeavesCloseOutToDispatcher(t *testing.T) {
+	h := newRoutineEventHarness(t)
+	activation := h.routine("paused-by-sync", nil)
+	h.offer(activation, 2)
+	// The dispatcher has claimed the batch and is creating its Run.
+	batch, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, RoutineEventMaxBatchEvents, h.now)
+	if err != nil || batch == nil {
+		t.Fatalf("claim = %#v, %v", batch, err)
+	}
+	paused, err := h.dispatcher.PauseRoutine(h.ctx, h.scope, activation.ID, RoutinePausedNeedsSignIn)
+	if err != nil || !paused {
+		t.Fatalf("pause = %v, %v", paused, err)
+	}
+	if stored, _, err := h.store.GetRoutineEventBatch(h.ctx, h.scope, batch.ID); err != nil || stored == nil {
+		t.Fatalf("pause deleted the batch being started: %#v, %v", stored, err)
+	}
+	if result := h.pass(); result.Started != 0 || result.Dropped != 2 {
+		t.Fatalf("pass after pause = %#v", result)
+	}
+	if count, _ := h.store.CountPendingRoutineEvents(h.ctx, h.scope, activation.ID); count != 0 {
+		t.Fatalf("pending after close-out = %d", count)
+	}
+}
+
+// passCountingStore counts dispatcher passes on the leader.
+type passCountingStore struct {
+	*MemoryStore
+	passes atomic.Int64
+}
+
+func (s *passCountingStore) ListRoutineEventWorkScopes(ctx context.Context) ([]Scope, error) {
+	s.passes.Add(1)
+	return s.MemoryStore.ListRoutineEventWorkScopes(ctx)
+}
+
+func TestRoutineEventDispatcherCoalescesNudges(t *testing.T) {
+	store := &passCountingStore{MemoryStore: NewMemoryStore()}
+	matcher := NewRoutineEventMatcher(store)
+	t.Cleanup(matcher.Close)
+	dispatcher := NewRoutineEventDispatcher(store, matcher)
+	dispatcher.minPassGap = 100 * time.Millisecond
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- dispatcher.Run(ctx, time.Hour, nil) }()
+	// A steady stream of inserts for 250 ms.
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		matcher.wake()
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	<-done
+	if passes := store.passes.Load(); passes < 2 || passes > 4 {
+		t.Fatalf("passes = %d, want one per 100 ms gap", passes)
+	}
 }

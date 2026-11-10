@@ -222,13 +222,31 @@ func (s *SQLiteStore) CountPendingRoutineEventsInScope(ctx context.Context, scop
 	return count, err
 }
 
-func (s *SQLiteStore) ListRoutineEventWork(ctx context.Context, scope Scope, limit int) ([]string, error) {
+func (s *SQLiteStore) ListRoutineEventWorkScopes(ctx context.Context) ([]Scope, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope_kind, scope_id FROM routine_events
+		WHERE state IN ('pending','batched') ORDER BY scope_kind, scope_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	scopes := make([]Scope, 0)
+	for rows.Next() {
+		var scope Scope
+		if err := rows.Scan(&scope.Kind, &scope.ID); err != nil {
+			return nil, err
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes, rows.Err()
+}
+
+func (s *SQLiteStore) ListRoutineEventWork(ctx context.Context, scope Scope, after string, limit int) ([]string, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT activation_id FROM routine_events
-		WHERE scope_kind = ? AND scope_id = ? AND state IN ('pending','batched') ORDER BY activation_id LIMIT ?`,
-		scope.Kind, scope.ID, normalizeRoutineEventLimit(limit, routineEventSubscriptionPageLimit))
+		WHERE scope_kind = ? AND scope_id = ? AND state IN ('pending','batched') AND activation_id > ? ORDER BY activation_id LIMIT ?`,
+		scope.Kind, scope.ID, after, normalizeRoutineEventLimit(limit, routineEventSubscriptionPageLimit))
 	if err != nil {
 		return nil, err
 	}
@@ -734,15 +752,12 @@ func (s *SQLiteStore) UpdateHook(ctx context.Context, scope Scope, hookID string
 	return updated, nil
 }
 
-func (s *SQLiteStore) PruneHooks(ctx context.Context, scope Scope, createdBefore time.Time) (int, error) {
-	if err := scope.Validate(); err != nil {
-		return 0, err
-	}
+func (s *SQLiteStore) PruneHooks(ctx context.Context, createdBefore time.Time) (int, error) {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM hooks
-		WHERE scope_kind = ? AND scope_id = ? AND created_at < ? AND NOT EXISTS (
+		WHERE created_at < ? AND NOT EXISTS (
 			SELECT 1 FROM runbook_activations a
 			WHERE a.scope_kind = hooks.scope_kind AND a.scope_id = hooks.scope_id AND a.id = hooks.activation_id AND a.status <> 'retired')`,
-		scope.Kind, scope.ID, sqliteRoutineTime(createdBefore))
+		sqliteRoutineTime(createdBefore))
 	if err != nil {
 		return 0, err
 	}

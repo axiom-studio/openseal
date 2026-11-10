@@ -75,7 +75,7 @@ func routineEventSeedFixture(n, payloadBytes int) (*AgentRun, *routineEventSeedF
 		store.records = append(store.records, &RoutineEventRecord{Scope: routineEventSeedScope, ActivationID: "act-1", Event: event, State: RoutineEventBatched, BatchID: batch.ID})
 	}
 	run := &AgentRun{
-		Scope: routineEventSeedScope, ID: "run-occ-1", Goal: "Answer support questions in #support.",
+		Scope: routineEventSeedScope, ID: "run-occ-1", RootRunID: "run-occ-1", Source: RunSourceEvent, Goal: "Answer support questions in #support.",
 		Context: map[string]interface{}{
 			"runbookActivationId":       "act-1",
 			RoutineEventBatchContextKey: batch.ID,
@@ -419,4 +419,37 @@ func TestRoutineEventSeedSkipsMissingRecord(t *testing.T) {
 	if !strings.HasPrefix(event.User.Content[0].Text, "A routine started this run because of 2 events") {
 		t.Fatalf("text counts the missing event: %q", event.User.Content[0].Text)
 	}
+}
+
+// TestRoutineEventSeedOnlyForOccurrenceRoot: a delegated, collaboration or
+// forked child inherits routineEventBatchId for the manual approval mode
+// only; its fresh session never gets the events or the silent instruction.
+func TestRoutineEventSeedOnlyForOccurrenceRoot(t *testing.T) {
+	for name, mutate := range map[string]func(*AgentRun){
+		"fork child":          func(run *AgentRun) { run.ID, run.ParentRunID, run.Source = "run-child", "run-occ-1", RunSourceFork },
+		"collaboration child": func(run *AgentRun) { run.ID, run.ParentRunID, run.Source = "run-child", "run-occ-1", RunSourceRequest },
+		"delegated child":     func(run *AgentRun) { run.ID, run.ParentRunID = "run-child", "run-occ-1" },
+		"manual run":          func(run *AgentRun) { run.Source = RunSourceManual },
+	} {
+		t.Run(name, func(t *testing.T) {
+			run, store := routineEventSeedFixture(2, 0)
+			mutate(run)
+			entries, err := loopRunSessionSeedEntries(t.Context(), store, nil, nil, run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if entry.User != nil && len(entry.User.Content) > 0 && strings.Contains(entry.User.Content[0].Text, "A routine started this run") {
+					t.Fatalf("child run got the event entry: %q", entry.User.Content[0].Text)
+				}
+			}
+		})
+	}
+	t.Run("batch of another routine", func(t *testing.T) {
+		run, store := routineEventSeedFixture(2, 0)
+		run.Context["runbookActivationId"] = "act-other"
+		if _, err := loopRunSessionSeedEntries(t.Context(), store, nil, nil, run); !errors.Is(err, ErrRoutineEventBatchNotFound) {
+			t.Fatalf("want ErrRoutineEventBatchNotFound, got %v", err)
+		}
+	})
 }

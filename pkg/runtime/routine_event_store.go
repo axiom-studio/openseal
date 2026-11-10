@@ -134,7 +134,8 @@ type RoutineEventStore interface {
 	InsertRoutineEvent(ctx context.Context, record *RoutineEventRecord) (inserted bool, err error)                                                    // ON CONFLICT DO NOTHING; a dropped record stores no payload
 	CountPendingRoutineEvents(ctx context.Context, scope Scope, activationID string) (int, error)                                                     // pending + unstarted batched, test included
 	CountPendingRoutineEventsInScope(ctx context.Context, scope Scope) (int, error)                                                                   // tenant cap, §3.1
-	ListRoutineEventWork(ctx context.Context, scope Scope, limit int) ([]string, error)                                                               // activation IDs with pending or batched events
+	ListRoutineEventWorkScopes(ctx context.Context) ([]Scope, error)                                                                                  // scopes with pending or batched events (partial pending index)
+	ListRoutineEventWork(ctx context.Context, scope Scope, after string, limit int) ([]string, error)                                                 // activation IDs with pending or batched events, keyset after `after`
 	ClaimRoutineEventBatch(ctx context.Context, scope Scope, activationID string, maxEvents int, now time.Time) (*RoutineEventBatch, error)
 	MarkRoutineEventBatchStarted(ctx context.Context, scope Scope, batchID, runID string, now time.Time) error
 	GetRoutineEventBatch(ctx context.Context, scope Scope, batchID string) (*RoutineEventBatch, []*RoutineEventRecord, error)
@@ -147,7 +148,7 @@ type RoutineEventStore interface {
 	CreateHook(ctx context.Context, hook *Hook) (*Hook, error)                                                                                             // idempotent on ID
 	GetHook(ctx context.Context, hookID string) (*Hook, error)                                                                                             // global lookup
 	UpdateHook(ctx context.Context, scope Scope, hookID string, expectedRevision int64, rotate bool, pathTokenEnabled *bool, now time.Time) (*Hook, error) // CAS; rotate bumps Revision
-	PruneHooks(ctx context.Context, scope Scope, createdBefore time.Time) (int, error)                                                                     // hooks whose activation is retired or does not exist
+	PruneHooks(ctx context.Context, createdBefore time.Time) (int, error)                                                                                  // hooks, in every scope, whose activation is retired or does not exist
 }
 
 // routineEventIndexOf returns the event index columns of an activation: the

@@ -38,7 +38,9 @@ type routineEventSeedStore interface {
 // loopRunSessionSeedEntries are the first entries of a model Run's fresh run
 // session: the brief seed (loopRunSessionSeed) and, for an event routine
 // occurrence, the entry holding its batch of events (SPEC §6.1). Other Runs
-// get only the brief seed.
+// get only the brief seed: a delegated, collaboration or forked child
+// inherits routineEventBatchId only to keep the manual approval mode, never
+// the events themselves.
 func loopRunSessionSeedEntries(ctx context.Context, store routineEventSeedStore, keeper RoutineEventFileKeeper, logger *zap.SugaredLogger, run *AgentRun) ([]*SessionEntry, error) {
 	var entries []*SessionEntry
 	seed, err := loopRunSessionSeed(run)
@@ -49,7 +51,7 @@ func loopRunSessionSeedEntries(ctx context.Context, store routineEventSeedStore,
 		entries = append(entries, seed)
 	}
 	batchID, _ := run.Context[RoutineEventBatchContextKey].(string)
-	if strings.TrimSpace(batchID) == "" {
+	if strings.TrimSpace(batchID) == "" || !routineEventOccurrenceRoot(run) {
 		return entries, nil
 	}
 	event, err := routineEventSeedEntry(ctx, store, keeper, logger, run, strings.TrimSpace(batchID))
@@ -57,6 +59,13 @@ func loopRunSessionSeedEntries(ctx context.Context, store routineEventSeedStore,
 		return nil, err
 	}
 	return append(entries, event), nil
+}
+
+// routineEventOccurrenceRoot reports whether the Run is the occurrence the
+// dispatcher started, not a child that inherited its batch ID.
+func routineEventOccurrenceRoot(run *AgentRun) bool {
+	return run.Source == RunSourceEvent && strings.TrimSpace(run.ParentRunID) == "" &&
+		(run.RootRunID == "" || run.RootRunID == run.ID)
 }
 
 // routineEventSeedEntry is the user entry that hands an occurrence its batch
@@ -73,6 +82,9 @@ func routineEventSeedEntry(ctx context.Context, store routineEventSeedStore, kee
 	}
 	if batch == nil {
 		return nil, fmt.Errorf("%w: event batch %s of run %s", ErrRoutineEventBatchNotFound, batchID, run.ID)
+	}
+	if activationID, _ := run.Context["runbookActivationId"].(string); batch.ActivationID != strings.TrimSpace(activationID) {
+		return nil, fmt.Errorf("%w: event batch %s belongs to routine %s, not to run %s", ErrRoutineEventBatchNotFound, batchID, batch.ActivationID, run.ID)
 	}
 	source := routineEventSeedSource{}
 	if kind, _ := run.Context[RoutineEventKindContextKey].(string); kind != "" {

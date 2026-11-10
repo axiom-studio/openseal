@@ -576,12 +576,16 @@ func TestRunbookActivationEventTaskValidation(t *testing.T) {
 	}
 	retired := eventTaskActivationForValidation()
 	retired.Status = RunbookActivationRetired
-	if !retired.Callable() {
-		t.Fatal("retired event task is not callable on demand")
+	if retired.Callable() {
+		t.Fatal("an event task the person retired is callable")
+	}
+	retired.Exhausted = true
+	if !retired.Callable() || retired.Validate() != nil {
+		t.Fatal("an exhausted event task is not callable on demand")
 	}
 	retired.Status = RunbookActivationPaused
-	if retired.Callable() {
-		t.Fatal("paused event task is callable")
+	if retired.Callable() || retired.Validate() == nil {
+		t.Fatal("a paused event task is callable or exhausted")
 	}
 }
 

@@ -408,9 +408,14 @@ func routineEventPayload(value interface{}) json.RawMessage {
 }
 
 // PauseRoutine pauses one event routine for a system reason (needs_sign_in,
-// source_removed, unverified) and drops its waiting events. A routine that
-// is retired, or already paused for the same reason, is left as it is; it
-// returns whether it paused.
+// source_removed, unverified). A routine that is retired, or already paused
+// for the same reason, is left as it is; it returns whether it paused.
+//
+// It runs on the caller's goroutine (for example Google sync), beside the
+// dispatcher loop, so it only changes the status and nudges the dispatcher.
+// The dispatcher closes out the waiting events on its next pass, on its own
+// goroutine, so the close-out never deletes the batch of a Run it is
+// creating at that moment.
 func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope Scope, activationID string, reason RoutinePausedReason) (bool, error) {
 	if d == nil || d.store == nil {
 		return false, errors.New("routine event dispatcher is not configured")
@@ -446,8 +451,10 @@ func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope Scope, 
 		if err != nil {
 			return false, err
 		}
-		_, err = d.closeOut(ctx, scope, activation.ID, RoutineEventDroppedPaused)
-		return true, err
+		if d.matcher != nil {
+			d.matcher.wake()
+		}
+		return true, nil
 	}
 	return false, ErrRunbookActivationRevision
 }

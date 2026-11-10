@@ -419,7 +419,8 @@ func routineRecipientKey(name string) bool {
 	case "to", "cc", "bcc", "recipient", "recipients", "replyto", "reply_to":
 		return true
 	}
-	return strings.Contains(key, "recipient") || strings.Contains(key, "email") || strings.Contains(key, "address")
+	return strings.Contains(key, "recipient") || strings.Contains(key, "email") || strings.Contains(key, "address") ||
+		strings.Contains(key, "attendee")
 }
 
 func routineActionHasRecipients(schema map[string]interface{}) bool {
@@ -432,11 +433,14 @@ func routineActionHasRecipients(schema map[string]interface{}) bool {
 	return false
 }
 
-// routineDestinationKey reports whether an argument names the channel or
-// conversation a message is posted to.
+// routineDestinationKey reports whether an argument names the channel,
+// conversation, chat, user, queue or webhook a message is posted to. A
+// plain url argument is not one: an outward action that takes only a url
+// cannot be pinned, so an event routine refuses it.
 func routineDestinationKey(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "channel", "channel_id", "channelid", "channels", "conversation", "conversation_id", "conversationid", "destination", "destinations":
+	case "channel", "channel_id", "channelid", "channels", "conversation", "conversation_id", "conversationid", "destination", "destinations",
+		"chat", "chat_id", "chatid", "userid", "user_id", "webhookurl", "webhook_url", "queueurl", "queue_url":
 		return true
 	}
 	return false
@@ -458,21 +462,32 @@ func routineActionDestinationKeys(schema map[string]interface{}) []string {
 // routineActionPostsToDestination reports whether an action has side effects
 // in a channel or conversation it takes as an argument.
 func routineActionPostsToDestination(action skill.Action) bool {
-	return action.SideEffect != skill.SideEffectRead && len(routineActionDestinationKeys(action.InputSchema)) > 0
+	return action.SideEffect != skill.SideEffectRead && action.SideEffect != skill.SideEffectNone && len(routineActionDestinationKeys(action.InputSchema)) > 0
 }
 
 // ErrRoutineEventSendGrantNotPinned refuses a free-recipient send in an event
 // routine's brief (E15): outside events must not choose who it writes to.
 var ErrRoutineEventSendGrantNotPinned = errors.New("An event routine can only send to you or to the channels you name")
 
-// routineSendGrantPinned reports whether a grant of a message-sending action
-// is limited to the owner or to named destinations. Grants of actions that
-// send nothing are always pinned.
+// routineSendGrantPinned reports whether an event routine's grant can only
+// reach the owner or named destinations. It fails closed: recipients must be
+// limited to the owner, destinations must be named, and an action with an
+// external or destructive effect whose target the kernel cannot read from a
+// known recipient or destination argument (a raw message body, an unknown
+// key) is never pinned. Reads, and writes with no target argument, are.
 func routineSendGrantPinned(action skill.Action, grant RoutineGrant) bool {
-	if !routineActionHasRecipients(action.InputSchema) && !routineActionPostsToDestination(action) {
+	if action.SideEffect == skill.SideEffectNone || action.SideEffect == skill.SideEffectRead {
 		return true
 	}
-	return grant.ToOwnerOnly || len(grant.ToDestinations) > 0
+	recipients := routineActionHasRecipients(action.InputSchema)
+	destinations := len(routineActionDestinationKeys(action.InputSchema)) > 0
+	if recipients && !grant.ToOwnerOnly || destinations && len(grant.ToDestinations) == 0 {
+		return false
+	}
+	if !recipients && !destinations {
+		return action.SideEffect != skill.SideEffectExternal && action.SideEffect != skill.SideEffectDestructive
+	}
+	return true
 }
 
 // routineGrantDestinationLabel makes the approved label name every pinned

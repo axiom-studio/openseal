@@ -43,7 +43,12 @@ func (s *PostgresStore) pendingRoutineEventsInScopeQuery() string {
 
 func (s *PostgresStore) routineEventWorkQuery() string {
 	return `SELECT DISTINCT activation_id FROM ` + s.table("routine_events") + `
-		WHERE scope_kind = $1 AND scope_id = $2 AND state IN ('pending','batched') ORDER BY activation_id LIMIT $3`
+		WHERE scope_kind = $1 AND scope_id = $2 AND state IN ('pending','batched') AND activation_id > $3 ORDER BY activation_id LIMIT $4`
+}
+
+func (s *PostgresStore) routineEventWorkScopesQuery() string {
+	return `SELECT DISTINCT scope_kind, scope_id FROM ` + s.table("routine_events") + `
+		WHERE state IN ('pending','batched') ORDER BY scope_kind, scope_id`
 }
 
 func (s *PostgresStore) pruneRoutineEventsQuery() string {
@@ -194,11 +199,28 @@ func (s *PostgresStore) CountPendingRoutineEventsInScope(ctx context.Context, sc
 	return count, err
 }
 
-func (s *PostgresStore) ListRoutineEventWork(ctx context.Context, scope Scope, limit int) ([]string, error) {
+func (s *PostgresStore) ListRoutineEventWorkScopes(ctx context.Context) ([]Scope, error) {
+	rows, err := s.db.QueryContext(ctx, s.routineEventWorkScopesQuery())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	scopes := make([]Scope, 0)
+	for rows.Next() {
+		var scope Scope
+		if err := rows.Scan(&scope.Kind, &scope.ID); err != nil {
+			return nil, err
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes, rows.Err()
+}
+
+func (s *PostgresStore) ListRoutineEventWork(ctx context.Context, scope Scope, after string, limit int) ([]string, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, s.routineEventWorkQuery(), scope.Kind, scope.ID, normalizeRoutineEventLimit(limit, routineEventSubscriptionPageLimit))
+	rows, err := s.db.QueryContext(ctx, s.routineEventWorkQuery(), scope.Kind, scope.ID, after, normalizeRoutineEventLimit(limit, routineEventSubscriptionPageLimit))
 	if err != nil {
 		return nil, err
 	}
@@ -664,15 +686,12 @@ func (s *PostgresStore) UpdateHook(ctx context.Context, scope Scope, hookID stri
 	return hook, err
 }
 
-func (s *PostgresStore) PruneHooks(ctx context.Context, scope Scope, createdBefore time.Time) (int, error) {
-	if err := scope.Validate(); err != nil {
-		return 0, err
-	}
+func (s *PostgresStore) PruneHooks(ctx context.Context, createdBefore time.Time) (int, error) {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM `+s.table("hooks")+` h
-		WHERE h.scope_kind = $1 AND h.scope_id = $2 AND h.created_at < $3 AND NOT EXISTS (
+		WHERE h.created_at < $1 AND NOT EXISTS (
 			SELECT 1 FROM `+s.table("runbook_activations")+` a
 			WHERE a.scope_kind = h.scope_kind AND a.scope_id = h.scope_id AND a.id = h.activation_id AND a.status <> 'retired')`,
-		scope.Kind, scope.ID, createdBefore.UTC())
+		createdBefore.UTC())
 	if err != nil {
 		return 0, err
 	}

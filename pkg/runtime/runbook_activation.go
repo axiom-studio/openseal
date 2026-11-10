@@ -182,20 +182,23 @@ type RunbookActivation struct {
 	OccurrencesProcessed int64                   `json:"occurrencesProcessed,omitempty"`
 	// PausedReason says why the system paused the routine. It is set only
 	// with Status paused and cleared on any other status change.
-	PausedReason        RoutinePausedReason `json:"pausedReason,omitempty"`
-	Revision            int64               `json:"revision"`
-	CreatedAt           time.Time           `json:"createdAt"`
-	UpdatedAt           time.Time           `json:"updatedAt"`
-	IdempotencyKeyHash  string              `json:"idempotencyKeyHash,omitempty"`
-	CreationFingerprint string              `json:"creationFingerprint,omitempty"`
+	PausedReason RoutinePausedReason `json:"pausedReason,omitempty"`
+	// Exhausted is set when the event dispatcher retires an event routine
+	// because it started its maximum of real batches. It is set only with
+	// Status retired; a routine the person cancelled never has it.
+	Exhausted           bool      `json:"exhausted,omitempty"`
+	Revision            int64     `json:"revision"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
+	IdempotencyKeyHash  string    `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint string    `json:"creationFingerprint,omitempty"`
 }
 
 // Callable reports whether an activation can be started on demand. A schedule
 // that reached its reviewed occurrence ceiling is no longer scheduler-active,
-// but its immutable reviewed operation remains safe to invoke off-cycle. A
-// retired event Task is callable too: its occurrence count lives in its event
-// batches, not on the activation. Paused activations and explicitly retired
-// activations without an exhausted schedule remain unavailable.
+// but its immutable reviewed operation remains safe to invoke off-cycle. An
+// event Task the dispatcher retired as exhausted is callable the same way.
+// Paused activations and routines the person retired remain unavailable.
 func (a *RunbookActivation) Callable() bool {
 	if a == nil {
 		return false
@@ -203,7 +206,7 @@ func (a *RunbookActivation) Callable() bool {
 	if a.Status == RunbookActivationActive {
 		return true
 	}
-	if a.Status == RunbookActivationRetired && a.Task != nil && a.Task.Event != nil && a.Trigger.Kind == runbook.TriggerEvent {
+	if a.Status == RunbookActivationRetired && a.Exhausted && a.Task != nil && a.Task.Event != nil && a.Trigger.Kind == runbook.TriggerEvent {
 		return true
 	}
 	return a.Status == RunbookActivationRetired && a.Trigger.Kind == runbook.TriggerSchedule &&
@@ -295,6 +298,9 @@ func (a *RunbookActivation) Validate() error {
 	if a.PausedReason != "" && (a.Status != RunbookActivationPaused || !validRoutinePausedReason(a.PausedReason)) {
 		return errors.New("Runbook activation paused reason is invalid")
 	}
+	if a.Exhausted && (a.Status != RunbookActivationRetired || a.Trigger.Kind != runbook.TriggerEvent) {
+		return errors.New("only a retired event Runbook activation can be exhausted")
+	}
 	if a.Revision < 1 || a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
 		return errors.New("Runbook activation requires valid revision and timestamps")
 	}
@@ -383,6 +389,9 @@ type UpdateRunbookActivationRequest struct {
 	// kernel sets it, never a client. A person's pause or resume leaves it
 	// empty, which clears any earlier reason.
 	PausedReason RoutinePausedReason `json:"-"`
+	// Exhausted is set only by the event dispatcher, with Status retired,
+	// when the routine started its maximum of real batches.
+	Exhausted bool `json:"-"`
 }
 
 type StartRunbookActivationRequest struct {
@@ -513,8 +522,10 @@ func activationBackpressured(ctx context.Context, store interface {
 	}
 	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID,
+		// Every non-terminal status, paused included: a paused occurrence
+		// may resume, and the tenant cap counts it too.
 		Statuses: []AgentRunStatus{
-			AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning, AgentRunStatusSleeping,
+			AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning, AgentRunStatusPaused, AgentRunStatusSleeping,
 			AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent, AgentRunStatusWaitingForApproval,
 			AgentRunStatusWaitingForEvent,
 		},
@@ -696,6 +707,9 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 	if request.PausedReason != "" && (request.Status != RunbookActivationPaused || !validRoutinePausedReason(request.PausedReason)) {
 		return nil, errors.New("Runbook activation paused reason is invalid")
 	}
+	if request.Exhausted && (request.Status != RunbookActivationRetired || current.Trigger.Kind != runbook.TriggerEvent) {
+		return nil, errors.New("only a retired event Runbook activation can be exhausted")
+	}
 	if current.Status == RunbookActivationRetired && request.Status != RunbookActivationRetired {
 		return nil, errors.New("retired Runbook activation cannot be resumed")
 	}
@@ -710,6 +724,7 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 	next := cloneRunbookActivation(current)
 	next.Status = request.Status
 	next.PausedReason = request.PausedReason
+	next.Exhausted = request.Exhausted
 	next.LifecycleActionID = request.ActionID
 	if next.Task != nil && next.Task.CreatedBy == "" && request.CreatedBy != "" {
 		next.Task.CreatedBy = request.CreatedBy

@@ -278,9 +278,15 @@ func runRoutineEventStoreContract(t *testing.T, open func(t *testing.T) (KernelS
 			if count, err := c.store.CountPendingRoutineEventsInScope(c.ctx, c.scope); err != nil || count != 60 {
 				c.t.Fatalf("pending in scope = %d, %v", count, err)
 			}
-			work, err := c.store.ListRoutineEventWork(c.ctx, c.scope, 10)
+			work, err := c.store.ListRoutineEventWork(c.ctx, c.scope, "", 10)
 			if err != nil || len(work) != 1 || work[0] != activation.ID {
 				c.t.Fatalf("work = %v, %v", work, err)
+			}
+			if after, err := c.store.ListRoutineEventWork(c.ctx, c.scope, activation.ID, 10); err != nil || len(after) != 0 {
+				c.t.Fatalf("work after the only routine = %v, %v", after, err)
+			}
+			if scopes, err := c.store.ListRoutineEventWorkScopes(c.ctx); err != nil || len(scopes) != 1 || scopes[0] != c.scope {
+				c.t.Fatalf("work scopes = %v, %v", scopes, err)
 			}
 			batch := c.claim(activation)
 			if batch == nil || len(batch.EventIDs) != 50 || batch.Test || batch.StartedAt != nil {
@@ -581,7 +587,7 @@ func runRoutineEventStoreContract(t *testing.T, open func(t *testing.T) (KernelS
 				}
 			}
 			cutoff := c.now.Add(-time.Hour)
-			if removed, err := c.store.PruneHooks(c.ctx, c.scope, cutoff); err != nil || removed != 1 {
+			if removed, err := c.store.PruneHooks(c.ctx, cutoff); err != nil || removed != 1 {
 				c.t.Fatalf("prune = %d, %v", removed, err)
 			}
 			if got, _ := c.store.GetHook(c.ctx, orphan.ID); got != nil {
@@ -594,7 +600,7 @@ func runRoutineEventStoreContract(t *testing.T, open func(t *testing.T) (KernelS
 				c.t.Fatal("the hook of a live routine survives")
 			}
 			c.setStatus(activation, RunbookActivationRetired, c.now)
-			if removed, err := c.store.PruneHooks(c.ctx, c.scope, c.now.Add(time.Second)); err != nil || removed != 2 {
+			if removed, err := c.store.PruneHooks(c.ctx, c.now.Add(time.Second)); err != nil || removed != 2 {
 				c.t.Fatalf("prune after retire = %d, %v", removed, err)
 			}
 			if got, _ := c.store.GetHook(c.ctx, hookID); got != nil {

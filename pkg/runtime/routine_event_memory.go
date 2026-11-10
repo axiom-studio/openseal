@@ -245,7 +245,29 @@ func (s *MemoryStore) CountPendingRoutineEventsInScope(_ context.Context, scope 
 	return count, nil
 }
 
-func (s *MemoryStore) ListRoutineEventWork(_ context.Context, scope Scope, limit int) ([]string, error) {
+func (s *MemoryStore) ListRoutineEventWorkScopes(_ context.Context) ([]Scope, error) {
+	s.mu.RLock()
+	unique := make(map[Scope]struct{})
+	for key, record := range s.routineEvents {
+		if routineEventPending(record) {
+			unique[key.scope] = struct{}{}
+		}
+	}
+	s.mu.RUnlock()
+	scopes := make([]Scope, 0, len(unique))
+	for scope := range unique {
+		scopes = append(scopes, scope)
+	}
+	sort.Slice(scopes, func(i, j int) bool {
+		if scopes[i].Kind == scopes[j].Kind {
+			return scopes[i].ID < scopes[j].ID
+		}
+		return scopes[i].Kind < scopes[j].Kind
+	})
+	return scopes, nil
+}
+
+func (s *MemoryStore) ListRoutineEventWork(_ context.Context, scope Scope, after string, limit int) ([]string, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -253,7 +275,7 @@ func (s *MemoryStore) ListRoutineEventWork(_ context.Context, scope Scope, limit
 	s.mu.RLock()
 	unique := make(map[string]struct{})
 	for key, record := range s.routineEvents {
-		if key.scope == scope && routineEventPending(record) {
+		if key.scope == scope && key.activationID > after && routineEventPending(record) {
 			unique[key.activationID] = struct{}{}
 		}
 	}
@@ -594,18 +616,15 @@ func (s *MemoryStore) UpdateHook(_ context.Context, scope Scope, hookID string, 
 	return cloneHook(hook), nil
 }
 
-func (s *MemoryStore) PruneHooks(_ context.Context, scope Scope, createdBefore time.Time) (int, error) {
-	if err := scope.Validate(); err != nil {
-		return 0, err
-	}
+func (s *MemoryStore) PruneHooks(_ context.Context, createdBefore time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	removed := 0
 	for id, hook := range s.hooks {
-		if hook.Scope != scope || !hook.CreatedAt.Before(createdBefore) {
+		if !hook.CreatedAt.Before(createdBefore) {
 			continue
 		}
-		activation := s.runbookActivations[portfolioKey(scope, hook.ActivationID)]
+		activation := s.runbookActivations[portfolioKey(hook.Scope, hook.ActivationID)]
 		if activation == nil || activation.Status == RunbookActivationRetired {
 			delete(s.hooks, id)
 			removed++

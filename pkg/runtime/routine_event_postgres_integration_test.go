@@ -99,7 +99,8 @@ func TestPostgresRoutineEventStore(t *testing.T) {
 		}{
 			{"routine_events", store.pendingRoutineEventsQuery(), []interface{}{"tenant", "one", "activation"}},
 			{"routine_events", store.pendingRoutineEventsInScopeQuery(), []interface{}{"tenant", "one"}},
-			{"routine_events", store.routineEventWorkQuery(), []interface{}{"tenant", "one", 10}},
+			{"routine_events", store.routineEventWorkQuery(), []interface{}{"tenant", "one", "", 10}},
+			{"routine_events", store.routineEventWorkScopesQuery(), nil},
 			{"routine_events", store.pruneRoutineEventsQuery(), []interface{}{now, 10}},
 			{"runbook_activations", store.routineEventActivationsQuery(), []interface{}{"tenant", "one", "webhook", "hook:hk_x"}},
 			{"runbook_activations", store.routineEventSourceKeysQuery(), []interface{}{"tenant", "one"}},
@@ -110,6 +111,20 @@ func TestPostgresRoutineEventStore(t *testing.T) {
 			if strings.Contains(plan, "Seq Scan on "+check.table) {
 				t.Fatalf("query scans %s sequentially:\n%s\n%s", check.table, check.query, plan)
 			}
+		}
+		// The scope-wide queries read only waiting rows, never the week of
+		// started and dropped history under the work index.
+		for _, query := range []string{store.pendingRoutineEventsInScopeQuery(), store.routineEventWorkScopesQuery()} {
+			args := []interface{}{"tenant", "one"}
+			if query == store.routineEventWorkScopesQuery() {
+				args = nil
+			}
+			if plan := explainWithoutSeqScan(t, ctx, store, query, args...); !strings.Contains(plan, "routine_events_pending_idx") {
+				t.Fatalf("query does not use the pending index:\n%s\n%s", query, plan)
+			}
+		}
+		if plan := explainWithoutSeqScan(t, ctx, store, store.routineEventWorkQuery(), "tenant", "one", "", 10); !strings.Contains(plan, "routine_events_pending_idx") {
+			t.Fatalf("work query does not use the pending index:\n%s", plan)
 		}
 	})
 }

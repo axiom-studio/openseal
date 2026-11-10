@@ -37,6 +37,9 @@ func (s *PostgresStore) migrateRoutineEvents(ctx context.Context, tx *sql.Tx) er
 			PRIMARY KEY (scope_kind, scope_id, activation_id, event_id))`,
 		`CREATE INDEX IF NOT EXISTS routine_events_work_idx ON ` + s.table("routine_events") + ` (scope_kind, scope_id, activation_id, state, received_at, event_id)`,
 		`CREATE INDEX IF NOT EXISTS routine_events_prune_idx ON ` + s.table("routine_events") + ` (received_at) WHERE state IN ('started','dropped')`,
+		// Scope-wide work and queue-depth queries touch only waiting rows,
+		// never the week of started and dropped history.
+		`CREATE INDEX IF NOT EXISTS routine_events_pending_idx ON ` + s.table("routine_events") + ` (scope_kind, scope_id, activation_id) WHERE state IN ('pending','batched')`,
 		`CREATE TABLE IF NOT EXISTS ` + s.table("routine_event_batches") + ` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL, activation_id TEXT NOT NULL,
 			event_ids JSONB NOT NULL, dropped INTEGER NOT NULL DEFAULT 0, test BOOLEAN NOT NULL DEFAULT false, run_id TEXT,
@@ -101,6 +104,7 @@ func migrateRoutineEventsSQLite(db *sql.DB) error {
 			PRIMARY KEY (scope_kind, scope_id, activation_id, event_id));
 		CREATE INDEX IF NOT EXISTS routine_events_work_idx ON routine_events (scope_kind, scope_id, activation_id, state, received_at, event_id);
 		CREATE INDEX IF NOT EXISTS routine_events_prune_idx ON routine_events (received_at) WHERE state IN ('started','dropped');
+		CREATE INDEX IF NOT EXISTS routine_events_pending_idx ON routine_events (scope_kind, scope_id, activation_id) WHERE state IN ('pending','batched');
 		CREATE TABLE IF NOT EXISTS routine_event_batches (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL, activation_id TEXT NOT NULL,
 			event_ids TEXT NOT NULL, dropped INTEGER NOT NULL DEFAULT 0, test INTEGER NOT NULL DEFAULT 0, run_id TEXT,
