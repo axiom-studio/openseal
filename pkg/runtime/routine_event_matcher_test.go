@@ -39,21 +39,27 @@ func newRoutineEventHarness(t *testing.T) *routineEventHarness {
 	h.matcher.now = h.clock
 	h.dispatcher = NewRoutineEventDispatcher(h.store, h.matcher)
 	h.dispatcher.now = h.clock
+	h.conversation, h.message = h.chat("Inbox")
+	return h
+}
+
+// chat creates a chat with one user request and returns their IDs.
+func (h *routineEventHarness) chat(title string) (string, string) {
+	h.t.Helper()
 	conversations := NewConversationService(h.store)
-	c, _, err := conversations.CreateConversation(h.ctx, CreateConversationRequest{Scope: h.scope, Owner: h.owner, Title: "Inbox", IdempotencyKey: "chat"})
+	c, _, err := conversations.CreateConversation(h.ctx, CreateConversationRequest{Scope: h.scope, Owner: h.owner, Title: title, IdempotencyKey: "chat:" + title})
 	if err != nil {
-		t.Fatal(err)
+		h.t.Fatal(err)
 	}
 	posted, err := conversations.PostChannelMessage(h.ctx, PostChannelMessageRequest{
 		Scope: h.scope, ConversationID: c.ID, ExpectedRevision: c.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
-		Content: "Tell me when an email comes in", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "request",
+		Content: "Tell me when an email comes in", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "request:" + title,
 	})
 	if err != nil {
-		t.Fatal(err)
+		h.t.Fatal(err)
 	}
-	h.conversation, h.message = c.ID, posted.Message.ID
-	return h
+	return c.ID, posted.Message.ID
 }
 
 func (h *routineEventHarness) clock() time.Time { return h.now }
@@ -283,6 +289,47 @@ func TestRoutineEventMatcherIndexesBySource(t *testing.T) {
 	}
 	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, hookEvent); err != nil || offer.Matched != 0 {
 		t.Fatalf("webhook with a foreign hook row offer=%#v err=%v", offer, err)
+	}
+
+	// Owner check: a GitHub routine matches only when its callback
+	// registration is active, in the event's scope and made by the
+	// routine's own deployment.
+	github := func(name, deploymentID string, status CallbackRegistrationStatus) *RunbookActivation {
+		h.createCallbackRegistration(name, deploymentID, status)
+		return h.routine(name, func(trigger *RoutineEventTrigger) {
+			*trigger = RoutineEventTrigger{Kind: RoutineEventGitHub, SourceRef: RoutineCallbackSourceRef("callback-" + name), SourceLabel: "your repository", MaxPerHour: 20}
+		})
+	}
+	githubEvent := func(activation *RunbookActivation, id string) *RoutineEvent {
+		return &RoutineEvent{Scope: h.scope, ID: id, Kind: RoutineEventGitHub, SourceRef: activation.Task.Event.SourceRef, OccurredAt: h.now, Summary: "Pull request opened", Fields: map[string][]string{"event": {"pull_request"}}}
+	}
+	owned := github("gh-owned", h.owner.ID, CallbackRegistrationActive)
+	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, githubEvent(owned, "github:1")); err != nil || offer != (RoutineEventOffer{Matched: 1, Inserted: 1}) {
+		t.Fatalf("github owned offer=%#v err=%v", offer, err)
+	}
+	otherDeployment := github("gh-foreign", "agent-2", CallbackRegistrationActive)
+	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, githubEvent(otherDeployment, "github:2")); err != nil || offer.Matched != 0 {
+		t.Fatalf("github foreign deployment offer=%#v err=%v", offer, err)
+	}
+	inactive := github("gh-paused", h.owner.ID, CallbackRegistrationPaused)
+	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, githubEvent(inactive, "github:3")); err != nil || offer.Matched != 0 {
+		t.Fatalf("github inactive registration offer=%#v err=%v", offer, err)
+	}
+}
+
+// createCallbackRegistration stores a GitHub callback registration with ID
+// "callback-<name>" made by deploymentID.
+func (h *routineEventHarness) createCallbackRegistration(name, deploymentID string, status CallbackRegistrationStatus) {
+	h.t.Helper()
+	if err := h.store.CreateCallbackRegistration(h.ctx, &CallbackRegistration{
+		ID: "callback-" + name, IngressRoute: "route-" + name, Scope: h.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, DeploymentID: deploymentID,
+		Name: "GitHub " + name, Provider: "github",
+		Adapter:       CallbackAdapterReference{SkillID: "github", SkillVersion: "1.0.0", BindingID: "github", BindingRevision: 1, AdapterID: "webhooks"},
+		Subscriptions: []CallbackSubscription{{EventType: "github.event", Consumer: "routines"}},
+		Status:        status, Revision: 1, CreatedAt: h.now, UpdatedAt: h.now,
+		Lifecycle: []CallbackRegistrationLifecycleEntry{{Revision: 1, Action: CallbackRegistrationActivated, Actor: ActivityActor{Type: "user", ID: "user-1"}, Reason: "connect", At: h.now}},
+	}); err != nil {
+		h.t.Fatal(err)
 	}
 }
 

@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -385,4 +387,86 @@ func TestRoutineEventBatchHeader(t *testing.T) {
 	if len(got) > RoutineEventHeaderMaxBytes || !strings.HasPrefix(strings.Repeat("é", 150), got) || len(got) != 200 {
 		t.Fatalf("long header has %d bytes: %q", len(got), got)
 	}
+}
+
+// TestRoutineEventArchivedChatPausesOnlyThatRoutine archives the chat of the
+// routine that sorts first. That routine is paused with its events closed
+// out, and the routine sorted after it still starts in the same pass.
+func TestRoutineEventArchivedChatPausesOnlyThatRoutine(t *testing.T) {
+	h := newRoutineEventHarness(t)
+	sharedChat, sharedMessage := h.conversation, h.message
+	first := h.routine("alpha", nil)
+	otherChat, otherMessage := h.chat("Other")
+	h.conversation, h.message = otherChat, otherMessage
+	second := h.routine("beta", nil)
+	h.conversation, h.message = sharedChat, sharedMessage
+	// broken sorts before healthy in ListRoutineEventWork.
+	broken, healthy, brokenChat := first, second, sharedChat
+	if second.ID < first.ID {
+		broken, healthy, brokenChat = second, first, otherChat
+	}
+	h.offer(broken, 2)
+	h.offer(healthy, 1)
+	conversations := NewConversationService(h.store)
+	chat, err := conversations.GetConversation(h.ctx, h.scope, brokenChat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived := ConversationStatusArchived
+	if _, err := conversations.UpdateConversation(h.ctx, UpdateConversationRequest{
+		Scope: h.scope, ConversationID: chat.ID, ExpectedRevision: chat.Revision, Status: &archived,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result := h.pass()
+	if result.Started != 1 || result.Paused != 1 || result.Dropped != 2 || result.Failed != 0 {
+		t.Fatalf("pass = %#v", result)
+	}
+	if len(h.eventRuns(healthy)) != 1 || len(h.eventRuns(broken)) != 0 {
+		t.Fatalf("healthy runs = %d, broken runs = %d", len(h.eventRuns(healthy)), len(h.eventRuns(broken)))
+	}
+	if current := h.get(broken); current.Status != RunbookActivationPaused || current.PausedReason != RoutinePausedUnverified {
+		t.Fatalf("broken routine status=%q reason=%q", current.Status, current.PausedReason)
+	}
+	if count, _ := h.store.CountPendingRoutineEvents(h.ctx, h.scope, broken.ID); count != 0 {
+		t.Fatalf("broken routine still has %d waiting events", count)
+	}
+	if result := h.pass(); result.Examined != 0 || result.Paused != 0 {
+		t.Fatalf("next pass = %#v", result)
+	}
+}
+
+// TestRoutineEventStartFailureStaysLocal makes one routine's start fail for
+// a reason that is not a pause. The pass reports the error but still starts
+// the routine sorted after it.
+func TestRoutineEventStartFailureStaysLocal(t *testing.T) {
+	h := newRoutineEventHarness(t)
+	first := h.routine("alpha", nil)
+	second := h.routine("beta", nil)
+	broken, healthy := first, second
+	if second.ID < first.ID {
+		broken, healthy = second, first
+	}
+	h.offer(broken, 1)
+	h.offer(healthy, 1)
+	h.dispatcher.SetAcceptedRunExecutionPreparer(failingRoutineExecutionPreparer{activationID: broken.ID})
+	result, err := h.dispatcher.ReconcileAll(h.ctx, 200)
+	if err == nil || !strings.Contains(err.Error(), broken.ID) {
+		t.Fatalf("pass error = %v", err)
+	}
+	if result.Started != 1 || result.Failed != 1 || len(h.eventRuns(healthy)) != 1 {
+		t.Fatalf("pass = %#v, healthy runs = %d", result, len(h.eventRuns(healthy)))
+	}
+	if current := h.get(broken); current.Status != RunbookActivationActive {
+		t.Fatalf("broken routine status = %q", current.Status)
+	}
+}
+
+type failingRoutineExecutionPreparer struct{ activationID string }
+
+func (p failingRoutineExecutionPreparer) PrepareAcceptedRunExecution(_ context.Context, request *CreateAgentRunRequest) error {
+	if request.Context["runbookActivationId"] == p.activationID {
+		return errors.New("execution preparation failed")
+	}
+	return nil
 }

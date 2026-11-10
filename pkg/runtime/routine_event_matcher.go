@@ -56,7 +56,15 @@ var _ RoutineEventOfferer = (*RoutineEventMatcher)(nil)
 // NewRoutineEventMatcher builds a matcher with an empty index and registers it
 // for activation writes made through RunbookActivationService on this store.
 // Call RebuildRoutineIndex once before serving.
+//
+// Activation writes refresh the index only when they go through the very
+// same store value, so the host must pass the store its
+// RunbookActivationService writes to (not a wrapper of it). A store that
+// cannot be a map key could never be followed, so it panics here.
 func NewRoutineEventMatcher(store routineEventMatcherStore) *RoutineEventMatcher {
+	if _, ok := routineActivationObserverKey(store); !ok {
+		panic("routine event matcher needs a comparable store (a pointer) so activation writes refresh its index")
+	}
 	matcher := &RoutineEventMatcher{store: store, nudge: make(chan struct{}, 1), now: time.Now}
 	matcher.index.current.Store(&routineEventIndex{scopes: map[Scope]routineEventScopeKeys{}})
 	matcher.unregister = registerRoutineActivationObserver(store, matcher.activationWritten)
@@ -254,8 +262,10 @@ func (m *RoutineEventMatcher) ownsSource(ctx context.Context, activation *Runboo
 	switch trigger.Kind {
 	case RoutineEventSlackMessage, RoutineEventTelegramMessage:
 		// The SourceRef hashes the deployment, binding, adapter and
-		// installation; create_task builds it from the routine owner's own
-		// connection, so an equal SourceRef is the owner check.
+		// installation. create_task builds it only from the routine owner's
+		// own connection, and the hourly SourceChecker (given the owner)
+		// pauses the routine when that connection is gone, so an equal
+		// SourceRef is the owner check (SPEC §1.3, Review log).
 		return true, nil
 	case RoutineEventGitHub:
 		reader, ok := m.store.(routineCallbackRegistrationReader)

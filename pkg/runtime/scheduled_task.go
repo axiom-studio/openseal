@@ -123,6 +123,10 @@ func activationGoal(a *RunbookActivation, o *Objective) string {
 	return o.Goal
 }
 
+// ErrRoutineReportingUnavailable means a routine can no longer report to the
+// chat it was made in. Retrying does not help; the routine must be paused.
+var ErrRoutineReportingUnavailable = errors.New("routine reporting chat is unavailable")
+
 func scheduledTaskConversation(ctx context.Context, store ConversationStore, scope Scope, owner ObjectiveOwner, task *ScheduledAgentTask) (*Conversation, error) {
 	if err := task.Validate(); err != nil {
 		return nil, err
@@ -132,14 +136,14 @@ func scheduledTaskConversation(ctx context.Context, store ConversationStore, sco
 		return nil, err
 	}
 	if c == nil || c.Scope != scope || c.Owner != owner || c.Status != ConversationStatusActive {
-		return nil, errors.New("scheduled task reporting conversation is unavailable")
+		return nil, fmt.Errorf("%w: its chat is archived or gone", ErrRoutineReportingUnavailable)
 	}
 	m, err := store.GetChannelMessage(ctx, scope, c.ID, task.SourceMessageID)
 	if err != nil {
 		return nil, err
 	}
 	if m == nil || m.Scope != scope || m.ConversationID != c.ID || m.Sender.Type != ConversationParticipantUser || m.Audience.Kind != ConversationAudienceChannel {
-		return nil, errors.New("scheduled tasks require a user request visible to the reporting channel")
+		return nil, fmt.Errorf("%w: its request message is gone or not visible in the chat", ErrRoutineReportingUnavailable)
 	}
 	return c, nil
 }

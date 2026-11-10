@@ -48,6 +48,9 @@ type RoutineEventDispatchResult struct {
 	Retired      int `json:"retired"`
 	Paused       int `json:"paused"`
 	Dropped      int `json:"dropped"`
+	// Failed counts routines whose dispatch failed this pass; the pass goes
+	// on with the next routine and retries the failed one on the next tick.
+	Failed int `json:"failed"`
 }
 
 func (r *RoutineEventDispatchResult) add(other *RoutineEventDispatchResult) {
@@ -61,6 +64,7 @@ func (r *RoutineEventDispatchResult) add(other *RoutineEventDispatchResult) {
 	r.Retired += other.Retired
 	r.Paused += other.Paused
 	r.Dropped += other.Dropped
+	r.Failed += other.Failed
 }
 
 // RoutineEventDispatcher turns stored routine events into occurrence Runs:
@@ -173,7 +177,8 @@ func (d *RoutineEventDispatcher) ReconcileAll(ctx context.Context, limitPerScope
 		total.add(result)
 		queueDepth += depth
 		if err != nil && firstErr == nil {
-			// One scope's failure must not stall the others.
+			// A failure in one scope, or of one routine, does not stall the
+			// rest of the pass.
 			firstErr = fmt.Errorf("dispatch routine events in %s/%s: %w", scope.Kind, scope.ID, err)
 		}
 	}
@@ -195,7 +200,6 @@ func (d *RoutineEventDispatcher) ReconcileScope(ctx context.Context, scope Scope
 type routineEventScopePass struct {
 	activeRuns int
 	capped     bool
-	queueDepth int
 }
 
 func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope Scope, limit int) (*RoutineEventDispatchResult, int, error) {
@@ -210,18 +214,39 @@ func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope Scope
 	if err != nil || len(ids) == 0 {
 		return result, 0, err
 	}
-	active, err := d.store.CountActiveRoutineEventRuns(ctx, scope)
+	// One scope-wide count gives the queue depth; nothing per routine.
+	depth, err := d.store.CountPendingRoutineEventsInScope(ctx, scope)
 	if err != nil {
 		return result, 0, err
 	}
+	active, err := d.store.CountActiveRoutineEventRuns(ctx, scope)
+	if err != nil {
+		return result, depth, err
+	}
 	pass := &routineEventScopePass{activeRuns: active}
-	for _, id := range ids {
+	var firstErr error
+	for index, id := range ids {
+		if !pass.capped && pass.activeRuns >= d.tenantRunCap() {
+			pass.capped = true
+			result.TenantCapped++
+		}
+		if pass.capped {
+			// The tenant cap skips the rest of the scope's work this pass,
+			// with no store reads per routine (SPEC §4).
+			result.Waiting += len(ids) - index
+			break
+		}
 		result.Examined++
 		if err := d.dispatchActivation(ctx, scope, id, pass, result); err != nil {
-			return result, pass.queueDepth, err
+			// One routine's failure stays local: the routines sorted after
+			// it still start. It is retried on the next tick.
+			result.Failed++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("routine %s: %w", id, err)
+			}
 		}
 	}
-	return result, pass.queueDepth, nil
+	return result, depth, firstErr
 }
 
 func routineEventIdempotencyKey(batchID string) string {
@@ -247,11 +272,6 @@ func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope S
 		result.Dropped += dropped
 		return err
 	}
-	pending, err := d.store.CountPendingRoutineEvents(ctx, scope, activation.ID)
-	if err != nil {
-		return err
-	}
-	pass.queueDepth += pending
 	now := d.now().UTC()
 
 	batch, err := d.store.GetOpenRoutineEventBatch(ctx, scope, activation.ID)
@@ -279,11 +299,9 @@ func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope S
 			return nil
 		}
 	}
-	if pass.capped || pass.activeRuns >= d.tenantRunCap() {
-		if !pass.capped {
-			pass.capped = true
-			result.TenantCapped++
-		}
+	if pass.activeRuns >= d.tenantRunCap() {
+		pass.capped = true
+		result.TenantCapped++
 		result.Waiting++
 		return nil
 	}
@@ -371,6 +389,12 @@ func (d *RoutineEventDispatcher) startBatch(ctx context.Context, activation *Run
 	created, err := startActivationOccurrence(ctx, d.store, d.reportingStore, activation, objective, RunSourceEvent,
 		routineEventIdempotencyKey(stored.ID), extra, ActivityActor{Type: "service", ID: "routine-event-dispatcher"},
 		runbookScheduleVisibility(activation), d.executionPreparer)
+	if errors.Is(err, ErrRoutineReportingUnavailable) {
+		// The routine's chat was archived or its request message is gone.
+		// Retrying cannot help: pause it so the person sees why, and close
+		// out its events.
+		return d.pause(ctx, activation, RoutinePausedUnverified, result)
+	}
 	if err != nil {
 		return fmt.Errorf("start routine %s for event batch %s: %w", activation.ID, stored.ID, err)
 	}
