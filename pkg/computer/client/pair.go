@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/computer/bridge"
@@ -54,10 +56,9 @@ func Pair(ctx context.Context, store Store, options PairOptions) (Config, error)
 	if out == nil {
 		out = io.Discard
 	}
-	link := start.VerificationURIComplete
-	if link == "" {
-		link = start.VerificationURI
-	}
+	// The link is on the server this person chose, never one the server names:
+	// behind a dev proxy or another host the server can't tell its own address.
+	link := strings.TrimRight(options.Server, "/") + "/?settings=computers&pair=" + url.QueryEscape(start.UserCode)
 	fmt.Fprintf(out, "\nYour code: %s\n\nConfirm it in HelloSeal: %s\n\n", start.UserCode, link)
 	if options.OpenBrowser != nil && link != "" {
 		_ = options.OpenBrowser(link)

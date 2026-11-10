@@ -155,7 +155,7 @@ func TestPairWaitsForApprovalAndSavesConnection(t *testing.T) {
 	if fake.start.Name != "laptop" || fake.start.Cwd != "/home/me/project" || fake.start.Version != "1.2.3" || fake.start.OS != runtime.GOOS {
 		t.Fatalf("start request = %+v", fake.start)
 	}
-	if !strings.Contains(out.String(), "ABCD-EF23") || opened != "https://helloseal.test/?settings=computers&pair=ABCD-EF23" {
+	if !strings.Contains(out.String(), "ABCD-EF23") || opened != server.URL+"/?settings=computers&pair=ABCD-EF23" {
 		t.Fatalf("printed %q, opened %q", out.String(), opened)
 	}
 	saved, err := store.Load()
