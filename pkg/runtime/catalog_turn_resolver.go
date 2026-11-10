@@ -57,8 +57,12 @@ type LoopBindingConfig struct {
 	// decides whether the model step system carries the media section.
 	Media        ModelStepMedia
 	Capabilities CapabilitySetConfig
-	Logger       *zap.SugaredLogger
-	Now          func() time.Time
+	// RoutineEventFiles keeps an event routine occurrence's events as a
+	// chat file when they are too big to inline (SPEC §6.3). nil: they are
+	// shortened to fit instead.
+	RoutineEventFiles RoutineEventFileKeeper
+	Logger            *zap.SugaredLogger
+	Now               func() time.Time
 }
 
 // SkillHostCapabilityResolver lets an embedding runtime project the exact
@@ -280,8 +284,7 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 		if err := validatePinnedRunbookPlan(definition.Runbook, run); err != nil {
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, err)
 		}
-		entrypoint := catalogRunbookEntrypoint(definition, run)
-		producer, resolveErr := NewRunbookStepProducer(definition.Runbook, entrypoint, catalog)
+		producer, resolveErr := NewRunbookStepProducer(definition.Runbook, strings.TrimSpace(run.Entrypoint), catalog)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, resolveErr)
 		}
@@ -449,7 +452,8 @@ func (r *loopBindingResolution) claimed() bool {
 // session is the session the Run writes to. A Run bound to one (its
 // conversation lane, or a same-Agent child created with its session) keeps
 // it. Any other Run gets its parentless run session at its first claim (A3):
-// a model Run's is seeded with its brief, a deterministic Run's stays empty.
+// a model Run's is seeded with its brief (and an event routine occurrence's
+// with its events), a deterministic Run's stays empty.
 func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*AgentSession, error) {
 	run := r.run
 	if run.SessionID != "" {
@@ -460,13 +464,11 @@ func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*Agen
 	}
 	var initial []*SessionEntry
 	if seeded {
-		seed, err := loopRunSessionSeed(run)
+		entries, err := loopRunSessionSeedEntries(ctx, r.config.Store, r.config.RoutineEventFiles, r.config.Logger, run)
 		if err != nil {
 			return nil, err
 		}
-		if seed != nil {
-			initial = []*SessionEntry{seed}
-		}
+		initial = entries
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	threadRootID, _ := run.Context["threadRootMessageId"].(string)
@@ -847,44 +849,6 @@ func skillPromptReference(prompt HostedSkillPrompt) string {
 		reference += fmt.Sprintf("#binding:%s@%d", strings.TrimSpace(prompt.BindingID), prompt.BindingRevision)
 	}
 	return reference
-}
-
-func catalogRunbookEntrypoint(definition *kernelagent.AgentDefinition, run *AgentRun) string {
-	if entrypoint := strings.TrimSpace(run.Entrypoint); entrypoint != "" {
-		return entrypoint
-	}
-	base := "manual"
-	switch run.Source {
-	case RunSourceSchedule:
-		base = "cron"
-	case RunSourceWebhook:
-		base = "webhook"
-	case RunSourceEvent:
-		base = "event"
-		if trigger, ok := run.Checkpoint["trigger"].(map[string]interface{}); ok {
-			for _, key := range []string{"kind", "type"} {
-				if value, ok := trigger[key].(string); ok && (value == "k8s-event" || value == "k8s-watch" || value == "event") {
-					base = value
-				}
-			}
-		}
-	}
-	if definition != nil && definition.Runbook != nil {
-		nodeID := ""
-		if trigger, ok := run.Checkpoint["trigger"].(map[string]interface{}); ok {
-			nodeID, _ = trigger["triggerNodeId"].(string)
-		}
-		if nodeID == "" {
-			nodeID, _ = run.Context["triggerNodeId"].(string)
-		}
-		candidate := base + ":" + strings.TrimSpace(nodeID)
-		if nodeID != "" {
-			if _, ok := definition.Runbook.Entrypoints[candidate]; ok {
-				return candidate
-			}
-		}
-	}
-	return base
 }
 
 // kernelManagementBindingID is the single well-known binding identity of a
