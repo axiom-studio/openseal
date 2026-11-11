@@ -3,10 +3,12 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
 )
 
 // SQLiteStore persists canonical kernel state in SQLite.
@@ -47,7 +49,54 @@ var inMemorySQLiteStores atomic.Uint64
 // fails concurrent access with "table is locked" instead of waiting.) Memdb
 // has no WAL: a writer waits for open readers to finish, up to the busy
 // timeout, where a file store in WAL mode would not.
+//
+// Running every migration takes tens of milliseconds, and tests open a store
+// each, so the schema is migrated once per process into a template database
+// and each new store starts as a page-for-page copy of it.
 func NewInMemorySQLiteStore() (*SQLiteStore, error) {
+	template, err := migratedTemplate()
+	if err != nil {
+		return nil, err
+	}
+	store, err := openInMemorySQLiteStore()
+	if err != nil {
+		return nil, err
+	}
+	if err := copySQLiteDatabase(store.memoryHold, template.memoryHold); err != nil {
+		store.Close()
+		return nil, fmt.Errorf("copy migrated template: %w", err)
+	}
+	return store, nil
+}
+
+var kernelTemplate struct {
+	once  sync.Once
+	store *SQLiteStore
+	err   error
+}
+
+// migratedTemplate returns the freshly migrated database that new in-memory
+// stores copy. It stays open for the life of the process and is never written
+// after migration, so copies made from it concurrently are all identical.
+func migratedTemplate() (*SQLiteStore, error) {
+	kernelTemplate.once.Do(func() {
+		store, err := openInMemorySQLiteStore()
+		if err != nil {
+			kernelTemplate.err = err
+			return
+		}
+		if err := migrate(store.db); err != nil {
+			store.Close()
+			kernelTemplate.err = fmt.Errorf("migrate: %w", err)
+			return
+		}
+		kernelTemplate.store = store
+	})
+	return kernelTemplate.store, kernelTemplate.err
+}
+
+// openInMemorySQLiteStore opens an empty memdb database under a new name.
+func openInMemorySQLiteStore() (*SQLiteStore, error) {
 	name := fmt.Sprintf("file:/openseal-kernel-%d?vfs=memdb&%s", inMemorySQLiteStores.Add(1), sqliteBusyTimeout)
 	db, err := sql.Open("sqlite3", name)
 	if err != nil {
@@ -58,12 +107,30 @@ func NewInMemorySQLiteStore() (*SQLiteStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	if err := migrate(db); err != nil {
-		hold.Close()
-		db.Close()
-		return nil, fmt.Errorf("migrate: %w", err)
-	}
 	return &SQLiteStore{db: db, memoryHold: hold}, nil
+}
+
+// copySQLiteDatabase replaces dst's main database with a copy of src's, using
+// SQLite's online backup, which copies every page as is.
+func copySQLiteDatabase(dst, src *sql.Conn) error {
+	return dst.Raw(func(dstDriver any) error {
+		return src.Raw(func(srcDriver any) error {
+			backup, err := dstDriver.(*sqlite3.SQLiteConn).Backup("main", srcDriver.(*sqlite3.SQLiteConn), "main")
+			if err != nil {
+				return err
+			}
+			done, err := backup.Step(-1)
+			if err != nil {
+				backup.Finish()
+				return err
+			}
+			if !done {
+				backup.Finish()
+				return errors.New("backup stopped on a locked database")
+			}
+			return backup.Finish()
+		})
+	})
 }
 
 func migrate(db *sql.DB) error {
