@@ -2283,7 +2283,9 @@ func New(opts ...Option) (_ *Engine, err error) {
 	conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
 	e.collaboration.SetAcceptedRunExecutionPreparer(e)
 	e.embeds, _ = runtime.NewEmbedSessionService(store, store)
+	e.runbookAudits = runtime.NewRunbookExecutionAuditService(store, e.agents)
 	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills)
+	e.skillSources, _ = sourceartifact.NewService(store)
 	e.progression = progression.NewService(e.agents, e.teams)
 	if err := e.spaces.UseTeams(e.teams); err != nil {
 		return nil, err
