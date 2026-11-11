@@ -24,24 +24,20 @@ export type Team = {
     scope?: { kind: string; id: string };
     roster: {
       id: string;
-      roleId: string;
       agentDeploymentId: string;
       displayName?: string;
+      purpose?: string;
+      channelParticipation?: "active" | "observe_only" | "disabled";
+      requiredSkillIds?: string[];
+      approver?: boolean;
+      lead?: boolean;
+      owns?: string[];
     }[];
   };
   definition: {
     displayName: string;
     purpose: string;
     operatingPrinciples?: string[];
-    roles: {
-      id: string;
-      displayName: string;
-      purpose: string;
-      minimumMembers?: number;
-      maximumMembers?: number;
-      requiredSkillIds?: string[];
-      requiredDefinitionIds?: string[];
-    }[];
   };
 };
 
@@ -138,7 +134,10 @@ export default function TeamBrowser({
         [
           definition.displayName,
           definition.purpose,
-          ...definition.roles.map((role) => role.displayName),
+          ...deployment.roster.flatMap((member) => [
+            member.displayName || "",
+            member.purpose || "",
+          ]),
         ]
           .join(" ")
           .toLocaleLowerCase()
@@ -158,7 +157,7 @@ export default function TeamBrowser({
           <span className="sr-only">Search teams</span>
           <input
             type="search"
-            placeholder="Search names, purposes, or roles…"
+            placeholder="Search names, purposes, or members…"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -223,7 +222,7 @@ export default function TeamBrowser({
           <p>
             {query || filter !== "all"
               ? "Try another search or show all teams."
-              : "Create a team to bring agents together around a shared goal. Review its roles and permissions before installing it."}
+              : "Create a team to bring agents together around a shared goal. Review its members and permissions before installing it."}
           </p>
           {(query || filter !== "all") && (
             <button
@@ -317,7 +316,7 @@ export default function TeamBrowser({
                     onWorkDraft={setChannelDraft}
                     onOpenRun={onOpenRun}
                   />
-                  <h2>Roles and members</h2>
+                  <h2>Members</h2>
                   <TeamRoster
                     key={`roster:${deployment.id}`}
                     team={{ deployment, definition }}
@@ -334,72 +333,57 @@ export default function TeamBrowser({
                       )
                     }
                   />
-                  <h3>Saved role assignments</h3>
-                  {definition.roles.map((role) => {
-                    const members = deployment.roster.filter(
-                      (member) => member.roleId === role.id,
+                  <h3>Saved members</h3>
+                  {!deployment.roster.length && (
+                    <p className="muted">No member assigned.</p>
+                  )}
+                  {deployment.roster.map((member) => {
+                    const agent = agents.find(
+                      (item) => item.deployment.id === member.agentDeploymentId,
                     );
+                    const name =
+                      member.displayName ||
+                      agent?.deployment.displayName ||
+                      agent?.definition.displayName ||
+                      member.agentDeploymentId;
                     return (
                       <section
                         className="team-role"
-                        key={role.id}
-                        aria-label={role.displayName}
+                        key={member.id}
+                        aria-label={name}
                       >
-                        <h3>{role.displayName}</h3>
-                        <p>{role.purpose}</p>
-                        <p className="muted">
-                          Minimum {role.minimumMembers || 0} ·{" "}
-                          {role.maximumMembers
-                            ? `Maximum ${role.maximumMembers}`
-                            : "No maximum specified"}
-                        </p>
-                        {!!role.requiredSkillIds?.length && (
+                        <h3>{name}</h3>
+                        {member.purpose && <p>{member.purpose}</p>}
+                        {!!member.requiredSkillIds?.length && (
                           <p>
-                            Required skills: {role.requiredSkillIds.join(", ")}
+                            Required skills:{" "}
+                            {member.requiredSkillIds.join(", ")}
                           </p>
                         )}
-                        {!members.length ? (
-                          <p className="muted">No member assigned.</p>
-                        ) : (
-                          <ul className="team-members">
-                            {members.map((member) => {
-                              const agent = agents.find(
-                                (item) =>
-                                  item.deployment.id ===
-                                  member.agentDeploymentId,
-                              );
-                              const name =
-                                member.displayName ||
-                                agent?.deployment.displayName ||
-                                agent?.definition.displayName ||
-                                member.agentDeploymentId;
-                              return (
-                                <li key={member.id}>
-                                  {agent ? (
-                                    <>
-                                      <button
-                                        className="button"
-                                        onClick={() => onOpenAgent(agent)}
-                                      >
-                                        View {name}
-                                      </button>
-                                      <span className="muted">
-                                        {agent.deployment.rolloutStatus}
-                                      </span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span>{name}</span>
-                                      <span className="muted">
-                                        Agent details unavailable
-                                      </span>
-                                    </>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
+                        <ul className="team-members">
+                          <li>
+                            {agent ? (
+                              <>
+                                <button
+                                  className="button"
+                                  onClick={() => onOpenAgent(agent)}
+                                >
+                                  View {name}
+                                </button>
+                                <span className="muted">
+                                  {agent.deployment.rolloutStatus}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span>{name}</span>
+                                <span className="muted">
+                                  Agent details unavailable
+                                </span>
+                              </>
+                            )}
+                          </li>
+                        </ul>
                       </section>
                     );
                   })}

@@ -276,7 +276,7 @@ export default function TeamControls({
                   : intent.operation === "restore"
                     ? "Restore this team in a paused state. It will stay unavailable for coordination until you resume it."
                     : intent.operation === "resume"
-                      ? "Resuming makes this team available for coordination under its existing roles and permissions."
+                      ? "Resuming makes this team available for coordination under its existing members and permissions."
                       : "Pausing makes this team unavailable for coordination."}{" "}
                 This does not cancel runs or pause member agents.
               </p>

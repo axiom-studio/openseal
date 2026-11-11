@@ -226,7 +226,7 @@ requests are reconciled through recipient policy. Ordinary Turn delegation
 places the requesting Run in `waiting_for_agent` and creates a small,
 decision-only Run for the recipient Agent; only explicitly preauthorized policy
 skips that review. A Team request deterministically selects one eligible roster
-Agent under the active Team role and delegation policy. That Agent can accept,
+Agent under the active Team roster and delegation policy. That Agent can accept,
 reject, or ask one concrete clarification question. Rejection resumes the
 requester with the durable reason. A clarification question also resumes it;
 the requester can answer through the same request, wait again, and receive a

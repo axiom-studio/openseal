@@ -154,7 +154,7 @@ refinements, evaluation, decisions, and the apply receipt survive reconnects.
 | Skill catalog | `GET /skills`; `GET /skills/{id}` | Read canonical definitions |
 | Agent actions | `GET /agent-deployments/{id}/skill-actions` | Read exact model-visible action surface |
 | Agent bindings | `GET /agent-deployments/{id}/skill-bindings`; item `PUT`; item `/disable` | Revisioned least-privilege authority |
-| Team bindings | `GET /team-deployments/{id}/skill-bindings`; item `PUT`; item `/disable` | Team-owned role authority |
+| Team bindings | `GET /team-deployments/{id}/skill-bindings`; item `PUT`; item `/disable` | Team-owned Skill authority |
 
 Mutation routes are omitted from capabilities unless a trusted operator boundary
 enabled them.

@@ -14,9 +14,6 @@ const initial = {
   definition: {
     displayName: "Managed team",
     purpose: "Review work together.",
-    roles: [
-      { id: "review", displayName: "Review", purpose: "Review evidence." },
-    ],
   },
 };
 async function setup(page: Page, get: () => typeof initial, update = true) {

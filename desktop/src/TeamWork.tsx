@@ -345,8 +345,8 @@ export default function TeamWork({
               )}
               {!ready && (
                 <p className="inline-help">
-                  Starting new work requires an active team and active agents in
-                  every assigned role.
+                  Starting new work requires an active team and an active agent
+                  for every member.
                 </p>
               )}
               {storageError && (

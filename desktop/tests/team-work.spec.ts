@@ -8,14 +8,18 @@ const team = {
     activeVersion: "1",
     status: "active",
     revision: 1,
-    roster: [{ id: "a", roleId: "research", agentDeploymentId: "lead" }],
+    roster: [
+      {
+        id: "a",
+        agentDeploymentId: "lead",
+        displayName: "Research",
+        purpose: "Find sources.",
+      },
+    ],
   },
   definition: {
     displayName: "Evidence team",
     purpose: "Review sources together.",
-    roles: [
-      { id: "research", displayName: "Research", purpose: "Find sources." },
-    ],
   },
 };
 const run = {

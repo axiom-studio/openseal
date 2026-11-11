@@ -12,40 +12,24 @@ const initial = {
     roster: [
       {
         id: "a",
-        roleId: "research",
         agentDeploymentId: "alpha",
         displayName: "Research lead",
+        purpose: "Find sources.",
+        requiredSkillIds: ["read"],
+        lead: true,
       },
       {
         id: "b",
-        roleId: "review",
         agentDeploymentId: "reviewer",
         displayName: "Saved reviewer",
+        purpose: "Review findings.",
+        approver: true,
       },
     ],
   },
   definition: {
     displayName: "Roster team",
     purpose: "Review evidence.",
-    roles: [
-      {
-        id: "research",
-        displayName: "Research",
-        purpose: "Find sources.",
-        minimumMembers: 1,
-        maximumMembers: 2,
-        requiredDefinitionIds: ["research-def"],
-        requiredSkillIds: ["read"],
-      },
-      {
-        id: "review",
-        displayName: "Review",
-        purpose: "Review findings.",
-        minimumMembers: 1,
-        maximumMembers: 1,
-        requiredDefinitionIds: ["review-def"],
-      },
-    ],
   },
 };
 const agents = [
@@ -101,7 +85,7 @@ async function setup(page: Page, get: () => typeof initial) {
     .click();
 }
 
-test("roster drafts survive reload, enforce role eligibility and require reviewed changes", async ({
+test("roster drafts survive reload, enforce member eligibility and require reviewed changes", async ({
   page,
 }) => {
   let current = structuredClone(initial);
@@ -119,14 +103,14 @@ test("roster drafts survive reload, enforce role eligibility and require reviewe
     return route.fulfill({ json: { deployment: current.deployment } });
   });
   await setup(page, () => current);
-  const select = page.getByLabel("Agent for Research 1", { exact: true });
+  const select = page.getByLabel("Agent for member 1", { exact: true });
   await expect(select.locator("option")).toHaveText([
     "Alpha · active",
     "Beta · inactive",
   ]);
   await select.selectOption("beta");
   await page
-    .getByLabel("Name in team for Research 1", { exact: true })
+    .getByLabel("Name in team for member 1", { exact: true })
     .fill("Evidence lead");
   await page
     .getByLabel("Reason for roster change", { exact: true })
@@ -138,21 +122,17 @@ test("roster drafts survive reload, enforce role eligibility and require reviewe
   await setup(page, () => current);
   await expect(select).toHaveValue("beta");
   await expect(
-    page.getByLabel("Name in team for Research 1", { exact: true }),
+    page.getByLabel("Name in team for member 1", { exact: true }),
   ).toHaveValue("Evidence lead");
   await expect(
     page.getByRole("button", { name: "Save roster", exact: true }),
   ).toBeDisabled();
-  await page
-    .getByRole("button", { name: "Add member to Research", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Add member", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Add member to Research", exact: true }),
-  ).toBeDisabled();
+    page.getByLabel("Agent for member 3", { exact: true }),
+  ).toHaveValue("alpha");
   await page.getByRole("button", { name: "Remove Alpha", exact: true }).click();
-  await page
-    .getByRole("checkbox", { name: "I reviewed the role assignments" })
-    .check();
+  await page.getByRole("checkbox", { name: "I reviewed the members" }).check();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.evaluate(() => {
     (document.activeElement as HTMLElement)?.blur();
@@ -180,6 +160,8 @@ test("roster drafts survive reload, enforce role eligibility and require reviewe
   ).toBeFocused();
   expect(writes).toBe(1);
   expect(current.deployment.roster[0].agentDeploymentId).toBe("beta");
+  expect(current.deployment.roster[0].lead).toBe(true);
+  expect(current.deployment.roster[1].approver).toBe(true);
   await expect
     .poll(() =>
       page.evaluate(() => localStorage.getItem("openseal.roster.roster-team")),
@@ -211,14 +193,12 @@ test("a stale roster draft preserves unrelated saved changes and requires review
   });
   await setup(page, () => current);
   await page
-    .getByLabel("Name in team for Research 1", { exact: true })
+    .getByLabel("Name in team for member 1", { exact: true })
     .fill("My research lead");
   await page
     .getByLabel("Reason for roster change", { exact: true })
     .fill("Clarify responsibilities.");
-  await page
-    .getByRole("checkbox", { name: "I reviewed the role assignments" })
-    .check();
+  await page.getByRole("checkbox", { name: "I reviewed the members" }).check();
   await page.getByRole("button", { name: "Save roster", exact: true }).click();
   await expect(
     page.getByRole("alert").filter({ hasText: "could not be confirmed" }),
@@ -227,18 +207,16 @@ test("a stale roster draft preserves unrelated saved changes and requires review
     .getByRole("button", { name: "Review latest team", exact: true })
     .click();
   await expect(
-    page.getByLabel("Name in team for Review 1", { exact: true }),
+    page.getByLabel("Name in team for member 2", { exact: true }),
   ).toHaveValue("Remote review lead");
   await expect(
-    page.getByLabel("Name in team for Research 1", { exact: true }),
+    page.getByLabel("Name in team for member 1", { exact: true }),
   ).toHaveValue("My research lead");
   await expect(
-    page.getByRole("checkbox", { name: "I reviewed the role assignments" }),
+    page.getByRole("checkbox", { name: "I reviewed the members" }),
   ).not.toBeChecked();
   expect(writes).toBe(1);
-  await page
-    .getByRole("checkbox", { name: "I reviewed the role assignments" })
-    .check();
+  await page.getByRole("checkbox", { name: "I reviewed the members" }).check();
   await page.getByRole("button", { name: "Save roster", exact: true }).click();
   await expect.poll(() => writes).toBe(2);
 });
@@ -254,7 +232,7 @@ test("conflicting assignment edits require a per-assignment choice before saving
   });
   await setup(page, () => current);
   await page
-    .getByLabel("Name in team for Research 1", { exact: true })
+    .getByLabel("Name in team for member 1", { exact: true })
     .fill("My lead");
   await page
     .getByLabel("Reason for roster change", { exact: true })
@@ -278,7 +256,7 @@ test("conflicting assignment edits require a per-assignment choice before saving
     .selectOption("saved");
   await page.getByRole("button", { name: "Use these choices" }).click();
   await expect(
-    page.getByLabel("Name in team for Research 1", { exact: true }),
+    page.getByLabel("Name in team for member 1", { exact: true }),
   ).toHaveValue("Saved lead");
   await expect(
     page.getByRole("button", { name: "Save roster", exact: true }),
@@ -301,14 +279,12 @@ test("lost roster response reconciles saved membership without replaying the mut
   });
   await setup(page, () => current);
   await page
-    .getByLabel("Agent for Research 1", { exact: true })
+    .getByLabel("Agent for member 1", { exact: true })
     .selectOption("beta");
   await page
     .getByLabel("Reason for roster change", { exact: true })
     .fill("Change the researcher.");
-  await page
-    .getByRole("checkbox", { name: "I reviewed the role assignments" })
-    .check();
+  await page.getByRole("checkbox", { name: "I reviewed the members" }).check();
   await page.getByRole("button", { name: "Save roster", exact: true }).click();
   await expect(
     page.getByRole("alert").filter({ hasText: "could not be confirmed" }),

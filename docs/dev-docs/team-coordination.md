@@ -58,7 +58,7 @@ of truth even when no participant needs to speak.
 
 ## Safety and recovery invariants
 
-- Team role grants and Agent authority are both narrowing boundaries.
+- Team skill grants and Agent authority are both narrowing boundaries.
 - Shared request context and artifacts cannot contain credentials.
 - Budgets are allocated to the child Run and cannot exceed the source Run.
 - Request, source Run, child Run, dependency resolution, and activity changes

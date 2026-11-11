@@ -11,7 +11,6 @@ const team = {
   definition: {
     displayName: "Research team",
     purpose: "Keep source decisions clear.",
-    roles: [],
   },
 };
 const initial = {

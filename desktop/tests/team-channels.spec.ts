@@ -12,7 +12,6 @@ const team = {
   definition: {
     displayName: "Evidence team",
     purpose: "Keep research decisions and source reviews together.",
-    roles: [],
   },
 };
 const channel = {
