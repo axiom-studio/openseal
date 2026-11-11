@@ -191,9 +191,10 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 	}
 }
 
-// Each filtered page is the matching slice of the same filter's full listing
-// (read in pages of 100): offset and limit apply after every predicate and
-// latest-version selection, never before.
+// Offset and limit apply after every predicate and latest-version selection,
+// never before. The expected pages are worked out from the seeded fixtures,
+// which all share one creation time, so the catalog orders them by ID and
+// then by version, newest first.
 func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	ctx := context.Background()
 	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
@@ -226,41 +227,55 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := &ObjectiveOwner{Type: OwnerTypeAgent, ID: "alice"}
-	filters := []ArtifactFilter{
-		{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: owner, LatestOnly: true, Limit: 25, Offset: 25},
-		{Scope: Scope{Kind: "tenant", ID: "one"}, Types: []string{" slides "}, MediaTypes: []string{"text/html"}, LatestOnly: true, Limit: 20, Offset: 20},
-		{Scope: Scope{Kind: "tenant", ID: "one"}, ProducerRunID: "run-research", ProducerRequestID: "request-research", Classifications: []ArtifactClassification{ArtifactClassificationInternal}, Limit: 100, Offset: 100},
-		{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: owner, EvidenceTarget: "https://forum.example/research/thread-7", Limit: 20, Offset: 40},
+	// ids lists artifact-<from>..artifact-<to> (stepping by step) at version 1.
+	ids := func(from, to, step int) []string {
+		listed := []string{}
+		for i := from; i <= to; i += step {
+			listed = append(listed, fmt.Sprintf("artifact-%03d:1", i))
+		}
+		return listed
 	}
-	list := func(filter ArtifactFilter) []string {
-		t.Helper()
-		artifacts, err := catalog.List(ctx, filter)
+	cases := []struct {
+		name   string
+		filter ArtifactFilter
+		want   []string
+	}{{
+		// Alice owns the even artifacts except artifact-000, whose latest
+		// version moved to the Team: 002..124, so the second page of 25
+		// starts at 052.
+		name:   "latest owner",
+		filter: ArtifactFilter{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: owner, LatestOnly: true, Limit: 25, Offset: 25},
+		want:   ids(52, 100, 2),
+	}, {
+		// Slides are every third artifact except artifact-000, whose latest
+		// version is a report: 003..123, so offset 20 starts at 063.
+		name:   "latest type and media type",
+		filter: ArtifactFilter{Scope: Scope{Kind: "tenant", ID: "one"}, Types: []string{" slides "}, MediaTypes: []string{"text/html"}, LatestOnly: true, Limit: 20, Offset: 20},
+		want:   ids(63, 120, 3),
+	}, {
+		// Every version matches: artifact-000 v2 and v1 come first, so
+		// offset 100 starts at artifact-099 and runs to the end.
+		name:   "every version by producer",
+		filter: ArtifactFilter{Scope: Scope{Kind: "tenant", ID: "one"}, ProducerRunID: "run-research", ProducerRequestID: "request-research", Classifications: []ArtifactClassification{ArtifactClassificationInternal}, Limit: 100, Offset: 100},
+		want:   ids(99, 124, 1),
+	}, {
+		// Without latest-only, artifact-000 v1 is still Alice's: 000..124,
+		// so offset 40 starts at 080.
+		name:   "every version by owner and evidence",
+		filter: ArtifactFilter{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: owner, EvidenceTarget: "https://forum.example/research/thread-7", Limit: 20, Offset: 40},
+		want:   ids(80, 118, 2),
+	}}
+	for _, tc := range cases {
+		artifacts, err := catalog.List(ctx, tc.filter)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ids := []string{}
+		page := []string{}
 		for _, artifact := range artifacts {
-			ids = append(ids, fmt.Sprintf("%s:%d", artifact.ID, artifact.Version))
+			page = append(page, fmt.Sprintf("%s:%d", artifact.ID, artifact.Version))
 		}
-		return ids
-	}
-	for _, filter := range filters {
-		var all []string
-		for offset := 0; ; offset += 100 {
-			unpaged := filter
-			unpaged.Offset, unpaged.Limit = offset, 100
-			page := list(unpaged)
-			all = append(all, page...)
-			if len(page) < 100 {
-				break
-			}
-		}
-		want := []string{}
-		if filter.Offset < len(all) {
-			want = all[filter.Offset:min(filter.Offset+filter.Limit, len(all))]
-		}
-		if page := list(filter); !reflect.DeepEqual(page, want) {
-			t.Fatalf("filter %#v: page %v, want %v", filter, page, want)
+		if !reflect.DeepEqual(page, tc.want) {
+			t.Fatalf("%s: page %v, want %v", tc.name, page, tc.want)
 		}
 	}
 }
