@@ -268,7 +268,7 @@ func assertSpaceAccessBackfilled(t *testing.T, store SpaceStore, scope Scope, wo
 	if err != nil || len(listed) != 2 {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
-	if listed[0].ID != legacyDefaultSpaceID(scope) || listed[0].Access != SpaceAccessEveryone || listed[0].OwnerID != legacyDefaultSpaceOwner ||
+	if listed[0].ID != legacyDefaultSpaceID(scope) || listed[0].Access != SpaceAccessOwner || listed[0].OwnerID != legacyDefaultSpaceOwner ||
 		!listed[0].IsDefault || listed[0].Name != "Default" {
 		t.Fatalf("Default = %+v", listed[0])
 	}
@@ -281,7 +281,8 @@ func assertSpaceAccessBackfilled(t *testing.T, store SpaceStore, scope Scope, wo
 	if people, err := store.ListSpacePeople(ctx, scope, workID); err != nil || len(people) != 0 {
 		t.Fatalf("people = %+v, err = %v", people, err)
 	}
-	if visible, err := store.VisibleSpaces(ctx, scope, "8"); err != nil || !slices.Equal(visible, []string{legacyDefaultSpaceID(scope)}) {
+	// Nothing was shared before the migration, so another person sees none.
+	if visible, err := store.VisibleSpaces(ctx, scope, "8"); err != nil || len(visible) != 0 {
 		t.Fatalf("visible to another person = %v, err = %v", visible, err)
 	}
 }

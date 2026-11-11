@@ -10,9 +10,8 @@ import (
 // space_people.
 const spaceAccessMigrationVersion int64 = 84
 
-// migrateSpaceAccess is PostgreSQL migration 84. Existing spaces become
-// "owner". The one space per scope that migration 67 made, owned by no
-// person, becomes "everyone".
+// migrateSpaceAccess is PostgreSQL migration 84. Every existing space becomes
+// "owner": only its owner sees it until they share it.
 func (s *PostgresStore) migrateSpaceAccess(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, spaceAccessMigrationVersion)
 	if err != nil || applied {
@@ -31,7 +30,6 @@ func (s *PostgresStore) migrateSpaceAccess(ctx context.Context, tx *sql.Tx) erro
 		statements = []string{
 			`ALTER TABLE ` + spaces + ` RENAME COLUMN created_by TO owner_id`,
 			`ALTER TABLE ` + spaces + ` ADD COLUMN access TEXT NOT NULL DEFAULT 'owner' CHECK (access IN ('owner', 'invited', 'everyone'))`,
-			`UPDATE ` + spaces + ` SET access = 'everyone' WHERE is_default`,
 		}
 	}
 	for _, statement := range append(statements,
@@ -93,7 +91,6 @@ func migrateSpaceAccessSQLite(db *sql.DB) error {
 	for _, statement := range []string{
 		`ALTER TABLE spaces RENAME COLUMN created_by TO owner_id`,
 		`ALTER TABLE spaces ADD COLUMN access TEXT NOT NULL DEFAULT 'owner'`,
-		`UPDATE spaces SET access = 'everyone' WHERE is_default = 1`,
 	} {
 		if _, err := tx.Exec(statement); err != nil {
 			return err
