@@ -12,6 +12,7 @@ func TestPublicConversationFacadeKeepsTeamChannelFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "channel"}
 	conversation, replayed, err := engine.CreateConversation(ctx, CreateConversationRequest{

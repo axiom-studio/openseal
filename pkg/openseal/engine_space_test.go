@@ -12,6 +12,7 @@ func TestEngineSpacesUseDefaultStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	scope := runtime.Scope{Kind: "tenant", ID: "7"}
 	space, err := engine.CreateSpace(t.Context(), CreateSpaceRequest{Scope: scope, Name: "Work", Look: runtime.SpaceLook("harbor")})
 	if err != nil {
@@ -35,6 +36,7 @@ func TestEngineCreatedDeploymentsJoinDefaultWhenInNoSpace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	scope := capability.ScopeReference{Kind: "tenant", ID: "9"}
 	spaceScope := runtime.Scope{Kind: scope.Kind, ID: scope.ID}
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{

@@ -29,6 +29,7 @@ func connectAccountEngine(t *testing.T) (context.Context, *runtime.SQLiteStore, 
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { e.Close() })
 	definition := &skill.Definition{
 		ID: "mail", Version: "1.0.0", Name: "Mail", Transport: skill.TransportReference{Kind: "http", Endpoint: "https://mail.invalid"},
 		Actions: map[string]skill.Action{"send": {

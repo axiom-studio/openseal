@@ -35,6 +35,7 @@ func runningCredentialRequestFixture(t *testing.T) (context.Context, *runtime.SQ
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { e.Close() })
 	scope := Scope{Kind: "tenant", ID: "one"}
 	run, err := runtime.NewPortfolioService(store).CreateAgentRun(ctx, runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindConversation,
 		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Order a cable", Source: runtime.RunSourceChat,

@@ -16,6 +16,7 @@ func TestSharedAgentEngineInstallsAndExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	if err := engine.RegisterSkill(ctx, &skill.Definition{
 		ID: "acme.search", Version: "1.0.0", Name: "Search", Description: "Search the web",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: "kernel://search"},
@@ -54,6 +55,7 @@ func TestSharedAgentEngineInstallsAndExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { bare.Close() })
 	if _, err := bare.ExportSharedAgent(ctx, reference, "any"); !errors.Is(err, errSharedAgentsUnavailable) {
 		t.Fatalf("export without the builder actions = %v", err)
 	}

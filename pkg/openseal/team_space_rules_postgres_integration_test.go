@@ -33,5 +33,6 @@ func TestPostgresTeamRostersFollowSpaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	exerciseTeamSpaceRules(t, engine)
 }

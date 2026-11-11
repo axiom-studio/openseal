@@ -16,6 +16,7 @@ func TestSkillManagementOptionOwnsDefinitionValidationAndDispatcherComposition(t
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	definition, err := engine.GetSkillDefinition(context.Background(), SkillManagementSkillID, SkillManagementSkillVersion)
 	if err != nil || definition == nil || definition.Version != SkillManagementSkillVersion ||
 		definition.Actions[SkillActionDiscover].Name != SkillActionDiscover ||

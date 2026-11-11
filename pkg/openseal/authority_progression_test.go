@@ -14,6 +14,7 @@ func TestEngineExposesGovernedAgentAuthorityProgression(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: "reviewer", Version: "1", DisplayName: "Reviewer", Purpose: "Review work", SystemPrompt: "Cite evidence.",
 		Authority:   AgentAuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},

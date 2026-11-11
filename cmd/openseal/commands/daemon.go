@@ -322,7 +322,7 @@ Options:
 	sugar.Infow("shutting down", "signal", sig)
 
 	stopRoutineEvents()
-	kernel.Stop()
+	kernel.Close()
 	apiServer.Shutdown(ctx)
 }
 

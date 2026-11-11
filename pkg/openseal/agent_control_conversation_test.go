@@ -28,6 +28,7 @@ func controlConversationFixture(t *testing.T) (*Engine, *conversationWriteCounti
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	definition, err := engine.RegisterAgentDefinition(context.Background(), &AgentDefinition{
 		ID: "control-fixture", Version: "1.0.0", DisplayName: "Control", Purpose: "Exercise control conversations",
 		SystemPrompt: "Be precise.", Authority: AgentAuthorityPolicy{MaximumRisk: SkillRiskWrite, MaxConcurrentRuns: 2},

@@ -89,6 +89,7 @@ func TestEngineExposesExternalConversationEndpointLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	definition := &SkillDefinition{
 		ID: "slack", Version: "1.0.0", Name: "Slack",
 		ConversationAdapters: map[string]ConversationAdapter{"conversations": {
@@ -159,6 +160,7 @@ func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	definition := &SkillDefinition{ID: "writer", Version: "1", Name: "Writer", Prompt: &SkillPromptModule{Instructions: "Write concise release notes."}}
 	if err := engine.RegisterSkill(context.Background(), definition); err != nil {
 		t.Fatal(err)
@@ -180,6 +182,7 @@ func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { restarted.Close() })
 	prompts, err := restarted.ListModelSkillPrompts(context.Background(), scope, "marketing")
 	if err != nil || len(prompts) != 1 || prompts[0].SkillID != "writer" {
 		t.Fatalf("restored prompts = %#v, %v", prompts, err)
@@ -213,6 +216,7 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
@@ -515,6 +519,7 @@ func TestEngineRunsAutonomousAgentPortfolio(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	registerLoopAgent(t, ctx, engine, scope, "agent")
@@ -568,6 +573,7 @@ func TestEngineRunsDynamicKindScopedPortfolio(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	registerLoopAgent(t, ctx, engine, scope, "worker")
@@ -636,6 +642,7 @@ func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	if !engine.ConversationRunsAvailable() {
 		t.Fatal("durable conversation runtime was not advertised")
 	}
@@ -782,6 +789,7 @@ func TestEngineWakeAgentWorkersForScopeClaimsWithoutPolling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	registerLoopAgent(t, ctx, engine, scope, "agent")

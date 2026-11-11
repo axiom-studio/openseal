@@ -33,6 +33,7 @@ func TestAgentBuilderEngineWiresValidatorAndDispatchers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	if engine.agentBuilderHost == nil {
 		t.Fatal("the builder host was not kept")
 	}
@@ -63,6 +64,7 @@ func TestAgentBuilderEngineEnsuresControlConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	reference := skill.ScopeReference{Kind: "tenant", ID: "one"}
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: "helper-definition", Version: "1.0.0", DisplayName: "Helper", Purpose: "Help", SystemPrompt: "Help.",
@@ -94,6 +96,7 @@ func TestAgentBuilderStartConversationOriginSpaceAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	requester := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
 	space, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: scope, Name: "Press", Look: runtime.DefaultSpaceLook, OwnerID: "ana"})
@@ -162,6 +165,7 @@ func TestAgentBuilderListDraftsKeepsRequesterActiveConversations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	ana := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
 	bo := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "bo"}

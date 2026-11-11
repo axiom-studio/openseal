@@ -143,5 +143,6 @@ func conversationBudgetEngine(t *testing.T, store *runtime.SQLiteStore, scope Sc
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	return engine
 }

@@ -15,6 +15,7 @@ func TestSkillSetupResolutionRequiresExactSavedBindingAndPersists(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { e.Close() })
 	scope := Scope{Kind: "tenant", ID: "one"}
 	skillScope := SkillScope{Kind: scope.Kind, ID: scope.ID}
 	definition := &SkillDefinition{ID: "github", Version: "1.0.0", Name: "GitHub", Transport: SkillTransportReference{Kind: "local"}, Actions: map[string]SkillAction{"read": {Name: "read", Description: "Read a repository", Risk: SkillRiskRead, SideEffect: SkillSideEffectRead, Idempotency: SkillIdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}}}
@@ -87,6 +88,7 @@ func TestCompletedSkillSetupDoesNotReappearInConversationChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { e.Close() })
 	scope := Scope{Kind: "tenant", ID: "one"}
 	skillScope := SkillScope{Kind: scope.Kind, ID: scope.ID}
 	definition := &SkillDefinition{ID: "github", Version: "1.0.0", Name: "GitHub", Transport: SkillTransportReference{Kind: "local"}, Actions: map[string]SkillAction{"read": {Name: "read", Description: "Read a repository", Risk: SkillRiskRead, SideEffect: SkillSideEffectRead, Idempotency: SkillIdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}}}

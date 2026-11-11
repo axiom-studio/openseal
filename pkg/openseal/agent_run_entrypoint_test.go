@@ -10,6 +10,7 @@ func TestAgentRunEntrypointIsValidatedBeforePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	deploymentScope := SkillScope{Kind: scope.Kind, ID: scope.ID}

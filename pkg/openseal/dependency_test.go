@@ -11,6 +11,7 @@ func TestPublicDependencyFacadeCoordinatesFanIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "fan-in"}
 	source, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{

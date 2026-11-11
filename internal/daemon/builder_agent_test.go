@@ -30,6 +30,7 @@ func newBuilderSeedEngine(t *testing.T) *opensealkernel.Engine {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	return engine
 }
 
@@ -264,6 +265,7 @@ func startDaemonEngine(t *testing.T, path string) (*opensealkernel.Engine, *runt
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	host.Bind(engine)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() {

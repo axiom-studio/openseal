@@ -16,6 +16,7 @@ func TestDefaultStoreTeamRostersFollowSpaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	exerciseTeamSpaceRules(t, engine)
 }
 
@@ -29,6 +30,7 @@ func TestSQLiteTeamRostersFollowSpaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	exerciseTeamSpaceRules(t, engine)
 }
 

@@ -12,6 +12,7 @@ func TestBoundedConversationArtifactsDoNotRequireApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	run := &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}}
 	for _, tc := range []struct {
 		name       string

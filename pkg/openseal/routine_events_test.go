@@ -102,6 +102,7 @@ func TestEngineRoutineEventEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	f := newRoutineEventFixture(t, ctx, engine, scope, "inbox-agent")
@@ -186,6 +187,7 @@ func TestEngineRoutineCreateListensAtOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	f := newRoutineEventFixture(t, t.Context(), engine, Scope{Kind: "tenant", ID: "routines-listen"}, "inbox-agent")
 	activation := f.gmailRoutine("listen")
 	if !f.listening(activation) {
@@ -238,6 +240,7 @@ func TestEngineRoutineIndexPublisher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	publisher := &recordingIndexPublisher{}
 	engine.SetRoutineIndexPublisher(publisher)
 	ctx := t.Context()

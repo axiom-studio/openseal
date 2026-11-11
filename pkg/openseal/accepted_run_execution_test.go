@@ -30,6 +30,7 @@ func TestEngineAcceptedRunExecutionPinsDefinitionAndReplaysOriginalIntent(t *tes
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Cleanup(func() { engine.Close() })
 				scope := Scope{Kind: "tenant", ID: "accepted-engine"}
 				definition := &AgentDefinition{
 					ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate safely", SystemPrompt: "Operate safely",

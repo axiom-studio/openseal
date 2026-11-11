@@ -160,6 +160,7 @@ func openCutoverEngine(t *testing.T, path string, options ...Option) (*Engine, *
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	t.Cleanup(func() {
 		engine.Stop()
 		_ = store.Close()
@@ -388,6 +389,7 @@ func TestAgentBuilderCutoverHostIsRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	if report, err := engine.AgentBuilderCutover(context.Background()); err != nil || report != (AgentBuilderCutoverReport{}) {
 		t.Fatalf("default store cutover = %#v, %v", report, err)
 	}

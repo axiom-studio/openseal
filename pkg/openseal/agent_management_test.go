@@ -18,6 +18,7 @@ func TestAgentManagementOptionOwnsDefinitionValidationAndDispatcherComposition(t
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	definition, err := engine.GetSkillDefinition(context.Background(), AgentManagementSkillID, AgentManagementSkillVersion)
 	if err != nil || definition == nil || definition.Version != AgentManagementSkillVersion ||
 		definition.Actions[AgentActionAmendBehavior].Name != AgentActionAmendBehavior ||

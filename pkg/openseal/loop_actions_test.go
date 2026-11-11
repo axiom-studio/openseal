@@ -39,6 +39,7 @@ func newLoopActionsEngine(t *testing.T, options ...Option) *Engine {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	t.Cleanup(engine.Stop)
 	return engine
 }

@@ -87,6 +87,7 @@ func TestDeploymentIDsShareOneNamespaceInDefaultStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	assertDeploymentIDNamespace(t, engine)
 }
 
@@ -100,6 +101,7 @@ func TestDeploymentIDsShareOneNamespaceInSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	assertDeploymentIDNamespace(t, engine)
 }
 
@@ -173,6 +175,7 @@ func teamRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *E
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	scope := Scope{Kind: "tenant", ID: "one"}
 	skillScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	umbrellaFixture(t, engine)

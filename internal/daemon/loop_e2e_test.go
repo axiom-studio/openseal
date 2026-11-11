@@ -60,6 +60,7 @@ func newDesktopLoop(t *testing.T, provider *fakeProvider, wrap func(runtime.Arti
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { kernel.Close() })
 	if err := resolver.Bind(kernel, content, nil); err != nil {
 		t.Fatal(err)
 	}

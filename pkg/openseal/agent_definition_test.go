@@ -13,6 +13,7 @@ func TestEngineListAgentDeploymentsFiltersWithinScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	definition, err := engine.RegisterAgentDefinition(t.Context(), &AgentDefinition{
 		ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate safely", SystemPrompt: "Inspect before acting.",
 		Authority: AgentAuthorityPolicy{MaximumRisk: SkillRiskRead, MaxConcurrentRuns: 1},
@@ -61,6 +62,7 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	definition := func(version string) *AgentDefinition {
 		return &AgentDefinition{
 			ID: "marketer", Version: version, DisplayName: "Marketer", Purpose: "Turn product work into demand",
@@ -166,6 +168,7 @@ func TestAgentStandingAuthorityAllowsOnlyExactReviewedActionScope(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	scope := SkillScope{Kind: "tenant", ID: "one"}
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
@@ -230,6 +233,7 @@ func TestAgentApprovalDeliverySurvivesSharedSkillBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	scope := SkillScope{Kind: "tenant", ID: "one"}
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
@@ -276,6 +280,7 @@ func TestAgentApprovalThresholdAllowsPreparationAndReviewsExternalEffects(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	scope := SkillScope{Kind: "tenant", ID: "one"}
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{

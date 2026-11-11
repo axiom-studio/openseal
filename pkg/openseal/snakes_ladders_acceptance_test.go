@@ -201,6 +201,7 @@ func runSnakesAndLaddersAcceptance(t *testing.T, commentator moveCommentator) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { finalEngine.Close() })
 	harness.setEngine(finalEngine, finalStore)
 	finalMoves, err := harness.replay(ctx)
 	if err != nil || len(finalMoves) != len(gameDice) {
@@ -227,6 +228,7 @@ func (h *snakesAcceptance) open(ctx context.Context) *Engine {
 		_ = store.Close()
 		h.t.Fatal(err)
 	}
+	h.t.Cleanup(func() { engine.Close() })
 	h.setEngine(engine, store)
 	return engine
 }

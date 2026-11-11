@@ -13,6 +13,7 @@ func TestPublicEngineComposesFirstClassAgentAndTeamDeployments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	agentDefinition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Find evidence", SystemPrompt: "Find evidence.",
 		Authority: AgentAuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
@@ -52,6 +53,7 @@ func TestPublicEngineProjectsEveryTeamBindingToEachMember(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	for _, definition := range []*SkillDefinition{
 		{ID: "portfolio", Version: "1", Name: "Portfolio", Transport: SkillTransportReference{Kind: "local"}, Actions: map[string]SkillAction{
 			"read":  {Name: "read", Description: "Read a portfolio", Risk: SkillRiskRead, SideEffect: SkillSideEffectRead, Idempotency: SkillIdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}},
@@ -134,6 +136,7 @@ func TestTeamManagementOptionOwnsValidationAndDispatcherComposition(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	if len(engine.actionValidators) != 2 || len(engine.actionPoolSpecs) != 1 {
 		t.Fatalf("Team action wiring validators=%d workers=%d", len(engine.actionValidators), len(engine.actionPoolSpecs))
 	}

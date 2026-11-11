@@ -24,6 +24,7 @@ func waitingConnectAppFixture(t *testing.T) (context.Context, *runtime.SQLiteSto
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { e.Close() })
 	if err := e.RegisterSkill(ctx, mcp.SkillDefinition()); err != nil {
 		t.Fatal(err)
 	}

@@ -28,6 +28,7 @@ func TestDaemonDispatcherStartsEventRoutineRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { kernel.Close() })
 	ConfigureRoutineEvents(kernel)
 	if err := kernel.Start(ctx); err != nil {
 		t.Fatal(err)

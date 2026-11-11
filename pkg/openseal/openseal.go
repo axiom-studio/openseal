@@ -2102,7 +2102,11 @@ var (
 // Engine is the primary entry point for OpenSeal. It composes the durable
 // Agent, Team, objective, collaboration, action, approval, and Skill services.
 type Engine struct {
-	store                         runtime.KernelStore
+	store runtime.KernelStore
+	// defaultStore is the in-memory store New opens. The Engine owns it even
+	// when WithStore replaces e.store, because services the replacement does
+	// not implement keep using it, and Close frees it.
+	defaultStore                  *runtime.SQLiteStore
 	portfolio                     *runtime.PortfolioService
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
@@ -2234,8 +2238,9 @@ type Option func(*Engine) error
 
 // New creates an Engine with the given options.
 // The default store is an in-memory SQLite store whose state ends with the
-// process; durable worker pools are opt-in.
-func New(opts ...Option) (*Engine, error) {
+// Engine; durable worker pools are opt-in. Callers must Close the Engine to
+// free that store.
+func New(opts ...Option) (_ *Engine, err error) {
 	logger, _ := zap.NewProduction()
 	sugar := logger.Sugar()
 
@@ -2243,6 +2248,11 @@ func New(opts ...Option) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("default store: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			store.Close()
+		}
+	}()
 	conversationChanges, _ := runtime.NewConversationChangeService(store, store)
 
 	// Agents and Teams share the kernel store so channel activation and Team
@@ -2250,6 +2260,7 @@ func New(opts ...Option) (*Engine, error) {
 	agentRegistry := kernelagent.NewRegistryWithStore(store)
 	e := &Engine{
 		store:               store,
+		defaultStore:        store,
 		workSignals:         runtime.NewWorkSignalStatus(),
 		portfolio:           runtime.NewPortfolioService(store),
 		activity:            runtime.NewRunActivityService(store, store),
@@ -2280,14 +2291,8 @@ func New(opts ...Option) (*Engine, error) {
 
 	for _, opt := range opts {
 		if err := opt(e); err != nil {
-			store.Close()
 			return nil, fmt.Errorf("engine option: %w", err)
 		}
-	}
-	// A complete replacement store rebuilt every service WithStore wires, so
-	// nothing reads the default store any more.
-	if _, replaced := e.store.(PersistentKernelStore); replaced && e.store != runtime.KernelStore(store) {
-		store.Close()
 	}
 	if e.actionPolicy == nil {
 		e.actionPolicy = runtime.ActionPolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
@@ -2438,6 +2443,19 @@ func (e *Engine) Stop() {
 	for _, pool := range e.agentPools {
 		pool.Stop()
 	}
+}
+
+// Close stops the Engine and frees the default store New opened. A store
+// passed with WithStore or WithPersistentStore stays open; its owner closes
+// it. The Engine must not be used after Close.
+func (e *Engine) Close() error {
+	e.Stop()
+	if e.defaultStore == nil {
+		return nil
+	}
+	err := e.defaultStore.Close()
+	e.defaultStore = nil
+	return err
 }
 
 // Store returns the execution store.

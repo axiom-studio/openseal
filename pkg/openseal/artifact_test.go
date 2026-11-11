@@ -14,6 +14,7 @@ func TestEngineExposesArtifactEvidenceCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	scope := Scope{Kind: "local", ID: "artifacts"}
 	digest := sha256.Sum256([]byte("game log"))
 	created, err := engine.RegisterArtifact(context.Background(), RegisterArtifactRequest{

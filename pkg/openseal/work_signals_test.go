@@ -141,6 +141,7 @@ func TestEngineWorkQueueRelaysOutboxSchedulesDeadlinesAndRoutesDeliveries(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	if err := engine.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

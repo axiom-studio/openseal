@@ -22,6 +22,7 @@ func TestSkillReferenceUpgradeMovesLiveReferencesAtomicallyAndPreservesHistory(t
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	assertSkillReferenceUpgradeMovesLiveReferences(t, engine)
 
 	store, err := openseal.NewSQLiteStore(filepath.Join(t.TempDir(), "upgrade.db"))
@@ -33,6 +34,7 @@ func TestSkillReferenceUpgradeMovesLiveReferencesAtomicallyAndPreservesHistory(t
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { durable.Close() })
 	assertSkillReferenceUpgradeMovesLiveReferences(t, durable)
 }
 
@@ -142,6 +144,7 @@ func TestSkillReferenceUpgradeRejectsStaleImpactAndRequiresApprovalForContractCh
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	from, to := upgradeTestDefinition(t, "2.0.0"), upgradeTestDefinition(t, "3.0.0")
 	action := to.Actions[upgradeTestAction]
 	action.Risk = openseal.SkillRiskWrite

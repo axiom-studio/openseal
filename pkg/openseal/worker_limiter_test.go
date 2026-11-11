@@ -7,6 +7,7 @@ func TestEngineConfiguresOneSharedWorkerConcurrencyBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	stats := engine.WorkerConcurrencyStats()
 	if stats.Limit != 7 || stats.InUse != 0 {
 		t.Fatalf("worker concurrency stats = %#v", stats)

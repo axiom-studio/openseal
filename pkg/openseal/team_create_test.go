@@ -20,6 +20,7 @@ func TestTeamCreateEngineWiring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	validators := 0
 	for _, validator := range engine.actionValidators {
 		if _, ok := validator.(*runtime.TeamCreateActionValidator); ok {

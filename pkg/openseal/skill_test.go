@@ -15,6 +15,7 @@ func TestEngineExposesGovernedSkillCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	definition := &SkillDefinition{
 		ID: "analytics", Version: "1.0.0", Name: "Analytics",
@@ -54,6 +55,7 @@ func TestEngineExposesCanonicalSkillBindingManagement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	definition := &SkillDefinition{ID: "reader", Version: "1", Name: "Reader", Transport: SkillTransportReference{Kind: "local"}, Actions: map[string]SkillAction{
 		"read": {Name: "read", Description: "Read", Risk: SkillRiskRead, SideEffect: SkillSideEffectRead, Idempotency: SkillIdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}},
@@ -111,6 +113,7 @@ func TestEngineExposesGovernedActionAndApprovalLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "governance"}
 	definition := &SkillDefinition{

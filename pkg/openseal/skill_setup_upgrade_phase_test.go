@@ -31,6 +31,7 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { engine.Close() })
 			for _, version := range []string{"1.0.0", "1.1.0"} {
 				if err := engine.RegisterSkill(ctx, &SkillDefinition{ID: "connector", Version: version, Name: "Connector", Transport: SkillTransportReference{Kind: "local"},
 					Actions: map[string]SkillAction{"read": {Name: "read", Description: "Read the connected service", Risk: SkillRiskRead, SideEffect: SkillSideEffectRead, Idempotency: SkillIdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}}}); err != nil {
@@ -89,6 +90,7 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 				}
 				t.Cleanup(func() { _ = reopened.Close() })
 				store = reopened
+				engine.Close()
 				engine, err = New(WithStore(store))
 				if err != nil {
 					t.Fatal(err)

@@ -135,6 +135,7 @@ func TestEngineStartRunsCutoverBeforeWorkers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { engine.Close() })
 		return engine
 	}
 

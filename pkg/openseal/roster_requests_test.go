@@ -20,6 +20,7 @@ func TestRequestsAreListedByTheConversationUmbrella(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { engine.Close() })
 	scope := runtime.Scope{Kind: "tenant", ID: "roster"}
 	catalogScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
