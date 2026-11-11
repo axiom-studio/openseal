@@ -18,18 +18,30 @@ func (s *PostgresStore) migrateSpaceAccess(ctx context.Context, tx *sql.Tx) erro
 		return err
 	}
 	spaces, people := s.table("spaces"), s.table("space_people")
-	for _, statement := range []string{
-		`ALTER TABLE ` + spaces + ` RENAME COLUMN created_by TO owner_id`,
-		`ALTER TABLE ` + spaces + ` ADD COLUMN access TEXT NOT NULL DEFAULT 'owner' CHECK (access IN ('owner', 'invited', 'everyone'))`,
-		`UPDATE ` + spaces + ` SET access = 'everyone' WHERE is_default`,
-		`CREATE TABLE IF NOT EXISTS ` + people + ` (
+	// A database that lost only this ledger row is already renamed; its
+	// spaces keep the access they have.
+	var legacy bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		WHERE table_schema = $1 AND table_name = 'spaces' AND column_name = 'created_by')`, s.schema).Scan(&legacy); err != nil {
+		return err
+	}
+	var statements []string
+	if legacy {
+		statements = []string{
+			`ALTER TABLE ` + spaces + ` RENAME COLUMN created_by TO owner_id`,
+			`ALTER TABLE ` + spaces + ` ADD COLUMN access TEXT NOT NULL DEFAULT 'owner' CHECK (access IN ('owner', 'invited', 'everyone'))`,
+			`UPDATE ` + spaces + ` SET access = 'everyone' WHERE is_default`,
+		}
+	}
+	for _, statement := range append(statements,
+		`CREATE TABLE IF NOT EXISTS `+people+` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, space_id TEXT NOT NULL, user_id TEXT NOT NULL,
 			added_by TEXT NOT NULL, added_at TIMESTAMPTZ NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, space_id, user_id),
-			FOREIGN KEY (scope_kind, scope_id, space_id) REFERENCES ` + spaces + ` (scope_kind, scope_id, id) ON DELETE CASCADE
+			FOREIGN KEY (scope_kind, scope_id, space_id) REFERENCES `+spaces+` (scope_kind, scope_id, id) ON DELETE CASCADE
 		)`,
-		`CREATE INDEX IF NOT EXISTS space_people_user_idx ON ` + people + ` (scope_kind, scope_id, user_id)`,
-	} {
+		`CREATE INDEX IF NOT EXISTS space_people_user_idx ON `+people+` (scope_kind, scope_id, user_id)`,
+	) {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return err
 		}
