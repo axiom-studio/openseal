@@ -114,16 +114,7 @@ func (s *SQLiteStore) CreateAgentTurn(ctx context.Context, turn *AgentTurn) (*Ag
 		turn.Scope.Kind, turn.Scope.ID, turn.RunID).Scan(&persisted.Sequence); err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(persisted)
-	if err != nil {
-		return nil, err
-	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO agent_turns
-		(id, scope_kind, scope_id, run_id, sequence, status, revision, lease_owner, lease_expires_at, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, persisted.ID, persisted.Scope.Kind, persisted.Scope.ID,
-		persisted.RunID, persisted.Sequence, persisted.Status, persisted.Revision, persisted.LeaseOwner,
-		persisted.LeaseExpiresAt, persisted.CreatedAt, string(payload))
-	if err != nil {
+	if err := insertSQLiteAgentTurn(ctx, conn, persisted); err != nil {
 		return nil, err
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
@@ -369,4 +360,17 @@ func decodeAgentTurnRecord(payload string) (*AgentTurn, error) {
 		return nil, err
 	}
 	return &turn, nil
+}
+
+func insertSQLiteAgentTurn(ctx context.Context, exec sqliteExecer, turn *AgentTurn) error {
+	payload, err := json.Marshal(turn)
+	if err != nil {
+		return err
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO agent_turns
+		(id, scope_kind, scope_id, run_id, sequence, status, revision, lease_owner, lease_expires_at, created_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, turn.ID, turn.Scope.Kind, turn.Scope.ID,
+		turn.RunID, turn.Sequence, turn.Status, turn.Revision, turn.LeaseOwner,
+		turn.LeaseExpiresAt, turn.CreatedAt, string(payload))
+	return err
 }

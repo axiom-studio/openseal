@@ -9,8 +9,8 @@ import (
 // The put* fixtures write kernel records straight into a SQLiteStore's tables,
 // skipping every store rule, for tests that need a state no store method
 // produces (a record left by a crashed worker, a tampered row) or that only
-// need records to read back. Each replaces the row with the same key. The
-// columns mirror the store's own inserts; triggers still project them.
+// need records to read back. Each replaces the row with the same key through
+// the store's own row insert, so triggers still project it.
 
 func putStoredRun(t testing.TB, store *SQLiteStore, run *AgentRun) {
 	t.Helper()
@@ -42,33 +42,25 @@ func putStoredRun(t testing.TB, store *SQLiteStore, run *AgentRun) {
 func putStoredTurn(t testing.TB, store *SQLiteStore, turn *AgentTurn) {
 	t.Helper()
 	deleteStoredRow(t, store, "agent_turns", turn.Scope, turn.ID)
-	execStoreSQL(t, store, `INSERT INTO agent_turns
-		(id, scope_kind, scope_id, run_id, sequence, status, revision, lease_owner, lease_expires_at, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, turn.ID, turn.Scope.Kind, turn.Scope.ID,
-		turn.RunID, turn.Sequence, turn.Status, turn.Revision, turn.LeaseOwner,
-		turn.LeaseExpiresAt, turn.CreatedAt, mustJSON(t, turn))
+	if err := insertSQLiteAgentTurn(context.Background(), store.db, turn); err != nil {
+		t.Fatalf("put turn %s: %v", turn.ID, err)
+	}
 }
 
 func putStoredAction(t testing.TB, store *SQLiteStore, call *ActionCall) {
 	t.Helper()
 	deleteStoredRow(t, store, "action_calls", call.Scope, call.ID)
-	execStoreSQL(t, store, `INSERT INTO action_calls
-		(id, scope_kind, scope_id, run_id, turn_id, status, idempotency_key, external_operation_digest, approval_id, available_at,
-		 lease_owner, lease_expires_at, revision, created_at, payload, deployment_id, binding_id, binding_revision, skill_id, skill_version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, call.Status, call.IdempotencyKey,
-		externalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, mustJSON(t, call),
-		call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion)
+	if err := insertSQLiteActionCall(context.Background(), store.db, call); err != nil {
+		t.Fatalf("put action %s: %v", call.ID, err)
+	}
 }
 
 func putStoredApproval(t testing.TB, store *SQLiteStore, approval *ApprovalCheckpoint) {
 	t.Helper()
 	deleteStoredRow(t, store, "approval_checkpoints", approval.Scope, approval.ID)
-	execStoreSQL(t, store, `INSERT INTO approval_checkpoints
-		(id, scope_kind, scope_id, run_id, action_call_id, status, expires_at, revision, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, approval.ID, approval.Scope.Kind, approval.Scope.ID,
-		approval.RunID, approval.ActionCallID, approval.Status, approval.ExpiresAt, approval.Revision,
-		approval.CreatedAt, mustJSON(t, approval))
+	if err := insertSQLiteApprovalCheckpoint(context.Background(), store.db, approval); err != nil {
+		t.Fatalf("put approval %s: %v", approval.ID, err)
+	}
 }
 
 // putStoredConversationTask stores task with workRun as the state of its work
@@ -76,65 +68,48 @@ func putStoredApproval(t testing.TB, store *SQLiteStore, approval *ApprovalCheck
 func putStoredConversationTask(t testing.TB, store *SQLiteStore, task *ConversationTask, workRun *AgentRun) {
 	t.Helper()
 	deleteStoredRow(t, store, "conversation_tasks", task.Scope, task.ID)
-	active := 1
-	if isTerminalAgentRunStatus(workRun.Status) {
-		active = 0
+	if err := insertSQLiteConversationTask(context.Background(), store.db, task, workRun.Status); err != nil {
+		t.Fatalf("put conversation task %s: %v", task.ID, err)
 	}
-	execStoreSQL(t, store, `INSERT INTO conversation_tasks
-		(scope_kind, scope_id, id, source_run_id, task_key, request_digest, owner_type, owner_id, actor_type, actor_id,
-		 conversation_id, thread_root_id, work_run_id, work_status, is_active, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, task.Scope.Kind, task.Scope.ID,
-		task.ID, task.SourceRunID, task.TaskKey, task.RequestDigest,
-		task.Owner.Type, task.Owner.ID, task.AuthenticatedActor.Type, task.AuthenticatedActor.ID,
-		task.ConversationID, task.ThreadRootID, task.WorkRunID, workRun.Status, active, task.CreatedAt.UTC(), mustJSON(t, task))
 }
 
 func putStoredExternalEndpoint(t testing.TB, store *SQLiteStore, endpoint *ExternalConversationEndpoint) {
 	t.Helper()
 	deleteStoredRow(t, store, "external_conversation_endpoints", endpoint.Scope, endpoint.ID)
-	execStoreSQL(t, store, `INSERT INTO external_conversation_endpoints
-		(scope_kind,scope_id,id,ingress_route,owner_type,owner_id,provider,status,revision,updated_at,payload)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.IngressRoute,
-		endpoint.Owner.Type, endpoint.Owner.ID, endpoint.Provider, endpoint.Status,
-		endpoint.Revision, endpoint.UpdatedAt, mustJSON(t, endpoint))
+	if err := insertSQLiteExternalConversationEndpoint(context.Background(), store.db, endpoint); err != nil {
+		t.Fatalf("put endpoint %s: %v", endpoint.ID, err)
+	}
 }
 
 func putStoredExternalDelivery(t testing.TB, store *SQLiteStore, delivery *ExternalConversationDelivery) {
 	t.Helper()
 	deleteStoredRow(t, store, "external_conversation_deliveries", delivery.Scope, delivery.ID)
-	execStoreSQL(t, store, `INSERT INTO external_conversation_deliveries
-		(scope_kind,scope_id,id,endpoint_id,endpoint_revision,conversation_id,channel_message_id,idempotency_key,status,
-		 available_at,lease_owner,lease_expires_at,created_at,revision,payload)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, delivery.Scope.Kind, delivery.Scope.ID, delivery.ID, delivery.EndpointID,
-		delivery.EndpointRevision, delivery.ConversationID, delivery.ChannelMessageID, delivery.IdempotencyKey, delivery.Status,
-		delivery.AvailableAt, delivery.LeaseOwner, nullableSQLiteTime(delivery.LeaseExpiresAt), delivery.CreatedAt, delivery.Revision, mustJSON(t, delivery))
+	if err := insertSQLiteExternalConversationDelivery(context.Background(), store.db, delivery); err != nil {
+		t.Fatalf("put delivery %s: %v", delivery.ID, err)
+	}
 }
 
 func putStoredArtifact(t testing.TB, store *SQLiteStore, artifact *Artifact) {
 	t.Helper()
+	ctx := context.Background()
 	execStoreSQL(t, store, `DELETE FROM artifacts WHERE scope_kind = ? AND scope_id = ? AND id = ? AND version = ?`,
 		artifact.Scope.Kind, artifact.Scope.ID, artifact.ID, artifact.Version)
-	execStoreSQL(t, store, `INSERT INTO artifacts
-		(scope_kind, scope_id, id, version, type, media_type, classification, digest, content_ref,
-		 producer_run_id, producer_request_id, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		artifact.Scope.Kind, artifact.Scope.ID, artifact.ID, artifact.Version, artifact.Type, artifact.MediaType,
-		artifact.Classification, artifact.Digest, artifact.ContentRef, artifact.Provenance.RunID,
-		artifact.Provenance.RequestID, artifact.CreatedAt, mustJSON(t, artifact))
+	var latest int64
+	if err := store.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM artifacts WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+		artifact.Scope.Kind, artifact.Scope.ID, artifact.ID).Scan(&latest); err != nil {
+		t.Fatal(err)
+	}
+	if err := insertSQLiteArtifactVersion(ctx, store.db, artifact, latest); err != nil {
+		t.Fatalf("put artifact %s: %v", artifact.ID, err)
+	}
 }
 
 func putStoredAgentRequest(t testing.TB, store *SQLiteStore, request *AgentRequest) {
 	t.Helper()
 	deleteStoredRow(t, store, "agent_requests", request.Scope, request.ID)
-	execStoreSQL(t, store, `INSERT INTO agent_requests
-		(scope_kind, scope_id, id, kind, status, requester_type, requester_id, recipient_type, recipient_id,
-		 source_run_id, child_run_id, idempotency_key, revision, created_at, updated_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		request.Scope.Kind, request.Scope.ID, request.ID, request.Kind, request.Status,
-		request.Requester.Type, request.Requester.ID, request.Recipient.Type, request.Recipient.ID,
-		request.SourceRunID, request.ChildRunID, request.IdempotencyKey, request.Revision,
-		request.CreatedAt, request.UpdatedAt, mustJSON(t, request))
+	if err := insertSQLiteAgentRequest(context.Background(), store.db, request); err != nil {
+		t.Fatalf("put agent request %s: %v", request.ID, err)
+	}
 }
 
 // rewriteStoredPayload decodes the JSON payload of one scoped row of table,

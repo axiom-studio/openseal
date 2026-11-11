@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 )
 
@@ -151,17 +150,7 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req Conversat
 			}
 		}
 	}
-	payload, err := json.Marshal(task)
-	if err != nil {
-		return nil, err
-	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO conversation_tasks
-		(scope_kind,scope_id,id,source_run_id,task_key,request_digest,owner_type,owner_id,actor_type,actor_id,
-		conversation_id,thread_root_id,work_run_id,work_status,is_active,created_at,payload)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, task.Scope.Kind, task.Scope.ID, task.ID, task.SourceRunID, task.TaskKey, task.RequestDigest,
-		task.Owner.Type, task.Owner.ID, task.AuthenticatedActor.Type, task.AuthenticatedActor.ID, task.ConversationID, task.ThreadRootID,
-		task.WorkRunID, updated.Status, 1, task.CreatedAt.UTC(), string(payload))
-	if err != nil {
+	if err := insertSQLiteConversationTask(ctx, conn, task, updated.Status); err != nil {
 		return nil, normalizeSQLiteConversationTaskConflict(err)
 	}
 	if _, err := insertSQLiteActivityConn(ctx, conn, event); err != nil {

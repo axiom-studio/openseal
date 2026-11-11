@@ -167,16 +167,7 @@ func (s *SQLiteStore) CreateExternalConversationEndpoint(ctx context.Context, en
 	if err := endpoint.Validate(); err != nil {
 		return err
 	}
-	payload, err := json.Marshal(endpoint)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO external_conversation_endpoints
-		(scope_kind,scope_id,id,ingress_route,owner_type,owner_id,provider,status,revision,updated_at,payload)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.IngressRoute,
-		endpoint.Owner.Type, endpoint.Owner.ID, endpoint.Provider, endpoint.Status,
-		endpoint.Revision, endpoint.UpdatedAt, string(payload))
+	err := insertSQLiteExternalConversationEndpoint(ctx, s.db, endpoint)
 	if sqliteUniqueViolation(err) {
 		return ErrExternalConversationConflict
 	}
@@ -683,16 +674,7 @@ func (s *SQLiteStore) EnqueueExternalConversationDelivery(ctx context.Context, d
 		}
 		return rebound, true, nil
 	}
-	payload, err := json.Marshal(delivery)
-	if err != nil {
-		return nil, false, err
-	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO external_conversation_deliveries
-		(scope_kind,scope_id,id,endpoint_id,endpoint_revision,conversation_id,channel_message_id,idempotency_key,status,
-		 available_at,lease_owner,lease_expires_at,created_at,revision,payload)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, delivery.Scope.Kind, delivery.Scope.ID, delivery.ID, delivery.EndpointID,
-		delivery.EndpointRevision, delivery.ConversationID, delivery.ChannelMessageID, delivery.IdempotencyKey, delivery.Status,
-		delivery.AvailableAt, delivery.LeaseOwner, nullableSQLiteTime(delivery.LeaseExpiresAt), delivery.CreatedAt, delivery.Revision, string(payload))
+	err = insertSQLiteExternalConversationDelivery(ctx, conn, delivery)
 	if sqliteUniqueViolation(err) {
 		return nil, false, ErrExternalConversationConflict
 	}
@@ -1024,4 +1006,32 @@ func (s *SQLiteStore) SaveExternalConversationReplyProgress(ctx context.Context,
 		return ErrExternalConversationConflict
 	}
 	return tx.Commit()
+}
+
+func insertSQLiteExternalConversationEndpoint(ctx context.Context, exec sqliteExecer, endpoint *ExternalConversationEndpoint) error {
+	payload, err := json.Marshal(endpoint)
+	if err != nil {
+		return err
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO external_conversation_endpoints
+		(scope_kind,scope_id,id,ingress_route,owner_type,owner_id,provider,status,revision,updated_at,payload)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.IngressRoute,
+		endpoint.Owner.Type, endpoint.Owner.ID, endpoint.Provider, endpoint.Status,
+		endpoint.Revision, endpoint.UpdatedAt, string(payload))
+	return err
+}
+
+func insertSQLiteExternalConversationDelivery(ctx context.Context, exec sqliteExecer, delivery *ExternalConversationDelivery) error {
+	payload, err := json.Marshal(delivery)
+	if err != nil {
+		return err
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO external_conversation_deliveries
+		(scope_kind,scope_id,id,endpoint_id,endpoint_revision,conversation_id,channel_message_id,idempotency_key,status,
+		 available_at,lease_owner,lease_expires_at,created_at,revision,payload)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, delivery.Scope.Kind, delivery.Scope.ID, delivery.ID, delivery.EndpointID,
+		delivery.EndpointRevision, delivery.ConversationID, delivery.ChannelMessageID, delivery.IdempotencyKey, delivery.Status,
+		delivery.AvailableAt, delivery.LeaseOwner, nullableSQLiteTime(delivery.LeaseExpiresAt), delivery.CreatedAt, delivery.Revision, string(payload))
+	return err
 }

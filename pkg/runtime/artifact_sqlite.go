@@ -50,11 +50,17 @@ func (s *SQLiteStore) CreateArtifactVersion(ctx context.Context, artifact *Artif
 	if err := artifact.Validate(); err != nil {
 		return err
 	}
+	return insertSQLiteArtifactVersion(ctx, s.db, artifact, expectedLatestVersion)
+}
+
+// insertSQLiteArtifactVersion stores artifact only while the artifact's latest
+// stored version is expectedLatestVersion (0 when none is stored).
+func insertSQLiteArtifactVersion(ctx context.Context, exec sqliteExecer, artifact *Artifact, expectedLatestVersion int64) error {
 	payload, err := json.Marshal(artifact)
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO artifacts
+	result, err := exec.ExecContext(ctx, `INSERT INTO artifacts
 		(scope_kind, scope_id, id, version, type, media_type, classification, digest, content_ref,
 		 producer_run_id, producer_request_id, created_at, payload)
 		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?

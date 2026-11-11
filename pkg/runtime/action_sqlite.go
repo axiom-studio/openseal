@@ -212,30 +212,11 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 		return nil, ErrLeaseLost
 	}
 
-	callPayload, err := json.Marshal(call)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO action_calls
-		(id, scope_kind, scope_id, run_id, turn_id, status, idempotency_key, external_operation_digest, approval_id, available_at,
-		 lease_owner, lease_expires_at, revision, created_at, payload, deployment_id, binding_id, binding_revision, skill_id, skill_version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, call.Status, call.IdempotencyKey,
-		externalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(callPayload),
-		call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion); err != nil {
+	if err := insertSQLiteActionCall(ctx, conn, call); err != nil {
 		return nil, err
 	}
 	if proposal.Approval != nil {
-		approvalPayload, err := json.Marshal(proposal.Approval)
-		if err != nil {
-			return nil, err
-		}
-		approval := proposal.Approval
-		if _, err := conn.ExecContext(ctx, `INSERT INTO approval_checkpoints
-			(id, scope_kind, scope_id, run_id, action_call_id, status, expires_at, revision, created_at, payload)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, approval.ID, approval.Scope.Kind, approval.Scope.ID,
-			approval.RunID, approval.ActionCallID, approval.Status, approval.ExpiresAt, approval.Revision,
-			approval.CreatedAt, string(approvalPayload)); err != nil {
+		if err := insertSQLiteApprovalCheckpoint(ctx, conn, proposal.Approval); err != nil {
 			return nil, err
 		}
 	}
@@ -865,4 +846,32 @@ func externalOperationClaimDigest(call *ActionCall) string {
 		return ""
 	}
 	return call.ExternalOperationDigest
+}
+
+func insertSQLiteActionCall(ctx context.Context, exec sqliteExecer, call *ActionCall) error {
+	payload, err := json.Marshal(call)
+	if err != nil {
+		return err
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO action_calls
+		(id, scope_kind, scope_id, run_id, turn_id, status, idempotency_key, external_operation_digest, approval_id, available_at,
+		 lease_owner, lease_expires_at, revision, created_at, payload, deployment_id, binding_id, binding_revision, skill_id, skill_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, call.Status, call.IdempotencyKey,
+		externalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload),
+		call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion)
+	return err
+}
+
+func insertSQLiteApprovalCheckpoint(ctx context.Context, exec sqliteExecer, approval *ApprovalCheckpoint) error {
+	payload, err := json.Marshal(approval)
+	if err != nil {
+		return err
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO approval_checkpoints
+		(id, scope_kind, scope_id, run_id, action_call_id, status, expires_at, revision, created_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, approval.ID, approval.Scope.Kind, approval.Scope.ID,
+		approval.RunID, approval.ActionCallID, approval.Status, approval.ExpiresAt, approval.Revision,
+		approval.CreatedAt, string(payload))
+	return err
 }

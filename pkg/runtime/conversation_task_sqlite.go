@@ -176,19 +176,7 @@ func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record Convers
 			return nil, err
 		}
 	}
-	payload, err := json.Marshal(record.Task)
-	if err != nil {
-		return nil, err
-	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO conversation_tasks
-		(scope_kind, scope_id, id, source_run_id, task_key, request_digest, owner_type, owner_id, actor_type, actor_id,
-		 conversation_id, thread_root_id, work_run_id, work_status, is_active, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, record.Task.Scope.Kind, record.Task.Scope.ID,
-		record.Task.ID, record.Task.SourceRunID, record.Task.TaskKey, record.Task.RequestDigest,
-		record.Task.Owner.Type, record.Task.Owner.ID, record.Task.AuthenticatedActor.Type, record.Task.AuthenticatedActor.ID,
-		record.Task.ConversationID, record.Task.ThreadRootID,
-		record.Task.WorkRunID, record.WorkRun.Status, 1, record.Task.CreatedAt.UTC(), string(payload))
-	if err != nil {
+	if err := insertSQLiteConversationTask(ctx, conn, record.Task, record.WorkRun.Status); err != nil {
 		return nil, normalizeSQLiteConversationTaskConflict(err)
 	}
 	if _, err := insertSQLiteActivityConn(ctx, conn, record.Event); err != nil {
@@ -329,4 +317,25 @@ func scanConversationTaskResults(rows *sql.Rows) ([]*ConversationTaskResult, err
 		results = append(results, &ConversationTaskResult{Task: task, WorkRun: run})
 	}
 	return results, rows.Err()
+}
+
+// insertSQLiteConversationTask stores task beside the status of its work Run,
+// which the row indexes. A task is active until that Run is terminal.
+func insertSQLiteConversationTask(ctx context.Context, exec sqliteExecer, task *ConversationTask, workStatus AgentRunStatus) error {
+	payload, err := json.Marshal(task)
+	if err != nil {
+		return err
+	}
+	active := 1
+	if isTerminalAgentRunStatus(workStatus) {
+		active = 0
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO conversation_tasks
+		(scope_kind, scope_id, id, source_run_id, task_key, request_digest, owner_type, owner_id, actor_type, actor_id,
+		 conversation_id, thread_root_id, work_run_id, work_status, is_active, created_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, task.Scope.Kind, task.Scope.ID,
+		task.ID, task.SourceRunID, task.TaskKey, task.RequestDigest,
+		task.Owner.Type, task.Owner.ID, task.AuthenticatedActor.Type, task.AuthenticatedActor.ID,
+		task.ConversationID, task.ThreadRootID, task.WorkRunID, workStatus, active, task.CreatedAt.UTC(), string(payload))
+	return err
 }

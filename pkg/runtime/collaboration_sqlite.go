@@ -43,10 +43,6 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 	if err := validateAgentRequestCreateRecord(record); err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(record.Request)
-	if err != nil {
-		return nil, err
-	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
 	if err != nil {
 		return nil, err
@@ -100,15 +96,7 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 			return nil, err
 		}
 	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO agent_requests
-		(scope_kind, scope_id, id, kind, status, requester_type, requester_id, recipient_type, recipient_id,
-		 source_run_id, child_run_id, idempotency_key, revision, created_at, updated_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.ID, record.Request.Kind, record.Request.Status,
-		record.Request.Requester.Type, record.Request.Requester.ID, record.Request.Recipient.Type, record.Request.Recipient.ID,
-		record.Request.SourceRunID, record.Request.ChildRunID, record.Request.IdempotencyKey, record.Request.Revision,
-		record.Request.CreatedAt, record.Request.UpdatedAt, string(payload))
-	if err != nil {
+	if err := insertSQLiteAgentRequest(ctx, conn, record.Request); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return nil, ErrAgentRequestIdempotency
 		}
@@ -404,6 +392,22 @@ func rollbackSQLiteConn(conn *sql.Conn, committed *bool) {
 		_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 	}
 	_ = conn.Close()
+}
+
+func insertSQLiteAgentRequest(ctx context.Context, exec sqliteExecer, request *AgentRequest) error {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO agent_requests
+		(scope_kind, scope_id, id, kind, status, requester_type, requester_id, recipient_type, recipient_id,
+		 source_run_id, child_run_id, idempotency_key, revision, created_at, updated_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		request.Scope.Kind, request.Scope.ID, request.ID, request.Kind, request.Status,
+		request.Requester.Type, request.Requester.ID, request.Recipient.Type, request.Recipient.ID,
+		request.SourceRunID, request.ChildRunID, request.IdempotencyKey, request.Revision,
+		request.CreatedAt, request.UpdatedAt, string(payload))
+	return err
 }
 
 func insertSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun) error {
