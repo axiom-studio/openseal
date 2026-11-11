@@ -1147,12 +1147,11 @@ func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 	definition := &kernelteam.Definition{
 		ID: "gtm-research", Version: "3", DisplayName: "GTM Research", Purpose: "Find evidence, synthesize it, and coordinate approved outreach.",
 		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "monitor", Title: "Monitor source communities"}, {ID: "report", Title: "Deliver cited report"}},
-		Roles:              []kernelteam.RoleSlot{{ID: "research", DisplayName: "Researcher", Purpose: "Find evidence"}},
 	}
 	deployment := &kernelteam.Deployment{
 		ID: "gtm-live", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
 		Status: kernelteam.DeploymentActive, Revision: 7,
-		Roster:       []kernelteam.RosterAssignment{{ID: "researcher", RoleID: "research", AgentDeploymentID: "agent-research", DisplayName: "Researcher"}},
+		Roster:       []kernelteam.RosterAssignment{{ID: "researcher", AgentDeploymentID: "agent-research", DisplayName: "Researcher"}},
 		Restrictions: kernelteam.DeploymentRestrictions{MaximumConcurrency: 3, MaximumRisk: capability.RiskLevelExternal},
 	}
 	fake := &fakeKernelClient{
@@ -1165,7 +1164,7 @@ func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 		t.Fatalf("team projection section=%v selected=%q", model.section, model.selectedTeamDeployment)
 	}
 	view := model.View()
-	for _, expected := range []string{"T Teams", "GTM Research", "Definition gtm-research@3", "relevance-arbitrated", "Researcher · research · Agent agent-research", "2 template(s)", "p pause/resume"} {
+	for _, expected := range []string{"T Teams", "GTM Research", "Definition gtm-research@3", "relevance-arbitrated", "Researcher · researcher · Agent agent-research", "2 template(s)", "p pause/resume"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Team view missing %q:\n%s", expected, view)
 		}
@@ -1289,7 +1288,6 @@ func TestTeamAmendmentGovernanceIsInspectableRevisionSafeAndCapabilityGated(t *t
 	scope := capability.ScopeReference{Kind: "local", ID: "default"}
 	definition := &kernelteam.Definition{
 		ID: "research", Version: "1", DisplayName: "Research", Purpose: "Monitor evidence",
-		Roles:       []kernelteam.RoleSlot{{ID: "analyst", DisplayName: "Analyst", Purpose: "Synthesize evidence"}},
 		Approvals:   kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 		Evaluations: []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
 		Amendments:  workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:local"}},

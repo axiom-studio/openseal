@@ -200,11 +200,10 @@ type (
 	TeamManifest                            = kernelteam.Manifest
 	TeamManifestMetadata                    = kernelteam.ManifestMetadata
 	TeamManifestSpec                        = kernelteam.ManifestSpec
-	TeamManifestRoleSlot                    = kernelteam.ManifestRoleSlot
+	TeamManifestMember                      = kernelteam.ManifestMember
 	TeamManifestDelegationPolicy            = kernelteam.ManifestDelegationPolicy
 	TeamManifestSharedContextPolicy         = kernelteam.ManifestSharedContextPolicy
-	TeamRoleSlot                            = kernelteam.RoleSlot
-	TeamRoleChannelParticipation            = kernelteam.RoleChannelParticipation
+	TeamChannelParticipation                = kernelteam.ChannelParticipation
 	TeamRoutingPolicy                       = kernelteam.RoutingPolicy
 	TeamDelegationPolicy                    = kernelteam.DelegationPolicy
 	TeamApprovalPolicy                      = kernelteam.ApprovalPolicy
@@ -713,8 +712,8 @@ type (
 	RunActionDispatcher                  = runtime.RunActionDispatcher
 	RunbookActionValidator               = runtime.RunbookActionValidator
 	RunbookActionDispatcher              = runtime.RunbookActionDispatcher
-	TeamRoleActionValidator              = runtime.TeamRoleActionValidator
-	TeamRoleActionDispatcher             = runtime.TeamRoleActionDispatcher
+	TeamMemberActionValidator            = runtime.TeamMemberActionValidator
+	TeamMemberActionDispatcher           = runtime.TeamMemberActionDispatcher
 	TeamSkillActionValidator             = runtime.TeamSkillActionValidator
 	TeamSkillAuthorityCatalog            = runtime.TeamSkillAuthorityCatalog
 	SkillBindingActionValidator          = runtime.SkillBindingActionValidator
@@ -1020,6 +1019,18 @@ func CompileTeamManifest(manifest *TeamManifest, definitionID string, provenance
 	return kernelteam.CompileManifest(manifest, definitionID, provenance)
 }
 
+// TeamManifestRoster returns the manifest's members as roster assignments;
+// agents maps each member id to its placed Agent deployment.
+func TeamManifestRoster(manifest *TeamManifest, agents map[string]string) ([]TeamRosterAssignment, error) {
+	return kernelteam.ManifestRoster(manifest, agents)
+}
+
+// TeamHasSpeakingMember reports whether any roster member may answer in the
+// Team channel.
+func TeamHasSpeakingMember(deployment *TeamDeployment) bool {
+	return kernelteam.HasSpeakingMember(deployment)
+}
+
 func DecodeTeamManifestYAML(data []byte) (*TeamManifest, error) {
 	return kernelteam.DecodeManifestYAML(data)
 }
@@ -1315,8 +1326,8 @@ var (
 	NewRunbookActionValidator           = runtime.NewRunbookActionValidator
 	NewRunbookActionDispatcher          = runtime.NewRunbookActionDispatcher
 	TeamManagementSkill                 = runtime.TeamManagementSkill
-	NewTeamRoleActionValidator          = runtime.NewTeamRoleActionValidator
-	NewTeamRoleActionDispatcher         = runtime.NewTeamRoleActionDispatcher
+	NewTeamMemberActionValidator        = runtime.NewTeamMemberActionValidator
+	NewTeamMemberActionDispatcher       = runtime.NewTeamMemberActionDispatcher
 	NewTeamSkillActionValidator         = runtime.NewTeamSkillActionValidator
 	AuthorizeTeamSkillActivation        = runtime.AuthorizeTeamSkillActivation
 	SkillManagementSkill                = runtime.SkillManagementSkill
@@ -1453,6 +1464,7 @@ var (
 	ErrTeamAmendmentNotFound                = kernelteam.ErrAmendmentNotFound
 	ErrTeamIdempotencyConflict              = kernelteam.ErrIdempotencyConflict
 	ErrTeamParticipationRecoveryNotRequired = kernelteam.ErrParticipationRecoveryNotRequired
+	ErrTeamRosterMinimum                    = kernelteam.ErrRosterMinimum
 )
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
@@ -1605,7 +1617,8 @@ const (
 	RunbookActionReplaceSchedule    = runtime.RunbookActionReplaceSchedule
 	TeamManagementSkillID           = runtime.TeamManagementSkillID
 	TeamManagementSkillVersion      = runtime.TeamManagementSkillVersion
-	TeamActionUpdateRole            = runtime.TeamActionUpdateRole
+	TeamActionUpdateMember          = runtime.TeamActionUpdateMember
+	TeamMemberAmendmentField        = runtime.TeamMemberAmendmentField
 	TeamActionUpdateProfile         = runtime.TeamActionUpdateProfile
 	TeamActionCreateTeam            = runtime.TeamActionCreateTeam
 	SkillManagementSkillID          = runtime.SkillManagementSkillID
@@ -1634,9 +1647,9 @@ const (
 	RunKindAgentWork    = runtime.RunKindAgentWork
 	RunKindConversation = runtime.RunKindConversation
 
-	TeamRoleChannelActive          = kernelteam.RoleChannelActive
-	TeamRoleChannelObserveOnly     = kernelteam.RoleChannelObserveOnly
-	TeamRoleChannelDisabled        = kernelteam.RoleChannelDisabled
+	TeamChannelActive              = kernelteam.ChannelActive
+	TeamChannelObserveOnly         = kernelteam.ChannelObserveOnly
+	TeamChannelDisabled            = kernelteam.ChannelDisabled
 	TeamDeploymentDraft            = kernelteam.DeploymentDraft
 	TeamDeploymentActive           = kernelteam.DeploymentActive
 	TeamDeploymentPaused           = kernelteam.DeploymentPaused
@@ -3123,7 +3136,7 @@ func (e *Engine) configureTeamManagementActions() error {
 	if err := e.skills.Register(context.Background(), runtime.TeamManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 		return err
 	}
-	validator, err := runtime.NewTeamRoleActionValidator(e.teams)
+	validator, err := runtime.NewTeamMemberActionValidator(e.teams)
 	if err != nil {
 		return err
 	}
@@ -3140,14 +3153,14 @@ func (e *Engine) configureTeamManagementActions() error {
 		e.actionValidators = append(e.actionValidators, createValidator)
 	}
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewTeamRoleActionDispatcher(e.store, e.teams, e.actionPoolSpecs[index].dispatcher)
+		dispatcher, dispatchErr := runtime.NewTeamMemberActionDispatcher(e.store, e.teams, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewTeamRoleActionDispatcher(e.store, e.teams, e.actionSupervisorSpecs[index].dispatcher)
+		dispatcher, dispatchErr := runtime.NewTeamMemberActionDispatcher(e.store, e.teams, e.actionSupervisorSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}

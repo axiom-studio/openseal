@@ -221,14 +221,8 @@ func (s *MemoryStore) ApplyRosterChanges(changes []*RosterChange) error {
 		if current.Revision != change.ExpectedRevision {
 			return ErrRevisionConflict
 		}
-		if change.Definition != nil && s.definitions[definitionKey(change.Definition.ID, change.Definition.Version)] != nil {
-			return errors.New("team definition versions are immutable")
-		}
 	}
 	for _, change := range changes {
-		if change.Definition != nil {
-			s.definitions[definitionKey(change.Definition.ID, change.Definition.Version)] = cloneDefinition(change.Definition)
-		}
 		key := deploymentKey(change.Deployment.Scope, change.Deployment.ID)
 		s.deployments[key] = cloneDeployment(change.Deployment)
 		s.activations[key] = append(s.activations[key], change.Activation)

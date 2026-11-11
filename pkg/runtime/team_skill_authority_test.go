@@ -173,11 +173,10 @@ func teamSkillAuthorityFixture(scope Scope) teamSkillAuthorityCatalogStub {
 		agentDefinition: &kernelagent.AgentDefinition{ID: "analyst", Version: "1", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelExternal, AllowedSkillIDs: []string{"forum"}}},
 		deployment: &kernelteam.Deployment{
 			ID: "research", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "research", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 3,
-			Roster: []kernelteam.RosterAssignment{{ID: "analyst", RoleID: "analyst", AgentDeploymentID: "analyst"}}, Restrictions: kernelteam.DeploymentRestrictions{MaximumRisk: capability.RiskLevelExternal},
+			Roster: []kernelteam.RosterAssignment{{ID: "analyst", AgentDeploymentID: "analyst"}}, Restrictions: kernelteam.DeploymentRestrictions{MaximumRisk: capability.RiskLevelExternal},
 		},
 		definition: &kernelteam.Definition{
 			ID: "research", Version: "1", Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal},
-			Roles: []kernelteam.RoleSlot{{ID: "analyst"}},
 		},
 	}
 }

@@ -122,8 +122,8 @@ Activation and amendment operations bind actor, reason, expected revision, and
 the exact reviewed definition or amendment.
 
 The same lifecycle is available prompt-first through portable kernel Skills:
-`openseal.agents/amend_behavior` is self-only, `openseal.teams/update_role`
-changes current Team role behavior, and `openseal.skills/*` manages exact Skill
+`openseal.agents/amend_behavior` is self-only, `openseal.teams/update_member`
+changes a current Team member's behavior, and `openseal.skills/*` manages exact Skill
 authority. Their deployment selectors and concurrency revisions are
 kernel-resolved; conversation models never choose those authority facts.
 

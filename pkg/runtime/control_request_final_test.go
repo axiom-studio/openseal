@@ -218,14 +218,13 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
 			Roster: []kernelteam.RosterAssignment{
-				{ID: "coordinator", RoleID: "coordinator", AgentDeploymentID: "coordinator-agent"},
-				{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer-agent"},
-				{ID: "specialist", RoleID: "specialist", AgentDeploymentID: "specialist-agent"},
+				{ID: "coordinator", AgentDeploymentID: "coordinator-agent"},
+				{ID: "reviewer", AgentDeploymentID: "reviewer-agent", Approver: true},
+				{ID: "specialist", AgentDeploymentID: "specialist-agent"},
 			},
 		},
 		definition: &kernelteam.Definition{
 			ID: "release-team", Version: "1",
-			Approvals: kernelteam.ApprovalPolicy{ApproverRoleIDs: []string{"reviewer"}},
 			Delegation: kernelteam.DelegationPolicy{
 				MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,
 				RequireAcceptance: true, RequireCompletionReview: true,

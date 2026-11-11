@@ -164,7 +164,6 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	teams := kernelteam.NewRegistryWithStore(primary, agents)
 	teamDefinition, err := teams.RegisterDefinition(ctx, &kernelteam.Definition{
 		ID: "review-team", Version: "1", DisplayName: "Review Team", Purpose: "Review work",
-		Roles:      []kernelteam.RoleSlot{{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review", RequiredDefinitionIDs: []string{"reviewer"}}},
 		Delegation: kernelteam.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 2, RequireAcceptance: true},
 		Approvals:  kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	})
@@ -174,8 +173,8 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	if _, _, err := teams.CreateDeployment(ctx, &kernelteam.Deployment{
 		ID: "review-team", Scope: scopeRef, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version,
 		Status: kernelteam.DeploymentActive, Roster: []kernelteam.RosterAssignment{
-			{ID: "a", RoleID: "reviewer", AgentDeploymentID: "reviewer-a"},
-			{ID: "b", RoleID: "reviewer", AgentDeploymentID: "reviewer-b"},
+			{ID: "a", AgentDeploymentID: "reviewer-a"},
+			{ID: "b", AgentDeploymentID: "reviewer-b"},
 		},
 	}, "user", "operator", "Team bidding test"); err != nil {
 		t.Fatal(err)
@@ -190,7 +189,7 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	created, err := NewCollaborationService(primary).CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"}, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "review-team"},
-		SemanticRole: "reviewer", Goal: "Review evidence",
+		Goal: "Review evidence",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ var (
 	ErrDeploymentNotFound  = errors.New("team deployment not found")
 	ErrRevisionConflict    = errors.New("team deployment revision conflict")
 	ErrAmendmentNotFound   = errors.New("team definition amendment not found")
-	ErrIdempotencyConflict = errors.New("team amendment idempotency key was already used for a different proposal")
+	ErrIdempotencyConflict = errors.New("team idempotency key was already used for a different request")
 )
 
 type AgentResolver interface {
@@ -120,7 +121,7 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *Deployment,
 	if err := candidate.Validate(definition); err != nil {
 		return nil, nil, err
 	}
-	if err := r.validateRoster(ctx, definition, candidate); err != nil {
+	if err := r.validateRoster(ctx, candidate); err != nil {
 		return nil, nil, err
 	}
 	if err := validateNarrowing(definition, candidate); err != nil {
@@ -155,9 +156,8 @@ func (r *Registry) ListDeployments(ctx context.Context, scope capability.ScopeRe
 }
 
 // UpdateDeployment atomically reconciles a Team's active immutable definition,
-// composition, restrictions, and operating state. This prevents role changes
-// from requiring an impossible ordering between definition activation and
-// roster mutation. The activation entry is the durable actor/reason audit.
+// composition, restrictions, and operating state. The activation entry is the
+// durable actor/reason audit.
 func (r *Registry) UpdateDeployment(ctx context.Context, proposed *Deployment, expectedRevision int64, actorType, actorID, reason string) (*Deployment, *workforce.DefinitionActivation, error) {
 	change, err := r.PrepareDeploymentUpdate(ctx, proposed, expectedRevision, actorType, actorID, reason)
 	if err != nil {
@@ -210,7 +210,7 @@ func (r *Registry) prepareUpdate(ctx context.Context, current, proposed *Deploym
 	if err := updated.Validate(definition); err != nil {
 		return nil, workforce.DefinitionActivation{}, err
 	}
-	if err := r.validateRoster(ctx, definition, updated); err != nil {
+	if err := r.validateRoster(ctx, updated); err != nil {
 		return nil, workforce.DefinitionActivation{}, err
 	}
 	if err := validateNarrowing(definition, updated); err != nil {
@@ -249,7 +249,7 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 	if err := updated.Validate(definition); err != nil {
 		return nil, nil, err
 	}
-	if err := r.validateRoster(ctx, definition, updated); err != nil {
+	if err := r.validateRoster(ctx, updated); err != nil {
 		return nil, nil, err
 	}
 	if err := validateNarrowing(definition, updated); err != nil {
@@ -478,6 +478,12 @@ func (r *Registry) ResolveAmendment(ctx context.Context, req ResolveAmendmentReq
 	return cloneAmendment(updated), nil
 }
 
+// AmendmentApproverEligible reports whether the principal may approve a
+// change the definition's amendment policy puts behind approval.
+func AmendmentApproverEligible(definition *Definition, actorType, actorID string) bool {
+	return teamAmendmentApproverEligible(strings.TrimSpace(actorType)+":"+strings.TrimSpace(actorID), strings.TrimSpace(definition.Provenance.CreatedBy), definition.Amendments.ApproverPrincipals)
+}
+
 func teamAmendmentApproverEligible(principal, owner string, allowed []string) bool {
 	if stringSubset([]string{principal}, allowed) {
 		return true
@@ -519,7 +525,7 @@ func (r *Registry) ActivateAmendment(ctx context.Context, scope capability.Scope
 	if err := updatedDeployment.Validate(definition); err != nil {
 		return nil, nil, nil, err
 	}
-	if err := r.validateRoster(ctx, definition, updatedDeployment); err != nil {
+	if err := r.validateRoster(ctx, updatedDeployment); err != nil {
 		return nil, nil, nil, err
 	}
 	if err := validateNarrowing(definition, updatedDeployment); err != nil {
@@ -540,11 +546,9 @@ func (r *Registry) ActivateAmendment(ctx context.Context, scope capability.Scope
 	return cloneAmendment(updatedAmendment), cloneDeployment(updatedDeployment), &copyActivation, nil
 }
 
-func (r *Registry) validateRoster(ctx context.Context, definition *Definition, deployment *Deployment) error {
-	roles := make(map[string]RoleSlot, len(definition.Roles))
-	for _, role := range definition.Roles {
-		roles[role.ID] = role
-	}
+// validateRoster checks that every member is an Agent deployment of the
+// Team's scope whose active definition declares the Skills the member needs.
+func (r *Registry) validateRoster(ctx context.Context, deployment *Deployment) error {
 	for _, assignment := range deployment.Roster {
 		agentDeployment, err := r.agents.GetDeployment(ctx, deployment.Scope, assignment.AgentDeploymentID)
 		if err != nil {
@@ -554,17 +558,9 @@ func (r *Registry) validateRoster(ctx context.Context, definition *Definition, d
 		if err != nil {
 			return errors.New("team roster Agent definition is unavailable")
 		}
-		role := roles[assignment.RoleID]
-		if len(role.RequiredDefinitionIDs) > 0 && !contains(role.RequiredDefinitionIDs, agentDefinition.ID) {
-			return errors.New("team roster Agent definition does not satisfy its role")
-		}
-		availableSkills := make(map[string]bool, len(agentDefinition.SkillRequirements))
-		for _, requirement := range agentDefinition.SkillRequirements {
-			availableSkills[requirement.SkillID] = true
-		}
-		for _, skillID := range role.RequiredSkillIDs {
-			if !availableSkills[skillID] {
-				return errors.New("team roster Agent skills do not satisfy its role")
+		for _, skillID := range assignment.RequiredSkillIDs {
+			if !slices.ContainsFunc(agentDefinition.SkillRequirements, func(requirement kernelagent.SkillRequirement) bool { return requirement.SkillID == skillID }) {
+				return errors.New("team roster Agent skills do not satisfy its member requirements")
 			}
 		}
 	}
@@ -589,13 +585,7 @@ func PrepareDefinition(definition *Definition, createdAt time.Time) (*Definition
 	candidate.Purpose = strings.TrimSpace(candidate.Purpose)
 	candidate.Digest = ""
 	candidate.CreatedAt = time.Time{}
-	for index := range candidate.Roles {
-		candidate.Roles[index].ID = strings.TrimSpace(candidate.Roles[index].ID)
-		candidate.Roles[index].RequiredSkillIDs = normalizedStrings(candidate.Roles[index].RequiredSkillIDs)
-		candidate.Roles[index].RequiredDefinitionIDs = normalizedStrings(candidate.Roles[index].RequiredDefinitionIDs)
-	}
 	candidate.OperatingPrinciples = normalizedStrings(candidate.OperatingPrinciples)
-	candidate.Approvals.ApproverRoleIDs = normalizedStrings(candidate.Approvals.ApproverRoleIDs)
 	candidate.Approvals.ApproverPrincipals = normalizedStrings(candidate.Approvals.ApproverPrincipals)
 	candidate.Amendments.AllowedFields = normalizedStrings(candidate.Amendments.AllowedFields)
 	candidate.Amendments.ApproverPrincipals = normalizedStrings(candidate.Amendments.ApproverPrincipals)
@@ -652,15 +642,6 @@ func normalizedStrings(values []string) []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 func stringSubset(values, allowed []string) bool {

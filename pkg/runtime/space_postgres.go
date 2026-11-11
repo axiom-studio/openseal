@@ -400,11 +400,6 @@ func (s *PostgresStore) DeleteSpaceAgentWithRosters(ctx context.Context, scope S
 		return err
 	}
 	for _, change := range changes {
-		if change.Definition != nil {
-			if err := s.createTeamDefinition(ctx, tx, change.Definition); err != nil {
-				return err
-			}
-		}
 		if err := s.updateTeamDeploymentTx(ctx, tx, change.Deployment, change.ExpectedRevision, change.Activation); err != nil {
 			return err
 		}

@@ -229,7 +229,7 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
 	crew := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
 	if err := store.CreateTeamDeployment(ctx, &kernelteam.Deployment{ID: crew.ID, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
-		Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "agent", RoleID: "member", AgentDeploymentID: "agent"}}}, workforce.DefinitionActivation{}); err != nil {
+		Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "agent", AgentDeploymentID: "agent"}}}, workforce.DefinitionActivation{}); err != nil {
 		t.Fatal(err)
 	}
 	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: crew, AssignedAgentID: "agent",
@@ -260,7 +260,7 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	parked := assertRunNotParkedByCall(t, f)
 	// A member removed from the Team can no longer act under it.
 	team, _ := store.GetTeamDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, crew.ID)
-	team.Roster, team.Revision = []kernelteam.RosterAssignment{{ID: "other", RoleID: "member", AgentDeploymentID: "other"}}, 2
+	team.Roster, team.Revision = []kernelteam.RosterAssignment{{ID: "other", AgentDeploymentID: "other"}}, 2
 	if err := store.UpdateTeamDeployment(ctx, team, 1, workforce.DefinitionActivation{}); err != nil {
 		t.Fatal(err)
 	}

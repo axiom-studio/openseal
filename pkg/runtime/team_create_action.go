@@ -280,34 +280,36 @@ func resolveTeamSpace(ctx context.Context, spaces *SpaceService, scope Scope, sp
 // replay registers nothing new.
 func teamBuilderDefinitionID(scope Scope, displayName, callID string) string {
 	digest := sha256.Sum256([]byte(scope.Kind + ":" + scope.ID + ":" + callID))
-	return "team-" + kernelteam.RoleSlug(displayName) + "-" + hex.EncodeToString(digest[:])[:8]
+	return "team-" + kernelteam.MemberSlug(displayName) + "-" + hex.EncodeToString(digest[:])[:8]
 }
 
-// teamBuilderDefinition builds the Team the way HelloSeal's team composer
-// does: one active role per member, required to run that member's
-// definition.
 func teamBuilderDefinition(id string, args teamCreateArguments, members []resolvedTeamMember, callID, approver string) *kernelteam.Definition {
 	purpose := args.Purpose
 	if purpose == "" {
 		purpose = args.DisplayName + " team"
 	}
-	roles := make([]kernelteam.RoleSlot, 0, len(members))
-	for index, member := range members {
-		rolePurpose := strings.TrimSpace(member.definition.Purpose)
-		if rolePurpose == "" {
-			rolePurpose = member.name + " team member"
-		}
-		roles = append(roles, kernelteam.RoleSlot{
-			ID: fmt.Sprintf("%s-%d", kernelteam.RoleSlug(member.name), index+1), DisplayName: member.name, Purpose: rolePurpose,
-			MinimumMembers: 1, MaximumMembers: 1, RequiredDefinitionIDs: []string{member.definition.ID},
-			ChannelParticipation: kernelteam.RoleChannelActive,
-		})
-	}
 	return &kernelteam.Definition{
-		ID: id, Version: teamDefinitionVersion, DisplayName: args.DisplayName, Purpose: purpose, Roles: roles,
+		ID: id, Version: teamDefinitionVersion, DisplayName: args.DisplayName, Purpose: purpose,
 		Approvals:  kernelteam.ApprovalPolicy{MaximumRisk: teamMembersMaximumRisk(members)},
 		Provenance: workforce.DefinitionProvenance{Source: agentBuilderProvenanceSource, Reference: callID, CreatedBy: approver},
 	}
+}
+
+// teamBuilderRoster lists the members the way HelloSeal's team composer
+// does: each active, named after its Agent and doing what that Agent does.
+func teamBuilderRoster(members []resolvedTeamMember) []kernelteam.RosterAssignment {
+	roster := make([]kernelteam.RosterAssignment, 0, len(members))
+	for index, member := range members {
+		purpose := strings.TrimSpace(member.definition.Purpose)
+		if purpose == "" {
+			purpose = member.name + " team member"
+		}
+		roster = append(roster, kernelteam.RosterAssignment{
+			ID: fmt.Sprintf("%s-%d", kernelteam.MemberSlug(member.name), index+1), AgentDeploymentID: member.deployment.ID,
+			DisplayName: member.name, Purpose: purpose, ChannelParticipation: kernelteam.ChannelActive,
+		})
+	}
+	return roster
 }
 
 // teamMembersMaximumRisk is the Team's approval ceiling: the highest member
@@ -368,18 +370,9 @@ func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input Act
 		if definition, err = d.registerTeamBuilderDefinition(ctx, teamBuilderDefinition(teamID, resolved.args, resolved.members, call.ID, approver)); err != nil {
 			return nil, err
 		}
-		if len(definition.Roles) != len(args.Members) {
-			return nil, fmt.Errorf("team definition %s does not match the reviewed members", teamID)
-		}
-		roster := make([]kernelteam.RosterAssignment, 0, len(definition.Roles))
-		for index, role := range definition.Roles {
-			roster = append(roster, kernelteam.RosterAssignment{
-				ID: role.ID, RoleID: role.ID, AgentDeploymentID: args.Members[index], DisplayName: role.DisplayName,
-			})
-		}
 		deployment, activation, err = d.provision.CreateTeamDeploymentInSpace(ctx, space.ID, &kernelteam.Deployment{
 			ID: teamID, Scope: reference, DefinitionID: definition.ID, ActiveVersion: definition.Version,
-			Roster: roster, Status: kernelteam.DeploymentActive, Revision: 1,
+			Roster: teamBuilderRoster(resolved.members), Status: kernelteam.DeploymentActive, Revision: 1,
 		}, "user", approver, teamCreateReason)
 		if err != nil {
 			return nil, err

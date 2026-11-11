@@ -72,9 +72,9 @@ func newUmbrellaFixture(t *testing.T) (*umbrellaCatalog, Scope) {
 		definition: &kernelagent.AgentDefinition{ID: "member", Version: "1", Purpose: "Help", SystemPrompt: "Help.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelExternal}},
 		teamDeployment: &kernelteam.Deployment{
 			ID: "crew", Scope: skillScope, DefinitionID: "crew", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
-			Roster: []kernelteam.RosterAssignment{{ID: "member", RoleID: "member", AgentDeploymentID: "member"}},
+			Roster: []kernelteam.RosterAssignment{{ID: "member", AgentDeploymentID: "member"}},
 		},
-		teamDefinition: &kernelteam.Definition{ID: "crew", Version: "1", Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal}, Roles: []kernelteam.RoleSlot{{ID: "member"}}},
+		teamDefinition: &kernelteam.Definition{ID: "crew", Version: "1", Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal}},
 	}}, scope
 }
 

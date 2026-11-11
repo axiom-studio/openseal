@@ -732,16 +732,15 @@ func conversationsAnswered(t *testing.T, ctx context.Context, engine *Engine, sc
 // registerLoopTeam activates a Team whose roster is members.
 func registerLoopTeam(t *testing.T, ctx context.Context, engine *Engine, scope Scope, id string, members ...string) {
 	t.Helper()
-	roles, roster := make([]TeamRoleSlot, 0, len(members)), make([]TeamRosterAssignment, 0, len(members))
+	roster := make([]TeamRosterAssignment, 0, len(members))
 	for index, member := range members {
-		role := fmt.Sprintf("member-%d", index+1)
-		roles = append(roles, TeamRoleSlot{ID: role, DisplayName: role, Purpose: "Answer the channel", MinimumMembers: 1})
-		roster = append(roster, TeamRosterAssignment{ID: role, RoleID: role, AgentDeploymentID: member})
+		id := fmt.Sprintf("member-%d", index+1)
+		roster = append(roster, TeamRosterAssignment{ID: id, AgentDeploymentID: member, DisplayName: id, Purpose: "Answer the channel"})
 	}
 	definition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
-		ID: id, Version: "1", DisplayName: id, Purpose: "Answer the channel", Roles: roles,
+		ID: id, Version: "1", DisplayName: id, Purpose: "Answer the channel",
 		Delegation: TeamDelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 3},
-		Approvals:  TeamApprovalPolicy{MaximumRisk: capability.RiskLevelWrite, ApproverRoleIDs: []string{roles[0].ID}},
+		Approvals:  TeamApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
 	})
 	if err != nil {
 		t.Fatal(err)

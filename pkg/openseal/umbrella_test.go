@@ -26,8 +26,7 @@ func umbrellaFixture(t *testing.T, engine *Engine) {
 	}
 	if _, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: "crew", Version: "1", DisplayName: "Crew", Purpose: "Work together",
-		Roles:     []TeamRoleSlot{{ID: "member", DisplayName: "Member", Purpose: "Help", MinimumMembers: 1}},
-		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"member"}},
+		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +43,7 @@ func createUmbrellaAgent(engine *Engine, scope capability.ScopeReference, id str
 func createUmbrellaTeam(engine *Engine, scope capability.ScopeReference, id, memberID string) error {
 	_, _, err := engine.CreateTeamDeployment(context.Background(), &TeamDeployment{
 		ID: id, Scope: scope, DefinitionID: "crew", ActiveVersion: "1", Status: TeamDeploymentActive,
-		Roster: []TeamRosterAssignment{{ID: "member", RoleID: "member", AgentDeploymentID: memberID}},
+		Roster: []TeamRosterAssignment{{ID: "member", AgentDeploymentID: memberID}},
 	}, "user", "operator", "test")
 	return err
 }
@@ -232,7 +231,7 @@ func TestTeamRequestDoesNotResumeAfterTheMemberLeft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	team.Roster = []TeamRosterAssignment{{ID: "member", RoleID: "member", AgentDeploymentID: "other"}}
+	team.Roster = []TeamRosterAssignment{{ID: "member", AgentDeploymentID: "other"}}
 	if _, _, err := engine.UpdateTeamDeployment(ctx, team, team.Revision, "user", "operator", "replace member"); err != nil {
 		t.Fatal(err)
 	}

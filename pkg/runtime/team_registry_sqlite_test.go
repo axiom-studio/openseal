@@ -41,7 +41,7 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 	}
 	deployment, _, err := teams.CreateDeployment(ctx, &kernelteam.Deployment{
 		ID: "research-team", Scope: scope, DefinitionID: "research-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive,
-		Roster: []kernelteam.RosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+		Roster: []kernelteam.RosterAssignment{{ID: "researcher", AgentDeploymentID: agentDeployment.ID}},
 	}, "user", "operator", "initial")
 	if err != nil {
 		t.Fatal(err)
@@ -103,9 +103,8 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 func sqliteTeamDefinition(version string) *kernelteam.Definition {
 	return &kernelteam.Definition{
 		ID: "research-team", Version: version, DisplayName: "Research Team", Purpose: "Produce evidence-backed findings",
-		Roles:      []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1, RequiredSkillIDs: []string{"web"}}},
 		Delegation: kernelteam.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 4, RequireAcceptance: true},
-		Approvals:  kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal, ApproverRoleIDs: []string{"researcher"}},
+		Approvals:  kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal},
 		Amendments: workforce.AmendmentPolicy{
 			AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"},
 		},

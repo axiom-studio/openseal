@@ -27,6 +27,9 @@ import (
 const (
 	APIVersion = "openseal.dev/workforce-bundle/v1alpha1"
 	Kind       = "WorkforceBundle"
+	// FormatRevision 2 lists a Team's members on its roster; revision 1
+	// described them through role slots.
+	FormatRevision = 2
 )
 
 var portableIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
@@ -73,11 +76,26 @@ type Agent struct {
 	Artifact *agent.Bundle `json:"artifact" yaml:"artifact"`
 }
 
+// RosterAssignment is a Team member whose Agent is named by its bundle key.
 type RosterAssignment struct {
-	ID          string `json:"id" yaml:"id"`
-	RoleID      string `json:"roleId" yaml:"roleId"`
-	AgentKey    string `json:"agentKey" yaml:"agentKey"`
-	DisplayName string `json:"displayName,omitempty" yaml:"displayName,omitempty"`
+	ID                   string                    `json:"id" yaml:"id"`
+	AgentKey             string                    `json:"agentKey" yaml:"agentKey"`
+	DisplayName          string                    `json:"displayName,omitempty" yaml:"displayName,omitempty"`
+	Purpose              string                    `json:"purpose,omitempty" yaml:"purpose,omitempty"`
+	ChannelParticipation team.ChannelParticipation `json:"channelParticipation,omitempty" yaml:"channelParticipation,omitempty"`
+	RequiredSkillIDs     []string                  `json:"requiredSkillIds,omitempty" yaml:"requiredSkillIds,omitempty"`
+	Approver             bool                      `json:"approver,omitempty" yaml:"approver,omitempty"`
+	Lead                 bool                      `json:"lead,omitempty" yaml:"lead,omitempty"`
+}
+
+// member is the roster member the assignment becomes once its Agent has a
+// deployment id.
+func (a RosterAssignment) member(agentDeploymentID string) team.RosterAssignment {
+	return team.RosterAssignment{
+		ID: a.ID, AgentDeploymentID: agentDeploymentID, DisplayName: a.DisplayName, Purpose: a.Purpose,
+		ChannelParticipation: a.ChannelParticipation, RequiredSkillIDs: append([]string(nil), a.RequiredSkillIDs...),
+		Approver: a.Approver, Lead: a.Lead,
+	}
 }
 
 type TeamDeployment struct {
@@ -146,7 +164,7 @@ type Bundle struct {
 }
 
 func New(metadata Metadata) *Bundle {
-	return &Bundle{APIVersion: APIVersion, Kind: Kind, Metadata: metadata, Compatibility: Compatibility{FormatRevision: 1}}
+	return &Bundle{APIVersion: APIVersion, Kind: Kind, Metadata: metadata, Compatibility: Compatibility{FormatRevision: FormatRevision}}
 }
 
 func (b *Bundle) Seal() error {
@@ -170,7 +188,10 @@ func (b *Bundle) Validate() error {
 	if !portableIDPattern.MatchString(strings.TrimSpace(b.Metadata.ID)) || strings.TrimSpace(b.Metadata.Version) == "" || strings.TrimSpace(b.Metadata.DisplayName) == "" {
 		return errors.New("workforce bundle requires a portable id, version, and display name")
 	}
-	if b.Compatibility.FormatRevision != 1 {
+	if b.Compatibility.FormatRevision == 1 {
+		return errors.New("workforce bundle format revision 1 (Team role slots) is no longer supported; export the workforce again")
+	}
+	if b.Compatibility.FormatRevision != FormatRevision {
 		return fmt.Errorf("workforce bundle format revision %d is unsupported", b.Compatibility.FormatRevision)
 	}
 	if len(b.Agents)+len(b.Teams) == 0 {
@@ -277,7 +298,7 @@ func validateTeamDeployment(item *Team, agents map[string]*agent.Bundle) error {
 		if !portableIDPattern.MatchString(assignment.ID) || agents[assignment.AgentKey] == nil {
 			return fmt.Errorf("workforce bundle Team %s roster references an unknown Agent", item.Key)
 		}
-		roster = append(roster, team.RosterAssignment{ID: assignment.ID, RoleID: assignment.RoleID, AgentDeploymentID: assignment.AgentKey, DisplayName: assignment.DisplayName})
+		roster = append(roster, assignment.member(assignment.AgentKey))
 	}
 	probe := &team.Deployment{
 		ID: item.Key, Scope: capability.ScopeReference{Kind: "portable", ID: "bundle"}, DefinitionID: item.Definition.ID,

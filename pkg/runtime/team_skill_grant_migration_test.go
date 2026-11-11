@@ -31,8 +31,10 @@ func TestSQLiteMigrationStripsTeamSkillGrantsAndRecomputesDigest(t *testing.T) {
 	if err := json.Unmarshal([]byte(payload), &document); err != nil {
 		t.Fatal(err)
 	}
-	role := document["roles"].([]interface{})[0].(map[string]interface{})
-	role["skillGrants"] = []interface{}{map[string]interface{}{"skillId": "forum", "skillVersion": "1", "maximumRisk": "read"}}
+	document["roles"] = []interface{}{map[string]interface{}{
+		"id": "researcher", "displayName": "Researcher", "purpose": "Find evidence",
+		"skillGrants": []interface{}{map[string]interface{}{"skillId": "forum", "skillVersion": "1", "maximumRisk": "read"}},
+	}}
 	document["digest"] = "sha256:stale"
 	encoded, _ := json.Marshal(document)
 	if _, err := store.db.ExecContext(ctx, `UPDATE team_definitions SET payload = ?, digest = 'sha256:stale' WHERE id = ? AND version = ?`, string(encoded), registered.ID, registered.Version); err != nil {

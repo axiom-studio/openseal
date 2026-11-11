@@ -44,10 +44,7 @@ func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 	for _, version := range []string{"1", "2"} {
 		definition := &kernelteam.Definition{
 			ID: "research-team", Version: version, DisplayName: "Research Team", Purpose: "Produce findings",
-			Roles: []kernelteam.RoleSlot{{
-				ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1,
-			}},
-			Approvals:   kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
+			Approvals:   kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 			Evaluations: []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
 			Amendments:  workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"}},
 		}
@@ -64,7 +61,7 @@ func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 
 	deployment := &kernelteam.Deployment{
 		ID: "research-team-one", Scope: scope, DefinitionID: "research-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive,
-		Roster: []kernelteam.RosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+		Roster: []kernelteam.RosterAssignment{{ID: "researcher", AgentDeploymentID: agentDeployment.ID}},
 	}
 	createPayload, _ := json.Marshal(kernelapi.CreateTeamDeploymentRequest{Deployment: deployment, ActorType: "user", ActorID: "operator", Reason: "initial"})
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/team-deployments", string(createPayload), "")

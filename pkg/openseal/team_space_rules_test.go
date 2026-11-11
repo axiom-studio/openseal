@@ -90,17 +90,15 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 		}
 		return teamRosterAgents(team.Roster)
 	}
-	// team builds one role per Agent, the shape HelloSeal's composer makes.
+	// team lists one member per Agent, the shape HelloSeal's composer makes.
 	team := func(id, version string, agents ...string) *TeamDeployment {
 		t.Helper()
-		roles := make([]TeamRoleSlot, 0, len(agents))
 		assignments := make([]TeamRosterAssignment, 0, len(agents))
 		for _, agent := range agents {
-			roles = append(roles, TeamRoleSlot{ID: agent, DisplayName: agent, Purpose: "Help", MinimumMembers: 1, MaximumMembers: 1})
-			assignments = append(assignments, TeamRosterAssignment{ID: agent, RoleID: agent, AgentDeploymentID: agent})
+			assignments = append(assignments, TeamRosterAssignment{ID: agent, AgentDeploymentID: agent, DisplayName: agent, Purpose: "Help"})
 		}
 		if _, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
-			ID: id, Version: version, DisplayName: strings.ToUpper(id), Purpose: "Work together", Roles: roles,
+			ID: id, Version: version, DisplayName: strings.ToUpper(id), Purpose: "Work together",
 			Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 		}); err != nil {
 			t.Fatal(err)
@@ -210,21 +208,17 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	if slices.Contains(members(work), "agent:ben") || !slices.Contains(members(lab), "agent:ben") {
 		t.Fatalf("work = %v, lab = %v", members(work), members(lab))
 	}
-	// The removal went through the registry: ben's role is gone in a new
-	// definition version, and the activation names who did it and why.
+	// The removal went through the registry: the definition stays, and the
+	// activation names who did it and why.
 	crew, err := engine.GetTeamDeployment(ctx, scope, "crew")
-	if err != nil {
-		t.Fatal(err)
-	}
-	crewDefinition, err := engine.GetTeamDefinition(ctx, crew.DefinitionID, crew.ActiveVersion)
-	if err != nil || crew.ActiveVersion != "5" || len(crewDefinition.Roles) != 2 {
-		t.Fatalf("crew version = %q, definition = %+v, err = %v", crew.ActiveVersion, crewDefinition, err)
+	if err != nil || crew.ActiveVersion != "3" {
+		t.Fatalf("crew = %+v, err = %v", crew, err)
 	}
 	activations, err := engine.ListTeamDefinitionActivations(ctx, scope, "crew")
 	if err != nil || len(activations) != int(crew.Revision) {
 		t.Fatalf("activations = %+v, err = %v", activations, err)
 	}
-	if last := activations[len(activations)-1]; last.ActorType != "user" || last.ActorID != "7" || last.FromVersion != "3" || last.ToVersion != "5" ||
+	if last := activations[len(activations)-1]; last.ActorType != "user" || last.ActorID != "7" || last.FromVersion != "3" || last.ToVersion != "3" ||
 		last.Reason != "Agent ben left the space Work" {
 		t.Fatalf("activation = %+v", last)
 	}

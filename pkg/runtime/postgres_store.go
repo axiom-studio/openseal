@@ -475,6 +475,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateSpaceAccess(ctx, tx); err != nil {
 		return fmt.Errorf("space access migration: %w", err)
 	}
+	if err := s.migrateTeamMembers(ctx, tx); err != nil {
+		return fmt.Errorf("team members migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

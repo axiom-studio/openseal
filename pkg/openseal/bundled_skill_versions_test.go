@@ -24,8 +24,8 @@ func TestBundledSkillVersionsForAgentBuilder(t *testing.T) {
 		{runtime.AgentManagementSkill(), AgentManagementSkillVersion, "1.6.0",
 			[]string{AgentActionAmendBehavior, AgentActionListChannels, AgentActionConfigureChannel,
 				runtime.AgentActionListAgents, runtime.AgentActionCreateAgent, runtime.AgentActionUpdateAgent, runtime.AgentActionTryAgent}},
-		{runtime.TeamManagementSkill(), TeamManagementSkillVersion, "2.1.0",
-			[]string{TeamActionUpdateRole, TeamActionUpdateProfile, TeamActionCreateTeam}},
+		{runtime.TeamManagementSkill(), TeamManagementSkillVersion, "2.2.0",
+			[]string{TeamActionUpdateMember, TeamActionUpdateProfile, TeamActionCreateTeam}},
 		{runtime.SkillManagementSkill(), SkillManagementSkillVersion, "1.7.0",
 			[]string{SkillActionDiscover, SkillActionUpsertBinding, SkillActionDisableBinding, SkillActionRequestSetup, SkillActionRequestConnection}},
 	} {
@@ -50,10 +50,10 @@ func TestBundledSkillVersionsForAgentBuilder(t *testing.T) {
 	if !IsSupportedAgentManagementSkillVersion("1.4.0") || !IsSupportedAgentManagementSkillVersion("1.5.0") || !IsSupportedAgentManagementSkillVersion("1.6.0") {
 		t.Fatal("openseal.agents 1.4.0, 1.5.0 and 1.6.0 must all run")
 	}
-	if !runtime.IsSupportedTeamManagementSkillVersion("2.0.0") || !runtime.IsSupportedTeamManagementSkillVersion("2.1.0") {
-		t.Fatal("openseal.teams 2.0.0 and 2.1.0 must both run")
+	if !runtime.IsSupportedTeamManagementSkillVersion("2.0.0") || !runtime.IsSupportedTeamManagementSkillVersion("2.1.0") || !runtime.IsSupportedTeamManagementSkillVersion("2.2.0") {
+		t.Fatal("openseal.teams 2.0.0, 2.1.0 and 2.2.0 must all run")
 	}
-	if IsSupportedAgentManagementSkillVersion("1.7.0") || runtime.IsSupportedTeamManagementSkillVersion("2.2.0") {
+	if IsSupportedAgentManagementSkillVersion("1.7.0") || runtime.IsSupportedTeamManagementSkillVersion("2.3.0") {
 		t.Fatal("an unreleased version must not be supported")
 	}
 }

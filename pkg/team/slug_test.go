@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestRoleSlug(t *testing.T) {
+func TestMemberSlug(t *testing.T) {
 	for name, want := range map[string]string{
 		"Inbox Triage":            "inbox-triage",
 		"  Ops -- Crew!! ":        "ops-crew",
@@ -14,8 +14,8 @@ func TestRoleSlug(t *testing.T) {
 		"":                        "member",
 		strings.Repeat("ab ", 30): strings.Trim(strings.Repeat("ab-", 16), "-"),
 	} {
-		if got := RoleSlug(name); got != want {
-			t.Errorf("RoleSlug(%q) = %q, want %q", name, got, want)
+		if got := MemberSlug(name); got != want {
+			t.Errorf("MemberSlug(%q) = %q, want %q", name, got, want)
 		}
 	}
 }

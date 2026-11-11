@@ -419,11 +419,6 @@ func (s *SQLiteStore) DeleteSpaceAgentWithRosters(ctx context.Context, scope Sco
 		return err
 	}
 	for _, change := range changes {
-		if change.Definition != nil {
-			if err := createTeamDefinitionSQLite(ctx, tx, change.Definition); err != nil {
-				return err
-			}
-		}
 		if err := updateTeamDeploymentSQLiteTx(ctx, tx, change.Deployment, change.ExpectedRevision, change.Activation); err != nil {
 			return err
 		}

@@ -73,7 +73,6 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 
 	registry := NewRegistry(agents)
 	definition := validDefinition()
-	definition.Roles[0].RequiredSkillIDs = []string{"web-research"}
 	registered, err := registry.RegisterDefinition(ctx, definition)
 	if err != nil || registered.Digest == "" {
 		t.Fatalf("registered definition = %#v, err = %v", registered, err)
@@ -83,7 +82,7 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 	}
 	deployment, activation, err := registry.CreateDeployment(ctx, &Deployment{
 		ID: "market-team", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
-		Roster:       []RosterAssignment{{ID: "primary-researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+		Roster:       []RosterAssignment{{ID: "primary-researcher", AgentDeploymentID: agentDeployment.ID}},
 		Restrictions: DeploymentRestrictions{MaximumRisk: capability.RiskLevelWrite, MaximumConcurrency: 2}, Status: DeploymentActive,
 	}, "user", "operator", "initial Team composition")
 	if err != nil || deployment.Revision != 1 || activation.ToVersion != "1.0.0" {
@@ -107,7 +106,6 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 
 	next := validDefinition()
 	next.Version = "1.1.0"
-	next.Roles = append(next.Roles, RoleSlot{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review evidence"})
 	next.OperatingPrinciples = []string{"Preserve evidence provenance"}
 	if _, err := registry.RegisterDefinition(ctx, next); err != nil {
 		t.Fatal(err)
@@ -117,7 +115,7 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 	}
 	proposed = cloneDeployment(deployment)
 	proposed.ActiveVersion = next.Version
-	proposed.Roster = append(proposed.Roster, RosterAssignment{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer-one"})
+	proposed.Roster = append(proposed.Roster, RosterAssignment{ID: "reviewer", AgentDeploymentID: "reviewer-one"})
 	reviewerDefinition, err := agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
 		ID: "reviewer", Version: "1", DisplayName: "Reviewer", Purpose: "Review evidence", SystemPrompt: "Review evidence.",
 		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
@@ -141,20 +139,19 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 	}
 }
 
-func TestRegistryRejectsMissingOrUnderqualifiedRosterAgentsAndAuthorityWidening(t *testing.T) {
+func TestRegistryRejectsMissingRosterAgentsAndAuthorityWidening(t *testing.T) {
 	ctx := context.Background()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	agents := kernelagent.NewRegistry()
 	registry := NewRegistry(agents)
 	definition := validDefinition()
-	definition.Roles[0].RequiredSkillIDs = []string{"web-research"}
 	registered, err := registry.RegisterDefinition(ctx, definition)
 	if err != nil {
 		t.Fatal(err)
 	}
 	base := &Deployment{
 		ID: "market-team", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
-		Roster: []RosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: "missing"}}, Status: DeploymentActive,
+		Roster: []RosterAssignment{{ID: "researcher", AgentDeploymentID: "missing"}}, Status: DeploymentActive,
 	}
 	if _, _, err := registry.CreateDeployment(ctx, base, "user", "operator", ""); err == nil {
 		t.Fatal("missing Agent deployment should fail closed")
@@ -174,16 +171,6 @@ func TestRegistryRejectsMissingOrUnderqualifiedRosterAgentsAndAuthorityWidening(
 		t.Fatal(err)
 	}
 	base.Roster[0].AgentDeploymentID = agentDeployment.ID
-	if _, _, err := registry.CreateDeployment(ctx, base, "user", "operator", ""); err == nil {
-		t.Fatal("underqualified Agent deployment should fail closed")
-	}
-	definition.Version = "1.0.1"
-	definition.Roles[0].RequiredSkillIDs = nil
-	registered, err = registry.RegisterDefinition(ctx, definition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	base.DefinitionID, base.ActiveVersion = registered.ID, registered.Version
 	base.Restrictions.MaximumRisk = capability.RiskLevelProduction
 	if _, _, err := registry.CreateDeployment(ctx, base, "user", "operator", ""); err == nil {
 		t.Fatal("authority widening should fail closed")
@@ -221,7 +208,7 @@ func TestRegistryGovernsEvaluatesApprovesAndAtomicallyActivatesTeamAmendment(t *
 	}
 	deployment, _, err := registry.CreateDeployment(ctx, &Deployment{
 		ID: "market-team", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
-		Roster: []RosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+		Roster: []RosterAssignment{{ID: "researcher", AgentDeploymentID: agentDeployment.ID}},
 		Status: DeploymentActive,
 	}, "user", "admin", "initial Team")
 	if err != nil {
@@ -300,11 +287,6 @@ func TestRegistryRecoversLegacyListeningOnlyTeamThroughAuditedImmutableAmendment
 	}
 	registry := NewRegistry(agents)
 	definition := validDefinition()
-	definition.Roles[0] = RoleSlot{
-		ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review evidence",
-		MinimumMembers: 1, MaximumMembers: 1, ChannelParticipation: RoleChannelObserveOnly,
-	}
-	definition.Approvals.ApproverRoleIDs = []string{"reviewer"}
 	// This intentionally represents a legacy definition with no amendment
 	// policy. Normal self-amendment must remain unavailable while an authorized
 	// operator can still recover the primary channel.
@@ -315,16 +297,16 @@ func TestRegistryRecoversLegacyListeningOnlyTeamThroughAuditedImmutableAmendment
 	}
 	deployment, _, err := registry.CreateDeployment(ctx, &Deployment{
 		ID: "legacy-review-team", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
-		Roster: []RosterAssignment{{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: agentDeployment.ID}},
+		Roster: []RosterAssignment{{ID: "reviewer", AgentDeploymentID: agentDeployment.ID, ChannelParticipation: ChannelObserveOnly}},
 		Status: DeploymentActive,
 	}, "user", "admin", "legacy Team")
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := RecoverParticipationRequest{
-		Scope: scope, DeploymentID: deployment.ID, BaseVersion: deployment.ActiveVersion,
-		ExpectedDeploymentRevision: deployment.Revision, RoleID: "reviewer",
-		ActorType: "user", ActorID: "admin", Reason: "Restore one reviewed speaking role", IdempotencyKey: "recover-reviewer-v1",
+		Scope: scope, DeploymentID: deployment.ID,
+		ExpectedDeploymentRevision: deployment.Revision, MemberID: "reviewer",
+		ActorType: "user", ActorID: "admin", Reason: "Restore one reviewed speaking member", IdempotencyKey: "recover-reviewer-v1",
 	}
 	agentRequest := request
 	agentRequest.ActorType, agentRequest.ActorID = "agent", agentDeployment.ID
@@ -337,24 +319,18 @@ func TestRegistryRecoversLegacyListeningOnlyTeamThroughAuditedImmutableAmendment
 		t.Fatalf("cross-scope recovery err = %v", err)
 	}
 	undeclared := request
-	undeclared.RoleID, undeclared.IdempotencyKey = "missing", "recover-missing-role"
+	undeclared.MemberID, undeclared.IdempotencyKey = "missing", "recover-missing-member"
 	if _, err := registry.RecoverParticipation(ctx, undeclared); err == nil {
-		t.Fatal("undeclared recovery role must fail closed")
+		t.Fatal("a recovery member off the roster must fail closed")
 	}
 	recovered, err := registry.RecoverParticipation(ctx, request)
 	if err != nil || recovered.Replayed || recovered.Deployment.Revision != 2 ||
-		recovered.Deployment.ActiveVersion == registered.Version || recovered.Activation.FromVersion != registered.Version ||
-		recovered.Amendment.Status != AmendmentActivated || !recovered.Amendment.RiskWidening ||
-		recovered.Amendment.Decision == nil || !recovered.Amendment.Decision.Approved ||
-		len(recovered.Amendment.Changes) != 1 || recovered.Amendment.Changes[0].Field != "roles" {
+		recovered.Deployment.ActiveVersion != registered.Version || recovered.Deployment.Roster[0].ChannelParticipation != ChannelActive ||
+		recovered.Activation.DeploymentRevision != 2 || recovered.Activation.ActorID != "admin" || recovered.Activation.Reason != request.Reason {
 		t.Fatalf("recovery = %#v, err = %v", recovered, err)
 	}
-	stored, err := registry.GetDefinition(ctx, registered.ID, recovered.Deployment.ActiveVersion)
-	if err != nil || stored.Roles[0].ChannelParticipation != RoleChannelActive ||
-		stored.Provenance.Source != "openseal-team-participation-recovery" || stored.Provenance.DerivedFrom != registered.Digest ||
-		stored.Amendments.AgentMayPropose || stored.Amendments.RequiresApproval || len(stored.Amendments.AllowedFields) != 0 ||
-		len(stored.Amendments.ApproverPrincipals) != 0 {
-		t.Fatalf("recovered definition = %#v, err = %v", stored, err)
+	if versions, err := registry.ListDefinitionVersions(ctx, registered.ID); err != nil || len(versions) != 1 {
+		t.Fatalf("recovery registered a definition: %d, %v", len(versions), err)
 	}
 	replay, err := registry.RecoverParticipation(ctx, request)
 	if err != nil || !replay.Replayed || replay.Activation.ID != recovered.Activation.ID || replay.Deployment.Revision != 2 {
@@ -371,7 +347,6 @@ func TestRegistryRecoversLegacyListeningOnlyTeamThroughAuditedImmutableAmendment
 		t.Fatalf("stale recovery err = %v", err)
 	}
 	alreadyActive := request
-	alreadyActive.BaseVersion = recovered.Deployment.ActiveVersion
 	alreadyActive.ExpectedDeploymentRevision = recovered.Deployment.Revision
 	alreadyActive.IdempotencyKey = "already-active"
 	if _, err := registry.RecoverParticipation(ctx, alreadyActive); !errors.Is(err, ErrParticipationRecoveryNotRequired) {

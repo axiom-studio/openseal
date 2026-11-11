@@ -68,7 +68,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	registries := []*kernelteam.Registry{primaryTeams, replicaTeams}
 	deploymentInput := &kernelteam.Deployment{
 		ID: "research-team", Scope: scope, DefinitionID: "research-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive,
-		Roster: []kernelteam.RosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+		Roster: []kernelteam.RosterAssignment{{ID: "researcher", AgentDeploymentID: agentDeployment.ID}},
 	}
 	var created atomic.Int32
 	var wait sync.WaitGroup

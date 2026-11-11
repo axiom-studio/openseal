@@ -744,8 +744,7 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	for _, version := range []string{"1", "2"} {
 		registered, err := client.RegisterTeamDefinition(ctx, &kernelteam.Definition{
 			ID: "research-team", Version: version, DisplayName: "Research Team", Purpose: "Produce findings",
-			Roles:       []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1}},
-			Approvals:   kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
+			Approvals:   kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 			Evaluations: []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
 			Amendments:  workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"}},
 		})
@@ -760,7 +759,7 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	created, err := client.CreateTeamDeployment(ctx, kernelapi.CreateTeamDeploymentRequest{
 		Deployment: &kernelteam.Deployment{
 			ID: "research-team-one", Scope: scope, DefinitionID: "research-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive,
-			Roster: []kernelteam.RosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+			Roster: []kernelteam.RosterAssignment{{ID: "researcher", AgentDeploymentID: agentDeployment.ID}},
 		},
 		ActorType: "user", ActorID: "operator", Reason: "initial",
 	})

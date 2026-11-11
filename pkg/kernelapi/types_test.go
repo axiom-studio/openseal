@@ -244,7 +244,7 @@ func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 	if capability.Supports("delete") {
 		t.Fatalf("unsupported Team definition operation advertised: %#v", capability.Operations)
 	}
-	if capability.Version != "4" || capability.Supports(OperationProposeAmendment) || capability.Supports(OperationRecoverParticipation) {
+	if capability.Version != "5" || capability.Supports(OperationProposeAmendment) || capability.Supports(OperationRecoverParticipation) {
 		t.Fatalf("portable Team definition capability = %#v", capability)
 	}
 	amendments := TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{Amendments: true})

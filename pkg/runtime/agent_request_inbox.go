@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -295,9 +296,9 @@ func (r *AgentRequestInboxReconciler) teamPartyAssignment(
 	party CollaborationParty,
 	semanticRole string,
 	excludedAgentID string,
-	useApproverRoles bool,
+	useApprovers bool,
 ) (string, *kernelteam.Definition, error) {
-	eligible, definition, err := r.teamPartyAssignments(ctx, scope, party, semanticRole, excludedAgentID, useApproverRoles)
+	eligible, definition, err := r.teamPartyAssignments(ctx, scope, party, semanticRole, excludedAgentID, useApprovers)
 	if err != nil {
 		return "", nil, err
 	}
@@ -310,7 +311,7 @@ func (r *AgentRequestInboxReconciler) teamPartyAssignments(
 	party CollaborationParty,
 	semanticRole string,
 	excludedAgentID string,
-	useApproverRoles bool,
+	useApprovers bool,
 ) ([]string, *kernelteam.Definition, error) {
 	if r.collaboration.teams == nil {
 		return nil, nil, fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)
@@ -335,22 +336,17 @@ func (r *AgentRequestInboxReconciler) teamPartyAssignments(
 	if definition == nil {
 		return nil, nil, fmt.Errorf("%w: active Team definition is unavailable", ErrAgentRequestAssignment)
 	}
-	eligibleRoles := make(map[string]struct{})
-	if useApproverRoles {
-		for _, roleID := range definition.Approvals.ApproverRoleIDs {
-			eligibleRoles[strings.TrimSpace(roleID)] = struct{}{}
-		}
-	}
+	// With no member marked as an approver, every member may review.
+	approversOnly := useApprovers && slices.ContainsFunc(deployment.Roster, func(assignment kernelteam.RosterAssignment) bool { return assignment.Approver })
 	eligible := make([]kernelteam.RosterAssignment, 0, len(deployment.Roster))
 	for _, assignment := range deployment.Roster {
-		_, approvedRole := eligibleRoles[assignment.RoleID]
-		if (semanticRole == "" || assignment.RoleID == semanticRole) &&
-			(!useApproverRoles || len(eligibleRoles) == 0 || approvedRole) && assignment.AgentDeploymentID != excludedAgentID {
+		if (semanticRole == "" || assignment.ID == semanticRole) &&
+			(!approversOnly || assignment.Approver) && assignment.AgentDeploymentID != excludedAgentID {
 			eligible = append(eligible, assignment)
 		}
 	}
 	if len(eligible) == 0 {
-		return nil, nil, fmt.Errorf("%w: Team has no independent Agent eligible for review role %q", ErrAgentRequestAssignment, semanticRole)
+		return nil, nil, fmt.Errorf("%w: Team has no independent Agent eligible for review as member %q", ErrAgentRequestAssignment, semanticRole)
 	}
 	sort.Slice(eligible, func(i, j int) bool {
 		if eligible[i].AgentDeploymentID != eligible[j].AgentDeploymentID {

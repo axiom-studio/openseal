@@ -58,15 +58,14 @@ func participationFixture() (*participationCatalog, runtime.ConversationParticip
 		agents:     map[string]*agent.AgentDeployment{}, definitions: map[string]*agent.AgentDefinition{},
 	}
 	for _, id := range []string{"z", "a", "observer", "disabled"} {
-		participation := team.RoleChannelActive
+		participation := team.ChannelActive
 		if id == "observer" {
-			participation = team.RoleChannelObserveOnly
+			participation = team.ChannelObserveOnly
 		}
 		if id == "disabled" {
-			participation = team.RoleChannelDisabled
+			participation = team.ChannelDisabled
 		}
-		c.definition.Roles = append(c.definition.Roles, team.RoleSlot{ID: id, DisplayName: id, Purpose: "Review evidence", ChannelParticipation: participation})
-		c.deployment.Roster = append(c.deployment.Roster, team.RosterAssignment{ID: "assignment-" + id, RoleID: id, AgentDeploymentID: id})
+		c.deployment.Roster = append(c.deployment.Roster, team.RosterAssignment{ID: id, AgentDeploymentID: id, DisplayName: id, Purpose: "Review evidence", ChannelParticipation: participation})
 		c.agents[id] = &agent.AgentDeployment{ID: id, Scope: scope, DefinitionID: "definition-" + id, ActiveVersion: "1", RolloutStatus: agent.RolloutActive, Environment: "local", Revision: 1, Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: 1}}
 		c.definitions["definition-"+id] = &agent.AgentDefinition{ID: "definition-" + id, Version: "1", DisplayName: id, Purpose: "Review evidence", SystemPrompt: "Report uncertainty", Authority: agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1}}
 	}
@@ -91,7 +90,7 @@ func TestDesktopParticipationUsesCanonicalActiveRoster(t *testing.T) {
 	// Returning a binding never transfers definition, credentials, or ownership.
 	bindings[0].SemanticRoles[0] = "forged"
 	catalog.agents["a"].RolloutStatus = agent.RolloutPaused
-	catalog.definition.Roles[0].ChannelParticipation = "" // legacy default is active
+	catalog.deployment.Roster[0].ChannelParticipation = "" // unset means active
 	refreshed, err := source.ResolveConversationParticipants(t.Context(), query)
 	if err != nil || len(refreshed) != 1 || refreshed[0].Participant.ID != "z" || refreshed[0].SemanticRoles[0] != "z" {
 		t.Fatalf("stale roster reused: %#v %v", refreshed, err)
@@ -117,8 +116,8 @@ func TestDesktopParticipationRejectsBrokenAuthority(t *testing.T) {
 			c.deployment.Scope.ID = "other"
 		},
 		"team-version": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) { c.definition.Version = "2" },
-		"unknown-role": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
-			c.deployment.Roster[0].RoleID = "unknown"
+		"unknown-participation": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+			c.deployment.Roster[0].ChannelParticipation = "unknown"
 		},
 		"duplicate-member": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
 			c.deployment.Roster[1].AgentDeploymentID = "z"
@@ -134,11 +133,8 @@ func TestDesktopParticipationRejectsBrokenAuthority(t *testing.T) {
 		"agent-definition": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
 			c.definitions["definition-a"].ID = "other"
 		},
-		"role-definition-requirement": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
-			c.definition.Roles[0].RequiredDefinitionIDs = []string{"other"}
-		},
-		"role-skill-requirement": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
-			c.definition.Roles[0].RequiredSkillIDs = []string{"missing"}
+		"member-skill-requirement": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+			c.deployment.Roster[1].RequiredSkillIDs = []string{"missing"}
 		},
 		"model-credential": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
 			c.agents["a"].Credentials = map[string]capability.CredentialReference{agent.ModelProviderCredentialBinding: {Kind: "vault", ID: "private"}}

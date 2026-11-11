@@ -99,10 +99,6 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	teams := kernelteam.NewRegistry(agents)
 	teamDefinition, err := teams.RegisterDefinition(ctx, &kernelteam.Definition{
 		ID: "ops-team-definition", Version: "1", DisplayName: "Ops  Crew", Purpose: "Run operations",
-		Roles: []kernelteam.RoleSlot{{
-			ID: "researcher-0", DisplayName: "Researcher", Purpose: "Research", MinimumMembers: 1, MaximumMembers: 1,
-			RequiredDefinitionIDs: []string{"researcher-definition"}, ChannelParticipation: kernelteam.RoleChannelActive,
-		}},
 		Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
 	})
 	if err != nil {
@@ -111,7 +107,7 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	if _, _, err := teams.CreateDeployment(ctx, &kernelteam.Deployment{
 		ID: "ops-team", Scope: reference, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version,
 		Status: kernelteam.DeploymentActive,
-		Roster: []kernelteam.RosterAssignment{{ID: "researcher-0", RoleID: "researcher-0", AgentDeploymentID: "researcher"}},
+		Roster: []kernelteam.RosterAssignment{{ID: "researcher-0", AgentDeploymentID: "researcher"}},
 	}, "user", "operator", "fixture"); err != nil {
 		t.Fatal(err)
 	}

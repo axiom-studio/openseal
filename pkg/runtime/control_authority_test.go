@@ -39,8 +39,8 @@ func controlAuthorityTeamCatalog(scope Scope) *resolverCatalog {
 		teamDeployment: &kernelteam.Deployment{
 			ID: "team", Scope: ref, DefinitionID: "team", ActiveVersion: "1", Status: kernelteam.DeploymentActive,
 			Roster: []kernelteam.RosterAssignment{
-				{ID: "lead", RoleID: "lead", AgentDeploymentID: "lead"},
-				{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer"},
+				{ID: "lead", AgentDeploymentID: "lead"},
+				{ID: "reviewer", AgentDeploymentID: "reviewer"},
 			},
 		},
 	}

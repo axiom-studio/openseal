@@ -407,16 +407,15 @@ func (h *snakesAcceptance) composeWorkforce(ctx context.Context, engine *Engine)
 			h.t.Fatal(err)
 		}
 	}
-	roles, roster := make([]TeamRoleSlot, 0, len(gamePlayers)), make([]TeamRosterAssignment, 0, len(gamePlayers))
+	roster := make([]TeamRosterAssignment, 0, len(gamePlayers))
 	for index, player := range gamePlayers {
-		role := fmt.Sprintf("player-%d", index+1)
-		roles = append(roles, TeamRoleSlot{ID: role, DisplayName: role, Purpose: "Play by authoritative game rules", MinimumMembers: 1})
-		roster = append(roster, TeamRosterAssignment{ID: role, RoleID: role, AgentDeploymentID: player})
+		id := fmt.Sprintf("player-%d", index+1)
+		roster = append(roster, TeamRosterAssignment{ID: id, AgentDeploymentID: player, DisplayName: id, Purpose: "Play by authoritative game rules", Approver: index == 0})
 	}
 	definition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: gameTeamID, Version: "1", DisplayName: "Snakes and Ladders Team", Purpose: "Complete a replayable multi-agent game",
-		Roles: roles, Delegation: TeamDelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 3},
-		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelWrite, ApproverRoleIDs: []string{roles[0].ID}},
+		Delegation: TeamDelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 3},
+		Approvals:  TeamApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
 	})
 	if err != nil {
 		h.t.Fatal(err)

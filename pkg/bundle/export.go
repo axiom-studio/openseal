@@ -51,7 +51,7 @@ func Export(request ExportRequest) (*Bundle, error) {
 	result := New(request.Metadata)
 	result.Compatibility = request.Compatibility
 	if result.Compatibility.FormatRevision == 0 {
-		result.Compatibility.FormatRevision = 1
+		result.Compatibility.FormatRevision = FormatRevision
 	}
 	result.Provenance = request.Provenance
 	agentKeys, teamKeys, objectiveKeys := map[string]string{}, map[string]string{}, map[string]string{}
@@ -89,7 +89,11 @@ func Export(request ExportRequest) (*Bundle, error) {
 			if agentKey == "" {
 				return nil, fmt.Errorf("workforce export Team %s roster assignment %s references an Agent outside the export", key, assignment.ID)
 			}
-			portable.Deployment.Roster = append(portable.Deployment.Roster, RosterAssignment{ID: assignment.ID, RoleID: assignment.RoleID, AgentKey: agentKey, DisplayName: assignment.DisplayName})
+			portable.Deployment.Roster = append(portable.Deployment.Roster, RosterAssignment{
+				ID: assignment.ID, AgentKey: agentKey, DisplayName: assignment.DisplayName, Purpose: assignment.Purpose,
+				ChannelParticipation: assignment.ChannelParticipation, RequiredSkillIDs: append([]string(nil), assignment.RequiredSkillIDs...),
+				Approver: assignment.Approver, Lead: assignment.Lead,
+			})
 		}
 		result.Teams = append(result.Teams, portable)
 		teamKeys[selected.Deployment.ID] = key

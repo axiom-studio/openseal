@@ -160,7 +160,7 @@ func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
 		{bound(AgentManagementSkillID, AgentActionTryAgent), false},
 		{bound(AgentManagementSkillID, AgentActionListAgents), false},
 		{bound(AgentManagementSkillID, AgentActionAmendBehavior), false},
-		{bound(TeamManagementSkillID, TeamActionUpdateRole), false},
+		{bound(TeamManagementSkillID, TeamActionUpdateMember), false},
 		{bound("acme.notes", AgentActionCreateAgent), false},
 		{nil, false},
 	} {

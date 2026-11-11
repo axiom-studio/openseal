@@ -6,6 +6,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func teamRoutingAgent(id string) ConversationParticipant {
@@ -259,4 +263,33 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 			t.Fatalf("member answer = %#v", answers)
 		}
 	})
+}
+
+// The router's view of a Team comes from its members: the one marked lead,
+// and what each does on the Team.
+func TestConversationTeamRosterReadsLeadAndPurposeFromMembers(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	if err := store.CreateTeamDefinition(ctx, &kernelteam.Definition{
+		ID: "launch", Version: "1", DisplayName: "Launch", Purpose: "Ship", Routing: kernelteam.RoutingPolicy{Notes: "Maya owns pricing"},
+		Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateTeamDeployment(ctx, &kernelteam.Deployment{
+		ID: "launch", Scope: scope, DefinitionID: "launch", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
+		Roster: []kernelteam.RosterAssignment{
+			{ID: "lead", AgentDeploymentID: "otto", DisplayName: "Otto", Purpose: "Owns press"},
+			{ID: "maya-2", AgentDeploymentID: "maya", DisplayName: "Maya", Purpose: "Owns pricing", Lead: true, Owns: []string{"pricing"}},
+		},
+	}, workforce.DefinitionActivation{ID: "created"}); err != nil {
+		t.Fatal(err)
+	}
+	roster := loadConversationTeamRoster(ctx, store, &Conversation{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}})
+	if roster.lead != "maya" || roster.notes != "Maya owns pricing" ||
+		!reflect.DeepEqual(roster.members["maya"], conversationTeamMember{name: "Maya", role: "Owns pricing", owns: []string{"pricing"}}) ||
+		roster.members["otto"].role != "Owns press" {
+		t.Fatalf("roster = %+v", roster)
+	}
 }

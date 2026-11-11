@@ -184,7 +184,7 @@ func CompileInstallation(request InstallationRequest) (*InstallationPlan, error)
 		}
 		roster := make([]team.RosterAssignment, 0, len(item.Deployment.Roster))
 		for _, assignment := range item.Deployment.Roster {
-			roster = append(roster, team.RosterAssignment{ID: assignment.ID, RoleID: assignment.RoleID, AgentDeploymentID: request.Placement.Agents[assignment.AgentKey].DeploymentID, DisplayName: assignment.DisplayName})
+			roster = append(roster, assignment.member(request.Placement.Agents[assignment.AgentKey].DeploymentID))
 		}
 		deployment := &team.Deployment{ID: request.Placement.Teams[item.Key].DeploymentID, Scope: request.Scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, Roster: roster, Restrictions: item.Deployment.Restrictions, Status: team.DeploymentActive, Revision: 1, CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
 		if err := deployment.Validate(definition); err != nil {

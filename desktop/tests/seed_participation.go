@@ -31,9 +31,9 @@ func main() {
 		check(err)
 	}
 	teams := team.NewRegistryWithStore(store, agents)
-	_, err = teams.RegisterDefinition(ctx, &team.Definition{ID: "ui-participation-team", Version: "1", DisplayName: "Channel reply team", Purpose: "Review channel evidence", Roles: []team.RoleSlot{{ID: "speaker", DisplayName: "Speaker", Purpose: "Review evidence", ChannelParticipation: team.RoleChannelActive}, {ID: "observer", DisplayName: "Observer", Purpose: "Observe evidence", ChannelParticipation: team.RoleChannelObserveOnly}}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}})
+	_, err = teams.RegisterDefinition(ctx, &team.Definition{ID: "ui-participation-team", Version: "1", DisplayName: "Channel reply team", Purpose: "Review channel evidence", Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}})
 	check(err)
-	_, _, err = teams.CreateDeployment(ctx, &team.Deployment{ID: "ui-participation-team", Scope: scope, DefinitionID: "ui-participation-team", ActiveVersion: "1", Status: team.DeploymentActive, Roster: []team.RosterAssignment{{ID: "speaker", RoleID: "speaker", AgentDeploymentID: "ui-participation-speaker"}, {ID: "observer", RoleID: "observer", AgentDeploymentID: "ui-participation-observer"}}}, "user", "fixture", "Synthetic channel participation")
+	_, _, err = teams.CreateDeployment(ctx, &team.Deployment{ID: "ui-participation-team", Scope: scope, DefinitionID: "ui-participation-team", ActiveVersion: "1", Status: team.DeploymentActive, Roster: []team.RosterAssignment{{ID: "speaker", AgentDeploymentID: "ui-participation-speaker", DisplayName: "Speaker", Purpose: "Review evidence", ChannelParticipation: team.ChannelActive}, {ID: "observer", AgentDeploymentID: "ui-participation-observer", DisplayName: "Observer", Purpose: "Observe evidence", ChannelParticipation: team.ChannelObserveOnly}}}, "user", "fixture", "Synthetic channel participation")
 	check(err)
 }
 func check(err error) {
