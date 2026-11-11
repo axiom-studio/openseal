@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -40,8 +42,29 @@ func newRoutineEventHarness(t *testing.T) *routineEventHarness {
 	h.matcher.now = h.clock
 	h.dispatcher = NewRoutineEventDispatcher(h.store, h.matcher)
 	h.dispatcher.now = h.clock
+	h.deployOwner()
 	h.conversation, h.message = h.chat("Inbox")
 	return h
+}
+
+// deployOwner installs the routines' Agent: a routine starts only while its
+// assigned Agent is deployed and active.
+func (h *routineEventHarness) deployOwner() {
+	h.t.Helper()
+	registry := kernelagent.NewRegistryWithStore(h.store)
+	definition := &kernelagent.AgentDefinition{
+		ID: "inbox-agent", Version: "1.0.0", DisplayName: "Inbox", Purpose: "Summarize email", SystemPrompt: "Summarize email.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+	}
+	if _, err := registry.RegisterDefinition(h.ctx, definition); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, _, err := registry.CreateDeployment(h.ctx, &kernelagent.AgentDeployment{
+		ID: h.owner.ID, Scope: capability.ScopeReference{Kind: h.scope.Kind, ID: h.scope.ID}, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "routine event test"); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 // chat creates a chat with one user request and returns their IDs.

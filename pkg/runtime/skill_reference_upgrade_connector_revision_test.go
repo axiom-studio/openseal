@@ -85,14 +85,12 @@ func TestSkillReferenceUpgradeMovesOlderConversationAndCallbackPinsAtomically(t 
 	}
 	scope := Scope{Kind: "tenant", ID: "1"}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
-	if err := store.SaveSkillBinding(ctx, &skill.Binding{
+	saveSkillBindingAtRevision(t, store, &skill.Binding{
 		ID: "slack", Scope: skillScope, DeploymentID: "agent:researcher", SkillID: "slack", SkillVersion: "1.0.0",
 		EnabledConversationAdapters: []string{"conversations"}, EnabledCallbackAdapters: []string{"interactions"},
 		Credentials: map[string]skill.CredentialReference{"token": {Kind: "api_key", ID: "credential://slack.token"}},
 		MaximumRisk: skill.RiskLevelExternal, Revision: 3,
-	}, 0); err != nil {
-		t.Fatal(err)
-	}
+	})
 	now := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent:researcher"}
 	if err := store.CreateExternalConversationEndpoint(ctx, &ExternalConversationEndpoint{

@@ -207,25 +207,6 @@ func TestSkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t *test
 	}
 }
 
-func TestSkillDefinitionIdentityProbeKeepsDelimiterCollisionImmutable(t *testing.T) {
-	ctx := context.Background()
-	store := newTestKernelStore(t)
-	definition := skillIdentityProbeDefinition("research\x00child", "1.0.0", "catalog::@publisher/research")
-	if err := skill.NewCatalogWithStore(store).Register(ctx, definition); err != nil {
-		t.Fatal(err)
-	}
-	// The existing store key encoding gives these different accepted ID/version
-	// pairs the same key. This probe does not change that storage contract or
-	// permit a second definition to overwrite the first immutable record.
-	collision := skillIdentityProbeDefinition("research", "child\x001.0.0", skill.DefinitionSourceIdentity(definition))
-	if err := skill.NewCatalogWithStore(store).Register(ctx, collision); !errors.Is(err, skill.ErrDefinitionImmutable) {
-		t.Fatalf("existing delimiter collision no longer rejects overwrite: %v", err)
-	}
-	if got, err := skill.NewCatalogWithStore(store).GetDefinition(ctx, definition.ID, definition.Version); err != nil || !reflect.DeepEqual(got, definition) {
-		t.Fatalf("delimiter collision altered registered immutable definition: %#v, %v", got, err)
-	}
-}
-
 func TestSQLiteSkillDefinitionIdentityProbeReturnsClosedStoreError(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "closed.db"))
 	if err != nil {

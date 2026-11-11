@@ -59,6 +59,20 @@ func TestSkillReferenceUpgradeEstablishesLifecycleForWorkforceBinding(t *testing
 	}
 }
 
+// saveSkillBindingAtRevision stores binding through its earlier revisions, as
+// edits would, because a store accepts only the next revision on each save.
+func saveSkillBindingAtRevision(t *testing.T, store *SQLiteStore, binding *skill.Binding) {
+	t.Helper()
+	target := binding.Revision
+	for revision := int64(1); revision <= target; revision++ {
+		step := *binding
+		step.Revision = revision
+		if err := store.SaveSkillBinding(t.Context(), &step, revision-1); err != nil {
+			t.Fatalf("save skill binding revision %d: %v", revision, err)
+		}
+	}
+}
+
 func TestSkillReferenceUpgradeMovesConversationAndCallbackAdaptersAtomically(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
@@ -93,14 +107,12 @@ func TestSkillReferenceUpgradeMovesConversationAndCallbackAdaptersAtomically(t *
 	}
 	scope := Scope{Kind: "tenant", ID: "1"}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
-	if err := store.SaveSkillBinding(ctx, &skill.Binding{
+	saveSkillBindingAtRevision(t, store, &skill.Binding{
 		ID: "slack", Scope: skillScope, DeploymentID: "agent:researcher", SkillID: "slack", SkillVersion: "1.0.0",
 		EnabledConversationAdapters: []string{"conversations"}, EnabledCallbackAdapters: []string{"interactions"},
 		Credentials: map[string]skill.CredentialReference{"token": {Kind: "api_key", ID: "credential://slack.token"}},
 		MaximumRisk: skill.RiskLevelExternal, Revision: 3,
-	}, 0); err != nil {
-		t.Fatal(err)
-	}
+	})
 	now := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent:researcher"}
 	if err := store.CreateExternalConversationEndpoint(ctx, &ExternalConversationEndpoint{
