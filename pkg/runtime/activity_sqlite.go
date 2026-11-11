@@ -330,18 +330,19 @@ func (s *SQLiteStore) ListActivity(ctx context.Context, filter ActivityFilter) (
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	if !filter.Descending {
-		rows, err := s.db.QueryContext(ctx, `SELECT payload FROM run_activity
-			WHERE scope_kind = ? AND scope_id = ? AND run_id = ? AND sequence > ?
-			ORDER BY sequence ASC LIMIT ?`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
-		if err != nil {
-			return nil, err
-		}
-		return scanSQLiteActivity(rows, limit)
-	}
 	query := `SELECT payload FROM run_activity WHERE scope_kind = ? AND scope_id = ?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
-	selectors := []struct{ column, value string }{{"run_id", filter.RunID}, {"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"team_id", filter.TeamID}}
+	order := ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	if !filter.Descending {
+		// An ascending read is one run's stream, so it pins run_id even when it is empty.
+		query += ` AND run_id = ? AND sequence > ?`
+		args = append(args, filter.RunID, filter.AfterSequence)
+		order = ` ORDER BY sequence ASC LIMIT ?`
+	}
+	selectors := []struct{ column, value string }{{"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"team_id", filter.TeamID}}
+	if filter.Descending {
+		selectors = append(selectors, struct{ column, value string }{"run_id", filter.RunID})
+	}
 	for _, selector := range selectors {
 		if selector.value != "" {
 			query += " AND " + selector.column + " = ?"
@@ -364,7 +365,7 @@ func (s *SQLiteStore) ListActivity(ctx context.Context, filter ActivityFilter) (
 		query += ` AND (created_at < ? OR (created_at = ? AND id < ?))`
 		args = append(args, filter.BeforeCreatedAt, filter.BeforeCreatedAt, filter.BeforeID)
 	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	query += order
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
