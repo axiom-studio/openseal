@@ -171,7 +171,7 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	}
 
 	spaces := NewSpaceService(NewMemoryStore())
-	sales, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Sales", Look: DefaultSpaceLook, CreatedBy: "operator"})
+	sales, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Sales", Look: DefaultSpaceLook, OwnerID: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}

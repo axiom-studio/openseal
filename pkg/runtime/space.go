@@ -49,14 +49,33 @@ var spaceLookPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
 
 func (l SpaceLook) Valid() bool { return spaceLookPattern.MatchString(string(l)) }
 
+// SpaceAccess is who may see a Space and what is in it.
+type SpaceAccess string
+
+const (
+	SpaceAccessOwner    SpaceAccess = "owner"    // only the person who owns it
+	SpaceAccessInvited  SpaceAccess = "invited"  // the owner and the people added to it
+	SpaceAccessEveryone SpaceAccess = "everyone" // every person in the tenant
+)
+
+func (a SpaceAccess) Valid() bool {
+	return a == SpaceAccessOwner || a == SpaceAccessInvited || a == SpaceAccessEveryone
+}
+
+// DefaultSpaceOwner owns every scope's Default space. It is no person, so
+// nobody edits the Default space as its owner.
+const DefaultSpaceOwner = "system"
+
 type Space struct {
-	ID        string    `json:"id"`
-	Scope     Scope     `json:"scope"`
-	Name      string    `json:"name"`
-	Look      SpaceLook `json:"look"`
-	Position  int       `json:"position"`
-	IsDefault bool      `json:"isDefault"`
-	CreatedBy string    `json:"createdBy"`
+	ID        string      `json:"id"`
+	Scope     Scope       `json:"scope"`
+	Name      string      `json:"name"`
+	Look      SpaceLook   `json:"look"`
+	Position  int         `json:"position"`
+	IsDefault bool        `json:"isDefault"`
+	Access    SpaceAccess `json:"access"`
+	// OwnerID is the principal id of the person who owns the space.
+	OwnerID   string    `json:"ownerId"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -77,8 +96,11 @@ func (s *Space) Validate() error {
 	if !s.Look.Valid() {
 		return fmt.Errorf("%w: invalid look %q", ErrInvalidSpace, s.Look)
 	}
-	if s.Position < 0 || s.CreatedAt.IsZero() || s.UpdatedAt.IsZero() || len(s.CreatedBy) > 128 {
-		return fmt.Errorf("%w: position, creator and timestamps are invalid", ErrInvalidSpace)
+	if !s.Access.Valid() {
+		return fmt.Errorf("%w: access must be owner, invited or everyone", ErrInvalidSpace)
+	}
+	if s.Position < 0 || s.CreatedAt.IsZero() || s.UpdatedAt.IsZero() || len(s.OwnerID) > 128 {
+		return fmt.Errorf("%w: position, owner and timestamps are invalid", ErrInvalidSpace)
 	}
 	return nil
 }
@@ -122,6 +144,25 @@ func (m *SpaceMember) Validate() error {
 	return nil
 }
 
+// SpacePerson is a person added to a space; with access "invited" they see
+// it. Agents and Teams in a space are SpaceMembers.
+type SpacePerson struct {
+	SpaceID string    `json:"spaceId"`
+	UserID  string    `json:"userId"`
+	AddedBy string    `json:"addedBy"`
+	AddedAt time.Time `json:"addedAt"`
+}
+
+func (p *SpacePerson) Validate() error {
+	if p == nil {
+		return fmt.Errorf("%w: person is required", ErrInvalidSpace)
+	}
+	if !validOpaqueIdentifier(p.SpaceID, 128) || !validOpaqueIdentifier(p.UserID, 128) || len(p.AddedBy) > 128 || p.AddedAt.IsZero() {
+		return fmt.Errorf("%w: person space, user, adder and time are invalid", ErrInvalidSpace)
+	}
+	return nil
+}
+
 // SpacePatch carries the optional changes of an UpdateSpace call. Position
 // moves the space to that index in the scope's ordering, renumbering the rest.
 type SpacePatch struct {
@@ -140,7 +181,7 @@ type SpaceStore interface {
 	ListSpaces(ctx context.Context, scope Scope) ([]*Space, error)
 	UpdateSpace(ctx context.Context, scope Scope, spaceID string, patch SpacePatch, now time.Time) (*Space, error)
 	// DeleteSpace moves the space's conversations to Default, drops its
-	// members, and adds any deployment left in no space to Default.
+	// members and people, and adds any deployment left in no space to Default.
 	DeleteSpace(ctx context.Context, scope Scope, spaceID string, now time.Time) error
 	ListSpaceMembers(ctx context.Context, scope Scope, spaceID string) ([]*SpaceMember, error)
 	// PutSpaceMember is idempotent: an existing member is returned unchanged.
@@ -151,6 +192,17 @@ type SpaceStore interface {
 	// scope's Default space, creating Default when needed. It returns the
 	// new membership, or nil when the deployment already had a space.
 	EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error)
+	// ListScopeSpaceMembers returns every space membership of the scope.
+	ListScopeSpaceMembers(ctx context.Context, scope Scope) ([]*SpaceMember, error)
+	SetSpaceAccess(ctx context.Context, scope Scope, spaceID string, access SpaceAccess, now time.Time) (*Space, error)
+	// PutSpacePerson is idempotent: an existing person is returned unchanged.
+	PutSpacePerson(ctx context.Context, scope Scope, person *SpacePerson) (*SpacePerson, bool, error)
+	DeleteSpacePerson(ctx context.Context, scope Scope, spaceID, userID string) error
+	ListSpacePeople(ctx context.Context, scope Scope, spaceID string) ([]*SpacePerson, error)
+	// VisibleSpaces returns, by position, the ids of the spaces the person
+	// may see: the ones they own, the ones with access "everyone", and the
+	// "invited" ones they were added to. An empty userID owns nothing.
+	VisibleSpaces(ctx context.Context, scope Scope, userID string) ([]string, error)
 }
 
 // SpaceRosterStore is a store holding both spaces and Teams. It takes an Agent
@@ -162,10 +214,17 @@ type SpaceRosterStore interface {
 }
 
 type CreateSpaceRequest struct {
-	Scope     Scope
-	Name      string
-	Look      SpaceLook
-	CreatedBy string
+	Scope   Scope
+	Name    string
+	Look    SpaceLook
+	OwnerID string
+}
+
+type AddSpacePersonRequest struct {
+	Scope   Scope
+	SpaceID string
+	UserID  string
+	AddedBy string
 }
 
 type UpdateSpaceRequest struct {
@@ -251,7 +310,7 @@ func (s *SpaceService) CreateSpace(ctx context.Context, req CreateSpaceRequest) 
 	now := s.now().UTC()
 	space := &Space{
 		ID: s.newID(), Scope: req.Scope, Name: strings.TrimSpace(req.Name), Look: req.Look,
-		CreatedBy: strings.TrimSpace(req.CreatedBy), CreatedAt: now, UpdatedAt: now,
+		Access: SpaceAccessOwner, OwnerID: strings.TrimSpace(req.OwnerID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := space.Validate(); err != nil {
 		return nil, err
@@ -489,6 +548,97 @@ func (s *SpaceService) EnsureMemberHasSpace(ctx context.Context, scope Scope, me
 	return s.store.EnsureMemberHasSpace(ctx, scope, memberType, memberID, s.now().UTC())
 }
 
+// ListScopeSpaceMembers returns every space membership of the scope in one
+// read: which spaces each Agent and Team is in.
+func (s *SpaceService) ListScopeSpaceMembers(ctx context.Context, scope Scope) ([]*SpaceMember, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	return s.store.ListScopeSpaceMembers(ctx, scope)
+}
+
+// SetSpaceAccess changes who may see the space. The people added to it stay,
+// so a space that returns to "invited" has them again.
+func (s *SpaceService) SetSpaceAccess(ctx context.Context, scope Scope, spaceID string, access SpaceAccess) (*Space, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if !access.Valid() {
+		return nil, fmt.Errorf("%w: access must be owner, invited or everyone", ErrInvalidSpace)
+	}
+	return s.store.SetSpaceAccess(ctx, scope, strings.TrimSpace(spaceID), access, s.now().UTC())
+}
+
+// AddSpacePerson adds a person to the space; the host must have verified
+// they belong to the scope.
+func (s *SpaceService) AddSpacePerson(ctx context.Context, req AddSpacePersonRequest) (*SpacePerson, bool, error) {
+	if err := req.Scope.Validate(); err != nil {
+		return nil, false, err
+	}
+	person := &SpacePerson{
+		SpaceID: strings.TrimSpace(req.SpaceID), UserID: strings.TrimSpace(req.UserID),
+		AddedBy: strings.TrimSpace(req.AddedBy), AddedAt: s.now().UTC(),
+	}
+	if err := person.Validate(); err != nil {
+		return nil, false, err
+	}
+	return s.store.PutSpacePerson(ctx, req.Scope, person)
+}
+
+func (s *SpaceService) RemoveSpacePerson(ctx context.Context, scope Scope, spaceID, userID string) error {
+	if err := scope.Validate(); err != nil {
+		return err
+	}
+	return s.store.DeleteSpacePerson(ctx, scope, strings.TrimSpace(spaceID), strings.TrimSpace(userID))
+}
+
+func (s *SpaceService) ListSpacePeople(ctx context.Context, scope Scope, spaceID string) ([]*SpacePerson, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	return s.store.ListSpacePeople(ctx, scope, strings.TrimSpace(spaceID))
+}
+
+// VisibleSpaces returns the ids of the spaces the person may see. Tenant
+// admins get no exception: an "owner" space is seen by its owner alone.
+func (s *SpaceService) VisibleSpaces(ctx context.Context, scope Scope, userID string) ([]string, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	return s.store.VisibleSpaces(ctx, scope, strings.TrimSpace(userID))
+}
+
+// CanEditSpace reports whether the person may change the space itself (name,
+// look, position, delete): its owner only. A missing space is false.
+func (s *SpaceService) CanEditSpace(ctx context.Context, scope Scope, spaceID, userID string) (bool, error) {
+	if err := scope.Validate(); err != nil {
+		return false, err
+	}
+	space, err := s.store.GetSpace(ctx, scope, strings.TrimSpace(spaceID))
+	if errors.Is(err, ErrSpaceNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	userID = strings.TrimSpace(userID)
+	return userID != "" && space.OwnerID == userID, nil
+}
+
+// CanManageSpace reports whether the person may change the space's access
+// and people: its owner, or a tenant admin who can see it.
+func (s *SpaceService) CanManageSpace(ctx context.Context, scope Scope, spaceID, userID string, isAdmin bool) (bool, error) {
+	owner, err := s.CanEditSpace(ctx, scope, spaceID, userID)
+	if err != nil || owner || !isAdmin {
+		return owner, err
+	}
+	visible, err := s.store.VisibleSpaces(ctx, scope, strings.TrimSpace(userID))
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(visible, strings.TrimSpace(spaceID)), nil
+}
+
 // DefaultSpaceID is the deterministic id of a scope's Default space. The
 // PostgreSQL backfill computes the same value with md5().
 func DefaultSpaceID(scope Scope) string {
@@ -499,7 +649,7 @@ func DefaultSpaceID(scope Scope) string {
 func newDefaultSpace(scope Scope, now time.Time) *Space {
 	return &Space{
 		ID: DefaultSpaceID(scope), Scope: scope, Name: DefaultSpaceName, Look: DefaultSpaceLook,
-		Position: 0, IsDefault: true, CreatedBy: "system", CreatedAt: now, UpdatedAt: now,
+		Position: 0, IsDefault: true, Access: SpaceAccessEveryone, OwnerID: DefaultSpaceOwner, CreatedAt: now, UpdatedAt: now,
 	}
 }
 
@@ -509,6 +659,13 @@ func cloneSpace(space *Space) *Space {
 	}
 	cloned := *space
 	return &cloned
+}
+
+// spaceVisibleTo is the rule VisibleSpaces applies to one space; invited
+// reports whether the person was added to it.
+func spaceVisibleTo(space *Space, userID string, invited bool) bool {
+	return (userID != "" && space.OwnerID == userID) || space.Access == SpaceAccessEveryone ||
+		(space.Access == SpaceAccessInvited && invited)
 }
 
 func cloneSpaceMember(member *SpaceMember) *SpaceMember {

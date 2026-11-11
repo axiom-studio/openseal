@@ -37,6 +37,53 @@ func TestPostgresSpaceStore(t *testing.T) {
 	exerciseSpaceStore(t, store)
 }
 
+func TestPostgresSpaceAccess(t *testing.T) {
+	store, _, _ := openSpacesPostgresStore(t, "openseal_space_access_")
+	exerciseSpaceAccess(t, store)
+}
+
+// Migration 83 on a database with spaces: created_by becomes owner_id, every
+// space is "owner" and the Default space "everyone". Rolling it back restores
+// created_by and drops the people.
+func TestPostgresSpaceAccessBackfillAndRollback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	store, dsn, schema := openSpacesPostgresStore(t, "openseal_space_access_backfill_")
+	scope := Scope{Kind: "tenant", ID: "legacy"}
+	spaces := NewSpaceService(store)
+	work, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Work", Look: DefaultSpaceLook, OwnerID: "7"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := spaces.SetSpaceAccess(ctx, scope, work.ID, SpaceAccessEveryone); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := spaces.AddSpacePerson(ctx, AddSpacePersonRequest{Scope: scope, SpaceID: work.ID, UserID: "8", AddedBy: "7"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RollbackPostgresMigrations(ctx, spaceAccessMigrationVersion-1); err != nil {
+		t.Fatal(err)
+	}
+	var columns int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+		WHERE table_schema = $1 AND (table_name = 'spaces' AND column_name IN ('access', 'owner_id') OR table_name = 'space_people')`, schema).Scan(&columns); err != nil || columns != 0 {
+		t.Fatalf("space access columns after rollback = %d, err = %v", columns, err)
+	}
+	var creator string
+	if err := store.db.QueryRowContext(ctx, `SELECT created_by FROM `+store.table("spaces")+` WHERE id = $1`, work.ID).Scan(&creator); err != nil || creator != "7" {
+		t.Fatalf("created_by after rollback = %q, err = %v", creator, err)
+	}
+	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+		t.Fatalf("schema version = %d, err = %v", version, err)
+	}
+	assertSpaceAccessBackfilled(t, reopened, scope, work.ID)
+}
+
 func TestPostgresSpacesBackfillAndRollback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

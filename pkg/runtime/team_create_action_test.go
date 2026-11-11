@@ -449,7 +449,7 @@ func TestTeamRoleActionMatchesSupportedVersions(t *testing.T) {
 func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
 	ctx := context.Background()
 	f := newTeamCreateFixture(t)
-	ops, err := f.spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: f.scope, Name: "Ops", Look: DefaultSpaceLook, CreatedBy: "operator"})
+	ops, err := f.spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: f.scope, Name: "Ops", Look: DefaultSpaceLook, OwnerID: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}

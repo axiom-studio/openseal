@@ -81,12 +81,12 @@ func (s *PostgresStore) rollbackSpaces(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-const postgresSpaceColumns = `id, scope_kind, scope_id, name, look, position, is_default, created_by, created_at, updated_at`
+const postgresSpaceColumns = `id, scope_kind, scope_id, name, look, position, is_default, access, owner_id, created_at, updated_at`
 
 func scanPostgresSpace(row interface{ Scan(...interface{}) error }) (*Space, error) {
 	var space Space
 	if err := row.Scan(&space.ID, &space.Scope.Kind, &space.Scope.ID, &space.Name, &space.Look, &space.Position,
-		&space.IsDefault, &space.CreatedBy, &space.CreatedAt, &space.UpdatedAt); err != nil {
+		&space.IsDefault, &space.Access, &space.OwnerID, &space.CreatedAt, &space.UpdatedAt); err != nil {
 		return nil, err
 	}
 	space.CreatedAt, space.UpdatedAt = space.CreatedAt.UTC(), space.UpdatedAt.UTC()
@@ -101,8 +101,8 @@ func (s *PostgresStore) spacesLock(ctx context.Context, tx *sql.Tx, scope Scope)
 func (s *PostgresStore) ensurePostgresDefaultSpaceTx(ctx context.Context, tx *sql.Tx, scope Scope, now time.Time) (*Space, bool, error) {
 	space := newDefaultSpace(scope, now)
 	result, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("spaces")+` (`+postgresSpaceColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`, space.ID, scope.Kind, scope.ID, space.Name, space.Look,
-		space.Position, space.IsDefault, space.CreatedBy, space.CreatedAt, space.UpdatedAt)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`, space.ID, scope.Kind, scope.ID, space.Name, space.Look,
+		space.Position, space.IsDefault, space.Access, space.OwnerID, space.CreatedAt, space.UpdatedAt)
 	if err != nil {
 		return nil, false, err
 	}
@@ -176,8 +176,8 @@ func (s *PostgresStore) CreateSpace(ctx context.Context, space *Space) (*Space, 
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("spaces")+` (`+postgresSpaceColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, created.ID, created.Scope.Kind, created.Scope.ID, created.Name, created.Look,
-		created.Position, created.IsDefault, created.CreatedBy, created.CreatedAt, created.UpdatedAt); err != nil {
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, created.ID, created.Scope.Kind, created.Scope.ID, created.Name, created.Look,
+		created.Position, created.IsDefault, created.Access, created.OwnerID, created.CreatedAt, created.UpdatedAt); err != nil {
 		if postgresUniqueViolation(err) {
 			return nil, ErrInvalidSpace
 		}
@@ -473,4 +473,127 @@ func (s *PostgresStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, m
 		return nil, err
 	}
 	return member, tx.Commit()
+}
+
+func (s *PostgresStore) SetSpaceAccess(ctx context.Context, scope Scope, spaceID string, access SpaceAccess, now time.Time) (*Space, error) {
+	space, err := scanPostgresSpace(s.db.QueryRowContext(ctx, `UPDATE `+s.table("spaces")+` SET access = $1, updated_at = $2
+		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5 RETURNING `+postgresSpaceColumns, access, now, scope.Kind, scope.ID, spaceID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrSpaceNotFound
+	}
+	return space, err
+}
+
+const postgresSpacePersonColumns = `space_id, user_id, added_by, added_at`
+
+func scanSpacePerson(row interface{ Scan(...interface{}) error }) (*SpacePerson, error) {
+	var person SpacePerson
+	if err := row.Scan(&person.SpaceID, &person.UserID, &person.AddedBy, &person.AddedAt); err != nil {
+		return nil, err
+	}
+	person.AddedAt = person.AddedAt.UTC()
+	return &person, nil
+}
+
+func (s *PostgresStore) PutSpacePerson(ctx context.Context, scope Scope, person *SpacePerson) (*SpacePerson, bool, error) {
+	if err := person.Validate(); err != nil {
+		return nil, false, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+	if err := s.spacesLock(ctx, tx, scope); err != nil {
+		return nil, false, err
+	}
+	if _, err := s.getPostgresSpace(ctx, tx, scope, person.SpaceID); err != nil {
+		return nil, false, err
+	}
+	people := s.table("space_people")
+	result, err := tx.ExecContext(ctx, `INSERT INTO `+people+` (scope_kind, scope_id, `+postgresSpacePersonColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, scope.Kind, scope.ID, person.SpaceID, person.UserID, person.AddedBy, person.AddedAt)
+	if err != nil {
+		return nil, false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	stored, err := scanSpacePerson(tx.QueryRowContext(ctx, `SELECT `+postgresSpacePersonColumns+` FROM `+people+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3 AND user_id = $4`, scope.Kind, scope.ID, person.SpaceID, person.UserID))
+	if err != nil {
+		return nil, false, err
+	}
+	return stored, affected == 1, tx.Commit()
+}
+
+func (s *PostgresStore) DeleteSpacePerson(ctx context.Context, scope Scope, spaceID, userID string) error {
+	if _, err := s.getPostgresSpace(ctx, s.db, scope, spaceID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM `+s.table("space_people")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3 AND user_id = $4`, scope.Kind, scope.ID, spaceID, userID)
+	return err
+}
+
+func (s *PostgresStore) ListSpacePeople(ctx context.Context, scope Scope, spaceID string) ([]*SpacePerson, error) {
+	if _, err := s.getPostgresSpace(ctx, s.db, scope, spaceID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+postgresSpacePersonColumns+` FROM `+s.table("space_people")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3 ORDER BY added_at, user_id`, scope.Kind, scope.ID, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*SpacePerson, 0)
+	for rows.Next() {
+		person, err := scanSpacePerson(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, person)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) VisibleSpaces(ctx context.Context, scope Scope, userID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT sp.id FROM `+s.table("spaces")+` sp
+		WHERE sp.scope_kind = $1 AND sp.scope_id = $2 AND (
+			(sp.owner_id = $3 AND $3 <> '') OR sp.access = 'everyone' OR (sp.access = 'invited' AND EXISTS (
+				SELECT 1 FROM `+s.table("space_people")+` p
+				WHERE p.scope_kind = sp.scope_kind AND p.scope_id = sp.scope_id AND p.space_id = sp.id AND p.user_id = $3)))
+		ORDER BY sp.position, sp.created_at, sp.id`, scope.Kind, scope.ID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		result = append(result, id)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) ListScopeSpaceMembers(ctx context.Context, scope Scope) ([]*SpaceMember, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+postgresSpaceMemberColumns+` FROM `+s.table("space_members")+`
+		WHERE scope_kind = $1 AND scope_id = $2`, scope.Kind, scope.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*SpaceMember, 0)
+	for rows.Next() {
+		member, err := scanPostgresSpaceMember(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, member)
+	}
+	return result, rows.Err()
 }

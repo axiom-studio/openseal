@@ -29,7 +29,7 @@ func defaultSpaceRewrites(spaces, members, conversations, artifacts string, post
 	}
 	return []string{
 		`UPDATE ` + spaces + ` SET is_default = ` + isFalse + ` WHERE id LIKE 'personal-%'`,
-		`INSERT INTO ` + spaces + ` (` + postgresSpaceColumns + `)
+		`INSERT INTO ` + spaces + ` (id, scope_kind, scope_id, name, look, position, is_default, created_by, created_at, updated_at)
 			SELECT ` + newID("id") + `, scope_kind, scope_id, CASE WHEN name = 'Personal' THEN '` + DefaultSpaceName + `' ELSE name END,
 				look, position, ` + isTrue + `, created_by, created_at, updated_at
 			FROM ` + spaces + ` WHERE id LIKE 'personal-%'`,

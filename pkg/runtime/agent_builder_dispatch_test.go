@@ -114,7 +114,7 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 	base := newAgentBuilderFixture(t, false)
 	store := &agentBuilderDispatchStore{MemoryStore: NewMemoryStore(), approvals: map[string]*ApprovalCheckpoint{}}
 	base.spaces = NewSpaceService(store)
-	sales, err := base.spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: base.scope, Name: "Sales", Look: DefaultSpaceLook, CreatedBy: "operator"})
+	sales, err := base.spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: base.scope, Name: "Sales", Look: DefaultSpaceLook, OwnerID: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}

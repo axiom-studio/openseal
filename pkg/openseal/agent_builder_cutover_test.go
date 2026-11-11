@@ -225,7 +225,7 @@ func TestAgentBuilderCutoverConvertsEachDraftAtStart(t *testing.T) {
 	if err := createCutoverAgent(ctx, engine, builderCutoverTestScope, "inbox-agent"); err != nil {
 		t.Fatal(err)
 	}
-	inbox, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: builderCutoverTestScope, Name: "Inbox", Look: runtime.DefaultSpaceLook, CreatedBy: "ana"})
+	inbox, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: builderCutoverTestScope, Name: "Inbox", Look: runtime.DefaultSpaceLook, OwnerID: "ana"})
 	if err != nil {
 		t.Fatal(err)
 	}

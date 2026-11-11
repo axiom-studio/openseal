@@ -419,6 +419,9 @@ type (
 	SpaceLook                            = runtime.SpaceLook
 	SpaceMember                          = runtime.SpaceMember
 	SpaceMemberType                      = runtime.SpaceMemberType
+	SpaceAccess                          = runtime.SpaceAccess
+	SpacePerson                          = runtime.SpacePerson
+	AddSpacePersonRequest                = runtime.AddSpacePersonRequest
 	SpaceStore                           = runtime.SpaceStore
 	SpacePatch                           = runtime.SpacePatch
 	CreateSpaceRequest                   = runtime.CreateSpaceRequest
@@ -1735,6 +1738,10 @@ const (
 
 	SpaceMemberAgent = runtime.SpaceMemberAgent
 	SpaceMemberTeam  = runtime.SpaceMemberTeam
+
+	SpaceAccessOwner    = runtime.SpaceAccessOwner
+	SpaceAccessInvited  = runtime.SpaceAccessInvited
+	SpaceAccessEveryone = runtime.SpaceAccessEveryone
 
 	ConversationParticipantUser       = runtime.ConversationParticipantUser
 	ConversationParticipantAgent      = runtime.ConversationParticipantAgent
@@ -3764,6 +3771,72 @@ func (e *Engine) DeleteSpaceMember(ctx context.Context, request runtime.DeleteSp
 		return errSpacesUnsupported
 	}
 	return e.spaces.DeleteSpaceMember(ctx, request)
+}
+
+// ListScopeSpaceMembers returns every space membership of the scope: which
+// spaces each Agent and Team is in.
+func (e *Engine) ListScopeSpaceMembers(ctx context.Context, scope runtime.Scope) ([]*runtime.SpaceMember, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.ListScopeSpaceMembers(ctx, scope)
+}
+
+// SetSpaceAccess changes who may see the space.
+func (e *Engine) SetSpaceAccess(ctx context.Context, scope runtime.Scope, spaceID string, access runtime.SpaceAccess) (*runtime.Space, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.SetSpaceAccess(ctx, scope, spaceID, access)
+}
+
+// AddSpacePerson adds a person to a space. The host must first verify the
+// person belongs to the scope.
+func (e *Engine) AddSpacePerson(ctx context.Context, request runtime.AddSpacePersonRequest) (*runtime.SpacePerson, bool, error) {
+	if e.spaces == nil {
+		return nil, false, errSpacesUnsupported
+	}
+	return e.spaces.AddSpacePerson(ctx, request)
+}
+
+func (e *Engine) RemoveSpacePerson(ctx context.Context, scope runtime.Scope, spaceID, userID string) error {
+	if e.spaces == nil {
+		return errSpacesUnsupported
+	}
+	return e.spaces.RemoveSpacePerson(ctx, scope, spaceID, userID)
+}
+
+func (e *Engine) ListSpacePeople(ctx context.Context, scope runtime.Scope, spaceID string) ([]*runtime.SpacePerson, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.ListSpacePeople(ctx, scope, spaceID)
+}
+
+// VisibleSpaces returns the ids of the spaces the person may see: the ones
+// they own, the ones open to everyone, and the ones they were added to.
+func (e *Engine) VisibleSpaces(ctx context.Context, scope runtime.Scope, userID string) ([]string, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.VisibleSpaces(ctx, scope, userID)
+}
+
+// CanEditSpace reports whether the person owns the space.
+func (e *Engine) CanEditSpace(ctx context.Context, scope runtime.Scope, spaceID, userID string) (bool, error) {
+	if e.spaces == nil {
+		return false, errSpacesUnsupported
+	}
+	return e.spaces.CanEditSpace(ctx, scope, spaceID, userID)
+}
+
+// CanManageSpace reports whether the person may change the space's access
+// and people: its owner, or a tenant admin who can see it.
+func (e *Engine) CanManageSpace(ctx context.Context, scope runtime.Scope, spaceID, userID string, isAdmin bool) (bool, error) {
+	if e.spaces == nil {
+		return false, errSpacesUnsupported
+	}
+	return e.spaces.CanManageSpace(ctx, scope, spaceID, userID, isAdmin)
 }
 
 func (e *Engine) CreateEmbedInstallation(ctx context.Context, request runtime.CreateEmbedInstallationRequest) (*runtime.EmbedInstallation, error) {

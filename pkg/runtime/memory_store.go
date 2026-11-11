@@ -48,6 +48,7 @@ type MemoryStore struct {
 	agentBuilderDrafts                  map[string]string
 	spaces                              map[Scope]map[string]*Space
 	spaceMembers                        map[Scope][]*SpaceMember
+	spacePeople                         map[Scope][]*SpacePerson
 	conversationTasks                   map[string]*ConversationTask
 	conversationTaskWorkRuns            map[string]string
 	conversationTaskOrder               map[memoryConversationTaskIndexKey]*memoryOrderedIndexNode[memoryConversationTaskPageKey]
@@ -132,6 +133,7 @@ func NewMemoryStore() *MemoryStore {
 		agentBuilderDrafts:        make(map[string]string),
 		spaces:                    make(map[Scope]map[string]*Space),
 		spaceMembers:              make(map[Scope][]*SpaceMember),
+		spacePeople:               make(map[Scope][]*SpacePerson),
 		conversationKeys:          make(map[string]string),
 		channelMessages:           make(map[string][]*ChannelMessage),
 		channelMessageIDs:         make(map[string]*ChannelMessage),

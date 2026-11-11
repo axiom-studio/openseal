@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -139,6 +140,7 @@ func (s *MemoryStore) DeleteSpace(_ context.Context, scope Scope, spaceID string
 		kept = append(kept, member)
 	}
 	s.spaceMembers[scope] = kept
+	s.spacePeople[scope] = slices.DeleteFunc(s.spacePeople[scope], func(person *SpacePerson) bool { return person.SpaceID == spaceID })
 	delete(s.spaces[scope], spaceID)
 	for _, member := range dropped {
 		if !s.hasSpaceMembershipLocked(scope, member.Type, member.ID) {
@@ -285,4 +287,95 @@ func (s *MemoryStore) EnsureMemberHasSpace(_ context.Context, scope Scope, membe
 	}
 	defaultSpace, _ := s.ensureDefaultSpaceLocked(scope, now)
 	return cloneSpaceMember(s.appendSpaceMemberLocked(scope, &SpaceMember{SpaceID: defaultSpace.ID, Type: memberType, ID: memberID, AddedAt: now})), nil
+}
+
+func (s *MemoryStore) SetSpaceAccess(_ context.Context, scope Scope, spaceID string, access SpaceAccess, now time.Time) (*Space, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	space := s.spaces[scope][spaceID]
+	if space == nil {
+		return nil, ErrSpaceNotFound
+	}
+	space.Access, space.UpdatedAt = access, now
+	return cloneSpace(space), nil
+}
+
+func (s *MemoryStore) PutSpacePerson(_ context.Context, scope Scope, person *SpacePerson) (*SpacePerson, bool, error) {
+	if err := person.Validate(); err != nil {
+		return nil, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.spaces[scope][person.SpaceID] == nil {
+		return nil, false, ErrSpaceNotFound
+	}
+	for _, existing := range s.spacePeople[scope] {
+		if existing.SpaceID == person.SpaceID && existing.UserID == person.UserID {
+			stored := *existing
+			return &stored, false, nil
+		}
+	}
+	stored := *person
+	s.spacePeople[scope] = append(s.spacePeople[scope], &stored)
+	created := stored
+	return &created, true, nil
+}
+
+func (s *MemoryStore) DeleteSpacePerson(_ context.Context, scope Scope, spaceID, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.spaces[scope][spaceID] == nil {
+		return ErrSpaceNotFound
+	}
+	s.spacePeople[scope] = slices.DeleteFunc(s.spacePeople[scope], func(person *SpacePerson) bool {
+		return person.SpaceID == spaceID && person.UserID == userID
+	})
+	return nil
+}
+
+func (s *MemoryStore) ListSpacePeople(_ context.Context, scope Scope, spaceID string) ([]*SpacePerson, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.spaces[scope][spaceID] == nil {
+		return nil, ErrSpaceNotFound
+	}
+	result := make([]*SpacePerson, 0)
+	for _, person := range s.spacePeople[scope] {
+		if person.SpaceID == spaceID {
+			listed := *person
+			result = append(result, &listed)
+		}
+	}
+	slices.SortStableFunc(result, func(a, b *SpacePerson) int {
+		if order := a.AddedAt.Compare(b.AddedAt); order != 0 {
+			return order
+		}
+		return strings.Compare(a.UserID, b.UserID)
+	})
+	return result, nil
+}
+
+func (s *MemoryStore) VisibleSpaces(_ context.Context, scope Scope, userID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]string, 0)
+	for _, space := range s.orderedSpacesLocked(scope, false) {
+		invited := slices.ContainsFunc(s.spacePeople[scope], func(person *SpacePerson) bool {
+			return person.SpaceID == space.ID && person.UserID == userID
+		})
+		if spaceVisibleTo(space, userID, invited) {
+			result = append(result, space.ID)
+		}
+	}
+	return result, nil
+}
+
+func (s *MemoryStore) ListScopeSpaceMembers(_ context.Context, scope Scope) ([]*SpaceMember, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*SpaceMember, 0, len(s.spaceMembers[scope]))
+	for _, member := range s.spaceMembers[scope] {
+		result = append(result, cloneSpaceMember(member))
+	}
+	return result, nil
 }

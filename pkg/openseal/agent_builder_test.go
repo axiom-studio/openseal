@@ -96,7 +96,7 @@ func TestAgentBuilderStartConversationOriginSpaceAndReplay(t *testing.T) {
 	}
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	requester := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
-	space, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: scope, Name: "Press", Look: runtime.DefaultSpaceLook, CreatedBy: "ana"})
+	space, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: scope, Name: "Press", Look: runtime.DefaultSpaceLook, OwnerID: "ana"})
 	if err != nil {
 		t.Fatal(err)
 	}

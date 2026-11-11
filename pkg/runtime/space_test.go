@@ -81,11 +81,11 @@ func exerciseSpaceStore(t *testing.T, store spaceConversationStore) {
 	if again, created, err := spaces.EnsureDefaultSpace(ctx, scope); err != nil || created || again.ID != defaultSpace.ID {
 		t.Fatalf("ensure again: %+v %v %v", again, created, err)
 	}
-	work, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "  Work  ", Look: SpaceLook("harbor"), CreatedBy: "7"})
-	if err != nil || work.Name != "Work" || work.Position != 1 || work.IsDefault || work.CreatedBy != "7" {
+	work, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "  Work  ", Look: SpaceLook("harbor"), OwnerID: "7"})
+	if err != nil || work.Name != "Work" || work.Position != 1 || work.IsDefault || work.OwnerID != "7" || work.Access != SpaceAccessOwner {
 		t.Fatalf("work = %+v, err = %v", work, err)
 	}
-	home, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Home", Look: SpaceLook("critter"), CreatedBy: "7"})
+	home, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Home", Look: SpaceLook("critter"), OwnerID: "7"})
 	if err != nil || home.Position != 2 {
 		t.Fatalf("home = %+v, err = %v", home, err)
 	}
@@ -372,6 +372,8 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	// Rewind to the Personal schema; the space keeps a name someone gave it.
 	for _, statement := range []string{
 		`DROP INDEX idx_spaces_default`,
+		`ALTER TABLE spaces DROP COLUMN access`,
+		`ALTER TABLE spaces RENAME COLUMN owner_id TO created_by`,
 		`ALTER TABLE spaces RENAME COLUMN is_default TO is_personal`,
 		`CREATE UNIQUE INDEX idx_spaces_personal ON spaces(scope_kind, scope_id) WHERE is_personal = 1`,
 		`UPDATE spaces SET id = '` + oldID + `', name = 'Shared'`,
@@ -391,7 +393,8 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
 	listed, err := reopened.ListSpaces(ctx, scope)
-	if err != nil || len(listed) != 1 || listed[0].ID != newID || !listed[0].IsDefault || listed[0].Name != "Shared" {
+	if err != nil || len(listed) != 1 || listed[0].ID != newID || !listed[0].IsDefault || listed[0].Name != "Shared" ||
+		listed[0].Access != SpaceAccessEveryone || listed[0].OwnerID != DefaultSpaceOwner {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
 	members, err := reopened.ListSpaceMembers(ctx, scope, newID)

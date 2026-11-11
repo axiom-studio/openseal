@@ -25,7 +25,7 @@ func seedAgentBuilderDrafts(t *testing.T, store KernelStore) agentBuilderDraftSe
 	f, card := cardApproval(t, store, "create", createAgentCard(), ApprovalTimeoutExpire)
 	ctx := f.ctx
 	service := NewConversationService(store.(ConversationStore))
-	second, err := NewSpaceService(store.(SpaceStore)).CreateSpace(ctx, CreateSpaceRequest{Scope: f.scope, Name: "Second", Look: DefaultSpaceLook, CreatedBy: "ana"})
+	second, err := NewSpaceService(store.(SpaceStore)).CreateSpace(ctx, CreateSpaceRequest{Scope: f.scope, Name: "Second", Look: DefaultSpaceLook, OwnerID: "ana"})
 	if err != nil {
 		t.Fatal(err)
 	}
