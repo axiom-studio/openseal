@@ -40,6 +40,7 @@ func newRoutineEventHarness(t *testing.T) *routineEventHarness {
 	h.matcher.now = h.clock
 	h.dispatcher = NewRoutineEventDispatcher(h.store, h.matcher)
 	h.dispatcher.now = h.clock
+	seedTestSpace(t, h.store, h.scope)
 	h.conversation, h.message = h.chat("Inbox")
 	return h
 }

@@ -46,12 +46,14 @@ func (h *agentBuilderTestHost) PrepareAgentModel(context.Context, AgentModelRequ
 func (h *agentBuilderTestHost) AfterAgentCreated(context.Context, AgentCreated) {}
 
 type agentBuilderFixture struct {
-	scope     Scope
-	agents    *kernelagent.Registry
-	teams     *kernelteam.Registry
-	catalog   *skill.Catalog
-	spaces    *SpaceService
-	salesID   string
+	scope   Scope
+	agents  *kernelagent.Registry
+	teams   *kernelteam.Registry
+	catalog *skill.Catalog
+	spaces  *SpaceService
+	salesID string
+	// homeID is the default space of the person the fixture's run acts for.
+	homeID    string
 	run       *AgentRun
 	host      *agentBuilderTestHost
 	validator *AgentBuilderActionValidator
@@ -167,15 +169,12 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	}
 
 	spaces := NewSpaceService(NewMemoryStore())
-	sales, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Sales", Look: DefaultSpaceLook, OwnerID: "operator"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	salesID, homeID := seedAgentBuilderSpaces(t, spaces, scope)
 	fixture := &agentBuilderFixture{
-		scope: scope, agents: agents, teams: teams, catalog: catalog, spaces: spaces, salesID: sales.ID,
+		scope: scope, agents: agents, teams: teams, catalog: catalog, spaces: spaces, salesID: salesID, homeID: homeID,
 		run: &AgentRun{
 			ID: "builder-run", Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
-			AssignedAgentID: "finn", Source: RunSourceChat,
+			AssignedAgentID: "finn", ActingUser: agentBuilderApprover.ID, Source: RunSourceChat,
 		},
 	}
 	var host AgentBuilderHost
@@ -188,6 +187,22 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 		t.Fatal(err)
 	}
 	return fixture
+}
+
+// seedAgentBuilderSpaces creates Sales, owned by an operator, and Home, the
+// default space of the person the builder run acts for.
+func seedAgentBuilderSpaces(t *testing.T, spaces *SpaceService, scope Scope) (salesID, homeID string) {
+	t.Helper()
+	ctx := context.Background()
+	sales, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Sales", Look: DefaultSpaceLook, OwnerID: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Home", Look: DefaultSpaceLook, OwnerID: agentBuilderApprover.ID})
+	if err != nil || !home.IsDefault {
+		t.Fatalf("home = %+v, err = %v", home, err)
+	}
+	return sales.ID, home.ID
 }
 
 func (f *agentBuilderFixture) bound(t *testing.T, action string) *skill.BoundAction {
@@ -287,7 +302,7 @@ func TestAgentBuilderCreateResolvesSpaceToPersonal(t *testing.T) {
 		t.Fatal(err)
 	}
 	space, _ := preview["space"].(map[string]interface{})
-	if space["id"] != DefaultSpaceID(fixture.scope) || space["name"] != DefaultSpaceName {
+	if space["id"] != fixture.homeID || space["name"] != "Home" {
 		t.Fatalf("space = %#v", space)
 	}
 	if model, _ := preview["model"].(map[string]interface{}); model["id"] != "" {

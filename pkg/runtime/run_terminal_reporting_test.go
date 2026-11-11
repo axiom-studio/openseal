@@ -29,6 +29,7 @@ func terminalReportingContractRun(t *testing.T, store terminalReportingContractS
 	t.Helper()
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "report-agent"}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Original request", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)

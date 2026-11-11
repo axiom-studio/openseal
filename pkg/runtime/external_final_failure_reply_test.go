@@ -21,6 +21,7 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 	store := &countingFinalReplyStore{MemoryStore: NewMemoryStore()}
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "17"}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "seal"}, Title: "Busy channel", IdempotencyKey: "busy-final-channel",
 	})

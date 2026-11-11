@@ -89,7 +89,7 @@ type TeamCreateActionValidator struct {
 
 // NewTeamCreateActionValidator needs the Agent and Team registries and the
 // spaces. conversations and runs place the Team in the conversation's space;
-// without them it goes to Default.
+// without them it goes to the default space of the person the run acts for.
 func NewTeamCreateActionValidator(
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
@@ -428,9 +428,6 @@ func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope Scop
 	if spaceID == "" {
 		return nil, errors.New("create_team requires a space")
 	}
-	if spaceID == DefaultSpaceID(scope) {
-		return &Space{ID: spaceID, Scope: scope, Name: DefaultSpaceName, IsDefault: true}, nil
-	}
 	spaces, err := d.provision.ListSpaces(ctx, scope)
 	if err != nil {
 		return nil, err
@@ -443,20 +440,12 @@ func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope Scop
 	return nil, fmt.Errorf("space %q no longer exists; propose create_team again", spaceID)
 }
 
-// placeTeamInSpace keeps a replayed Team in the reviewed space only: the
-// create places it there, or in Default when it could not reach the space.
+// placeTeamInSpace adds the Team to the reviewed space. The create placed it
+// there; a replay whose create committed without the membership gets it
+// here.
 func (d *AgentBuilderActionDispatcher) placeTeamInSpace(ctx context.Context, scope Scope, space *Space, teamID string) error {
-	if _, _, err := d.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
+	_, _, err := d.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
 		Scope: scope, SpaceID: space.ID, Type: SpaceMemberTeam, MemberID: teamID,
-	}); err != nil {
-		return err
-	}
-	defaultSpace := DefaultSpaceID(scope)
-	if space.ID == defaultSpace {
-		return nil
-	}
-	if err := d.provision.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: scope, SpaceID: defaultSpace, Type: SpaceMemberTeam, MemberID: teamID}); err != nil && !errors.Is(err, ErrSpaceNotFound) {
-		return err
-	}
-	return nil
+	})
+	return err
 }

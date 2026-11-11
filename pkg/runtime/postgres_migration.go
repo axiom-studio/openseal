@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 85
+const currentPostgresSchemaVersion int64 = 86
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -38,8 +38,9 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 	if _, err := s.acquireMigrationLock(ctx, tx); err != nil {
 		return err
 	}
+	// Rolling back 86 leaves one default space per scope, the oldest.
 	// Rolling back 85 gives every Team member a role slot of its own.
-	// Rolling back 83 loses each space's access and the people added to it.
+	// Rolling back 84 loses each space's access and the people added to it.
 	// Rolling back 81 does not restore event waits; rolling back 80 keeps the two event index columns of
 	// runbook_activations; rolling back 79 does not restore event sources; rolling back 78 keeps
 	// the Default space ids; rolling back 77 does not restore kernel Projects;
@@ -79,6 +80,11 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		2:  {"agent_runs", "objectives"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == ownerDefaultSpaceMigrationVersion {
+			if err := s.rollbackOwnerDefaultSpace(ctx, tx); err != nil {
+				return err
+			}
+		}
 		if version == teamMembersMigrationVersion {
 			if err := s.rollbackTeamMembers(ctx, tx); err != nil {
 				return err

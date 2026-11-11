@@ -10,6 +10,7 @@ func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "conversation-runbook-start"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Agent work", IdempotencyKey: "agent-work-channel",
 	})

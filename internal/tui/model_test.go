@@ -2286,6 +2286,13 @@ func TestTeamChannelCreateAndQuestionPostPreserveIdempotency(t *testing.T) {
 
 func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 	store := runtime.NewMemoryStore()
+	// The daemon creates the local operator's space at start; the server
+	// puts a channel made with no space there.
+	if _, err := runtime.NewSpaceService(store).CreateSpace(t.Context(), runtime.CreateSpaceRequest{
+		Scope: runtime.Scope{Kind: "tenant", ID: "one"}, Name: "Home", Look: runtime.DefaultSpaceLook, OwnerID: "local-operator",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()

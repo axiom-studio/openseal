@@ -33,6 +33,7 @@ func TestTargetedSkillSetupResolvesFromTheBuildersChat(t *testing.T) {
 	if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}
+	seedSpace(t, e, scope, "")
 	if _, _, err := e.CreateConversation(ctx, CreateConversationRequest{ID: "chat-finn", Scope: scope, Owner: agentOwner("finn"), Title: "New agent", IdempotencyKey: "builder-chat"}); err != nil {
 		t.Fatal(err)
 	}

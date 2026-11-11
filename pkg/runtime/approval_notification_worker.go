@@ -117,7 +117,7 @@ func (w *ApprovalNotificationWorker) notifyInternal(ctx context.Context, approva
 	if err != nil {
 		return err
 	}
-	conversation, err := w.agentApprovalConversation(ctx, approval.Scope, run.Owner)
+	conversation, err := w.agentApprovalConversation(ctx, approval.Scope, run.Owner, run.ActingUser)
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,9 @@ func agentApprovalConversationKey(owner ObjectiveOwner) string {
 	return "agent-approvals:" + string(owner.Type) + ":" + owner.ID
 }
 
-func (w *ApprovalNotificationWorker) agentApprovalConversation(ctx context.Context, scope Scope, owner ObjectiveOwner) (*Conversation, error) {
+// agentApprovalConversation returns the owner's Approvals conversation. The
+// first one is created for person, the one the run acts for.
+func (w *ApprovalNotificationWorker) agentApprovalConversation(ctx context.Context, scope Scope, owner ObjectiveOwner, person string) (*Conversation, error) {
 	key := agentApprovalConversationKey(owner)
 	existing, err := w.store.FindConversationByIdempotencyKey(ctx, scope, key)
 	if err != nil {
@@ -163,7 +165,7 @@ func (w *ApprovalNotificationWorker) agentApprovalConversation(ctx context.Conte
 		return existing, nil
 	}
 	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: owner, Title: "Approvals",
+		Scope: scope, Owner: owner, Title: "Approvals", CreatedBy: person,
 		Origin: &ConversationReference{Kind: ConversationReferenceAgentApprovals, ID: AgentApprovalsConversationReferenceID(owner)}, IdempotencyKey: key,
 	})
 	if !errors.Is(err, ErrMessageConflict) {
@@ -556,7 +558,7 @@ func (w *ApprovalNotificationWorker) approvalConversation(
 		return existing, nil
 	}
 	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: endpoint.Owner, Title: endpoint.Name + " approvals", IdempotencyKey: key,
+		Scope: scope, Owner: endpoint.Owner, Title: endpoint.Name + " approvals", CreatedBy: endpoint.CreatedBy, IdempotencyKey: key,
 	})
 	if !errors.Is(err, ErrMessageConflict) {
 		return conversation, err

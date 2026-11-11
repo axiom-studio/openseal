@@ -55,6 +55,7 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 			store := conversationTaskChangeStore(t, backend)
 			conversations := NewConversationService(store.(ConversationStore))
 			scope := Scope{Kind: "tenant", ID: "task-stream"}
+			seedTestSpace(t, store.(SpaceStore), scope)
 			conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Task stream", IdempotencyKey: "task-stream",
 			})
@@ -148,6 +149,7 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 	store := NewMemoryStore()
 	conversations := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "task-thread-privacy"}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Private task", IdempotencyKey: "private-task",
 	})
@@ -264,6 +266,7 @@ func TestConversationChangesIncludeCanonicalLocalRootedForeground(t *testing.T) 
 			store := conversationTaskChangeStore(t, backend)
 			conversations := NewConversationService(store.(ConversationStore))
 			scope := Scope{Kind: "tenant", ID: "rooted-stream"}
+			seedTestSpace(t, store.(SpaceStore), scope)
 			conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Rooted stream", IdempotencyKey: "rooted-stream",
 			})

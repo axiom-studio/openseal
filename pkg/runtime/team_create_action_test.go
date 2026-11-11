@@ -74,7 +74,7 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 			t.Fatal(err)
 		}
 	}
-	for _, spaceID := range []string{DefaultSpaceID(base.scope), base.salesID} {
+	for _, spaceID := range []string{base.homeID, base.salesID} {
 		for _, agentID := range []string{"researcher", "platform"} {
 			if _, _, err := base.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: base.scope, SpaceID: spaceID, Type: SpaceMemberAgent, MemberID: agentID}); err != nil {
 				t.Fatal(err)
@@ -198,11 +198,11 @@ func TestTeamCreateResolvesSpaceToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defaultSpace := DefaultSpaceID(f.scope)
+	defaultSpace := f.homeID
 	if arguments["spaceId"] != defaultSpace {
 		t.Fatalf("spaceId = %#v, want %q", arguments["spaceId"], defaultSpace)
 	}
-	if space := preview["space"].(map[string]interface{}); space["id"] != defaultSpace || space["name"] != DefaultSpaceName {
+	if space := preview["space"].(map[string]interface{}); space["id"] != defaultSpace || space["name"] != "Home" {
 		t.Fatalf("space = %#v", space)
 	}
 }
@@ -311,7 +311,7 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 		!reflect.DeepEqual(deployment.Roster, wantRoster) {
 		t.Fatalf("deployment = %#v", deployment)
 	}
-	if !f.teamInSpace(t, f.salesID, teamID) || f.teamInSpace(t, DefaultSpaceID(f.scope), teamID) {
+	if !f.teamInSpace(t, f.salesID, teamID) || f.teamInSpace(t, f.homeID, teamID) {
 		t.Fatal("team is not only in the reviewed space")
 	}
 
@@ -355,8 +355,8 @@ func TestTeamCreateWithoutPurposeUsesComposerDefault(t *testing.T) {
 	if definition.Purpose != "Launch Crew team" {
 		t.Fatalf("purpose = %q", definition.Purpose)
 	}
-	if !f.teamInSpace(t, DefaultSpaceID(f.scope), teamID) {
-		t.Fatal("team is not in Default")
+	if !f.teamInSpace(t, f.homeID, teamID) || f.teamInSpace(t, f.salesID, teamID) {
+		t.Fatal("team is not only in the person's default space")
 	}
 }
 

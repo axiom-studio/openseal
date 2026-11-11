@@ -9,7 +9,9 @@ import (
 
 func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 	t.Parallel()
-	service := NewConversationService(NewMemoryStore())
+	store := NewMemoryStore()
+	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "one"})
+	service := NewConversationService(store)
 	origin := &ConversationReference{Kind: ConversationReferenceObjective, ID: "objective-reddit-research"}
 
 	conversation, replayed, err := service.CreateConversation(context.Background(), CreateConversationRequest{
@@ -29,9 +31,11 @@ func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 
 func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 	t.Parallel()
-	service := NewConversationService(NewMemoryStore())
+	store := NewMemoryStore()
+	service := NewConversationService(store)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, Title: "First title", IdempotencyKey: "chat-one",
 	})
@@ -60,9 +64,11 @@ func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 }
 
 func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
-	service := NewConversationService(NewMemoryStore())
+	store := NewMemoryStore()
+	service := NewConversationService(store)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "visibility"}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Private coordination", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +135,7 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 	service.now = func() time.Time { return now }
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, Title: "Operations", IdempotencyKey: "operations-v1",
 	})

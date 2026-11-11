@@ -63,7 +63,7 @@ func WithAgentBuilderHost(host AgentBuilderHost) Option {
 // EnsureAgentControlConversation returns the Agent's control conversation,
 // creating it when it is missing.
 func (e *Engine) EnsureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*runtime.Conversation, error) {
-	return e.ensureAgentControlConversation(ctx, deployment)
+	return e.ensureAgentControlConversation(ctx, deployment, "")
 }
 
 // configureAgentBuilderActions adds the builder validator and wraps every

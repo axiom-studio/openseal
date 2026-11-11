@@ -27,6 +27,7 @@ func testChannelTimelineStore(t *testing.T, store ConversationStore) {
 	t.Helper()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "channel-timeline"}
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
 		Title: "Channel timeline", IdempotencyKey: "timeline",

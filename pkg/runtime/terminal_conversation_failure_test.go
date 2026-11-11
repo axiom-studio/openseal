@@ -14,6 +14,7 @@ func terminalFailureConversationFixture(t *testing.T, store terminalReportingCon
 	scope := Scope{Kind: "tenant", ID: "failure-" + uuid.NewString()}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
@@ -243,6 +244,7 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 			scope := Scope{Kind: "tenant", ID: "canonical-scheduled-failure-" + uuid.NewString()}
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
 			service := NewConversationService(store)
+			seedTestSpace(t, store.(SpaceStore), scope)
 			conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Scheduled user question", IdempotencyKey: uuid.NewString()})
 			if err != nil {
 				t.Fatal(err)

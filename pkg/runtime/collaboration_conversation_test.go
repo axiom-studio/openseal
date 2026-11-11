@@ -72,6 +72,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 			},
 		},
 	}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"},
 		Title: "Release coordination", IdempotencyKey: "release-coordination",
@@ -184,6 +185,7 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "escalation-projection"}
 	store := NewMemoryStore()
+	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"},
 		Title: "Incident coordination", IdempotencyKey: "incident-coordination",

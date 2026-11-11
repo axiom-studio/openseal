@@ -225,7 +225,7 @@ func (w *ExternalConversationInboxWorker) ensureConversation(
 		key := stableExternalConversationID(endpoint.Scope, endpoint.ID, "conversation", event.ExternalConversationID)
 		origin := &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}
 		conversation, _, createErr := w.conversations.CreateConversation(ctx, CreateConversationRequest{
-			Scope: endpoint.Scope, Owner: endpoint.Owner, Title: endpoint.Name, Origin: origin, IdempotencyKey: key,
+			Scope: endpoint.Scope, Owner: endpoint.Owner, Title: endpoint.Name, Origin: origin, CreatedBy: endpoint.CreatedBy, IdempotencyKey: key,
 		})
 		if createErr != nil {
 			return nil, nil, createErr

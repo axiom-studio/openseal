@@ -327,6 +327,7 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 		workerID: loopFixtureWorker1,
 		config:   config,
 	}
+	seedTestSpace(t, store.(SpaceStore), f.scope)
 	f.model.setContextWindow(config.contextWindow)
 	for name, handler := range config.hostTools {
 		f.tools.handle(name, handler)

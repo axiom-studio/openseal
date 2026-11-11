@@ -68,6 +68,7 @@ func claimedForegroundChatRun(t *testing.T, store *MemoryStore) *AgentRun {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "control-authority"}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "control-authority-chat",
 	})

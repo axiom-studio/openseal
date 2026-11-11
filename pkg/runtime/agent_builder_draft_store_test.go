@@ -25,6 +25,11 @@ func seedAgentBuilderDrafts(t *testing.T, store KernelStore) agentBuilderDraftSe
 	f, card := cardApproval(t, store, "create", createAgentCard(), ApprovalTimeoutExpire)
 	ctx := f.ctx
 	service := NewConversationService(store.(ConversationStore))
+	// Each requester's first space is their default; the plain chat has no
+	// person behind it and goes to the empty owner's.
+	seedTestSpaceFor(t, store.(SpaceStore), f.scope, "ana")
+	seedTestSpaceFor(t, store.(SpaceStore), f.scope, "bo")
+	seedTestSpace(t, store.(SpaceStore), f.scope)
 	second, err := NewSpaceService(store.(SpaceStore)).CreateSpace(ctx, CreateSpaceRequest{Scope: f.scope, Name: "Second", Look: DefaultSpaceLook, OwnerID: "ana"})
 	if err != nil {
 		t.Fatal(err)

@@ -36,6 +36,7 @@ func forCatchUpStores(t *testing.T, owner ObjectiveOwner, test func(*testing.T, 
 			t.Fatalf("%T is not an agent session store", store)
 		}
 		service := NewConversationService(store)
+		seedTestSpace(t, store.(SpaceStore), Scope{Kind: "tenant", ID: "catch-up"})
 		conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 			Scope: Scope{Kind: "tenant", ID: "catch-up"}, Owner: owner, Title: "Catch-up", IdempotencyKey: "catch-up",
 		})

@@ -26,6 +26,7 @@ func prepareRunReporting(
 	scope Scope,
 	owner ObjectiveOwner,
 	policy *runbook.ReportingPolicy,
+	person string,
 	runID string,
 	contextValues map[string]interface{},
 ) (*Conversation, string, error) {
@@ -35,7 +36,7 @@ func prepareRunReporting(
 	if store == nil {
 		return nil, "", errors.New("run reporting requires a conversation store")
 	}
-	channel, err := ensureRunReportingChannel(ctx, store, scope, owner, policy)
+	channel, err := ensureRunReportingChannel(ctx, store, scope, owner, policy, person)
 	if err != nil {
 		return nil, "", err
 	}
@@ -55,13 +56,15 @@ func prepareRunReporting(
 // ensureRunReportingChannel materializes the durable work channel selected by
 // an active Runbook. Activations and Runs both call this boundary so accepted
 // compositions expose their channel immediately while execution safely reuses
-// the same owner-scoped Conversation.
+// the same owner-scoped Conversation. person is the one the activation acts
+// for; the channel is created for them.
 func ensureRunReportingChannel(
 	ctx context.Context,
 	store ConversationStore,
 	scope Scope,
 	owner ObjectiveOwner,
 	policy *runbook.ReportingPolicy,
+	person string,
 ) (*Conversation, error) {
 	if policy == nil {
 		return nil, nil
@@ -70,7 +73,7 @@ func ensureRunReportingChannel(
 		return nil, errors.New("run reporting requires a conversation store")
 	}
 	channel, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: owner, Title: strings.TrimSpace(policy.Title),
+		Scope: scope, Owner: owner, Title: strings.TrimSpace(policy.Title), CreatedBy: person,
 		IdempotencyKey: runReportingChannelKey(owner, policy),
 	})
 	return channel, err

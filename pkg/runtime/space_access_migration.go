@@ -11,7 +11,8 @@ import (
 const spaceAccessMigrationVersion int64 = 84
 
 // migrateSpaceAccess is PostgreSQL migration 84. Existing spaces become
-// "owner". The Default space, owned by no person, becomes "everyone".
+// "owner". The one space per scope that migration 67 made, owned by no
+// person, becomes "everyone".
 func (s *PostgresStore) migrateSpaceAccess(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, spaceAccessMigrationVersion)
 	if err != nil || applied {

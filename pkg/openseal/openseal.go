@@ -1442,6 +1442,7 @@ var (
 	ErrSpaceNotFound                        = runtime.ErrSpaceNotFound
 	ErrInvalidSpace                         = runtime.ErrInvalidSpace
 	ErrDefaultSpaceProtected                = runtime.ErrDefaultSpaceProtected
+	ErrNoDefaultSpace                       = runtime.ErrNoDefaultSpace
 	ErrTeamAgentOutsideSpace                = runtime.ErrTeamAgentOutsideSpace
 	ErrChannelMessageNotFound               = runtime.ErrChannelMessageNotFound
 	ErrParticipationRoundNotFound           = runtime.ErrParticipationRoundNotFound
@@ -3716,8 +3717,7 @@ func (e *Engine) LastConversationActivity(ctx context.Context, scope runtime.Sco
 
 var errSpacesUnsupported = errors.New("spaces are not supported by this store")
 
-// ListSpaces returns the scope's spaces by position, creating its Default
-// space on first use.
+// ListSpaces returns the scope's spaces by position. It creates none.
 func (e *Engine) ListSpaces(ctx context.Context, scope runtime.Scope) ([]*runtime.Space, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
@@ -3725,13 +3725,13 @@ func (e *Engine) ListSpaces(ctx context.Context, scope runtime.Scope) ([]*runtim
 	return e.spaces.ListSpaces(ctx, scope)
 }
 
-// EnsureDefaultSpace returns the scope's Default space and whether this call
-// created it.
-func (e *Engine) EnsureDefaultSpace(ctx context.Context, scope runtime.Scope) (*runtime.Space, bool, error) {
+// DefaultSpace returns the owner's default space in the scope: the first
+// space they created there. An owner with no space gets ErrNoDefaultSpace.
+func (e *Engine) DefaultSpace(ctx context.Context, scope runtime.Scope, ownerID string) (*runtime.Space, error) {
 	if e.spaces == nil {
-		return nil, false, errSpacesUnsupported
+		return nil, errSpacesUnsupported
 	}
-	return e.spaces.EnsureDefaultSpace(ctx, scope)
+	return e.spaces.DefaultSpace(ctx, scope, ownerID)
 }
 
 func (e *Engine) GetSpace(ctx context.Context, scope runtime.Scope, spaceID string) (*runtime.Space, error) {
@@ -3755,8 +3755,9 @@ func (e *Engine) UpdateSpace(ctx context.Context, request runtime.UpdateSpaceReq
 	return e.spaces.UpdateSpace(ctx, request)
 }
 
-// DeleteSpace moves the space's conversations to Default and drops its
-// members; a deployment left in no space joins Default.
+// DeleteSpace deletes a space that is not a default space. Its conversations,
+// and the deployments that are in no other space, move to the default space
+// of its owner.
 func (e *Engine) DeleteSpace(ctx context.Context, scope runtime.Scope, spaceID string) error {
 	if e.spaces == nil {
 		return errSpacesUnsupported
@@ -3778,7 +3779,15 @@ func (e *Engine) PutSpaceMember(ctx context.Context, request runtime.PutSpaceMem
 	if e.spaces == nil {
 		return nil, false, errSpacesUnsupported
 	}
-	return e.spaces.PutSpaceMember(ctx, request)
+	member, created, err := e.spaces.PutSpaceMember(ctx, request)
+	// An Agent created in no space got no control conversation; its first
+	// space gives it one.
+	if err == nil && created && member.Type == runtime.SpaceMemberAgent && e.agents != nil {
+		if deployment, getErr := e.agents.GetDeployment(ctx, skill.ScopeReference{Kind: request.Scope.Kind, ID: request.Scope.ID}, member.ID); getErr == nil {
+			e.ensureAgentControlConversationAfterWrite(ctx, deployment, "")
+		}
+	}
+	return member, created, err
 }
 
 // DeleteSpaceMember takes a deployment out of a space. An Agent also leaves
@@ -3807,6 +3816,16 @@ func (e *Engine) SetSpaceAccess(ctx context.Context, scope runtime.Scope, spaceI
 		return nil, errSpacesUnsupported
 	}
 	return e.spaces.SetSpaceAccess(ctx, scope, spaceID, access)
+}
+
+// SetSpaceOwner hands a space to another owner. The host must first verify
+// the person belongs to the scope. Each of the two owners then has the oldest
+// space they own as their default space.
+func (e *Engine) SetSpaceOwner(ctx context.Context, scope runtime.Scope, spaceID, ownerID string) (*runtime.Space, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.SetSpaceOwner(ctx, scope, spaceID, ownerID)
 }
 
 // AddSpacePerson adds a person to a space. The host must first verify the
@@ -4764,16 +4783,56 @@ func (e *Engine) ListAgentDefinitionVersions(ctx context.Context, id string) ([]
 	return e.agents.ListDefinitionVersions(ctx, id)
 }
 
+// CreateAgentDeployment creates the Agent in the default space of the person
+// creating it (actorType "user"). When no person is behind the call, or they
+// have no default space, the Agent is created in no space and gets its
+// control conversation when it joins one.
 func (e *Engine) CreateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
 	created, activation, err := e.agents.CreateDeployment(ctx, deployment, actorType, actorID, reason)
 	if err != nil {
 		return nil, nil, err
 	}
-	e.ensureDeploymentHasSpace(ctx, created.Scope, runtime.SpaceMemberAgent, created.ID)
-	if _, ensureErr := e.ensureAgentControlConversation(ctx, created); ensureErr != nil {
+	person := actingPerson(actorType, actorID)
+	e.ensureDeploymentHasSpace(ctx, created.Scope, person, runtime.SpaceMemberAgent, created.ID)
+	if _, ensureErr := e.ensureAgentControlConversation(ctx, created, person); ensureErr != nil && !errors.Is(ensureErr, runtime.ErrNoDefaultSpace) {
 		return created, activation, ensureErr
 	}
 	return created, activation, nil
+}
+
+// CreateAgentDeploymentInSpace creates the Agent as a member of the space,
+// with its control conversation there. No default space is involved.
+func (e *Engine) CreateAgentDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	if e.spaces == nil {
+		return nil, nil, errSpacesUnsupported
+	}
+	if deployment == nil {
+		return nil, nil, errors.New("agent deployment is required")
+	}
+	scope := runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
+	if _, err := e.spaces.GetSpace(ctx, scope, spaceID); err != nil {
+		return nil, nil, err
+	}
+	created, activation, err := e.agents.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, _, err := e.spaces.PutSpaceMember(ctx, runtime.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: runtime.SpaceMemberAgent, MemberID: created.ID}); err != nil {
+		return created, activation, err
+	}
+	if _, err := e.ensureAgentControlConversation(ctx, created, actingPerson(actorType, actorID)); err != nil {
+		return created, activation, err
+	}
+	return created, activation, nil
+}
+
+// actingPerson is the person behind a deployment write: its actor when that
+// is a user, else no one.
+func actingPerson(actorType, actorID string) string {
+	if strings.TrimSpace(actorType) != "user" {
+		return ""
+	}
+	return strings.TrimSpace(actorID)
 }
 
 // GetAgentDeployment and ListAgentDeployments are side-effect free. The
@@ -4790,17 +4849,20 @@ func (e *Engine) ListAgentDeployments(ctx context.Context, filter AgentDeploymen
 // ensureAgentControlConversationAfterWrite runs after a deployment write has
 // committed. The conversation is idempotent and the write must not appear
 // to fail because of it, so a failure is logged and retried by the next
-// deployment write.
-func (e *Engine) ensureAgentControlConversationAfterWrite(ctx context.Context, deployment *kernelagent.AgentDeployment) {
+// deployment write. An Agent in no space, written by no person with a
+// default space, has none until it joins a space.
+func (e *Engine) ensureAgentControlConversationAfterWrite(ctx context.Context, deployment *kernelagent.AgentDeployment, person string) {
 	if deployment == nil {
 		return
 	}
-	if _, err := e.ensureAgentControlConversation(ctx, deployment); err != nil && e.logger != nil {
+	if _, err := e.ensureAgentControlConversation(ctx, deployment, person); err != nil && !errors.Is(err, runtime.ErrNoDefaultSpace) && e.logger != nil {
 		e.logger.Warnw("failed to ensure Agent control conversation", "deploymentId", deployment.ID, "error", err)
 	}
 }
 
-func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*runtime.Conversation, error) {
+// ensureAgentControlConversation creates the control conversation in the
+// Agent's first space, else in the default space of person.
+func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment, person string) (*runtime.Conversation, error) {
 	if e == nil || e.conversations == nil || deployment == nil {
 		return nil, errors.New("Agent control conversation service is unavailable")
 	}
@@ -4810,6 +4872,7 @@ func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment 
 		Owner:          runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: deployment.ID},
 		Title:          "Agent control",
 		Origin:         &runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentControl, ID: agentControlReferenceID(deployment.ID)},
+		CreatedBy:      person,
 		IdempotencyKey: "agent-control:" + deployment.ID,
 	})
 	if err != nil {
@@ -4830,7 +4893,7 @@ func AgentApprovalsConversationReferenceID(owner ObjectiveOwner) string {
 func (e *Engine) UpdateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
 	updated, activation, err := e.agents.UpdateDeployment(ctx, deployment, expectedRevision, actorType, actorID, reason)
 	if err == nil {
-		e.ensureAgentControlConversationAfterWrite(ctx, updated)
+		e.ensureAgentControlConversationAfterWrite(ctx, updated, actingPerson(actorType, actorID))
 	}
 	return updated, activation, err
 }
@@ -4838,7 +4901,7 @@ func (e *Engine) UpdateAgentDeployment(ctx context.Context, deployment *kernelag
 func (e *Engine) ActivateAgentDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
 	activated, activation, err := e.agents.ActivateDefinition(ctx, scope, deploymentID, version, expectedRevision, actorType, actorID, reason)
 	if err == nil {
-		e.ensureAgentControlConversationAfterWrite(ctx, activated)
+		e.ensureAgentControlConversationAfterWrite(ctx, activated, actingPerson(actorType, actorID))
 	}
 	return activated, activation, err
 }
@@ -4846,7 +4909,7 @@ func (e *Engine) ActivateAgentDefinition(ctx context.Context, scope skill.ScopeR
 func (e *Engine) RollbackAgentDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
 	rolledBack, activation, err := e.agents.RollbackDefinition(ctx, scope, deploymentID, expectedRevision, actorType, actorID, reason)
 	if err == nil {
-		e.ensureAgentControlConversationAfterWrite(ctx, rolledBack)
+		e.ensureAgentControlConversationAfterWrite(ctx, rolledBack, actingPerson(actorType, actorID))
 	}
 	return rolledBack, activation, err
 }
@@ -4915,12 +4978,25 @@ func (e *Engine) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*
 	return e.teams.ListDefinitionVersions(ctx, id)
 }
 
-// CreateTeamDeployment creates the Team and adds it to the scope's Default
-// space, which brings its Agents there.
+// CreateTeamDeployment creates the Team in the default space of the person
+// creating it (actorType "user"), which brings its Agents there. When no
+// person is behind the call, or they have no default space, it creates
+// nothing and returns ErrNoDefaultSpace; CreateTeamDeploymentInSpace names
+// the space instead.
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+	if e.spaces == nil {
+		return e.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+	}
+	if deployment == nil {
+		return nil, nil, errors.New("team deployment is required")
+	}
+	space, err := e.spaces.DefaultSpace(ctx, runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, actingPerson(actorType, actorID))
+	if err != nil {
+		return nil, nil, err
+	}
 	created, activation, err := e.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
-	if err == nil && e.spaces != nil {
-		e.placeTeam(ctx, created, "")
+	if err == nil {
+		e.placeTeam(ctx, created, space.ID)
 	}
 	return created, activation, err
 }
@@ -4945,21 +5021,11 @@ func (e *Engine) CreateTeamDeploymentInSpace(ctx context.Context, spaceID string
 	return created, activation, err
 }
 
-// placeTeam runs after the Team's create has committed: it joins the space,
-// or Default when spaceID is empty. A failure is logged, not returned; the
-// Team exists.
+// placeTeam runs after the Team's create has committed: it joins the space.
+// A failure is logged, not returned; the Team exists.
 func (e *Engine) placeTeam(ctx context.Context, team *kernelteam.Deployment, spaceID string) {
 	scope := runtime.Scope{Kind: team.Scope.Kind, ID: team.Scope.ID}
-	var err error
-	if spaceID == "" {
-		var space *runtime.Space
-		if space, _, err = e.spaces.EnsureDefaultSpace(ctx, scope); err == nil {
-			spaceID = space.ID
-		}
-	}
-	if err == nil {
-		_, _, err = e.spaces.PutSpaceMember(ctx, runtime.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: runtime.SpaceMemberTeam, MemberID: team.ID})
-	}
+	_, _, err := e.spaces.PutSpaceMember(ctx, runtime.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: runtime.SpaceMemberTeam, MemberID: team.ID})
 	if err != nil && e.logger != nil {
 		e.logger.Warnw("team was not placed in a space", "deploymentId", team.ID, "spaceId", spaceID, "error", err)
 	}
@@ -4973,14 +5039,17 @@ func teamRosterAgents(roster []kernelteam.RosterAssignment) []string {
 	return agents
 }
 
-// ensureDeploymentHasSpace runs after a deployment write has committed: a
-// deployment in no space joins the scope's Default space. A failure is
-// logged, not returned; the deployment exists and the next write retries.
-func (e *Engine) ensureDeploymentHasSpace(ctx context.Context, scope skill.ScopeReference, memberType runtime.SpaceMemberType, deploymentID string) {
+// ensureDeploymentHasSpace runs after a deployment create has committed: a
+// deployment in no space joins the default space of the person who created
+// it. Without a person, or when they have no default space, it stays in no
+// space: a host provisions Agents before any space exists and adds them to
+// spaces itself. Any other failure is logged, not returned; the deployment
+// exists.
+func (e *Engine) ensureDeploymentHasSpace(ctx context.Context, scope skill.ScopeReference, person string, memberType runtime.SpaceMemberType, deploymentID string) {
 	if e == nil || e.spaces == nil {
 		return
 	}
-	if _, err := e.spaces.EnsureMemberHasSpace(ctx, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, memberType, deploymentID); err != nil && e.logger != nil {
+	if _, err := e.spaces.EnsureMemberHasSpace(ctx, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, person, memberType, deploymentID); err != nil && !errors.Is(err, runtime.ErrNoDefaultSpace) && e.logger != nil {
 		e.logger.Warnw("deployment was not placed in a space", "deploymentId", deploymentID, "type", memberType, "error", err)
 	}
 }

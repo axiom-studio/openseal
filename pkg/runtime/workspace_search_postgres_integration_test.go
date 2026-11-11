@@ -29,6 +29,7 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	service := NewConversationService(store)
 	for _, tenant := range []string{"one", "two"} {
 		scope := Scope{Kind: "tenant", ID: tenant}
+		seedTestSpace(t, store, scope)
 		conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Quorum planning", IdempotencyKey: "plan"})
 		if err != nil {
 			t.Fatal(err)

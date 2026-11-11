@@ -106,6 +106,7 @@ func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedTestSpace(t, store, item.Scope)
 	conversations := NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		ID: item.ConversationID, Scope: item.Scope, Owner: endpoint.Owner, Title: "Saved provider thread",

@@ -30,6 +30,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 			conversations := NewConversationService(conversationStore)
 			conversations.now = func() time.Time { return now }
+			seedTestSpace(t, store.(SpaceStore), scope)
 			conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 				Title: "Operations", IdempotencyKey: "operations-channel",
@@ -154,6 +155,7 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 	conversations := NewConversationService(store)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "private-stream"}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Private stream", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
@@ -229,6 +231,7 @@ func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 	}
 	scope := Scope{Kind: "tenant", ID: "restart"}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 		Title: "Restart", IdempotencyKey: "restart-channel",

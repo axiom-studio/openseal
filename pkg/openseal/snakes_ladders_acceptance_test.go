@@ -390,6 +390,7 @@ func (h *snakesAcceptance) hasRecovered() bool {
 func (h *snakesAcceptance) composeWorkforce(ctx context.Context, engine *Engine) {
 	h.t.Helper()
 	scope := SkillScope{Kind: "tenant", ID: "acceptance"}
+	seedSpace(h.t, engine, Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	for _, player := range gamePlayers {
 		definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 			ID: player, Version: "1", DisplayName: strings.ReplaceAll(player, "-", " "),

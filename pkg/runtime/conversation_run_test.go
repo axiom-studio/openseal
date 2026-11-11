@@ -17,6 +17,7 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "scheduler"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"},
 		Title: "Engineering", IdempotencyKey: "engineering-channel",
@@ -111,6 +112,7 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 	}
 	scope := Scope{Kind: "tenant", ID: "restart"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 		Title: "Operations", IdempotencyKey: "operations-channel",
@@ -170,6 +172,7 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "canceled-conversation"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 		Title: "Operations", IdempotencyKey: "canceled-channel",
@@ -237,6 +240,7 @@ func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "legacy-round"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"},
 		Title: "Engineering", IdempotencyKey: "legacy-channel",

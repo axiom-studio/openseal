@@ -21,6 +21,7 @@ func TestPublicEngineComposesFirstClassAgentAndTeamDeployments(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := capability.ScopeReference{Kind: "workspace", ID: "local"}
+	seedSpace(t, engine, Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	agentDeployment, _, err := engine.CreateAgentDeployment(ctx, &AgentDeployment{
 		ID: "researcher-one", Scope: scope, DefinitionID: agentDefinition.ID, ActiveVersion: agentDefinition.Version,
 		RolloutStatus: AgentRolloutActive, Environment: "local", Capacity: AgentDeploymentCapacity{MaxConcurrentRuns: 1},
@@ -65,6 +66,7 @@ func TestPublicEngineProjectsEveryTeamBindingToEachMember(t *testing.T) {
 		}
 	}
 	scope := SkillScope{Kind: "tenant", ID: "one"}
+	seedSpace(t, engine, Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	agentMaximumRisk := SkillRiskExternal
 	agentDefinition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate portfolios", SystemPrompt: "Operate safely.",

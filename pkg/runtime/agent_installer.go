@@ -110,7 +110,7 @@ func (i *AgentInstaller) build(ctx context.Context, input agentBuildInput) (*age
 	}); err != nil {
 		return nil, err
 	}
-	deployment, activation, replayed, err := i.createAgentDeployment(ctx, reference, input.DeploymentID, definition, approver, input.Reason)
+	deployment, activation, replayed, err := i.createAgentDeployment(ctx, reference, space.ID, input.DeploymentID, definition, approver, input.Reason)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func sameDefinitionProvenance(left, right workforce.DefinitionProvenance) bool {
 // finishCreatedAgent places the committed Agent in the reviewed space, binds
 // the grants and returns its control conversation.
 func (i *AgentInstaller) finishCreatedAgent(ctx context.Context, scope Scope, space *Space, deployment *kernelagent.AgentDeployment, grants []resolvedAgentSkillGrant, actor skill.BindingActor, reason string) ([]interface{}, *Conversation, error) {
-	if err := i.placeAgentInSpace(ctx, scope, space, deployment.ID, actor); err != nil {
+	if err := i.placeAgentInSpace(ctx, scope, space, deployment.ID); err != nil {
 		return nil, nil, err
 	}
 	bindings := make([]interface{}, 0, len(grants))
@@ -179,9 +179,6 @@ func (i *AgentInstaller) retireFailedAgent(ctx context.Context, reference capabi
 func (i *AgentInstaller) createSpace(ctx context.Context, scope Scope, spaceID string) (*Space, error) {
 	if spaceID == "" {
 		return nil, errors.New("an Agent needs a space")
-	}
-	if spaceID == DefaultSpaceID(scope) {
-		return &Space{ID: spaceID, Scope: scope, Name: DefaultSpaceName, IsDefault: true}, nil
 	}
 	spaces, err := i.provision.ListSpaces(ctx, scope)
 	if err != nil {
@@ -230,9 +227,9 @@ func (i *AgentInstaller) registerAgentBuilderDefinition(ctx context.Context, def
 	return registered, nil
 }
 
-// createAgentDeployment creates the deployment, or returns the one an
-// earlier attempt of the call created (replayed true).
-func (i *AgentInstaller) createAgentDeployment(ctx context.Context, reference capability.ScopeReference, deploymentID string, definition *kernelagent.AgentDefinition, approver, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, bool, error) {
+// createAgentDeployment creates the deployment in the reviewed space, or
+// returns the one an earlier attempt of the call created (replayed true).
+func (i *AgentInstaller) createAgentDeployment(ctx context.Context, reference capability.ScopeReference, spaceID, deploymentID string, definition *kernelagent.AgentDefinition, approver, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, bool, error) {
 	existing, err := i.agents.GetDeployment(ctx, reference, deploymentID)
 	if err == nil && existing != nil {
 		if existing.RolloutStatus == kernelagent.RolloutRetired {
@@ -247,7 +244,7 @@ func (i *AgentInstaller) createAgentDeployment(ctx context.Context, reference ca
 	if err != nil && !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
 		return nil, nil, false, err
 	}
-	deployment, activation, err := i.provision.CreateAgentDeployment(ctx, &kernelagent.AgentDeployment{
+	deployment, activation, err := i.provision.CreateAgentDeploymentInSpace(ctx, spaceID, &kernelagent.AgentDeployment{
 		ID: deploymentID, Scope: reference, DefinitionID: definition.ID, ActiveVersion: definition.Version,
 		RolloutStatus: kernelagent.RolloutActive, Environment: "default",
 		Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 1,
@@ -279,24 +276,14 @@ func (i *AgentInstaller) firstAgentActivation(ctx context.Context, reference cap
 	return &first, nil
 }
 
-// placeAgentInSpace adds the Agent to the reviewed space. Outside Default it
-// then leaves Default, where the deployment create placed it.
-func (i *AgentInstaller) placeAgentInSpace(ctx context.Context, scope Scope, space *Space, deploymentID string, actor skill.BindingActor) error {
-	if _, _, err := i.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
+// placeAgentInSpace adds the Agent to the reviewed space. The create placed
+// it there; a replay whose create committed without the membership gets it
+// here.
+func (i *AgentInstaller) placeAgentInSpace(ctx context.Context, scope Scope, space *Space, deploymentID string) error {
+	_, _, err := i.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
 		Scope: scope, SpaceID: space.ID, Type: SpaceMemberAgent, MemberID: deploymentID,
-	}); err != nil {
-		return err
-	}
-	defaultSpace := DefaultSpaceID(scope)
-	if space.ID == defaultSpace {
-		return nil
-	}
-	if err := i.provision.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{
-		Scope: scope, SpaceID: defaultSpace, Type: SpaceMemberAgent, MemberID: deploymentID, ActorType: actor.Type, ActorID: actor.ID,
-	}); err != nil && !errors.Is(err, ErrSpaceNotFound) {
-		return err
-	}
-	return nil
+	})
+	return err
 }
 
 // grantAgentSkill binds one grant under its builder binding id. A binding

@@ -42,6 +42,7 @@ func newAgentBuilderTestServer(t *testing.T, withBuilder bool) (*Server, *runtim
 			t.Fatal(err)
 		}
 	}
+	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
 	return server, store

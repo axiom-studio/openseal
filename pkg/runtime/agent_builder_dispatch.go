@@ -17,9 +17,9 @@ import (
 // AgentProvisioner is the Engine side of the builder actions: creating
 // deployments and placing them in spaces. *openseal.Engine implements it.
 type AgentProvisioner interface {
-	// CreateAgentDeployment creates the deployment, places it in Default
-	// when it has no space and creates its control conversation.
-	CreateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error)
+	// CreateAgentDeploymentInSpace creates the deployment as a member of the
+	// space and creates its control conversation there.
+	CreateAgentDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error)
 	// EnsureAgentControlConversation returns the Agent's control
 	// conversation, creating it when it is missing. It is idempotent.
 	EnsureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*Conversation, error)
@@ -29,7 +29,6 @@ type AgentProvisioner interface {
 	ListSpaces(ctx context.Context, scope Scope) ([]*Space, error)
 	ListSpaceMembers(ctx context.Context, scope Scope, spaceID string) ([]*SpaceMember, error)
 	PutSpaceMember(ctx context.Context, request PutSpaceMemberRequest) (*SpaceMember, bool, error)
-	DeleteSpaceMember(ctx context.Context, request DeleteSpaceMemberRequest) error
 }
 
 const (

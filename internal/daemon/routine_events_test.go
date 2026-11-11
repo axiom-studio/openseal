@@ -36,6 +36,7 @@ func TestDaemonDispatcherStartsEventRoutineRuns(t *testing.T) {
 	stop := StartRoutineEventDispatcher(ctx, kernel)
 	t.Cleanup(stop)
 
+	seedLocalOperatorSpace(t, store)
 	const agentID = "triage"
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: agentID}
 	definition, err := kernel.RegisterAgentDefinition(ctx, &opensealkernel.AgentDefinition{

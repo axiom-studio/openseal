@@ -19,6 +19,7 @@ func newInteractionFixture(t *testing.T, calls []LoopToolCall) *interactionFixtu
 	t.Helper()
 	f := newControlFixture(t, calls)
 	conversations := NewConversationService(f.store)
+	seedTestSpace(t, f.store, f.run.Scope)
 	conversation, _, err := conversations.CreateConversation(f.ctx, CreateConversationRequest{
 		Scope: f.run.Scope, Owner: f.run.Owner, Title: "Chat", IdempotencyKey: "chat",
 	})

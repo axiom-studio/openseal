@@ -455,6 +455,7 @@ func loopBindingConfig(engine *Engine, host StepHost) (LoopBindingConfig, error)
 // registerLoopAgent activates a prompt-only Agent (no Skills) in scope.
 func registerLoopAgent(t *testing.T, ctx context.Context, engine *Engine, scope Scope, id string) {
 	t.Helper()
+	seedSpace(t, engine, scope, "operator")
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: id, Version: "1", DisplayName: strings.ReplaceAll(id, "-", " "),
 		Purpose:      "Answer and work from the evidence in front of you.",

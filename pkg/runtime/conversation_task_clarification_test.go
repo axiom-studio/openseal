@@ -42,6 +42,7 @@ func forConversationTaskClarificationStores(t *testing.T, test func(*testing.T, 
 func newConversationTaskClarificationFixture(t *testing.T, store conversationTaskClarificationStore, threaded bool) *conversationTaskClarificationFixture {
 	t.Helper()
 	service := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), Scope{Kind: "organization", ID: "task-clarification"})
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: Scope{Kind: "organization", ID: "task-clarification"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"},
 		Title: "Independent writing task", IdempotencyKey: "task-clarification",

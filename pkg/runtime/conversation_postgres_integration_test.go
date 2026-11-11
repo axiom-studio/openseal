@@ -44,6 +44,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	replicaService := NewConversationService(replica)
 	replicaService.now = func() time.Time { return fixed }
 	scope := Scope{Kind: "tenant", ID: "one"}
+	seedTestSpace(t, primary, scope)
 	conversation, _, err := primaryService.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"}, Title: "Release channel", IdempotencyKey: "release-v1",
 	})

@@ -24,6 +24,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 			}
 			service := NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "initiator"}
+			seedTestSpace(t, store.(SpaceStore), scope)
 			conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 				Title: "Conversation", IdempotencyKey: "conversation",
@@ -97,8 +98,10 @@ func TestChannelMessagesRejectUntrustedInitiator(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
-			service := NewConversationService(NewMemoryStore())
+			store := NewMemoryStore()
+			service := NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "initiator"}
+			seedTestSpace(t, store, scope)
 			conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 				Title: "Conversation", IdempotencyKey: "conversation",

@@ -46,8 +46,9 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Every Agent starts in Default; finn stands for the assistant the host
-	// keeps in every space.
+	// Every Agent starts in its creator's default space; finn stands for the
+	// assistant the host keeps in every space.
+	defaultID := seedSpace(t, engine, spaceScope, "7").ID
 	for _, id := range []string{"ana", "ben", "cy", "finn"} {
 		if _, _, err := engine.CreateAgentDeployment(ctx, &AgentDeployment{
 			ID: id, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
@@ -58,7 +59,7 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	}
 	newSpace := func(name string, agents ...string) string {
 		t.Helper()
-		space, err := engine.CreateSpace(ctx, CreateSpaceRequest{Scope: spaceScope, Name: name, Look: runtime.DefaultSpaceLook})
+		space, err := engine.CreateSpace(ctx, CreateSpaceRequest{Scope: spaceScope, Name: name, Look: runtime.DefaultSpaceLook, OwnerID: "7"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,7 +117,6 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 		_, _, err = engine.UpdateTeamDeployment(ctx, next, current.Revision, "user", "7", "add members")
 		return err
 	}
-	defaultID := runtime.DefaultSpaceID(spaceScope)
 	work := newSpace("Work", "ana", "ben", "finn")
 
 	// Rule 1: a Team is created from, and joined by, Agents in its space.
@@ -293,7 +293,8 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 		t.Fatalf("chat = %+v, err = %v", chat, err)
 	}
 
-	// A Team created without naming a space joins Default with its Agents.
+	// A Team created without naming a space joins its creator's default
+	// space with its Agents.
 	if err := remove(defaultID, "finn", true); err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +305,8 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 		t.Fatalf("default after an unplaced create = %v", got)
 	}
 
-	// A deleted space's Teams fall back to Default with their Agents.
+	// A deleted space's Teams fall back to its owner's default space with
+	// their Agents.
 	only := newSpace("Only", "dee")
 	if err := remove(defaultID, "dee", false); err != nil {
 		t.Fatal(err)

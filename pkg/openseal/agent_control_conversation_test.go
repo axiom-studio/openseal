@@ -34,7 +34,11 @@ func controlConversationFixture(t *testing.T) (*Engine, *conversationWriteCounti
 	if err != nil {
 		t.Fatal(err)
 	}
-	return engine, store, SkillScope{Kind: "tenant", ID: "7"}, definition
+	// The fixture's writes have no person behind them; the empty owner's
+	// default space is where their control conversations go.
+	scope := SkillScope{Kind: "tenant", ID: "7"}
+	seedSpace(t, engine, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, "")
+	return engine, store, scope, definition
 }
 
 func controlConversation(t *testing.T, engine *Engine, scope SkillScope, deploymentID string) *runtime.Conversation {

@@ -63,6 +63,7 @@ func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *Conve
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "task-sql"}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"}, Title: "Task setup", IdempotencyKey: "task-setup-chat",
 	})

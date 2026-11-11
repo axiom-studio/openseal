@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -234,6 +235,17 @@ Options:
 	}
 	// Event routines: no webhooks and no Google sources on the desktop.
 	daemon.ConfigureRoutineEvents(kernel)
+	// The kernel creates no space and the daemon has no space API, so the
+	// local operator's first space, their default, is created here, before the
+	// kernel starts work that opens chats for them.
+	if _, err := kernel.DefaultSpace(ctx, scope, "local-operator"); errors.Is(err, runtime.ErrNoDefaultSpace) {
+		_, err = kernel.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: scope, Name: "Home", Look: runtime.DefaultSpaceLook, OwnerID: "local-operator"})
+		if err != nil {
+			sugar.Fatalf("create the local operator's space: %v", err)
+		}
+	} else if err != nil {
+		sugar.Fatalf("read the local operator's space: %v", err)
+	}
 	if err := kernel.Start(ctx); err != nil {
 		sugar.Fatalf("start OpenSeal kernel: %v", err)
 	}

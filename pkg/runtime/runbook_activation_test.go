@@ -241,6 +241,7 @@ func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 			},
 		},
 	}
+	seedTestSpace(t, store, scope)
 	activation, err := service.Create(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -270,6 +271,7 @@ func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T)
 	ctx := context.Background()
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "3"}
+	seedTestSpace(t, store, scope)
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Publish research", Goal: "Publish a cited brief", Status: ObjectiveStatusActive,
@@ -477,6 +479,7 @@ func eventTaskFixture(t *testing.T, store *MemoryStore) (Scope, CreateRunbookAct
 		t.Fatal(err)
 	}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	c, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Orders", IdempotencyKey: "chat"})
 	if err != nil {
 		t.Fatal(err)

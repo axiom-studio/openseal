@@ -21,6 +21,7 @@ func newForegroundClarificationFixture(t *testing.T, store conversationTaskClari
 	t.Helper()
 	f := &foregroundClarificationFixture{store: store, service: NewConversationService(store)}
 	var err error
+	seedTestSpace(t, store.(SpaceStore), Scope{Kind: "organization", ID: "foreground-clarification"})
 	f.conversation, _, err = f.service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: Scope{Kind: "organization", ID: "foreground-clarification"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"},
 		Title: "Browser research", IdempotencyKey: "browser-chat",

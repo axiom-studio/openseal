@@ -161,10 +161,14 @@ type ExternalConversationEndpoint struct {
 	Policy           ExternalConversationPolicy           `json:"policy"`
 	Configuration    map[string]interface{}               `json:"configuration,omitempty"`
 	Status           ExternalConversationEndpointStatus   `json:"status"`
-	Revision         int64                                `json:"revision"`
-	CreatedAt        time.Time                            `json:"createdAt"`
-	UpdatedAt        time.Time                            `json:"updatedAt"`
-	RetiredAt        *time.Time                           `json:"retiredAt,omitempty"`
+	// CreatedBy is the person who created the endpoint, when the host names
+	// one. Its conversations go to their default space while the owner is in
+	// no space.
+	CreatedBy string     `json:"createdBy,omitempty"`
+	Revision  int64      `json:"revision"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	RetiredAt *time.Time `json:"retiredAt,omitempty"`
 }
 
 func (e *ExternalConversationEndpoint) Validate() error {
@@ -235,6 +239,8 @@ type CreateExternalConversationEndpointRequest struct {
 	Policy           ExternalConversationPolicy
 	Configuration    map[string]interface{}
 	Status           ExternalConversationEndpointStatus
+	// CreatedBy is the person creating the endpoint.
+	CreatedBy string
 }
 
 type UpdateExternalConversationEndpointRequest struct {
@@ -290,7 +296,7 @@ func (s *ExternalConversationEndpointService) Create(ctx context.Context, req Cr
 		Mode: req.Mode, InstallationID: strings.TrimSpace(req.InstallationID), ApplicationID: strings.TrimSpace(req.ApplicationID),
 		Address: strings.TrimSpace(req.Address), InstallationWide: req.InstallationWide, Handler: normalizeExternalConversationHandler(req.Handler),
 		Policy: req.Policy, Configuration: cloneMap(req.Configuration), Status: status,
-		Revision: 1, CreatedAt: now, UpdatedAt: now,
+		CreatedBy: strings.TrimSpace(req.CreatedBy), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if endpoint.ID == "" {
 		endpoint.ID = "conversation-endpoint:" + s.newID()

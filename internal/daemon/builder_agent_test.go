@@ -209,6 +209,9 @@ func writeV75DaemonStore(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The draft's requester has a default space; the converted draft's
+	// conversation goes there.
+	seedLocalOperatorSpace(t, fresh)
 	if err := fresh.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -243,6 +246,20 @@ func writeV75DaemonStore(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// seedLocalOperatorSpace creates the local operator's first space, their
+// default space. The kernel creates none; the daemon command creates this
+// one at start.
+func seedLocalOperatorSpace(t *testing.T, store runtime.SpaceStore) *runtime.Space {
+	t.Helper()
+	space, err := runtime.NewSpaceService(store).CreateSpace(t.Context(), runtime.CreateSpaceRequest{
+		Scope: localScope, Name: "Home", Look: runtime.DefaultSpaceLook, OwnerID: "local-operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return space
 }
 
 // startDaemonEngine opens path the way the daemon does, with its cutover

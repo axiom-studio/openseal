@@ -29,6 +29,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 		_ = store.Close()
 	})
 	scope := Scope{Kind: "tenant", ID: "one"}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})

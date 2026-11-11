@@ -33,6 +33,7 @@ func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedTestSpace(t, store, scope)
 	first, err := service.OpenSession(t.Context(), OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://example.com"})
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +71,7 @@ func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testin
 	if _, err := service.OpenSession(t.Context(), OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://app.example.com"}); !errors.Is(err, ErrEmbedAuthentication) {
 		t.Fatalf("unsigned open error = %v", err)
 	}
+	seedTestSpace(t, store, installation.Scope)
 	opened, err := service.OpenSession(t.Context(), OpenEmbedSessionRequest{
 		PublicRoute: installation.PublicRoute, Origin: "https://app.example.com", VerifiedClaims: map[string]interface{}{"userId": "customer-42"},
 	})
@@ -104,6 +106,7 @@ func TestSQLiteEmbedSessionCapabilityAndClaimsSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedTestSpace(t, store, installation.Scope)
 	opened, err := service.OpenSession(t.Context(), OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://app.example.com", VerifiedClaims: map[string]interface{}{"userId": "user-7"}})
 	if err != nil {
 		t.Fatal(err)

@@ -19,6 +19,7 @@ func teamRoutingAgent(id string) ConversationParticipant {
 func TestTeamRoutingAddressingOrder(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewConversationService(store)
+	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "routing"})
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: Scope{Kind: "tenant", ID: "routing"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"},
 		Title: "Launch", IdempotencyKey: "launch",

@@ -35,7 +35,7 @@ type StartAgentBuilderRequest struct {
 	// Parameters are the form fields; an empty Kind means "agent".
 	Parameters AgentBuilderParameters
 	// SpaceID places the conversation; "" uses the builder's first space,
-	// else Personal.
+	// else the requester's default space.
 	SpaceID        string
 	IdempotencyKey string
 }
@@ -89,6 +89,7 @@ func StartAgentBuilderConversation(ctx context.Context, writer AgentBuilderConve
 		Title:          agentBuilderConversationTitle(parameters),
 		Origin:         &ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: key},
 		SpaceID:        strings.TrimSpace(req.SpaceID),
+		CreatedBy:      strings.TrimSpace(req.Requester.ID),
 		IdempotencyKey: agentBuilderConversationKeyPrefix + key,
 	})
 	if err != nil {

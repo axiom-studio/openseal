@@ -160,6 +160,9 @@ func openCutoverEngine(t *testing.T, path string, options ...Option) (*Engine, *
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The drafts' requester has a default space, as a person who used the
+	// product does; a converted draft with no placed deployment goes there.
+	seedSpace(t, engine, builderCutoverTestScope, "ana")
 	t.Cleanup(func() {
 		engine.Stop()
 		_ = store.Close()
@@ -232,11 +235,6 @@ func TestAgentBuilderCutoverConvertsEachDraftAtStart(t *testing.T) {
 	if _, _, err := engine.PutSpaceMember(ctx, runtime.PutSpaceMemberRequest{Scope: builderCutoverTestScope, SpaceID: inbox.ID, Type: runtime.SpaceMemberAgent, MemberID: "inbox-agent"}); err != nil {
 		t.Fatal(err)
 	}
-	defaultSpace, _, err := engine.EnsureDefaultSpace(ctx, builderCutoverTestScope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = engine.DeleteSpaceMember(ctx, runtime.DeleteSpaceMemberRequest{Scope: builderCutoverTestScope, SpaceID: defaultSpace.ID, Type: runtime.SpaceMemberAgent, MemberID: "inbox-agent"})
 
 	startCutoverEngine(t, engine)
 

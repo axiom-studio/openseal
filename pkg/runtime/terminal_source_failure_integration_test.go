@@ -23,6 +23,7 @@ func sourceFailureRun(t *testing.T, store sourceFailureStore, at time.Time) (*Ag
 	scope := Scope{Kind: "tenant", ID: "source-failure-" + uuid.NewString()[:8]}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)

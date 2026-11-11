@@ -178,6 +178,7 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "run-failed-" + uuid.NewString()[:8]}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)

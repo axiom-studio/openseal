@@ -14,10 +14,11 @@ func TestPublicConversationFacadeKeepsTeamChannelFacts(t *testing.T) {
 	}
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "channel"}
+	home := seedSpace(t, engine, scope, "")
 	conversation, replayed, err := engine.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"}, Title: "Release", IdempotencyKey: "release-v1",
 	})
-	if err != nil || replayed {
+	if err != nil || replayed || conversation.SpaceID != home.ID {
 		t.Fatalf("conversation = %#v, replayed = %v, err = %v", conversation, replayed, err)
 	}
 	question, err := engine.PostChannelMessage(ctx, PostChannelMessageRequest{

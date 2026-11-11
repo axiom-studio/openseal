@@ -180,7 +180,7 @@ func validateScheduledTaskTarget(ctx context.Context, reader RunbookActivationRe
 
 func prepareActivationReporting(ctx context.Context, store ConversationStore, a *RunbookActivation, runID string, values map[string]interface{}) (*Conversation, string, error) {
 	if a.Task == nil {
-		return prepareRunReporting(ctx, store, a.Scope, a.Owner, a.Trigger.Reporting, runID, values)
+		return prepareRunReporting(ctx, store, a.Scope, a.Owner, a.Trigger.Reporting, activationActingUser(a), runID, values)
 	}
 	if store == nil {
 		return nil, "", errors.New("scheduled task reporting store unavailable")

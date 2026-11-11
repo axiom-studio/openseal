@@ -117,6 +117,7 @@ func newChatLoopFixture(t *testing.T, base conversationThreadStartTestStore, opt
 	if options.team {
 		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-1"}
 	}
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Chat loop", IdempotencyKey: "chat-loop",
 	})

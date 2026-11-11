@@ -133,6 +133,7 @@ func TestLinkRunbooks(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "links"}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Chat", IdempotencyKey: "chat",
 	})

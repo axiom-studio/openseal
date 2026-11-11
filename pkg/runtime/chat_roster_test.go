@@ -192,6 +192,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	ctx, store, scope := t.Context(), NewMemoryStore(), Scope{Kind: "tenant", ID: "task-test"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	chat, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
 	if err != nil {
 		t.Fatal(err)
@@ -277,6 +278,7 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	team := chatRosterTeam(scope, "task-agent")
 	store := teamRosterPortfolio{MemoryStore: memory, team: team}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, memory, scope)
 	chat, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Team task", IdempotencyKey: "team-task-chat"})
 	if err != nil {
 		t.Fatal(err)

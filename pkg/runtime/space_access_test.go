@@ -37,12 +37,9 @@ func exerciseSpaceAccess(t *testing.T, store SpaceStore) {
 	other := Scope{Kind: "tenant", ID: scope.ID + "-other"}
 	const ana, ben, cy = "7", "8", "9"
 
-	defaultSpace, _, err := spaces.EnsureDefaultSpace(ctx, scope)
-	if err != nil || defaultSpace.Access != SpaceAccessEveryone || defaultSpace.OwnerID != DefaultSpaceOwner {
-		t.Fatalf("Default = %+v, err = %v", defaultSpace, err)
-	}
+	// A person's default space is theirs alone, like any space they create.
 	mine, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Mine", Look: DefaultSpaceLook, OwnerID: ana})
-	if err != nil || mine.Access != SpaceAccessOwner || mine.OwnerID != ana {
+	if err != nil || mine.Access != SpaceAccessOwner || mine.OwnerID != ana || !mine.IsDefault {
 		t.Fatalf("new space = %+v, err = %v", mine, err)
 	}
 	invited, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Invited", Look: DefaultSpaceLook, OwnerID: ana})
@@ -83,11 +80,11 @@ func exerciseSpaceAccess(t *testing.T, store SpaceStore) {
 			t.Fatalf("VisibleSpaces(%s, %q) = %v, err = %v; want %v", scope.ID, userID, got, err, want)
 		}
 	}
-	visible(scope, ana, defaultSpace.ID, mine.ID, invited.ID, open.ID)
-	visible(scope, ben, defaultSpace.ID, open.ID)
-	visible(scope, "", defaultSpace.ID, open.ID)
-	visible(other, ana, DefaultSpaceID(other), theirs.ID)
-	visible(other, ben, DefaultSpaceID(other))
+	visible(scope, ana, mine.ID, invited.ID, open.ID)
+	visible(scope, ben, open.ID)
+	visible(scope, "", open.ID)
+	visible(other, ana, theirs.ID)
+	visible(other, ben)
 
 	person, created, err := spaces.AddSpacePerson(ctx, AddSpacePersonRequest{Scope: scope, SpaceID: invited.ID, UserID: " " + ben + " ", AddedBy: ana})
 	if err != nil || !created || person.SpaceID != invited.ID || person.UserID != ben || person.AddedBy != ana || person.AddedAt.IsZero() {
@@ -113,7 +110,7 @@ func exerciseSpaceAccess(t *testing.T, store SpaceStore) {
 	if _, _, err := spaces.AddSpacePerson(ctx, AddSpacePersonRequest{Scope: scope, SpaceID: invited.ID, UserID: " "}); !errors.Is(err, ErrInvalidSpace) {
 		t.Fatalf("add nobody: %v", err)
 	}
-	visible(scope, ben, defaultSpace.ID, invited.ID, open.ID)
+	visible(scope, ben, invited.ID, open.ID)
 	people, err := spaces.ListSpacePeople(ctx, scope, invited.ID)
 	if err != nil || len(people) != 2 || people[0].UserID != ben || people[1].UserID != cy {
 		t.Fatalf("people = %+v, err = %v", people, err)
@@ -167,9 +164,7 @@ func exerciseSpaceAccess(t *testing.T, store SpaceStore) {
 	check(invited.ID, ben, true, false, true)
 	check(open.ID, cy, true, false, true)
 	check(open.ID, cy, false, false, false)
-	check(defaultSpace.ID, ana, false, false, false)
-	check(defaultSpace.ID, ana, true, false, true)
-	check(defaultSpace.ID, DefaultSpaceOwner, false, true, true)
+	check(open.ID, ana, false, true, true)
 	check("missing", ana, true, false, false)
 	check(mine.ID, "", true, false, false)
 	if ok, err := spaces.CanManageSpace(ctx, other, mine.ID, ana, true); err != nil || ok {
@@ -185,8 +180,8 @@ func exerciseSpaceAccess(t *testing.T, store SpaceStore) {
 	if err := spaces.RemoveSpacePerson(ctx, scope, "missing", ben); !errors.Is(err, ErrSpaceNotFound) {
 		t.Fatalf("remove from missing space: %v", err)
 	}
-	visible(scope, ben, defaultSpace.ID, open.ID)
-	visible(scope, cy, defaultSpace.ID, invited.ID, open.ID)
+	visible(scope, ben, open.ID)
+	visible(scope, cy, invited.ID, open.ID)
 
 	// Deleting a space deletes its people: a space made again under the same
 	// id starts with nobody.
@@ -204,14 +199,15 @@ func exerciseSpaceAccess(t *testing.T, store SpaceStore) {
 	if people, err := spaces.ListSpacePeople(ctx, scope, invited.ID); err != nil || len(people) != 0 {
 		t.Fatalf("people after delete = %+v, err = %v", people, err)
 	}
-	visible(scope, cy, defaultSpace.ID, open.ID)
+	visible(scope, cy, open.ID)
 	if people, err := spaces.ListSpacePeople(ctx, scope, mine.ID); err != nil || len(people) != 1 {
 		t.Fatalf("people of another space = %+v, err = %v", people, err)
 	}
 }
 
-// A database from before space access keeps created_by: opening it renames
-// the column, makes every space "owner" and the Default space "everyone".
+// A database from before space access keeps created_by and one Default space
+// per scope owned by no person: opening it renames the column, makes every
+// space "owner" and the Default space "everyone".
 func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "legacy.db")
@@ -229,7 +225,16 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	if _, err := spaces.SetSpaceAccess(ctx, scope, work.ID, SpaceAccessEveryone); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.db.Exec(`UPDATE spaces SET is_default = 0, position = 1 WHERE id = ?`, work.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, 'Default', 'tidepool', 0, 1, 'everyone', ?, ?, ?)`,
+		legacyDefaultSpaceID(scope), scope.Kind, scope.ID, legacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour), work.CreatedAt.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	for _, statement := range []string{
+		`DROP INDEX idx_spaces_owner_default`,
+		`CREATE UNIQUE INDEX idx_spaces_default ON spaces(scope_kind, scope_id) WHERE is_default = 1`,
 		`ALTER TABLE spaces DROP COLUMN access`,
 		`ALTER TABLE spaces RENAME COLUMN owner_id TO created_by`,
 		`DROP TABLE space_people`,
@@ -253,6 +258,9 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	}
 }
 
+// assertSpaceAccessBackfilled checks a migrated database that had the legacy
+// Default space and one space a person made. Migration 85 then leaves the
+// legacy space as it is and makes the person's space their default.
 func assertSpaceAccessBackfilled(t *testing.T, store SpaceStore, scope Scope, workID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -260,16 +268,20 @@ func assertSpaceAccessBackfilled(t *testing.T, store SpaceStore, scope Scope, wo
 	if err != nil || len(listed) != 2 {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
-	if listed[0].ID != DefaultSpaceID(scope) || listed[0].Access != SpaceAccessEveryone || listed[0].OwnerID != DefaultSpaceOwner {
+	if listed[0].ID != legacyDefaultSpaceID(scope) || listed[0].Access != SpaceAccessEveryone || listed[0].OwnerID != legacyDefaultSpaceOwner ||
+		!listed[0].IsDefault || listed[0].Name != "Default" {
 		t.Fatalf("Default = %+v", listed[0])
 	}
-	if listed[1].ID != workID || listed[1].Access != SpaceAccessOwner || listed[1].OwnerID != "7" {
+	if listed[1].ID != workID || listed[1].Access != SpaceAccessOwner || listed[1].OwnerID != "7" || !listed[1].IsDefault {
 		t.Fatalf("work = %+v", listed[1])
+	}
+	if owned, err := store.DefaultSpace(ctx, scope, "7"); err != nil || owned.ID != workID {
+		t.Fatalf("default space of the person = %+v, err = %v", owned, err)
 	}
 	if people, err := store.ListSpacePeople(ctx, scope, workID); err != nil || len(people) != 0 {
 		t.Fatalf("people = %+v, err = %v", people, err)
 	}
-	if visible, err := store.VisibleSpaces(ctx, scope, "8"); err != nil || !slices.Equal(visible, []string{DefaultSpaceID(scope)}) {
+	if visible, err := store.VisibleSpaces(ctx, scope, "8"); err != nil || !slices.Equal(visible, []string{legacyDefaultSpaceID(scope)}) {
 		t.Fatalf("visible to another person = %v, err = %v", visible, err)
 	}
 }

@@ -777,7 +777,7 @@ func (s *RunbookActivationService) ensureReportingChannel(ctx context.Context, a
 	if !ok {
 		return errors.New("active Runbook reporting requires a conversation store")
 	}
-	_, err := ensureRunReportingChannel(ctx, store, activation.Scope, activation.Owner, activation.Trigger.Reporting)
+	_, err := ensureRunReportingChannel(ctx, store, activation.Scope, activation.Owner, activation.Trigger.Reporting, activationActingUser(activation))
 	return err
 }
 

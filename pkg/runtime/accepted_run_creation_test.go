@@ -235,6 +235,7 @@ func TestAcceptedRunCreationDiscardsUntrustedPinBeforeCanonicalReplay(t *testing
 func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing.T) {
 	store := NewMemoryStore()
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}})
+	seedTestSpace(t, store, activation.Scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: activation.Scope, Owner: activation.Owner, Title: "Review",
 		Origin: &ConversationReference{Kind: ConversationReferenceObjective, ID: activation.ObjectiveID, Version: 1}, IdempotencyKey: "review-channel",

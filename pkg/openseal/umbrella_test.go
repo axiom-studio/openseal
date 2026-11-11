@@ -53,6 +53,7 @@ func assertDeploymentIDNamespace(t *testing.T, engine *Engine) {
 	ctx := context.Background()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	umbrellaFixture(t, engine)
+	seedSpace(t, engine, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	if err := createUmbrellaAgent(engine, scope, "shared"); err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +144,7 @@ func ensureTestAgent(t *testing.T, engine *Engine, scope capability.ScopeReferen
 	if owner, err := engine.ResolveUmbrella(ctx, scope, id); err == nil {
 		return owner
 	}
+	seedSpace(t, engine, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	definition := "test-agent-" + id
 	if _, err := engine.GetAgentDefinition(ctx, definition, "1"); err != nil {
 		if _, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
@@ -174,6 +176,7 @@ func teamRequestFixture(t *testing.T) (context.Context, *runtime.MemoryStore, *E
 	scope := Scope{Kind: "tenant", ID: "one"}
 	skillScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	umbrellaFixture(t, engine)
+	seedSpace(t, engine, scope, "operator")
 	for _, id := range []string{"member", "other"} {
 		if err := createUmbrellaAgent(engine, skillScope, id); err != nil {
 			t.Fatal(err)

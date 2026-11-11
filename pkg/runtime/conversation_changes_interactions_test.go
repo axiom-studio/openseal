@@ -46,6 +46,7 @@ func newInteractionChangeFixture(t *testing.T, store KernelStore) *interactionCh
 	f := &interactionChangeFixture{ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "interactions"}}
 	conversationStore := store.(ConversationStore)
 	conversations := NewConversationService(conversationStore)
+	seedTestSpace(t, store.(SpaceStore), f.scope)
 	conversation, _, err := conversations.CreateConversation(f.ctx, CreateConversationRequest{
 		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})
@@ -271,6 +272,7 @@ func (p teamRosterPortfolio) GetTeamDeployment(_ context.Context, scope capabili
 func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	ctx, store, scope := context.Background(), NewMemoryStore(), Scope{Kind: "tenant", ID: "team-requests"}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}, Title: "Team", IdempotencyKey: "team",
 	})

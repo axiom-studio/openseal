@@ -144,6 +144,7 @@ func TestExternalConversationReplyAliasesNeverReuseForeignParents(t *testing.T) 
 				threadID, parentID = "topic:100", ""
 			}
 			if target.ID != endpoint.ID || target.Scope != endpoint.Scope {
+				seedTestSpace(t, store, target.Scope)
 				if err := store.CreateExternalConversationEndpoint(ctx, target); err != nil {
 					t.Fatal(err)
 				}

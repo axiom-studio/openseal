@@ -96,6 +96,7 @@ func TestCompletedSkillSetupDoesNotReappearInConversationChanges(t *testing.T) {
 	if err := e.BindSkill(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
+	seedSpace(t, e, scope, "")
 	conversation, _, err := e.CreateConversation(ctx, CreateConversationRequest{ID: "chat", Scope: scope, Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, Title: "Setup", IdempotencyKey: "setup-chat"})
 	if err != nil {
 		t.Fatal(err)

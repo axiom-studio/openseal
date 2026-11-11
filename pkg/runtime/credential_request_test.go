@@ -213,6 +213,7 @@ func TestRepeatedRefusedSetupIsNotRetriedInTheSameRun(t *testing.T) {
 func mustConversationChanges(t *testing.T, ctx context.Context, store *MemoryStore, scope Scope) (*ConversationChangeSet, error) {
 	t.Helper()
 	now := time.Now().UTC()
+	seedTestSpace(t, store, scope)
 	if _, _, err := store.CreateConversation(ctx, &Conversation{ID: "chat", Scope: scope, Title: "Amazon order", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Status: ConversationStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now}, "chat-key"); err != nil {
 		return nil, err
 	}

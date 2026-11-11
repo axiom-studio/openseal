@@ -11,27 +11,27 @@ import (
 
 var _ SpaceStore = (*MemoryStore)(nil)
 
-func (s *MemoryStore) EnsureDefaultSpace(_ context.Context, scope Scope, now time.Time) (*Space, bool, error) {
+func (s *MemoryStore) DefaultSpace(_ context.Context, scope Scope, ownerID string) (*Space, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	space, created := s.ensureDefaultSpaceLocked(scope, now)
-	return cloneSpace(space), created, nil
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	space := s.defaultSpaceLocked(scope, ownerID)
+	if space == nil {
+		return nil, ErrNoDefaultSpace
+	}
+	return cloneSpace(space), nil
 }
 
-func (s *MemoryStore) ensureDefaultSpaceLocked(scope Scope, now time.Time) (*Space, bool) {
-	id := DefaultSpaceID(scope)
-	if existing := s.spaces[scope][id]; existing != nil {
-		return existing, false
+// defaultSpaceLocked returns the owner's default space, or nil.
+func (s *MemoryStore) defaultSpaceLocked(scope Scope, ownerID string) *Space {
+	for _, space := range s.spaces[scope] {
+		if space.IsDefault && space.OwnerID == ownerID {
+			return space
+		}
 	}
-	if s.spaces[scope] == nil {
-		s.spaces[scope] = make(map[string]*Space)
-	}
-	space := newDefaultSpace(scope, now)
-	s.spaces[scope][id] = space
-	return space, true
+	return nil
 }
 
 func (s *MemoryStore) CreateSpace(_ context.Context, space *Space) (*Space, error) {
@@ -47,7 +47,7 @@ func (s *MemoryStore) CreateSpace(_ context.Context, space *Space) (*Space, erro
 		return nil, ErrInvalidSpace
 	}
 	created := cloneSpace(space)
-	created.IsDefault = false
+	created.IsDefault = s.defaultSpaceLocked(space.Scope, space.OwnerID) == nil
 	created.Position = 0
 	for _, existing := range s.spaces[space.Scope] {
 		if existing.Position >= created.Position {
@@ -124,7 +124,10 @@ func (s *MemoryStore) DeleteSpace(_ context.Context, scope Scope, spaceID string
 	if space.IsDefault {
 		return ErrDefaultSpaceProtected
 	}
-	defaultSpace, _ := s.ensureDefaultSpaceLocked(scope, now)
+	defaultSpace := s.defaultSpaceLocked(scope, space.OwnerID)
+	if defaultSpace == nil {
+		return ErrNoDefaultSpace
+	}
 	for _, conversation := range s.conversations {
 		if conversation.Scope == scope && conversation.SpaceID == spaceID {
 			conversation.SpaceID = defaultSpace.ID
@@ -245,8 +248,9 @@ func (s *MemoryStore) DeleteSpaceAgentWithRosters(_ context.Context, scope Scope
 	return nil
 }
 
-// resolveConversationSpaceLocked fills an empty SpaceID with the owner's
-// first space, else Default, and verifies an explicit one exists.
+// resolveConversationSpaceLocked verifies an explicit SpaceID exists. It
+// fills an empty one with the owner deployment's first space, else the
+// default space of the person who created the conversation.
 func (s *MemoryStore) resolveConversationSpaceLocked(conversation *Conversation) error {
 	scope := conversation.Scope
 	if conversation.SpaceID != "" {
@@ -273,19 +277,25 @@ func (s *MemoryStore) resolveConversationSpaceLocked(conversation *Conversation)
 		first = pair[0]
 	}
 	if first == nil {
-		first, _ = s.ensureDefaultSpaceLocked(scope, conversation.CreatedAt)
+		first = s.defaultSpaceLocked(scope, conversation.CreatedBy)
+	}
+	if first == nil {
+		return ErrNoDefaultSpace
 	}
 	conversation.SpaceID = first.ID
 	return nil
 }
 
-func (s *MemoryStore) EnsureMemberHasSpace(_ context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {
+func (s *MemoryStore) EnsureMemberHasSpace(_ context.Context, scope Scope, ownerID string, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.hasSpaceMembershipLocked(scope, memberType, memberID) {
 		return nil, nil
 	}
-	defaultSpace, _ := s.ensureDefaultSpaceLocked(scope, now)
+	defaultSpace := s.defaultSpaceLocked(scope, ownerID)
+	if defaultSpace == nil {
+		return nil, ErrNoDefaultSpace
+	}
 	return cloneSpaceMember(s.appendSpaceMemberLocked(scope, &SpaceMember{SpaceID: defaultSpace.ID, Type: memberType, ID: memberID, AddedAt: now})), nil
 }
 
@@ -297,6 +307,34 @@ func (s *MemoryStore) SetSpaceAccess(_ context.Context, scope Scope, spaceID str
 		return nil, ErrSpaceNotFound
 	}
 	space.Access, space.UpdatedAt = access, now
+	return cloneSpace(space), nil
+}
+
+func (s *MemoryStore) SetSpaceOwner(_ context.Context, scope Scope, spaceID, ownerID string, now time.Time) (*Space, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	space := s.spaces[scope][spaceID]
+	if space == nil {
+		return nil, ErrSpaceNotFound
+	}
+	// Both owners give up their default, the space changes hands, and each
+	// owner's oldest space becomes their default again.
+	owners := []string{space.OwnerID, ownerID}
+	space.OwnerID, space.UpdatedAt = ownerID, now
+	oldest := map[string]*Space{}
+	for _, other := range s.spaces[scope] {
+		if !slices.Contains(owners, other.OwnerID) {
+			continue
+		}
+		other.IsDefault = false
+		first := oldest[other.OwnerID]
+		if first == nil || other.CreatedAt.Before(first.CreatedAt) || (other.CreatedAt.Equal(first.CreatedAt) && other.ID < first.ID) {
+			oldest[other.OwnerID] = other
+		}
+	}
+	for _, first := range oldest {
+		first.IsDefault = true
+	}
 	return cloneSpace(space), nil
 }
 

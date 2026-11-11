@@ -21,6 +21,7 @@ func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ..
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}
 	reader := store.(ConversationStore)
 	service := NewConversationService(reader)
+	seedTestSpace(t, store.(SpaceStore), scope)
 	c, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
 	if err != nil {
 		t.Fatal(err)

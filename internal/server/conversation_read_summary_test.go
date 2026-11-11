@@ -17,6 +17,7 @@ func TestChannelListReadPositionsAreScopedOptionalAndReadOnly(t *testing.T) {
 	service := runtime.NewConversationService(store)
 	local := runtime.Scope{Kind: "local", ID: "default"}
 	reader := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "local-operator"}
+	seedSpace(t, store, local, "")
 	channel, _, err := service.CreateConversation(context.Background(), runtime.CreateConversationRequest{Scope: local, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +81,7 @@ func (s failingReadSummaryStore) GetConversationCursor(context.Context, runtime.
 func TestChannelListDoesNotInventUnreadCountsOnCursorFailure(t *testing.T) {
 	store := failingReadSummaryStore{runtime.NewMemoryStore()}
 	service := runtime.NewConversationService(store)
+	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, "")
 	if _, _, err := service.CreateConversation(context.Background(), runtime.CreateConversationRequest{Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"}); err != nil {
 		t.Fatal(err)
 	}
