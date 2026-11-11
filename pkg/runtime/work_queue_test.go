@@ -36,10 +36,11 @@ func newQueueHarness(t *testing.T) *queueHarness {
 func (h *queueHarness) onDelivery(deliver func(WorkSignal)) { h.deliver.Store(&deliver) }
 
 // deadlineActionStore reports ActionCall deadlines with the PostgreSQL
-// store's semantics over the in-memory store, and counts every read.
+// store's semantics over the SQLite store, and counts every read.
 type deadlineActionStore struct {
 	*SQLiteStore
 	claims        atomic.Int64
+	claimsDone    atomic.Int64
 	claimed       atomic.Int64
 	deadlineReads atomic.Int64
 }
@@ -47,6 +48,7 @@ type deadlineActionStore struct {
 func (s *deadlineActionStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
 	s.claims.Add(1)
 	call, err := s.SQLiteStore.ClaimNextAction(ctx, claim)
+	s.claimsDone.Add(1)
 	if call != nil {
 		s.claimed.Add(1)
 	}
@@ -113,7 +115,9 @@ func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
 	pool.SetWorkSignals(newQueueHarness(t).status)
 	pool.Start(t.Context())
 	defer pool.Stop()
-	waitForCondition(t, time.Second, func() bool { return store.deadlineReads.Load() > 0 }, "initial probe was not observed")
+	// The start-up claim must finish before work exists, or it claims the
+	// work itself and hides whether the other scope's wake did.
+	waitForCondition(t, time.Second, func() bool { return store.claimsDone.Load() > 0 && store.deadlineReads.Load() > 0 }, "initial probe was not observed")
 	createActionPoolWork(t, store.SQLiteStore, catalog, scope)
 	pool.WakeScope(Scope{Kind: scope.Kind, ID: "another"})
 	select {
@@ -135,7 +139,9 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 			store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
 			catalog, scope := governedActionCatalog(t)
 			proposal := createActionPoolWork(t, store.SQLiteStore, catalog, scope)
-			due := time.Now().Add(150 * time.Millisecond)
+			// The SQLite store compares timestamps as text, so like every
+			// runtime caller the fixture passes UTC times.
+			due := time.Now().UTC().Add(150 * time.Millisecond)
 			if scenario == "retry" {
 				call, err := store.GetActionCall(t.Context(), scope, proposal.Call.ID)
 				if err != nil {
@@ -145,7 +151,7 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 				putStoredAction(t, store.SQLiteStore, call)
 			} else {
 				// A crashed worker holds the lease until it expires.
-				claimed, err := store.SQLiteStore.ClaimNextAction(t.Context(), ActionClaim{Scope: scope, WorkerID: "crashed", Now: time.Now(), LeaseDuration: time.Until(due)})
+				claimed, err := store.SQLiteStore.ClaimNextAction(t.Context(), ActionClaim{Scope: scope, WorkerID: "crashed", Now: time.Now().UTC(), LeaseDuration: time.Until(due)})
 				if err != nil || claimed == nil {
 					t.Fatalf("crashed claim = %#v, %v", claimed, err)
 				}

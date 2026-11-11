@@ -3,10 +3,12 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -228,8 +230,18 @@ func mustConversationChanges(t *testing.T, ctx context.Context, store *SQLiteSto
 func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
 	crew := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
-	if err := store.CreateTeamDeployment(ctx, &kernelteam.Deployment{ID: crew.ID, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
-		Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "agent", RoleID: "member", AgentDeploymentID: "agent"}}}, workforce.DefinitionActivation{}); err != nil {
+	deploymentScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	// The store records one definition activation per deployment revision.
+	activation := func(deploymentID string, revision int64) workforce.DefinitionActivation {
+		return workforce.DefinitionActivation{ID: fmt.Sprintf("%s-%d", deploymentID, revision), Scope: deploymentScope, DeploymentID: deploymentID, DeploymentRevision: revision}
+	}
+	// A Team run acts under the Team only while its member is an active Agent.
+	if err := store.CreateDeployment(ctx, &kernelagent.AgentDeployment{ID: "agent", Scope: deploymentScope,
+		RolloutStatus: kernelagent.RolloutActive, Revision: 1}, activation("agent", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateTeamDeployment(ctx, &kernelteam.Deployment{ID: crew.ID, Scope: deploymentScope, Status: kernelteam.DeploymentActive,
+		Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "agent", RoleID: "member", AgentDeploymentID: "agent"}}}, activation(crew.ID, 1)); err != nil {
 		t.Fatal(err)
 	}
 	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: crew, AssignedAgentID: "agent",
@@ -261,7 +273,7 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	// A member removed from the Team can no longer act under it.
 	team, _ := store.GetTeamDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, crew.ID)
 	team.Roster, team.Revision = []kernelteam.RosterAssignment{{ID: "other", RoleID: "member", AgentDeploymentID: "other"}}, 2
-	if err := store.UpdateTeamDeployment(ctx, team, 1, workforce.DefinitionActivation{}); err != nil {
+	if err := store.UpdateTeamDeployment(ctx, team, 1, activation(crew.ID, 2)); err != nil {
 		t.Fatal(err)
 	}
 	if resumable, err := InteractionRunResumable(ctx, store, parked, crew, "agent"); err != nil || resumable {

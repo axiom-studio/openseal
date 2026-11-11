@@ -270,6 +270,7 @@ func TestRunConversationIDFallsBackToRootRun(t *testing.T) {
 	}
 	conversation := approvalModeConversation(t, store)
 	root.Context["conversationId"] = conversation.ID
+	putStoredRun(t, store, root)
 	if _, mode, err := RunConversationApprovalMode(ctx, store, store, child); err != nil || mode != ConversationApprovalAuto {
 		t.Fatalf("root conversation mode = %q %v", mode, err)
 	}
