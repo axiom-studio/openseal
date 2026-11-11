@@ -79,22 +79,13 @@ func NewRegistry() *Registry {
 }
 
 // NewRegistryWithStore uses store as the deployment-ID reserver when it is
-// one, and otherwise an in-process reserver. WithDeploymentIDs overrides it.
+// one, and otherwise an in-process reserver.
 func NewRegistryWithStore(store Store) *Registry {
 	ids, ok := store.(workforce.DeploymentIDReserver)
 	if !ok {
 		ids = workforce.NewMemoryDeploymentIDs()
 	}
 	return &Registry{store: store, ids: ids, now: time.Now, newID: uuid.NewString}
-}
-
-// WithDeploymentIDs makes the registry reserve deployment IDs through ids,
-// the namespace it shares with the Team registry.
-func (r *Registry) WithDeploymentIDs(ids workforce.DeploymentIDReserver) *Registry {
-	if r != nil && ids != nil {
-		r.ids = ids
-	}
-	return r
 }
 
 // DeploymentIDs returns the Agent and Team deployment-ID namespace.
