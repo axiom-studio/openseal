@@ -170,12 +170,35 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	if _, _, err := engine.CreateTeamDeploymentInSpace(ctx, work, team("solo", "1", "ana"), "user", "7", "create"); err != nil {
 		t.Fatal(err)
 	}
-	remove := func(spaceID, agentID string) error {
+	if _, _, err := engine.CreateTeamDeploymentInSpace(ctx, lab, team("lone", "1", "ana"), "user", "7", "create"); err != nil {
+		t.Fatal(err)
+	}
+	remove := func(spaceID, agentID string, confirm bool) error {
 		return engine.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{
-			Scope: spaceScope, SpaceID: spaceID, Type: runtime.SpaceMemberAgent, MemberID: agentID, ActorType: "user", ActorID: "7",
+			Scope: spaceScope, SpaceID: spaceID, Type: runtime.SpaceMemberAgent, MemberID: agentID, ActorType: "user", ActorID: "7", ConfirmTeams: confirm,
 		})
 	}
-	if err := remove(work, "ben"); err != nil {
+	// needsConfirmation is the Teams an unconfirmed removal reported.
+	needsConfirmation := func(err error) []SpaceAgentRemovalTeam {
+		t.Helper()
+		var pending *SpaceAgentRemovalNeedsConfirmation
+		if !errors.As(err, &pending) {
+			t.Fatalf("want a removal that needs confirmation, got %v", err)
+		}
+		return pending.Teams
+	}
+	// An Agent on no Team of the space leaves at once.
+	if err := remove(work, "dee", false); err != nil || slices.Contains(members(work), "agent:dee") {
+		t.Fatalf("removing an Agent on no Team: %v, work = %v", err, members(work))
+	}
+	// A Team that keeps members: unconfirmed, nothing changes.
+	if got := needsConfirmation(remove(work, "ben", false)); !slices.Equal(got, []SpaceAgentRemovalTeam{{ID: "crew", DisplayName: "CREW", Outcome: SpaceTeamLeaves, Remaining: 2}}) {
+		t.Fatalf("unconfirmed removal of ben = %+v", got)
+	}
+	if !slices.Contains(members(work), "agent:ben") || !slices.Equal(roster("crew"), []string{"ana", "ben", "finn"}) {
+		t.Fatalf("unconfirmed removal changed work = %v, crew = %v", members(work), roster("crew"))
+	}
+	if err := remove(work, "ben", true); err != nil {
 		t.Fatal(err)
 	}
 	if got := roster("crew"); !slices.Equal(got, []string{"ana", "finn"}) {
@@ -206,14 +229,46 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 		t.Fatalf("activation = %+v", last)
 	}
 
-	// A Team that would be left without a member refuses the removal, and
+	// A Team that would be left without a member is archived. Unconfirmed,
 	// nothing changes: not the space, and not the other Team listing ana.
-	err = remove(work, "ana")
-	if !errors.Is(err, ErrSpaceAgentNeededByTeam) || err.Error() != `a team in this space needs the agent: removing agent "ana" from space "Work" would leave team "SOLO" (solo) invalid: team roster would fall below its minimum: a team needs at least one member` {
-		t.Fatalf("removing a Team's only member: %v", err)
+	if got := needsConfirmation(remove(work, "ana", false)); !slices.Equal(got, []SpaceAgentRemovalTeam{
+		{ID: "crew", DisplayName: "CREW", Outcome: SpaceTeamLeaves, Remaining: 1},
+		{ID: "solo", DisplayName: "SOLO", Outcome: SpaceTeamArchived, Remaining: 0},
+	}) {
+		t.Fatalf("unconfirmed removal of ana = %+v", got)
 	}
-	if !slices.Contains(members(work), "agent:ana") || !slices.Equal(roster("crew"), []string{"ana", "finn"}) {
-		t.Fatalf("refused removal changed work = %v, crew = %v", members(work), roster("crew"))
+	status := func(teamID string) TeamDeploymentStatus {
+		t.Helper()
+		team, err := engine.GetTeamDeployment(ctx, scope, teamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return team.Status
+	}
+	if !slices.Contains(members(work), "agent:ana") || !slices.Equal(roster("crew"), []string{"ana", "finn"}) || status("solo") != TeamDeploymentActive {
+		t.Fatalf("unconfirmed removal changed work = %v, crew = %v, solo = %s", members(work), roster("crew"), status("solo"))
+	}
+	if err := remove(work, "ana", true); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(members(work), "agent:ana") || !slices.Equal(roster("crew"), []string{"finn"}) {
+		t.Fatalf("after ana left: work = %v, crew = %v", members(work), roster("crew"))
+	}
+	// Archived the way a retire does: same roster, one more signed revision.
+	if status("solo") != TeamDeploymentArchived || !slices.Equal(roster("solo"), []string{"ana"}) {
+		t.Fatalf("solo = %s %v", status("solo"), roster("solo"))
+	}
+	if soloActivations, err := engine.ListTeamDefinitionActivations(ctx, scope, "solo"); err != nil || len(soloActivations) != 2 ||
+		soloActivations[1].ActorID != "7" || soloActivations[1].Reason != "Agent ana left the space Work" {
+		t.Fatalf("solo activations = %+v, err = %v", soloActivations, err)
+	}
+	// ana's Team in another space is untouched.
+	if status("lone") != TeamDeploymentActive || !slices.Equal(roster("lone"), []string{"ana"}) || !slices.Contains(members(lab), "agent:ana") {
+		t.Fatalf("lone = %s %v, lab = %v", status("lone"), roster("lone"), members(lab))
+	}
+	// Leaving again changes nothing: an archived Team is not asked about.
+	if err := remove(work, "ana", false); err != nil {
+		t.Fatal(err)
 	}
 
 	// A Team that already breaks the rule keeps working: here "elsewhere" is
@@ -234,7 +289,7 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	if err := join("elsewhere", "2", "finn"); err != nil {
 		t.Fatalf("join a Team with Agents outside its space: %v", err)
 	}
-	if listed, err := engine.ListTeamDeployments(ctx, scope); err != nil || len(listed) != 3 {
+	if listed, err := engine.ListTeamDeployments(ctx, scope); err != nil || len(listed) != 4 {
 		t.Fatalf("teams = %+v, err = %v", listed, err)
 	}
 	chat, _, err := engine.CreateConversation(ctx, CreateConversationRequest{
@@ -245,7 +300,7 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	}
 
 	// A Team created without naming a space joins Default with its Agents.
-	if err := remove(defaultID, "finn"); err != nil {
+	if err := remove(defaultID, "finn", true); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := engine.CreateTeamDeployment(ctx, team("strays", "1", "finn"), "user", "7", "create"); err != nil {
@@ -257,7 +312,7 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 
 	// A deleted space's Teams fall back to Default with their Agents.
 	only := newSpace("Only", "dee")
-	if err := remove(defaultID, "dee"); err != nil {
+	if err := remove(defaultID, "dee", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := engine.CreateTeamDeploymentInSpace(ctx, only, team("duo", "1", "dee"), "user", "7", "create"); err != nil {

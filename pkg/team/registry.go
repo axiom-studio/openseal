@@ -159,35 +159,45 @@ func (r *Registry) ListDeployments(ctx context.Context, scope capability.ScopeRe
 // from requiring an impossible ordering between definition activation and
 // roster mutation. The activation entry is the durable actor/reason audit.
 func (r *Registry) UpdateDeployment(ctx context.Context, proposed *Deployment, expectedRevision int64, actorType, actorID, reason string) (*Deployment, *workforce.DefinitionActivation, error) {
+	change, err := r.PrepareDeploymentUpdate(ctx, proposed, expectedRevision, actorType, actorID, reason)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := r.store.UpdateTeamDeployment(ctx, change.Deployment, expectedRevision, change.Activation); err != nil {
+		return nil, nil, err
+	}
+	activation := change.Activation
+	return cloneDeployment(change.Deployment), &activation, nil
+}
+
+// PrepareDeploymentUpdate is UpdateDeployment without the write: a store
+// commits the returned change together with other writes.
+func (r *Registry) PrepareDeploymentUpdate(ctx context.Context, proposed *Deployment, expectedRevision int64, actorType, actorID, reason string) (*RosterChange, error) {
 	if r == nil || r.store == nil || r.agents == nil || proposed == nil {
-		return nil, nil, errors.New("team registry, Agent resolver, and deployment are required")
+		return nil, errors.New("team registry, Agent resolver, and deployment are required")
 	}
 	if strings.TrimSpace(actorType) == "" || strings.TrimSpace(actorID) == "" || strings.TrimSpace(reason) == "" {
-		return nil, nil, errors.New("team deployment update actor and reason are required")
+		return nil, errors.New("team deployment update actor and reason are required")
 	}
 	current, err := r.store.GetTeamDeployment(ctx, proposed.Scope, proposed.ID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if current.Revision != expectedRevision {
-		return nil, nil, ErrRevisionConflict
+		return nil, ErrRevisionConflict
 	}
 	if proposed.DefinitionID != current.DefinitionID {
-		return nil, nil, errors.New("team deployment update cannot change definition identity")
+		return nil, errors.New("team deployment update cannot change definition identity")
 	}
 	definition, err := r.store.GetTeamDefinition(ctx, proposed.DefinitionID, proposed.ActiveVersion)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	updated, activation, err := r.prepareUpdate(ctx, current, proposed, definition, actorType, actorID, reason)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if err := r.store.UpdateTeamDeployment(ctx, updated, expectedRevision, activation); err != nil {
-		return nil, nil, err
-	}
-	copyActivation := activation
-	return cloneDeployment(updated), &copyActivation, nil
+	return &RosterChange{Deployment: updated, ExpectedRevision: expectedRevision, Activation: activation}, nil
 }
 
 // prepareUpdate validates proposed against definition and returns the next

@@ -428,6 +428,9 @@ type (
 	UpdateSpaceRequest                   = runtime.UpdateSpaceRequest
 	PutSpaceMemberRequest                = runtime.PutSpaceMemberRequest
 	DeleteSpaceMemberRequest             = runtime.DeleteSpaceMemberRequest
+	SpaceAgentRemovalTeam                = runtime.SpaceAgentRemovalTeam
+	SpaceAgentRemovalNeedsConfirmation   = runtime.SpaceAgentRemovalNeedsConfirmation
+	SpaceTeamOutcome                     = runtime.SpaceTeamOutcome
 	PostChannelMessageRequest            = runtime.PostChannelMessageRequest
 	ChannelMessageFilter                 = runtime.ChannelMessageFilter
 	ConversationViewer                   = runtime.ConversationViewer
@@ -1429,7 +1432,6 @@ var (
 	ErrInvalidSpace                         = runtime.ErrInvalidSpace
 	ErrDefaultSpaceProtected                = runtime.ErrDefaultSpaceProtected
 	ErrTeamAgentOutsideSpace                = runtime.ErrTeamAgentOutsideSpace
-	ErrSpaceAgentNeededByTeam               = runtime.ErrSpaceAgentNeededByTeam
 	ErrChannelMessageNotFound               = runtime.ErrChannelMessageNotFound
 	ErrParticipationRoundNotFound           = runtime.ErrParticipationRoundNotFound
 	ErrInvalidConversation                  = runtime.ErrInvalidConversation
@@ -1738,6 +1740,9 @@ const (
 
 	SpaceMemberAgent = runtime.SpaceMemberAgent
 	SpaceMemberTeam  = runtime.SpaceMemberTeam
+
+	SpaceTeamLeaves   = runtime.SpaceTeamLeaves
+	SpaceTeamArchived = runtime.SpaceTeamArchived
 
 	SpaceAccessOwner    = runtime.SpaceAccessOwner
 	SpaceAccessInvited  = runtime.SpaceAccessInvited
@@ -3764,8 +3769,9 @@ func (e *Engine) PutSpaceMember(ctx context.Context, request runtime.PutSpaceMem
 }
 
 // DeleteSpaceMember takes a deployment out of a space. An Agent also leaves
-// the rosters of the Teams in that space; ErrSpaceAgentNeededByTeam refuses
-// the removal when one of them cannot lose it.
+// the rosters of the Teams in that space, and a Team that cannot lose it is
+// archived; until the request confirms that, nothing changes and the error is
+// a *SpaceAgentRemovalNeedsConfirmation.
 func (e *Engine) DeleteSpaceMember(ctx context.Context, request runtime.DeleteSpaceMemberRequest) error {
 	if e.spaces == nil {
 		return errSpacesUnsupported

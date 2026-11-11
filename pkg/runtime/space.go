@@ -27,9 +27,6 @@ var (
 	// ErrTeamAgentOutsideSpace refuses a Team roster Agent that is not in
 	// every space the Team is in.
 	ErrTeamAgentOutsideSpace = errors.New("a team's agents must be in its space")
-	// ErrSpaceAgentNeededByTeam refuses taking an Agent out of a space when a
-	// Team in that space cannot lose it.
-	ErrSpaceAgentNeededByTeam = errors.New("a team in this space needs the agent")
 )
 
 const (
@@ -247,10 +244,42 @@ type DeleteSpaceMemberRequest struct {
 	SpaceID  string
 	Type     SpaceMemberType
 	MemberID string
-	// ActorType and ActorID sign the Team roster updates that removing an
-	// Agent makes.
+	// ActorType and ActorID sign the Team updates that removing an Agent
+	// makes.
 	ActorType string
 	ActorID   string
+	// ConfirmTeams accepts what removing an Agent does to the Teams in the
+	// space that list it; without it such a removal changes nothing and
+	// returns *SpaceAgentRemovalNeedsConfirmation.
+	ConfirmTeams bool
+}
+
+type SpaceTeamOutcome string
+
+const (
+	// SpaceTeamLeaves: the Agent leaves the Team's roster.
+	SpaceTeamLeaves SpaceTeamOutcome = "leaves"
+	// SpaceTeamArchived: the Team cannot lose the Agent and is archived.
+	SpaceTeamArchived SpaceTeamOutcome = "archived"
+)
+
+// SpaceAgentRemovalTeam is what taking an Agent out of a space does to one
+// Team there. Remaining counts the roster without the Agent.
+type SpaceAgentRemovalTeam struct {
+	ID          string           `json:"id"`
+	DisplayName string           `json:"displayName"`
+	Outcome     SpaceTeamOutcome `json:"outcome"`
+	Remaining   int              `json:"remaining"`
+}
+
+// SpaceAgentRemovalNeedsConfirmation is the error of an unconfirmed removal
+// that would change Teams. Nothing was changed.
+type SpaceAgentRemovalNeedsConfirmation struct {
+	Teams []SpaceAgentRemovalTeam
+}
+
+func (e *SpaceAgentRemovalNeedsConfirmation) Error() string {
+	return fmt.Sprintf("removing the agent changes %d team(s) in this space and needs confirmation", len(e.Teams))
 }
 
 type SpaceService struct {
@@ -419,9 +448,10 @@ func (s *SpaceService) PutSpaceMember(ctx context.Context, req PutSpaceMemberReq
 }
 
 // DeleteSpaceMember takes the member out of the space. An Agent also leaves
-// the rosters of the Teams in that space: the Team registry prepares each
-// roster update and the store commits them with the removal. When a Team
-// cannot lose the Agent, nothing changes and the error names the Team.
+// the rosters of the Teams in that space, and a Team that cannot lose it is
+// archived: the Team registry prepares each update and the store commits them
+// with the removal. That needs req.ConfirmTeams; without it nothing changes
+// and the error is a *SpaceAgentRemovalNeedsConfirmation listing the Teams.
 func (s *SpaceService) DeleteSpaceMember(ctx context.Context, req DeleteSpaceMemberRequest) error {
 	if err := req.Scope.Validate(); err != nil {
 		return err
@@ -430,62 +460,74 @@ func (s *SpaceService) DeleteSpaceMember(ctx context.Context, req DeleteSpaceMem
 		return fmt.Errorf("%w: member type must be agent or team", ErrInvalidSpace)
 	}
 	spaceID, memberID := strings.TrimSpace(req.SpaceID), strings.TrimSpace(req.MemberID)
-	var changes []*kernelteam.RosterChange
-	if req.Type == SpaceMemberAgent && s.teams != nil {
-		var err error
-		if changes, err = s.agentRemovalRosterChanges(ctx, req.Scope, spaceID, memberID, req.ActorType, req.ActorID); err != nil {
-			return err
-		}
+	if req.Type != SpaceMemberAgent || s.teams == nil {
+		return s.store.DeleteSpaceMember(ctx, req.Scope, spaceID, req.Type, memberID)
+	}
+	teams, changes, err := s.agentRemovalTeamChanges(ctx, req.Scope, spaceID, memberID, req.ActorType, req.ActorID)
+	if err != nil {
+		return err
 	}
 	if len(changes) == 0 {
 		return s.store.DeleteSpaceMember(ctx, req.Scope, spaceID, req.Type, memberID)
 	}
+	if !req.ConfirmTeams {
+		return &SpaceAgentRemovalNeedsConfirmation{Teams: teams}
+	}
 	return s.rosters.DeleteSpaceAgentWithRosters(ctx, req.Scope, spaceID, memberID, changes)
 }
 
-// agentRemovalRosterChanges prepares the roster update of every Team in the
-// space that lists the Agent. An Agent that is not in the space changes none.
-func (s *SpaceService) agentRemovalRosterChanges(ctx context.Context, scope Scope, spaceID, agentID, actorType, actorID string) ([]*kernelteam.RosterChange, error) {
+// agentRemovalTeamChanges prepares the update of every Team in the space that
+// lists the Agent: its roster without the Agent or, when that would break the
+// Team's minimum, the same archiving update a retire makes. An Agent that is
+// not in the space changes none.
+func (s *SpaceService) agentRemovalTeamChanges(ctx context.Context, scope Scope, spaceID, agentID, actorType, actorID string) ([]SpaceAgentRemovalTeam, []*kernelteam.RosterChange, error) {
 	members, err := s.store.ListSpaceMembers(ctx, scope, spaceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !slices.ContainsFunc(members, func(member *SpaceMember) bool { return member.Type == SpaceMemberAgent && member.ID == agentID }) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	space, err := s.store.GetSpace(ctx, scope, spaceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	reason := fmt.Sprintf("Agent %s left the space %s", agentID, space.Name)
+	var teams []SpaceAgentRemovalTeam
 	var changes []*kernelteam.RosterChange
 	for _, member := range members {
 		if member.Type != SpaceMemberTeam {
 			continue
 		}
-		change, err := s.teams.PrepareAgentRemoval(ctx, agentBuilderScope(scope), member.ID, agentID, actorType, actorID,
-			fmt.Sprintf("Agent %s left the space %s", agentID, space.Name))
-		switch {
-		case errors.Is(err, kernelteam.ErrRosterMinimum):
-			return nil, fmt.Errorf("%w: removing agent %q from space %q would leave team %s invalid: %v",
-				ErrSpaceAgentNeededByTeam, agentID, space.Name, s.teamLabel(ctx, scope, member.ID), err)
-		case errors.Is(err, kernelteam.ErrDeploymentNotFound):
-		case err != nil:
-			return nil, err
-		case change != nil:
-			changes = append(changes, change)
+		team, err := s.teams.GetDeployment(ctx, agentBuilderScope(scope), member.ID)
+		if errors.Is(err, kernelteam.ErrDeploymentNotFound) {
+			continue
 		}
-	}
-	return changes, nil
-}
-
-// teamLabel is `"name" (id)` for an error message, or the quoted id alone.
-func (s *SpaceService) teamLabel(ctx context.Context, scope Scope, teamID string) string {
-	if team, err := s.teams.GetDeployment(ctx, agentBuilderScope(scope), teamID); err == nil {
-		if definition, err := s.teams.GetDefinition(ctx, team.DefinitionID, team.ActiveVersion); err == nil {
-			return fmt.Sprintf("%q (%s)", definition.DisplayName, teamID)
+		if err != nil {
+			return nil, nil, err
 		}
+		outcome := SpaceTeamLeaves
+		change, err := s.teams.PrepareAgentRemoval(ctx, agentBuilderScope(scope), team.ID, agentID, actorType, actorID, reason)
+		if errors.Is(err, kernelteam.ErrRosterMinimum) {
+			outcome = SpaceTeamArchived
+			archived := *team
+			archived.Status = kernelteam.DeploymentArchived
+			change, err = s.teams.PrepareDeploymentUpdate(ctx, &archived, team.Revision, actorType, actorID, reason)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if change == nil {
+			continue
+		}
+		definition, err := s.teams.GetDefinition(ctx, team.DefinitionID, team.ActiveVersion)
+		if err != nil {
+			return nil, nil, err
+		}
+		teams = append(teams, SpaceAgentRemovalTeam{ID: team.ID, DisplayName: definition.DisplayName, Outcome: outcome, Remaining: len(team.Roster) - 1})
+		changes = append(changes, change)
 	}
-	return fmt.Sprintf("%q", teamID)
+	return teams, changes, nil
 }
 
 // CheckSpaceAgents refuses Agents that are not members of the space.

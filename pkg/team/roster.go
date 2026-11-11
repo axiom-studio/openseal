@@ -12,12 +12,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-// ErrRosterMinimum refuses a removal that would leave a Team without a
+// ErrRosterMinimum reports a removal that would leave a Team without a
 // member, or one of its roles with fewer members than it requires.
 var ErrRosterMinimum = errors.New("team roster would fall below its minimum")
 
-// RosterChange is a Team deployment update the registry has validated and
-// not stored: a store commits it together with other writes.
+// RosterChange is a Team deployment update (a roster edit, or archiving) the
+// registry has validated and not stored: a store commits it together with
+// other writes.
 type RosterChange struct {
 	// Definition is a new version to register first; nil keeps the active one.
 	Definition       *Definition
