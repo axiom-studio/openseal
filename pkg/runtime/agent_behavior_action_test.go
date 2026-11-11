@@ -60,7 +60,9 @@ func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	agents := kernelagent.NewRegistry()
+	// Channel activation writes the Agent definition and the endpoint in one
+	// transaction, so the registry shares the runtime store.
+	agents := kernelagent.NewRegistryWithStore(store)
 	definition, err := agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
 		ID: "slack-agent-definition", Version: "1.0.0", DisplayName: "Slack Agent", Purpose: "Handle Slack work", SystemPrompt: "Work carefully.",
 		Authority:  kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 1},
