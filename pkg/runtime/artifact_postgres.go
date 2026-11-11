@@ -30,13 +30,6 @@ func (s *PostgresStore) migrateArtifacts(ctx context.Context, tx *sql.Tx) error 
 		return err
 	}
 	statements := []string{
-		`CREATE TABLE IF NOT EXISTS ` + s.table("artifact_working_files") + ` (
-			scope_kind TEXT NOT NULL,
-			scope_id TEXT NOT NULL,
-			id TEXT NOT NULL,
-			marked_at TIMESTAMPTZ NOT NULL,
-			PRIMARY KEY (scope_kind, scope_id, id)
-		)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_latest_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, id, version DESC)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_catalog_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, type, media_type, classification, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_provenance_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, producer_run_id, producer_request_id, created_at DESC)`,

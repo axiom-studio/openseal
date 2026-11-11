@@ -469,6 +469,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateAgentBuilderDrafts(ctx, tx); err != nil {
 		return fmt.Errorf("agent builder draft migration: %w", err)
 	}
+	if err := s.migrateArtifactWorkingFiles(ctx, tx); err != nil {
+		return fmt.Errorf("artifact working files migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

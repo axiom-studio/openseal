@@ -76,6 +76,33 @@ func markRunFiles(ctx context.Context, store ArtifactStore, scope Scope, saved [
 	return marker.MarkArtifactFiles(ctx, scope, working, results)
 }
 
+// artifactWorkingFilesMigrationVersion adds the artifact_working_files table.
+// It is its own migration, not part of the artifact catalog's (8): a database
+// whose ledger is already current skips every earlier migration, so a table
+// added to an old one would never be created there.
+const artifactWorkingFilesMigrationVersion int64 = 83
+
+// migrateArtifactWorkingFiles is PostgreSQL migration 83.
+func (s *PostgresStore) migrateArtifactWorkingFiles(ctx context.Context, tx *sql.Tx) error {
+	applied, err := s.postgresMigrationApplied(ctx, tx, artifactWorkingFilesMigrationVersion)
+	if err != nil || applied {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+s.table("artifact_working_files")+` (
+		scope_kind TEXT NOT NULL,
+		scope_id TEXT NOT NULL,
+		id TEXT NOT NULL,
+		marked_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (scope_kind, scope_id, id)
+	)`); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version, name)
+		VALUES ($1, 'artifact working files') ON CONFLICT (version) DO NOTHING`, artifactWorkingFilesMigrationVersion)
+	return err
+}
+
+// SQLite has no ledger: the table is created, if missing, on every open.
 const sqliteWorkingFilesTable = `
 	CREATE TABLE IF NOT EXISTS artifact_working_files (
 		scope_kind TEXT NOT NULL,
