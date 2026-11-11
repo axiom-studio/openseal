@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -510,4 +511,14 @@ func terminalCreditError(status AgentRunStatus, failure *RunFailureExplanation) 
 		return nil
 	}
 	return &RunCreditError{Code: RunCreditErrorWorkspaceCreditsExhausted}
+}
+
+func cloneActivityEvent(in *ActivityEvent) *ActivityEvent {
+	if in == nil {
+		return nil
+	}
+	var out ActivityEvent
+	data, _ := json.Marshal(in)
+	_ = json.Unmarshal(data, &out)
+	return &out
 }

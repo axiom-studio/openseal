@@ -167,3 +167,7 @@ func (s *PostgresStore) ListArtifacts(ctx context.Context, filter ArtifactFilter
 }
 
 var _ ArtifactStore = (*PostgresStore)(nil)
+
+func artifactStorageKey(scope Scope, id string) string {
+	return scope.Kind + "\x00" + scope.ID + "\x00" + id
+}

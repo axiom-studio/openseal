@@ -292,3 +292,12 @@ type SkillSetupRequestStore interface {
 	ListSkillSetupRequests(context.Context, Scope, string, string) ([]*SkillSetupRequest, error)
 	SaveSkillSetupRequest(context.Context, *SkillSetupRequest, int64) error
 }
+
+func cloneSkillSetupRequest(r *SkillSetupRequest) *SkillSetupRequest {
+	if r == nil {
+		return nil
+	}
+	c := *r
+	c.RequiredActions = append([]string(nil), r.RequiredActions...)
+	return &c
+}
