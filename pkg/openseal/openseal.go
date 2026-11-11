@@ -2233,15 +2233,21 @@ type actionWorkerSupervisorSpec struct {
 type Option func(*Engine) error
 
 // New creates an Engine with the given options.
-// The default store is in-memory; durable worker pools are opt-in.
+// The default store is an in-memory SQLite store whose state ends with the
+// process; durable worker pools are opt-in.
 func New(opts ...Option) (*Engine, error) {
 	logger, _ := zap.NewProduction()
 	sugar := logger.Sugar()
 
-	store := runtime.NewMemoryStore()
+	store, err := runtime.NewInMemorySQLiteStore()
+	if err != nil {
+		return nil, fmt.Errorf("default store: %w", err)
+	}
 	conversationChanges, _ := runtime.NewConversationChangeService(store, store)
 
-	agentRegistry := kernelagent.NewRegistry().WithDeploymentIDs(store)
+	// Agents and Teams share the kernel store so channel activation and Team
+	// upgrades commit in one transaction with it.
+	agentRegistry := kernelagent.NewRegistryWithStore(store)
 	e := &Engine{
 		store:               store,
 		workSignals:         runtime.NewWorkSignalStatus(),
@@ -2274,8 +2280,14 @@ func New(opts ...Option) (*Engine, error) {
 
 	for _, opt := range opts {
 		if err := opt(e); err != nil {
+			store.Close()
 			return nil, fmt.Errorf("engine option: %w", err)
 		}
+	}
+	// A complete replacement store rebuilt every service WithStore wires, so
+	// nothing reads the default store any more.
+	if _, replaced := e.store.(PersistentKernelStore); replaced && e.store != runtime.KernelStore(store) {
+		store.Close()
 	}
 	if e.actionPolicy == nil {
 		e.actionPolicy = runtime.ActionPolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
