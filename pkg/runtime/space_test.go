@@ -196,10 +196,10 @@ func exerciseSpaceStore(t *testing.T, store spaceConversationStore) {
 	if homeMembers, err := spaces.ListSpaceMembers(ctx, scope, home.ID); err != nil || len(homeMembers) != 1 || homeMembers[0].ID != "finn" {
 		t.Fatalf("home members = %+v, err = %v", homeMembers, err)
 	}
-	if err := spaces.DeleteSpaceMember(ctx, scope, home.ID, SpaceMemberAgent, "finn"); err != nil {
+	if err := spaces.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: scope, SpaceID: home.ID, Type: SpaceMemberAgent, MemberID: "finn"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := spaces.DeleteSpaceMember(ctx, scope, home.ID, SpaceMemberAgent, "finn"); err != nil {
+	if err := spaces.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: scope, SpaceID: home.ID, Type: SpaceMemberAgent, MemberID: "finn"}); err != nil {
 		t.Fatalf("delete absent member: %v", err)
 	}
 	if homeMembers, err := spaces.ListSpaceMembers(ctx, scope, home.ID); err != nil || len(homeMembers) != 0 {

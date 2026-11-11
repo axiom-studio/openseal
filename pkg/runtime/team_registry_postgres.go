@@ -174,11 +174,15 @@ func (s *PostgresStore) ActivateTeamAmendment(ctx context.Context, amendment *ke
 }
 
 func (s *PostgresStore) CreateTeamDefinition(ctx context.Context, definition *kernelteam.Definition) error {
+	return s.createTeamDefinition(ctx, s.db, definition)
+}
+
+func (s *PostgresStore) createTeamDefinition(ctx context.Context, db sqlExecQueryer, definition *kernelteam.Definition) error {
 	payload, err := json.Marshal(definition)
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO `+s.table("team_definitions")+` (id, version, digest, created_at, payload)
+	result, err := db.ExecContext(ctx, `INSERT INTO `+s.table("team_definitions")+` (id, version, digest, created_at, payload)
 		VALUES ($1, $2, $3, $4, $5::jsonb) ON CONFLICT (id, version) DO NOTHING`,
 		definition.ID, definition.Version, definition.Digest, definition.CreatedAt, string(payload))
 	if err != nil {
@@ -291,15 +295,22 @@ func (s *PostgresStore) ListTeamDeployments(ctx context.Context, scope capabilit
 }
 
 func (s *PostgresStore) UpdateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
-	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
-	if err != nil {
-		return err
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := s.updateTeamDeploymentTx(ctx, tx, deployment, expectedRevision, activation); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *PostgresStore) updateTeamDeploymentTx(ctx context.Context, tx *sql.Tx, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
+	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
+	if err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("team_deployments")+` SET active_version = $1, revision = $2, updated_at = $3, payload = $4::jsonb
 		WHERE scope_kind = $5 AND scope_id = $6 AND id = $7 AND revision = $8`, deployment.ActiveVersion, deployment.Revision,
 		deployment.UpdatedAt, deploymentPayload, deployment.Scope.Kind, deployment.Scope.ID, deployment.ID, expectedRevision)
@@ -312,10 +323,7 @@ func (s *PostgresStore) UpdateTeamDeployment(ctx context.Context, deployment *ke
 		}
 		return kernelteam.ErrRevisionConflict
 	}
-	if err := s.insertTeamActivationPostgres(ctx, tx, activation, activationPayload); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.insertTeamActivationPostgres(ctx, tx, activation, activationPayload)
 }
 
 func (s *PostgresStore) ListTeamDefinitionActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {

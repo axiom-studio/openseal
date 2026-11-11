@@ -175,33 +175,42 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *Deployment, e
 	if proposed.DefinitionID != current.DefinitionID {
 		return nil, nil, errors.New("team deployment update cannot change definition identity")
 	}
-	updated := cloneDeployment(proposed)
-	updated.CreatedAt = current.CreatedAt
-	updated.UpdatedAt = r.now().UTC()
-	updated.Revision = current.Revision + 1
-	definition, err := r.store.GetTeamDefinition(ctx, updated.DefinitionID, updated.ActiveVersion)
+	definition, err := r.store.GetTeamDefinition(ctx, proposed.DefinitionID, proposed.ActiveVersion)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := updated.Validate(definition); err != nil {
+	updated, activation, err := r.prepareUpdate(ctx, current, proposed, definition, actorType, actorID, reason)
+	if err != nil {
 		return nil, nil, err
-	}
-	if err := r.validateRoster(ctx, definition, updated); err != nil {
-		return nil, nil, err
-	}
-	if err := validateNarrowing(definition, updated); err != nil {
-		return nil, nil, err
-	}
-	activation := workforce.DefinitionActivation{
-		ID: r.newID(), Scope: updated.Scope, DeploymentID: updated.ID, DefinitionID: updated.DefinitionID,
-		FromVersion: current.ActiveVersion, ToVersion: updated.ActiveVersion, DeploymentRevision: updated.Revision,
-		Reason: strings.TrimSpace(reason), ActorType: strings.TrimSpace(actorType), ActorID: strings.TrimSpace(actorID), CreatedAt: updated.UpdatedAt,
 	}
 	if err := r.store.UpdateTeamDeployment(ctx, updated, expectedRevision, activation); err != nil {
 		return nil, nil, err
 	}
 	copyActivation := activation
 	return cloneDeployment(updated), &copyActivation, nil
+}
+
+// prepareUpdate validates proposed against definition and returns the next
+// revision of current with its activation entry, storing nothing.
+func (r *Registry) prepareUpdate(ctx context.Context, current, proposed *Deployment, definition *Definition, actorType, actorID, reason string) (*Deployment, workforce.DefinitionActivation, error) {
+	updated := cloneDeployment(proposed)
+	updated.CreatedAt = current.CreatedAt
+	updated.UpdatedAt = r.now().UTC()
+	updated.Revision = current.Revision + 1
+	if err := updated.Validate(definition); err != nil {
+		return nil, workforce.DefinitionActivation{}, err
+	}
+	if err := r.validateRoster(ctx, definition, updated); err != nil {
+		return nil, workforce.DefinitionActivation{}, err
+	}
+	if err := validateNarrowing(definition, updated); err != nil {
+		return nil, workforce.DefinitionActivation{}, err
+	}
+	return updated, workforce.DefinitionActivation{
+		ID: r.newID(), Scope: updated.Scope, DeploymentID: updated.ID, DefinitionID: updated.DefinitionID,
+		FromVersion: current.ActiveVersion, ToVersion: updated.ActiveVersion, DeploymentRevision: updated.Revision,
+		Reason: strings.TrimSpace(reason), ActorType: strings.TrimSpace(actorType), ActorID: strings.TrimSpace(actorID), CreatedAt: updated.UpdatedAt,
+	}, nil
 }
 
 func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*Deployment, *workforce.DefinitionActivation, error) {

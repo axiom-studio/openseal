@@ -23,11 +23,13 @@ type AgentProvisioner interface {
 	// EnsureAgentControlConversation returns the Agent's control
 	// conversation, creating it when it is missing. It is idempotent.
 	EnsureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*Conversation, error)
-	CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error)
+	// CreateTeamDeploymentInSpace creates the Team as a member of the
+	// space; its Agents must already be in it.
+	CreateTeamDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error)
 	ListSpaces(ctx context.Context, scope Scope) ([]*Space, error)
 	ListSpaceMembers(ctx context.Context, scope Scope, spaceID string) ([]*SpaceMember, error)
 	PutSpaceMember(ctx context.Context, request PutSpaceMemberRequest) (*SpaceMember, bool, error)
-	DeleteSpaceMember(ctx context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error
+	DeleteSpaceMember(ctx context.Context, request DeleteSpaceMemberRequest) error
 }
 
 const (

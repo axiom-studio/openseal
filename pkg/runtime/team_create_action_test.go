@@ -15,21 +15,29 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-// teamCreateTestProvisioner creates Teams the way the Engine does: the
-// registry create, then Default when the Team has no space.
+// teamCreateTestProvisioner creates Teams the way the Engine does: its
+// Agents must be in the space, then the registry create and the placement.
 type teamCreateTestProvisioner struct {
 	*agentBuilderTestProvisioner
 	teams       *kernelteam.Registry
 	teamCreates int
 }
 
-func (p *teamCreateTestProvisioner) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+func (p *teamCreateTestProvisioner) CreateTeamDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+	scope := Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
+	agents := make([]string, 0, len(deployment.Roster))
+	for _, assignment := range deployment.Roster {
+		agents = append(agents, assignment.AgentDeploymentID)
+	}
+	if err := p.spaces.CheckSpaceAgents(ctx, scope, spaceID, agents); err != nil {
+		return nil, nil, err
+	}
 	created, activation, err := p.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
 	if err != nil {
 		return nil, nil, err
 	}
 	p.teamCreates++
-	if _, err := p.spaces.EnsureMemberHasSpace(ctx, Scope{Kind: created.Scope.Kind, ID: created.Scope.ID}, SpaceMemberTeam, created.ID); err != nil {
+	if _, _, err := p.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: SpaceMemberTeam, MemberID: created.ID}); err != nil {
 		return nil, nil, err
 	}
 	return created, activation, nil
@@ -63,6 +71,13 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 	} {
 		if err := base.catalog.Bind(ctx, binding); err != nil {
 			t.Fatal(err)
+		}
+	}
+	for _, spaceID := range []string{DefaultSpaceID(base.scope), base.salesID} {
+		for _, agentID := range []string{"researcher", "platform"} {
+			if _, _, err := base.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: base.scope, SpaceID: spaceID, Type: SpaceMemberAgent, MemberID: agentID}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	provision := &teamCreateTestProvisioner{agentBuilderTestProvisioner: base.provision, teams: base.teams}
@@ -428,5 +443,36 @@ func TestTeamRoleActionMatchesSupportedVersions(t *testing.T) {
 		if got := isTeamRoleAction(bound); got != want {
 			t.Errorf("isTeamRoleAction(%s) = %v", version, got)
 		}
+	}
+}
+
+func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
+	ctx := context.Background()
+	f := newTeamCreateFixture(t)
+	ops, err := f.spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: f.scope, Name: "Ops", Look: DefaultSpaceLook, CreatedBy: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: f.scope, SpaceID: ops.ID, Type: SpaceMemberAgent, MemberID: "researcher"}); err != nil {
+		t.Fatal(err)
+	}
+	// The card is refused before review, and so is a Team approved while
+	// one of its Agents left the space.
+	if _, _, err := f.proposeTeam(t, teamCreateArgumentsFor(ops.ID)); !errors.Is(err, ErrTeamAgentOutsideSpace) ||
+		!strings.Contains(err.Error(), `agent "platform" is not in space "Ops"`) {
+		t.Fatalf("propose err = %v", err)
+	}
+	_, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(f.salesID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.spaces.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: f.scope, SpaceID: f.salesID, Type: SpaceMemberAgent, MemberID: "platform"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.executeTeam(t, "call-outside", arguments, agentBuilderApprover); !errors.Is(err, ErrTeamAgentOutsideSpace) {
+		t.Fatalf("execute err = %v", err)
+	}
+	if f.teamProvision.teamCreates != 0 {
+		t.Fatalf("team creates = %d", f.teamProvision.teamCreates)
 	}
 }

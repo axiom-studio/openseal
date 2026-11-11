@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -423,6 +424,7 @@ type (
 	CreateSpaceRequest                   = runtime.CreateSpaceRequest
 	UpdateSpaceRequest                   = runtime.UpdateSpaceRequest
 	PutSpaceMemberRequest                = runtime.PutSpaceMemberRequest
+	DeleteSpaceMemberRequest             = runtime.DeleteSpaceMemberRequest
 	PostChannelMessageRequest            = runtime.PostChannelMessageRequest
 	ChannelMessageFilter                 = runtime.ChannelMessageFilter
 	ConversationViewer                   = runtime.ConversationViewer
@@ -1423,6 +1425,8 @@ var (
 	ErrSpaceNotFound                        = runtime.ErrSpaceNotFound
 	ErrInvalidSpace                         = runtime.ErrInvalidSpace
 	ErrDefaultSpaceProtected                = runtime.ErrDefaultSpaceProtected
+	ErrTeamAgentOutsideSpace                = runtime.ErrTeamAgentOutsideSpace
+	ErrSpaceAgentNeededByTeam               = runtime.ErrSpaceAgentNeededByTeam
 	ErrChannelMessageNotFound               = runtime.ErrChannelMessageNotFound
 	ErrParticipationRoundNotFound           = runtime.ErrParticipationRoundNotFound
 	ErrInvalidConversation                  = runtime.ErrInvalidConversation
@@ -2257,6 +2261,9 @@ func New(opts ...Option) (*Engine, error) {
 	e.embeds, _ = runtime.NewEmbedSessionService(store, store)
 	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills)
 	e.progression = progression.NewService(e.agents, e.teams)
+	if err := e.spaces.UseTeams(e.teams); err != nil {
+		return nil, err
+	}
 
 	for _, opt := range opts {
 		if err := opt(e); err != nil {
@@ -2485,6 +2492,11 @@ func WithStore(store runtime.KernelStore) Option {
 		}
 		if teamStore, ok := store.(kernelteam.Store); ok && e.agents != nil {
 			e.teams = kernelteam.NewRegistryWithStore(teamStore, e.agents)
+		}
+		if e.spaces != nil && e.teams != nil {
+			if err := e.spaces.UseTeams(e.teams); err != nil {
+				return err
+			}
 		}
 		e.progression = progression.NewService(e.agents, e.teams)
 		if skillStore, ok := store.(skill.CatalogStore); ok {
@@ -3734,8 +3746,9 @@ func (e *Engine) ListSpaceMembers(ctx context.Context, scope runtime.Scope, spac
 	return e.spaces.ListSpaceMembers(ctx, scope, spaceID)
 }
 
-// PutSpaceMember adds an Agent or Team deployment to a space. The host must
-// first verify the deployment belongs to the scope.
+// PutSpaceMember adds an Agent or Team deployment to a space; a Team brings
+// the Agents on its roster. The host must first verify the deployment belongs
+// to the scope.
 func (e *Engine) PutSpaceMember(ctx context.Context, request runtime.PutSpaceMemberRequest) (*runtime.SpaceMember, bool, error) {
 	if e.spaces == nil {
 		return nil, false, errSpacesUnsupported
@@ -3743,11 +3756,14 @@ func (e *Engine) PutSpaceMember(ctx context.Context, request runtime.PutSpaceMem
 	return e.spaces.PutSpaceMember(ctx, request)
 }
 
-func (e *Engine) DeleteSpaceMember(ctx context.Context, scope runtime.Scope, spaceID string, memberType runtime.SpaceMemberType, memberID string) error {
+// DeleteSpaceMember takes a deployment out of a space. An Agent also leaves
+// the rosters of the Teams in that space; ErrSpaceAgentNeededByTeam refuses
+// the removal when one of them cannot lose it.
+func (e *Engine) DeleteSpaceMember(ctx context.Context, request runtime.DeleteSpaceMemberRequest) error {
 	if e.spaces == nil {
 		return errSpacesUnsupported
 	}
-	return e.spaces.DeleteSpaceMember(ctx, scope, spaceID, memberType, memberID)
+	return e.spaces.DeleteSpaceMember(ctx, request)
 }
 
 func (e *Engine) CreateEmbedInstallation(ctx context.Context, request runtime.CreateEmbedInstallationRequest) (*runtime.EmbedInstallation, error) {
@@ -4807,12 +4823,62 @@ func (e *Engine) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*
 	return e.teams.ListDefinitionVersions(ctx, id)
 }
 
+// CreateTeamDeployment creates the Team and adds it to the scope's Default
+// space, which brings its Agents there.
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
 	created, activation, err := e.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
-	if err == nil {
-		e.ensureDeploymentHasSpace(ctx, created.Scope, runtime.SpaceMemberTeam, created.ID)
+	if err == nil && e.spaces != nil {
+		e.placeTeam(ctx, created, "")
 	}
 	return created, activation, err
+}
+
+// CreateTeamDeploymentInSpace creates the Team as a member of the space.
+// Every Agent on its roster must already be in that space
+// (ErrTeamAgentOutsideSpace).
+func (e *Engine) CreateTeamDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+	if e.spaces == nil {
+		return nil, nil, errSpacesUnsupported
+	}
+	if deployment == nil {
+		return nil, nil, errors.New("team deployment is required")
+	}
+	if err := e.spaces.CheckSpaceAgents(ctx, runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, spaceID, teamRosterAgents(deployment.Roster)); err != nil {
+		return nil, nil, err
+	}
+	created, activation, err := e.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+	if err == nil {
+		e.placeTeam(ctx, created, spaceID)
+	}
+	return created, activation, err
+}
+
+// placeTeam runs after the Team's create has committed: it joins the space,
+// or Default when spaceID is empty. A failure is logged, not returned; the
+// Team exists.
+func (e *Engine) placeTeam(ctx context.Context, team *kernelteam.Deployment, spaceID string) {
+	scope := runtime.Scope{Kind: team.Scope.Kind, ID: team.Scope.ID}
+	var err error
+	if spaceID == "" {
+		var space *runtime.Space
+		if space, _, err = e.spaces.EnsureDefaultSpace(ctx, scope); err == nil {
+			spaceID = space.ID
+		}
+	}
+	if err == nil {
+		_, _, err = e.spaces.PutSpaceMember(ctx, runtime.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: runtime.SpaceMemberTeam, MemberID: team.ID})
+	}
+	if err != nil && e.logger != nil {
+		e.logger.Warnw("team was not placed in a space", "deploymentId", team.ID, "spaceId", spaceID, "error", err)
+	}
+}
+
+func teamRosterAgents(roster []kernelteam.RosterAssignment) []string {
+	agents := make([]string, 0, len(roster))
+	for _, assignment := range roster {
+		agents = append(agents, assignment.AgentDeploymentID)
+	}
+	return agents
 }
 
 // ensureDeploymentHasSpace runs after a deployment write has committed: a
@@ -4835,7 +4901,20 @@ func (e *Engine) ListTeamDeployments(ctx context.Context, scope skill.ScopeRefer
 	return e.teams.ListDeployments(ctx, scope)
 }
 
+// UpdateTeamDeployment refuses an Agent joining the roster that is not in
+// every space the Team is in (ErrTeamAgentOutsideSpace). Agents already on
+// the roster are not checked, so a Team that predates the rule keeps working.
 func (e *Engine) UpdateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, expectedRevision int64, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+	if e.spaces != nil && deployment != nil {
+		if current, err := e.teams.GetDeployment(ctx, deployment.Scope, deployment.ID); err == nil {
+			joining := slices.DeleteFunc(teamRosterAgents(deployment.Roster), func(agentID string) bool {
+				return slices.Contains(teamRosterAgents(current.Roster), agentID)
+			})
+			if err := e.spaces.CheckTeamAgents(ctx, runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, deployment.ID, joining); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
 	return e.teams.UpdateDeployment(ctx, deployment, expectedRevision, actorType, actorID, reason)
 }
 

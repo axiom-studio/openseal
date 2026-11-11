@@ -87,8 +87,9 @@ func TestEngineCreatedDeploymentsJoinDefaultWhenInNoSpace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	createAgent("second")
 	for range 2 {
-		if _, _, err := engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: spaceScope, SpaceID: work.ID, Type: runtime.SpaceMemberAgent, MemberID: "first"}); err != nil {
+		if _, _, err := engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: spaceScope, SpaceID: work.ID, Type: runtime.SpaceMemberAgent, MemberID: "second"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -96,10 +97,10 @@ func TestEngineCreatedDeploymentsJoinDefaultWhenInNoSpace(t *testing.T) {
 		t.Fatalf("work members = %+v, err = %v", workMembers, err)
 	}
 	// A deployment already in a space is not added to Default.
-	if err := engine.DeleteSpaceMember(ctx, spaceScope, defaultSpace, runtime.SpaceMemberAgent, "first"); err != nil {
+	if err := engine.DeleteSpaceMember(ctx, runtime.DeleteSpaceMemberRequest{Scope: spaceScope, SpaceID: defaultSpace, Type: runtime.SpaceMemberAgent, MemberID: "second"}); err != nil {
 		t.Fatal(err)
 	}
-	if placed, err := engine.spaces.EnsureMemberHasSpace(ctx, spaceScope, runtime.SpaceMemberAgent, "first"); err != nil || placed != nil {
+	if placed, err := engine.spaces.EnsureMemberHasSpace(ctx, spaceScope, runtime.SpaceMemberAgent, "second"); err != nil || placed != nil {
 		t.Fatalf("already placed = %+v, err = %v", placed, err)
 	}
 }

@@ -2,7 +2,10 @@ package runtime
 
 import (
 	"context"
+	"slices"
 	"time"
+
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 var _ SpaceStore = (*MemoryStore)(nil)
@@ -182,21 +185,31 @@ func (s *MemoryStore) ListSpaceMembers(_ context.Context, scope Scope, spaceID s
 	return result, nil
 }
 
-func (s *MemoryStore) PutSpaceMember(_ context.Context, scope Scope, member *SpaceMember) (*SpaceMember, bool, error) {
-	if err := member.Validate(); err != nil {
-		return nil, false, err
+func (s *MemoryStore) PutSpaceMember(_ context.Context, scope Scope, member *SpaceMember, with ...*SpaceMember) (*SpaceMember, bool, error) {
+	for _, each := range append([]*SpaceMember{member}, with...) {
+		if err := each.Validate(); err != nil {
+			return nil, false, err
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.spaces[scope][member.SpaceID] == nil {
 		return nil, false, ErrSpaceNotFound
 	}
+	stored, created := s.putSpaceMemberLocked(scope, member)
+	for _, each := range with {
+		s.putSpaceMemberLocked(scope, each)
+	}
+	return cloneSpaceMember(stored), created, nil
+}
+
+func (s *MemoryStore) putSpaceMemberLocked(scope Scope, member *SpaceMember) (*SpaceMember, bool) {
 	for _, existing := range s.spaceMembers[scope] {
 		if existing.SpaceID == member.SpaceID && existing.Type == member.Type && existing.ID == member.ID {
-			return cloneSpaceMember(existing), false, nil
+			return existing, false
 		}
 	}
-	return cloneSpaceMember(s.appendSpaceMemberLocked(scope, member)), true, nil
+	return s.appendSpaceMemberLocked(scope, member), true
 }
 
 func (s *MemoryStore) DeleteSpaceMember(_ context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error {
@@ -205,14 +218,28 @@ func (s *MemoryStore) DeleteSpaceMember(_ context.Context, scope Scope, spaceID 
 	if s.spaces[scope][spaceID] == nil {
 		return ErrSpaceNotFound
 	}
-	kept := s.spaceMembers[scope][:0]
-	for _, member := range s.spaceMembers[scope] {
-		if member.SpaceID == spaceID && member.Type == memberType && member.ID == memberID {
-			continue
-		}
-		kept = append(kept, member)
+	s.deleteSpaceMemberLocked(scope, spaceID, memberType, memberID)
+	return nil
+}
+
+func (s *MemoryStore) deleteSpaceMemberLocked(scope Scope, spaceID string, memberType SpaceMemberType, memberID string) {
+	s.spaceMembers[scope] = slices.DeleteFunc(s.spaceMembers[scope], func(member *SpaceMember) bool {
+		return member.SpaceID == spaceID && member.Type == memberType && member.ID == memberID
+	})
+}
+
+// DeleteSpaceAgentWithRosters stores the Teams' roster changes and the
+// Agent's removal from the space together.
+func (s *MemoryStore) DeleteSpaceAgentWithRosters(_ context.Context, scope Scope, spaceID, agentID string, changes []*kernelteam.RosterChange) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.spaces[scope][spaceID] == nil {
+		return ErrSpaceNotFound
 	}
-	s.spaceMembers[scope] = kept
+	if err := s.MemoryStore.ApplyRosterChanges(changes); err != nil {
+		return err
+	}
+	s.deleteSpaceMemberLocked(scope, spaceID, SpaceMemberAgent, agentID)
 	return nil
 }
 

@@ -148,6 +148,9 @@ func (v *TeamCreateActionValidator) ValidateActionProposal(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
+	if err := v.builder.spaces.CheckSpaceAgents(ctx, input.Run.Scope, space.ID, resolved.args.Members); err != nil {
+		return nil, err
+	}
 	members := make([]map[string]interface{}, 0, len(resolved.members))
 	for _, member := range resolved.members {
 		members = append(members, map[string]interface{}{
@@ -342,6 +345,10 @@ func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input Act
 		return nil, err
 	}
 	replayed := deployment != nil
+	space, err := d.teamSpace(ctx, scope, args.SpaceID)
+	if err != nil {
+		return nil, err
+	}
 	var definition *kernelteam.Definition
 	var activation *workforce.DefinitionActivation
 	if replayed {
@@ -370,17 +377,13 @@ func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input Act
 				ID: role.ID, RoleID: role.ID, AgentDeploymentID: args.Members[index], DisplayName: role.DisplayName,
 			})
 		}
-		deployment, activation, err = d.provision.CreateTeamDeployment(ctx, &kernelteam.Deployment{
+		deployment, activation, err = d.provision.CreateTeamDeploymentInSpace(ctx, space.ID, &kernelteam.Deployment{
 			ID: teamID, Scope: reference, DefinitionID: definition.ID, ActiveVersion: definition.Version,
 			Roster: roster, Status: kernelteam.DeploymentActive, Revision: 1,
 		}, "user", approver, teamCreateReason)
 		if err != nil {
 			return nil, err
 		}
-	}
-	space, err := d.teamSpace(ctx, scope, args.SpaceID)
-	if err != nil {
-		return nil, err
 	}
 	if err := d.placeTeamInSpace(ctx, scope, space, teamID); err != nil {
 		return nil, err
@@ -447,8 +450,8 @@ func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope Scop
 	return nil, fmt.Errorf("space %q no longer exists; propose create_team again", spaceID)
 }
 
-// placeTeamInSpace adds the Team to the reviewed space. Outside Default it
-// then leaves Default, where the deployment create placed it.
+// placeTeamInSpace keeps a replayed Team in the reviewed space only: the
+// create places it there, or in Default when it could not reach the space.
 func (d *AgentBuilderActionDispatcher) placeTeamInSpace(ctx context.Context, scope Scope, space *Space, teamID string) error {
 	if _, _, err := d.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
 		Scope: scope, SpaceID: space.ID, Type: SpaceMemberTeam, MemberID: teamID,
@@ -459,7 +462,7 @@ func (d *AgentBuilderActionDispatcher) placeTeamInSpace(ctx context.Context, sco
 	if space.ID == defaultSpace {
 		return nil
 	}
-	if err := d.provision.DeleteSpaceMember(ctx, scope, defaultSpace, SpaceMemberTeam, teamID); err != nil && !errors.Is(err, ErrSpaceNotFound) {
+	if err := d.provision.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: scope, SpaceID: defaultSpace, Type: SpaceMemberTeam, MemberID: teamID}); err != nil && !errors.Is(err, ErrSpaceNotFound) {
 		return err
 	}
 	return nil

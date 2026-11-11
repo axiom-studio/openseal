@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 const spacesMigrationVersion int64 = 67
@@ -320,9 +322,11 @@ func (s *PostgresStore) ListSpaceMembers(ctx context.Context, scope Scope, space
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) PutSpaceMember(ctx context.Context, scope Scope, member *SpaceMember) (*SpaceMember, bool, error) {
-	if err := member.Validate(); err != nil {
-		return nil, false, err
+func (s *PostgresStore) PutSpaceMember(ctx context.Context, scope Scope, member *SpaceMember, with ...*SpaceMember) (*SpaceMember, bool, error) {
+	for _, each := range append([]*SpaceMember{member}, with...) {
+		if err := each.Validate(); err != nil {
+			return nil, false, err
+		}
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -335,12 +339,25 @@ func (s *PostgresStore) PutSpaceMember(ctx context.Context, scope Scope, member 
 	if _, err := s.getPostgresSpace(ctx, tx, scope, member.SpaceID); err != nil {
 		return nil, false, err
 	}
+	stored, created, err := s.putPostgresSpaceMemberTx(ctx, tx, scope, member)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, each := range with {
+		if _, _, err := s.putPostgresSpaceMemberTx(ctx, tx, scope, each); err != nil {
+			return nil, false, err
+		}
+	}
+	return stored, created, tx.Commit()
+}
+
+func (s *PostgresStore) putPostgresSpaceMemberTx(ctx context.Context, tx *sql.Tx, scope Scope, member *SpaceMember) (*SpaceMember, bool, error) {
 	members := s.table("space_members")
 	existing, err := scanPostgresSpaceMember(tx.QueryRowContext(ctx, `SELECT `+postgresSpaceMemberColumns+` FROM `+members+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3 AND member_type = $4 AND member_id = $5`,
 		scope.Kind, scope.ID, member.SpaceID, member.Type, member.ID))
 	if err == nil {
-		return existing, false, tx.Commit()
+		return existing, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, err
@@ -354,17 +371,48 @@ func (s *PostgresStore) PutSpaceMember(ctx context.Context, scope Scope, member 
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`, scope.Kind, scope.ID, created.SpaceID, created.Type, created.ID, created.Position, created.AddedAt); err != nil {
 		return nil, false, err
 	}
-	return created, true, tx.Commit()
+	return created, true, nil
 }
 
 func (s *PostgresStore) DeleteSpaceMember(ctx context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error {
 	if _, err := s.getPostgresSpace(ctx, s.db, scope, spaceID); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM `+s.table("space_members")+`
+	return s.deletePostgresSpaceMember(ctx, s.db, scope, spaceID, memberType, memberID)
+}
+
+func (s *PostgresStore) deletePostgresSpaceMember(ctx context.Context, db sqlExecQueryer, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error {
+	_, err := db.ExecContext(ctx, `DELETE FROM `+s.table("space_members")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3 AND member_type = $4 AND member_id = $5`,
 		scope.Kind, scope.ID, spaceID, memberType, memberID)
 	return err
+}
+
+// DeleteSpaceAgentWithRosters commits the Teams' roster changes and the
+// Agent's removal from the space together.
+func (s *PostgresStore) DeleteSpaceAgentWithRosters(ctx context.Context, scope Scope, spaceID, agentID string, changes []*kernelteam.RosterChange) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := s.getPostgresSpace(ctx, tx, scope, spaceID); err != nil {
+		return err
+	}
+	for _, change := range changes {
+		if change.Definition != nil {
+			if err := s.createTeamDefinition(ctx, tx, change.Definition); err != nil {
+				return err
+			}
+		}
+		if err := s.updateTeamDeploymentTx(ctx, tx, change.Deployment, change.ExpectedRevision, change.Activation); err != nil {
+			return err
+		}
+	}
+	if err := s.deletePostgresSpaceMember(ctx, tx, scope, spaceID, SpaceMemberAgent, agentID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // resolvePostgresConversationSpaceTx fills an empty SpaceID with the owner's

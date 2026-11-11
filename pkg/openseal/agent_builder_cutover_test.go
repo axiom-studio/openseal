@@ -236,7 +236,7 @@ func TestAgentBuilderCutoverConvertsEachDraftAtStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = engine.DeleteSpaceMember(ctx, builderCutoverTestScope, defaultSpace.ID, runtime.SpaceMemberAgent, "inbox-agent")
+	_ = engine.DeleteSpaceMember(ctx, runtime.DeleteSpaceMemberRequest{Scope: builderCutoverTestScope, SpaceID: defaultSpace.ID, Type: runtime.SpaceMemberAgent, MemberID: "inbox-agent"})
 
 	startCutoverEngine(t, engine)
 

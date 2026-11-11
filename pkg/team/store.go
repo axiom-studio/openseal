@@ -209,6 +209,33 @@ func (s *MemoryStore) UpdateTeamDeployment(_ context.Context, deployment *Deploy
 	return nil
 }
 
+// ApplyRosterChanges stores every change or none.
+func (s *MemoryStore) ApplyRosterChanges(changes []*RosterChange) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, change := range changes {
+		current := s.deployments[deploymentKey(change.Deployment.Scope, change.Deployment.ID)]
+		if current == nil {
+			return ErrDeploymentNotFound
+		}
+		if current.Revision != change.ExpectedRevision {
+			return ErrRevisionConflict
+		}
+		if change.Definition != nil && s.definitions[definitionKey(change.Definition.ID, change.Definition.Version)] != nil {
+			return errors.New("team definition versions are immutable")
+		}
+	}
+	for _, change := range changes {
+		if change.Definition != nil {
+			s.definitions[definitionKey(change.Definition.ID, change.Definition.Version)] = cloneDefinition(change.Definition)
+		}
+		key := deploymentKey(change.Deployment.Scope, change.Deployment.ID)
+		s.deployments[key] = cloneDeployment(change.Deployment)
+		s.activations[key] = append(s.activations[key], change.Activation)
+	}
+	return nil
+}
+
 func (s *MemoryStore) ListTeamDefinitionActivations(_ context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -60,7 +60,7 @@ func (p *agentBuilderTestProvisioner) EnsureAgentControlConversation(ctx context
 	return conversation, err
 }
 
-func (p *agentBuilderTestProvisioner) CreateTeamDeployment(context.Context, *kernelteam.Deployment, string, string, string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+func (p *agentBuilderTestProvisioner) CreateTeamDeploymentInSpace(context.Context, string, *kernelteam.Deployment, string, string, string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
 	return nil, nil, errors.New("not used")
 }
 
@@ -79,8 +79,8 @@ func (p *agentBuilderTestProvisioner) PutSpaceMember(ctx context.Context, reques
 	return p.spaces.PutSpaceMember(ctx, request)
 }
 
-func (p *agentBuilderTestProvisioner) DeleteSpaceMember(ctx context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error {
-	return p.spaces.DeleteSpaceMember(ctx, scope, spaceID, memberType, memberID)
+func (p *agentBuilderTestProvisioner) DeleteSpaceMember(ctx context.Context, request DeleteSpaceMemberRequest) error {
+	return p.spaces.DeleteSpaceMember(ctx, request)
 }
 
 // agentBuilderRecordingHost records what the dispatcher asks the host.

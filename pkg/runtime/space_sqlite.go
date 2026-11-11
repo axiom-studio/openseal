@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 var _ SpaceStore = (*SQLiteStore)(nil)
@@ -335,9 +337,11 @@ func (s *SQLiteStore) ListSpaceMembers(ctx context.Context, scope Scope, spaceID
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) PutSpaceMember(ctx context.Context, scope Scope, member *SpaceMember) (*SpaceMember, bool, error) {
-	if err := member.Validate(); err != nil {
-		return nil, false, err
+func (s *SQLiteStore) PutSpaceMember(ctx context.Context, scope Scope, member *SpaceMember, with ...*SpaceMember) (*SpaceMember, bool, error) {
+	for _, each := range append([]*SpaceMember{member}, with...) {
+		if err := each.Validate(); err != nil {
+			return nil, false, err
+		}
 	}
 	var result *SpaceMember
 	var created bool
@@ -345,24 +349,16 @@ func (s *SQLiteStore) PutSpaceMember(ctx context.Context, scope Scope, member *S
 		if _, err := getSQLiteSpace(ctx, conn, scope, member.SpaceID); err != nil {
 			return err
 		}
-		existing, err := scanSQLiteSpaceMember(conn.QueryRowContext(ctx, `SELECT `+postgresSpaceMemberColumns+` FROM space_members
-			WHERE scope_kind = ? AND scope_id = ? AND space_id = ? AND member_type = ? AND member_id = ?`,
-			scope.Kind, scope.ID, member.SpaceID, member.Type, member.ID))
-		if err == nil {
-			result = existing
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		var err error
+		if result, created, err = putSQLiteSpaceMember(ctx, conn, scope, member); err != nil {
 			return err
 		}
-		result, created = cloneSpaceMember(member), true
-		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM space_members
-			WHERE scope_kind = ? AND scope_id = ? AND space_id = ?`, scope.Kind, scope.ID, member.SpaceID).Scan(&result.Position); err != nil {
-			return err
+		for _, each := range with {
+			if _, _, err := putSQLiteSpaceMember(ctx, conn, scope, each); err != nil {
+				return err
+			}
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO space_members (scope_kind, scope_id, `+postgresSpaceMemberColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, scope.Kind, scope.ID, result.SpaceID, result.Type, result.ID, result.Position, result.AddedAt)
-		return err
+		return nil
 	})
 	if err != nil {
 		return nil, false, err
@@ -370,14 +366,67 @@ func (s *SQLiteStore) PutSpaceMember(ctx context.Context, scope Scope, member *S
 	return result, created, nil
 }
 
+func putSQLiteSpaceMember(ctx context.Context, conn *sql.Conn, scope Scope, member *SpaceMember) (*SpaceMember, bool, error) {
+	existing, err := scanSQLiteSpaceMember(conn.QueryRowContext(ctx, `SELECT `+postgresSpaceMemberColumns+` FROM space_members
+		WHERE scope_kind = ? AND scope_id = ? AND space_id = ? AND member_type = ? AND member_id = ?`,
+		scope.Kind, scope.ID, member.SpaceID, member.Type, member.ID))
+	if err == nil {
+		return existing, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, err
+	}
+	created := cloneSpaceMember(member)
+	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM space_members
+		WHERE scope_kind = ? AND scope_id = ? AND space_id = ?`, scope.Kind, scope.ID, member.SpaceID).Scan(&created.Position); err != nil {
+		return nil, false, err
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO space_members (scope_kind, scope_id, `+postgresSpaceMemberColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, scope.Kind, scope.ID, created.SpaceID, created.Type, created.ID, created.Position, created.AddedAt); err != nil {
+		return nil, false, err
+	}
+	return created, true, nil
+}
+
 func (s *SQLiteStore) DeleteSpaceMember(ctx context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error {
 	if _, err := getSQLiteSpace(ctx, s.db, scope, spaceID); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM space_members
+	return deleteSQLiteSpaceMember(ctx, s.db, scope, spaceID, memberType, memberID)
+}
+
+func deleteSQLiteSpaceMember(ctx context.Context, db sqliteSpaceExecer, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error {
+	_, err := db.ExecContext(ctx, `DELETE FROM space_members
 		WHERE scope_kind = ? AND scope_id = ? AND space_id = ? AND member_type = ? AND member_id = ?`,
 		scope.Kind, scope.ID, spaceID, memberType, memberID)
 	return err
+}
+
+// DeleteSpaceAgentWithRosters commits the Teams' roster changes and the
+// Agent's removal from the space together.
+func (s *SQLiteStore) DeleteSpaceAgentWithRosters(ctx context.Context, scope Scope, spaceID, agentID string, changes []*kernelteam.RosterChange) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := getSQLiteSpace(ctx, tx, scope, spaceID); err != nil {
+		return err
+	}
+	for _, change := range changes {
+		if change.Definition != nil {
+			if err := createTeamDefinitionSQLite(ctx, tx, change.Definition); err != nil {
+				return err
+			}
+		}
+		if err := updateTeamDeploymentSQLiteTx(ctx, tx, change.Deployment, change.ExpectedRevision, change.Activation); err != nil {
+			return err
+		}
+	}
+	if err := deleteSQLiteSpaceMember(ctx, tx, scope, spaceID, SpaceMemberAgent, agentID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // resolveSQLiteConversationSpace mirrors resolvePostgresConversationSpaceTx.

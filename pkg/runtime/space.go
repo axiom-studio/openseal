@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
 )
 
@@ -22,6 +24,12 @@ var (
 	ErrSpaceNotFound         = errors.New("space not found")
 	ErrInvalidSpace          = errors.New("invalid space")
 	ErrDefaultSpaceProtected = errors.New("the Default space cannot be deleted")
+	// ErrTeamAgentOutsideSpace refuses a Team roster Agent that is not in
+	// every space the Team is in.
+	ErrTeamAgentOutsideSpace = errors.New("a team's agents must be in its space")
+	// ErrSpaceAgentNeededByTeam refuses taking an Agent out of a space when a
+	// Team in that space cannot lose it.
+	ErrSpaceAgentNeededByTeam = errors.New("a team in this space needs the agent")
 )
 
 const (
@@ -136,12 +144,21 @@ type SpaceStore interface {
 	DeleteSpace(ctx context.Context, scope Scope, spaceID string, now time.Time) error
 	ListSpaceMembers(ctx context.Context, scope Scope, spaceID string) ([]*SpaceMember, error)
 	// PutSpaceMember is idempotent: an existing member is returned unchanged.
-	PutSpaceMember(ctx context.Context, scope Scope, member *SpaceMember) (*SpaceMember, bool, error)
+	// The same write adds each of with that is not in the space yet.
+	PutSpaceMember(ctx context.Context, scope Scope, member *SpaceMember, with ...*SpaceMember) (*SpaceMember, bool, error)
 	DeleteSpaceMember(ctx context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error
 	// EnsureMemberHasSpace adds a deployment that is in no space to the
 	// scope's Default space, creating Default when needed. It returns the
 	// new membership, or nil when the deployment already had a space.
 	EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error)
+}
+
+// SpaceRosterStore is a store holding both spaces and Teams. It takes an Agent
+// out of a space and stores the roster changes of that space's Teams in one
+// transaction.
+type SpaceRosterStore interface {
+	kernelteam.Store
+	DeleteSpaceAgentWithRosters(ctx context.Context, scope Scope, spaceID, agentID string, changes []*kernelteam.RosterChange) error
 }
 
 type CreateSpaceRequest struct {
@@ -166,14 +183,40 @@ type PutSpaceMemberRequest struct {
 	MemberID string
 }
 
+type DeleteSpaceMemberRequest struct {
+	Scope    Scope
+	SpaceID  string
+	Type     SpaceMemberType
+	MemberID string
+	// ActorType and ActorID sign the Team roster updates that removing an
+	// Agent makes.
+	ActorType string
+	ActorID   string
+}
+
 type SpaceService struct {
-	store SpaceStore
-	now   func() time.Time
-	newID func() string
+	store   SpaceStore
+	teams   *kernelteam.Registry
+	rosters SpaceRosterStore
+	now     func() time.Time
+	newID   func() string
 }
 
 func NewSpaceService(store SpaceStore) *SpaceService {
 	return &SpaceService{store: store, now: time.Now, newID: uuid.NewString}
+}
+
+// UseTeams ties Team rosters to spaces: a Team's Agents are in every space
+// the Team is in. A Team added to a space brings its Agents, and an Agent
+// that leaves a space leaves that space's Teams. The registry must write to
+// this service's store, so both changes commit together.
+func (s *SpaceService) UseTeams(teams *kernelteam.Registry) error {
+	store, ok := s.store.(SpaceRosterStore)
+	if !ok || !teams.UsesStore(store) {
+		return errors.New("spaces and Teams must share one store")
+	}
+	s.teams, s.rosters = teams, store
+	return nil
 }
 
 // ListSpaces ensures the scope's Default space and returns every space by
@@ -244,7 +287,38 @@ func (s *SpaceService) DeleteSpace(ctx context.Context, scope Scope, spaceID str
 	if err := scope.Validate(); err != nil {
 		return err
 	}
-	return s.store.DeleteSpace(ctx, scope, strings.TrimSpace(spaceID), s.now().UTC())
+	spaceID = strings.TrimSpace(spaceID)
+	var teams []string
+	if s.teams != nil {
+		members, err := s.store.ListSpaceMembers(ctx, scope, spaceID)
+		if err != nil {
+			return err
+		}
+		for _, member := range members {
+			if member.Type == SpaceMemberTeam {
+				teams = append(teams, member.ID)
+			}
+		}
+	}
+	if err := s.store.DeleteSpace(ctx, scope, spaceID, s.now().UTC()); err != nil || len(teams) == 0 {
+		return err
+	}
+	// A Team that fell back to Default brings its Agents there, like a Team
+	// added to any space.
+	defaultID := DefaultSpaceID(scope)
+	members, err := s.store.ListSpaceMembers(ctx, scope, defaultID)
+	if err != nil {
+		return err
+	}
+	for _, member := range members {
+		if member.Type != SpaceMemberTeam || !slices.Contains(teams, member.ID) {
+			continue
+		}
+		if _, _, err := s.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: defaultID, Type: SpaceMemberTeam, MemberID: member.ID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *SpaceService) ListSpaceMembers(ctx context.Context, scope Scope, spaceID string) ([]*SpaceMember, error) {
@@ -255,26 +329,150 @@ func (s *SpaceService) ListSpaceMembers(ctx context.Context, scope Scope, spaceI
 }
 
 // PutSpaceMember adds the member at the end of the space; the host must have
-// verified the deployment belongs to the scope.
+// verified the deployment belongs to the scope. A Team brings the Agents on
+// its roster.
 func (s *SpaceService) PutSpaceMember(ctx context.Context, req PutSpaceMemberRequest) (*SpaceMember, bool, error) {
 	if err := req.Scope.Validate(); err != nil {
 		return nil, false, err
 	}
-	member := &SpaceMember{SpaceID: strings.TrimSpace(req.SpaceID), Type: req.Type, ID: strings.TrimSpace(req.MemberID), AddedAt: s.now().UTC()}
+	now := s.now().UTC()
+	member := &SpaceMember{SpaceID: strings.TrimSpace(req.SpaceID), Type: req.Type, ID: strings.TrimSpace(req.MemberID), AddedAt: now}
 	if err := member.Validate(); err != nil {
 		return nil, false, err
 	}
-	return s.store.PutSpaceMember(ctx, req.Scope, member)
+	var agents []*SpaceMember
+	if member.Type == SpaceMemberTeam && s.teams != nil {
+		team, err := s.teams.GetDeployment(ctx, agentBuilderScope(req.Scope), member.ID)
+		if err != nil && !errors.Is(err, kernelteam.ErrDeploymentNotFound) {
+			return nil, false, err
+		}
+		if team != nil {
+			for _, assignment := range team.Roster {
+				agent := &SpaceMember{SpaceID: member.SpaceID, Type: SpaceMemberAgent, ID: assignment.AgentDeploymentID, AddedAt: now}
+				// A legacy scoped id ("tenant/7/x:live") cannot be a space member.
+				if agent.Validate() == nil {
+					agents = append(agents, agent)
+				}
+			}
+		}
+	}
+	return s.store.PutSpaceMember(ctx, req.Scope, member, agents...)
 }
 
-func (s *SpaceService) DeleteSpaceMember(ctx context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error {
-	if err := scope.Validate(); err != nil {
+// DeleteSpaceMember takes the member out of the space. An Agent also leaves
+// the rosters of the Teams in that space: the Team registry prepares each
+// roster update and the store commits them with the removal. When a Team
+// cannot lose the Agent, nothing changes and the error names the Team.
+func (s *SpaceService) DeleteSpaceMember(ctx context.Context, req DeleteSpaceMemberRequest) error {
+	if err := req.Scope.Validate(); err != nil {
 		return err
 	}
-	if !memberType.Valid() {
+	if !req.Type.Valid() {
 		return fmt.Errorf("%w: member type must be agent or team", ErrInvalidSpace)
 	}
-	return s.store.DeleteSpaceMember(ctx, scope, strings.TrimSpace(spaceID), memberType, strings.TrimSpace(memberID))
+	spaceID, memberID := strings.TrimSpace(req.SpaceID), strings.TrimSpace(req.MemberID)
+	var changes []*kernelteam.RosterChange
+	if req.Type == SpaceMemberAgent && s.teams != nil {
+		var err error
+		if changes, err = s.agentRemovalRosterChanges(ctx, req.Scope, spaceID, memberID, req.ActorType, req.ActorID); err != nil {
+			return err
+		}
+	}
+	if len(changes) == 0 {
+		return s.store.DeleteSpaceMember(ctx, req.Scope, spaceID, req.Type, memberID)
+	}
+	return s.rosters.DeleteSpaceAgentWithRosters(ctx, req.Scope, spaceID, memberID, changes)
+}
+
+// agentRemovalRosterChanges prepares the roster update of every Team in the
+// space that lists the Agent. An Agent that is not in the space changes none.
+func (s *SpaceService) agentRemovalRosterChanges(ctx context.Context, scope Scope, spaceID, agentID, actorType, actorID string) ([]*kernelteam.RosterChange, error) {
+	members, err := s.store.ListSpaceMembers(ctx, scope, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(members, func(member *SpaceMember) bool { return member.Type == SpaceMemberAgent && member.ID == agentID }) {
+		return nil, nil
+	}
+	space, err := s.store.GetSpace(ctx, scope, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	var changes []*kernelteam.RosterChange
+	for _, member := range members {
+		if member.Type != SpaceMemberTeam {
+			continue
+		}
+		change, err := s.teams.PrepareAgentRemoval(ctx, agentBuilderScope(scope), member.ID, agentID, actorType, actorID,
+			fmt.Sprintf("Agent %s left the space %s", agentID, space.Name))
+		switch {
+		case errors.Is(err, kernelteam.ErrRosterMinimum):
+			return nil, fmt.Errorf("%w: removing agent %q from space %q would leave team %s invalid: %v",
+				ErrSpaceAgentNeededByTeam, agentID, space.Name, s.teamLabel(ctx, scope, member.ID), err)
+		case errors.Is(err, kernelteam.ErrDeploymentNotFound):
+		case err != nil:
+			return nil, err
+		case change != nil:
+			changes = append(changes, change)
+		}
+	}
+	return changes, nil
+}
+
+// teamLabel is `"name" (id)` for an error message, or the quoted id alone.
+func (s *SpaceService) teamLabel(ctx context.Context, scope Scope, teamID string) string {
+	if team, err := s.teams.GetDeployment(ctx, agentBuilderScope(scope), teamID); err == nil {
+		if definition, err := s.teams.GetDefinition(ctx, team.DefinitionID, team.ActiveVersion); err == nil {
+			return fmt.Sprintf("%q (%s)", definition.DisplayName, teamID)
+		}
+	}
+	return fmt.Sprintf("%q", teamID)
+}
+
+// CheckSpaceAgents refuses Agents that are not members of the space.
+func (s *SpaceService) CheckSpaceAgents(ctx context.Context, scope Scope, spaceID string, agentIDs []string) error {
+	space, err := s.store.GetSpace(ctx, scope, strings.TrimSpace(spaceID))
+	if err != nil {
+		return err
+	}
+	members, err := s.store.ListSpaceMembers(ctx, scope, space.ID)
+	if err != nil {
+		return err
+	}
+	return agentsInSpace(space, members, agentIDs)
+}
+
+// CheckTeamAgents refuses Agents that are not in every space the Team is in.
+func (s *SpaceService) CheckTeamAgents(ctx context.Context, scope Scope, teamID string, agentIDs []string) error {
+	if len(agentIDs) == 0 {
+		return nil
+	}
+	spaces, err := s.store.ListSpaces(ctx, scope)
+	if err != nil {
+		return err
+	}
+	for _, space := range spaces {
+		members, err := s.store.ListSpaceMembers(ctx, scope, space.ID)
+		if err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(members, func(member *SpaceMember) bool { return member.Type == SpaceMemberTeam && member.ID == teamID }) {
+			continue
+		}
+		if err := agentsInSpace(space, members, agentIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func agentsInSpace(space *Space, members []*SpaceMember, agentIDs []string) error {
+	for _, agentID := range agentIDs {
+		if !slices.ContainsFunc(members, func(member *SpaceMember) bool { return member.Type == SpaceMemberAgent && member.ID == agentID }) {
+			return fmt.Errorf("%w: agent %q is not in space %q", ErrTeamAgentOutsideSpace, agentID, space.Name)
+		}
+	}
+	return nil
 }
 
 // EnsureMemberHasSpace places a newly created Agent or Team deployment in
