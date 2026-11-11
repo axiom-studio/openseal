@@ -232,9 +232,12 @@ type ArtifactFilter struct {
 	SpaceID            string
 	EvidenceTarget     string
 	RetentionDueBefore *time.Time
-	LatestOnly         bool
-	Limit              int
-	Offset             int
+	// Files leaves out, or keeps only, the files a Run made to build its
+	// result and did not hand over.
+	Files      ArtifactFiles
+	LatestOnly bool
+	Limit      int
+	Offset     int
 }
 
 type ArtifactStore interface {
@@ -347,6 +350,9 @@ func (c *ArtifactCatalog) List(ctx context.Context, filter ArtifactFilter) ([]*A
 	}
 	filter.ConversationID = strings.TrimSpace(filter.ConversationID)
 	filter.SpaceID = strings.TrimSpace(filter.SpaceID)
+	if !filter.Files.Valid() {
+		return nil, errors.New("artifact files must be results or working")
+	}
 	if filter.Limit <= 0 {
 		filter.Limit = 50
 	}

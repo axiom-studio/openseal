@@ -42,7 +42,7 @@ func migrateArtifacts(db *sql.DB) error {
 			ON artifacts(scope_kind, scope_id,
 				json_extract(payload, '$.provenance.spaceId'),
 				created_at DESC, id, version DESC);
-	`)
+	` + sqliteWorkingFilesTable)
 	return err
 }
 
@@ -102,8 +102,15 @@ func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter ArtifactFilter) 
 		return nil, err
 	}
 	if filter.EvidenceTarget == "" && filter.RetentionDueBefore == nil {
-		query, args := artifactListQuery(filter, "artifacts", false)
+		query, args := artifactListQuery(filter, "artifacts", "artifact_working_files", false)
 		return queryArtifactPage(ctx, s.db, query, args)
+	}
+	var working map[string]bool
+	if filter.Files != ArtifactFilesAll {
+		var err error
+		if working, err = workingArtifactIDs(ctx, s.db, `SELECT id FROM artifact_working_files WHERE scope_kind = ? AND scope_id = ?`, filter.Scope); err != nil {
+			return nil, err
+		}
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM artifacts WHERE scope_kind = ? AND scope_id = ?`, filter.Scope.Kind, filter.Scope.ID)
 	if err != nil {
@@ -134,7 +141,7 @@ func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter ArtifactFilter) 
 		if filter.LatestOnly && artifact.Version != latest[artifact.ID] {
 			continue
 		}
-		if matchesArtifactFilter(artifact, filter) {
+		if matchesArtifactFilter(artifact, filter) && filter.Files.keeps(working[artifact.ID]) {
 			result = append(result, artifact)
 		}
 	}

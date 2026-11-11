@@ -11,7 +11,7 @@ import (
 // SQL so a user-visible page does not load and sort every tenant artifact.
 // Evidence and retention queries keep the exact Go filter until those nested
 // fields have a portable indexed representation.
-func artifactListQuery(filter ArtifactFilter, table string, postgres bool) (string, []any) {
+func artifactListQuery(filter ArtifactFilter, table, workingTable string, postgres bool) (string, []any) {
 	args := make([]any, 0, 12)
 	bind := func(value any) string {
 		args = append(args, value)
@@ -67,6 +67,13 @@ func artifactListQuery(filter ArtifactFilter, table string, postgres bool) (stri
 	}
 	if filter.SpaceID != "" {
 		where = append(where, provenanceField("spaceId")+" = "+bind(filter.SpaceID))
+	}
+	if filter.Files == ArtifactFilesResults || filter.Files == ArtifactFilesWorking {
+		marked := "EXISTS (SELECT 1 FROM " + workingTable + " w WHERE w.scope_kind = a.scope_kind AND w.scope_id = a.scope_id AND w.id = a.id)"
+		if filter.Files == ArtifactFilesResults {
+			marked = "NOT " + marked
+		}
+		where = append(where, marked)
 	}
 	if filter.LatestOnly {
 		where = append(where, "NOT EXISTS (SELECT 1 FROM "+table+" newer WHERE newer.scope_kind = a.scope_kind AND newer.scope_id = a.scope_id AND newer.id = a.id AND newer.version > a.version)")

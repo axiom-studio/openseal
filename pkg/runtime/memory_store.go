@@ -41,6 +41,7 @@ type MemoryStore struct {
 	dependencyGroupKeys                 map[string]string
 	dependencies                        map[string]map[string]*RunDependency
 	artifacts                           map[string]map[int64]*Artifact
+	workingFiles                        map[string]bool
 	conversations                       map[string]*Conversation
 	// agentBuilderDrafts maps an unfinished builder conversation to the
 	// person who started it (the builder_draft_requester column).

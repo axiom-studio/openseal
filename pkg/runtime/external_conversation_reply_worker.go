@@ -305,6 +305,9 @@ func (w *ExternalConversationReplyWorker) projectReply(
 			return nil, refErr
 		}
 		artifacts, _ := handedOverArtifacts(saved, run.Output)
+		if catalog, ok := any(w.store).(ArtifactStore); ok {
+			_ = markRunFiles(ctx, catalog, run.Scope, saved, artifacts)
+		}
 		current, getErr := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
 		if getErr != nil {
 			return nil, getErr

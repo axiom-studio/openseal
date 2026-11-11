@@ -100,7 +100,12 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		ConversationID:    strings.TrimSpace(r.URL.Query().Get("conversationId")),
 		SpaceID:           strings.TrimSpace(r.URL.Query().Get("spaceId")),
 		EvidenceTarget:    strings.TrimSpace(r.URL.Query().Get("evidenceTarget")),
+		Files:             runtime.ArtifactFiles(strings.TrimSpace(r.URL.Query().Get("files"))),
 		LatestOnly:        latestOnly, Limit: limit, Offset: offset,
+	}
+	if !filter.Files.Valid() {
+		s.respondError(w, http.StatusBadRequest, "files must be results or working")
+		return
 	}
 	ownerType := strings.TrimSpace(r.URL.Query().Get("ownerType"))
 	ownerID := strings.TrimSpace(r.URL.Query().Get("ownerId"))

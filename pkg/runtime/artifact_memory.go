@@ -70,7 +70,7 @@ func (s *MemoryStore) ListArtifacts(_ context.Context, filter ArtifactFilter) ([
 			if filter.LatestOnly && version != latest {
 				continue
 			}
-			if matchesArtifactFilter(artifact, filter) {
+			if matchesArtifactFilter(artifact, filter) && filter.Files.keeps(s.workingFiles[artifactStorageKey(artifact.Scope, artifact.ID)]) {
 				result = append(result, cloneArtifact(artifact))
 			}
 		}

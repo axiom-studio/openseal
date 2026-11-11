@@ -30,6 +30,13 @@ func (s *PostgresStore) migrateArtifacts(ctx context.Context, tx *sql.Tx) error 
 		return err
 	}
 	statements := []string{
+		`CREATE TABLE IF NOT EXISTS ` + s.table("artifact_working_files") + ` (
+			scope_kind TEXT NOT NULL,
+			scope_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			marked_at TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (scope_kind, scope_id, id)
+		)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_latest_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, id, version DESC)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_catalog_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, type, media_type, classification, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_provenance_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, producer_run_id, producer_request_id, created_at DESC)`,
@@ -109,8 +116,15 @@ func (s *PostgresStore) ListArtifacts(ctx context.Context, filter ArtifactFilter
 		return nil, err
 	}
 	if filter.EvidenceTarget == "" && filter.RetentionDueBefore == nil {
-		query, args := artifactListQuery(filter, s.table("artifacts"), true)
+		query, args := artifactListQuery(filter, s.table("artifacts"), s.table("artifact_working_files"), true)
 		return queryArtifactPage(ctx, s.db, query, args)
+	}
+	var working map[string]bool
+	if filter.Files != ArtifactFilesAll {
+		var err error
+		if working, err = workingArtifactIDs(ctx, s.db, `SELECT id FROM `+s.table("artifact_working_files")+` WHERE scope_kind = $1 AND scope_id = $2`, filter.Scope); err != nil {
+			return nil, err
+		}
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("artifacts")+` WHERE scope_kind = $1 AND scope_id = $2`, filter.Scope.Kind, filter.Scope.ID)
 	if err != nil {
@@ -141,7 +155,7 @@ func (s *PostgresStore) ListArtifacts(ctx context.Context, filter ArtifactFilter
 		if filter.LatestOnly && artifact.Version != latest[artifact.ID] {
 			continue
 		}
-		if matchesArtifactFilter(artifact, filter) {
+		if matchesArtifactFilter(artifact, filter) && filter.Files.keeps(working[artifact.ID]) {
 			result = append(result, artifact)
 		}
 	}

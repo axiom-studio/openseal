@@ -102,6 +102,10 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 	if len(unknownFiles) > 0 && !runExplainingFailure(run) {
 		return FinalDeliveryResult{Kind: FinalDeliveryRetryFinal, RejectionText: unknownHandedOverFilesText(unknownFiles, artifacts)}, nil
 	}
+	// The files the Run saved and does not hand over were made to build its
+	// answer; the catalog remembers that so file lists can leave them out.
+	// It is bookkeeping for listings, so it never holds an answer back.
+	_ = markRunFiles(ctx, r.artifacts, run.Scope, artifacts, handedOver)
 
 	// 3. Failure explanation: always a visible text reply, never a visual.
 	if runExplainingFailure(run) {
