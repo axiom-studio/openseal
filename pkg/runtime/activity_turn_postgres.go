@@ -329,19 +329,21 @@ func (s *PostgresStore) ListActivity(ctx context.Context, filter ActivityFilter)
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	if !filter.Descending {
-		rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("run_activity")+`
-			WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3 AND sequence > $4
-			ORDER BY sequence ASC LIMIT $5`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
-		if err != nil {
-			return nil, err
-		}
-		return scanPostgresActivity(rows, limit)
-	}
 	query := `SELECT payload FROM ` + s.table("run_activity") + ` WHERE scope_kind = $1 AND scope_id = $2`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
 	placeholder := 3
-	selectors := []struct{ column, value string }{{"run_id", filter.RunID}, {"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"team_id", filter.TeamID}}
+	order := " ORDER BY created_at DESC, id DESC"
+	if !filter.Descending {
+		// An ascending read is one run's stream, so it pins run_id even when it is empty.
+		query += " AND run_id = $3 AND sequence > $4"
+		args = append(args, filter.RunID, filter.AfterSequence)
+		placeholder = 5
+		order = " ORDER BY sequence ASC"
+	}
+	selectors := []struct{ column, value string }{{"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"team_id", filter.TeamID}}
+	if filter.Descending {
+		selectors = append(selectors, struct{ column, value string }{"run_id", filter.RunID})
+	}
 	for _, selector := range selectors {
 		if selector.value == "" {
 			continue
@@ -367,7 +369,7 @@ func (s *PostgresStore) ListActivity(ctx context.Context, filter ActivityFilter)
 		args = append(args, filter.BeforeCreatedAt, filter.BeforeID)
 		placeholder += 2
 	}
-	query += fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", placeholder)
+	query += order + fmt.Sprintf(" LIMIT $%d", placeholder)
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
