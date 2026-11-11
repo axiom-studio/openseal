@@ -25,9 +25,6 @@ func validateSessionEvents(scope Scope, runID string, events []*ActivityEvent, k
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Open / create
-
 func validateCreateRunAgentSessionTxRequest(req CreateRunAgentSessionTxRequest) error {
 	if err := req.Scope.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidAgentSession, err)
@@ -57,12 +54,3 @@ func initialEntriesAppend(req CreateRunAgentSessionTxRequest, sessionID string) 
 		Now:       req.Now,
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Reads
-
-// ---------------------------------------------------------------------------
-// Append
-
-// ---------------------------------------------------------------------------
-// Tool entry transitions
