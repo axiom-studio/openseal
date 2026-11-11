@@ -34,7 +34,6 @@ func nestedActionStores(t *testing.T) []struct {
 		name string
 		open func(*testing.T) KernelStore
 	}{
-		{name: "memory", open: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", open: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "nested.db"))
 			if err != nil {
@@ -511,4 +510,3 @@ func TestNestedActionBoundsArePerStep(t *testing.T) {
 		})
 	}
 }
-

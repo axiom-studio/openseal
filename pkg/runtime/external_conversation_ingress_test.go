@@ -457,7 +457,7 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 
 func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpointsExist(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalog()
 	definition := slackConversationSkillDefinition()
 	if err := catalog.Register(ctx, definition); err != nil {

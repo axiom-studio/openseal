@@ -64,7 +64,7 @@ func resolveControlAuthorityForTest(t *testing.T, in ControlAuthorityInput) Cont
 
 // claimedForegroundChatRun schedules and claims the foreground conversation
 // Run for one user message in an Agent's chat.
-func claimedForegroundChatRun(t *testing.T, store *MemoryStore) *AgentRun {
+func claimedForegroundChatRun(t *testing.T, store *SQLiteStore) *AgentRun {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "control-authority"}
 	conversations := NewConversationService(store)
@@ -89,7 +89,7 @@ func claimedForegroundChatRun(t *testing.T, store *MemoryStore) *AgentRun {
 	return claimed
 }
 
-func chatAuthorityInput(store *MemoryStore, run *AgentRun) ControlAuthorityInput {
+func chatAuthorityInput(store *SQLiteStore, run *AgentRun) ControlAuthorityInput {
 	return ControlAuthorityInput{
 		Run: run, DeploymentID: "agent", ConversationTasks: store, Runs: store, Conversations: store,
 	}
@@ -179,7 +179,7 @@ func TestForkChildCannotFork(t *testing.T) {
 }
 
 func TestVoiceCallDisablesTaskStart(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run := claimedForegroundChatRun(t, store)
 
 	typed := resolveControlAuthorityForTest(t, chatAuthorityInput(store, run))
@@ -202,7 +202,7 @@ func TestVoiceCallDisablesTaskStart(t *testing.T) {
 }
 
 func TestChatReplyCannotWait(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run := claimedForegroundChatRun(t, store)
 	chat := resolveControlAuthorityForTest(t, chatAuthorityInput(store, run))
 	if chat.CanWait {

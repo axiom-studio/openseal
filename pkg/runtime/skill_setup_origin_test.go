@@ -10,9 +10,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func skillSetupTaskFixture(t *testing.T) (*SkillBindingActionDispatcher, *MemoryStore, *ConversationTaskResult) {
+func skillSetupTaskFixture(t *testing.T) (*SkillBindingActionDispatcher, *SQLiteStore, *ConversationTaskResult) {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, turn, _, _ := settledWorkerTaskFixture(t, store)
 	result, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
@@ -114,33 +114,46 @@ func TestSkillSetupTaskOriginRejectsUnprovedContextAndChangedCanonicalSource(t *
 			dispatcher, store, task := skillSetupTaskFixture(t)
 			run := cloneAgentRun(task.WorkRun)
 			deploymentID := "agent"
-			store.mu.Lock()
 			switch scenario {
 			case "non-task":
-				canonical := store.agentRuns[portfolioKey(run.Scope, run.ID)]
-				delete(canonical.Context, ConversationTaskContextKey)
-				canonical.ConcurrencyKey = "ordinary-work"
-				delete(store.conversationTaskWorkRuns, portfolioKey(run.Scope, run.ID))
+				rewriteStoredPayload(t, store, "agent_runs", run.Scope, run.ID, func(canonical *AgentRun) {
+					delete(canonical.Context, ConversationTaskContextKey)
+					canonical.ConcurrencyKey = "ordinary-work"
+				})
+				execStoreSQL(t, store, `UPDATE conversation_tasks SET work_run_id = '' WHERE scope_kind = ? AND scope_id = ? AND id = ?`, run.Scope.Kind, run.Scope.ID, task.Task.ID)
 			case "foreign-scope":
 				run.Scope.ID = "other"
 			case "foreign-agent":
 				deploymentID = "other"
 			case "source-changed":
-				store.agentRuns[portfolioKey(run.Scope, task.Task.SourceRunID)].Context["triggerMessageId"] = "other"
+				rewriteStoredPayload(t, store, "agent_runs", run.Scope, task.Task.SourceRunID, func(source *AgentRun) {
+					source.Context["triggerMessageId"] = "other"
+				})
 			case "actor-changed":
-				store.conversationTasks[portfolioKey(run.Scope, task.Task.ID)].AuthenticatedActor.ID = "other"
+				rewriteStoredPayload(t, store, "conversation_tasks", run.Scope, task.Task.ID, func(ledger *ConversationTask) {
+					ledger.AuthenticatedActor.ID = "other"
+				})
 			case "thread-changed":
-				store.conversationTasks[portfolioKey(run.Scope, task.Task.ID)].ThreadRootID = "other"
+				rewriteStoredPayload(t, store, "conversation_tasks", run.Scope, task.Task.ID, func(ledger *ConversationTask) {
+					ledger.ThreadRootID = "other"
+				})
 			case "turn-changed":
-				store.turns[portfolioKey(run.Scope, task.Task.SourceRunID)][task.Task.SourceTurnID].Status = AgentTurnStatusFailed
+				rewriteStoredPayload(t, store, "agent_turns", run.Scope, task.Task.SourceTurnID, func(turn *AgentTurn) {
+					turn.Status = AgentTurnStatusFailed
+				})
+				execStoreSQL(t, store, `UPDATE agent_turns SET status = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, AgentTurnStatusFailed, run.Scope.Kind, run.Scope.ID, task.Task.SourceTurnID)
 			case "archived":
-				store.conversations[conversationStoreKey(run.Scope, task.Task.ConversationID)].Status = ConversationStatusArchived
+				rewriteStoredPayload(t, store, "conversations", run.Scope, task.Task.ConversationID, func(conversation *Conversation) {
+					conversation.Status = ConversationStatusArchived
+				})
+				execStoreSQL(t, store, `UPDATE conversations SET status = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, ConversationStatusArchived, run.Scope.Kind, run.Scope.ID, task.Task.ConversationID)
 			case "fork-owner":
-				store.agentRuns[portfolioKey(run.Scope, run.ID)].Owner.ID = "other"
+				rewriteStoredPayload(t, store, "agent_runs", run.Scope, run.ID, func(canonical *AgentRun) {
+					canonical.Owner.ID = "other"
+				})
 			case "missing-ledger":
-				delete(store.conversationTasks, portfolioKey(run.Scope, task.Task.ID))
+				execStoreSQL(t, store, `DELETE FROM conversation_tasks WHERE scope_kind = ? AND scope_id = ? AND id = ?`, run.Scope.Kind, run.Scope.ID, task.Task.ID)
 			}
-			store.mu.Unlock()
 			input := ActionDispatchInput{Call: &ActionCall{ID: "rejected", Scope: run.Scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Connect"}}
 			if _, err := dispatcher.requestSkillSetup(t.Context(), input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}); err == nil {
 				t.Fatal("unproved origin created setup")
@@ -148,10 +161,7 @@ func TestSkillSetupTaskOriginRejectsUnprovedContextAndChangedCanonicalSource(t *
 			if _, err := dispatcher.listSkillSetupRequests(t.Context(), run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}); err == nil {
 				t.Fatal("unproved origin listed setup")
 			}
-			store.mu.RLock()
-			count := len(store.skillSetupRequests)
-			store.mu.RUnlock()
-			if count != 0 {
+			if countStoreRows(t, store, "skill_setup_requests") != 0 {
 				t.Fatal("rejected origin left durable setup")
 			}
 		})
@@ -160,7 +170,7 @@ func TestSkillSetupTaskOriginRejectsUnprovedContextAndChangedCanonicalSource(t *
 
 // skillSetupOriginAllowed reports whether a task work Run's in-chat setup
 // origin resolves to the task's source conversation and message.
-func skillSetupOriginAllowed(t *testing.T, store *MemoryStore, task *ConversationTaskResult) bool {
+func skillSetupOriginAllowed(t *testing.T, store *SQLiteStore, task *ConversationTaskResult) bool {
 	t.Helper()
 	run := task.WorkRun
 	conversationID, messageID, err := skillSetupConversationOrigin(t.Context(), store, run, run.AssignedAgentID, run.Owner)
@@ -203,15 +213,12 @@ func TestSkillSetupOriginDeniesTamperedGoal(t *testing.T) {
 	for name, tamper := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, store, task := skillSetupTaskFixture(t)
-			store.mu.Lock()
-			entry := store.memorySessionEntryLocked(task.Task.Scope, task.Task.SourceToolEntryID)
-			ledger := store.conversationTasks[portfolioKey(task.Task.Scope, task.Task.ID)]
-			if entry == nil || ledger == nil {
-				store.mu.Unlock()
-				t.Fatal("fixture has no source entry or ledger task")
-			}
-			tamper(entry, ledger)
-			store.mu.Unlock()
+			scope := task.Task.Scope
+			rewriteStoredPayload(t, store, "agent_session_entries", scope, task.Task.SourceToolEntryID, func(entry *SessionEntry) {
+				rewriteStoredPayload(t, store, "conversation_tasks", scope, task.Task.ID, func(ledger *ConversationTask) {
+					tamper(entry, ledger)
+				})
+			})
 			if skillSetupOriginAllowed(t, store, task) {
 				t.Fatal("tampered task start proved an origin")
 			}
@@ -223,14 +230,15 @@ func TestSkillSetupOriginDeniesTaskWithoutEntry(t *testing.T) {
 	for _, scenario := range []string{"no-entry-id", "entry-missing"} {
 		t.Run(scenario, func(t *testing.T) {
 			_, store, task := skillSetupTaskFixture(t)
-			store.mu.Lock()
+			scope := task.Task.Scope
 			switch scenario {
 			case "no-entry-id":
-				store.conversationTasks[portfolioKey(task.Task.Scope, task.Task.ID)].SourceToolEntryID = ""
+				rewriteStoredPayload(t, store, "conversation_tasks", scope, task.Task.ID, func(ledger *ConversationTask) {
+					ledger.SourceToolEntryID = ""
+				})
 			case "entry-missing":
-				delete(store.agentSessionEntryIndex, portfolioKey(task.Task.Scope, task.Task.SourceToolEntryID))
+				execStoreSQL(t, store, `DELETE FROM agent_session_entries WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, task.Task.SourceToolEntryID)
 			}
-			store.mu.Unlock()
 			if skillSetupOriginAllowed(t, store, task) {
 				t.Fatal("task without its start_task entry proved an origin")
 			}

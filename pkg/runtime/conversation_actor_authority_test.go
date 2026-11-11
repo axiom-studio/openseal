@@ -9,7 +9,7 @@ import (
 )
 
 type conversationActorFixture struct {
-	store        *MemoryStore
+	store        *SQLiteStore
 	service      *ConversationService
 	scheduler    *ConversationRunScheduler
 	conversation *Conversation
@@ -17,7 +17,7 @@ type conversationActorFixture struct {
 
 func newConversationActorFixture(t *testing.T, scope Scope, agentID string) *conversationActorFixture {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID},

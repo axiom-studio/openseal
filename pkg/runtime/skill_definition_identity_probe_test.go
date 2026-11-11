@@ -34,7 +34,6 @@ func TestSkillDefinitionIdentityProbeIsLiveExactAndIsolated(t *testing.T) {
 		name string
 		open func(*testing.T) skillIdentityProbeTestStore
 	}{
-		{name: "memory", open: func(*testing.T) skillIdentityProbeTestStore { return NewMemoryStore() }},
 		{name: "sqlite", open: func(t *testing.T) skillIdentityProbeTestStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "identities.db"))
 			if err != nil {
@@ -164,25 +163,7 @@ func TestSQLiteSkillDefinitionIdentityProbeDoesNotDecodePayload(t *testing.T) {
 	}
 }
 
-func TestMemorySkillDefinitionIdentityProbeDoesNotInspectPayload(t *testing.T) {
-	store := NewMemoryStore()
-	identity := capability.SkillIdentity{ID: "broken", Version: "1", SourceIdentity: "catalog::@publisher/broken"}
-	// This immutable payload cannot be encoded by the deep-clone hydration
-	// path. The metadata probe must derive its identity from the map key.
-	store.skillDefinitions[memorySkillDefinitionKey(identity.ID, identity.Version, identity.SourceIdentity)] = &skill.Definition{
-		ID: "foreign", Version: "foreign",
-		Actions: map[string]skill.Action{"read": {InputSchema: map[string]interface{}{"unencodable": make(chan int)}}},
-	}
-	got, err := store.ListSkillDefinitionIdentities(context.Background(), identity.ID, identity.Version)
-	if err != nil || !reflect.DeepEqual(got, []capability.SkillIdentity{identity}) {
-		t.Fatalf("metadata inspected mutable payload fields = %#v, %v", got, err)
-	}
-	if definition, err := skill.NewCatalogWithStore(store).GetDefinitionVariant(context.Background(), identity.ID, identity.Version, identity.SourceIdentity); err == nil || definition != nil {
-		t.Fatalf("cold catalog accepted invalid payload = %#v, %v", definition, err)
-	}
-}
-
-func TestMemorySkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t *testing.T) {
+func TestSkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t *testing.T) {
 	for _, test := range []struct{ name, id, version string }{
 		{name: "id", id: "research\x00child", version: "1.0.0"},
 		{name: "version", id: "research", version: "1.0.0\x00preview"},
@@ -195,7 +176,7 @@ func TestMemorySkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t
 			}
 			t.Run(name, func(t *testing.T) {
 				ctx := context.Background()
-				store := NewMemoryStore()
+				store := newTestKernelStore(t)
 				definition := skillIdentityProbeDefinition(test.id, test.version, source)
 				writer := skill.NewCatalogWithStore(store)
 				if err := writer.Register(ctx, definition); err != nil {
@@ -226,9 +207,9 @@ func TestMemorySkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t
 	}
 }
 
-func TestMemorySkillDefinitionIdentityProbeKeepsDelimiterCollisionImmutable(t *testing.T) {
+func TestSkillDefinitionIdentityProbeKeepsDelimiterCollisionImmutable(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	definition := skillIdentityProbeDefinition("research\x00child", "1.0.0", "catalog::@publisher/research")
 	if err := skill.NewCatalogWithStore(store).Register(ctx, definition); err != nil {
 		t.Fatal(err)

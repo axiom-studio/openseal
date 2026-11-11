@@ -27,7 +27,7 @@ func BenchmarkActionWorkerIdleClaims(b *testing.B) {
 				var totalClaims, totalHydration int64
 				var observed time.Duration
 				for range b.N {
-					store := &countingActionPoolStore{MemoryStore: NewMemoryStore()}
+					store := &countingActionPoolStore{SQLiteStore: newTestKernelStore(b)}
 					catalog := skill.NewCatalog()
 					dispatcher := ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 						return nil, errors.New("idle benchmark cannot dispatch")

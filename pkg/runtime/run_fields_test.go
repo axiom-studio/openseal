@@ -16,7 +16,6 @@ type runFieldsStore interface {
 }
 
 func runFieldsBackends(t *testing.T, test func(t *testing.T, store runFieldsStore)) {
-	t.Run("memory", func(t *testing.T) { test(t, NewMemoryStore()) })
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "runtime.db"))
 		if err != nil {

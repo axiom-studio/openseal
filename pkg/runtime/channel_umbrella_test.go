@@ -24,7 +24,7 @@ func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 			t.Fatalf("%s: gateway accepted", name)
 		}
 	}
-	for _, store := range []ExternalConversationGatewayStore{NewMemoryStore(), func() ExternalConversationGatewayStore {
+	for _, store := range []ExternalConversationGatewayStore{newTestKernelStore(t), func() ExternalConversationGatewayStore {
 		sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "gateways.db"))
 		if err != nil {
 			t.Fatal(err)

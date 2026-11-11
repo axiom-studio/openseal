@@ -3,11 +3,12 @@ package runtime
 import (
 	"context"
 	"errors"
-	"github.com/axiom-studio/openseal/pkg/skill"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func setupRequestFixture() *SkillSetupRequest {
@@ -21,7 +22,7 @@ func TestSkillSetupStoresScopeCASAndTerminalState(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	for name, store := range map[string]SkillSetupRequestStore{"memory": NewMemoryStore(), "sqlite": sqlite} {
+	for name, store := range map[string]SkillSetupRequestStore{"sqlite": sqlite} {
 		t.Run(name, func(t *testing.T) {
 			r := setupRequestFixture()
 			if err := store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
@@ -86,7 +87,7 @@ func TestSkillSetupSurvivesSQLiteReopen(t *testing.T) {
 }
 func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
@@ -136,7 +137,7 @@ func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing
 
 func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "a"}
 	catalog := skillActionCatalog(t, ctx, scope, "agent")
 	if err := catalog.Bind(ctx, &skill.Binding{ID: "setup-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, AllowedActions: []string{SkillActionRequestSetup, SkillActionListSetupRequests}, MaximumRisk: skill.RiskLevelRead}); err != nil {
@@ -183,7 +184,7 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 
 func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
@@ -233,7 +234,7 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 
 func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "a"}
 	catalog := skillActionCatalog(t, ctx, scope, "agent")
 	discoveries := 0
@@ -249,7 +250,7 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "connect"}
 	failed := &ActionCall{ID: "failed", Scope: scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, Action: SkillActionRequestSetup, Status: ActionCallStatusFailed, Arguments: args}
-	store.actions[portfolioKey(scope, failed.ID)] = failed
+	putStoredAction(t, store, failed)
 	_, err = dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "retry"}, Arguments: args}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err == nil || discoveries != 0 {
 		t.Fatalf("repeated failed setup rediscovered: %v %d", err, discoveries)
@@ -266,7 +267,7 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 
 func TestSkillSetupResolvesAnOmittedSourceFromTheCatalog(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)

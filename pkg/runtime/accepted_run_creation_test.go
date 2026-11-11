@@ -52,7 +52,6 @@ func (p *acceptedCreationTestPreparer) PrepareAcceptedRunExecution(_ context.Con
 
 func acceptedCreationStores(t *testing.T, test func(*testing.T, KernelStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) { test(t, NewMemoryStore()) })
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "accepted-creation.db"))
 		if err != nil {
@@ -189,7 +188,7 @@ func TestAcceptedRunCreationSchedulerRetainsPinAcrossOccurrenceDeliveryRetry(t *
 }
 
 func TestAcceptedRunCreationReplayRejectsChangedWorkBeforePreparation(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}})
 	request := CreateAgentRunRequest{Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID, Entrypoint: "review", Goal: "Original work", Source: RunSourceManual, IdempotencyKey: "request-conflict", Context: map[string]interface{}{"runbookDefinitionId": "review", "runbookDefinitionVersion": "1"}}
 	commands := NewRunCommandService(store)
@@ -210,7 +209,7 @@ func TestAcceptedRunCreationReplayRejectsChangedWorkBeforePreparation(t *testing
 }
 
 func TestAcceptedRunCreationDiscardsUntrustedPinBeforeCanonicalReplay(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}})
 	request := CreateAgentRunRequest{
 		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: "rowan", Entrypoint: "review", Goal: "Original work", Source: RunSourceManual, IdempotencyKey: "untrusted-pin",
@@ -233,7 +232,7 @@ func TestAcceptedRunCreationDiscardsUntrustedPinBeforeCanonicalReplay(t *testing
 }
 
 func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}})
 	conversation, _, err := NewConversationService(store).CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: activation.Scope, Owner: activation.Owner, Title: "Review",

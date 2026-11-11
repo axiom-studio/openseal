@@ -44,7 +44,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	}, "user", "operator", "audit"); err != nil {
 		t.Fatal(err)
 	}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Research", Goal: "Find evidence", Status: ObjectiveStatusActive,
 	})
@@ -78,56 +78,55 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	requestKey := strings.Join([]string{"delegation", run.ID, "review"}, ":")
 	requestID := stableCollaborationID(scope, requestKey, "request")
 	childID := "child-review"
-	store.mu.Lock()
-	persistedRun := cloneAgentRun(store.agentRuns[portfolioKey(scope, run.ID)])
+	persistedRun, err := store.GetAgentRun(ctx, scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	persistedRun.Checkpoint = checkpoint
 	persistedRun.Status = AgentRunStatusRunning
 	persistedRun.UpdatedAt = now.Add(2 * time.Minute)
-	store.agentRuns[portfolioKey(scope, run.ID)] = persistedRun
-	store.turns[portfolioKey(scope, run.ID)] = map[string]*AgentTurn{
-		"turn-browse": {ID: "turn-browse", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusCompleted, OutputSummary: "Requested browser", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now},
-		"turn-review": {ID: "turn-review", Scope: scope, RunID: run.ID, Sequence: 2, Status: AgentTurnStatusCompleted, OutputSummary: "Delegated review", Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute), StartedAt: now.Add(2 * time.Minute)},
-	}
-	store.actions[portfolioKey(scope, "action-browse")] = &ActionCall{
+	putStoredRun(t, store, persistedRun)
+	putStoredTurn(t, store, &AgentTurn{ID: "turn-browse", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusCompleted, OutputSummary: "Requested browser", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now})
+	putStoredTurn(t, store, &AgentTurn{ID: "turn-review", Scope: scope, RunID: run.ID, Sequence: 2, Status: AgentTurnStatusCompleted, OutputSummary: "Delegated review", Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute), StartedAt: now.Add(2 * time.Minute)})
+	putStoredAction(t, store, &ActionCall{
 		ID: "action-browse", Scope: scope, RunID: run.ID, TurnID: "turn-browse", DeploymentID: owner.ID,
 		SkillID: "browser", SkillVersion: "1", Action: "browse", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead,
 		Arguments: map[string]interface{}{"url": "https://example.test/article", "password": "never-project-this"}, Output: map[string]interface{}{"title": "Useful article", "token": "nor-this"}, ApprovalID: "approval-browse",
 		Attempt: 1, MaxAttempts: 2, Revision: 2, CreatedAt: now, UpdatedAt: now.Add(time.Minute),
-	}
-	store.approvals[portfolioKey(scope, "approval-browse")] = &ApprovalCheckpoint{
+	})
+	putStoredApproval(t, store, &ApprovalCheckpoint{
 		ID: "approval-browse", Scope: scope, RunID: run.ID, ActionCallID: "action-browse", Status: ApprovalStatusPending,
 		Risk: skill.RiskLevelRead, Summary: "Approve browsing", ProposedAction: map[string]interface{}{"comment": "A concise reviewed reply", "password": "also-never-project-this"},
 		EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
+	})
 	adapter := ExternalConversationAdapterReference{SkillID: "slack", SkillVersion: "1", BindingID: "slack-binding", BindingRevision: 1, AdapterID: "slack"}
-	store.externalEndpoints[externalConversationEndpointKey(scope, "slack-approvals")] = &ExternalConversationEndpoint{
+	putStoredExternalEndpoint(t, store, &ExternalConversationEndpoint{
 		ID: "slack-approvals", IngressRoute: "slack-callback", Scope: scope, Owner: owner, DeploymentID: owner.ID,
 		Name: "Reddit approvals", Adapter: adapter, Provider: "slack", Mode: capability.ConversationEndpointChannel,
 		Address: "#team-reddit-agent-approvals", Status: ExternalConversationEndpointActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	store.externalDeliveries[externalConversationDeliveryKey(scope, "approval-delivery")] = &ExternalConversationDelivery{
+	})
+	putStoredExternalDelivery(t, store, &ExternalConversationDelivery{
 		ID: "approval-delivery", Scope: scope, EndpointID: "slack-approvals", EndpointRevision: 1, Adapter: adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "approval-conversation", ChannelMessageID: "approval-message",
 		OrderingKey: "approval-conversation", IdempotencyKey: "approval-delivery:approval-browse:slack-approvals",
 		Correlation: &ExternalConversationDeliveryCorrelation{Kind: "approval", ID: "approval-browse", Phase: "request"},
 		Status:      ExternalConversationDeliveryDelivered, Attempt: 1, MaximumAttempts: 5, AvailableAt: now,
 		ProviderMessageID: "slack-message-1", Revision: 2, CreatedAt: now, UpdatedAt: now.Add(time.Minute), DeliveredAt: now.Add(time.Minute),
-	}
-	store.artifacts[artifactStorageKey(scope, "evidence")] = map[int64]*Artifact{1: {
+	})
+	putStoredArtifact(t, store, &Artifact{
 		ID: "evidence", Version: 1, Scope: scope, Name: "Evidence", ContentRef: "opaque-secret-storage-ref", Digest: strings.Repeat("a", 64), SizeBytes: 12,
 		Classification: ArtifactClassificationInternal, Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: owner.ID}, RunID: run.ID, TurnID: "turn-browse", ActionID: "action-browse"}, CreatedAt: now,
-	}}
-	store.agentRuns[portfolioKey(scope, childID)] = &AgentRun{
+	})
+	putStoredRun(t, store, &AgentRun{
 		ID: childID, Scope: scope, ObjectiveID: objective.ID, ParentRunID: run.ID, RootRunID: run.ID, Owner: owner, AssignedAgentID: "reviewer",
 		Goal: "Review findings", Source: RunSourceRequest, Status: AgentRunStatusRunning, AvailableAt: now.Add(2 * time.Minute), QueueEnteredAt: now.Add(2 * time.Minute), Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute),
-	}
-	store.requests[requestStoreKey(scope, requestID)] = &AgentRequest{
+	})
+	putStoredAgentRequest(t, store, &AgentRequest{
 		ID: requestID, Scope: scope, Kind: AgentRequestKindRequest, Status: AgentRequestStatusAccepted,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: owner.ID}, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer"},
 		SourceRunID: run.ID, ChildRunID: childID, Goal: "Review findings", AcceptancePolicy: AgentRequestAcceptanceRecipientReview,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	store.mu.Unlock()
+	})
 
 	audit, err := NewRunbookExecutionAuditService(store, registry).Get(ctx, scope, run.ID)
 	if err != nil {
@@ -175,7 +174,7 @@ func TestRunExecutionAuditProjectsConversationalRunAsOneGraph(t *testing.T) {
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "conversation-audit"}
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"},
 		AssignedAgentID: "assistant", Goal: "Respond to an Agent channel message", Source: RunSourceRequest,
@@ -184,21 +183,17 @@ func TestRunExecutionAuditProjectsConversationalRunAsOneGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.mu.Lock()
-	store.turns[portfolioKey(scope, run.ID)] = map[string]*AgentTurn{
-		"turn-one": {
-			ID: "turn-one", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusFailed,
-			Error: "capability binding unavailable", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
-		},
-	}
-	store.actions[portfolioKey(scope, "action-one")] = &ActionCall{
+	putStoredTurn(t, store, &AgentTurn{
+		ID: "turn-one", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusFailed,
+		Error: "capability binding unavailable", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
+	})
+	putStoredAction(t, store, &ActionCall{
 		ID: "action-one", Scope: scope, RunID: run.ID, TurnID: "turn-one", DeploymentID: "assistant",
 		BindingID: "bundled:agents", BindingRevision: 1, SkillID: AgentManagementSkillID,
 		SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
 		Status: ActionCallStatusFailed, Error: "binding unavailable", Attempt: 1, MaxAttempts: 1,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	store.mu.Unlock()
+	})
 
 	audit, err := NewRunbookExecutionAuditService(store, nil).Get(ctx, scope, run.ID)
 	if err != nil {

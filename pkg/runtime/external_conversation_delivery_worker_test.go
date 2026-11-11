@@ -281,7 +281,7 @@ func externalConversationDeliveryFixture(
 	t *testing.T,
 	ctx context.Context,
 	provider string,
-) (*MemoryStore, *skill.Catalog, *ExternalConversationEndpoint) {
+) (*SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint) {
 	return externalConversationDeliveryFixtureWithOperations(t, ctx, provider, []skill.ConversationDeliveryOperation{skill.ConversationDeliveryMessageSend})
 }
 
@@ -290,9 +290,9 @@ func externalConversationDeliveryFixtureWithOperations(
 	ctx context.Context,
 	provider string,
 	operations []skill.ConversationDeliveryOperation,
-) (*MemoryStore, *skill.Catalog, *ExternalConversationEndpoint) {
+) (*SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint) {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, provider, operations)
 	return store, catalog, endpoint
 }

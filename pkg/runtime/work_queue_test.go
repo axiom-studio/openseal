@@ -38,7 +38,7 @@ func (h *queueHarness) onDelivery(deliver func(WorkSignal)) { h.deliver.Store(&d
 // deadlineActionStore reports ActionCall deadlines with the PostgreSQL
 // store's semantics over the in-memory store, and counts every read.
 type deadlineActionStore struct {
-	*MemoryStore
+	*SQLiteStore
 	claims        atomic.Int64
 	claimed       atomic.Int64
 	deadlineReads atomic.Int64
@@ -46,22 +46,21 @@ type deadlineActionStore struct {
 
 func (s *deadlineActionStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
 	s.claims.Add(1)
-	call, err := s.MemoryStore.ClaimNextAction(ctx, claim)
+	call, err := s.SQLiteStore.ClaimNextAction(ctx, claim)
 	if call != nil {
 		s.claimed.Add(1)
 	}
 	return call, err
 }
 
-func (s *deadlineActionStore) NextActionDeadline(_ context.Context, scope Scope, now time.Time) (*time.Time, error) {
+func (s *deadlineActionStore) NextActionDeadline(ctx context.Context, scope Scope, now time.Time) (*time.Time, error) {
 	s.deadlineReads.Add(1)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	calls, err := s.SQLiteStore.ListActionCalls(ctx, ActionFilter{Scope: scope, Status: []ActionCallStatus{ActionCallStatusReady, ActionCallStatusRunning}, Limit: 500})
+	if err != nil {
+		return nil, err
+	}
 	var result *time.Time
-	for _, call := range s.actions {
-		if call.Scope != scope {
-			continue
-		}
+	for _, call := range calls {
 		if call.Status == ActionCallStatusReady && call.AvailableAt.After(now) {
 			result = earliestDeadline(result, &call.AvailableAt)
 		}
@@ -86,7 +85,7 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 }
 
 func TestQueueDrivenActionPoolIssuesNoReadsWhileIdle(t *testing.T) {
-	store := &deadlineActionStore{MemoryStore: NewMemoryStore()}
+	store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	pool := newTestActionPool(t, store, catalog, scope, 5*time.Millisecond, 4, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		return nil, errors.New("unexpected idle dispatch")
@@ -104,7 +103,7 @@ func TestQueueDrivenActionPoolIssuesNoReadsWhileIdle(t *testing.T) {
 }
 
 func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
-	store := &deadlineActionStore{MemoryStore: NewMemoryStore()}
+	store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	dispatched := make(chan struct{}, 1)
 	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 2, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
@@ -115,7 +114,7 @@ func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
 	pool.Start(t.Context())
 	defer pool.Stop()
 	waitForCondition(t, time.Second, func() bool { return store.deadlineReads.Load() > 0 }, "initial probe was not observed")
-	createActionPoolWork(t, store.MemoryStore, catalog, scope)
+	createActionPoolWork(t, store.SQLiteStore, catalog, scope)
 	pool.WakeScope(Scope{Kind: scope.Kind, ID: "another"})
 	select {
 	case <-dispatched:
@@ -133,17 +132,20 @@ func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
 func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.T) {
 	for _, scenario := range []string{"retry", "expired_lease"} {
 		t.Run(scenario, func(t *testing.T) {
-			store := &deadlineActionStore{MemoryStore: NewMemoryStore()}
+			store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
 			catalog, scope := governedActionCatalog(t)
-			proposal := createActionPoolWork(t, store.MemoryStore, catalog, scope)
+			proposal := createActionPoolWork(t, store.SQLiteStore, catalog, scope)
 			due := time.Now().Add(150 * time.Millisecond)
 			if scenario == "retry" {
-				store.mu.Lock()
-				store.actions[portfolioKey(scope, proposal.Call.ID)].AvailableAt = due
-				store.mu.Unlock()
+				call, err := store.GetActionCall(t.Context(), scope, proposal.Call.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				call.AvailableAt = due
+				putStoredAction(t, store.SQLiteStore, call)
 			} else {
 				// A crashed worker holds the lease until it expires.
-				claimed, err := store.MemoryStore.ClaimNextAction(t.Context(), ActionClaim{Scope: scope, WorkerID: "crashed", Now: time.Now(), LeaseDuration: time.Until(due)})
+				claimed, err := store.SQLiteStore.ClaimNextAction(t.Context(), ActionClaim{Scope: scope, WorkerID: "crashed", Now: time.Now(), LeaseDuration: time.Until(due)})
 				if err != nil || claimed == nil {
 					t.Fatalf("crashed claim = %#v, %v", claimed, err)
 				}
@@ -179,7 +181,7 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 }
 
 func TestQueueDrivenActionPoolPollsWhileQueueIsUnhealthy(t *testing.T) {
-	store := &deadlineActionStore{MemoryStore: NewMemoryStore()}
+	store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	status := newQueueHarness(t).status
 	pool := newTestActionPool(t, store, catalog, scope, 10*time.Millisecond, 1, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
@@ -204,7 +206,7 @@ func TestQueueDrivenActionPoolPollsWhileQueueIsUnhealthy(t *testing.T) {
 
 // deadlineAgentRunStore counts every read an AgentRunWorkerPool makes.
 type deadlineAgentRunStore struct {
-	*MemoryStore
+	*SQLiteStore
 	claims        atomic.Int64
 	lists         atomic.Int64
 	deadlineReads atomic.Int64
@@ -213,17 +215,17 @@ type deadlineAgentRunStore struct {
 
 func (s *deadlineAgentRunStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
 	s.claims.Add(1)
-	return s.MemoryStore.ClaimNextAgentRunWithDecision(ctx, claim)
+	return s.SQLiteStore.ClaimNextAgentRunWithDecision(ctx, claim)
 }
 
 func (s *deadlineAgentRunStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
 	s.claims.Add(1)
-	return s.MemoryStore.ClaimNextAgentRun(ctx, claim)
+	return s.SQLiteStore.ClaimNextAgentRun(ctx, claim)
 }
 
 func (s *deadlineAgentRunStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
 	s.lists.Add(1)
-	return s.MemoryStore.ListAgentRuns(ctx, filter)
+	return s.SQLiteStore.ListAgentRuns(ctx, filter)
 }
 
 func (s *deadlineAgentRunStore) NextAgentRunDeadline(context.Context, Scope, RunKind, string, time.Time) (*time.Time, error) {
@@ -236,7 +238,7 @@ func (s *deadlineAgentRunStore) reads() int64 {
 }
 
 func TestQueueDrivenAgentRunPoolIssuesNoReadsWhileIdleAndWakesOnDeadline(t *testing.T) {
-	store := &deadlineAgentRunStore{MemoryStore: NewMemoryStore()}
+	store := &deadlineAgentRunStore{SQLiteStore: newTestKernelStore(t)}
 	scope := Scope{Kind: "tenant", ID: "idle-runs"}
 	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected idle turn")
@@ -307,7 +309,7 @@ func (s *checkedScopeSource) WorkerScopeActive(context.Context, Scope) (bool, er
 }
 
 func TestQueueDrivenSupervisorAdmitsScopesWithoutListingAndRetiresIdlePools(t *testing.T) {
-	store := &deadlineActionStore{MemoryStore: NewMemoryStore()}
+	store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	source := &checkedScopeSource{}
 	source.active.Store(true)
@@ -437,17 +439,17 @@ func TestTerminalRunSweepProgressDoesNotRepeatCompletedSweeps(t *testing.T) {
 }
 
 type signalConversationStore struct {
-	*MemoryStore
+	*SQLiteStore
 	conversationLists atomic.Int64
 }
 
 func (s *signalConversationStore) ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error) {
 	s.conversationLists.Add(1)
-	return s.MemoryStore.ListConversations(ctx, filter)
+	return s.SQLiteStore.ListConversations(ctx, filter)
 }
 
 func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) {
-	store := &signalConversationStore{MemoryStore: NewMemoryStore()}
+	store := &signalConversationStore{SQLiteStore: newTestKernelStore(t)}
 	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)

@@ -18,7 +18,6 @@ func (p *recordingReactionProjector) ProjectMessageReaction(_ context.Context, e
 func TestConversationReactionsAcrossStores(t *testing.T) {
 	t.Parallel()
 	stores := map[string]func(t *testing.T) ConversationStore{
-		"memory": func(*testing.T) ConversationStore { return NewMemoryStore() },
 		"sqlite": func(t *testing.T) ConversationStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "reactions.db"))
 			if err != nil {
@@ -147,7 +146,7 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 		t.Fatalf("external reaction projected back out: %d, %v", len(projector.events), err)
 	}
 
-	changes, err := NewConversationChangeService(store, NewMemoryStore())
+	changes, err := NewConversationChangeService(store, newTestKernelStore(t))
 	if err != nil {
 		t.Fatal(err)
 	}

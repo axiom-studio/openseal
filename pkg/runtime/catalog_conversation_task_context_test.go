@@ -8,27 +8,27 @@ import (
 )
 
 type countedCatalogTaskContextStore struct {
-	*MemoryStore
+	*SQLiteStore
 	runReads, taskReads, taskLists int
 }
 
 func (s *countedCatalogTaskContextStore) GetAgentRun(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
 	s.runReads++
-	return s.MemoryStore.GetAgentRun(ctx, scope, id)
+	return s.SQLiteStore.GetAgentRun(ctx, scope, id)
 }
 
 func (s *countedCatalogTaskContextStore) FindConversationTaskByWorkRunID(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
 	s.taskReads++
-	return s.MemoryStore.FindConversationTaskByWorkRunID(ctx, scope, id)
+	return s.SQLiteStore.FindConversationTaskByWorkRunID(ctx, scope, id)
 }
 
 func (s *countedCatalogTaskContextStore) ListConversationTasks(ctx context.Context, filter ConversationTaskFilter) ([]*ConversationTaskResult, error) {
 	s.taskLists++
-	return s.MemoryStore.ListConversationTasks(ctx, filter)
+	return s.SQLiteStore.ListConversationTasks(ctx, filter)
 }
 
 func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
-	store := &countedCatalogTaskContextStore{MemoryStore: NewMemoryStore()}
+	store := &countedCatalogTaskContextStore{SQLiteStore: newTestKernelStore(t)}
 	for name, input := range map[string]map[string]interface{}{
 		"non-chat":           {},
 		"partial context":    {conversationRunContextConversationID: "chat"},
@@ -45,7 +45,7 @@ func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
 }
 
 func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *testing.T) {
-	memory := NewMemoryStore()
+	memory := newTestKernelStore(t)
 	source, _, _, _ := settledWorkerTaskFixture(t, memory)
 	child, err := NewPortfolioService(memory).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: source.Scope, Owner: source.Owner, Kind: RunKindAgentWork, ParentRunID: source.ID, AssignedAgentID: source.AssignedAgentID,
@@ -54,16 +54,16 @@ func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &countedCatalogTaskContextStore{MemoryStore: memory}
+	store := &countedCatalogTaskContextStore{SQLiteStore: memory}
 	result, err := resolveCatalogConversationTaskContext(t.Context(), nil, child, store)
 	if err != nil || result != nil || store.runReads != 1 || store.taskReads != 0 || store.taskLists != 0 {
 		t.Fatalf("ordinary chat child added task lookups: result=%#v err=%v runs=%d tasks=%d lists=%d", result, err, store.runReads, store.taskReads, store.taskLists)
 	}
 }
 
-func catalogTaskPageFixture(t *testing.T, count int) (*MemoryStore, *Conversation, []*ConversationTaskResult) {
+func catalogTaskPageFixture(t *testing.T, count int) (*SQLiteStore, *Conversation, []*ConversationTaskResult) {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	base := time.Now().UTC().Add(-time.Hour)
 	scope := Scope{Kind: "tenant", ID: "task-sql"}
 	conversation := &Conversation{ID: "conversation", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"},

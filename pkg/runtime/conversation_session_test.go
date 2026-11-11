@@ -69,7 +69,7 @@ func TestTeamRoutingRunHasNoSession(t *testing.T) {
 	}
 	run := &AgentRun{ID: "routing", Scope: scope, Kind: RunKindConversation, Owner: team.Owner,
 		ConcurrencyKey: request.ConcurrencyKey, Context: request.Context}
-	session, err := conversationRunSession(context.Background(), NewMemoryStore(), run)
+	session, err := conversationRunSession(context.Background(), newTestKernelStore(t), run)
 	if err != nil || session != nil {
 		t.Fatalf("routing run session = %+v, %v", session, err)
 	}
@@ -119,7 +119,7 @@ func TestValidateConversationRunRejectsForeignSession(t *testing.T) {
 
 func TestConversationRunSessionResolvesLaneAndChildSessions(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	lane := conversationRunLane("c1", "", "agent-a")
 	run := putTestSessionRun(t, store, "r1", conversationSessionID(testSessionScope, lane), AgentRunStatusRunning, 0)
 	run.AssignedAgentID = "agent-a"
@@ -177,7 +177,7 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 	}
 
 	// A valid request forks the parent at the given entry through the store.
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	parent := openTestConversationSession(t, store, "r1")
 	if _, err := testAppend(store, parent.ID, "r1", testUserEntry("p1", "a"), testUserEntry("p2", "b"), testUserEntry("p3", "c")); err != nil {
 		t.Fatal(err)
@@ -194,9 +194,7 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.mu.Lock()
-	created, err := store.createRunAgentSessionLocked(txReq)
-	store.mu.Unlock()
+	created, err := store.conformanceCreateRunAgentSessionTx(t.Context(), txReq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +204,7 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 		session.ConversationID != "c1" || session.NextSequence != 2 {
 		t.Fatalf("child session = %+v", session)
 	}
-	if run := testMemoryRun(t, store, "child"); run.SessionID != session.ID {
+	if run := testStoredSessionRun(t, store, "child"); run.SessionID != session.ID {
 		t.Fatalf("child run session = %q", run.SessionID)
 	}
 	entry, err := store.GetSessionEntry(context.Background(), testSessionScope, seed.ID)

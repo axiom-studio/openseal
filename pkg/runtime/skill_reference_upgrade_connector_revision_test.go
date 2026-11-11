@@ -53,7 +53,7 @@ func TestSkillReferenceUpgradeAdapterMatchesOnlySameBindingAndPastRevision(t *te
 
 func TestSkillReferenceUpgradeMovesOlderConversationAndCallbackPinsAtomically(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	for _, version := range []string{"1.0.0", "1.1.0"} {
 		conversationAdapter, err := capability.NormalizeConversationAdapter(skill.ConversationAdapter{

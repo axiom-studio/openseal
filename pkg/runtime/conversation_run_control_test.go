@@ -10,7 +10,7 @@ import (
 
 func TestActiveConversationRunsIncludeNonterminalDescendantAfterCoordinationRootEnds(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := time.Now().UTC()
 	scope := Scope{Kind: "tenant", ID: "1"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}

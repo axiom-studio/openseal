@@ -10,7 +10,7 @@ type participationTestStore interface {
 }
 
 func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	scope := Scope{Kind: "local", ID: "default"}
 	channel, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, Title: "Research", IdempotencyKey: "archive"})

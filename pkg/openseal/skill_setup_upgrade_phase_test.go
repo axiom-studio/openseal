@@ -11,13 +11,13 @@ import (
 )
 
 func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing.T) {
-	for _, kind := range []string{"memory", "sqlite"} {
+	for _, kind := range []string{"sqlite"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			var store interface {
 				runtime.KernelStore
 				runtime.SkillSetupRequestStore
-			} = runtime.NewMemoryStore()
+			}
 			path := filepath.Join(t.TempDir(), "setup.db")
 			if kind == "sqlite" {
 				sqlite, err := runtime.NewSQLiteStore(path)

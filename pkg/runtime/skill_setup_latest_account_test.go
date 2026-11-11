@@ -18,7 +18,7 @@ type latestSetupTestLocation struct {
 type latestSetupTestFixture struct {
 	ctx        context.Context
 	scope      Scope
-	store      *MemoryStore
+	store      *SQLiteStore
 	catalog    *skill.Catalog
 	run        *AgentRun
 	dispatcher *SkillBindingActionDispatcher
@@ -29,7 +29,7 @@ type latestSetupTestFixture struct {
 
 func newLatestSetupTestFixture(t *testing.T, source string) *latestSetupTestFixture {
 	t.Helper()
-	f := &latestSetupTestFixture{ctx: context.Background(), scope: Scope{Kind: "tenant", ID: "a"}, store: NewMemoryStore(), source: source}
+	f := &latestSetupTestFixture{ctx: context.Background(), scope: Scope{Kind: "tenant", ID: "a"}, store: newTestKernelStore(t), source: source}
 	f.catalog = skillActionCatalog(t, f.ctx, f.scope, "agent")
 	f.locations = []latestSetupTestLocation{{scope: skill.ScopeReference{Kind: "tenant", ID: "a"}, deploymentID: "agent"}}
 	if source != "" {

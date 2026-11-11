@@ -12,7 +12,6 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 		name  string
 		store func(*testing.T) KernelStore
 	}{
-		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-archive.db"))
 			if err != nil {
@@ -92,7 +91,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 }
 
 func TestConversationArchiveImportRejectsUnknownReplyAndDuplicateRecords(t *testing.T) {
-	service := NewConversationService(NewMemoryStore())
+	service := NewConversationService(newTestKernelStore(t))
 	base := ImportConversationArchiveRequest{
 		Scope: Scope{Kind: "tenant", ID: "archive"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 		Title: "Imported history", Source: ConversationArchiveSource{System: "source", ResourceType: "chat", ResourceID: "1"},

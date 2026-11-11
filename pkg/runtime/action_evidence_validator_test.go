@@ -10,17 +10,18 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// runHistoryFixture seeds terminal action calls into a memory store and reads
+// runHistoryFixture seeds terminal action calls into an in-memory store and reads
 // them back through the same RunActionHistory Propose builds.
 type runHistoryFixture struct {
-	store *MemoryStore
+	t     *testing.T
+	store *SQLiteStore
 	scope Scope
 	base  time.Time
 	next  int
 }
 
-func newRunHistoryFixture() *runHistoryFixture {
-	return &runHistoryFixture{store: NewMemoryStore(), scope: Scope{Kind: "tenant", ID: "one"}, base: time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)}
+func newRunHistoryFixture(t *testing.T) *runHistoryFixture {
+	return &runHistoryFixture{t: t, store: newTestKernelStore(t), scope: Scope{Kind: "tenant", ID: "one"}, base: time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)}
 }
 
 // add stores call as completed after every call added before it.
@@ -35,7 +36,7 @@ func (f *runHistoryFixture) add(call ActionCall) {
 	}
 	call.Scope, call.TurnID = f.scope, "step-1"
 	call.CreatedAt, call.UpdatedAt, call.CompletedAt = completed, completed, &completed
-	f.store.actions[portfolioKey(f.scope, call.ID)] = &call
+	putStoredAction(f.t, f.store, &call)
 }
 
 func (f *runHistoryFixture) history() RunActionHistory {
@@ -70,7 +71,7 @@ func requireMissingFillEvidence(t *testing.T, err error) {
 }
 
 func TestRequiredEvidenceFromSucceededRunCalls(t *testing.T) {
-	f := newRunHistoryFixture()
+	f := newRunHistoryFixture(t)
 	arguments := map[string]interface{}{"sessionId": "session-a"}
 	// No history at all (validators called outside Propose) and an empty Run
 	// history both lack the evidence; a model summary cannot stand in for it.
@@ -87,7 +88,7 @@ func TestRequiredEvidenceFromSucceededRunCalls(t *testing.T) {
 }
 
 func TestRequiredEvidenceIgnoresVMFailedAndOtherRunCalls(t *testing.T) {
-	f := newRunHistoryFixture()
+	f := newRunHistoryFixture(t)
 	fill := func(id string, mutate func(*ActionCall)) {
 		call := ActionCall{ID: id, SkillID: "browser", SkillVersion: "2", Action: "fill", Status: ActionCallStatusSucceeded,
 			Arguments: map[string]interface{}{"sessionId": "session-a"}}
@@ -106,7 +107,7 @@ func TestRequiredEvidenceIgnoresVMFailedAndOtherRunCalls(t *testing.T) {
 }
 
 func TestRequiredEvidenceMatchingArguments(t *testing.T) {
-	f := newRunHistoryFixture()
+	f := newRunHistoryFixture(t)
 	f.add(ActionCall{ID: "fill-a", SkillID: "browser", SkillVersion: "2", Action: "fill", Status: ActionCallStatusSucceeded,
 		Arguments: map[string]interface{}{"sessionId": "session-a", "value": "exact draft"}})
 	f.add(ActionCall{ID: "fill-c", SkillID: "browser", SkillVersion: "2", Action: "fill", Status: ActionCallStatusSucceeded,

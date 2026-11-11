@@ -10,14 +10,14 @@ import (
 )
 
 func TestEngineAcceptedRunExecutionPinsDefinitionAndReplaysOriginalIntent(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"sqlite"} {
 		for _, explicit := range []bool{false, true} {
 			name := backend + "/derived"
 			if explicit {
 				name = backend + "/explicit"
 			}
 			t.Run(name, func(t *testing.T) {
-				var store runtime.KernelStore = runtime.NewMemoryStore()
+				var store runtime.KernelStore
 				if backend == "sqlite" {
 					sqlite, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "accepted-engine.db"))
 					if err != nil {

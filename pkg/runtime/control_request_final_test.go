@@ -14,7 +14,7 @@ import (
 // newRequestFinalFixture claims run (a queued decision or review Run in store)
 // and gives it a session whose one finished step made call. The executor runs
 // the real decision and review handlers.
-func newRequestFinalFixture(t *testing.T, store *MemoryStore, run *AgentRun, call LoopToolCall) *controlFixture {
+func newRequestFinalFixture(t *testing.T, store *SQLiteStore, run *AgentRun, call LoopToolCall) *controlFixture {
 	t.Helper()
 	ctx := context.Background()
 	// After the reconciler created the Run (claims ignore Runs from the future).
@@ -97,7 +97,7 @@ func (f *controlFixture) completeWithFinal(final *FinalAnswer) *AgentRun {
 	return completed
 }
 
-func onlyRunWithSource(t *testing.T, store *MemoryStore, scope Scope, parentID string, source RunSource) *AgentRun {
+func onlyRunWithSource(t *testing.T, store *SQLiteStore, scope Scope, parentID string, source RunSource) *AgentRun {
 	t.Helper()
 	runs, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: parentID, Limit: 20})
 	if err != nil {
@@ -121,7 +121,7 @@ func onlyRunWithSource(t *testing.T, store *MemoryStore, scope Scope, parentID s
 
 func reconcileDecisionRun(t *testing.T) (*agentRequestInboxTeamStore, *AgentRequestInboxReconciler, *AgentRequest, *AgentRun) {
 	t.Helper()
-	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -130,12 +130,12 @@ func reconcileDecisionRun(t *testing.T) (*agentRequestInboxTeamStore, *AgentRequ
 	if result, err := reconciler.Reconcile(t.Context(), request.Scope, "recipient"); err != nil || result.DecisionRunsCreated != 1 {
 		t.Fatalf("reconcile = %#v, %v", result, err)
 	}
-	return store, reconciler, request, onlyRunWithSource(t, store.MemoryStore, request.Scope, source.ID, RunSourceRequestDecision)
+	return store, reconciler, request, onlyRunWithSource(t, store.SQLiteStore, request.Scope, source.ID, RunSourceRequestDecision)
 }
 
 func TestDecisionToolWritesOutputConsumedByResolveDecisionRun(t *testing.T) {
 	store, reconciler, request, run := reconcileDecisionRun(t)
-	f := newRequestFinalFixture(t, store.MemoryStore, run,
+	f := newRequestFinalFixture(t, store.SQLiteStore, run,
 		requestDecisionCall("decide", `{"decision":"reject","message":" Outside my role. "}`))
 	authority := ControlAuthority{AgentID: "recipient", FinalMode: FinalModeDecision}
 	result, err := f.exec.Settle(f.ctx, f.context("decide", authority))
@@ -172,7 +172,7 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			store, _, _, run := reconcileDecisionRun(t)
-			f := newRequestFinalFixture(t, store.MemoryStore, run, requestDecisionCall("decide", args))
+			f := newRequestFinalFixture(t, store.SQLiteStore, run, requestDecisionCall("decide", args))
 			result, err := f.exec.Settle(f.ctx, f.context("decide", authority))
 			if err != nil {
 				t.Fatal(err)
@@ -190,7 +190,7 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 	}
 	// Unknown fields are refused by the strict decoder.
 	store, _, _, run := reconcileDecisionRun(t)
-	f := newRequestFinalFixture(t, store.MemoryStore, run,
+	f := newRequestFinalFixture(t, store.SQLiteStore, run,
 		requestDecisionCall("decide", `{"decision":"accept","message":"ok","budget":3}`))
 	if _, err := f.exec.Settle(f.ctx, f.context("decide", authority)); err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 	requireControlError(t, f.stored("decide").Tool.Result, ToolResultFailed, controlArgumentsInvalidCode)
 	// One concrete question is accepted.
 	store, _, _, run = reconcileDecisionRun(t)
-	g := newRequestFinalFixture(t, store.MemoryStore, run,
+	g := newRequestFinalFixture(t, store.SQLiteStore, run,
 		requestDecisionCall("decide", `{"decision":"request_clarification","message":"Which launch region?"}`))
 	result, err := g.exec.Settle(g.ctx, g.context("decide", authority))
 	if err != nil {
@@ -213,7 +213,7 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 func TestReviewToolResolvesCompletionReview(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "inbox"}
 	store := &agentRequestInboxTeamStore{
-		MemoryStore: NewMemoryStore(),
+		SQLiteStore: newTestKernelStore(t),
 		deployment: &kernelteam.Deployment{
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
@@ -274,7 +274,7 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 	if result, err := reconciler.Reconcile(t.Context(), scope, "reviewer-agent"); err != nil || result.CompletionReviewsCreated != 1 {
 		t.Fatalf("reconcile = %#v, %v", result, err)
 	}
-	run := onlyRunWithSource(t, store.MemoryStore, scope, source.ID, RunSourceCompletionReview)
+	run := onlyRunWithSource(t, store.SQLiteStore, scope, source.ID, RunSourceCompletionReview)
 	if want := (&BudgetPolicy{
 		MaxAttempts: 5, MaxTurns: 12, MaxInputTokens: 256000, MaxOutputTokens: 4096,
 		MaxTotalTokens: 272384, MaxDurationMS: 180000,
@@ -282,7 +282,7 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 		t.Fatalf("review budget = %#v", run.Budget)
 	}
 
-	f := newRequestFinalFixture(t, store.MemoryStore, run,
+	f := newRequestFinalFixture(t, store.SQLiteStore, run,
 		completionReviewCall("review", `{"decision":"approve","message":"The evidence meets the criteria."}`))
 	authority := ControlAuthority{AgentID: "reviewer-agent", FinalMode: FinalModeReview}
 	// The decision tool is not offered in a review Run.

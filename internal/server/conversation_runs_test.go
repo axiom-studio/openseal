@@ -13,9 +13,9 @@ import (
 )
 
 func TestConversationRunsAreScopedFilteredBeforePaging(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store runtime.KernelStore = runtime.NewMemoryStore()
+			var store runtime.KernelStore
 			if backend == "sqlite" {
 				db, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
 				if err != nil {

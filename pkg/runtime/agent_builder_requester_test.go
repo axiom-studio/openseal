@@ -20,7 +20,7 @@ func TestAgentBuilderCardIsDecidedByTheRequester(t *testing.T) {
 		{"", []ApprovalPrincipal{{Type: "user", ID: "operator"}}},
 	} {
 		fixture := newAgentBuilderFixture(t, true)
-		store := NewMemoryStore()
+		store := newTestKernelStore(t)
 		if _, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: fixture.scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
 			AssignedAgentID: "finn", ActingUser: tc.actingUser, Goal: "Build an inbox helper", Source: RunSourceChat,

@@ -21,7 +21,6 @@ func surfaceInteractionStores(t *testing.T) []struct {
 		name  string
 		store func(*testing.T) KernelStore
 	}{
-		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "surface-interactions.db"))
 			if err != nil {

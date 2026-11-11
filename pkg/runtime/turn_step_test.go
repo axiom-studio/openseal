@@ -21,7 +21,6 @@ type turnStepBackend struct {
 
 func turnStepBackends() []turnStepBackend {
 	return []turnStepBackend{
-		{name: "memory", open: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", open: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "turn-steps.db"))
 			if err != nil {

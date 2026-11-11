@@ -209,17 +209,14 @@ func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 		}
 	}
 	overflow := 0
-	h.store.mu.RLock()
-	for _, record := range h.store.routineEvents {
+	for _, record := range listStoredRoutineEvents(t, h.store, h.scope) {
 		if record.State == RoutineEventDropped && record.DroppedReason == RoutineEventDroppedOverflow {
 			overflow++
-			if len(record.Event.Payload) != 0 || record.Event.Summary != "" || len(record.Event.Fields) != 0 {
-				h.store.mu.RUnlock()
-				t.Fatalf("overflow row keeps event data: %#v", record.Event)
+			if record.KeepsData {
+				t.Fatalf("overflow row keeps event data: %#v", record)
 			}
 		}
 	}
-	h.store.mu.RUnlock()
 	if overflow != 20 {
 		t.Fatalf("overflow rows = %d, want 20", overflow)
 	}

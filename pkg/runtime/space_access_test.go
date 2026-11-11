@@ -10,11 +10,6 @@ import (
 	"time"
 )
 
-func TestMemorySpaceAccess(t *testing.T) {
-	t.Parallel()
-	exerciseSpaceAccess(t, NewMemoryStore())
-}
-
 func TestSQLiteSpaceAccess(t *testing.T) {
 	t.Parallel()
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "access.db"))
@@ -25,7 +20,7 @@ func TestSQLiteSpaceAccess(t *testing.T) {
 	exerciseSpaceAccess(t, store)
 }
 
-// exerciseSpaceAccess is the access contract shared by the memory, SQLite
+// exerciseSpaceAccess is the access contract shared by the SQLite
 // and PostgreSQL stores.
 func exerciseSpaceAccess(t *testing.T, store SpaceStore) {
 	t.Helper()

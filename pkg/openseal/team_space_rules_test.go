@@ -11,7 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
-func TestMemoryTeamRostersFollowSpaces(t *testing.T) {
+func TestDefaultStoreTeamRostersFollowSpaces(t *testing.T) {
 	engine, err := New()
 	if err != nil {
 		t.Fatal(err)

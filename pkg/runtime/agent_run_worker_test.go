@@ -9,17 +9,17 @@ import (
 )
 
 type countingAgentRunClaimStore struct {
-	*MemoryStore
+	*SQLiteStore
 	claims atomic.Int64
 }
 
 func (s *countingAgentRunClaimStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
 	s.claims.Add(1)
-	return s.MemoryStore.ClaimNextAgentRunWithDecision(ctx, claim)
+	return s.SQLiteStore.ClaimNextAgentRunWithDecision(ctx, claim)
 }
 
 func TestAgentRunWorkerPoolCoalescesIdleClaimPolling(t *testing.T) {
-	store := &countingAgentRunClaimStore{MemoryStore: NewMemoryStore()}
+	store := &countingAgentRunClaimStore{SQLiteStore: newTestKernelStore(t)}
 	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected resolver call")
 	}), nil, AgentRunWorkerConfig{

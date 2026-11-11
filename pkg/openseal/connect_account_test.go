@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -20,10 +21,10 @@ func (f availabilityCheck) CheckCredentialAvailability(ctx context.Context, req 
 
 // connectAccountEngine has a per_person Mail binding on Agent "agent"; the
 // host reports Ana's ("7") Google sign-in only once connected is set.
-func connectAccountEngine(t *testing.T) (context.Context, *runtime.MemoryStore, *Engine, *atomic.Bool, *[]CredentialAvailabilityRequest) {
+func connectAccountEngine(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *atomic.Bool, *[]CredentialAvailabilityRequest) {
 	t.Helper()
 	ctx := context.Background()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	e, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +66,7 @@ func connectAccountEngine(t *testing.T) (context.Context, *runtime.MemoryStore, 
 
 // parkedConnectAccountRun is a chat run acting for actingUser that waits on
 // its own connect_account card for requestedFor.
-func parkedConnectAccountRun(t *testing.T, ctx context.Context, store *runtime.MemoryStore, call, actingUser, requestedFor, mode string) (*runtime.AgentRun, *SkillSetupRequest) {
+func parkedConnectAccountRun(t *testing.T, ctx context.Context, store *runtime.SQLiteStore, call, actingUser, requestedFor, mode string) (*runtime.AgentRun, *SkillSetupRequest) {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	run, err := runtime.NewPortfolioService(store).CreateAgentRun(ctx, runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindConversation,

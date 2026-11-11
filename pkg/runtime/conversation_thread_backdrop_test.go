@@ -24,7 +24,7 @@ func (s *countedConversationBackdropStore) ListChannelMessages(ctx context.Conte
 func TestConversationThreadBackdropDoesNotSeekPastHiddenPage(t *testing.T) {
 	for _, replyTo := range []bool{false, true} {
 		t.Run(fmt.Sprintf("replyTo=%t", replyTo), func(t *testing.T) {
-			store := NewMemoryStore()
+			store := newTestKernelStore(t)
 			service := NewConversationService(store)
 			conversation := conversationThreadStartConversation(t, store)
 			older := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
@@ -148,7 +148,7 @@ func TestConversationThreadBackdropIsBoundedAuthorizedAndStable(t *testing.T) {
 }
 
 func TestOrdinaryConversationHasNoThreadBackdropReads(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	conversation := conversationThreadStartConversation(t, store)
 	root := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "ordinary-root"})

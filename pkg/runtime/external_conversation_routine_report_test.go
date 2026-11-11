@@ -13,7 +13,7 @@ import (
 )
 
 type routineReportFixture struct {
-	store        *MemoryStore
+	store        *SQLiteStore
 	endpoint     *ExternalConversationEndpoint
 	conversation *Conversation
 	source       *ChannelMessage

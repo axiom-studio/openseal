@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -25,11 +26,18 @@ func (f *agentBuilderDraftFake) ListConversations(_ context.Context, filter Conv
 	selected := []*Conversation{}
 	for _, conversation := range f.conversations {
 		if f.messages[conversation.ID][0].Sender.ID == filter.AgentBuilderDraftOf && !f.created[conversation.ID] &&
-			containsConversationStatus(filter.Statuses, conversation.Status) {
+			slices.Contains(filter.Statuses, conversation.Status) {
 			selected = append(selected, conversation)
 		}
 	}
-	return pageConversations(selected, filter.Offset, filter.Limit), nil
+	if filter.Offset >= len(selected) {
+		return []*Conversation{}, nil
+	}
+	selected = selected[filter.Offset:]
+	if filter.Limit > 0 && len(selected) > filter.Limit {
+		selected = selected[:filter.Limit]
+	}
+	return selected, nil
 }
 
 func (f *agentBuilderDraftFake) ListChannelMessages(_ context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {

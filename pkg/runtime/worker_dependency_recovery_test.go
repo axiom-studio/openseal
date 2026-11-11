@@ -118,24 +118,24 @@ func TestAgentRunWorkerDependencyRetirementLeavesIndependentTargetsUntouched(t *
 }
 
 type dependencyRepairReadCountingStore struct {
-	*MemoryStore
+	*SQLiteStore
 	runReads atomic.Int64
 	runLists atomic.Int64
 }
 
 func (s *dependencyRepairReadCountingStore) GetAgentRun(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
 	s.runReads.Add(1)
-	return s.MemoryStore.GetAgentRun(ctx, scope, id)
+	return s.SQLiteStore.GetAgentRun(ctx, scope, id)
 }
 
 func (s *dependencyRepairReadCountingStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
 	s.runLists.Add(1)
-	return s.MemoryStore.ListAgentRuns(ctx, filter)
+	return s.SQLiteStore.ListAgentRuns(ctx, filter)
 }
 
 func TestAgentRunWorkerIdleDependencyMetadataDoesNotHydrateRunsOrHistory(t *testing.T) {
-	store := &dependencyRepairReadCountingStore{MemoryStore: NewMemoryStore()}
-	fixture := newDependencyRetirementFixtureWithPolicy(t, store.MemoryStore, Scope{Kind: "tenant", ID: uuid.NewString()}, RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureWait})
+	store := &dependencyRepairReadCountingStore{SQLiteStore: newTestKernelStore(t)}
+	fixture := newDependencyRetirementFixtureWithPolicy(t, store.SQLiteStore, Scope{Kind: "tenant", ID: uuid.NewString()}, RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureWait})
 	pool := newDependencyRepairTestPool(t, store, fixture.scope)
 	for range 5 {
 		pool.reconcileForkChildren(t.Context())

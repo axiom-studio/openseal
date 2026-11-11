@@ -26,7 +26,7 @@ func (h *callbackHostStub) NormalizeCallback(_ context.Context, request Callback
 
 func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 
@@ -66,7 +66,7 @@ func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testi
 
 func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -112,7 +112,7 @@ func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) 
 
 func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -172,7 +172,7 @@ func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.
 
 func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -207,7 +207,7 @@ func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 
 func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -221,8 +221,8 @@ func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T)
 	_, err := service.Receive(ctx, CallbackPublicRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte("forged"),
 	}, &callbackHostStub{err: verificationErr})
-	if !errors.Is(err, verificationErr) || consumed != 0 || len(store.callbackEvents) != 0 {
-		t.Fatalf("verification failure = %v, consumed %d, receipts %d", err, consumed, len(store.callbackEvents))
+	if receipts := countStoreRows(t, store, "callback_events"); !errors.Is(err, verificationErr) || consumed != 0 || receipts != 0 {
+		t.Fatalf("verification failure = %v, consumed %d, receipts %d", err, consumed, receipts)
 	}
 }
 
@@ -287,7 +287,7 @@ func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 	}
 }
 
-func newCallbackCatalog(t *testing.T, ctx context.Context, store *MemoryStore) *skillCatalogAdapter {
+func newCallbackCatalog(t *testing.T, ctx context.Context, store *SQLiteStore) *skillCatalogAdapter {
 	t.Helper()
 	catalog := newSkillCatalogAdapter(store)
 	registerCallbackFixture(t, ctx, catalog.Catalog)
@@ -298,7 +298,7 @@ func newCallbackCatalog(t *testing.T, ctx context.Context, store *MemoryStore) *
 // the callback resolver/store relationship explicit.
 type skillCatalogAdapter struct{ *skill.Catalog }
 
-func newSkillCatalogAdapter(store *MemoryStore) *skillCatalogAdapter {
+func newSkillCatalogAdapter(store *SQLiteStore) *skillCatalogAdapter {
 	return &skillCatalogAdapter{Catalog: skill.NewCatalogWithStore(store)}
 }
 

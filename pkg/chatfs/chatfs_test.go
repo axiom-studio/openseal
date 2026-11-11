@@ -10,12 +10,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/artifact"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 type catalog struct {
 	*runtime.ArtifactCatalog
-	store *runtime.MemoryStore
+	store *runtime.SQLiteStore
 }
 
 func (c catalog) RegisterArtifact(ctx context.Context, request runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error) {
@@ -36,7 +37,7 @@ func newTestStore(t *testing.T) (*Store, Chat, Author) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	memory := runtime.NewMemoryStore()
+	memory := runtimetest.NewKernelStore(t)
 	chat := Chat{Scope: runtime.Scope{Kind: "tenant", ID: "1"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "finn"}, ConversationID: "c1"}
 	author := Author{Producer: runtime.ActivityActor{Type: "agent", ID: "finn"}, RunID: "run-1"}
 	return NewStore(catalog{runtime.NewArtifactCatalog(memory), memory}, content), chat, author

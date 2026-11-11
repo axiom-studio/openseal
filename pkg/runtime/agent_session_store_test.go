@@ -2,16 +2,15 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
 	"time"
 )
 
-// Memory-backend specifics of the session store (store-3): the Run binding
-// fence, the watermark CAS, the cursor-in-append, lease-less terminal notes and
-// the in-lock helpers. The cross-backend conformance suite is store-4's.
+// Session store specifics (store-3): the Run binding fence, the watermark
+// CAS, the cursor-in-append and lease-less terminal notes. The cross-backend
+// conformance suite is store-4's.
 
 var testSessionNow = time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 
@@ -24,7 +23,7 @@ func testSessionLeasePtr() *AgentRunLeaseGuard {
 	return &lease
 }
 
-func putTestSessionRun(t *testing.T, store *MemoryStore, runID, sessionID string, status AgentRunStatus, interventions int) *AgentRun {
+func putTestSessionRun(t *testing.T, store *SQLiteStore, runID, sessionID string, status AgentRunStatus, interventions int) *AgentRun {
 	t.Helper()
 	expires := testSessionNow.Add(time.Minute)
 	run := &AgentRun{
@@ -34,20 +33,33 @@ func putTestSessionRun(t *testing.T, store *MemoryStore, runID, sessionID string
 	for i := 0; i < interventions; i++ {
 		run.PendingInterventions = append(run.PendingInterventions, AgentRunIntervention{ID: "iv" + string(rune('a'+i)), Instruction: "steer"})
 	}
-	store.mu.Lock()
-	store.saveMemoryAgentRunLocked(portfolioKey(testSessionScope, runID), run)
-	store.mu.Unlock()
+	// The Run is written as is, without the scheduler's rules, so a test can
+	// rebind or relabel one mid-scenario.
+	ctx := context.Background()
+	conn, err := store.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `DELETE FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`, testSessionScope.Kind, testSessionScope.ID, runID); err != nil {
+		t.Fatal(err)
+	}
+	if err := insertSQLiteAgentRunConn(ctx, conn, run); err != nil {
+		t.Fatal(err)
+	}
 	return run
 }
 
-func testMemoryRun(t *testing.T, store *MemoryStore, runID string) *AgentRun {
+func testStoredSessionRun(t *testing.T, store *SQLiteStore, runID string) *AgentRun {
 	t.Helper()
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-	return cloneAgentRun(store.agentRuns[portfolioKey(testSessionScope, runID)])
+	run, err := store.GetAgentRun(context.Background(), testSessionScope, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return run
 }
 
-func openTestConversationSession(t *testing.T, store *MemoryStore, runID string) *AgentSession {
+func openTestConversationSession(t *testing.T, store *SQLiteStore, runID string) *AgentSession {
 	t.Helper()
 	sessionID := ConversationAgentSessionID(testSessionScope, conversationRunLane("c1", "", "agent-a"))
 	putTestSessionRun(t, store, runID, sessionID, AgentRunStatusRunning, 0)
@@ -60,14 +72,14 @@ func openTestConversationSession(t *testing.T, store *MemoryStore, runID string)
 	return opened.Session
 }
 
-func testAppend(store *MemoryStore, sessionID, runID string, entries ...*SessionEntry) (*AppendAgentSessionEntriesResult, error) {
+func testAppend(store *SQLiteStore, sessionID, runID string, entries ...*SessionEntry) (*AppendAgentSessionEntriesResult, error) {
 	return store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: sessionID, RunID: runID, Lease: testSessionLeasePtr(), Entries: entries, Now: testSessionNow,
 	})
 }
 
-func TestMemoryOpenConversationSessionChecksRunBinding(t *testing.T) {
-	store := NewMemoryStore()
+func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
+	store := newTestKernelStore(t)
 	putTestSessionRun(t, store, "r1", "other-session", AgentRunStatusRunning, 0)
 	req := OpenConversationAgentSessionRequest{Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r1", Lease: testSessionLease()}
 	if _, err := store.OpenConversationAgentSession(context.Background(), req); !errors.Is(err, ErrSessionMoved) {
@@ -78,15 +90,15 @@ func TestMemoryOpenConversationSessionChecksRunBinding(t *testing.T) {
 	if _, err := store.OpenConversationAgentSession(context.Background(), bad); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("open with a foreign lease = %v, want ErrLeaseLost", err)
 	}
-	if len(store.agentSessions) != 0 {
+	if countStoreRows(t, store, "agent_sessions") != 0 {
 		t.Fatalf("a failed open stored a session")
 	}
 
-	session := openTestConversationSession(t, NewMemoryStore(), "r2")
+	session := openTestConversationSession(t, newTestKernelStore(t), "r2")
 	if session.Kind != AgentSessionKindConversation || session.NextSequence != 1 || session.RootSessionID != session.ID || session.Revision != 1 {
 		t.Fatalf("new session = %+v", session)
 	}
-	store = NewMemoryStore()
+	store = newTestKernelStore(t)
 	first := openTestConversationSession(t, store, "r2")
 	again, err := store.OpenConversationAgentSession(context.Background(), OpenConversationAgentSessionRequest{
 		Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r2", Lease: testSessionLease(),
@@ -96,8 +108,8 @@ func TestMemoryOpenConversationSessionChecksRunBinding(t *testing.T) {
 	}
 }
 
-func TestMemoryAppendFencedBySessionBindingAndLease(t *testing.T) {
-	store := NewMemoryStore()
+func TestAppendFencedBySessionBindingAndLease(t *testing.T) {
+	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	result, err := testAppend(store, session.ID, "r1", testUserEntry("u1", "hi"), testUserEntry("u2", "there"))
 	if err != nil {
@@ -131,8 +143,8 @@ func TestMemoryAppendFencedBySessionBindingAndLease(t *testing.T) {
 	}
 }
 
-func TestMemoryAppendWatermarkCAS(t *testing.T) {
-	store := NewMemoryStore()
+func TestAppendWatermarkCAS(t *testing.T) {
+	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	zero := int64(0)
 	ten := int64(10)
@@ -168,11 +180,11 @@ func TestMemoryAppendWatermarkCAS(t *testing.T) {
 	}
 }
 
-func TestMemoryAppendConsumesInterventionsWithEntries(t *testing.T) {
-	store := NewMemoryStore()
+func TestAppendConsumesInterventionsWithEntries(t *testing.T) {
+	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	putTestSessionRun(t, store, "r1", session.ID, AgentRunStatusRunning, 2)
-	before := testMemoryRun(t, store, "r1")
+	before := testStoredSessionRun(t, store, "r1")
 	through := 2
 	steer := &SessionEntry{ID: "s1", Type: SessionEntryUser, SourceKey: InterventionSourceKey("iva"), User: &UserEntry{
 		Origin: UserEntryIntervention, InterventionID: "iva", Author: SessionAuthor{Type: "user", ID: "u1"}, Content: []ContentPart{testTextPart("steer")},
@@ -184,7 +196,7 @@ func TestMemoryAppendConsumesInterventionsWithEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
-	after := testMemoryRun(t, store, "r1")
+	after := testStoredSessionRun(t, store, "r1")
 	if after.ConsumedInterventions != 2 || after.Revision != before.Revision+1 {
 		t.Fatalf("run after cursor append: consumed=%d revision=%d (was %d)", after.ConsumedInterventions, after.Revision, before.Revision)
 	}
@@ -209,13 +221,13 @@ func TestMemoryAppendConsumesInterventionsWithEntries(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("cursor-only append: %v", err)
 	}
-	if run := testMemoryRun(t, store, "r1"); run.Revision != after.Revision {
+	if run := testStoredSessionRun(t, store, "r1"); run.Revision != after.Revision {
 		t.Fatalf("unchanged cursor bumped the run revision")
 	}
 }
 
-func TestMemoryLeaselessNoteNeedsTerminalRun(t *testing.T) {
-	store := NewMemoryStore()
+func TestLeaselessNoteNeedsTerminalRun(t *testing.T) {
+	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	note := &SessionEntry{ID: "n1", Type: SessionEntryNote, SourceKey: FailureNoteSourceKey("r1", "t1"), Note: &NoteEntry{Kind: NoteRunFailed, Text: "the run failed"}}
 	req := AppendAgentSessionEntriesRequest{Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Entries: []*SessionEntry{note}}
@@ -233,8 +245,8 @@ func TestMemoryLeaselessNoteNeedsTerminalRun(t *testing.T) {
 	}
 }
 
-func TestMemoryAppendReplayAndEvents(t *testing.T) {
-	store := NewMemoryStore()
+func TestAppendReplayAndEvents(t *testing.T) {
+	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	batch := []*SessionEntry{testAssistantEntry("a1", "t1", "c1"), testToolEntry("e1", "t1", "c1", ToolEntryPending)}
 	event := &ActivityEvent{Scope: testSessionScope, RunID: "r1", EventType: "turn.narration", Summary: "Checking"}
@@ -264,8 +276,8 @@ func TestMemoryAppendReplayAndEvents(t *testing.T) {
 	}
 }
 
-func TestMemoryCreateRunSessionBindsRunAndForks(t *testing.T) {
-	store := NewMemoryStore()
+func TestCreateRunSessionBindsRunAndForks(t *testing.T) {
+	store := newTestKernelStore(t)
 	parent := openTestConversationSession(t, store, "r1")
 	if _, err := testAppend(store, parent.ID, "r1", testUserEntry("p1", "a"), testUserEntry("p2", "b"), testUserEntry("p3", "c")); err != nil {
 		t.Fatal(err)
@@ -282,7 +294,7 @@ func TestMemoryCreateRunSessionBindsRunAndForks(t *testing.T) {
 	if err != nil || !created.Created || created.Session.NextSequence != 2 || created.Session.ID != RunAgentSessionID(testSessionScope, "bg") {
 		t.Fatalf("create = %+v, %v", created, err)
 	}
-	if run := testMemoryRun(t, store, "bg"); run.SessionID != created.Session.ID || run.Revision != 2 {
+	if run := testStoredSessionRun(t, store, "bg"); run.SessionID != created.Session.ID || run.Revision != 2 {
 		t.Fatalf("run binding = %q rev %d", run.SessionID, run.Revision)
 	}
 	again, err := store.CreateRunAgentSession(context.Background(), CreateRunAgentSessionRequest{
@@ -299,26 +311,22 @@ func TestMemoryCreateRunSessionBindsRunAndForks(t *testing.T) {
 
 	// Same-Agent fork in the child-creating transaction, before p3.
 	putTestSessionRun(t, store, "child", "", AgentRunStatusQueued, 0)
-	store.mu.Lock()
-	_, err = store.createRunAgentSessionLocked(CreateRunAgentSessionTxRequest{
+	_, err = store.conformanceCreateRunAgentSessionTx(context.Background(), CreateRunAgentSessionTxRequest{
 		Scope: testSessionScope, OwnerRunID: "child", AgentID: "agent-a", ParentSessionID: parent.ID, ForkSequence: 5,
 	})
-	store.mu.Unlock()
 	if !errors.Is(err, ErrInvalidAgentSession) {
 		t.Fatalf("fork past the leaf = %v, want ErrInvalidAgentSession", err)
 	}
-	store.mu.Lock()
-	fork, err := store.createRunAgentSessionLocked(CreateRunAgentSessionTxRequest{
+	fork, err := store.conformanceCreateRunAgentSessionTx(context.Background(), CreateRunAgentSessionTxRequest{
 		Scope: testSessionScope, OwnerRunID: "child", AgentID: "agent-a", ParentSessionID: parent.ID, ForkSequence: 2, Now: testSessionNow,
 	})
-	store.mu.Unlock()
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
 	if fork.Session.Depth != 1 || fork.Session.ForkEntryID != "p2" || fork.Session.RootSessionID != parent.ID || fork.Session.ConversationID != "c1" {
 		t.Fatalf("fork session = %+v", fork.Session)
 	}
-	if run := testMemoryRun(t, store, "child"); run.SessionID != fork.Session.ID {
+	if run := testStoredSessionRun(t, store, "child"); run.SessionID != fork.Session.ID {
 		t.Fatalf("child binding = %q", run.SessionID)
 	}
 	if _, err := testAppend(store, fork.Session.ID, "child", testUserEntry("c1", "child")); err != nil {
@@ -335,17 +343,15 @@ func TestMemoryCreateRunSessionBindsRunAndForks(t *testing.T) {
 	}
 }
 
-func TestMemoryForkDepthLimit(t *testing.T) {
-	store := NewMemoryStore()
+func TestForkDepthLimit(t *testing.T) {
+	store := newTestKernelStore(t)
 	parent := openTestConversationSession(t, store, "r0")
 	for depth := 1; depth <= MaxAgentSessionDepth+1; depth++ {
 		runID := "d" + string(rune('0'+depth))
 		putTestSessionRun(t, store, runID, "", AgentRunStatusQueued, 0)
-		store.mu.Lock()
-		result, err := store.createRunAgentSessionLocked(CreateRunAgentSessionTxRequest{
+		result, err := store.conformanceCreateRunAgentSessionTx(context.Background(), CreateRunAgentSessionTxRequest{
 			Scope: testSessionScope, OwnerRunID: runID, AgentID: "agent-a", ParentSessionID: parent.ID,
 		})
-		store.mu.Unlock()
 		if depth > MaxAgentSessionDepth {
 			if !errors.Is(err, ErrAgentSessionForkTooDeep) {
 				t.Fatalf("depth %d = %v, want ErrAgentSessionForkTooDeep", depth, err)
@@ -359,8 +365,8 @@ func TestMemoryForkDepthLimit(t *testing.T) {
 	}
 }
 
-func TestMemoryTransitionToolEntry(t *testing.T) {
-	store := NewMemoryStore()
+func TestTransitionToolEntry(t *testing.T) {
+	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	if _, err := testAppend(store, session.ID, "r1", testAssistantEntry("a1", "t1", "c1"), testToolEntry("e1", "t1", "c1", ToolEntryPending)); err != nil {
 		t.Fatal(err)
@@ -424,8 +430,8 @@ func TestMemoryTransitionToolEntry(t *testing.T) {
 	}
 }
 
-func TestMemoryCompactionCannotDropAssistantWithOpenToolEntry(t *testing.T) {
-	store := NewMemoryStore()
+func TestCompactionCannotDropAssistantWithOpenToolEntry(t *testing.T) {
+	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	if _, err := testAppend(store, session.ID, "r1", testUserEntry("u1", "a")); err != nil {
 		t.Fatal(err)
@@ -457,32 +463,5 @@ func TestMemoryCompactionCannotDropAssistantWithOpenToolEntry(t *testing.T) {
 	after, err := store.ListAgentSessionEntries(context.Background(), SessionEntryFilter{Scope: testSessionScope, SessionID: session.ID, AfterCompaction: true})
 	if err != nil || len(after) != 0 {
 		t.Fatalf("entries after compaction = %d, %v", len(after), err)
-	}
-}
-
-func TestMemoryInLockHelpersSkipFence(t *testing.T) {
-	store := NewMemoryStore()
-	session := openTestConversationSession(t, store, "r1")
-	if _, err := testAppend(store, session.ID, "r1", testAssistantEntry("a1", "t1", "c1"), testToolEntry("e1", "t1", "c1", ToolEntryPending)); err != nil {
-		t.Fatal(err)
-	}
-	// Promotion-style note from a Run that is now bound elsewhere.
-	putTestSessionRun(t, store, "r1", "child-session", AgentRunStatusRunning, 0)
-	note := &SessionEntry{ID: "n1", Type: SessionEntryNote, SourceKey: TaskPromotedSourceKey("r1"), Note: &NoteEntry{Kind: NoteTaskPromoted, Text: "moved", Data: json.RawMessage(`{}`)}}
-	store.mu.Lock()
-	_, appendErr := store.appendAgentSessionEntriesLocked(AppendAgentSessionEntriesRequest{
-		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Entries: []*SessionEntry{note},
-	})
-	_, transitionErr := store.transitionToolEntryLocked(ToolEntryTransitionRequest{
-		Scope: testSessionScope, EntryID: "e1", RunID: "r1", Lease: AgentRunLeaseGuard{WorkerID: "w-other"},
-		From: ToolEntryPending, To: ToolEntryAwaitingChild, Wait: &ToolEntryWait{ChildRunIDs: []string{"child"}},
-	})
-	store.mu.Unlock()
-	if appendErr != nil || transitionErr != nil {
-		t.Fatalf("in-lock helpers: append %v, transition %v", appendErr, transitionErr)
-	}
-	byStep, err := store.ListAgentSessionEntries(context.Background(), SessionEntryFilter{Scope: testSessionScope, StepID: "t1", Descending: true})
-	if err != nil || len(byStep) != 2 || byStep[0].ID != "e1" || byStep[0].State != ToolEntryAwaitingChild {
-		t.Fatalf("list by step = %v, %v", byStep, err)
 	}
 }

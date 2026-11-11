@@ -11,12 +11,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 	t.Parallel()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := runtime.Scope{Kind: "local", ID: "workspace"}
 	run, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
 		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},

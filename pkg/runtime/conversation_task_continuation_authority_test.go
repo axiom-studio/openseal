@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-func promotedContinuationAuthorityFixture(t *testing.T, id string) (*MemoryStore, *ConversationTaskResult, *Conversation, *ChannelMessage) {
+func promotedContinuationAuthorityFixture(t *testing.T, id string) (*SQLiteStore, *ConversationTaskResult, *Conversation, *ChannelMessage) {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, conversation, message := continuationLifecycleFixture(t, store, id)
 	now := time.Now().UTC()
 	run = backdateContinuationLifecycleRun(t, store, run, now.Add(-ConversationTaskForegroundTimeout-time.Second))
@@ -21,21 +21,22 @@ func promotedContinuationAuthorityFixture(t *testing.T, id string) (*MemoryStore
 	return store, result, conversation, message
 }
 
-func finishContinuationAuthorityRun(t *testing.T, store *MemoryStore, run *AgentRun, status AgentRunStatus) *AgentRun {
+func finishContinuationAuthorityRun(t *testing.T, store *SQLiteStore, run *AgentRun, status AgentRunStatus) *AgentRun {
 	t.Helper()
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	current := cloneAgentRun(store.agentRuns[portfolioKey(run.Scope, run.ID)])
+	current, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	current.Status, current.LeaseOwner, current.LeaseExpiresAt = status, "", nil
 	current.CompletedAt, current.UpdatedAt = &now, now
 	current.Revision++
-	store.saveMemoryAgentRunLocked(portfolioKey(current.Scope, current.ID), current)
-	return cloneAgentRun(current)
+	putStoredRun(t, store, current)
+	return current
 }
 
 func TestConversationTaskContinuationUsesTaskReserveAndLeavesForegroundSlot(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	base, _, _ := continuationLifecycleFixture(t, store, "continuation-reserve")
 	now := time.Now().UTC()
 	base = backdateContinuationLifecycleRun(t, store, base, now.Add(-ConversationTaskForegroundTimeout-time.Second))
@@ -106,9 +107,7 @@ func TestConversationTaskContinuationAdmitsOriginalDelegatedAuthorityOnly(t *tes
 	if err := store.CreateAgentRun(t.Context(), child); err != nil {
 		t.Fatal(err)
 	}
-	store.mu.Lock()
-	store.requests[requestStoreKey(request.Scope, request.ID)] = cloneAgentRequest(request)
-	store.mu.Unlock()
+	putStoredAgentRequest(t, store, request)
 	getRun := func(id string) (*AgentRun, error) { return store.GetAgentRun(t.Context(), parent.Scope, id) }
 	getRequest := func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
 		return store.GetAgentRequest(ctx, scope, id)
@@ -119,9 +118,12 @@ func TestConversationTaskContinuationAdmitsOriginalDelegatedAuthorityOnly(t *tes
 	}
 	claim := AgentRunClaim{Scope: child.Scope, Kind: RunKindConversation, WorkerID: "specialist", AssignedAgentID: child.AssignedAgentID,
 		Now: time.Now().Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 4, ConversationTaskForegroundReserve: 1}
-	store.mu.Lock()
-	err = store.prepareConversationTaskAdmissionLocked(t.Context(), &claim, []*AgentRun{child})
-	store.mu.Unlock()
+	conn, err := store.db.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.prepareConversationTaskAdmissionConn(t.Context(), conn, &claim, []*AgentRun{child})
+	conn.Close()
 	if err != nil || !claim.conversationTaskRuns[child.ID] {
 		t.Fatalf("original delegate bypassed background reserve: %#v %v", claim.conversationTaskRuns, err)
 	}

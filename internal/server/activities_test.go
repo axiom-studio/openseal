@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestActivityAPIIsCapabilityAdvertisedSelectorBoundedAndDetailedOnRequest(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
 	run, err := runtime.NewPortfolioService(store).CreateAgentRun(context.Background(), runtime.CreateAgentRunRequest{

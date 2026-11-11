@@ -18,10 +18,6 @@ type conversationTaskDueBenchmarkStore interface {
 
 // Only fixture construction writes history. Timed calls use the production due
 // query with its production page limit, including a page after a keyset cursor.
-func BenchmarkConversationTaskContinuationDueMemory(b *testing.B) {
-	conversationTaskBenchmarkDue(b, func(*testing.B) conversationTaskDueBenchmarkStore { return NewMemoryStore() })
-}
-
 func BenchmarkConversationTaskContinuationDueSQLite(b *testing.B) {
 	conversationTaskBenchmarkDue(b, func(b *testing.B) conversationTaskDueBenchmarkStore {
 		store, err := NewSQLiteStore(filepath.Join(b.TempDir(), "continuation-due.db"))

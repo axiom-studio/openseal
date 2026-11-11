@@ -36,7 +36,7 @@ func TestDefaultActionPolicyProfileImageExceptionIsNarrow(t *testing.T) {
 
 func TestProfileImageProposalProceedsWithoutApproval(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog, scope := governedActionCatalog(t)
 	definition := builtin.SkillDefinition()
 	if err := catalog.Register(ctx, definition); err != nil {

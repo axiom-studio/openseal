@@ -37,7 +37,7 @@ func (deterministicBudgetProducer) Produce(context.Context, StepInput) (StepOutp
 
 type stepBudgetFixture struct {
 	t        *testing.T
-	store    *MemoryStore
+	store    *SQLiteStore
 	activity *RunActivityService
 	turns    *AgentTurnService
 	run      *AgentRun
@@ -48,7 +48,7 @@ type stepBudgetFixture struct {
 func newStepBudgetFixture(t *testing.T, budget *BudgetPolicy) *stepBudgetFixture {
 	t.Helper()
 	ctx := t.Context()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "local", ID: "step-budget-" + strings.ReplaceAll(t.Name(), "/", "-")}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "bounded work", Budget: budget,

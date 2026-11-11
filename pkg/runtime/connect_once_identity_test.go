@@ -111,7 +111,7 @@ func TestDelegatedAgentRunWorksWithoutAnyConnection(t *testing.T) {
 }
 
 func TestOnlyTheActingPersonSteersARun(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "steering"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", ActingUser: "7",
@@ -168,7 +168,7 @@ func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 }
 
 func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := t.Context()
 	run, catalog, bound, args := scheduledTaskFixture(t, store)
 	conversationID := run.Context[conversationRunContextConversationID].(string)
@@ -272,7 +272,7 @@ func TestRoutineRunsActForTheirCreatorOnlyWithATask(t *testing.T) {
 	// A started routine with a task acts for its creator. (A task routine is
 	// always scheduled; its scheduled occurrences are checked in
 	// TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores.)
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, _, bound, args := scheduledTaskFixture(t, store)
 	activation := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*RunbookActivation)
 	started, err := StartRunbookActivation(t.Context(), store, run.Scope, activation.ID, StartRunbookActivationRequest{IdempotencyKey: "start-now", Actor: ActivityActor{Type: "user", ID: "user"}})

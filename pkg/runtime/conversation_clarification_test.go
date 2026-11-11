@@ -77,9 +77,9 @@ func (f *clarificationFixture) answer(t *testing.T, target string) *ChannelMessa
 	return posted.Message
 }
 func TestConversationClarificationRoundTrip(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store clarificationStore = NewMemoryStore()
+			var store clarificationStore = newTestKernelStore(t)
 			if backend == "sqlite" {
 				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
 				if err != nil {
@@ -135,7 +135,7 @@ func TestConversationClarificationRoundTrip(t *testing.T) {
 }
 
 func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
-	f := newClarificationFixture(t, NewMemoryStore(), "targets")
+	f := newClarificationFixture(t, newTestKernelStore(t), "targets")
 	q := f.question(t)
 	other, err := NewPortfolioService(f.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: f.root.Scope, Kind: RunKindAgentWork, Owner: f.root.Owner, AssignedAgentID: "writer", ParentRunID: f.root.ID, Goal: "Draft the outline", Source: RunSourceRequest})
 	if err != nil {
@@ -173,7 +173,7 @@ func (s *failingAnswerProjectionStore) CommitChannelMessage(ctx context.Context,
 	return s.ConversationStore.CommitChannelMessage(ctx, record)
 }
 func TestConversationClarificationRecoversAfterWakeBeforeAcknowledgment(t *testing.T) {
-	f := newClarificationFixture(t, NewMemoryStore(), "crash")
+	f := newClarificationFixture(t, newTestKernelStore(t), "crash")
 	q := f.question(t)
 	answer := f.answer(t, q.ID)
 	failing := &failingAnswerProjectionStore{ConversationStore: f.store, fail: true}
@@ -188,7 +188,7 @@ func TestConversationClarificationRecoversAfterWakeBeforeAcknowledgment(t *testi
 	}
 }
 func TestConversationWorkOriginKeepsOwnerBoundary(t *testing.T) {
-	f := newClarificationFixture(t, NewMemoryStore(), "context")
+	f := newClarificationFixture(t, newTestKernelStore(t), "context")
 	other := cloneAgentRun(f.child)
 	other.Owner.ID = "another-agent"
 	_, conversation, _, err := conversationWorkOrigin(t.Context(), f.store, f.store, other)

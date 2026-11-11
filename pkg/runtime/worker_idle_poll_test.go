@@ -12,7 +12,7 @@ import (
 )
 
 type countingActionPoolStore struct {
-	*MemoryStore
+	*SQLiteStore
 	claims    atomic.Int64
 	empty     atomic.Int64
 	hydration atomic.Int64
@@ -23,7 +23,7 @@ type countingActionPoolStore struct {
 
 func (s *countingActionPoolStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
 	n := s.claims.Add(1)
-	call, err := s.MemoryStore.ClaimNextAction(ctx, claim)
+	call, err := s.SQLiteStore.ClaimNextAction(ctx, claim)
 	if n == 1 && s.entered != nil {
 		close(s.entered)
 		select {
@@ -43,11 +43,11 @@ func (s *countingActionPoolStore) GetAgentRun(ctx context.Context, scope Scope, 
 	if s.failRead {
 		return nil, errors.New("temporary Run hydration failure")
 	}
-	return s.MemoryStore.GetAgentRun(ctx, scope, id)
+	return s.SQLiteStore.GetAgentRun(ctx, scope, id)
 }
 
 func TestActionWorkerPoolCoalescesIdleClaimsBeforeHydration(t *testing.T) {
-	store := &countingActionPoolStore{MemoryStore: NewMemoryStore()}
+	store := &countingActionPoolStore{SQLiteStore: newTestKernelStore(t)}
 	pool, err := NewActionWorkerPool(store, skill.NewCatalog(), nil,
 		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 			return nil, errors.New("unexpected idle dispatch")
@@ -67,7 +67,7 @@ func TestActionWorkerPoolCoalescesIdleClaimsBeforeHydration(t *testing.T) {
 }
 
 func TestActionWorkerPoolWakeSurvivesEmptyClaimRace(t *testing.T) {
-	store := &countingActionPoolStore{MemoryStore: NewMemoryStore(), entered: make(chan struct{}), release: make(chan struct{})}
+	store := &countingActionPoolStore{SQLiteStore: newTestKernelStore(t), entered: make(chan struct{}), release: make(chan struct{})}
 	catalog, scope := governedActionCatalog(t)
 	dispatched := make(chan struct{}, 1)
 	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 1, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
@@ -81,7 +81,7 @@ func TestActionWorkerPoolWakeSurvivesEmptyClaimRace(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("initial empty claim was not reached")
 	}
-	createActionPoolWork(t, store.MemoryStore, catalog, scope)
+	createActionPoolWork(t, store.SQLiteStore, catalog, scope)
 	pool.Wake()
 	close(store.release)
 	select {
@@ -94,7 +94,7 @@ func TestActionWorkerPoolWakeSurvivesEmptyClaimRace(t *testing.T) {
 func TestActionWorkerPoolRecoversMissedWakeAndRestart(t *testing.T) {
 	for _, scenario := range []string{"missed_wake", "restart", "wake_after_idle"} {
 		t.Run(scenario, func(t *testing.T) {
-			store := &countingActionPoolStore{MemoryStore: NewMemoryStore()}
+			store := &countingActionPoolStore{SQLiteStore: newTestKernelStore(t)}
 			catalog, scope := governedActionCatalog(t)
 			dispatched := make(chan struct{}, 1)
 			interval := 25 * time.Millisecond
@@ -117,7 +117,7 @@ func TestActionWorkerPoolRecoversMissedWakeAndRestart(t *testing.T) {
 			if scenario == "restart" {
 				pool.Stop()
 			}
-			createActionPoolWork(t, store.MemoryStore, catalog, scope)
+			createActionPoolWork(t, store.SQLiteStore, catalog, scope)
 			started := time.Now()
 			if scenario == "restart" {
 				pool.Start(t.Context())
@@ -138,7 +138,7 @@ func TestActionWorkerPoolRecoversMissedWakeAndRestart(t *testing.T) {
 }
 
 func TestActionWorkerPoolHandsOffClaimBeforeProviderAndDrainsBacklog(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog, scope := governedActionCatalog(t)
 	const calls = 8
 	for i := 0; i < calls; i++ {
@@ -240,10 +240,10 @@ func TestWorkerPollSignalPreservesNotificationBeforeWait(t *testing.T) {
 }
 
 func TestActionWorkerPoolBacksOffAfterClaimedRunHydrationFailure(t *testing.T) {
-	store := &countingActionPoolStore{MemoryStore: NewMemoryStore(), failRead: true}
+	store := &countingActionPoolStore{SQLiteStore: newTestKernelStore(t), failRead: true}
 	catalog, scope := governedActionCatalog(t)
 	for range 20 {
-		createActionPoolWork(t, store.MemoryStore, catalog, scope)
+		createActionPoolWork(t, store.SQLiteStore, catalog, scope)
 	}
 	pool := newTestActionPool(t, store, catalog, scope, 50*time.Millisecond, 1, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		return nil, errors.New("hydration failure must prevent dispatch")
@@ -264,7 +264,7 @@ func TestActionWorkerPoolBacksOffAfterClaimedRunHydrationFailure(t *testing.T) {
 }
 
 func TestActionWorkerPoolSerializesStopBeforeConcurrentRestart(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog, scope := governedActionCatalog(t)
 	createActionPoolWork(t, store, catalog, scope)
 	entered, stopping, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
@@ -340,7 +340,7 @@ func TestWorkerPollSignalBroadcastsAndCancelsAllWaiters(t *testing.T) {
 
 func TestWorkerPoolScopeWakeDoesNotWakeAnotherTenant(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "mine"}
-	pool := newTestActionPool(t, NewMemoryStore(), skill.NewCatalog(), scope, time.Hour, 1,
+	pool := newTestActionPool(t, newTestKernelStore(t), skill.NewCatalog(), scope, time.Hour, 1,
 		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }))
 	pool.WakeScope(Scope{Kind: "tenant", ID: "other"})
 	select {
@@ -357,7 +357,7 @@ func TestWorkerPoolScopeWakeDoesNotWakeAnotherTenant(t *testing.T) {
 }
 
 func TestAgentRunWorkerObservesTimerDeadlineWithoutWaitingForFallback(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "timer-deadline"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "sleep then resume", Source: RunSourceManual,

@@ -21,7 +21,6 @@ type conversationTaskAdmissionTestStore interface {
 
 func forConversationTaskAdmissionStores(t *testing.T, test func(*testing.T, conversationTaskAdmissionTestStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) { test(t, NewMemoryStore()) })
 	forConversationTaskSQLStores(t, func(t *testing.T, fixture conversationTaskSQLTestFixture) {
 		test(t, fixture.store.(conversationTaskAdmissionTestStore))
 	})

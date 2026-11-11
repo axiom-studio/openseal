@@ -44,9 +44,7 @@ func newTaskReviewFixture(t *testing.T, calls ...LoopToolCall) *controlFixture {
 		ConversationID: "conv-1", SourceMessageID: "msg-1", ThreadRootID: "msg-1", SourceRunID: "source-run",
 		TargetAgentID: "agent-1", WorkRunID: f.run.ID, TaskKey: "key-1", Goal: taskReviewGoal, CreatedAt: f.now,
 	}
-	f.store.mu.Lock()
-	f.store.saveMemoryConversationTaskLocked(task, f.run)
-	f.store.mu.Unlock()
+	putStoredConversationTask(f.t, f.store, task, f.run)
 	return f
 }
 

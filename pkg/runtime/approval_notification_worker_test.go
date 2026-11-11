@@ -87,8 +87,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	// A tenant's immutable approval history must not starve current,
 	// deadline-bearing work when the worker uses a bounded page.
 	historyCall := &ActionCall{ID: "historical-call", Scope: endpoint.Scope, RunID: claimed.ID, Status: ActionCallStatusSucceeded, Revision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
-	store.mu.Lock()
-	store.actions[portfolioKey(endpoint.Scope, historyCall.ID)] = cloneActionCall(historyCall)
+	putStoredAction(t, store, historyCall)
 	for index := range 11 {
 		historical := &ApprovalCheckpoint{
 			ID: "historical-approval-" + string(rune('a'+index)), Scope: endpoint.Scope, RunID: claimed.ID,
@@ -98,9 +97,8 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		if index == 0 {
 			historical.Destinations = []ApprovalDestination{{EndpointID: endpoint.ID}}
 		}
-		store.approvals[portfolioKey(endpoint.Scope, historical.ID)] = historical
+		putStoredApproval(t, store, historical)
 	}
-	store.mu.Unlock()
 
 	transport := NewExternalConversationTransportService(store, catalog)
 	transport.now = func() time.Time { return now }
@@ -122,9 +120,9 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
 	// Marketplace definitions may retain their portable manifest channel key
 	// after the reviewed callback has been placed onto a concrete endpoint.
-	store.mu.Lock()
-	store.approvals[portfolioKey(endpoint.Scope, approval.ID)].Destinations = []ApprovalDestination{{EndpointID: "coding-slack-channel"}}
-	store.mu.Unlock()
+	rewriteStoredPayload(t, store, "approval_checkpoints", endpoint.Scope, approval.ID, func(stored *ApprovalCheckpoint) {
+		stored.Destinations = []ApprovalDestination{{EndpointID: "coding-slack-channel"}}
+	})
 	lookupStore := &approvalNotificationDeliveryLookupStore{ApprovalNotificationStore: store}
 	worker := NewApprovalNotificationWorker(lookupStore, transport, catalog)
 	worker.now = func() time.Time { return now }
@@ -288,9 +286,9 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	}
 	for _, message := range messages {
 		if strings.HasPrefix(message.IdempotencyKey, "approval-outcome:"+approval.ID+":") {
-			store.mu.Lock()
-			store.channelMessageIDs[channelMessageStoreKey(message.Scope, message.ConversationID, message.ID)].Content = "historical presentation"
-			store.mu.Unlock()
+			execStoreSQL(t, store, `UPDATE channel_messages SET payload = json_set(payload, '$.content', ?)
+				WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND id = ?`,
+				"historical presentation", message.Scope.Kind, message.Scope.ID, message.ConversationID, message.ID)
 		}
 	}
 	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
@@ -368,7 +366,7 @@ func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T
 func registerApprovalNotificationCallback(
 	t *testing.T,
 	ctx context.Context,
-	store *MemoryStore,
+	store *SQLiteStore,
 	catalog *skill.Catalog,
 	endpoint *ExternalConversationEndpoint,
 ) *CallbackRegistration {

@@ -14,7 +14,6 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "bounded-schedule.db"))
 			if err != nil {
@@ -100,7 +99,7 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 
 func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -181,7 +180,7 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 
 func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "reporting"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-one"}
 	run := &AgentRun{
@@ -216,7 +215,7 @@ func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
 
 func TestRunbookSchedulerKeepsSiblingRunbooksIndependent(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	objective, _ := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{

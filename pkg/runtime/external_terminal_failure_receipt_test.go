@@ -49,7 +49,7 @@ func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testi
 }
 
 func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := runStoreContractEpoch
 	run, conversation, trigger := terminalFailureConversationFixture(t, store, now, false)
 	run = failTerminalConversation(t, store, run, now, "provider_rate_limited")

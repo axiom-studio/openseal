@@ -13,7 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// repeatExecFixture is a claimed Run with its session in the memory store; it
+// repeatExecFixture is a claimed Run with its session in an in-memory store; it
 // plays the LoopToolExecutor around a loopRepeatGuard.
 type repeatExecFixture struct {
 	*loopStoreFixture
@@ -24,7 +24,7 @@ type repeatExecFixture struct {
 
 func newRepeatExecFixture(t *testing.T) *repeatExecFixture {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	f := newLoopStoreFixture(t, store)
 	lease := AgentRunLeaseGuard{WorkerID: loopStoreWorker, Now: f.now}
 	if _, err := store.CreateRunAgentSession(f.ctx, CreateRunAgentSessionRequest{

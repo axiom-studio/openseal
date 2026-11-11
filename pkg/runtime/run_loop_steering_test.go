@@ -8,27 +8,23 @@ import (
 
 // steeringRun stores run r1 (bound to a conversation session) with the given
 // interventions and cursor, and returns the stored Run and session.
-func steeringRun(t *testing.T, store *MemoryStore, consumed int, interventions ...AgentRunIntervention) (*AgentRun, *AgentSession) {
+func steeringRun(t *testing.T, store *SQLiteStore, consumed int, interventions ...AgentRunIntervention) (*AgentRun, *AgentSession) {
 	t.Helper()
 	session := openTestConversationSession(t, store, "r1")
-	store.mu.Lock()
-	run := cloneAgentRun(store.agentRuns[portfolioKey(testSessionScope, "r1")])
+	run := getStoredRun(t, store, testSessionScope, "r1")
 	run.PendingInterventions = interventions
 	run.ConsumedInterventions = consumed
-	store.saveMemoryAgentRunLocked(portfolioKey(testSessionScope, "r1"), run)
-	store.mu.Unlock()
-	return testMemoryRun(t, store, "r1"), session
+	putStoredRun(t, store, run)
+	return testStoredSessionRun(t, store, "r1"), session
 }
 
-func addSteeringIntervention(t *testing.T, store *MemoryStore, intervention AgentRunIntervention) *AgentRun {
+func addSteeringIntervention(t *testing.T, store *SQLiteStore, intervention AgentRunIntervention) *AgentRun {
 	t.Helper()
-	store.mu.Lock()
-	run := cloneAgentRun(store.agentRuns[portfolioKey(testSessionScope, "r1")])
+	run := getStoredRun(t, store, testSessionScope, "r1")
 	run.PendingInterventions = append(run.PendingInterventions, intervention)
 	run.Revision++
-	store.saveMemoryAgentRunLocked(portfolioKey(testSessionScope, "r1"), run)
-	store.mu.Unlock()
-	return testMemoryRun(t, store, "r1")
+	putStoredRun(t, store, run)
+	return testStoredSessionRun(t, store, "r1")
 }
 
 func steeringStep() *AgentTurn { return &AgentTurn{ID: "step-3", Sequence: 3} }
@@ -37,7 +33,7 @@ func steeringInput(run *AgentRun, session *AgentSession) StepInput {
 	return StepInput{Run: run, Step: steeringStep(), Session: session, WorkerID: "w1", Mode: StepModeNormal}
 }
 
-func steeringEntries(t *testing.T, store *MemoryStore, sessionID string) []*SessionEntry {
+func steeringEntries(t *testing.T, store *SQLiteStore, sessionID string) []*SessionEntry {
 	t.Helper()
 	entries, err := store.ListAgentSessionEntries(context.Background(), SessionEntryFilter{Scope: testSessionScope, SessionID: sessionID})
 	if err != nil {
@@ -76,7 +72,7 @@ func mixedSteeringPrefix() []AgentRunIntervention {
 }
 
 func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, session := steeringRun(t, store, 1, mixedSteeringPrefix()...)
 	preparer := &steeringPreparer{}
 	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []StepPreparer{preparer}, testSessionNow)
@@ -107,7 +103,7 @@ func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
 	if setup.User.Author.Type != "service" || len(setup.User.Content) != 2 || setup.User.Content[1].Type != ContentPartJSON {
 		t.Fatalf("setup entry = %+v", setup.User)
 	}
-	after := testMemoryRun(t, store, "r1")
+	after := testStoredSessionRun(t, store, "r1")
 	if after.ConsumedInterventions != 6 || after.Revision != run.Revision+1 {
 		t.Fatalf("run cursor = %d revision %d, want 6 and %d", after.ConsumedInterventions, after.Revision, run.Revision+1)
 	}
@@ -123,7 +119,7 @@ func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
 }
 
 func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, session := steeringRun(t, store, 0, mixedSteeringPrefix()[3])
 	catchUp := &steeringPreparer{fn: func(in StepInput, plan SteeringPlan) *StepContextAppend {
 		expected := in.Session.ChannelWatermark
@@ -144,13 +140,13 @@ func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
 	if len(entries) != 1 || entries[0].User.Content[0].Text != "[u1] also check the invoice" {
 		t.Fatalf("entries = %+v, want only the catch-up entry", entries)
 	}
-	if result.Session.ChannelWatermark != 7 || testMemoryRun(t, store, "r1").ConsumedInterventions != 1 {
-		t.Fatalf("watermark %d cursor %d", result.Session.ChannelWatermark, testMemoryRun(t, store, "r1").ConsumedInterventions)
+	if result.Session.ChannelWatermark != 7 || testStoredSessionRun(t, store, "r1").ConsumedInterventions != 1 {
+		t.Fatalf("watermark %d cursor %d", result.Session.ChannelWatermark, testStoredSessionRun(t, store, "r1").ConsumedInterventions)
 	}
 }
 
 func TestSteeringCursorCommitsWithEntries(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, session := steeringRun(t, store, 0, AgentRunIntervention{ID: "steer", Instruction: "stop after the draft"})
 	stale := int64(99)
 	moving := &steeringPreparer{fn: func(StepInput, SteeringPlan) *StepContextAppend {
@@ -163,7 +159,7 @@ func TestSteeringCursorCommitsWithEntries(t *testing.T) {
 	if moving.calls != stepContextAttempts {
 		t.Fatalf("preparer ran %d times, want %d", moving.calls, stepContextAttempts)
 	}
-	if got := testMemoryRun(t, store, "r1"); got.ConsumedInterventions != 0 || got.Revision != run.Revision {
+	if got := testStoredSessionRun(t, store, "r1"); got.ConsumedInterventions != 0 || got.Revision != run.Revision {
 		t.Fatalf("failed append moved the cursor: %d (revision %d)", got.ConsumedInterventions, got.Revision)
 	}
 	if got := len(steeringEntries(t, store, session.ID)); got != 0 {
@@ -187,13 +183,13 @@ func TestSteeringCursorCommitsWithEntries(t *testing.T) {
 	if tries != 2 || len(result.Append.Entries) != 1 || result.Session.ChannelWatermark != 5 {
 		t.Fatalf("tries %d result %+v", tries, result.Append)
 	}
-	if got := testMemoryRun(t, store, "r1"); got.ConsumedInterventions != 1 || got.Revision != run.Revision+1 {
+	if got := testStoredSessionRun(t, store, "r1"); got.ConsumedInterventions != 1 || got.Revision != run.Revision+1 {
 		t.Fatalf("cursor %d revision %d after commit", got.ConsumedInterventions, got.Revision)
 	}
 }
 
 func TestSteeringReplayAfterCrashAppendsOnce(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, session := steeringRun(t, store, 0,
 		AgentRunIntervention{ID: "a", Instruction: "first"},
 		AgentRunIntervention{ID: "b", Instruction: "second"})
@@ -212,7 +208,7 @@ func TestSteeringReplayAfterCrashAppendsOnce(t *testing.T) {
 	if got := len(steeringEntries(t, store, session.ID)); got != 2 {
 		t.Fatalf("entries after replay = %d, want 2", got)
 	}
-	reloaded := testMemoryRun(t, store, "r1")
+	reloaded := testStoredSessionRun(t, store, "r1")
 	if reloaded.ConsumedInterventions != 2 || reloaded.Revision != run.Revision+1 {
 		t.Fatalf("cursor %d revision %d after replay", reloaded.ConsumedInterventions, reloaded.Revision)
 	}
@@ -226,7 +222,7 @@ func TestSteeringReplayAfterCrashAppendsOnce(t *testing.T) {
 	if len(entries) != 3 || entries[2].User.InterventionID != "c" {
 		t.Fatalf("entries = %d, last %+v", len(entries), entries[len(entries)-1].User)
 	}
-	if got := testMemoryRun(t, store, "r1").ConsumedInterventions; got != 3 {
+	if got := testStoredSessionRun(t, store, "r1").ConsumedInterventions; got != 3 {
 		t.Fatalf("cursor = %d, want 3", got)
 	}
 }

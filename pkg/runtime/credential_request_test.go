@@ -46,7 +46,7 @@ func TestCredentialRequestStoresScopeCASAndTerminalState(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	for name, store := range map[string]CredentialRequestStore{"memory": NewMemoryStore(), "sqlite": sqlite} {
+	for name, store := range map[string]CredentialRequestStore{"sqlite": sqlite} {
 		t.Run(name, func(t *testing.T) {
 			r := credentialRequestFixture()
 			if err := store.SaveCredentialRequest(ctx, r, 0); err != nil {
@@ -77,10 +77,10 @@ func TestCredentialRequestStoresScopeCASAndTerminalState(t *testing.T) {
 	}
 }
 
-func credentialRequestDispatchFixture(t *testing.T) (context.Context, *MemoryStore, *skill.Catalog, *SkillBindingActionDispatcher, Scope) {
+func credentialRequestDispatchFixture(t *testing.T) (context.Context, *SQLiteStore, *skill.Catalog, *SkillBindingActionDispatcher, Scope) {
 	t.Helper()
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "a"}
 	catalog := skillActionCatalog(t, ctx, scope, "agent")
 	if err := catalog.Bind(ctx, &skill.Binding{ID: "interaction-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent",
@@ -98,7 +98,7 @@ func credentialRequestDispatchFixture(t *testing.T) (context.Context, *MemorySto
 	return ctx, store, catalog, dispatcher, scope
 }
 
-func proposeInteraction(t *testing.T, ctx context.Context, store *MemoryStore, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) *AgentRun {
+func proposeInteraction(t *testing.T, ctx context.Context, store *SQLiteStore, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) *AgentRun {
 	t.Helper()
 	f, _ := proposeInteractionCall(t, ctx, store, catalog, scope, action, arguments)
 	return f.run
@@ -107,7 +107,7 @@ func proposeInteraction(t *testing.T, ctx context.Context, store *MemoryStore, c
 // proposeInteractionCall proposes a SkillManagement interaction action as a
 // loop step of a new chat Run leased by "worker" and returns the Run's
 // fixture and its ready call.
-func proposeInteractionCall(t *testing.T, ctx context.Context, store *MemoryStore, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) (*loopProposalFixture, *ActionCall) {
+func proposeInteractionCall(t *testing.T, ctx context.Context, store *SQLiteStore, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) (*loopProposalFixture, *ActionCall) {
 	t.Helper()
 	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "Order a cable on amazon.in", Source: RunSourceChat, Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
@@ -202,7 +202,7 @@ func TestRepeatedRefusedSetupIsNotRetriedInTheSameRun(t *testing.T) {
 	args := map[string]interface{}{"kind": "configure", "skillId": "skill-live-browser", "skillVersion": "latest", "reason": "connect"}
 	refused := &ActionCall{ID: "refused", Scope: scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, Action: SkillActionRequestSetup,
 		Status: ActionCallStatusSucceeded, Arguments: args, Output: interactionRequestRefusalResult(refuseInteraction("not available"))}
-	store.actions[portfolioKey(scope, refused.ID)] = refused
+	putStoredAction(t, store, refused)
 	_, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "retry"}, Arguments: args}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	var refusal *interactionRequestRefusal
 	if !errors.As(err, &refusal) {
@@ -210,7 +210,7 @@ func TestRepeatedRefusedSetupIsNotRetriedInTheSameRun(t *testing.T) {
 	}
 }
 
-func mustConversationChanges(t *testing.T, ctx context.Context, store *MemoryStore, scope Scope) (*ConversationChangeSet, error) {
+func mustConversationChanges(t *testing.T, ctx context.Context, store *SQLiteStore, scope Scope) (*ConversationChangeSet, error) {
 	t.Helper()
 	now := time.Now().UTC()
 	if _, _, err := store.CreateConversation(ctx, &Conversation{ID: "chat", Scope: scope, Title: "Amazon order", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Status: ConversationStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now}, "chat-key"); err != nil {

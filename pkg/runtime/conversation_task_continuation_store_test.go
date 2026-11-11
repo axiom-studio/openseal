@@ -18,10 +18,6 @@ type conversationContinuationTestStore interface {
 
 func forConversationContinuationStores(t *testing.T, test func(*testing.T, conversationContinuationTestStore, func(*testing.T) conversationContinuationTestStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) {
-		store := NewMemoryStore()
-		test(t, store, func(*testing.T) conversationContinuationTestStore { return store })
-	})
 	forConversationTaskSQLStores(t, func(t *testing.T, fixture conversationTaskSQLTestFixture) {
 		test(t, fixture.store.(conversationContinuationTestStore), func(t *testing.T) conversationContinuationTestStore {
 			return fixture.reopen(t).(conversationContinuationTestStore)
@@ -194,7 +190,7 @@ func TestConversationTaskContinuationStoreConcurrentReplay(t *testing.T) {
 }
 
 func TestConversationTaskContinuationStoreRejectsWeakenedDeadline(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, _, _ := conversationContinuationFixture(t, store, AgentRunStatusQueued, false)
 	_, err := store.PromoteConversationTask(t.Context(), ConversationTaskPromotionRequest{Scope: source.Scope, RunID: source.ID, Now: time.Now(), MinimumAge: time.Second})
 	if !errors.Is(err, ErrInvalidConversationTask) {

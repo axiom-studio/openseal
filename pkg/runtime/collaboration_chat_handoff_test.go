@@ -62,7 +62,7 @@ func TestOneToOneChatCannotHandWorkToAnotherAgent(t *testing.T) {
 // A Team chat hand-off is checked against the roster again when it is
 // accepted: the child answers in the chat, so a removed member cannot take it.
 func TestTeamChatHandOffAcceptanceRechecksTheRoster(t *testing.T) {
-	ctx, store, scope := t.Context(), NewMemoryStore(), Scope{Kind: "tenant", ID: "handoff-roster"}
+	ctx, store, scope := t.Context(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "handoff-roster"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}
 	team := activeCollaborationTeam(scope, owner.ID,
 		kernelteam.RosterAssignment{ID: "marlow", AgentDeploymentID: "marlow"}, kernelteam.RosterAssignment{ID: "harp", AgentDeploymentID: "harp"})

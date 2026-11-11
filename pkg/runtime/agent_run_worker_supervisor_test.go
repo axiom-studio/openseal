@@ -30,7 +30,7 @@ func (s *mutableWorkerScopeSource) set(scopes []Scope, err error) {
 }
 
 func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope1 := Scope{Kind: "tenant", ID: "1"}
 	scope2 := Scope{Kind: "tenant", ID: "2"}

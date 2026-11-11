@@ -11,11 +11,11 @@ import (
 
 // agentBuilderApprovalCoordinator wires the builder fixture to a kernel store
 // with a claimed Finn Run, so proposals take the real coordinator path.
-func agentBuilderApprovalCoordinator(t *testing.T, policy ActionPolicyEvaluator, now time.Time) (*agentBuilderFixture, *MemoryStore, *AgentRun, *ActionCoordinator) {
+func agentBuilderApprovalCoordinator(t *testing.T, policy ActionPolicyEvaluator, now time.Time) (*agentBuilderFixture, *SQLiteStore, *AgentRun, *ActionCoordinator) {
 	t.Helper()
 	ctx := context.Background()
 	fixture := newAgentBuilderFixture(t, true)
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: fixture.scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
 		AssignedAgentID: "finn", Goal: "Build an inbox helper", Source: RunSourceChat,
@@ -170,7 +170,7 @@ func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
 	}
 
 	// A create_team card gets the same policy as an agent card.
-	coordinator := NewActionCoordinator(NewMemoryStore(), NewMemoryStore(), skill.NewCatalog(), NewDefaultActionPolicy())
+	coordinator := NewActionCoordinator(newTestKernelStore(t), newTestKernelStore(t), skill.NewCatalog(), NewDefaultActionPolicy())
 	coordinator.newID = func() string { return "approval-team" }
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	team := bound(TeamManagementSkillID, "create_team")

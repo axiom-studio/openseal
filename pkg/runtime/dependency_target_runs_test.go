@@ -18,7 +18,6 @@ func TestDependencyFanOutAtomicallyCreatesTargetRuns(t *testing.T) {
 		name string
 		open func(*testing.T) (atomicForkStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (atomicForkStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (atomicForkStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "fork.db"))
 			if err != nil {
@@ -52,7 +51,7 @@ func TestDependencyFanOutAtomicallyCreatesTargetRuns(t *testing.T) {
 }
 
 func TestDependencyFanOutRejectsUnsealedTargetWithoutMutation(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	record := atomicTargetRunFixture(t, store)
 	record.Dependencies[0].TargetRunID = "missing-child"
 	if _, err := store.CreateRunDependencyGroup(t.Context(), record); err == nil {

@@ -3,15 +3,16 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"github.com/axiom-studio/openseal/pkg/skill"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestSetupListReportsSavedBindingAccessWithoutCredentials(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
 		ctx := context.Background()
-		store := NewMemoryStore()
+		store := newTestKernelStore(t)
 		r := setupRequestFixture()
 		catalog := skillActionCatalog(t, ctx, r.Scope, r.DeploymentID)
 		b := &skill.Binding{ID: "saved", Revision: 1, Scope: skill.ScopeReference{Kind: r.Scope.Kind, ID: r.Scope.ID}, DeploymentID: r.DeploymentID, SkillID: r.SkillID, SkillVersion: r.SkillVersion, AllowedActions: []string{"read"}, EnablePrompt: true, MaximumRisk: skill.RiskLevelRead, Credentials: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "credential://private-account"}}}

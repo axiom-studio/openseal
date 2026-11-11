@@ -243,7 +243,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("flashcards_and_recipe", func(t *testing.T) {
-		f := newLoopFixture(t, NewMemoryStore())
+		f := newLoopFixture(t, newTestKernelStore(t))
 		convRunner(f, ConversationRunTurnRunnerConfig{})
 		first := true
 		f.model.add(&modelRule{name: "card", reply: func(v stepView) ModelStepResult {
@@ -281,7 +281,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("poll", func(t *testing.T) {
-		f := newLoopFixture(t, NewMemoryStore())
+		f := newLoopFixture(t, newTestKernelStore(t))
 		people := []ConversationParticipant{convActor("ana"), convActor("ben"), convActor("cy")}
 		convRunner(f, ConversationRunTurnRunnerConfig{
 			HumanParticipants: func(_ context.Context, _ *Conversation) ([]ConversationParticipant, error) { return people, nil },
@@ -329,7 +329,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("places", func(t *testing.T) {
-		f := newLoopFixture(t, NewMemoryStore(), withRules(convAnswer("ok: ")))
+		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
 		found := map[string][]ConversationPlace{}
 		convRunner(f, ConversationRunTurnRunnerConfig{Places: func(_ context.Context, run *AgentRun) []ConversationPlace {
 			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
@@ -367,7 +367,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("image_style", func(t *testing.T) {
-		f := newLoopFixture(t, NewMemoryStore(), withRules(convAnswer("ok: ")))
+		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
 		// The host reads the style saved by the sender of the Run's trigger.
 		styles := map[string]string{"Draw a fox": " cartoon "}
 		convRunner(f, ConversationRunTurnRunnerConfig{ImageStyle: func(_ context.Context, run *AgentRun) string {
@@ -809,7 +809,7 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 		// A message in a local thread runs in the thread's lane and session:
 		// the canonical trigger is the thread message, the session holds only
 		// the thread, and the answer goes back into the thread.
-		f := newLoopFixture(t, NewMemoryStore(), withRules(convAnswer("ok: ")))
+		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
 		conversation := convChat(f, ObjectiveOwner{}, nil)
 		root := convPost(f, conversation.ID, "Call one started", func(r *PostChannelMessageRequest) {
 			r.Sender = ConversationParticipant{Type: ConversationParticipantService, ID: "calls"}
@@ -914,7 +914,7 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 		// reply root there is not a thread. The reply's Run works in the
 		// chat's own lane, and its seed holds the whole chat, not only the
 		// quoted message's "thread".
-		f := newLoopFixture(t, NewMemoryStore(), withRules(convAnswer("ok: ")))
+		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
 		conversation := convChat(f, ObjectiveOwner{}, &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "telegram-endpoint"})
 		source := func(id, thread string) *ExternalMessageSource {
 			return &ExternalMessageSource{Provider: "telegram", ChannelType: "private", ChannelID: "chat-7", ThreadID: thread, MessageID: id, ParticipantID: "kev"}
@@ -1018,7 +1018,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 	})
 
 	t.Run("participation_opt_in", func(t *testing.T) {
-		f := newLoopFixture(t, NewMemoryStore(), withRules(convAnswer("ok: ")))
+		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
 		convRunner(f, ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
 		conversation := convChat(f, ObjectiveOwner{}, nil)
 
@@ -1093,7 +1093,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 // response mode from its trigger: the run_context names a spoken reply, the
 // spoken system section is offered, and the answer is posted spoken.
 func TestSpokenTriggerKeepsItsResponseMode(t *testing.T) {
-	f := newLoopFixture(t, NewMemoryStore(), withRules(&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
+	f := newLoopFixture(t, newTestKernelStore(t), withRules(&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
 		args := map[string]any{"answer": "Leave at seven."}
 		// The spoken final tool requires silent.
 		for _, tool := range v.Request().Tools {

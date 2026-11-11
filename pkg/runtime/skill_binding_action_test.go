@@ -15,7 +15,7 @@ import (
 
 func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
@@ -131,7 +131,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 
 func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
@@ -231,7 +231,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	catalog := skillActionCatalog(t, ctx, scope, "agent-a")
-	validator, _ := NewSkillBindingActionValidator(catalog, NewMemoryStore())
+	validator, _ := NewSkillBindingActionValidator(catalog, newTestKernelStore(t))
 	management := SkillManagementSkill()
 	bound, err := catalog.Resolve(ctx, skillScope, "agent-a", management.ID, management.Version, SkillActionUpsertBinding)
 	if err != nil {
@@ -246,7 +246,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: foreignRun, Bound: bound, Arguments: base}); err == nil {
 		t.Fatal("management binding from agent-a escalated into agent-b")
 	}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	durableForeign, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindConversation, Owner: foreignRun.Owner, AssignedAgentID: foreignRun.AssignedAgentID, Goal: "Manage Skills", Source: RunSourceChat,
 	})
@@ -375,7 +375,7 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID},
 		AssignedAgentID: deploymentID, Goal: "Enable Slack conversations", Source: RunSourceChat,
@@ -496,7 +496,7 @@ func slackConversationSkillDefinition() *skill.Definition {
 	}
 }
 
-func createClaimedSkillActionRun(t *testing.T, ctx context.Context, store *MemoryStore, scope Scope, deploymentID, workerID string) *AgentRun {
+func createClaimedSkillActionRun(t *testing.T, ctx context.Context, store *SQLiteStore, scope Scope, deploymentID, workerID string) *AgentRun {
 	t.Helper()
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, AssignedAgentID: deploymentID,
@@ -515,7 +515,7 @@ func createClaimedSkillActionRun(t *testing.T, ctx context.Context, store *Memor
 // approveParkedSkillAction parks f's Run on proposal's approval at step end,
 // approves it, and leases the queued Run to worker as the loop's next claim
 // does.
-func approveParkedSkillAction(t *testing.T, ctx context.Context, store *MemoryStore, f *loopProposalFixture, proposal *ActionProposalResult, worker string) *loopProposalFixture {
+func approveParkedSkillAction(t *testing.T, ctx context.Context, store *SQLiteStore, f *loopProposalFixture, proposal *ActionProposalResult, worker string) *loopProposalFixture {
 	t.Helper()
 	f.assertUntouched()
 	f.parkOnApproval(proposal.Approval.ID)
@@ -526,7 +526,7 @@ func approveParkedSkillAction(t *testing.T, ctx context.Context, store *MemorySt
 	return newLoopProposalFixture(t, store, f.run, worker, time.Now().UTC())
 }
 
-func approveSkillAction(t *testing.T, ctx context.Context, store *MemoryStore, scope Scope, proposal *ActionProposalResult) {
+func approveSkillAction(t *testing.T, ctx context.Context, store *SQLiteStore, scope Scope, proposal *ActionProposalResult) {
 	t.Helper()
 	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
 		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,

@@ -223,14 +223,11 @@ func TestRoutineEventPausedDrops(t *testing.T) {
 	if count, _ := h.store.CountPendingRoutineEvents(h.ctx, h.scope, activation.ID); count != 0 {
 		t.Fatalf("pending = %d", count)
 	}
-	h.store.mu.RLock()
-	for key, record := range h.store.routineEvents {
-		if key.activationID == activation.ID && (record.State != RoutineEventDropped || record.DroppedReason != RoutineEventDroppedPaused || len(record.Event.Payload) != 0) {
-			h.store.mu.RUnlock()
-			t.Fatalf("record %s = %#v", key.eventID, record)
+	for _, record := range listStoredRoutineEvents(t, h.store, h.scope) {
+		if record.ActivationID == activation.ID && (record.State != RoutineEventDropped || record.DroppedReason != RoutineEventDroppedPaused || record.KeepsData) {
+			t.Fatalf("record %s = %#v", record.EventID, record)
 		}
 	}
-	h.store.mu.RUnlock()
 }
 
 func TestRoutineTestEventsNeverMixWithReal(t *testing.T) {
@@ -611,17 +608,17 @@ func TestPauseRoutineLeavesCloseOutToDispatcher(t *testing.T) {
 
 // passCountingStore counts dispatcher passes on the leader.
 type passCountingStore struct {
-	*MemoryStore
+	*SQLiteStore
 	passes atomic.Int64
 }
 
 func (s *passCountingStore) ListRoutineEventWorkScopes(ctx context.Context) ([]Scope, error) {
 	s.passes.Add(1)
-	return s.MemoryStore.ListRoutineEventWorkScopes(ctx)
+	return s.SQLiteStore.ListRoutineEventWorkScopes(ctx)
 }
 
 func TestRoutineEventDispatcherCoalescesNudges(t *testing.T) {
-	store := &passCountingStore{MemoryStore: NewMemoryStore()}
+	store := &passCountingStore{SQLiteStore: newTestKernelStore(t)}
 	matcher := NewRoutineEventMatcher(store)
 	t.Cleanup(matcher.Close)
 	dispatcher := NewRoutineEventDispatcher(store, matcher)

@@ -11,18 +11,18 @@ import (
 )
 
 type terminalFinalizerStore struct {
-	*MemoryStore
+	*SQLiteStore
 	activityFilters []ActivityFilter
 }
 
 func (s *terminalFinalizerStore) ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error) {
 	s.activityFilters = append(s.activityFilters, filter)
-	return s.MemoryStore.ListActivity(ctx, filter)
+	return s.SQLiteStore.ListActivity(ctx, filter)
 }
 
 func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *testing.T) {
 	ctx := context.Background()
-	store := &terminalFinalizerStore{MemoryStore: NewMemoryStore()}
+	store := &terminalFinalizerStore{SQLiteStore: newTestKernelStore(t)}
 	catalog := skill.NewCatalog()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{
@@ -67,22 +67,20 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.mu.Lock()
-	store.actions[portfolioKey(scope, "start-call")] = &ActionCall{
+	putStoredAction(t, store.SQLiteStore, &ActionCall{
 		ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "binding", BindingRevision: 1,
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Arguments: map[string]interface{}{},
 		Output: map[string]interface{}{"sessionId": "agent-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	store.actions[portfolioKey(scope, "reuse-call")] = &ActionCall{
+	})
+	putStoredAction(t, store.SQLiteStore, &ActionCall{
 		ID: "reuse-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "binding", BindingRevision: 1,
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Arguments: map[string]interface{}{},
 		Output: map[string]interface{}{"sessionId": "agent-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now,
 		Revision: 1, CreatedAt: now.Add(time.Millisecond), UpdatedAt: now.Add(time.Millisecond),
-	}
-	store.mu.Unlock()
+	})
 	activity := NewRunActivityService(store, store)
 	activity.now = func() time.Time { return now.Add(time.Second) }
 	terminal, _, err := activity.TransitionRun(ctx, scope, claimed.ID, RunTransitionRequest{
@@ -127,7 +125,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 
 func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalog()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{
@@ -161,8 +159,8 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 	}
 	now := time.Date(2026, 7, 31, 19, 0, 0, 0, time.UTC)
 	run := &AgentRun{ID: "historical", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "cleanup", Source: RunSourceObjective, Status: AgentRunStatusCanceled, CreatedAt: now, UpdatedAt: now}
-	store.agentRuns[portfolioKey(scope, run.ID)] = cloneAgentRun(run)
-	store.actions[portfolioKey(scope, "start-call")] = &ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	putStoredRun(t, store, cloneAgentRun(run))
+	putStoredAction(t, store, &ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	dispatches := 0
 	finalizer := NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
@@ -189,7 +187,7 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 
 func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	start := time.Date(2026, 7, 31, 8, 0, 0, 0, time.UTC)
 	for index := range 205 {
@@ -200,7 +198,7 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 			CreatedAt: start.Add(time.Duration(index) * time.Second),
 			UpdatedAt: start.Add(time.Duration(index) * time.Second),
 		}
-		store.agentRuns[portfolioKey(scope, run.ID)] = run
+		putStoredRun(t, store, run)
 	}
 	finalized := make([]string, 0, 206)
 	seen := make(map[string]bool, 206)
@@ -225,7 +223,7 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 		Goal: "newly terminal cleanup", Source: RunSourceObjective, Status: AgentRunStatusCanceled,
 		CreatedAt: start.Add(205 * time.Second), UpdatedAt: start.Add(205 * time.Second),
 	}
-	store.agentRuns[portfolioKey(scope, newest.ID)] = newest
+	putStoredRun(t, store, newest)
 	for range 20 {
 		pool.lastFinalizationScan = time.Time{}
 		pool.reconcileTerminalRunFinalizers(ctx)
@@ -244,7 +242,7 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 
 func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "canceled-child"}
 	portfolio := NewPortfolioService(store)
 	parent, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -300,7 +298,7 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 
 func TestTerminalRunReconciliationCancelsOrphanedDescendantsAfterRestart(t *testing.T) {
 	ctx := t.Context()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "terminal-cascade"}
 	service := NewRunCommandService(store)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}

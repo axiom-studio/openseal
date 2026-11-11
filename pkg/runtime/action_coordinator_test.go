@@ -13,11 +13,11 @@ import (
 
 func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
-	store.actions[portfolioKey(scope, "prepared-comment")] = &ActionCall{
+	putStoredAction(t, store, &ActionCall{
 		ID: "prepared-comment", Scope: scope, RunID: run.ID, TurnID: "step-0", DeploymentID: "release-agent",
 		SkillID: "browser", SkillVersion: "2.0.0", Action: "fill", Status: ActionCallStatusSucceeded,
 		Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
@@ -25,7 +25,7 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 			"value": "The exact reviewed comment.", "target": "comment-box", "apiToken": "legacy-secret",
 		},
 		Attempt: 1, MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
+	})
 	policy := ActionPolicyEvaluatorFunc(func(_ context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
 		if input.Bound.Action.Name != "deploy" || input.Run.ID != run.ID {
 			t.Fatalf("policy input mismatch: %#v", input)
@@ -97,7 +97,7 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 
 func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
@@ -140,7 +140,7 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 
 func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog, scope := governedActionCatalog(t)
 	policyEvaluations := 0
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
@@ -177,7 +177,7 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 
 func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog, scope := externalOperationPolicyCatalog(t)
 	run := claimedActionRun(t, store, scope, time.Now().UTC(), "worker")
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
@@ -282,13 +282,13 @@ func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 	return catalog, scope
 }
 
-func claimedActionRun(t *testing.T, store *MemoryStore, scope Scope, now time.Time, worker string) *AgentRun {
+func claimedActionRun(t *testing.T, store *SQLiteStore, scope Scope, now time.Time, worker string) *AgentRun {
 	t.Helper()
 	return claimedOwnedActionRun(t, store, scope, now, worker, ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"})
 }
 
 // claimedOwnedActionRun claims a run of release-agent under owner.
-func claimedOwnedActionRun(t *testing.T, store *MemoryStore, scope Scope, now time.Time, worker string, owner ObjectiveOwner) *AgentRun {
+func claimedOwnedActionRun(t *testing.T, store *SQLiteStore, scope Scope, now time.Time, worker string, owner ObjectiveOwner) *AgentRun {
 	t.Helper()
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }

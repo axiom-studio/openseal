@@ -9,7 +9,7 @@ import (
 // The create_task approval names the activation the approved call creates, so
 // a decided approval can open the routine (a webhook routine's address).
 func TestCreateTaskApprovalNamesItsActivation(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, catalog, bound, args := scheduledTaskFixture(t, store)
 	now := time.Now().Add(time.Second)
 	if claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || claimed == nil {

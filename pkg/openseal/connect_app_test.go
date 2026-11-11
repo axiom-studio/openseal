@@ -10,15 +10,16 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/mcp"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // waitingConnectAppFixture is a run parked on a Linear connect card. Linear
 // is supplied to that run only once connected is set and only for that run.
-func waitingConnectAppFixture(t *testing.T) (context.Context, *runtime.MemoryStore, *Engine, *runtime.AgentRun, *SkillSetupRequest, *atomic.Bool) {
+func waitingConnectAppFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *runtime.AgentRun, *SkillSetupRequest, *atomic.Bool) {
 	t.Helper()
 	ctx := context.Background()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	e, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

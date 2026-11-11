@@ -165,7 +165,7 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 }
 
 func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, conversation, trigger := terminalFailureConversationFixture(t, store, runStoreContractEpoch, false)
 	run = failTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	for _, mutate := range []func(*AgentRun){
@@ -277,7 +277,7 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 }
 
 func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, conversation, _ := terminalFailureConversationFixture(t, store, runStoreContractEpoch, false)
 	run = failTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)
@@ -332,7 +332,7 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 }
 
 func TestFailedConversationReplySkipsServiceWakeWithoutRetry(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, conversation, _ := terminalFailureConversationFixture(t, store, runStoreContractEpoch, false)
 	run = failTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)

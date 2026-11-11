@@ -802,8 +802,6 @@ func dependencyRetirementChildResult(branch string, child *AgentRun) map[string]
 func reopenDependencyRetirementStore(t *testing.T, store dependencyRetirementStore) dependencyRetirementStore {
 	t.Helper()
 	switch original := store.(type) {
-	case *MemoryStore:
-		return original
 	case *SQLiteStore:
 		var sequence int
 		var name, path string

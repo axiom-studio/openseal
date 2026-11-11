@@ -246,8 +246,6 @@ func assertSkillRuntimeMaintenanceRecord(t *testing.T, store SkillRuntimeMainten
 func reopenSkillRuntimeMaintenanceStore(t *testing.T, kernel KernelStore) SkillRuntimeMaintenanceStore {
 	t.Helper()
 	switch original := kernel.(type) {
-	case *MemoryStore:
-		return original
 	case *SQLiteStore:
 		var sequence int
 		var name, path string

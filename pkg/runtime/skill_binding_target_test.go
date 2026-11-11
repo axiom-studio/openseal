@@ -17,7 +17,7 @@ import (
 // for: researcher (changeable), platform (fixed policy) and old (retired).
 type skillTargetFixture struct {
 	ctx        context.Context
-	store      *MemoryStore
+	store      *SQLiteStore
 	scope      Scope
 	skillScope skill.ScopeReference
 	agents     *kernelagent.Registry
@@ -29,7 +29,7 @@ type skillTargetFixture struct {
 
 func newSkillTargetFixture(t *testing.T) *skillTargetFixture {
 	t.Helper()
-	f := &skillTargetFixture{ctx: context.Background(), store: NewMemoryStore(), scope: Scope{Kind: "tenant", ID: "tenant-a"}}
+	f := &skillTargetFixture{ctx: context.Background(), store: newTestKernelStore(t), scope: Scope{Kind: "tenant", ID: "tenant-a"}}
 	f.skillScope = skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}
 	reference := capability.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}
 	f.agents = kernelagent.NewRegistry()

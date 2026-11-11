@@ -165,7 +165,7 @@ func TestExternalConversationEndpointCanRetireWhenAdapterIsUnavailable(t *testin
 	}
 }
 
-func TestExternalConversationMemoryInboxIsIdempotentAndLeaseRecoverable(t *testing.T) {
+func TestExternalConversationInboxIsIdempotentAndLeaseRecoverable(t *testing.T) {
 	ctx := context.Background()
 	store, endpoint := activeExternalConversationTestEndpoint(t, ctx)
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -310,7 +310,7 @@ func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgr
 	}
 }
 
-func TestExternalConversationMemoryMappingsAndOutboxSurviveRetry(t *testing.T) {
+func TestExternalConversationMappingsAndOutboxSurviveRetry(t *testing.T) {
 	ctx := context.Background()
 	store, endpoint := activeExternalConversationTestEndpoint(t, ctx)
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -591,9 +591,9 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	}
 }
 
-func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*MemoryStore, *skill.Catalog, Scope, ExternalConversationAdapterReference) {
+func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*SQLiteStore, *skill.Catalog, Scope, ExternalConversationAdapterReference) {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalog()
 	definition := slackConversationSkillDefinition()
 	if err := catalog.Register(ctx, definition); err != nil {
@@ -618,7 +618,7 @@ func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*Memory
 	}
 }
 
-func activeExternalConversationTestEndpoint(t *testing.T, ctx context.Context) (*MemoryStore, *ExternalConversationEndpoint) {
+func activeExternalConversationTestEndpoint(t *testing.T, ctx context.Context) (*SQLiteStore, *ExternalConversationEndpoint) {
 	t.Helper()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	endpoint, err := NewExternalConversationEndpointService(store, catalog).Create(ctx, CreateExternalConversationEndpointRequest{

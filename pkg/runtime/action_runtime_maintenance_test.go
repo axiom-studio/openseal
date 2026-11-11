@@ -496,12 +496,6 @@ func seedActionRuntimeMaintenanceLegacyCall(t *testing.T, kernel KernelStore, fi
 		call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion}
 	columns := `(id,scope_kind,scope_id,run_id,turn_id,status,idempotency_key,external_operation_digest,approval_id,available_at,lease_owner,lease_expires_at,revision,created_at,payload,deployment_id,binding_id,binding_revision,skill_id,skill_version)`
 	switch store := kernel.(type) {
-	case *MemoryStore:
-		store.mu.Lock()
-		defer store.mu.Unlock()
-		store.saveMemoryActionCallLocked(portfolioKey(call.Scope, call.ID), cloneActionCall(call))
-		store.actionKeys[actionIdempotencyKey(call.Scope, call.RunID, call.IdempotencyKey)] = call.ID
-		store.externalOperationKeys[externalOperationStoreKey(call.Scope, call.ExternalOperationDigest)] = call.ID
 	case *SQLiteStore:
 		tx, beginErr := store.db.BeginTx(t.Context(), nil)
 		if beginErr != nil {

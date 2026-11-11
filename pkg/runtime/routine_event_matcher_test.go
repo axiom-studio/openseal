@@ -12,13 +12,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-// routineEventHarness is one memory store with a matcher, a dispatcher and a
+// routineEventHarness is one in-memory store with a matcher, a dispatcher and a
 // test clock, plus helpers to create event routines through the activation
 // service (so index refresh is exercised on every create).
 type routineEventHarness struct {
 	t            *testing.T
 	ctx          context.Context
-	store        *MemoryStore
+	store        *SQLiteStore
 	scope        Scope
 	owner        ObjectiveOwner
 	matcher      *RoutineEventMatcher
@@ -32,7 +32,7 @@ type routineEventHarness struct {
 func newRoutineEventHarness(t *testing.T) *routineEventHarness {
 	t.Helper()
 	h := &routineEventHarness{
-		t: t, ctx: t.Context(), store: NewMemoryStore(), scope: Scope{Kind: "tenant", ID: "event-routines"},
+		t: t, ctx: t.Context(), store: newTestKernelStore(t), scope: Scope{Kind: "tenant", ID: "event-routines"},
 		owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}, now: time.Now().UTC(),
 	}
 	h.matcher = NewRoutineEventMatcher(h.store)
@@ -422,7 +422,7 @@ func TestRoutineEventIndexRefreshOnActivationChange(t *testing.T) {
 // process would have.
 type routineEventStoreOnly struct {
 	RoutineEventStore
-	activations *MemoryStore
+	activations *SQLiteStore
 }
 
 func (s *routineEventStoreOnly) GetRunbookActivation(ctx context.Context, scope Scope, id string) (*RunbookActivation, error) {
@@ -439,14 +439,17 @@ func TestRoutineEventOverflowStoresNoPayload(t *testing.T) {
 	if err != nil || offer != (RoutineEventOffer{Matched: 1, Dropped: 1}) {
 		t.Fatalf("overflow offer=%#v err=%v", offer, err)
 	}
-	h.store.mu.RLock()
-	record := h.store.routineEvents[memoryRoutineEventKey{scope: h.scope, activationID: activation.ID, eventID: overflowID}]
-	h.store.mu.RUnlock()
+	var record *storedRoutineEvent
+	for _, stored := range listStoredRoutineEvents(t, h.store, h.scope) {
+		if stored.ActivationID == activation.ID && stored.EventID == overflowID {
+			record = &stored
+		}
+	}
 	if record == nil || record.State != RoutineEventDropped || record.DroppedReason != RoutineEventDroppedOverflow {
 		t.Fatalf("overflow record = %#v", record)
 	}
-	if len(record.Event.Payload) != 0 || record.Event.Summary != "" || len(record.Event.Fields) != 0 {
-		t.Fatalf("overflow record kept event data: %#v", record.Event)
+	if record.KeepsData {
+		t.Fatalf("overflow record kept event data: %#v", record)
 	}
 	// A replay of the dropped event is still a duplicate.
 	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, h.event(activation, overflowID)); err != nil || offer.Duplicates != 1 {

@@ -8,9 +8,9 @@ import (
 )
 
 func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store RunCommandStore = NewMemoryStore()
+			var store RunCommandStore = newTestKernelStore(t)
 			if backend == "sqlite" {
 				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "retry.db"))
 				if err != nil {
@@ -86,9 +86,9 @@ func failedReplyFixtureWithFailure(t *testing.T, store RunCommandStore, failure 
 }
 
 func TestRetryConversationRunRejectsAnAlreadyExplainedProposalFailure(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store RunCommandStore = NewMemoryStore()
+			var store RunCommandStore = newTestKernelStore(t)
 			if backend == "sqlite" {
 				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "explained-retry.db"))
 				if err != nil {
@@ -120,9 +120,9 @@ func TestRetryConversationRunRejectsAnAlreadyExplainedProposalFailure(t *testing
 }
 
 func TestRetryClearsFailureExplanation(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store RunCommandStore = NewMemoryStore()
+			var store RunCommandStore = newTestKernelStore(t)
 			if backend == "sqlite" {
 				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "retry-failure.db"))
 				if err != nil {
@@ -153,7 +153,7 @@ func TestRetryClearsFailureExplanation(t *testing.T) {
 }
 
 type retryGuardStore struct {
-	*MemoryStore
+	*SQLiteStore
 	actions  []*ActionCall
 	children []*AgentRun
 	pending  []*AgentTurn
@@ -172,7 +172,7 @@ func (s *retryGuardStore) ListAgentTurns(context.Context, AgentTurnFilter) ([]*A
 func TestRetryConversationRunRejectsUnrecoveredWork(t *testing.T) {
 	for _, kind := range []string{"actions", "children", "pending"} {
 		t.Run(kind, func(t *testing.T) {
-			store := &retryGuardStore{MemoryStore: NewMemoryStore()}
+			store := &retryGuardStore{SQLiteStore: newTestKernelStore(t)}
 			service, failed := failedReplyFixture(t, store)
 			switch kind {
 			case "actions":

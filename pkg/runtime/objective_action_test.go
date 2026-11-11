@@ -96,7 +96,7 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 }
 
 func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeApproval(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "marketing"}
@@ -142,7 +142,7 @@ func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeA
 }
 
 func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "sre"}
@@ -231,7 +231,6 @@ func numericRevision(value interface{}) (int64, bool) {
 
 func objectiveActionStores() []objectiveActionStoreCase {
 	return []objectiveActionStoreCase{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objectives.db"))
 			if err != nil {

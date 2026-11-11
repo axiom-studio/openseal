@@ -43,7 +43,7 @@ func personActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 
 // claimedPersonChatRun claims a 1:1 chat run of release-agent acting for
 // actingUser.
-func claimedPersonChatRun(t *testing.T, store *MemoryStore, scope Scope, now time.Time, actingUser string) *AgentRun {
+func claimedPersonChatRun(t *testing.T, store *SQLiteStore, scope Scope, now time.Time, actingUser string) *AgentRun {
 	t.Helper()
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
@@ -64,7 +64,7 @@ func claimedPersonChatRun(t *testing.T, store *MemoryStore, scope Scope, now tim
 
 // proposePersonAction proposes send as the governed tool call of run loop
 // step stepID, as the loop does for the Run's lease owner.
-func proposePersonAction(t *testing.T, store *MemoryStore, catalog *skill.Catalog, scope Scope, run *AgentRun, now time.Time, stepID, key string, policy ActionPolicyEvaluator) *ActionProposalResult {
+func proposePersonAction(t *testing.T, store *SQLiteStore, catalog *skill.Catalog, scope Scope, run *AgentRun, now time.Time, stepID, key string, policy ActionPolicyEvaluator) *ActionProposalResult {
 	t.Helper()
 	if policy == nil {
 		policy = ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
@@ -103,7 +103,7 @@ func (f availabilityFunc) CheckCredentialAvailability(ctx context.Context, req C
 }
 
 func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, "")
@@ -135,7 +135,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 }
 
 func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
@@ -224,7 +224,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 // The same external operation of a parked call is admitted again in another
 // run: its digest was released when it parked.
 func TestParkedCallReleasesExternalOperation(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
@@ -245,7 +245,7 @@ func TestParkedCallReleasesExternalOperation(t *testing.T) {
 }
 
 func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
@@ -271,7 +271,7 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 }
 
 func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
@@ -294,7 +294,7 @@ func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 }
 
 func TestPersonActionApprovalOnlyByActingUser(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)

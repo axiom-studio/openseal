@@ -197,7 +197,7 @@ func ensureStartTaskToolEntry(t *testing.T, store taskStartFixtureStore, source 
 }
 
 func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
 	service := NewConversationTaskService(store)
 	req := taskStartRequest(t, store, source, turn)
@@ -261,7 +261,7 @@ func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) {
 	for _, cancel := range []bool{false, true} {
 		t.Run(map[bool]string{false: "lease expired", true: "source cancelled"}[cancel], func(t *testing.T) {
-			store := NewMemoryStore()
+			store := newTestKernelStore(t)
 			source, turn, conversation, _ := settledWorkerTaskFixture(t, store)
 			if cancel {
 				_, err := NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: source.Scope, RunID: source.ID, ExpectedRevision: source.Revision, Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "sender-user"}, Summary: "Cancel pending foreground"})
@@ -269,11 +269,10 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 					t.Fatal(err)
 				}
 			} else {
-				store.mu.Lock()
-				current := store.agentRuns[portfolioKey(source.Scope, source.ID)]
+				current := getStoredRun(t, store, source.Scope, source.ID)
 				at := time.Now().Add(-time.Second)
 				current.LeaseExpiresAt = &at
-				store.mu.Unlock()
+				putStoredRun(t, store, current)
 			}
 			if _, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err == nil {
 				t.Fatal("non-current source admitted work")
@@ -287,7 +286,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 }
 
 func TestConversationTaskTransfersOnlyRemainingSourceBudget(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, turn, _, _ := settledWorkerTaskFixture(t, store)
 	previous := source.Revision
 	source.Budget = &BudgetPolicy{MaxAttempts: 10, MaxTurns: 10, MaxInputTokens: 60000, MaxOutputTokens: 40000, MaxTotalTokens: 100000, MaxCostMicros: 1000000, MaxDurationMS: 600000, MaxActions: 10}
@@ -322,7 +321,7 @@ func TestConversationTaskTransfersOnlyRemainingSourceBudget(t *testing.T) {
 func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T) {
 	for _, threaded := range []bool{false, true} {
 		t.Run(map[bool]string{false: "directed question", true: "private thread"}[threaded], func(t *testing.T) {
-			store := NewMemoryStore()
+			store := newTestKernelStore(t)
 			service := NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "private-task"}
 			conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Private question", IdempotencyKey: "private-task"})
@@ -405,7 +404,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 }
 
 func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
 	first, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {

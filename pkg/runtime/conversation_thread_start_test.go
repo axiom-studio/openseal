@@ -15,10 +15,6 @@ type conversationThreadStartTestStore interface {
 
 func forConversationThreadStartStores(t *testing.T, test func(*testing.T, conversationThreadStartTestStore, func(*testing.T) conversationThreadStartTestStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) {
-		store := NewMemoryStore()
-		test(t, store, func(*testing.T) conversationThreadStartTestStore { return store })
-	})
 	forConversationTaskSQLStores(t, func(t *testing.T, fixture conversationTaskSQLTestFixture) {
 		test(t, fixture.store.(conversationThreadStartTestStore), func(t *testing.T) conversationThreadStartTestStore {
 			return fixture.reopen(t).(conversationThreadStartTestStore)

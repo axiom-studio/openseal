@@ -108,7 +108,7 @@ func TestAskUserOptionsPostedAndAnsweredWithSelectedOptions(t *testing.T) {
 }
 
 func TestAskUserWithoutOptionsResultHasNoSelectedOptions(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	f := claimedForegroundRun(t, store)
 	parked, call := askUserParked(t, store, f.run, "foreground-worker", askUserTestQuestion)
 	f.run = parked
@@ -128,7 +128,7 @@ func TestAskUserWithoutOptionsResultHasNoSelectedOptions(t *testing.T) {
 }
 
 func TestPostChannelMessageRefusesInvalidSelectedOptions(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	f := claimedForegroundRun(t, store)
 	single := `{"question":"` + askUserTestQuestion + `","options":[{"label":"Pricing"},{"label":"Docs"}]}`
 	call := newAskUserCallWithArguments(t, store, f.run, "foreground-worker", json.RawMessage(single))
@@ -221,7 +221,7 @@ func TestAgentBuilderConversationOriginValidates(t *testing.T) {
 	if err := (ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: "k"}).Validate(); err != nil {
 		t.Fatal(err)
 	}
-	service := NewConversationService(NewMemoryStore())
+	service := NewConversationService(newTestKernelStore(t))
 	origin := &ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: "k"}
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: Scope{Kind: "organization", ID: "builder"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "builder-agent"},

@@ -10,8 +10,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func TestMemoryActionProposalIsAtomicAndIdempotent(t *testing.T) {
-	store := NewMemoryStore()
+func TestActionProposalIsAtomicAndIdempotent(t *testing.T) {
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -110,12 +110,12 @@ func TestMemoryActionProposalIsAtomicAndIdempotent(t *testing.T) {
 	}
 }
 
-func TestMemoryApprovalPaginationUsesIDToBreakTimestampTies(t *testing.T) {
-	store := NewMemoryStore()
+func TestApprovalPaginationUsesIDToBreakTimestampTies(t *testing.T) {
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "local", ID: "review-pagination"}
 	now := time.Now().UTC()
 	for _, id := range []string{"approval-c", "approval-a", "approval-b"} {
-		store.approvals[portfolioKey(scope, id)] = &ApprovalCheckpoint{ID: id, Scope: scope, Status: ApprovalStatusPending, CreatedAt: now}
+		putStoredApproval(t, store, &ApprovalCheckpoint{ID: id, Scope: scope, Status: ApprovalStatusPending, CreatedAt: now})
 	}
 	for _, newest := range []bool{false, true} {
 		for i := 0; i < 20; i++ {

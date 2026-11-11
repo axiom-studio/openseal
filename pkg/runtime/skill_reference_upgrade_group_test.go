@@ -19,7 +19,6 @@ type groupUpgradeStore interface {
 // one binding, so every binding at that version moves together.
 func TestSkillReferenceUpgradeMovesEveryBindingAtTheVersionTogether(t *testing.T) {
 	for name, open := range map[string]func(*testing.T) groupUpgradeStore{
-		"memory": func(*testing.T) groupUpgradeStore { return NewMemoryStore() },
 		"sqlite": func(t *testing.T) groupUpgradeStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "group-upgrade.db"))
 			if err != nil {
@@ -105,7 +104,7 @@ func runGroupUpgradeScenario(t *testing.T, store groupUpgradeStore) {
 
 func TestSkillReferenceGroupUpgradeRejectsStaleSiblings(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	registerGroupUpgradeVersions(t, catalog)
 	scope := skill.ScopeReference{Kind: "tenant", ID: "1"}

@@ -102,10 +102,10 @@ func dispatchTaskForTest(t *testing.T, store KernelStore, run *AgentRun, bound *
 	return result
 }
 func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T) {
-	for _, kind := range []string{"memory", "sqlite"} {
+	for _, kind := range []string{"sqlite"} {
 		for _, limit := range []string{"bounded", "omitted", "null"} {
 			t.Run(kind+"/"+limit, func(t *testing.T) {
-				var store KernelStore = NewMemoryStore()
+				var store KernelStore = newTestKernelStore(t)
 				if kind == "sqlite" {
 					s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "tasks.db"))
 					if err != nil {
@@ -211,7 +211,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 	}
 }
 func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, _, bound, args := scheduledTaskFixture(t, store)
 	v, _ := NewRunbookActionValidator(store)
 	for _, change := range []string{"scope", "owner", "background", "conversation", "binding", "cron", "timezone", "foreign-input"} {
@@ -247,7 +247,7 @@ func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion
 }
 
 func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
-	for _, kind := range []string{"memory", "sqlite"} {
+	for _, kind := range []string{"sqlite"} {
 		t.Run(kind, func(t *testing.T) {
 			store := routineTestStore(t, kind)
 			run, catalog, bound, args := scheduledTaskFixture(t, store)
@@ -306,7 +306,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 	}
 }
 func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, catalog, bound, args := scheduledTaskFixture(t, store)
 	a := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*RunbookActivation)
 	statusBound, err := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, RunbookActionSetStatus)
@@ -350,7 +350,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) {
 	for _, limit := range []string{"bounded", "omitted", "null"} {
 		t.Run(limit, func(t *testing.T) {
-			store := NewMemoryStore()
+			store := newTestKernelStore(t)
 			run, catalog, bound, args := scheduledTaskFixture(t, store)
 			if limit != "bounded" {
 				args = withScheduleArgument(args, "maximumOccurrences", nil, limit == "omitted")
@@ -390,7 +390,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 }
 
 func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, _, bound, args := scheduledTaskFixture(t, store)
 	a := dispatchTaskForTest(t, store, source, bound, args, "create")["activation"].(*RunbookActivation)
 	scheduler := NewRunbookScheduler(store)
@@ -421,7 +421,7 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 }
 
 func TestScheduledTaskSurvivesAgentDefinitionSynchronization(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, _, bound, args := scheduledTaskFixture(t, store)
 	first := dispatchTaskForTest(t, store, run, bound, args, "task-one")["activation"].(*RunbookActivation)
 	second := dispatchTaskForTest(t, store, run, bound, args, "task-two")["activation"].(*RunbookActivation)

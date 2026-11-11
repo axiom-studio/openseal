@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
 // Bounded conversation Runs reserve every model step before it runs (D12):
@@ -18,7 +19,7 @@ import (
 
 func TestPublicAgentConversationReservesEveryStepAndPreservesDirectWork(t *testing.T) {
 	t.Parallel()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "bounded-agent-conversation"}
 	budget := BudgetPolicy{MaxAttempts: 4, MaxTurns: 4, MaxInputTokens: 200000, MaxOutputTokens: 4096}
 	var engine *Engine
@@ -88,7 +89,7 @@ func TestPublicAgentConversationReservesEveryStepAndPreservesDirectWork(t *testi
 
 func TestPublicAgentConversationPausesBeforeAnUnfundedStep(t *testing.T) {
 	t.Parallel()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "unfunded-agent-conversation"}
 	budget := BudgetPolicy{MaxAttempts: 4, MaxTurns: 4, MaxInputTokens: 1, MaxOutputTokens: 4096}
 	var engine *Engine
@@ -128,7 +129,7 @@ func TestPublicAgentConversationPausesBeforeAnUnfundedStep(t *testing.T) {
 	}
 }
 
-func conversationBudgetEngine(t *testing.T, store *runtime.MemoryStore, scope Scope, budget *BudgetPolicy, resolver TurnRunnerResolver) *Engine {
+func conversationBudgetEngine(t *testing.T, store *runtime.SQLiteStore, scope Scope, budget *BudgetPolicy, resolver TurnRunnerResolver) *Engine {
 	t.Helper()
 	engine, err := New(WithStore(store), WithConversationCoordinator(
 		ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {

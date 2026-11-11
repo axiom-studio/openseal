@@ -22,10 +22,6 @@ type skillSetupTaskTestStore interface {
 // so the callback must recover both task authority and its waiting run from disk.
 func forSkillSetupTaskStores(t *testing.T, test func(*testing.T, skillSetupTaskTestStore, func() skillSetupTaskTestStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) {
-		store := NewMemoryStore()
-		test(t, store, func() skillSetupTaskTestStore { return store })
-	})
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "setup-task.db")
 		var current *SQLiteStore

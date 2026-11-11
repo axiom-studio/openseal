@@ -23,6 +23,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -2287,7 +2288,7 @@ func TestTeamChannelCreateAndQuestionPostPreserveIdempotency(t *testing.T) {
 }
 
 func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
@@ -2331,7 +2332,7 @@ func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 }
 
 func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	source, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
 		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
@@ -2402,7 +2403,7 @@ func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *tes
 }
 
 func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
 	run, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
@@ -2495,7 +2496,7 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 }
 
 func TestActivityWorkspaceFlowsThroughPublicHTTPKernelBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := runtime.Scope{Kind: "local", ID: "activity-http"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
 	portfolio := runtime.NewPortfolioService(store)

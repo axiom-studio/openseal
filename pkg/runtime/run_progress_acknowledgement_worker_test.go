@@ -12,7 +12,7 @@ import (
 )
 
 type runProgressWorkerFixture struct {
-	store        *MemoryStore
+	store        *SQLiteStore
 	catalog      *skill.Catalog
 	endpoint     *ExternalConversationEndpoint
 	conversation *Conversation
@@ -229,7 +229,7 @@ func TestProgressAckIsSessionlessToolFreeModelStep(t *testing.T) {
 	if req.RunID != "run-1" || req.AgentID != "agent-1" || req.DefinitionID != "def" || req.DefinitionVersion != "1" {
 		t.Fatalf("identity = %+v", req)
 	}
-	wantStep := "progress-ack-" + hashString("run-1\x00event-1\x00"+string(AgentRunStatusRunning))[:16]
+	wantStep := "progress-ack-" + hashString("run-1\x00event-1\x00" + string(AgentRunStatusRunning))[:16]
 	if req.StepID != wantStep {
 		t.Fatalf("step id = %q, want %q", req.StepID, wantStep)
 	}

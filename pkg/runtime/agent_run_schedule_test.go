@@ -8,7 +8,7 @@ import (
 )
 
 func TestCreateAgentRunInitializesDurableQueueMetadata(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewPortfolioService(store)
 	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return now }
@@ -54,7 +54,6 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "portfolio-capacity.db"))
 			if err != nil {
@@ -173,7 +172,6 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-policy.db"))
 			if err != nil {
@@ -251,7 +249,6 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "admission-decision.db"))
 			if err != nil {
@@ -324,7 +321,6 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-resources.db"))
 			if err != nil {

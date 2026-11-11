@@ -389,6 +389,6 @@ func TestAgentBuilderCutoverHostIsRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	if report, err := engine.AgentBuilderCutover(context.Background()); err != nil || report != (AgentBuilderCutoverReport{}) {
-		t.Fatalf("memory store cutover = %#v, %v", report, err)
+		t.Fatalf("default store cutover = %#v, %v", report, err)
 	}
 }

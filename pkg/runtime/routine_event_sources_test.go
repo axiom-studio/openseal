@@ -44,7 +44,7 @@ func (c routineGoogleSourcesForTest) ListRoutineEventSources(context.Context, Sc
 }
 
 type eventRoutineFixture struct {
-	store      *MemoryStore
+	store      *SQLiteStore
 	run        *AgentRun
 	catalog    *skill.Catalog
 	bound      *skill.BoundAction
@@ -62,7 +62,7 @@ var routineSlackAdapterForTest = ExternalConversationAdapterReference{SkillID: "
 func newEventRoutineFixture(t *testing.T, hooksAvailable bool) *eventRoutineFixture {
 	t.Helper()
 	ctx := t.Context()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, catalog, bound, args := scheduledTaskFixture(t, store)
 	now := time.Now().UTC()
 	owner := run.Owner

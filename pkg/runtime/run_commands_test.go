@@ -13,7 +13,6 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 		name  string
 		store func(*testing.T) RunCommandStore
 	}{
-		{name: "memory", store: func(*testing.T) RunCommandStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) RunCommandStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "commands.db"))
 			if err != nil {
@@ -132,7 +131,6 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 		name  string
 		store func(*testing.T) RunCommandStore
 	}{
-		{name: "memory", store: func(*testing.T) RunCommandStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) RunCommandStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cascade.db"))
 			if err != nil {
@@ -218,7 +216,7 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 
 func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewRunCommandService(store)
 	scope := Scope{Kind: "tenant", ID: "human"}
 	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -272,7 +270,7 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 
 func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewRunCommandService(store)
 	activity := NewRunActivityService(store, store)
 	scope := Scope{Kind: "tenant", ID: "human"}
@@ -329,7 +327,7 @@ func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 
 func TestRunPausePreservesWaitingCondition(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewRunCommandService(store)
 	scope := Scope{Kind: "local", ID: "wait"}
 	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -404,7 +402,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 }
 
 func TestRunCreationRejectsCredentialStateButAllowsTokenBudgets(t *testing.T) {
-	service := NewRunCommandService(NewMemoryStore())
+	service := NewRunCommandService(newTestKernelStore(t))
 	base := CreateAgentRunRequest{
 		Scope: Scope{Kind: "tenant", ID: "safe"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 		Goal: "Operate safely", Source: RunSourceManual,

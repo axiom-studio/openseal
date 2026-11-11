@@ -113,7 +113,7 @@ func testEntryView(entry *SessionEntry) SessionEntryView {
 
 type compactionFixture struct {
 	*sessionConformance
-	store     *MemoryStore
+	store     *SQLiteStore
 	runID     string
 	sessionID string
 	host      *fakeSummaryHost
@@ -123,7 +123,7 @@ type compactionFixture struct {
 
 func newCompactionFixture(t *testing.T) *compactionFixture {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	f := &sessionConformance{
 		t: t, ctx: context.Background(), store: store,
 		scope: Scope{Kind: "tenant", ID: "compact-" + uuid.NewString()[:8]},

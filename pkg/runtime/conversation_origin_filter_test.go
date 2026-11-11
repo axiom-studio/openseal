@@ -13,7 +13,6 @@ import (
 
 func conversationOriginFilterStores() map[string]func(*testing.T) ConversationStore {
 	return map[string]func(*testing.T) ConversationStore{
-		"memory": func(*testing.T) ConversationStore { return NewMemoryStore() },
 		"sqlite": func(t *testing.T) ConversationStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "origin-filter.db"))
 			if err != nil {

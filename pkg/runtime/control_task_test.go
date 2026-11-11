@@ -22,7 +22,6 @@ type startTaskTestStore interface {
 // forStartTaskStores runs test on memory and SQLite.
 func forStartTaskStores(t *testing.T, test func(*testing.T, startTaskTestStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) { test(t, NewMemoryStore()) })
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "start-task.db"))
 		if err != nil {
@@ -250,7 +249,7 @@ func TestStartTaskCompletesForegroundWithAcknowledgmentAtomically(t *testing.T) 
 }
 
 func TestStartTaskProvenanceSourceTurnIsStepAndLastApplied(t *testing.T) {
-	f := newStartTaskFixture(t, NewMemoryStore())
+	f := newStartTaskFixture(t, newTestKernelStore(t))
 	f.settle("call-task")
 	tasks := f.tasks()
 	if len(tasks) != 1 {
@@ -279,7 +278,7 @@ func TestStartTaskProvenanceSourceTurnIsStepAndLastApplied(t *testing.T) {
 	}
 
 	// A request that does not match the step's entry is refused.
-	g := newStartTaskFixture(t, NewMemoryStore())
+	g := newStartTaskFixture(t, newTestKernelStore(t))
 	for name, mutate := range map[string]func(*StartConversationTaskRequest){
 		"tampered goal":     func(r *StartConversationTaskRequest) { r.Goal = "Something else entirely." },
 		"tampered ack":      func(r *StartConversationTaskRequest) { r.Acknowledgment = "Done already." },
@@ -337,14 +336,14 @@ func TestStartTaskRefusedWhenSteeringUnconsumed(t *testing.T) {
 		f.assertNotStarted("call-task")
 	}
 	t.Run("seen by the settle", func(t *testing.T) {
-		f := newStartTaskFixture(t, NewMemoryStore())
+		f := newStartTaskFixture(t, newTestKernelStore(t))
 		f.run = steer(t, f)
 		check(t, f, f.settle("call-task"))
 	})
 	t.Run("arrived under the settle", func(t *testing.T) {
 		// The settle's Run copy predates the message; the admission reads
 		// the stored Run and refuses.
-		f := newStartTaskFixture(t, NewMemoryStore())
+		f := newStartTaskFixture(t, newTestKernelStore(t))
 		stale := f.run
 		steered := steer(t, f)
 		cc := f.context("call-task")
@@ -427,7 +426,7 @@ func TestStartTaskNotAloneIsRefused(t *testing.T) {
 		t.Fatalf("refusals = %#v", refusals)
 	}
 	// Settled anyway (a resumed entry), the handler applies the same rule.
-	f := newStartTaskFixture(t, NewMemoryStore(), calls...)
+	f := newStartTaskFixture(t, newTestKernelStore(t), calls...)
 	result := f.settle("call-task")
 	entry := f.storedEntry(f.entries["call-task"].ID)
 	value := controlResultValue(t, entry)
@@ -474,7 +473,7 @@ func TestTaskWorkRunSessionForksBeforeStartDecision(t *testing.T) {
 }
 
 func TestOldTaskWithoutToolEntryStillValidates(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	record := conversationTaskSQLRecord(t, store, "old")
 	task := record.Task
 	if task.SourceToolEntryID != "" || task.Validate() != nil {

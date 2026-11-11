@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Catch-up (run-loop section 05 §4, CONV-03), on the memory and SQLite stores
+// Catch-up (run-loop section 05 §4, CONV-03), on the SQLite store
 // (Postgres with OPENSEAL_TEST_POSTGRES_DSN).
 
 type catchUpTestStore interface {
@@ -402,7 +402,7 @@ func TestCatchUpCapsToOneAppendWithOmittedNote(t *testing.T) {
 }
 
 func TestCatchUpCapsByAppendBytes(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	conversation := conversationThreadStartConversation(t, store)
 	f := &catchUpFixture{t: t, store: store, service: service, conversation: conversation, agentID: conversation.Owner.ID,

@@ -20,7 +20,7 @@ type collaborationTeamStoreStub struct {
 }
 
 type collaborationAgentCatalogStore struct {
-	*MemoryStore
+	*SQLiteStore
 	deployments map[string]*kernelagent.AgentDeployment
 	definitions map[string]*kernelagent.AgentDefinition
 }
@@ -66,7 +66,7 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	t.Parallel()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "developer",
 		Goal: "Coordinate the release", Source: RunSourceManual,
@@ -156,7 +156,7 @@ func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T
 	t.Parallel()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "review-quorum"}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "lead",
 		Goal: "Coordinate reviewed delivery", Source: RunSourceManual,
@@ -231,8 +231,8 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
-	newService := func(policy kernelteam.DelegationPolicy) (*MemoryStore, *PortfolioService, *CollaborationService) {
-		store := NewMemoryStore()
+	newService := func(policy kernelteam.DelegationPolicy) (*SQLiteStore, *PortfolioService, *CollaborationService) {
+		store := newTestKernelStore(t)
 		portfolio := NewPortfolioService(store)
 		service := NewCollaborationService(store)
 		service.teams = collaborationTeamStoreStub{
@@ -304,7 +304,6 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 		name string
 		open func(*testing.T) (CollaborationKernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (CollaborationKernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (CollaborationKernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "delegation-capacity.db"))
 			if err != nil {
@@ -456,7 +455,6 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 		name string
 		open func(*testing.T) (CollaborationKernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (CollaborationKernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (CollaborationKernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "collaboration.db"))
 			if err != nil {
@@ -624,7 +622,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 
 func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)
@@ -755,9 +753,9 @@ func TestTeamWorkOfferFiltersExactRoleSkillsAndRecordsCapacity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "team-authority"}
-	memory := NewMemoryStore()
+	memory := newTestKernelStore(t)
 	store := &collaborationAgentCatalogStore{
-		MemoryStore: memory,
+		SQLiteStore: memory,
 		deployments: map[string]*kernelagent.AgentDeployment{
 			"eligible": {ID: "eligible", DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 2}},
 			"busy":     {ID: "busy", DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}},
@@ -837,7 +835,7 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 		})
 	}
 
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	portfolio := NewPortfolioService(store)
 	activity := NewRunActivityService(store, store)
 	service := NewCollaborationService(store)
@@ -910,7 +908,7 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 
 func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)
@@ -946,7 +944,7 @@ func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *test
 
 func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)
@@ -1088,7 +1086,7 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 }
 
 func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)
@@ -1150,7 +1148,7 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 }
 
 func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "artifact-delegation"}
 	portfolio := NewPortfolioService(store)

@@ -14,7 +14,7 @@ import (
 )
 
 // The conversation seams of the RunLoop (run-loop section 05 §7, §13 on
-// SPEC §2.4), on the memory and SQLite stores. Runs are driven through the
+// SPEC §2.4), on the SQLite store. Runs are driven through the
 // real RunLoop with a recording model producer, or the seams are called the
 // way the loop calls them (appendStepContext is the loop's phase 3).
 

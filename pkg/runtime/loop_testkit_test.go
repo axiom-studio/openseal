@@ -295,7 +295,7 @@ func TestLoopTestkitFakeClock(t *testing.T) {
 }
 
 func TestLoopTestkitStoreMatrixRunsEveryAvailableStore(t *testing.T) {
-	want := []string{"memory", "sqlite"}
+	want := []string{"sqlite"}
 	if os.Getenv("OPENSEAL_TEST_POSTGRES_DSN") != "" {
 		want = append(want, "postgres")
 	}

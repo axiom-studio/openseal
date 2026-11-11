@@ -16,9 +16,9 @@ type agentBuilderParametersFixture struct {
 	user    ConversationParticipant
 }
 
-func newAgentBuilderParametersFixture() agentBuilderParametersFixture {
+func newAgentBuilderParametersFixture(t *testing.T) agentBuilderParametersFixture {
 	return agentBuilderParametersFixture{
-		service: NewConversationService(NewMemoryStore()),
+		service: NewConversationService(newTestKernelStore(t)),
 		scope:   Scope{Kind: "organization", ID: "builder"},
 		user:    ConversationParticipant{Type: ConversationParticipantUser, ID: "u_7"},
 	}
@@ -54,7 +54,7 @@ func (f agentBuilderParametersFixture) post(t *testing.T, conversation *Conversa
 }
 
 func TestAgentBuilderParametersAcceptedOnUserMessageInBuilderConversation(t *testing.T) {
-	f := newAgentBuilderParametersFixture()
+	f := newAgentBuilderParametersFixture(t)
 	conversation := f.builderConversation(t)
 	parameters := &AgentBuilderParameters{Kind: " agent ", Name: "  Press Desk ", Model: "openai/gpt-5"}
 	result, err := f.post(t, conversation, f.user, "Build me a press desk agent", parameters, "agent-builder-prompt:k")
@@ -92,7 +92,7 @@ func TestAgentBuilderParametersAcceptedOnUserMessageInBuilderConversation(t *tes
 }
 
 func TestAgentBuilderParametersEmptyContentOnlyWithParameters(t *testing.T) {
-	f := newAgentBuilderParametersFixture()
+	f := newAgentBuilderParametersFixture(t)
 	conversation := f.builderConversation(t)
 	result, err := f.post(t, conversation, f.user, "  ", &AgentBuilderParameters{Kind: AgentBuilderKindTeam, Name: "Launch crew"}, "rename")
 	if err != nil {
@@ -113,7 +113,7 @@ func TestAgentBuilderParametersEmptyContentOnlyWithParameters(t *testing.T) {
 }
 
 func TestAgentBuilderParametersRefusedOutsideBuilderConversation(t *testing.T) {
-	f := newAgentBuilderParametersFixture()
+	f := newAgentBuilderParametersFixture(t)
 	parameters := &AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: "Press Desk"}
 	for name, origin := range map[string]*ConversationReference{
 		"no origin":    nil,
@@ -133,7 +133,7 @@ func TestAgentBuilderParametersRefusedOutsideBuilderConversation(t *testing.T) {
 }
 
 func TestAgentBuilderParametersRefusedFromAgentSender(t *testing.T) {
-	f := newAgentBuilderParametersFixture()
+	f := newAgentBuilderParametersFixture(t)
 	conversation := f.builderConversation(t)
 	for _, sender := range []ConversationParticipant{
 		{Type: ConversationParticipantAgent, ID: "openseal-assistant"},

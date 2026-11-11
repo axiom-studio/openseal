@@ -20,7 +20,7 @@ func testEmbedPermissions() EmbedPermissionPolicy {
 }
 
 func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service, err := NewEmbedSessionService(store, store)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
 }
 
 func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service, _ := NewEmbedSessionService(store, store)
 	installation, err := service.CreateInstallation(t.Context(), CreateEmbedInstallationRequest{
 		Scope: Scope{Kind: "tenant", ID: "1"}, DeploymentID: "support-agent", Name: "Signed support", AllowedOrigins: []string{"https://app.example.com"},

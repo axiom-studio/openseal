@@ -7,7 +7,7 @@ import (
 )
 
 func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	parent := openTestConversationSession(t, store, "r1")
 	if _, err := testAppend(store, parent.ID, "r1", testUserEntry("p1", "a"), testUserEntry("p2", "b")); err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 	if assistant == nil || tool == nil || assistant.Sequence != 3 {
 		t.Fatalf("path = %+v", path.Entries)
 	}
-	run := testMemoryRun(t, store, "r1")
+	run := testStoredSessionRun(t, store, "r1")
 	run.AssignedAgentID = "agent-a"
 	cc := ControlContext{Run: run, Session: path.Session, Path: path, Assistant: assistant, Entry: tool}
 
@@ -58,9 +58,7 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.mu.Lock()
-	created, err := store.createRunAgentSessionLocked(txReq)
-	store.mu.Unlock()
+	created, err := store.conformanceCreateRunAgentSessionTx(t.Context(), txReq)
 	if err != nil {
 		t.Fatal(err)
 	}

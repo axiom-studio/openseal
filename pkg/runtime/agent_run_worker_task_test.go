@@ -27,16 +27,12 @@ type workerTaskProducer struct {
 func (*workerTaskProducer) Kind() StepProducerKind { return StepProducerModel }
 
 func (p *workerTaskProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
-	p.mu.Lock()
 	p.calls++
 	call := p.calls
-	p.mu.Unlock()
 	return p.reply(ctx, call, in)
 }
 
 func (p *workerTaskProducer) count() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.calls
 }
 
@@ -61,7 +57,7 @@ func answerStep(text string) StepOutput {
 // binding does for the parts these tests need: the lane session (seeded with
 // the trigger message), the control authority and the claim tool executor,
 // whose control executor admits tasks through tasks.
-func workerTaskResolver(t *testing.T, store *MemoryStore, tasks ConversationTaskKernelStore, producer StepProducer) TurnRunnerResolverFunc {
+func workerTaskResolver(t *testing.T, store *SQLiteStore, tasks ConversationTaskKernelStore, producer StepProducer) TurnRunnerResolverFunc {
 	t.Helper()
 	activity := NewRunActivityService(store, store)
 	control := &ControlExecutor{
@@ -93,7 +89,7 @@ func workerTaskResolver(t *testing.T, store *MemoryStore, tasks ConversationTask
 
 // openWorkerTaskSession opens the chat Run's lane session and appends the
 // trigger message once (the conversation catch-up's part).
-func openWorkerTaskSession(ctx context.Context, store *MemoryStore, run *AgentRun) (*AgentSession, error) {
+func openWorkerTaskSession(ctx context.Context, store *SQLiteStore, run *AgentRun) (*AgentSession, error) {
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
 	thread, _ := run.Context["threadRootMessageId"].(string)
@@ -125,12 +121,12 @@ func openWorkerTaskSession(ctx context.Context, store *MemoryStore, run *AgentRu
 	return store.GetAgentSession(ctx, run.Scope, session.ID)
 }
 
-func workerTaskPool(t *testing.T, store *MemoryStore, scope Scope, producer StepProducer) *AgentRunWorkerPool {
+func workerTaskPool(t *testing.T, store *SQLiteStore, scope Scope, producer StepProducer) *AgentRunWorkerPool {
 	t.Helper()
 	return workerTaskPoolWith(t, store, scope, workerTaskResolver(t, store, store, producer))
 }
 
-func workerTaskPoolWith(t *testing.T, store *MemoryStore, scope Scope, resolver TurnRunnerResolver) *AgentRunWorkerPool {
+func workerTaskPoolWith(t *testing.T, store *SQLiteStore, scope Scope, resolver TurnRunnerResolver) *AgentRunWorkerPool {
 	t.Helper()
 	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
 		Scope: scope, Kind: RunKindConversation, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute,
@@ -143,7 +139,7 @@ func workerTaskPoolWith(t *testing.T, store *MemoryStore, scope Scope, resolver 
 
 // admissionLostTaskStore loses the source lease at the task admission
 // commit: the worker died after its step was applied, before the settle.
-type admissionLostTaskStore struct{ *MemoryStore }
+type admissionLostTaskStore struct{ *SQLiteStore }
 
 func (s *admissionLostTaskStore) CreateConversationTask(context.Context, ConversationTaskCreateRecord) (*ConversationTaskResult, error) {
 	return nil, ErrLeaseLost
@@ -154,7 +150,7 @@ func (s *admissionLostTaskStore) CreateConversationTask(context.Context, Convers
 // applied, and stops before admission: the Run is running, leased by
 // "worker", its last step completed and applied, and the tool entry
 // pending. Callers admit the task themselves (taskStartRequest).
-func settledWorkerTaskFixture(t *testing.T, store *MemoryStore) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
+func settledWorkerTaskFixture(t *testing.T, store *SQLiteStore) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "worker-task"}
 	conversations := NewConversationService(store)
@@ -180,7 +176,7 @@ func settledWorkerTaskFixture(t *testing.T, store *MemoryStore) (*AgentRun, *Age
 	producer := &workerTaskProducer{reply: func(context.Context, int, StepInput) (StepOutput, error) {
 		return startTaskStep(proposal.goal, proposal.ack), nil
 	}}
-	pool := workerTaskPoolWith(t, store, scope, workerTaskResolver(t, store, &admissionLostTaskStore{MemoryStore: store}, producer))
+	pool := workerTaskPoolWith(t, store, scope, workerTaskResolver(t, store, &admissionLostTaskStore{SQLiteStore: store}, producer))
 	pool.executeClaim(t.Context(), "worker", claimed)
 
 	source, err := store.GetAgentRun(t.Context(), scope, claimed.ID)
@@ -212,7 +208,7 @@ func workerTaskProposal() workerTaskProposalText {
 // without calling the model again: the task is admitted once, the source Run
 // completes with the acknowledgment, and the tool entry completes.
 func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, step, conversation, _ := settledWorkerTaskFixture(t, store)
 	expireRunLease(t, store, source)
 
@@ -256,19 +252,16 @@ func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
 
 // expireRunLease moves the Run's lease into the past so another worker can
 // claim it (the first worker is gone).
-func expireRunLease(t *testing.T, store *MemoryStore, run *AgentRun) {
+func expireRunLease(t *testing.T, store *SQLiteStore, run *AgentRun) {
 	t.Helper()
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	key := portfolioKey(run.Scope, run.ID)
-	current := cloneAgentRun(store.agentRuns[key])
+	current := getStoredRun(t, store, run.Scope, run.ID)
 	past := time.Now().UTC().Add(-time.Second)
 	current.LeaseExpiresAt = &past
-	store.saveMemoryAgentRunLocked(key, current)
+	putStoredRun(t, store, current)
 }
 
 func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
 	if _, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err != nil {
 		t.Fatal(err)

@@ -7,20 +7,19 @@ import (
 	"time"
 )
 
-func claimedForkTaskFixture(t *testing.T) (*MemoryStore, *AgentRun, *ConversationTaskResult) {
+func claimedForkTaskFixture(t *testing.T) (*SQLiteStore, *AgentRun, *ConversationTaskResult) {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	foreground, turn, _, _ := settledWorkerTaskFixture(t, store)
 	accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, foreground, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.mu.Lock()
-	root := store.agentRuns[portfolioKey(accepted.WorkRun.Scope, accepted.WorkRun.ID)]
+	root := getStoredRun(t, store, accepted.WorkRun.Scope, accepted.WorkRun.ID)
 	root.Context["privateBrief"] = "source-only"
 	root.Context["release"] = "original"
 	root.Plan = map[string]interface{}{"research": "canonical-plan"}
-	store.mu.Unlock()
+	putStoredRun(t, store, root)
 	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
 		Scope: accepted.Task.Scope, Kind: RunKindAgentWork, AssignedAgentID: accepted.Task.TargetAgentID,
 		WorkerID: "fork-worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
@@ -164,7 +163,7 @@ func TestRunForkTaskRejectsBranchProvenanceReplacement(t *testing.T) {
 }
 
 func TestRunForkTaskRejectsContextOnlySelfRoot(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: Scope{Kind: "tenant", ID: "forged-task-fork"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 		AssignedAgentID: "agent", Goal: "Forged task source", Context: map[string]interface{}{ConversationTaskContextKey: "forged-task"},

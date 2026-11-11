@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
 // outboxStore is an in-memory store with a work outbox the test fills.
 type outboxStore struct {
-	*runtime.MemoryStore
+	*runtime.SQLiteStore
 	claims    atomic.Int64
 	deadline  atomic.Pointer[time.Time]
 	committed chan struct{}
@@ -26,7 +27,7 @@ type outboxStore struct {
 
 func (s *outboxStore) ClaimNextAction(ctx context.Context, claim runtime.ActionClaim) (*runtime.ActionCall, error) {
 	s.claims.Add(1)
-	return s.MemoryStore.ClaimNextAction(ctx, claim)
+	return s.SQLiteStore.ClaimNextAction(ctx, claim)
 }
 
 func (s *outboxStore) NextActionDeadline(context.Context, runtime.Scope, time.Time) (*time.Time, error) {
@@ -126,7 +127,7 @@ func TestEngineWorkQueueRelaysOutboxSchedulesDeadlinesAndRoutesDeliveries(t *tes
 	defer cancel()
 	scope := Scope{Kind: "local", ID: "queue"}
 	other := Scope{Kind: "local", ID: "elsewhere"}
-	store := &outboxStore{MemoryStore: runtime.NewMemoryStore(), committed: make(chan struct{}, 1)}
+	store := &outboxStore{SQLiteStore: runtimetest.NewKernelStore(t), committed: make(chan struct{}, 1)}
 	store.pending = []runtime.WorkItem{{Family: runtime.WorkFamilyAction, Scope: other, DueAt: time.Now()}}
 	queue := &scriptedQueue{signals: make(chan runtime.WorkSignal)}
 	engine, err := New(

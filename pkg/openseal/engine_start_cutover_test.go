@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/google/uuid"
 )
 
 // cutoverOrderStore records whether the run loop cutover had finished when a
 // worker first claimed a Run.
 type cutoverOrderStore struct {
-	*runtime.MemoryStore
+	*runtime.SQLiteStore
 	failList bool
 
 	mu               sync.Mutex
@@ -30,7 +31,7 @@ func (s *cutoverOrderStore) ListRunLoopCutoverCandidates(ctx context.Context) ([
 	if s.failList {
 		return nil, errCutoverListFailed
 	}
-	refs, err := s.MemoryStore.ListRunLoopCutoverCandidates(ctx)
+	refs, err := s.SQLiteStore.ListRunLoopCutoverCandidates(ctx)
 	s.mu.Lock()
 	s.listedCandidates += len(refs)
 	s.mu.Unlock()
@@ -38,7 +39,7 @@ func (s *cutoverOrderStore) ListRunLoopCutoverCandidates(ctx context.Context) ([
 }
 
 func (s *cutoverOrderStore) WithRunLoopCutoverLock(ctx context.Context, fn func(context.Context) error) error {
-	err := s.MemoryStore.WithRunLoopCutoverLock(ctx, fn)
+	err := s.SQLiteStore.WithRunLoopCutoverLock(ctx, fn)
 	if err == nil {
 		s.mu.Lock()
 		s.cutoverDone = true
@@ -58,12 +59,12 @@ func (s *cutoverOrderStore) noteClaim() {
 
 func (s *cutoverOrderStore) ClaimNextAgentRun(ctx context.Context, claim runtime.AgentRunClaim) (*runtime.AgentRun, error) {
 	s.noteClaim()
-	return s.MemoryStore.ClaimNextAgentRun(ctx, claim)
+	return s.SQLiteStore.ClaimNextAgentRun(ctx, claim)
 }
 
 func (s *cutoverOrderStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim runtime.AgentRunClaim) (*runtime.AgentRunAdmissionDecision, error) {
 	s.noteClaim()
-	return s.MemoryStore.ClaimNextAgentRunWithDecision(ctx, claim)
+	return s.SQLiteStore.ClaimNextAgentRunWithDecision(ctx, claim)
 }
 
 func (s *cutoverOrderStore) counts() (claims, beforeCut int, done bool) {
@@ -76,7 +77,7 @@ var engineCutoverScope = Scope{Kind: "tenant", ID: "engine-cutover"}
 
 // oldEngineRun creates a Run and rewrites it as the old engine left it: no
 // Engine marker, optionally claimed by an old worker first.
-func oldEngineRun(t *testing.T, store *runtime.MemoryStore, key string, claimed bool) *runtime.AgentRun {
+func oldEngineRun(t *testing.T, store *runtime.SQLiteStore, key string, claimed bool) *runtime.AgentRun {
 	t.Helper()
 	ctx := context.Background()
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "agent-1"}
@@ -140,9 +141,9 @@ func TestEngineStartRunsCutoverBeforeWorkers(t *testing.T) {
 	t.Run("adopts and cancels before the first claim", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		store := &cutoverOrderStore{MemoryStore: runtime.NewMemoryStore()}
-		running := oldEngineRun(t, store.MemoryStore, "running", true)
-		queued := oldEngineRun(t, store.MemoryStore, "queued", false)
+		store := &cutoverOrderStore{SQLiteStore: runtimetest.NewKernelStore(t)}
+		running := oldEngineRun(t, store.SQLiteStore, "running", true)
+		queued := oldEngineRun(t, store.SQLiteStore, "queued", false)
 		resolved := make(chan *runtime.AgentRun, 4)
 		engine := newEngine(t, store, resolved)
 
@@ -192,8 +193,8 @@ func TestEngineStartRunsCutoverBeforeWorkers(t *testing.T) {
 	t.Run("fails closed", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		store := &cutoverOrderStore{MemoryStore: runtime.NewMemoryStore(), failList: true}
-		oldEngineRun(t, store.MemoryStore, "queued", false)
+		store := &cutoverOrderStore{SQLiteStore: runtimetest.NewKernelStore(t), failList: true}
+		oldEngineRun(t, store.SQLiteStore, "queued", false)
 		resolved := make(chan *runtime.AgentRun, 1)
 		engine := newEngine(t, store, resolved)
 

@@ -17,21 +17,6 @@ import (
 // holds its payload. Each backend reads its own storage.
 type routineEventPayloadProbe func(t *testing.T, scope Scope, activationID, eventID string) bool
 
-func TestMemoryRoutineEventStore(t *testing.T) {
-	runRoutineEventStoreContract(t, func(t *testing.T) (KernelStore, routineEventPayloadProbe) {
-		store := NewMemoryStore()
-		return store, func(t *testing.T, scope Scope, activationID, eventID string) bool {
-			store.mu.RLock()
-			defer store.mu.RUnlock()
-			record := store.routineEvents[memoryRoutineEventKey{scope: scope, activationID: activationID, eventID: eventID}]
-			if record == nil {
-				t.Fatalf("event %s is not stored", eventID)
-			}
-			return len(record.Event.Payload) > 0 || record.Event.Summary != ""
-		}
-	})
-}
-
 func TestSQLiteRoutineEventStore(t *testing.T) {
 	runRoutineEventStoreContract(t, func(t *testing.T) (KernelStore, routineEventPayloadProbe) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "routine-events.db"))

@@ -29,7 +29,6 @@ func interactionChangeStores() []struct {
 		name  string
 		store func(*testing.T) KernelStore
 	}{
-		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "interaction-changes.db"))
 			if err != nil {
@@ -216,7 +215,7 @@ func TestConversationChangesProjectSkillSetupRequests(t *testing.T) {
 }
 
 func TestConversationChangesBoundSettledInteractions(t *testing.T) {
-	f := newInteractionChangeFixture(t, NewMemoryStore())
+	f := newInteractionChangeFixture(t, newTestKernelStore(t))
 	setups := f.store.(SkillSetupRequestStore)
 	start := time.Now().UTC()
 	for index := 0; index < conversationInteractionHistoryLimit+5; index++ {
@@ -255,7 +254,7 @@ func TestConversationRunLineageValueInheritsThreadPlacement(t *testing.T) {
 }
 
 type teamRosterPortfolio struct {
-	*MemoryStore
+	*SQLiteStore
 	team *kernelteam.Deployment
 }
 
@@ -269,7 +268,7 @@ func (p teamRosterPortfolio) GetTeamDeployment(_ context.Context, scope capabili
 // Requests in a Team chat are saved to the Team, whichever member asked;
 // one saved to a member's own umbrella never shows in the Team chat.
 func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
-	ctx, store, scope := context.Background(), NewMemoryStore(), Scope{Kind: "tenant", ID: "team-requests"}
+	ctx, store, scope := context.Background(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "team-requests"}
 	conversations := NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}, Title: "Team", IdempotencyKey: "team",
@@ -287,7 +286,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	}
 	team := &kernelteam.Deployment{ID: "gtm", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "a", AgentDeploymentID: "member"}, {ID: "b", AgentDeploymentID: "other"}}}
-	changes, err := NewConversationChangeService(store, teamRosterPortfolio{MemoryStore: store, team: team})
+	changes, err := NewConversationChangeService(store, teamRosterPortfolio{SQLiteStore: store, team: team})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,6 @@ func terminalCloseStores() []struct {
 		name  string
 		store func(*testing.T) terminalCloseTestStore
 	}{
-		{name: "memory", store: func(*testing.T) terminalCloseTestStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) terminalCloseTestStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "terminal-close.db"))
 			if err != nil {

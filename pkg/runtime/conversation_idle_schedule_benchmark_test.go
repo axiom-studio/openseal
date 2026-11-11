@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// Count authoritative reads while retaining the canonical MemoryStore paths.
+// Count authoritative reads while retaining the canonical SQLiteStore paths.
 // These benchmarks measure reconciliation work, not SQL latency or serving CPU.
 type idleConversationBenchmarkStore struct {
-	*MemoryStore
+	*SQLiteStore
 	messageReads uint64
 	roundReads   uint64
 	roundRows    uint64
@@ -18,19 +18,19 @@ type idleConversationBenchmarkStore struct {
 
 func (s *idleConversationBenchmarkStore) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
 	s.messageReads++
-	return s.MemoryStore.ListChannelMessages(ctx, filter)
+	return s.SQLiteStore.ListChannelMessages(ctx, filter)
 }
 
 func (s *idleConversationBenchmarkStore) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
 	s.roundReads++
-	rounds, err := s.MemoryStore.ListParticipationRounds(ctx, filter)
+	rounds, err := s.SQLiteStore.ListParticipationRounds(ctx, filter)
 	s.roundRows += uint64(len(rounds))
 	return rounds, err
 }
 
 func (s *idleConversationBenchmarkStore) GetConversationCursor(ctx context.Context, scope Scope, id string, participant ConversationParticipant) (*ConversationCursor, error) {
 	s.cursorReads++
-	return s.MemoryStore.GetConversationCursor(ctx, scope, id, participant)
+	return s.SQLiteStore.GetConversationCursor(ctx, scope, id, participant)
 }
 
 func (s *idleConversationBenchmarkStore) resetReads() {
@@ -46,7 +46,7 @@ func (s *idleConversationBenchmarkStore) reportReads(b *testing.B) {
 
 func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (*idleConversationBenchmarkStore, *ConversationRunScheduler, Scope, []*Conversation) {
 	b.Helper()
-	store := &idleConversationBenchmarkStore{MemoryStore: NewMemoryStore()}
+	store := &idleConversationBenchmarkStore{SQLiteStore: newTestKernelStore(b)}
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "idle-scheduler-benchmark"}
 	ctx := b.Context()

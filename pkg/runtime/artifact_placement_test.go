@@ -44,7 +44,7 @@ func TestArtifactCatalogRecordsTheChatAndSpaceAnArtifactWasMadeIn(t *testing.T) 
 		"chat-sales":  {ID: "chat-sales", SpaceID: "space-sales"},
 		"chat-design": {ID: "chat-design", SpaceID: "space-design"},
 	}}
-	catalog := NewArtifactCatalog(NewMemoryStore()).WithPlacement(ArtifactPlacement{Runs: runs, Conversations: conversations})
+	catalog := NewArtifactCatalog(newTestKernelStore(t)).WithPlacement(ArtifactPlacement{Runs: runs, Conversations: conversations})
 	register := func(id string, mutate func(*Artifact)) ArtifactProvenance {
 		t.Helper()
 		artifact := validCatalogArtifact(id, 1)
@@ -110,7 +110,7 @@ func TestArtifactCatalogRecordsTheChatAndSpaceAnArtifactWasMadeIn(t *testing.T) 
 
 func TestArtifactPlacementFailsOnConversationLookupErrors(t *testing.T) {
 	lookupErr := errors.New("conversation store unavailable")
-	catalog := NewArtifactCatalog(NewMemoryStore()).WithPlacement(ArtifactPlacement{
+	catalog := NewArtifactCatalog(newTestKernelStore(t)).WithPlacement(ArtifactPlacement{
 		Runs:          placementRuns{"run-chat": {ID: "run-chat", Context: map[string]interface{}{"conversationId": "chat-sales"}}},
 		Conversations: placementConversations{err: lookupErr},
 	})
@@ -128,7 +128,7 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	catalogs := []*ArtifactCatalog{NewArtifactCatalog(NewMemoryStore()), NewArtifactCatalog(sqlite)}
+	catalogs := []*ArtifactCatalog{NewArtifactCatalog(newTestKernelStore(t)), NewArtifactCatalog(sqlite)}
 	stamp := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
 	for _, catalog := range catalogs {
 		catalog.now = func() time.Time { return stamp }
@@ -197,7 +197,7 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 }
 
 func TestArtifactRejectsInvalidPlacementIdentifiers(t *testing.T) {
-	catalog := NewArtifactCatalog(NewMemoryStore())
+	catalog := NewArtifactCatalog(newTestKernelStore(t))
 	for name, mutate := range map[string]func(*Artifact){
 		"conversation": func(a *Artifact) { a.Provenance.ConversationID = "chats/sales" },
 		"space":        func(a *Artifact) { a.Provenance.SpaceID = strings.Repeat("s", 129) },
@@ -216,7 +216,7 @@ func TestKernelStoresProvideArtifactPlacementLookups(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	for name, store := range map[string]any{"memory": NewMemoryStore(), "sqlite": sqlite, "postgres": &PostgresStore{}} {
+	for name, store := range map[string]any{"sqlite": sqlite, "postgres": &PostgresStore{}} {
 		if placement := NewStoreArtifactPlacement(store); placement.Runs == nil || placement.Conversations == nil {
 			t.Fatalf("%s store placement = %#v", name, placement)
 		}

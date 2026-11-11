@@ -9,19 +9,19 @@ import (
 )
 
 type countingConversationStore struct {
-	*MemoryStore
+	*SQLiteStore
 	conversationReads int
 }
 
 func (s *countingConversationStore) GetConversation(ctx context.Context, scope Scope, id string) (*Conversation, error) {
 	s.conversationReads++
-	return s.MemoryStore.GetConversation(ctx, scope, id)
+	return s.SQLiteStore.GetConversation(ctx, scope, id)
 }
 
 func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t *testing.T) {
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "deleted-conversation-projection"}
-	store := &countingConversationStore{MemoryStore: NewMemoryStore()}
+	store := &countingConversationStore{SQLiteStore: newTestKernelStore(t)}
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "requester"}, AssignedAgentID: "requester",
 		Goal: "Coordinate work", Source: RunSourceManual,
@@ -55,7 +55,7 @@ func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t
 func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "conversation-projection"}
 	store := &agentRequestInboxTeamStore{
-		MemoryStore: NewMemoryStore(),
+		SQLiteStore: newTestKernelStore(t),
 		deployment: &kernelteam.Deployment{
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
@@ -184,7 +184,7 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "escalation-projection"}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"},
 		Title: "Incident coordination", IdempotencyKey: "incident-coordination",

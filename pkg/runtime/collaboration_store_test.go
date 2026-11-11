@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func TestMemoryAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
+func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)
@@ -64,9 +64,9 @@ func TestMemoryAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	}
 }
 
-func TestMemoryAgentRequestNegotiationAndSafety(t *testing.T) {
+func TestAgentRequestNegotiationAndSafety(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)

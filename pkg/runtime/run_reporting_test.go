@@ -5,7 +5,7 @@ import (
 )
 
 func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "conversation-runbook-start"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}

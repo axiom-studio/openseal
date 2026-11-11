@@ -7,11 +7,12 @@ import (
 
 	"github.com/axiom-studio/openseal/internal/server"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestKernelHTTPClientChannelTimelineRoundTrip(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	service := runtime.NewConversationService(store)
 	scope := runtime.Scope{Kind: "tenant", ID: "timeline"}
 	conversation, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{

@@ -10,7 +10,7 @@ import (
 
 func TestRunActionValidatorResolvesRevisionAndEnforcesConversationOwner(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "1"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
 	created, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -44,7 +44,7 @@ func TestRunActionValidatorResolvesRevisionAndEnforcesConversationOwner(t *testi
 
 func TestRunActionDispatcherCancelsWaitingApprovalRun(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "1"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
 	created, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{

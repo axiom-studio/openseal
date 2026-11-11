@@ -26,11 +26,9 @@ func agentTrialArguments() map[string]interface{} {
 }
 
 // putAgentTrialRun stores run as given, bypassing transition rules.
-func putAgentTrialRun(t *testing.T, store *MemoryStore, run *AgentRun) *AgentRun {
+func putAgentTrialRun(t *testing.T, store *SQLiteStore, run *AgentRun) *AgentRun {
 	t.Helper()
-	store.mu.Lock()
-	store.saveMemoryAgentRunLocked(portfolioKey(run.Scope, run.ID), cloneAgentRun(run))
-	store.mu.Unlock()
+	putStoredRun(t, store, cloneAgentRun(run))
 	return run
 }
 
@@ -145,7 +143,7 @@ func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
 	// A finished trial never parks.
 	now = child.CreatedAt.Add(time.Minute)
 	child.Status = AgentRunStatusCompleted
-	putAgentTrialRun(t, f.store.MemoryStore, child)
+	putAgentTrialRun(t, f.store.SQLiteStore, child)
 	if wake, _, err := parker.governedCardWait(context.Background(), f.run, call); err != nil || wake != nil {
 		t.Fatalf("wake after completion = %#v, %v", wake, err)
 	}
@@ -159,7 +157,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 		definition: &kernelagent.AgentDefinition{ID: "finn-definition", Version: "7", Purpose: "Build Agents", SystemPrompt: "You are Finn, the builder."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skillScope, DeploymentID: "finn"},
 	}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	parent := putAgentTrialRun(t, store, &AgentRun{
 		ID: "parent", Scope: scope, Kind: RunKindConversation, RootRunID: "parent", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
 		AssignedAgentID: "finn", Status: AgentRunStatusRunning, Revision: 1, CreatedAt: time.Now().UTC(),
@@ -232,7 +230,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 
 // agentTrialFinalizerFixture is a builder Run waiting on its trial child.
 type agentTrialFinalizerFixture struct {
-	store  *MemoryStore
+	store  *SQLiteStore
 	scope  Scope
 	parent *AgentRun
 	child  *AgentRun
@@ -249,8 +247,8 @@ func newAgentTrialFinalizerFixture(t *testing.T, parentStatus AgentRunStatus) *a
 		deadline := agentTrialDeadline(child)
 		parent.WakeCondition = &WakeCondition{Type: AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}
 	}
-	putAgentTrialRun(t, f.store.MemoryStore, parent)
-	return &agentTrialFinalizerFixture{store: f.store.MemoryStore, scope: f.scope, parent: parent, child: child, call: call}
+	putAgentTrialRun(t, f.store.SQLiteStore, parent)
+	return &agentTrialFinalizerFixture{store: f.store.SQLiteStore, scope: f.scope, parent: parent, child: child, call: call}
 }
 
 func (f *agentTrialFinalizerFixture) endChild(t *testing.T, status AgentRunStatus, output map[string]interface{}, message string) *AgentRun {

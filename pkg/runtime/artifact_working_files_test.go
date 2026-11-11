@@ -20,7 +20,7 @@ func TestWorkingFilesAreLeftOutOfResultsUntilHandedOver(t *testing.T) {
 	}
 	defer sqlite.Close()
 	scope := Scope{Kind: "tenant", ID: "one"}
-	stores := map[string]ArtifactStore{"memory": NewMemoryStore(), "sqlite": sqlite}
+	stores := map[string]ArtifactStore{"sqlite": sqlite}
 	for name, store := range stores {
 		catalog := NewArtifactCatalog(store)
 		catalog.now = func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) }

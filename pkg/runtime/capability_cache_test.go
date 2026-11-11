@@ -46,7 +46,7 @@ func (f *prepareFixture) capabilityNotes() []*SessionEntry {
 	return notes
 }
 
-func mustJSON(t *testing.T, value interface{}) string {
+func mustJSON(t testing.TB, value interface{}) string {
 	t.Helper()
 	encoded, err := json.Marshal(value)
 	if err != nil {

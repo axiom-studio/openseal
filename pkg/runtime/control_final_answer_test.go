@@ -472,12 +472,10 @@ func TestDecisionRunPlainTextGetsNoteThenFails(t *testing.T) {
 func (f *controlFixture) governedEntry(callID, skillID, action string, output map[string]interface{}) {
 	f.t.Helper()
 	actionID := "action-" + callID
-	f.store.mu.Lock()
-	f.store.actions[actionID] = &ActionCall{
+	putStoredAction(f.t, f.store, &ActionCall{
 		ID: actionID, Scope: f.run.Scope, RunID: f.run.ID, SkillID: skillID, Action: action,
 		Status: ActionCallStatusSucceeded, Origin: ActionOriginLoop, Output: output, CreatedAt: f.now, UpdatedAt: f.now,
-	}
-	f.store.mu.Unlock()
+	})
 	entry := f.entries[callID]
 	_, err := f.store.TransitionToolEntry(f.ctx, ToolEntryTransitionRequest{
 		Scope: f.run.Scope, EntryID: entry.ID, RunID: f.run.ID,
@@ -703,12 +701,10 @@ func (f *controlFixture) addRunActionCall(id string, status ActionCallStatus, si
 // addActionCallFor stores a finished action call of the given Run.
 func (f *controlFixture) addActionCallFor(runID, id string, status ActionCallStatus, sideEffect skill.SideEffect) {
 	f.t.Helper()
-	f.store.mu.Lock()
-	defer f.store.mu.Unlock()
-	f.store.actions[portfolioKey(f.run.Scope, id)] = &ActionCall{
+	putStoredAction(f.t, f.store, &ActionCall{
 		ID: id, Scope: f.run.Scope, RunID: runID, SkillID: "mail", Action: "send", Status: status,
 		SideEffect: sideEffect, Origin: ActionOriginLoop, CreatedAt: f.now, UpdatedAt: f.now,
-	}
+	})
 }
 
 func TestFinalAnswerRoutineOccurrenceSilent(t *testing.T) {
@@ -788,9 +784,7 @@ func TestRoutineOccurrenceSilentRefusedAfterChildWrite(t *testing.T) {
 	}
 	child := cloneAgentRun(f.run)
 	child.ID, child.ParentRunID, child.RootRunID = "occurrence-child", f.run.ID, rootID
-	f.store.mu.Lock()
-	f.store.agentRuns[portfolioKey(child.Scope, child.ID)] = child
-	f.store.mu.Unlock()
+	putStoredRun(f.t, f.store, child)
 	f.addActionCallFor(child.ID, "child-sent", ActionCallStatusSucceeded, skill.SideEffectExternal)
 	requireRejected(t, f, f.settleFinal("quiet", ControlAuthority{RoutineOccurrence: true}), "quiet", finalSilentAfterChangeCode)
 }

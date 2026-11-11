@@ -12,11 +12,12 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	createBody := `{
@@ -98,7 +99,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 }
 
 func TestAgentRunAdmissionAPIExplainsObjectiveBackpressureWithoutClaiming(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	ctx := t.Context()
 	scope := runtime.Scope{Kind: "tenant", ID: "admission"}
@@ -143,7 +144,7 @@ func TestAgentRunAdmissionAPIExplainsObjectiveBackpressureWithoutClaiming(t *tes
 }
 
 func TestAgentRunAPIRejectsExplicitZeroBudgetLimitButAcceptsOmission(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	base := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"agent","id":"agent"},"assignedAgentId":"agent","goal":"Read one source","source":"manual","budget":%s}`
@@ -160,7 +161,7 @@ func TestAgentRunAPIRejectsExplicitZeroBudgetLimitButAcceptsOmission(t *testing.
 }
 
 func TestCapabilitiesAdvertiseAgentRunOperations(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	recorder := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	var document kernelapi.CapabilityDocument
@@ -213,7 +214,7 @@ func TestAgentRunSearchQueryValidation(t *testing.T) {
 }
 
 func TestTeamWorkCapabilityRequiresExplicitCapableHost(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	hasTeamWork := func() bool {
 		response := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")

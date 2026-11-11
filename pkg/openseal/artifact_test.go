@@ -6,11 +6,11 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
 func TestEngineExposesArtifactEvidenceCatalog(t *testing.T) {
-	engine, err := New(WithStore(runtime.NewMemoryStore()))
+	engine, err := New(WithStore(runtimetest.NewKernelStore(t)))
 	if err != nil {
 		t.Fatal(err)
 	}

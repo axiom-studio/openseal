@@ -130,7 +130,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 
 func TestLinkRunbooks(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "links"}
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{

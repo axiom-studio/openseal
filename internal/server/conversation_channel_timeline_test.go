@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestChannelTimelineQueryRejectsAmbiguousValues(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	service := runtime.NewConversationService(store)
 	conversation, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{
 		Scope: runtime.Scope{Kind: "tenant", ID: "one"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"},

@@ -7,22 +7,23 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
 // conversationWriteCountingStore counts conversation creation attempts.
 type conversationWriteCountingStore struct {
-	*runtime.MemoryStore
+	*runtime.SQLiteStore
 	creates atomic.Int64
 }
 
 func (s *conversationWriteCountingStore) CreateConversation(ctx context.Context, conversation *runtime.Conversation, key string) (*runtime.Conversation, bool, error) {
 	s.creates.Add(1)
-	return s.MemoryStore.CreateConversation(ctx, conversation, key)
+	return s.SQLiteStore.CreateConversation(ctx, conversation, key)
 }
 
 func controlConversationFixture(t *testing.T) (*Engine, *conversationWriteCountingStore, SkillScope, *AgentDefinition) {
 	t.Helper()
-	store := &conversationWriteCountingStore{MemoryStore: runtime.NewMemoryStore()}
+	store := &conversationWriteCountingStore{SQLiteStore: runtimetest.NewKernelStore(t)}
 	engine, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

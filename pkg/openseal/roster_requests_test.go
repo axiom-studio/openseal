@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
 // A conversation's requests are listed by the umbrella that owns it: the
@@ -14,7 +15,7 @@ import (
 // chat. Nobody else lists them, not even a Team member under its own Agent.
 func TestRequestsAreListedByTheConversationUmbrella(t *testing.T) {
 	ctx := t.Context()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	engine, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

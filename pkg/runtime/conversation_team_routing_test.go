@@ -13,7 +13,7 @@ func teamRoutingAgent(id string) ConversationParticipant {
 }
 
 func TestTeamRoutingAddressingOrder(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: Scope{Kind: "tenant", ID: "routing"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"},

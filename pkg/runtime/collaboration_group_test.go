@@ -12,7 +12,6 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 		name string
 		open func(*testing.T) (CollaborationKernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (CollaborationKernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (CollaborationKernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "grouped-collaboration.db"))
 			if err != nil {
@@ -102,7 +101,7 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 
 func TestGroupedAgentRequestsRecordLosingCompletionWithoutSecondWake(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "any-fan-in"}
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -164,7 +163,7 @@ func TestGroupedAgentRequestsRecordLosingCompletionWithoutSecondWake(t *testing.
 
 func TestGroupedAgentRequestRejectionFailsRequiredFanIn(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "reject-fan-in"}
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{

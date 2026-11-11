@@ -37,7 +37,6 @@ func workerLoopStores() []struct {
 		name  string
 		store func(*testing.T) KernelStore
 	}{
-		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "workers.db"))
 			if err != nil {
@@ -121,7 +120,7 @@ func TestAgentRunWorkerDrivesRunLoopAcrossClaims(t *testing.T) {
 
 // A binding without a step producer cannot run and fails the Run.
 func TestAgentRunWorkerFailsRunWithoutStepProducer(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{

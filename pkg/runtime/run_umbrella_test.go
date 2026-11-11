@@ -80,7 +80,7 @@ func newUmbrellaFixture(t *testing.T) (*umbrellaCatalog, Scope) {
 
 func umbrellaRunActions(t *testing.T, catalog *umbrellaCatalog, run *AgentRun) []string {
 	t.Helper()
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}

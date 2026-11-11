@@ -338,12 +338,10 @@ func TestGovernedToolViewsReadsRunCallsInPathOrder(t *testing.T) {
 	}
 
 	// The store-backed loader returns the same views.
-	store := NewMemoryStore()
-	store.mu.Lock()
+	store := newTestKernelStore(t)
 	for _, call := range f.calls {
-		store.saveMemoryActionCallLocked(portfolioKey(call.Scope, call.ID), call)
+		putStoredAction(t, store, call)
 	}
-	store.mu.Unlock()
 	loaded, err := loadGovernedToolViews(context.Background(), store, f.run.Scope, f.path, f.run.ID)
 	if err != nil {
 		t.Fatal(err)

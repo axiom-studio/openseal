@@ -12,7 +12,7 @@ import (
 )
 
 func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
-	service := NewConversationService(NewMemoryStore())
+	service := NewConversationService(newTestKernelStore(t))
 	scope := Scope{Kind: "tenant", ID: "one"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: owner.ID}}
@@ -91,15 +91,13 @@ func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
 // TestConversationHistoryStores checks the conversation-scoped approval and
 // Run listings on every store, with approvals proposed by loop steps.
 func TestConversationHistoryStores(t *testing.T) {
-	for _, name := range []string{"memory", "sqlite", "postgres"} {
+	for _, name := range []string{"sqlite", "postgres"} {
 		t.Run(name, func(t *testing.T) {
 			var store interface {
 				KernelStore
 				ActionStore
 			}
 			switch name {
-			case "memory":
-				store = NewMemoryStore()
 			case "sqlite":
 				s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "history.db"))
 				if err != nil {

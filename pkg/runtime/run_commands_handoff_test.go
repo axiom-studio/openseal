@@ -19,7 +19,6 @@ type handoffCommandTestStore interface {
 
 func forHandoffCommandStores(t *testing.T, test func(*testing.T, handoffCommandTestStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) { test(t, NewMemoryStore()) })
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "handoff.db"))
 		if err != nil {
@@ -745,5 +744,5 @@ func TestRunCommandsHandoffUnavailableReceiptReaderFailsClosed(t *testing.T) {
 
 // Keep the fixture's composed backend contract checked without widening the
 // production RunCommandStore interface for a test-only handoff dependency.
-var _ handoffCommandTestStore = (*MemoryStore)(nil)
+var _ handoffCommandTestStore = (*SQLiteStore)(nil)
 var _ handoffCommandTestStore = (*SQLiteStore)(nil)

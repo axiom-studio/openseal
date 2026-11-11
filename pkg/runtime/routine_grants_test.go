@@ -21,7 +21,7 @@ func (r routineOwnerAddressesForTest) RoutineOwnerAddresses(_ context.Context, _
 }
 
 type routineGrantFixtureState struct {
-	store     *MemoryStore
+	store     *SQLiteStore
 	run       *AgentRun
 	catalog   *skill.Catalog
 	bound     *skill.BoundAction
@@ -34,7 +34,7 @@ type routineGrantFixtureState struct {
 
 func routineGrantFixture(t *testing.T) *routineGrantFixtureState {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, catalog, bound, args := scheduledTaskFixture(t, store)
 	recipients := map[string]interface{}{"type": "string"}
 	mail := &skill.Definition{

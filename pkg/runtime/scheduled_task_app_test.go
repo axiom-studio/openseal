@@ -8,7 +8,7 @@ import (
 // A routine may keep an app from its own chat up to date; each occurrence is
 // told which app to save to. An app from another chat or owner is refused.
 func TestScheduledTaskKeepsOnlyItsChatsAppUpToDate(t *testing.T) {
-	for _, kind := range []string{"memory", "sqlite"} {
+	for _, kind := range []string{"sqlite"} {
 		t.Run(kind, func(t *testing.T) {
 			store := routineTestStore(t, kind)
 			run, _, _, args := scheduledTaskFixture(t, store)

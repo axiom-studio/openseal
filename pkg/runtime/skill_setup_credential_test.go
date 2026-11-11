@@ -2,8 +2,9 @@ package runtime
 
 import (
 	"context"
-	"github.com/axiom-studio/openseal/pkg/skill"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T) {
@@ -20,7 +21,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			store := NewMemoryStore()
+			store := newTestKernelStore(t)
 			scope := Scope{Kind: "tenant", ID: "a"}
 			catalog := skillActionCatalog(t, ctx, scope, "agent")
 			provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {

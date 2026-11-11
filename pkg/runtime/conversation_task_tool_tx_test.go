@@ -21,7 +21,6 @@ type conversationTaskToolTestStore interface {
 // OPENSEAL_TEST_POSTGRES_DSN) Postgres.
 func forConversationTaskToolStores(t *testing.T, test func(*testing.T, conversationTaskToolTestStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) { test(t, NewMemoryStore()) })
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-task-tool.db"))
 		if err != nil {
@@ -348,7 +347,7 @@ func TestStartTaskCompletesSourceAtomically(t *testing.T) {
 }
 
 func TestConversationTaskToolRecordValidation(t *testing.T) {
-	fixture := conversationTaskToolRecord(t, NewMemoryStore(), "validate")
+	fixture := conversationTaskToolRecord(t, newTestKernelStore(t), "validate")
 	mutate := map[string]func(*ConversationTaskCreateRecord){
 		"transition without entry id": func(r *ConversationTaskCreateRecord) {
 			task := *r.Task

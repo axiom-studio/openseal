@@ -25,7 +25,6 @@ func forEachDependencySessionStore(t *testing.T, fn func(f *sessionConformance, 
 		name string
 		open func(t *testing.T) dependencySessionStore
 	}{
-		{"memory", func(*testing.T) dependencySessionStore { return NewMemoryStore() }},
 		{"sqlite", func(t *testing.T) dependencySessionStore { return openTestSQLiteSessionStore(t) }},
 		{"postgres", openDependencySessionPostgres},
 	}

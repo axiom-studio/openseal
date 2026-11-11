@@ -10,11 +10,12 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	service := runtime.NewConversationService(store)
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	channel, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})
@@ -69,7 +70,7 @@ func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.
 }
 
 func TestChannelPostDispatchRunsAfterDesktopAuth(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	service := runtime.NewConversationService(store)
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	channel, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})

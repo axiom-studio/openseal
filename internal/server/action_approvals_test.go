@@ -11,13 +11,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
 
 func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *testing.T) {
 	t.Parallel()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	proposal := createActionApprovalFixture(t, store)
 	api := NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
@@ -106,10 +107,10 @@ func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *test
 	}
 }
 
-func createActionApprovalFixture(t *testing.T, store *runtime.MemoryStore) *runtime.ActionProposalResult {
+func createActionApprovalFixture(t *testing.T, store *runtime.SQLiteStore) *runtime.ActionProposalResult {
 	return createActionApprovalFixtureWithApprover(t, store, runtime.ApprovalPrincipal{Type: "user", ID: "alice"})
 }
-func createActionApprovalFixtureWithApprover(t *testing.T, store *runtime.MemoryStore, approver runtime.ApprovalPrincipal) *runtime.ActionProposalResult {
+func createActionApprovalFixtureWithApprover(t *testing.T, store *runtime.SQLiteStore, approver runtime.ApprovalPrincipal) *runtime.ActionProposalResult {
 	t.Helper()
 	now := time.Now().UTC()
 	scope := runtime.Scope{Kind: "local", ID: "workspace"}
@@ -172,7 +173,7 @@ func approvalFixtureRunEvent(scope runtime.Scope, runID, id string, now time.Tim
 func TestDesktopApprovalDecisionsUseCanonicalStateAndReplay(t *testing.T) {
 	for _, decision := range []runtime.ApprovalDecision{runtime.ApprovalDecisionApprove, runtime.ApprovalDecisionReject, runtime.ApprovalDecisionRequestChanges} {
 		t.Run(string(decision), func(t *testing.T) {
-			store := runtime.NewMemoryStore()
+			store := runtimetest.NewKernelStore(t)
 			fixture := createActionApprovalFixture(t, store)
 			// The fixture names Alice; desktop ownership must not grant her authority.
 			api := NewServer(store, zap.NewNop().Sugar())
@@ -222,13 +223,13 @@ func TestDesktopApprovalDecisionsUseCanonicalStateAndReplay(t *testing.T) {
 }
 
 type desktopEligibleFixture struct {
-	store    *runtime.MemoryStore
+	store    *runtime.SQLiteStore
 	proposal *runtime.ActionProposalResult
 }
 
 func createDesktopEligibleApprovalFixture(t *testing.T) desktopEligibleFixture {
 	// A separate store helper keeps both fixtures on the normal proposal transaction.
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	return desktopEligibleFixture{store: store, proposal: createActionApprovalFixtureWithApprover(t, store, runtime.ApprovalPrincipal{Type: "role", ID: "operator"})}
 }
 

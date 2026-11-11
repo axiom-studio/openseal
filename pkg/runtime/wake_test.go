@@ -14,7 +14,6 @@ func TestWakeSignalsRequeueRunsExactlyOnce(t *testing.T) {
 		name  string
 		store func(*testing.T) KernelStore
 	}{
-		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "wake.db"))
 			if err != nil {

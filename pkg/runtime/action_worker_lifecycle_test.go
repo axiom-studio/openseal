@@ -211,7 +211,6 @@ func forActionLifecycleStores(t *testing.T, test func(*testing.T, KernelStore)) 
 		name string
 		open func(*testing.T) KernelStore
 	}{
-		{name: "memory", open: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", open: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "action-lifecycle.db"))
 			if err != nil {

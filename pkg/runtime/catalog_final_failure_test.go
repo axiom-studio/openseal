@@ -29,7 +29,7 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				Goal: "Explain the stopped attempt", Context: map[string]interface{}{},
 				FailureExplanation: &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "action_failed", Message: "The image service rejected the request."},
 			}
-			config := loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{})
+			config := loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{})
 			config.SkillHosts = SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {
 				t.Fatal("failure explanation attempted runtime preparation")
 				return nil, nil

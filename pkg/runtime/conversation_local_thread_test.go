@@ -5,7 +5,7 @@ import (
 )
 
 func TestLocalConversationThreadScopesFollowUpsAndPreservesIndependentWork(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "local-threads"}
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{

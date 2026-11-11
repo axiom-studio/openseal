@@ -13,7 +13,7 @@ import (
 )
 
 func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "scheduler"}
 	service := NewConversationService(store)
@@ -166,7 +166,7 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 }
 
 func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "canceled-conversation"}
 	service := NewConversationService(store)
@@ -223,7 +223,7 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	}
 }
 
-func mustConversationRunScheduler(t *testing.T, store *MemoryStore) *ConversationRunScheduler {
+func mustConversationRunScheduler(t *testing.T, store *SQLiteStore) *ConversationRunScheduler {
 	t.Helper()
 	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
 	if err != nil {
@@ -233,7 +233,7 @@ func mustConversationRunScheduler(t *testing.T, store *MemoryStore) *Conversatio
 }
 
 func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "legacy-round"}
 	service := NewConversationService(store)

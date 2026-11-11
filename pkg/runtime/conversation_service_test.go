@@ -9,7 +9,7 @@ import (
 
 func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 	t.Parallel()
-	service := NewConversationService(NewMemoryStore())
+	service := NewConversationService(newTestKernelStore(t))
 	origin := &ConversationReference{Kind: ConversationReferenceObjective, ID: "objective-reddit-research"}
 
 	conversation, replayed, err := service.CreateConversation(context.Background(), CreateConversationRequest{
@@ -29,7 +29,7 @@ func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 
 func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 	t.Parallel()
-	service := NewConversationService(NewMemoryStore())
+	service := NewConversationService(newTestKernelStore(t))
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
@@ -60,7 +60,7 @@ func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 }
 
 func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
-	service := NewConversationService(NewMemoryStore())
+	service := NewConversationService(newTestKernelStore(t))
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "visibility"}
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Private coordination", IdempotencyKey: "channel"})
@@ -123,7 +123,7 @@ func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
 
 func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return now }

@@ -28,7 +28,6 @@ type conversationTaskClarificationFixture struct {
 
 func forConversationTaskClarificationStores(t *testing.T, test func(*testing.T, conversationTaskClarificationStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) { test(t, NewMemoryStore()) })
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "task-clarification.db"))
 		if err != nil {

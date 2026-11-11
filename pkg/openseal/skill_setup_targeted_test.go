@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
 // A builder's setup card for another Agent is shown in the builder's chat, so
@@ -14,7 +15,7 @@ import (
 // records the target's binding.
 func TestTargetedSkillSetupResolvesFromTheBuildersChat(t *testing.T) {
 	ctx := context.Background()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	e, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

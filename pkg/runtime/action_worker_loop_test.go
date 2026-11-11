@@ -445,8 +445,8 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 		t.Run(boundary, func(t *testing.T) {
 			forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
 				if boundary == "before_claim" {
-					if _, ok := store.(*MemoryStore); !ok {
-						t.Skip("the store-side claim gate is seeded through the memory store")
+					if _, ok := store.(*SQLiteStore); !ok {
+						t.Skip("the store-side claim gate is seeded through the SQLite store")
 					}
 				}
 				f := newLoopWorkerFixture(t, store, &BudgetPolicy{MaxActions: 10})
@@ -455,13 +455,10 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				gate := &SkillRuntimeMaintenance{Scope: f.scope, SkillID: "release", OperationID: "upgrade-release", Owner: "controller", Active: true, Revision: 1}
 				wrapped := &loopMaintenanceStore{KernelStore: store, gate: gate, active: boundary != "after_catalog"}
 				if boundary == "before_claim" {
-					memory := store.(*MemoryStore)
-					memory.mu.Lock()
-					if memory.skillRuntimeMaintenance == nil {
-						memory.skillRuntimeMaintenance = make(map[string]*SkillRuntimeMaintenance)
+					sqlite := store.(*SQLiteStore)
+					if err := writeSkillRuntimeMaintenance(t.Context(), sqlite.db, "skill_runtime_maintenance", gate, false); err != nil {
+						t.Fatal(err)
 					}
-					memory.skillRuntimeMaintenance[skillRuntimeMaintenanceLockKey(f.scope, "release")] = cloneSkillRuntimeMaintenance(gate)
-					memory.mu.Unlock()
 				}
 				catalogCalls := 0
 				catalog := &actionRuntimeMaintenanceCatalog{ActionExecutionCatalog: f.catalog, calls: &catalogCalls}
@@ -499,10 +496,7 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				// Maintenance ends: the same call executes on resume.
 				wrapped.active = false
 				if boundary == "before_claim" {
-					memory := store.(*MemoryStore)
-					memory.mu.Lock()
-					delete(memory.skillRuntimeMaintenance, skillRuntimeMaintenanceLockKey(f.scope, "release"))
-					memory.mu.Unlock()
+					execStoreSQL(t, store.(*SQLiteStore), `DELETE FROM skill_runtime_maintenance WHERE scope_kind = ? AND scope_id = ? AND skill_id = ?`, f.scope.Kind, f.scope.ID, "release")
 				}
 				catalog.afterResolve = nil
 				f.clock = held.RetryAt
@@ -604,7 +598,7 @@ func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testin
 }
 
 func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)

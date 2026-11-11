@@ -13,7 +13,7 @@ import (
 
 func TestSkillReferenceUpgradeEstablishesLifecycleForWorkforceBinding(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	for _, version := range []string{"1.0.0", "1.1.0"} {
 		if err := catalog.Register(ctx, &skill.Definition{
@@ -61,7 +61,7 @@ func TestSkillReferenceUpgradeEstablishesLifecycleForWorkforceBinding(t *testing
 
 func TestSkillReferenceUpgradeMovesConversationAndCallbackAdaptersAtomically(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	for _, version := range []string{"1.0.0", "1.1.0"} {
 		conversationAdapter, err := capability.NormalizeConversationAdapter(skill.ConversationAdapter{
@@ -167,7 +167,7 @@ func TestCompatibleAdapterFeatureAdditionPreservesAuthority(t *testing.T) {
 
 func TestSkillReferenceUpgradeDropsActionsRemovedFromTarget(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	action := func(name string) skill.Action {
 		return skill.Action{
@@ -223,7 +223,7 @@ func TestSkillReferenceUpgradeDropsActionsRemovedFromTarget(t *testing.T) {
 
 func TestSkillReferenceUpgradeGrantActions(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	action := func(name string) skill.Action {
 		return skill.Action{

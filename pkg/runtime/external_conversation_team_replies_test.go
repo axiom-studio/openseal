@@ -14,7 +14,7 @@ import (
 // routed to two members, each with its own member Run.
 type teamChannelFixture struct {
 	t            *testing.T
-	store        *MemoryStore
+	store        *SQLiteStore
 	catalog      *skill.Catalog
 	endpoint     *ExternalConversationEndpoint
 	conversation *Conversation
@@ -29,7 +29,7 @@ var teamChannelMembers = []string{"agent-a", "agent-b"}
 func newTeamChannelFixture(t *testing.T, operations ...capability.ConversationDeliveryOperation) *teamChannelFixture {
 	t.Helper()
 	ctx := t.Context()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "support-team"}
 	catalog, endpoint := externalConversationEndpointFixtureOwnedBy(t, ctx, store, "slack", operations, owner)
 	conversations := NewConversationService(store)
@@ -201,7 +201,7 @@ func TestExternalTeamChannelRejectsUnverifiedMemberRun(t *testing.T) {
 
 // routingOverride serves a routing Run whose output a test changed.
 type routingOverride struct {
-	*MemoryStore
+	*SQLiteStore
 	routing *AgentRun
 }
 
@@ -209,7 +209,7 @@ func (s routingOverride) GetAgentRun(ctx context.Context, scope Scope, id string
 	if id == s.routing.ID {
 		return s.routing, nil
 	}
-	return s.MemoryStore.GetAgentRun(ctx, scope, id)
+	return s.SQLiteStore.GetAgentRun(ctx, scope, id)
 }
 
 func TestExternalTeamChannelForwardsMemberProgress(t *testing.T) {

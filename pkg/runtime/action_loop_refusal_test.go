@@ -67,7 +67,7 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 }
 
 func TestNewRefusedLoopCallDuplicateSuppressedSummary(t *testing.T) {
-	f := newLoopStoreFixture(t, NewMemoryStore())
+	f := newLoopStoreFixture(t, newTestKernelStore(t))
 	prior := f.propose(f.loopCall("prior"))
 	coordinator := NewActionCoordinator(f.store, f.store, nil, nil)
 	_, event, err := coordinator.NewRefusedLoopCall(refusedLoopCallRequest(f, prior, RefusedLoopCallDuplicateSuppressed))
@@ -87,7 +87,7 @@ func TestNewRefusedLoopCallDuplicateSuppressedSummary(t *testing.T) {
 }
 
 func TestRefusedLoopCallRequiresLiveLease(t *testing.T) {
-	f := newLoopStoreFixture(t, NewMemoryStore())
+	f := newLoopStoreFixture(t, newTestKernelStore(t))
 	prior := f.propose(f.loopCall("prior"))
 	coordinator := NewActionCoordinator(f.store, f.store, nil, nil)
 	req := refusedLoopCallRequest(f, prior, RefusedLoopCallRepeat)

@@ -9,9 +9,6 @@ import (
 
 func conversationTaskChangeStore(t *testing.T, backend string) KernelStore {
 	t.Helper()
-	if backend == "memory" {
-		return NewMemoryStore()
-	}
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "task-changes.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +47,7 @@ func changeRunByID(runs []*AgentRun, id string) *AgentRun {
 }
 
 func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			store := conversationTaskChangeStore(t, backend)
 			conversations := NewConversationService(store.(ConversationStore))
@@ -145,7 +142,7 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 }
 
 func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	conversations := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "task-thread-privacy"}
 	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
@@ -199,7 +196,7 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 }
 
 func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	source, turn, conversation, message := settledWorkerTaskFixture(t, store)
 	admitted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
@@ -259,7 +256,7 @@ func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
 }
 
 func TestConversationChangesIncludeCanonicalLocalRootedForeground(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			store := conversationTaskChangeStore(t, backend)
 			conversations := NewConversationService(store.(ConversationStore))

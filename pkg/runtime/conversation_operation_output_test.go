@@ -4,7 +4,7 @@ import "testing"
 
 func TestConversationOperationFailedHasNoSavedOutput(t *testing.T) {
 	failed := &AgentRun{ID: "operation", Status: AgentRunStatusFailed, Output: map[string]interface{}{"summary": "partial draft"}}
-	if output, err := conversationOperationSavedOutput(t.Context(), NewMemoryStore(), failed); err != nil || output != "" {
+	if output, err := conversationOperationSavedOutput(t.Context(), newTestKernelStore(t), failed); err != nil || output != "" {
 		t.Fatalf("failed operation output = %q, %v", output, err)
 	}
 }

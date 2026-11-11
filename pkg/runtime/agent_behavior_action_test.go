@@ -134,7 +134,7 @@ func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing
 
 func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	agents := agentBehaviorActionRegistry(t, ctx, scope, nil)
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -244,7 +244,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 // A Team member's Run amends that member exactly as its own chat would.
 func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	agents := agentBehaviorActionRegistry(t, ctx, scope, nil)
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -288,7 +288,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	}
 	team := &kernelteam.Deployment{ID: "research-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "other", AgentDeploymentID: "writer"}}}
-	validator.SetTeamRoster(teamRosterPortfolio{MemoryStore: store, team: team})
+	validator.SetTeamRoster(teamRosterPortfolio{SQLiteStore: store, team: team})
 	if _, err := propose("team-rename-removed"); err == nil || !strings.Contains(err.Error(), "is not on the active Team roster") {
 		t.Fatalf("proposal from an Agent off the Team roster = %v, want the roster rejection", err)
 	}
@@ -307,7 +307,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	if err != nil || resolved.Call.Status != ActionCallStatusReady {
 		t.Fatalf("resolve = %#v, %v", resolved, err)
 	}
-	dispatcher, err := NewAgentBehaviorActionDispatcher(teamRosterPortfolio{MemoryStore: store, team: team}, agents, nil)
+	dispatcher, err := NewAgentBehaviorActionDispatcher(teamRosterPortfolio{SQLiteStore: store, team: team}, agents, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 
 func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	agents := agentBehaviorActionRegistry(t, ctx, scope, &workforce.AmendmentPolicy{
 		AgentMayPropose: true, AllowedFields: []string{"systemPrompt"}, RequiresApproval: true,
@@ -569,7 +569,7 @@ func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T)
 	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", "1.3.1"} {
 		t.Run(version, func(t *testing.T) {
 			ctx := t.Context()
-			store := NewMemoryStore()
+			store := newTestKernelStore(t)
 			conversation := approvalModeConversation(t, store)
 			setApprovalModeForTest(t, NewConversationApprovalModeService(store), conversation, ConversationApprovalSkip)
 			// Published versions predate review: always, so their stored
@@ -638,10 +638,10 @@ var legacyAgentManagementArguments = map[string]map[string]interface{}{
 // The roster can change while a proposal waits for approval, so dispatch
 // rechecks it; an Agent's own Run is its roster of one.
 func TestAgentBehaviorRunOnRosterChecksTheCurrentTeamRoster(t *testing.T) {
-	ctx, store, scope := context.Background(), NewMemoryStore(), Scope{Kind: "tenant", ID: "tenant-a"}
+	ctx, store, scope := context.Background(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "tenant-a"}
 	team := &kernelteam.Deployment{ID: "research-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "member", AgentDeploymentID: "researcher"}}}
-	teams := teamRosterPortfolio{MemoryStore: store, team: team}
+	teams := teamRosterPortfolio{SQLiteStore: store, team: team}
 	member := &AgentRun{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "researcher"}
 	if err := agentBehaviorRunOnRoster(ctx, teams, member); err != nil {
 		t.Fatalf("roster member rejected: %v", err)

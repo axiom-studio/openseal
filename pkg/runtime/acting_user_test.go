@@ -54,7 +54,7 @@ func TestAgentRunActingUserValidation(t *testing.T) {
 
 func TestAgentRunReplayActingUser(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewRunCommandService(store)
 	scope := Scope{Kind: "tenant", ID: "1"}
 	request := func(key, actingUser string) CreateAgentRunRequest {
@@ -89,7 +89,6 @@ func TestAgentRunReplayActingUser(t *testing.T) {
 
 func TestAgentRunActingUserIsImmutable(t *testing.T) {
 	stores := map[string]func(*testing.T) KernelStore{
-		"memory": func(*testing.T) KernelStore { return NewMemoryStore() },
 		"sqlite": func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "acting-user.db"))
 			if err != nil {

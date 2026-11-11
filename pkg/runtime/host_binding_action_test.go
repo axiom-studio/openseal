@@ -62,7 +62,7 @@ func (durableCatalog) UsesDurableBindings() bool { return true }
 // A connected app's tool is proposed, fenced and executed for the run it was
 // supplied to, with no stored binding row; another user's run cannot reach it.
 func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	claimed := claimedOwnedActionRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
 	// Another run in the workspace, e.g. another user's chat.
@@ -114,7 +114,7 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 // The durable fence admits a host binding only without a stored row of the
 // same identity, and only while the call matches it exactly.
 func TestActionProposalFenceChecksHostBindings(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	claimed := claimedOwnedActionRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
 	catalog := hostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})
@@ -252,7 +252,7 @@ func TestRoutineGrantsCoverHostBindingTools(t *testing.T) {
 // this run, and the refusal names the connected tools to use instead.
 func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "a"}
 	catalog := skillActionCatalog(t, ctx, scope, "agent")
 	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")

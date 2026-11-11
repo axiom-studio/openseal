@@ -29,7 +29,6 @@ func (f *explanationFinal) Deliver(context.Context, FinalDelivery) (FinalDeliver
 
 func explanationStores(t *testing.T, test func(*testing.T, KernelStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) { test(t, NewMemoryStore()) })
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "run-loop-explanation.db"))
 		if err != nil {

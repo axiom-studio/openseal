@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-func TestConversationActiveRunsMemoryTracksCanonicalRootChanges(t *testing.T) {
-	store := NewMemoryStore()
+func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "active-root"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
 	at := time.Now()
@@ -47,7 +47,7 @@ func TestConversationActiveRunsMemoryTracksCanonicalRootChanges(t *testing.T) {
 	child.Revision++
 	updateConversationTaskSQLRun(t, store, child, child.Revision-1)
 	check("moved", 0)
-	if len(store.conversationActiveRunRoots) != 0 || len(store.conversationActiveRunRootKeys) != 0 {
+	if countStoreRows(t, store, "conversation_active_runs") != 0 {
 		t.Fatal("terminal children retained active root lookup entries")
 	}
 }

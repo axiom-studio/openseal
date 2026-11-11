@@ -12,9 +12,6 @@ import (
 
 func TestSkillReferenceUpgradeStoreRollsBackEveryResourceOnConflict(t *testing.T) {
 	tests := map[string]func(*testing.T) SkillReferenceUpgradeStore{
-		"memory": func(*testing.T) SkillReferenceUpgradeStore {
-			return NewMemoryStore()
-		},
 		"sqlite": func(t *testing.T) SkillReferenceUpgradeStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "upgrade.db"))
 			if err != nil {

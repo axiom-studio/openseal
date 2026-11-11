@@ -13,7 +13,6 @@ func TestObjectiveBudgetAllocatesConcurrentTopLevelRunsAtomically(t *testing.T) 
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-budget.db"))
 			if err != nil {
@@ -80,7 +79,6 @@ func TestObjectiveBudgetRejectsConcurrentOverAllocation(t *testing.T) {
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-budget-race.db"))
 			if err != nil {

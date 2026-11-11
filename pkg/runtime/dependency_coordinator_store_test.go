@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func createDependencySource(t *testing.T, store *MemoryStore, scope Scope, id string) *AgentRun {
+func createDependencySource(t *testing.T, store *SQLiteStore, scope Scope, id string) *AgentRun {
 	t.Helper()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := &AgentRun{
@@ -24,10 +24,10 @@ func createDependencySource(t *testing.T, store *MemoryStore, scope Scope, id st
 	return run
 }
 
-func TestMemoryDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
+func TestDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	createDependencySource(t, store, scope, "source-all")
 	coordinator := NewDependencyCoordinator(store)
 	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 12, 1, 0, 0, time.UTC) }
@@ -94,10 +94,10 @@ func TestMemoryDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestMemoryDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
+func TestDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "concurrent"}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	createDependencySource(t, store, scope, "source-any")
 	coordinator := NewDependencyCoordinator(store)
 	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC) }
@@ -163,10 +163,10 @@ func TestMemoryDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testin
 	}
 }
 
-func TestMemoryDependencyCoordinatorOptionalCompletionContinuesAfterWake(t *testing.T) {
+func TestDependencyCoordinatorOptionalCompletionContinuesAfterWake(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "optional"}
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	createDependencySource(t, store, scope, "source-optional")
 	coordinator := NewDependencyCoordinator(store)
 	optional := false

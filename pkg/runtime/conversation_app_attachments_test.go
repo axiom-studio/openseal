@@ -28,7 +28,7 @@ func (s *conversationAppContent) Open(_ context.Context, _ Scope, ref string) (i
 	return io.NopCloser(strings.NewReader(text)), nil
 }
 
-func storeConversationApp(t *testing.T, store *MemoryStore, content *conversationAppContent, scope Scope, version int64, files []appproject.File) {
+func storeConversationApp(t *testing.T, store *SQLiteStore, content *conversationAppContent, scope Scope, version int64, files []appproject.File) {
 	t.Helper()
 	project, err := appproject.New("Tracker", files)
 	if err != nil {
@@ -66,7 +66,7 @@ func appMessageText(t *testing.T, got conversationMessageAttachments) string {
 }
 
 func TestConversationAppAttachmentIsTheReferencedVersion(t *testing.T) {
-	store, content := NewMemoryStore(), &conversationAppContent{byRef: map[string]string{}}
+	store, content := newTestKernelStore(t), &conversationAppContent{byRef: map[string]string{}}
 	scope := conversationTestArtifact().Scope
 	for version, label := range []string{"first", "second", "third"} {
 		storeConversationApp(t, store, content, scope, int64(version+1), []appproject.File{appEntry(label), {Path: "src/styles.css", Content: "h1 { color: teal; }"}})
@@ -89,7 +89,7 @@ func TestConversationAppAttachmentIsTheReferencedVersion(t *testing.T) {
 }
 
 func TestConversationAppAttachmentRespectsItsBudget(t *testing.T) {
-	store, content := NewMemoryStore(), &conversationAppContent{byRef: map[string]string{}}
+	store, content := newTestKernelStore(t), &conversationAppContent{byRef: map[string]string{}}
 	scope := conversationTestArtifact().Scope
 	files := []appproject.File{appEntry("big"), {Path: "src/small.ts", Content: "export const small = 1;\n"}}
 	for _, name := range []string{"a", "b", "c"} {
@@ -113,7 +113,7 @@ func TestConversationAppAttachmentRespectsItsBudget(t *testing.T) {
 }
 
 func TestConversationAppAttachmentRejectsOtherScopes(t *testing.T) {
-	store, content := NewMemoryStore(), &conversationAppContent{byRef: map[string]string{}}
+	store, content := newTestKernelStore(t), &conversationAppContent{byRef: map[string]string{}}
 	home := conversationTestArtifact().Scope
 	other := Scope{Kind: home.Kind, ID: "other"}
 	storeConversationApp(t, store, content, home, 1, []appproject.File{appEntry("home")})

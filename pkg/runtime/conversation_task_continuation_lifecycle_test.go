@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func continuationLifecycleFixture(t *testing.T, store *MemoryStore, id string) (*AgentRun, *Conversation, *ChannelMessage) {
+func continuationLifecycleFixture(t *testing.T, store *SQLiteStore, id string) (*AgentRun, *Conversation, *ChannelMessage) {
 	t.Helper()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: id}
@@ -29,25 +29,21 @@ func continuationLifecycleFixture(t *testing.T, store *MemoryStore, id string) (
 	return result.Run, conversation, message
 }
 
-func backdateContinuationLifecycleRun(t *testing.T, store *MemoryStore, run *AgentRun, createdAt time.Time) *AgentRun {
+func backdateContinuationLifecycleRun(t *testing.T, store *SQLiteStore, run *AgentRun, createdAt time.Time) *AgentRun {
 	t.Helper()
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	current := cloneAgentRun(store.agentRuns[portfolioKey(run.Scope, run.ID)])
+	current := getStoredRun(t, store, run.Scope, run.ID)
 	current.CreatedAt = createdAt
-	store.saveMemoryAgentRunLocked(portfolioKey(run.Scope, run.ID), current)
+	putStoredRun(t, store, current)
 	return cloneAgentRun(current)
 }
 
 func TestConversationTaskContinuationReconcilesQueuedRunFromCreationTime(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, conversation, _ := continuationLifecycleFixture(t, store, "queued-continuation")
 	now := time.Now().UTC()
 	run = backdateContinuationLifecycleRun(t, store, run, now.Add(-ConversationTaskForegroundTimeout))
 	// A fresh activity timestamp is not a new foreground deadline.
-	store.mu.Lock()
-	store.agentRuns[portfolioKey(run.Scope, run.ID)].UpdatedAt = now
-	store.mu.Unlock()
+	rewriteStoredPayload(t, store, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.UpdatedAt = now })
 	reconciler, err := NewConversationTaskContinuationReconciler(store)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +72,7 @@ func TestAgentRunWorkerKeepsForegroundDuringSlowResolution(t *testing.T) {
 func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool) {
 	t.Helper()
 	synctest.Test(t, func(t *testing.T) {
-		store := NewMemoryStore()
+		store := newTestKernelStore(t)
 		run, conversation, trigger := continuationLifecycleFixture(t, store, "slow-foreground")
 		claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 		if err != nil || claimed == nil {
@@ -132,7 +128,7 @@ func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool)
 	})
 }
 
-func assertConversationRunStillForeground(t *testing.T, store *MemoryStore, original *AgentRun, conversation *Conversation, trigger *ChannelMessage, status AgentRunStatus) *AgentRun {
+func assertConversationRunStillForeground(t *testing.T, store *SQLiteStore, original *AgentRun, conversation *Conversation, trigger *ChannelMessage, status AgentRunStatus) *AgentRun {
 	t.Helper()
 	current, err := store.GetAgentRun(t.Context(), original.Scope, original.ID)
 	if err != nil || current == nil || current.Status != status || current.Kind != RunKindConversation || current.ConcurrencyKey != original.ConcurrencyKey || current.Context[ConversationTaskContextKey] != nil {
@@ -157,7 +153,7 @@ func assertConversationRunStillForeground(t *testing.T, store *MemoryStore, orig
 }
 
 type promotionTurnPublisher struct {
-	store *MemoryStore
+	store *SQLiteStore
 	calls int
 }
 
@@ -171,7 +167,7 @@ func (p *promotionTurnPublisher) PublishTurnOutput(ctx context.Context, run *Age
 }
 
 func TestAgentRunWorkerContinuationAbsorbsNativeTaskProposal(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	run, conversation, _ := continuationLifecycleFixture(t, store, "native-continuation")
 	run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-ConversationTaskForegroundTimeout-time.Second))
 	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
@@ -214,7 +210,7 @@ func TestAgentRunWorkerKeepsForegroundDuringSlowTurn(t *testing.T) {
 
 func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		store := NewMemoryStore()
+		store := newTestKernelStore(t)
 		run, conversation, trigger := continuationLifecycleFixture(t, store, "limited-foreground")
 		var modelCalls atomic.Int32
 		pool := workerTaskPool(t, store, run.Scope, &workerTaskProducer{reply: func(context.Context, int, StepInput) (StepOutput, error) {
@@ -245,7 +241,7 @@ func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *
 func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 	for _, status := range []AgentRunStatus{AgentRunStatusQueued, AgentRunStatusRunning} {
 		t.Run(string(status), func(t *testing.T) {
-			store := NewMemoryStore()
+			store := newTestKernelStore(t)
 			run, conversation, trigger := continuationLifecycleFixture(t, store, "reconcile-foreground")
 			run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-time.Minute))
 			if status == AgentRunStatusRunning {

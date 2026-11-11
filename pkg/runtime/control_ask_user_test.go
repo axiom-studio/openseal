@@ -310,7 +310,7 @@ func TestAskUserAnswerResumesWithAnswerAndConsumesIntervention(t *testing.T) {
 }
 
 func TestAskUserResumeWithoutAnswerRepostsAndReparks(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	f := claimedForegroundRun(t, store)
 	call := newAskUserCall(t, store, f.run, "foreground-worker", askUserTestQuestion)
 	// Crash after the entry transition, before the post and the park: the
@@ -371,7 +371,7 @@ func TestAskUserQuestionReconcilerRepostsFromEntry(t *testing.T) {
 }
 
 func TestAskUserAnswerFromOtherActorIgnored(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	f := claimedForegroundRun(t, store)
 	parked, call := askUserParked(t, store, f.run, "foreground-worker", askUserTestQuestion)
 	f.run = parked

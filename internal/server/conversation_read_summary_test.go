@@ -9,11 +9,12 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestChannelListReadPositionsAreScopedOptionalAndReadOnly(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	service := runtime.NewConversationService(store)
 	local := runtime.Scope{Kind: "local", ID: "default"}
 	reader := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "local-operator"}
@@ -72,13 +73,13 @@ func TestChannelListReadPositionsAreScopedOptionalAndReadOnly(t *testing.T) {
 	}
 }
 
-type failingReadSummaryStore struct{ *runtime.MemoryStore }
+type failingReadSummaryStore struct{ *runtime.SQLiteStore }
 
 func (s failingReadSummaryStore) GetConversationCursor(context.Context, runtime.Scope, string, runtime.ConversationParticipant) (*runtime.ConversationCursor, error) {
 	return nil, errors.New("read storage unavailable")
 }
 func TestChannelListDoesNotInventUnreadCountsOnCursorFailure(t *testing.T) {
-	store := failingReadSummaryStore{runtime.NewMemoryStore()}
+	store := failingReadSummaryStore{runtimetest.NewKernelStore(t)}
 	service := runtime.NewConversationService(store)
 	if _, _, err := service.CreateConversation(context.Background(), runtime.CreateConversationRequest{Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"}); err != nil {
 		t.Fatal(err)

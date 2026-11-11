@@ -12,9 +12,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 		name  string
 		store KernelStore
 		close func()
-	}{
-		{name: "memory", store: NewMemoryStore(), close: func() {}},
-	}
+	}{}
 	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "activity.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +88,7 @@ func TestActivityEventRejectsInvalidUsageDelta(t *testing.T) {
 }
 
 func TestActivityFeedRequiresSelectorAndRejectsInvalidCursor(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewRunActivityService(store, store)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	if _, err := service.ListActivityFeed(context.Background(), ActivityFeedRequest{Scope: scope}); err == nil {
@@ -105,7 +103,7 @@ func TestActivityFeedRequiresSelectorAndRejectsInvalidCursor(t *testing.T) {
 }
 
 func TestExistingRunActivityStreamKeepsSequenceCursor(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
 	if err := store.CreateAgentRun(context.Background(), activityFeedRun("run", scope, "agent", now)); err != nil {

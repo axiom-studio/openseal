@@ -8,7 +8,6 @@ import (
 
 func TestAgentRunCreatedDescendingOrderPrecedesPagination(t *testing.T) {
 	stores := map[string]func(*testing.T) PortfolioStore{
-		"memory": func(*testing.T) PortfolioStore { return NewMemoryStore() },
 		"sqlite": func(t *testing.T) PortfolioStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
 			if err != nil {
@@ -47,9 +46,9 @@ func TestAgentRunCreatedDescendingOrderPrecedesPagination(t *testing.T) {
 }
 
 func TestAgentRunSearchPrecedesPaginationAndIsLiteral(t *testing.T) {
-	for _, kind := range []string{"memory", "sqlite"} {
+	for _, kind := range []string{"sqlite"} {
 		t.Run(kind, func(t *testing.T) {
-			var store PortfolioStore = NewMemoryStore()
+			var store PortfolioStore = newTestKernelStore(t)
 			if kind == "sqlite" {
 				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "search.db"))
 				if err != nil {

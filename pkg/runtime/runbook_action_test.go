@@ -46,7 +46,7 @@ func TestRunbookScheduleReplacementContractRequiresTimingChange(t *testing.T) {
 
 func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -136,7 +136,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 
 func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -189,7 +189,7 @@ func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *test
 
 func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -288,7 +288,7 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 
 func TestRunbookScheduleReplacementRejectsActiveOrForeignActivation(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	rowan := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	other := ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}
@@ -318,7 +318,7 @@ func TestRunbookScheduleReplacementRejectsActiveOrForeignActivation(t *testing.T
 
 func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	rowan := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	other := ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}
@@ -346,12 +346,9 @@ func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 	}
 }
 
-// routineTestStore is a memory or SQLite kernel store for routine action tests.
+// routineTestStore is a SQLite kernel store for routine action tests.
 func routineTestStore(t *testing.T, kind string) KernelStore {
 	t.Helper()
-	if kind == "memory" {
-		return NewMemoryStore()
-	}
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "routines.db"))
 	if err != nil {
 		t.Fatal(err)

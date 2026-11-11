@@ -11,7 +11,7 @@ import (
 )
 
 type agentRequestInboxTeamStore struct {
-	*MemoryStore
+	*SQLiteStore
 	deployment *kernelteam.Deployment
 	definition *kernelteam.Definition
 }
@@ -54,7 +54,7 @@ func createInboxRequest(t *testing.T, store AgentRequestInboxStore, policy Agent
 }
 
 func TestAgentRequestInboxBoundsConversationProjectionCadence(t *testing.T) {
-	reconciler, err := NewAgentRequestInboxReconciler(NewMemoryStore())
+	reconciler, err := NewAgentRequestInboxReconciler(newTestKernelStore(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestAgentRequestInboxBoundsConversationProjectionCadence(t *testing.T) {
 }
 
 func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
-	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -110,7 +110,7 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 }
 
 func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *testing.T) {
-	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -128,13 +128,12 @@ func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *te
 	// Simulate a decision Run authored by an older OpenSeal release. Its
 	// idempotency fingerprint no longer matches the current enriched input,
 	// but its authoritative request lineage remains unchanged.
-	store.mu.Lock()
-	persisted := store.agentRuns[portfolioKey(request.Scope, runs[0].ID)]
-	inbox := persisted.Context[AgentRequestInboxContextKey].(map[string]interface{})
-	delete(inbox, "clarificationQuestion")
-	delete(inbox, "clarificationResponse")
-	delete(inbox, "artifactRequirements")
-	store.mu.Unlock()
+	rewriteStoredPayload(t, store.SQLiteStore, "agent_runs", request.Scope, runs[0].ID, func(persisted *AgentRun) {
+		inbox := persisted.Context[AgentRequestInboxContextKey].(map[string]interface{})
+		delete(inbox, "clarificationQuestion")
+		delete(inbox, "clarificationResponse")
+		delete(inbox, "artifactRequirements")
+	})
 
 	second, err := reconciler.Reconcile(t.Context(), request.Scope, "recipient")
 	if err != nil {
@@ -150,7 +149,7 @@ func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *te
 }
 
 func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t *testing.T) {
-	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -211,7 +210,7 @@ func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t
 }
 
 func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnded(t *testing.T) {
-	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -269,7 +268,7 @@ func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnde
 }
 
 func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing.T) {
-	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	otherSource, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: request.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"},
@@ -321,7 +320,7 @@ func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing
 }
 
 func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
-	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
 	scope := Scope{Kind: "tenant", ID: "paginated-inbox"}
 	portfolio := NewPortfolioService(store)
 	collaboration := NewCollaborationService(store)
@@ -365,7 +364,7 @@ func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
 }
 
 func TestAgentRequestInboxRecoversPreauthorizedDelegationWithoutReview(t *testing.T) {
-	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptancePreauthorized, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -393,7 +392,7 @@ func TestAgentRequestInboxUsesDeterministicTeamRoleAndAcceptancePolicy(t *testin
 		t.Run(fmt.Sprintf("review-%t", requireAcceptance), func(t *testing.T) {
 			scope := Scope{Kind: "tenant", ID: "inbox"}
 			store := &agentRequestInboxTeamStore{
-				MemoryStore: NewMemoryStore(),
+				SQLiteStore: newTestKernelStore(t),
 				deployment: &kernelteam.Deployment{
 					ID: "marketing", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 					DefinitionID: "marketing", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,

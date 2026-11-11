@@ -189,7 +189,7 @@ func TestOwnedItemActivityNamesTheActingMember(t *testing.T) {
 // A Team member creates a routine in its Team chat as in its own chat: the
 // Team owns it and the member runs it, only while the member is on the roster.
 func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
-	ctx, store, scope := t.Context(), NewMemoryStore(), Scope{Kind: "tenant", ID: "task-test"}
+	ctx, store, scope := t.Context(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "task-test"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
 	service := NewConversationService(store)
 	chat, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
@@ -256,7 +256,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Each firing rechecks the roster; a removed member's routine is unverified, so the scheduler pauses it.
-	reader := teamRosterPortfolio{MemoryStore: store, team: team}
+	reader := teamRosterPortfolio{SQLiteStore: store, team: team}
 	if err := validateScheduledTaskTarget(ctx, reader, agents, activations[0]); err != nil {
 		t.Fatalf("member routine target = %v", err)
 	}
@@ -272,10 +272,10 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 // A Team member's background task reaches account setup exactly as its 1:1
 // task does, and loses it once the member leaves the roster.
 func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
-	ctx, memory, scope := t.Context(), NewMemoryStore(), Scope{Kind: "tenant", ID: "task-sql"}
+	ctx, memory, scope := t.Context(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "task-sql"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
 	team := chatRosterTeam(scope, "task-agent")
-	store := teamRosterPortfolio{MemoryStore: memory, team: team}
+	store := teamRosterPortfolio{SQLiteStore: memory, team: team}
 	conversations := NewConversationService(store)
 	chat, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Team task", IdempotencyKey: "team-task-chat"})
 	if err != nil {

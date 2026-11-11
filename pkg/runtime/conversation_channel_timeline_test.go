@@ -8,9 +8,6 @@ import (
 )
 
 func TestChannelTimelineStoresPaginateRootsAndBroadcastsBeforeLimiting(t *testing.T) {
-	t.Run("memory", func(t *testing.T) {
-		testChannelTimelineStore(t, NewMemoryStore())
-	})
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "channel-timeline.db"))
 		if err != nil {

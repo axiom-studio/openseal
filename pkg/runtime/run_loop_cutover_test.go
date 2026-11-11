@@ -26,7 +26,6 @@ func cutoverStores() []struct {
 		name string
 		open func(*testing.T) cutoverTestStore
 	}{
-		{name: "memory", open: func(*testing.T) cutoverTestStore { return NewMemoryStore() }},
 		{name: "sqlite", open: func(t *testing.T) cutoverTestStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cutover.db"))
 			if err != nil {

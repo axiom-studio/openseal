@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
-func waitingCredentialRequestFixture(t *testing.T) (context.Context, *runtime.MemoryStore, *Engine, *runtime.AgentRun, *CredentialRequest) {
+func waitingCredentialRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *runtime.AgentRun, *CredentialRequest) {
 	t.Helper()
 	ctx, store, e, run, request := runningCredentialRequestFixture(t)
 	waiting, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, runtime.RunTransitionRequest{
@@ -26,10 +27,10 @@ func waitingCredentialRequestFixture(t *testing.T) (context.Context, *runtime.Me
 
 // runningCredentialRequestFixture is a Run claimed by "worker" whose step
 // opened a credential card and has not parked yet.
-func runningCredentialRequestFixture(t *testing.T) (context.Context, *runtime.MemoryStore, *Engine, *runtime.AgentRun, *CredentialRequest) {
+func runningCredentialRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *runtime.AgentRun, *CredentialRequest) {
 	t.Helper()
 	ctx := context.Background()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	e, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +107,7 @@ func TestCredentialRequestForAnEndedRunAsksTheHostToReply(t *testing.T) {
 
 func TestInteractionSettleCarriesActionCallID(t *testing.T) {
 	resolver := InteractionResolver{UserID: "5", CanManage: true}
-	assertCarried := func(t *testing.T, store *runtime.MemoryStore, run *runtime.AgentRun, prefix string) {
+	assertCarried := func(t *testing.T, store *runtime.SQLiteStore, run *runtime.AgentRun, prefix string) {
 		t.Helper()
 		resumed, err := store.GetAgentRun(context.Background(), run.Scope, run.ID)
 		if err != nil || resumed.Status != runtime.AgentRunStatusQueued || len(resumed.PendingInterventions) != 1 {

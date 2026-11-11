@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestMemoryActivitySequencesConcurrentAppends(t *testing.T) {
-	store := NewMemoryStore()
+func TestActivitySequencesConcurrentAppends(t *testing.T) {
+	store := newTestKernelStore(t)
 	portfolio := NewPortfolioService(store)
 	activity := NewRunActivityService(store, store)
 	ctx := context.Background()
@@ -48,8 +48,8 @@ func TestMemoryActivitySequencesConcurrentAppends(t *testing.T) {
 	}
 }
 
-func TestMemoryRunTransitionPersistsWakeAndTerminalState(t *testing.T) {
-	store := NewMemoryStore()
+func TestRunTransitionPersistsWakeAndTerminalState(t *testing.T) {
+	store := newTestKernelStore(t)
 	portfolio := NewPortfolioService(store)
 	activity := NewRunActivityService(store, store)
 	ctx := context.Background()

@@ -7,10 +7,10 @@ import (
 )
 
 func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
-			var store ConversationStore = NewMemoryStore()
+			var store ConversationStore = newTestKernelStore(t)
 			var disk *SQLiteStore
 			path := filepath.Join(t.TempDir(), "initiator.db")
 			if backend == "sqlite" {
@@ -97,7 +97,7 @@ func TestChannelMessagesRejectUntrustedInitiator(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
-			service := NewConversationService(NewMemoryStore())
+			service := NewConversationService(newTestKernelStore(t))
 			scope := Scope{Kind: "tenant", ID: "initiator"}
 			conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},

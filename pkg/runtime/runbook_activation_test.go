@@ -15,7 +15,7 @@ import (
 
 func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -73,7 +73,7 @@ func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 
 func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	registry := kernelagent.NewRegistryWithStore(kernelagent.NewMemoryStore())
@@ -182,7 +182,7 @@ func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 
 func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	portfolio := NewPortfolioService(store)
@@ -219,7 +219,7 @@ func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 
 func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -268,7 +268,7 @@ func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 
 func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -365,7 +365,7 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 
 func TestRunbookActivationCannotCrossObjectiveOwner(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}, Title: "Outcome", Goal: "Do useful work", Status: ObjectiveStatusActive,
@@ -385,7 +385,7 @@ func TestRunbookActivationCannotCrossObjectiveOwner(t *testing.T) {
 
 func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -431,7 +431,7 @@ func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testin
 
 func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "3"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -465,7 +465,7 @@ func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 
 // eventTaskFixture creates an Objective and a chat with a user request that an
 // event Task can report to, and returns a create request for a webhook routine.
-func eventTaskFixture(t *testing.T, store *MemoryStore) (Scope, CreateRunbookActivationRequest) {
+func eventTaskFixture(t *testing.T, store *SQLiteStore) (Scope, CreateRunbookActivationRequest) {
 	t.Helper()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "event-task"}
@@ -590,7 +590,7 @@ func TestRunbookActivationEventTaskValidation(t *testing.T) {
 }
 
 func TestRunbookActivationCreateEventTaskNoCursor(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope, request := eventTaskFixture(t, store)
 	activation, err := NewRunbookActivationService(store).Create(t.Context(), request)
 	if err != nil {
@@ -623,7 +623,7 @@ func TestRunbookActivationCreateEventTaskNoCursor(t *testing.T) {
 }
 
 func TestRunbookActivationPausedReason(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope, request := eventTaskFixture(t, store)
 	service := NewRunbookActivationService(store)
 	activation, err := service.Create(t.Context(), request)
@@ -654,7 +654,7 @@ func TestRunbookActivationPausedReason(t *testing.T) {
 }
 
 func TestRunbookActivationPausedReasonOnPausedRoutine(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope, request := eventTaskFixture(t, store)
 	service := NewRunbookActivationService(store)
 	activation, err := service.Create(t.Context(), request)

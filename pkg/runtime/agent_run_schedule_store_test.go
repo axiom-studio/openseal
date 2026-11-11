@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-func TestMemoryAgentRunClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
-	store := NewMemoryStore()
+func TestAgentRunClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
@@ -80,8 +80,8 @@ func TestMemoryAgentRunClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
 	}
 }
 
-func TestMemoryAgentRunAttemptBudgetSurvivesLeaseRecovery(t *testing.T) {
-	store := NewMemoryStore()
+func TestAgentRunAttemptBudgetSurvivesLeaseRecovery(t *testing.T) {
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "attempt-budget"}
 	now := time.Now().UTC()
@@ -105,8 +105,8 @@ func TestMemoryAgentRunAttemptBudgetSurvivesLeaseRecovery(t *testing.T) {
 	}
 }
 
-func TestMemoryAgentRunClaimHonorsCapacityAndScope(t *testing.T) {
-	store := NewMemoryStore()
+func TestAgentRunClaimHonorsCapacityAndScope(t *testing.T) {
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	otherScope := Scope{Kind: "tenant", ID: "two"}
@@ -154,8 +154,8 @@ func TestMemoryAgentRunClaimHonorsCapacityAndScope(t *testing.T) {
 	}
 }
 
-func TestMemoryAgentRunClaimHonorsConcurrencyKeyCapacity(t *testing.T) {
-	store := NewMemoryStore()
+func TestAgentRunClaimHonorsConcurrencyKeyCapacity(t *testing.T) {
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "conversation-capacity"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
@@ -205,8 +205,8 @@ func TestMemoryAgentRunClaimHonorsConcurrencyKeyCapacity(t *testing.T) {
 	}
 }
 
-func TestMemoryAgentRunClaimIsolatesRunKinds(t *testing.T) {
-	store := NewMemoryStore()
+func TestAgentRunClaimIsolatesRunKinds(t *testing.T) {
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "kinds"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)

@@ -14,11 +14,6 @@ type spaceConversationStore interface {
 	ConversationStore
 }
 
-func TestMemorySpaceStore(t *testing.T) {
-	t.Parallel()
-	exerciseSpaceStore(t, NewMemoryStore())
-}
-
 func TestSQLiteSpaceStore(t *testing.T) {
 	t.Parallel()
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "spaces.db"))
@@ -31,7 +26,7 @@ func TestSQLiteSpaceStore(t *testing.T) {
 
 func TestSpaceValidation(t *testing.T) {
 	t.Parallel()
-	service := NewSpaceService(NewMemoryStore())
+	service := NewSpaceService(newTestKernelStore(t))
 	scope := Scope{Kind: "tenant", ID: "one"}
 	ctx := context.Background()
 	for _, request := range []CreateSpaceRequest{
@@ -57,7 +52,7 @@ func TestSpaceValidation(t *testing.T) {
 	}
 }
 
-// exerciseSpaceStore is the store contract shared by the memory, SQLite and
+// exerciseSpaceStore is the store contract shared by the SQLite and
 // PostgreSQL implementations.
 func exerciseSpaceStore(t *testing.T, store spaceConversationStore) {
 	t.Helper()

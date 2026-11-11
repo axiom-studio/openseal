@@ -483,7 +483,7 @@ const runbookLoopWorker = "runbook-loop-worker"
 type runbookLoopFixture struct {
 	t        *testing.T
 	ctx      context.Context
-	store    *MemoryStore
+	store    *SQLiteStore
 	scope    Scope
 	control  *ControlExecutor
 	tools    *StepToolDispatcher
@@ -493,7 +493,7 @@ type runbookLoopFixture struct {
 
 func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runbookLoopFixture {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	f := &runbookLoopFixture{t: t, ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "runbook-loop"}}
 	collaboration := NewCollaborationService(store)
 	f.control = &ControlExecutor{Portfolio: store, Sessions: store, Forks: NewRunForkCoordinator(store), Collaboration: collaboration}

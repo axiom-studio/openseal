@@ -211,7 +211,7 @@ func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
 type controlFixture struct {
 	t        *testing.T
 	ctx      context.Context
-	store    *MemoryStore
+	store    *SQLiteStore
 	run      *AgentRun
 	session  *AgentSession
 	step     *AgentTurn
@@ -227,7 +227,7 @@ func newControlFixture(t *testing.T, calls []LoopToolCall) *controlFixture {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "control-" + uuid.NewString()[:8]}
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }

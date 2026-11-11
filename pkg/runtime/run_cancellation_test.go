@@ -19,7 +19,6 @@ func TestCancelWaitingApprovalClosesAction(t *testing.T) {
 		name  string
 		store func(*testing.T) cancellationStore
 	}{
-		{name: "memory", store: func(*testing.T) cancellationStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) cancellationStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cancel.db"))
 			if err != nil {
@@ -37,7 +36,7 @@ func TestCancelWaitingApprovalClosesAction(t *testing.T) {
 
 func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 	ctx := t.Context()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog, scope := cancellationActionCatalog(t)
 	runs := NewRunCommandService(store)
 	root, err := runs.CreateAgentRun(ctx, CreateAgentRunRequest{

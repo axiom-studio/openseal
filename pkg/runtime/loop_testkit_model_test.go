@@ -544,7 +544,6 @@ type kernelStoreCase struct {
 func kernelStoreMatrix(t *testing.T, prefix string) []kernelStoreCase {
 	t.Helper()
 	cases := []kernelStoreCase{
-		{name: "memory", open: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", open: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), prefix+".db"))
 			if err != nil {

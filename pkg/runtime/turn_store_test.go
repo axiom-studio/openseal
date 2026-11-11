@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-func TestMemoryAgentTurnsEnforceOneActiveTurn(t *testing.T) {
-	store := NewMemoryStore()
+func TestAgentTurnsEnforceOneActiveTurn(t *testing.T) {
+	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	portfolio := NewPortfolioService(store)

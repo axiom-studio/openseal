@@ -13,12 +13,12 @@ import (
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestWorkforceBundleHTTPContractIsCapabilityTruthfulAndHostAuthorized(t *testing.T) {
-	server := NewServer(runtime.NewMemoryStore(), zap.NewNop().Sugar())
+	server := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
 	document := requestWorkforceBundleAPI(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", nil, "", http.StatusOK)
 	var capabilities kernelapi.CapabilityDocument
 	if err := json.Unmarshal(document, &capabilities); err != nil {

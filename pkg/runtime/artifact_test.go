@@ -19,9 +19,6 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 		name string
 		open func(*testing.T) (ArtifactStore, func())
 	}{
-		{name: "memory", open: func(t *testing.T) (ArtifactStore, func()) {
-			return NewMemoryStore(), func() {}
-		}},
 		{name: "sqlite", open: func(t *testing.T) (ArtifactStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
 			if err != nil {
@@ -107,7 +104,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 }
 
 func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := NewArtifactCatalog(store)
 	catalog.now = func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }
 	artifact := validCatalogArtifact("game-log", 1)
@@ -139,7 +136,7 @@ func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
 }
 
 func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T) {
-	catalog := NewArtifactCatalog(NewMemoryStore())
+	catalog := NewArtifactCatalog(newTestKernelStore(t))
 	tests := []struct {
 		name   string
 		mutate func(*Artifact)
@@ -194,38 +191,39 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 	}
 }
 
-func TestSQLiteArtifactCatalogPagesMatchMemoryFilters(t *testing.T) {
+// Each filtered page is the matching slice of the same filter's full listing
+// (read in pages of 100): offset and limit apply after every predicate and
+// latest-version selection, never before.
+func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	ctx := context.Background()
 	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	catalogs := []*ArtifactCatalog{NewArtifactCatalog(NewMemoryStore()), NewArtifactCatalog(sqlite)}
+	catalog := NewArtifactCatalog(sqlite)
 	stamp := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
-	for _, catalog := range catalogs {
-		catalog.now = func() time.Time { return stamp }
-		for i := 0; i < 125; i++ {
-			artifact := validCatalogArtifact(fmt.Sprintf("artifact-%03d", i), 1)
-			if i%2 == 0 {
-				artifact.Provenance.Owner = &ObjectiveOwner{Type: OwnerTypeAgent, ID: "alice"}
-			}
-			if i%3 == 0 {
-				artifact.Type = "slides"
-				artifact.MediaType = "text/html"
-			}
-			if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: artifact}); err != nil {
-				t.Fatal(err)
-			}
+	catalog.now = func() time.Time { return stamp }
+	for i := 0; i < 125; i++ {
+		artifact := validCatalogArtifact(fmt.Sprintf("artifact-%03d", i), 1)
+		if i%2 == 0 {
+			artifact.Provenance.Owner = &ObjectiveOwner{Type: OwnerTypeAgent, ID: "alice"}
 		}
-		// The latest version changes owners, so filtering must select latest
-		// globally before applying the owner predicate.
-		latest := validCatalogArtifact("artifact-000", 2)
-		latest.ContentRef = "object-store:artifact-000-v2"
-		latest.Digest = digestFor("artifact-000-v2")
-		if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: latest, ExpectedLatestVersion: 1}); err != nil {
+		if i%3 == 0 {
+			artifact.Type = "slides"
+			artifact.MediaType = "text/html"
+		}
+		if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: artifact}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// The latest version changes owners, so filtering must select latest
+	// globally before applying the owner predicate.
+	latest := validCatalogArtifact("artifact-000", 2)
+	latest.ContentRef = "object-store:artifact-000-v2"
+	latest.Digest = digestFor("artifact-000-v2")
+	if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: latest, ExpectedLatestVersion: 1}); err != nil {
+		t.Fatal(err)
 	}
 	owner := &ObjectiveOwner{Type: OwnerTypeAgent, ID: "alice"}
 	filters := []ArtifactFilter{
@@ -234,19 +232,35 @@ func TestSQLiteArtifactCatalogPagesMatchMemoryFilters(t *testing.T) {
 		{Scope: Scope{Kind: "tenant", ID: "one"}, ProducerRunID: "run-research", ProducerRequestID: "request-research", Classifications: []ArtifactClassification{ArtifactClassificationInternal}, Limit: 100, Offset: 100},
 		{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: owner, EvidenceTarget: "https://forum.example/research/thread-7", Limit: 20, Offset: 40},
 	}
+	list := func(filter ArtifactFilter) []string {
+		t.Helper()
+		artifacts, err := catalog.List(ctx, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for _, artifact := range artifacts {
+			ids = append(ids, fmt.Sprintf("%s:%d", artifact.ID, artifact.Version))
+		}
+		return ids
+	}
 	for _, filter := range filters {
-		pages := make([][]string, len(catalogs))
-		for i, catalog := range catalogs {
-			artifacts, err := catalog.List(ctx, filter)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, artifact := range artifacts {
-				pages[i] = append(pages[i], fmt.Sprintf("%s:%d", artifact.ID, artifact.Version))
+		var all []string
+		for offset := 0; ; offset += 100 {
+			unpaged := filter
+			unpaged.Offset, unpaged.Limit = offset, 100
+			page := list(unpaged)
+			all = append(all, page...)
+			if len(page) < 100 {
+				break
 			}
 		}
-		if !reflect.DeepEqual(pages[0], pages[1]) {
-			t.Fatalf("filter %#v: memory page %v, sqlite page %v", filter, pages[0], pages[1])
+		want := []string{}
+		if filter.Offset < len(all) {
+			want = all[filter.Offset:min(filter.Offset+filter.Limit, len(all))]
+		}
+		if page := list(filter); !reflect.DeepEqual(page, want) {
+			t.Fatalf("filter %#v: page %v, want %v", filter, page, want)
 		}
 	}
 }

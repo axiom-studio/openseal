@@ -15,13 +15,13 @@ import (
 
 const toolExecWorker = "tool-exec-worker"
 
-// toolExecFixture is a claimed Run with a run session in the memory store and
+// toolExecFixture is a claimed Run with a run session in an in-memory store and
 // a claim tool executor whose host tools go to host and whose control tools
 // go to fake handlers.
 type toolExecFixture struct {
 	t        *testing.T
 	ctx      context.Context
-	store    *MemoryStore
+	store    *SQLiteStore
 	scope    Scope
 	now      time.Time
 	run      *AgentRun
@@ -34,7 +34,7 @@ type toolExecFixture struct {
 func newToolExecFixture(t *testing.T, authority ControlAuthority) *toolExecFixture {
 	t.Helper()
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "tools-" + uuid.NewString()[:8]}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	portfolio := NewPortfolioService(store)

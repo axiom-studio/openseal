@@ -2,14 +2,15 @@ package openseal
 
 import (
 	"context"
-	"github.com/axiom-studio/openseal/pkg/runtime"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
 func TestSkillSetupResolutionRequiresExactSavedBindingAndPersists(t *testing.T) {
 	ctx := context.Background()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	e, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +82,7 @@ func TestSkillSetupResolutionRequiresExactSavedBindingAndPersists(t *testing.T) 
 // setup card never reappears.
 func TestCompletedSkillSetupDoesNotReappearInConversationChanges(t *testing.T) {
 	ctx := context.Background()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	e, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

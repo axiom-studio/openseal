@@ -278,8 +278,6 @@ func TestSkillUpgradeDrainProjectsRollingVersionWritesAcrossStores(t *testing.T)
 		actions := "action_calls"
 		postgres := false
 		switch value := store.(type) {
-		case *MemoryStore:
-			t.Skip("MemoryStore is process local and cannot share a rolling-version writer")
 		case *SQLiteStore:
 			db = value.db
 		case *PostgresStore:
@@ -333,8 +331,6 @@ func TestSkillUpgradeDrainFencesLegacyWritersAgainstExistingAuthority(t *testing
 				actions := "action_calls"
 				postgres := false
 				switch value := store.(type) {
-				case *MemoryStore:
-					t.Skip("MemoryStore cannot share rolling-version writers")
 				case *SQLiteStore:
 					db = value.db
 				case *PostgresStore:
@@ -499,7 +495,8 @@ func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 			for _, status := range statuses {
 				call.Status = status
 				seedSkillUsageMetadata(t, store, run, call)
-				want := unfinishedSkillActionStatus(status) || (status == ActionCallStatusSucceeded && !isTerminalAgentRunStatus(runStatus))
+				unfinished := status == ActionCallStatusReady || status == ActionCallStatusWaitingApproval || status == ActionCallStatusRunning || status == ActionCallStatusCompensating
+				want := unfinished || (status == ActionCallStatusSucceeded && !isTerminalAgentRunStatus(runStatus))
 				busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter)
 				if err != nil || busy != want {
 					t.Fatalf("%s action / %s run: busy=%v want=%v error=%v", status, runStatus, busy, want, err)
@@ -530,13 +527,6 @@ func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 // exercised through Coordinator/Worker in the drain regression above.
 func seedSkillUsageMetadata(t *testing.T, store KernelStore, run *AgentRun, call *ActionCall) {
 	t.Helper()
-	if memory, ok := store.(*MemoryStore); ok {
-		memory.mu.Lock()
-		memory.saveMemoryAgentRunLocked(portfolioKey(run.Scope, run.ID), run)
-		memory.saveMemoryActionCallLocked(portfolioKey(call.Scope, call.ID), call)
-		memory.mu.Unlock()
-		return
-	}
 	var db *sql.DB
 	postgres := false
 	actions, runs := "action_calls", "agent_runs"

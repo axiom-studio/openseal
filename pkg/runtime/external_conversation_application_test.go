@@ -103,11 +103,7 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 				tc.mutate(endpoint, host.result)
 			}
 			// Reinsert to allow a foreign-scope fixture without weakening normal update checks.
-			store.mu.Lock()
-			for key := range store.externalEndpoints {
-				delete(store.externalEndpoints, key)
-			}
-			store.mu.Unlock()
+			execStoreSQL(t, store, `DELETE FROM external_conversation_endpoints`)
 			if err := store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
 				t.Fatal(err)
 			}

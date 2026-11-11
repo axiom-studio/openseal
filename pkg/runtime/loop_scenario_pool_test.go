@@ -127,7 +127,7 @@ func TestLoopPoolYieldsAfterItsStepSlice(t *testing.T) {
 // instead of going back to the queue: the model is never called past the
 // attempt limit, and the paused Run is not claimed again.
 func TestLoopPoolNeverChargesPastAttemptLimit(t *testing.T) {
-	f := newLoopFixture(t, NewMemoryStore(), withRules(lookupSteps(4)...))
+	f := newLoopFixture(t, newTestKernelStore(t), withRules(lookupSteps(4)...))
 	pool := poolFixturePool(t, f, 1)
 	run, err := f.portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
 		Scope: f.scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}, AssignedAgentID: loopFixtureAgent,
@@ -242,7 +242,7 @@ func (p *plannedPoolProducer) Produce(_ context.Context, in StepInput) (StepOutp
 // The pool reserves the producer's planned usage for the step and settles
 // exactly the step's usage when the Run completes.
 func TestLoopPoolPreservesProducerBudgetPlanning(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "7"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher",
@@ -298,7 +298,7 @@ func (p *slowPoolProducer) Produce(ctx context.Context, _ StepInput) (StepOutput
 // heartbeat renews the Run lease and the loop renews the step lease, so the
 // step completes once on the original worker.
 func TestLoopPoolRenewsLeaseDuringLongStep(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	scope := Scope{Kind: "local", ID: "test"}
@@ -344,7 +344,7 @@ func (handoffPoolProducer) Produce(context.Context, StepInput) (StepOutput, erro
 // when the recipient's Run finishes: the pool resolves the terminal child
 // into the AgentRequest and the source's output.
 func TestLoopPoolCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "7"}
 	portfolio := NewPortfolioService(store)
 	source, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{

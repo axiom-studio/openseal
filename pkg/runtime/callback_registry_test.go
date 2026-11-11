@@ -12,7 +12,7 @@ import (
 
 func TestCallbackRegistryPinsExactAdapterAndLifecycle(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	definition, binding := registerCallbackFixture(t, ctx, catalog)
 	registry := NewCallbackRegistry(store, catalog)
@@ -85,7 +85,7 @@ func TestCallbackRegistryPinsExactAdapterAndLifecycle(t *testing.T) {
 
 func TestCallbackRegistryRejectsUndeclaredEvent(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	definition, binding := registerCallbackFixture(t, ctx, catalog)
 	_, err := NewCallbackRegistry(store, catalog).Create(ctx, CreateCallbackRegistrationRequest{

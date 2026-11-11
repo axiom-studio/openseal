@@ -55,7 +55,6 @@ func newCountedBatchConversationStore(store ConversationStore) *countedBatchConv
 
 func channelMessageBatchStores(t *testing.T, test func(*testing.T, KernelStore)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) { test(t, NewMemoryStore()) })
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "message-batch.db"))
 		if err != nil {
@@ -118,7 +117,7 @@ func channelMessageBatchHistory(t testing.TB, store KernelStore, count int) (*Co
 }
 
 func TestConversationMessageBatchReducesIdleHistoricalPollReads(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	conversation, runs := channelMessageBatchHistory(t, store, 100)
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "viewer"}, Roles: []string{"reader"}}
 	counted := newCountedBatchConversationStore(store)
@@ -252,7 +251,7 @@ func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T
 }
 
 func TestConversationMessageBatchChunksAndDeduplicatesExactIDs(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	conversation, runs := channelMessageBatchHistory(t, store, 401)
 	runs = append(runs, runs[0])
 	counted := newCountedBatchConversationStore(store)

@@ -73,13 +73,13 @@ func TestMessageHeaderExactFormat(t *testing.T) {
 // attachmentFixture stores artifacts whose content is served by ref.
 type attachmentFixture struct {
 	t       *testing.T
-	store   *MemoryStore
+	store   *SQLiteStore
 	content *conversationAppContent
 	scope   Scope
 }
 
 func newAttachmentFixture(t *testing.T) *attachmentFixture {
-	return &attachmentFixture{t: t, store: NewMemoryStore(), content: &conversationAppContent{byRef: map[string]string{}}, scope: conversationTestArtifact().Scope}
+	return &attachmentFixture{t: t, store: newTestKernelStore(t), content: &conversationAppContent{byRef: map[string]string{}}, scope: conversationTestArtifact().Scope}
 }
 
 func (f *attachmentFixture) put(id, name, mediaType, data string) ConversationReference {

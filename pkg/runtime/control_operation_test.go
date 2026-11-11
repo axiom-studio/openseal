@@ -316,7 +316,7 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 }
 
 func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	var trigger *ChannelMessage
 	var conversation *Conversation

@@ -139,7 +139,7 @@ func TestSkillConfigPersistsWithDefinitionAcrossStores(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	for name, store := range map[string]skill.CatalogStore{"memory": NewMemoryStore(), "sqlite": sqlite} {
+	for name, store := range map[string]skill.CatalogStore{"sqlite": sqlite} {
 		t.Run(name, func(t *testing.T) {
 			definition := configUpgradeBase()
 			if err := skill.NewCatalogWithStore(store).Register(t.Context(), definition); err != nil {

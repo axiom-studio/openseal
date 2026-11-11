@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -81,7 +82,7 @@ func assertDeploymentIDNamespace(t *testing.T, engine *Engine) {
 	}
 }
 
-func TestDeploymentIDsShareOneNamespaceInMemory(t *testing.T) {
+func TestDeploymentIDsShareOneNamespaceInDefaultStore(t *testing.T) {
 	engine, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -164,10 +165,10 @@ func ensureTestAgent(t *testing.T, engine *Engine, scope capability.ScopeReferen
 
 // teamRequestFixture parks a Team member's run on a credential request saved
 // to the Team.
-func teamRequestFixture(t *testing.T) (context.Context, *runtime.MemoryStore, *Engine, *runtime.AgentRun, *CredentialRequest, ObjectiveOwner) {
+func teamRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *runtime.AgentRun, *CredentialRequest, ObjectiveOwner) {
 	t.Helper()
 	ctx := context.Background()
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	engine, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

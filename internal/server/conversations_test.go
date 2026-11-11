@@ -7,11 +7,12 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	createBody := `{
 		"scope":{"kind":"tenant","id":"one"},
@@ -156,7 +157,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 }
 
 func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
 	body := `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"Evidence"}`
@@ -206,7 +207,7 @@ func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
 }
 
 func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) {
-	server := NewServer(runtime.NewMemoryStore(), zap.NewNop().Sugar())
+	server := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"Evidence"}`, "lifecycle")
 	var conversation runtime.Conversation
@@ -268,7 +269,7 @@ func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) 
 }
 
 func TestDesktopReadPositionsBindLocalReaderAndPreserveMonotonicHistory(t *testing.T) {
-	server := NewServer(runtime.NewMemoryStore(), zap.NewNop().Sugar())
+	server := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"Reading evidence"}`, "read-channel")
 	var channel runtime.Conversation

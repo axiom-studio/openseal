@@ -14,7 +14,7 @@ import (
 )
 
 // Final answer delivery of chat Runs (run-loop section 05 §8, CONV-08), on
-// the memory and SQLite stores (Postgres with OPENSEAL_TEST_POSTGRES_DSN).
+// the SQLite store (Postgres with OPENSEAL_TEST_POSTGRES_DSN).
 
 const finalDeliveryWorker = "final-worker"
 

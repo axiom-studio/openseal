@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// The run_context note (run-loop section 05 §5, CONV-04), on the memory and
-// SQLite stores through the catch-up fixture.
+// The run_context note (run-loop section 05 §5, CONV-04), on the
+// SQLite store through the catch-up fixture.
 
 func (f *catchUpFixture) noteRunner() *ConversationRunTurnRunner {
 	return &ConversationRunTurnRunner{conversations: f.service, portfolio: f.store, runbooks: f.store}

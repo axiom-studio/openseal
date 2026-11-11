@@ -22,7 +22,7 @@ func TestDelegateCreateTransitionsEntryAtomically(t *testing.T) {
 		name string
 		open func(t *testing.T) delegateTxStore
 	}{
-		{"Memory", func(*testing.T) delegateTxStore { return NewMemoryStore() }},
+		{"Memory", func(*testing.T) delegateTxStore { return newTestKernelStore(t) }},
 		{"SQLite", func(t *testing.T) delegateTxStore { return openTestSQLiteSessionStore(t) }},
 	}
 	for _, backend := range backends {

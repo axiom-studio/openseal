@@ -8,11 +8,12 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestConversationApprovalModeAPI(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations",
 		`{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"agent","id":"assistant"},"title":"Chat"}`, "chat")

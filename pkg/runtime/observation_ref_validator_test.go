@@ -42,7 +42,7 @@ func requireObservationError(t *testing.T, err error, want string) {
 }
 
 func TestObservationRefUsesNewestSameSkillCall(t *testing.T) {
-	f := newRunHistoryFixture()
+	f := newRunHistoryFixture(t)
 	f.add(observation("old", ActionCallStatusSucceeded, 4, map[string]interface{}{"ref": "s4:e1", "role": "button"}))
 	f.add(ActionCall{ID: "new", SkillID: "browser", SkillVersion: "2", Action: "observe", Status: ActionCallStatusSucceeded,
 		// A compacted output keeps the observation under value.
@@ -73,7 +73,7 @@ func TestObservationRefRejectsFailedLatestObservation(t *testing.T) {
 	bound := observationRefAction(map[string]interface{}{"roles": []string{"button"}})
 	arguments := map[string]interface{}{"target": "s5:e1"}
 	requireObservationError(t, validateObservationRef(bound, nil, arguments), "current observation is unavailable")
-	f := newRunHistoryFixture()
+	f := newRunHistoryFixture(t)
 	requireObservationError(t, validateObservationRef(bound, f.history(), arguments), "current observation is unavailable")
 
 	f.add(observation("observe", ActionCallStatusSucceeded, 5, map[string]interface{}{"ref": "s5:e1", "role": "button"}))
@@ -87,7 +87,7 @@ func TestObservationRefRejectsFailedLatestObservation(t *testing.T) {
 }
 
 func TestObservationRefRejectsStaleGeneration(t *testing.T) {
-	f := newRunHistoryFixture()
+	f := newRunHistoryFixture(t)
 	f.add(observation("observe-6", ActionCallStatusSucceeded, 6, map[string]interface{}{"ref": "s6:e1", "role": "button"}))
 	f.add(observation("observe-7", ActionCallStatusSucceeded, 7, map[string]interface{}{"ref": "s7:e1", "role": "button"}))
 	bound := observationRefAction(map[string]interface{}{"roles": []string{"button"}})
@@ -97,7 +97,7 @@ func TestObservationRefRejectsStaleGeneration(t *testing.T) {
 }
 
 func TestObservationRefIgnoresOtherSkillCalls(t *testing.T) {
-	f := newRunHistoryFixture()
+	f := newRunHistoryFixture(t)
 	f.add(observation("observe", ActionCallStatusSucceeded, 3, map[string]interface{}{"ref": "s3:e2", "role": "button"}))
 	// Unrelated reads after the observation, in the same Run.
 	f.add(ActionCall{ID: "mail", SkillID: "mail", SkillVersion: "1", Action: "search", Status: ActionCallStatusSucceeded,
@@ -108,7 +108,7 @@ func TestObservationRefIgnoresOtherSkillCalls(t *testing.T) {
 }
 
 func TestPayButtonRequiresFinalPayFlag(t *testing.T) {
-	f := newRunHistoryFixture()
+	f := newRunHistoryFixture(t)
 	f.add(observation("checkout", ActionCallStatusSucceeded, 11,
 		map[string]interface{}{"ref": "s11:e5", "role": "button", "finalPay": true, "state": map[string]interface{}{}},
 		map[string]interface{}{"ref": "s11:e12", "role": "button", "state": map[string]interface{}{}},

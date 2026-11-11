@@ -173,7 +173,7 @@ func TestCreditErrorFromTypedFailure(t *testing.T) {
 
 func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	ctx := t.Context()
-	store := NewMemoryStore()
+	store := newTestKernelStore(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	scope := Scope{Kind: "tenant", ID: "run-failed-" + uuid.NewString()[:8]}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}

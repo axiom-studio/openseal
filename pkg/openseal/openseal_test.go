@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -24,7 +25,7 @@ func TestPublicFacadeExposesCanonicalActivityCapability(t *testing.T) {
 }
 
 func TestRunTerminalFinalizationIsAutomaticWhenActionsCanExecute(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	engine := &Engine{
 		store:  store,
 		skills: skill.NewCatalog(),
@@ -194,7 +195,7 @@ func TestConversationRunsRejectMismatchedParticipationPolicy(t *testing.T) {
 			return ConversationRouteDecision{}, nil
 		})
 		_, err := New(
-			WithStore(runtime.NewMemoryStore()),
+			WithStore(runtimetest.NewKernelStore(t)),
 			WithConversationCoordinator(participants, router, DefaultConversationCoordinatorConfig()),
 			WithDynamicConversationRuns(ConversationRunConfig{
 				Scheduler: ConversationRunSchedulerConfig{RequireParticipationOptIn: schedulerOptIn},
@@ -208,7 +209,7 @@ func TestConversationRunsRejectMismatchedParticipationPolicy(t *testing.T) {
 }
 
 func TestEngineExposesObjectivePortfolio(t *testing.T) {
-	engine, err := New(WithStore(runtime.NewMemoryStore()))
+	engine, err := New(WithStore(runtimetest.NewKernelStore(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +497,7 @@ func waitForRunStatus(t *testing.T, ctx context.Context, engine *Engine, scope S
 }
 
 func TestEngineRunsAutonomousAgentPortfolio(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := Scope{Kind: "local", ID: "autonomous"}
 	var engine *Engine
 	host := &loopStepHost{decide: func(_ context.Context, req ModelStepRequest) (loopReply, error) {
@@ -550,7 +551,7 @@ func TestEngineRunsAutonomousAgentPortfolio(t *testing.T) {
 }
 
 func TestEngineRunsDynamicKindScopedPortfolio(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "dynamic"}
 	var engine *Engine
 	host := &loopStepHost{decide: func(context.Context, ModelStepRequest) (loopReply, error) {
@@ -598,7 +599,7 @@ func TestEngineRunsDynamicKindScopedPortfolio(t *testing.T) {
 }
 
 func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "conversation-runtime"}
 	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
 		return []ConversationParticipantBinding{{
@@ -758,7 +759,7 @@ func TestEngineWakeAgentWorkersForScopeClaimsWithoutPolling(t *testing.T) {
 	var nilEngine *Engine
 	nilEngine.WakeAgentWorkersForScope(Scope{Kind: "local", ID: "x"})
 
-	store := runtime.NewMemoryStore()
+	store := runtimetest.NewKernelStore(t)
 	scope := Scope{Kind: "local", ID: "wake"}
 	claimed := make(chan time.Time, 1)
 	var engine *Engine

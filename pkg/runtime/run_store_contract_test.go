@@ -11,7 +11,7 @@ import (
 )
 
 // These contracts use the same public commands and durable scheduling boundary
-// on the memory, SQLite and PostgreSQL stores.
+// on the SQLite and PostgreSQL stores.
 type runStoreContractStore interface {
 	RunCommandStore
 	AgentRunScheduleStore
@@ -24,7 +24,6 @@ type runStoreContractFixture struct {
 
 func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContractFixture)) {
 	t.Helper()
-	t.Run("memory", func(t *testing.T) { test(t, runStoreContractFixture{store: NewMemoryStore()}) })
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "contract.db")
 		current, err := NewSQLiteStore(path)
