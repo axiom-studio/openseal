@@ -753,9 +753,9 @@ func TestTeamWorkOfferFiltersExactRoleSkillsAndRecordsCapacity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "team-authority"}
-	memory := newTestKernelStore(t)
+	kernel := newTestKernelStore(t)
 	store := &collaborationAgentCatalogStore{
-		SQLiteStore: memory,
+		SQLiteStore: kernel,
 		deployments: map[string]*kernelagent.AgentDeployment{
 			"eligible": {ID: "eligible", DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 2}},
 			"busy":     {ID: "busy", DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}},

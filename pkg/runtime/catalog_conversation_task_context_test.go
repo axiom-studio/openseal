@@ -45,16 +45,16 @@ func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
 }
 
 func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *testing.T) {
-	memory := newTestKernelStore(t)
-	source, _, _, _ := settledWorkerTaskFixture(t, memory)
-	child, err := NewPortfolioService(memory).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+	kernel := newTestKernelStore(t)
+	source, _, _, _ := settledWorkerTaskFixture(t, kernel)
+	child, err := NewPortfolioService(kernel).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: source.Scope, Owner: source.Owner, Kind: RunKindAgentWork, ParentRunID: source.ID, AssignedAgentID: source.AssignedAgentID,
 		Goal: "Ordinary delegated operation", Source: RunSourceFork, Context: cloneMap(source.Context),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &countedCatalogTaskContextStore{SQLiteStore: memory}
+	store := &countedCatalogTaskContextStore{SQLiteStore: kernel}
 	result, err := resolveCatalogConversationTaskContext(t.Context(), nil, child, store)
 	if err != nil || result != nil || store.runReads != 1 || store.taskReads != 0 || store.taskLists != 0 {
 		t.Fatalf("ordinary chat child added task lookups: result=%#v err=%v runs=%d tasks=%d lists=%d", result, err, store.runReads, store.taskReads, store.taskLists)

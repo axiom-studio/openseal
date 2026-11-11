@@ -37,10 +37,10 @@ func newTestStore(t *testing.T) (*Store, Chat, Author) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	memory := runtimetest.NewKernelStore(t)
+	kernel := runtimetest.NewKernelStore(t)
 	chat := Chat{Scope: runtime.Scope{Kind: "tenant", ID: "1"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "finn"}, ConversationID: "c1"}
 	author := Author{Producer: runtime.ActivityActor{Type: "agent", ID: "finn"}, RunID: "run-1"}
-	return NewStore(catalog{runtime.NewArtifactCatalog(memory), memory}, content), chat, author
+	return NewStore(catalog{runtime.NewArtifactCatalog(kernel), kernel}, content), chat, author
 }
 
 func run(t *testing.T, store *Store, chat Chat, author Author, operation string, args map[string]interface{}) map[string]interface{} {
