@@ -1,18 +1,30 @@
 name: Release
 
-# Triggered by pushing a release tag, e.g. v0.1.0 or v0.1.0-rc1.
+# Started by hand, never by a push. Pushing a tag builds nothing.
 #
-# Development tags (v1.0.20-dev.N) are not releases. They exist so cortex can
-# pin a commit of this module, and one is cut for nearly every change, so
-# building binaries, the container and the desktop installers (the macOS .dmg
-# alone takes most of the run) for each of them was a full release per commit.
-# Their commits are tested by ci.yml on the push to develop; installers are
-# built once, for the release.
+#   Actions > Release > Run workflow          the newest release tag
+#   gh workflow run release.yml               the same
+#   gh workflow run release.yml -f tag=v1.2.3 that tag
+#
+# A release tag is vMAJOR.MINOR.PATCH with or without a pre-release part
+# (v0.1.0, v0.1.0-rc1). Development tags (v1.0.20-dev.N) are not releases: they
+# exist so cortex can pin a commit of this module and are cut for nearly every
+# change. They are never picked as the newest, though one can still be named.
+# Every commit is tested by ci.yml on the push to develop; the binaries, the
+# container and the desktop installers are built when someone asks for them.
+#
+# The build always runs ON the tag: every job reads the tag from GITHUB_REF_NAME
+# and checks out GITHUB_SHA. A run started from a branch, as the button does by
+# default, only works out which tag is meant and starts this workflow again on
+# it (the `pick` job). So the tag must hold a copy of this file with the manual
+# trigger; a tag cut before that cannot be built this way.
 on:
-  push:
-    tags:
-      - 'v*.*.*'
-      - '!v*.*.*-dev.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and release. Empty: the newest release tag."
+        required: false
+        type: string
 
 # Tags are immutable, so cancelling an in-progress run buys nothing and risks
 # half-publishing. Default token scope is read-only; jobs opt into their writes.
@@ -46,6 +58,68 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Which tag this run is for.
+  #
+  # Run on the tag that is meant (input empty, or naming that same tag), this
+  # says build and every job below runs. Run from anywhere else, it works out
+  # the tag (the input, else the newest release tag) and starts this workflow
+  # on that tag instead; this run then stops here with nothing built. GitHub
+  # lets the workflow token start a workflow_dispatch run, the one event it may
+  # trigger.
+  pick:
+    name: Pick the tag
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      build: ${{ steps.pick.outputs.build }}
+    steps:
+      - name: Build this tag, or start the run for the right one
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          WANTED: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="$(printf '%s' "$WANTED" | tr -d '[:space:]')"
+          if [ -z "$TAG" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME"
+          fi
+          if [ -z "$TAG" ]; then
+            # The newest release tag by version, not by date: a patch to an
+            # older line must not outrank the current one. versionsort.suffix
+            # puts v1.2.3-rc1 before v1.2.3. Development tags are left out.
+            git init -q .
+            git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+            GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0="http.extraHeader"
+            export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+            git fetch -q --depth 1 --tags origin
+            TAG="$(git -c versionsort.suffix=- tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -v -- '-dev\.' | head -n 1 || true)"
+            if [ -z "$TAG" ]; then
+              echo "::error::there is no release tag to build. Create one, or name a tag in the run's input." >&2
+              exit 1
+            fi
+          fi
+          if ! printf '%s' "${TAG#v}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::${TAG} is not a release tag (expected vMAJOR.MINOR.PATCH[-prerelease])" >&2
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" = "$TAG" ]; then
+            echo "building ${TAG}"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "this run is on ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}; starting the release of ${TAG} on its tag"
+          gh workflow run release.yml --ref "$TAG" -f tag="$TAG"
+          echo "::notice::Started the release of ${TAG}. Its run is the one that builds; this run built nothing."
+          echo "build=false" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
   # Create the release up front, as a draft, so every build job has somewhere to
   # put its asset the moment it finishes.
   #
@@ -58,6 +132,8 @@ jobs:
   # or failed run never leaves a half-populated release visible to users.
   prepare:
     name: Create the draft release
+    needs: pick
+    if: needs.pick.outputs.build == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -124,8 +200,8 @@ jobs:
               #
               # That hazard is asset-bearing, not publication-bearing. A release
               # created from the GitHub web UI carries ZERO assets: the web form
-              # creates the release and its tag in one action, and that tag push
-              # is what triggers this workflow. Refusing it protected nothing and
+              # creates the release and its tag in one action, and this workflow
+              # is then run for that tag. Refusing it protected nothing and
               # killed the run in ~5s before any build started (v1.0.17 run
               # 35976118250, v1.0.19 run 36038036013).
               #
