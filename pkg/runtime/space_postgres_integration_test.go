@@ -42,7 +42,7 @@ func TestPostgresSpaceAccess(t *testing.T) {
 	exerciseSpaceAccess(t, store)
 }
 
-// Migration 83 on a database with spaces: created_by becomes owner_id, every
+// Migration 84 on a database with spaces: created_by becomes owner_id, every
 // space is "owner" and the Default space "everyone". Rolling it back restores
 // created_by and drops the people.
 func TestPostgresSpaceAccessBackfillAndRollback(t *testing.T) {

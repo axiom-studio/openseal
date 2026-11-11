@@ -52,7 +52,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 		`UPDATE ` + store.table("space_members") + ` SET space_id = '` + oldID + `'`,
 		`ALTER TABLE ` + store.table("space_members") + ` ADD FOREIGN KEY (scope_kind, scope_id, space_id) REFERENCES ` + store.table("spaces") + ` (scope_kind, scope_id, id) ON DELETE CASCADE`,
 		`UPDATE ` + store.table("conversations") + ` SET space_id = '` + oldID + `', payload = jsonb_set(payload, '{spaceId}', to_jsonb('` + oldID + `'::text))`,
-		`DELETE FROM ` + store.table("schema_migrations") + ` WHERE version IN (78, 83)`,
+		`DELETE FROM ` + store.table("schema_migrations") + ` WHERE version IN (78, 84)`,
 	} {
 		if _, err := store.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)

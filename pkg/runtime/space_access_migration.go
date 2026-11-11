@@ -54,9 +54,15 @@ func (s *PostgresStore) migrateSpaceAccess(ctx context.Context, tx *sql.Tx) erro
 // rollbackSpaceAccess restores created_by. Each space's access and the
 // people added to it are lost.
 func (s *PostgresStore) rollbackSpaceAccess(ctx context.Context, tx *sql.Tx) error {
+	// A rollback may run again after an earlier one already took the spaces
+	// table or this migration's columns away.
 	_, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+s.table("space_people")+`;
-		ALTER TABLE `+s.table("spaces")+` DROP COLUMN IF EXISTS access;
-		ALTER TABLE `+s.table("spaces")+` RENAME COLUMN owner_id TO created_by`)
+		ALTER TABLE IF EXISTS `+s.table("spaces")+` DROP COLUMN IF EXISTS access;
+		DO $$ BEGIN
+			IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = '`+s.schema+`' AND table_name = 'spaces' AND column_name = 'owner_id') THEN
+				ALTER TABLE `+s.table("spaces")+` RENAME COLUMN owner_id TO created_by;
+			END IF;
+		END $$`)
 	return err
 }
 
