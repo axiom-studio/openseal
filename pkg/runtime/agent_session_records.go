@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func memorySessionNow(now time.Time) time.Time {
+func sessionNow(now time.Time) time.Time {
 	if now.IsZero() {
 		return time.Now().UTC()
 	}

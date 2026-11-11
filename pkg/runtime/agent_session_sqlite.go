@@ -335,7 +335,7 @@ func (s *SQLiteStore) OpenConversationAgentSession(ctx context.Context, req Open
 		strings.TrimSpace(req.RunID) == "" || strings.TrimSpace(req.Lease.WorkerID) == "" {
 		return nil, fmt.Errorf("%w: conversationId, agentId, runId and a lease are required", ErrInvalidAgentSession)
 	}
-	now := memorySessionNow(req.Now)
+	now := sessionNow(req.Now)
 	lane := conversationRunLane(req.ConversationID, req.ThreadRootID, req.AgentID)
 	id := ConversationAgentSessionID(req.Scope, lane)
 
@@ -396,7 +396,7 @@ func (s *SQLiteStore) CreateRunAgentSession(ctx context.Context, req CreateRunAg
 		ConversationID: req.ConversationID,
 		ThreadRootID:   req.ThreadRootID,
 		InitialEntries: req.InitialEntries,
-		Now:            memorySessionNow(req.Now),
+		Now:            sessionNow(req.Now),
 	}
 	if strings.TrimSpace(req.Lease.WorkerID) == "" {
 		return nil, fmt.Errorf("%w: a lease is required", ErrInvalidAgentSession)
@@ -428,7 +428,7 @@ func (s *SQLiteStore) CreateRunAgentSession(ctx context.Context, req CreateRunAg
 // transaction (Revision+1 when it changes). A replay with the same parent and
 // Agent returns the existing session with Created=false and writes nothing.
 func (s *SQLiteStore) createRunAgentSessionTx(ctx context.Context, conn *sql.Conn, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
-	req.Now = memorySessionNow(req.Now)
+	req.Now = sessionNow(req.Now)
 	if err := validateCreateRunAgentSessionTxRequest(req); err != nil {
 		return nil, err
 	}
@@ -787,7 +787,7 @@ func sqlitePlaceholders(n int) string {
 // req.SessionID. The watermark CAS, the intervention cursor, the entries and
 // the events commit together.
 func (s *SQLiteStore) AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
-	req.Now = memorySessionNow(req.Now)
+	req.Now = sessionNow(req.Now)
 	if err := validateAppendAgentSessionEntries(req); err != nil {
 		return nil, err
 	}
@@ -826,7 +826,7 @@ func (s *SQLiteStore) AppendAgentSessionEntries(ctx context.Context, req AppendA
 // checked); everything else, including the watermark CAS and the cursor, is
 // as AppendAgentSessionEntries.
 func (s *SQLiteStore) appendAgentSessionEntriesTx(ctx context.Context, conn *sql.Conn, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
-	req.Now = memorySessionNow(req.Now)
+	req.Now = sessionNow(req.Now)
 	if err := validateAppendAgentSessionEntries(req); err != nil {
 		return nil, err
 	}
@@ -1064,7 +1064,7 @@ func commitSQLiteAppend(ctx context.Context, conn *sql.Conn, plan *sqliteAppendP
 // terminal (loop-16 terminal close). The session binding is not checked, so a
 // promoted Run can still settle entries it left in the parent session.
 func (s *SQLiteStore) TransitionToolEntry(ctx context.Context, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
-	req.Now = memorySessionNow(req.Now)
+	req.Now = sessionNow(req.Now)
 	if err := validateToolEntryTransitionRequest(req); err != nil {
 		return nil, err
 	}
@@ -1097,7 +1097,7 @@ func (s *SQLiteStore) TransitionToolEntry(ctx context.Context, req ToolEntryTran
 // transitionToolEntryTx is the in-transaction transition. conn holds BEGIN
 // IMMEDIATE and the caller owns the lease check.
 func (s *SQLiteStore) transitionToolEntryTx(ctx context.Context, conn *sql.Conn, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
-	req.Now = memorySessionNow(req.Now)
+	req.Now = sessionNow(req.Now)
 	if err := validateToolEntryTransitionRequest(req); err != nil {
 		return nil, err
 	}
