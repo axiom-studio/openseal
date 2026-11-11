@@ -220,6 +220,10 @@ func (s *SQLiteStore) ListConversations(ctx context.Context, filter Conversation
 		query += ` AND json_extract(payload, '$.origin.kind') = ?`
 		args = append(args, string(filter.OriginKind))
 	}
+	if filter.AgentBuilderDraftOf != "" {
+		query += ` AND builder_draft_requester = ?`
+		args = append(args, filter.AgentBuilderDraftOf)
+	}
 	query += ` ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?`
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
@@ -246,6 +250,38 @@ func (s *SQLiteStore) ListConversations(ctx context.Context, filter Conversation
 			return nil, err
 		}
 		result = append(result, conversation)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLiteStore) LastConversationActivity(ctx context.Context, scope Scope, ownerType OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	result := make(map[string]time.Time)
+	if len(ownerIDs) == 0 {
+		return result, nil
+	}
+	// With MAX, SQLite takes payload from the row that holds the maximum.
+	query, args := appendSQLiteActivityStrings(`SELECT owner_id, MAX(updated_at), payload FROM conversations
+		WHERE scope_kind = ? AND scope_id = ? AND owner_type = ? AND status = ? AND last_sequence > 0`,
+		[]interface{}{scope.Kind, scope.ID, ownerType, ConversationStatusActive}, "owner_id", ownerIDs)
+	rows, err := s.db.QueryContext(ctx, query+` GROUP BY owner_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ownerID, payload string
+		var newest interface{}
+		if err := rows.Scan(&ownerID, &newest, &payload); err != nil {
+			return nil, err
+		}
+		conversation, err := decodeConversation(payload)
+		if err != nil {
+			return nil, err
+		}
+		result[ownerID] = conversation.UpdatedAt
 	}
 	return result, rows.Err()
 }
@@ -307,6 +343,12 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMe
 	}
 	if err := insertSQLiteChannelMessage(ctx, conn, record.Message); err != nil {
 		return nil, err
+	}
+	if requester := agentBuilderDraftStarter(current, record.Message); requester != "" {
+		if _, err := conn.ExecContext(ctx, `UPDATE conversations SET builder_draft_requester = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+			requester, current.Scope.Kind, current.Scope.ID, current.ID); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err

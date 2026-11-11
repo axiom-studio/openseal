@@ -130,8 +130,9 @@ func (s *MemoryStore) ListConversations(_ context.Context, filter ConversationFi
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]*Conversation, 0)
-	for _, conversation := range s.conversations {
+	for key, conversation := range s.conversations {
 		if conversation.Scope != filter.Scope || (filter.Owner != nil && conversation.Owner != *filter.Owner) ||
+			(filter.AgentBuilderDraftOf != "" && s.agentBuilderDrafts[key] != filter.AgentBuilderDraftOf) ||
 			(filter.SpaceID != "" && conversation.SpaceID != filter.SpaceID) ||
 			(len(filter.Statuses) > 0 && !containsConversationStatus(filter.Statuses, conversation.Status)) ||
 			(filter.OriginKind != "" && (conversation.Origin == nil || conversation.Origin.Kind != filter.OriginKind)) {
@@ -146,6 +147,25 @@ func (s *MemoryStore) ListConversations(_ context.Context, filter ConversationFi
 		return result[i].ID < result[j].ID
 	})
 	return pageConversations(result, filter.Offset, filter.Limit), nil
+}
+
+func (s *MemoryStore) LastConversationActivity(_ context.Context, scope Scope, ownerType OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]time.Time)
+	for _, conversation := range s.conversations {
+		if conversation.Scope != scope || conversation.Owner.Type != ownerType || !slices.Contains(ownerIDs, conversation.Owner.ID) ||
+			conversation.Status != ConversationStatusActive || conversation.LastSequence == 0 {
+			continue
+		}
+		if conversation.UpdatedAt.After(result[conversation.Owner.ID]) {
+			result[conversation.Owner.ID] = conversation.UpdatedAt
+		}
+	}
+	return result, nil
 }
 
 func (s *MemoryStore) CommitChannelMessage(_ context.Context, record ChannelMessageCommitRecord) (*ChannelMessageCommitResult, error) {
@@ -186,6 +206,9 @@ func (s *MemoryStore) CommitChannelMessage(_ context.Context, record ChannelMess
 	}
 	if s.channelMessageIDs[messageKey] != nil {
 		return nil, ErrMessageConflict
+	}
+	if requester := agentBuilderDraftStarter(current, record.Message); requester != "" {
+		s.agentBuilderDrafts[conversationKey] = requester
 	}
 	s.conversations[conversationKey] = cloneConversation(record.Conversation)
 	s.channelMessages[conversationKey] = append(s.channelMessages[conversationKey], cloneChannelMessage(persistedChannelMessage(record.Message)))

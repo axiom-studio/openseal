@@ -680,6 +680,12 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			summary = fmt.Sprintf("Failed %s.%s after %d attempts", call.SkillID, call.Action, call.Attempt)
 		}
 	}
+	createdFromConversation := ""
+	if updatedCall.Status == ActionCallStatusSucceeded && isAgentBuilderApprovalAction(bound) {
+		if createdFromConversation, err = createdAgentBuilderConversation(ctx, w.store, call, sourceRun); err != nil {
+			return ActionExecutionRecord{}, err
+		}
+	}
 	terminalOutcome := updatedCall.Status == ActionCallStatusSucceeded || updatedCall.Status == ActionCallStatusFailed
 	if terminalOutcome && w.hostSummary != "" && call.Execution == ActionExecutionHost {
 		summary = w.hostSummary
@@ -740,7 +746,7 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 	}
 	return ActionExecutionRecord{
 		Call: updatedCall, ExpectedCallRevision: call.Revision, Run: updatedRun, ExpectedRunRevision: sourceRun.Revision,
-		WorkerID: workerID, Now: now, Event: event,
+		WorkerID: workerID, Now: now, Event: event, CreatedFromBuilderConversationID: createdFromConversation,
 	}, nil
 }
 

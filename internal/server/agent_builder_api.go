@@ -51,10 +51,6 @@ func (r agentBuilderReader) ListApprovals(ctx context.Context, filter runtime.Ap
 	return r.store.ListApprovals(ctx, filter)
 }
 
-func (r agentBuilderReader) GetActionCall(ctx context.Context, scope runtime.Scope, id string) (*runtime.ActionCall, error) {
-	return r.store.GetActionCall(ctx, scope, id)
-}
-
 func (s *Server) handleStartAgentBuilderConversation(w http.ResponseWriter, r *http.Request) {
 	service, ok := s.conversationService()
 	if !ok {

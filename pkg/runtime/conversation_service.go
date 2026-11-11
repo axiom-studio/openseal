@@ -41,8 +41,11 @@ type ConversationFilter struct {
 	// OriginKind keeps only conversations whose Origin has this kind; empty
 	// lists every origin.
 	OriginKind ConversationReferenceKind
-	Limit      int
-	Offset     int
+	// AgentBuilderDraftOf keeps only the builder conversations this person
+	// started that have not produced their Agent or Team.
+	AgentBuilderDraftOf string
+	Limit               int
+	Offset              int
 }
 
 type PostChannelMessageRequest struct {
@@ -220,6 +223,10 @@ type ConversationStore interface {
 	GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error)
 	FindConversationByIdempotencyKey(ctx context.Context, scope Scope, key string) (*Conversation, error)
 	ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error)
+	// LastConversationActivity returns, by owner id, the newest UpdatedAt of
+	// each owner's active conversations that hold a message. An owner with
+	// none is absent.
+	LastConversationActivity(ctx context.Context, scope Scope, ownerType OwnerType, ownerIDs []string) (map[string]time.Time, error)
 	CommitChannelMessage(ctx context.Context, record ChannelMessageCommitRecord) (*ChannelMessageCommitResult, error)
 	GetChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string) (*ChannelMessage, error)
 	FindChannelMessageByIdempotencyKey(ctx context.Context, scope Scope, conversationID, key string) (*ChannelMessage, error)
@@ -370,6 +377,10 @@ func (s *ConversationService) UpdateConversation(ctx context.Context, req Update
 
 func (s *ConversationService) ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error) {
 	return s.store.ListConversations(ctx, filter)
+}
+
+func (s *ConversationService) LastConversationActivity(ctx context.Context, scope Scope, ownerType OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+	return s.store.LastConversationActivity(ctx, scope, ownerType, ownerIDs)
 }
 
 func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostChannelMessageRequest) (*ChannelMessageCommitResult, error) {

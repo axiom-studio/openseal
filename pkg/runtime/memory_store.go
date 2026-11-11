@@ -42,6 +42,9 @@ type MemoryStore struct {
 	dependencies                        map[string]map[string]*RunDependency
 	artifacts                           map[string]map[int64]*Artifact
 	conversations                       map[string]*Conversation
+	// agentBuilderDrafts maps an unfinished builder conversation to the
+	// person who started it (the builder_draft_requester column).
+	agentBuilderDrafts                  map[string]string
 	spaces                              map[Scope]map[string]*Space
 	spaceMembers                        map[Scope][]*SpaceMember
 	conversationTasks                   map[string]*ConversationTask
@@ -125,6 +128,7 @@ func NewMemoryStore() *MemoryStore {
 		dependencies:              make(map[string]map[string]*RunDependency),
 		artifacts:                 make(map[string]map[int64]*Artifact),
 		conversations:             make(map[string]*Conversation),
+		agentBuilderDrafts:        make(map[string]string),
 		spaces:                    make(map[Scope]map[string]*Space),
 		spaceMembers:              make(map[Scope][]*SpaceMember),
 		conversationKeys:          make(map[string]string),

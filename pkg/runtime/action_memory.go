@@ -425,6 +425,9 @@ func (s *MemoryStore) PersistActionExecution(_ context.Context, execution Action
 	if execution.Run != nil {
 		s.saveMemoryAgentRunLocked(runKey, execution.Run)
 	}
+	if execution.CreatedFromBuilderConversationID != "" {
+		delete(s.agentBuilderDrafts, conversationStoreKey(execution.Call.Scope, execution.CreatedFromBuilderConversationID))
+	}
 	s.activity[runKey] = append(s.activity[runKey], event)
 	return &ActionExecutionResult{Call: cloneActionCall(execution.Call), Run: cloneAgentRun(execution.Run), Event: cloneActivityEvent(event)}, nil
 }

@@ -221,6 +221,11 @@ func (s *PostgresStore) ListConversations(ctx context.Context, filter Conversati
 		args = append(args, string(filter.OriginKind))
 		placeholder++
 	}
+	if filter.AgentBuilderDraftOf != "" {
+		query += fmt.Sprintf(` AND builder_draft_requester = $%d`, placeholder)
+		args = append(args, filter.AgentBuilderDraftOf)
+		placeholder++
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -237,6 +242,36 @@ func (s *PostgresStore) ListConversations(ctx context.Context, filter Conversati
 	}
 	defer rows.Close()
 	return scanPostgresConversations(rows)
+}
+
+func (s *PostgresStore) LastConversationActivity(ctx context.Context, scope Scope, ownerType OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	// Each owner's first row in ListConversations order, read off
+	// conversations_owner_idx; the payload time keeps the precision a
+	// listed conversation has.
+	rows, err := s.db.QueryContext(ctx, `SELECT o.owner_id, c.payload_updated_at
+		FROM unnest($4::text[]) AS o(owner_id)
+		CROSS JOIN LATERAL (
+			SELECT payload->>'updatedAt' AS payload_updated_at FROM `+s.table("conversations")+`
+			WHERE scope_kind = $1 AND scope_id = $2 AND owner_type = $3 AND owner_id = o.owner_id AND status = $5 AND last_sequence > 0
+			ORDER BY updated_at DESC, id ASC LIMIT 1) c`, scope.Kind, scope.ID, ownerType, pq.Array(ownerIDs), ConversationStatusActive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]time.Time)
+	for rows.Next() {
+		var ownerID, updatedAt string
+		if err := rows.Scan(&ownerID, &updatedAt); err != nil {
+			return nil, err
+		}
+		if result[ownerID], err = time.Parse(time.RFC3339Nano, updatedAt); err != nil {
+			return nil, fmt.Errorf("decode conversation: %w", err)
+		}
+	}
+	return result, rows.Err()
 }
 
 func (s *PostgresStore) CommitChannelMessage(ctx context.Context, record ChannelMessageCommitRecord) (*ChannelMessageCommitResult, error) {
@@ -296,6 +331,12 @@ func (s *PostgresStore) CommitChannelMessage(ctx context.Context, record Channel
 	}
 	if err := s.insertPostgresChannelMessageTx(ctx, tx, record.Message); err != nil {
 		return nil, err
+	}
+	if requester := agentBuilderDraftStarter(current, record.Message); requester != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("conversations")+` SET builder_draft_requester=$1 WHERE scope_kind=$2 AND scope_id=$3 AND id=$4`,
+			requester, current.Scope.Kind, current.Scope.ID, current.ID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

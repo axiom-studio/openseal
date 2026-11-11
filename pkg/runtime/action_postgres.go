@@ -648,6 +648,12 @@ func (s *PostgresStore) PersistActionExecution(ctx context.Context, execution Ac
 			return nil, err
 		}
 	}
+	if execution.CreatedFromBuilderConversationID != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("conversations")+` SET builder_draft_requester=NULL WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`,
+			execution.Call.Scope.Kind, execution.Call.Scope.ID, execution.CreatedFromBuilderConversationID); err != nil {
+			return nil, err
+		}
+	}
 	event, err := s.insertActivityTx(ctx, tx, execution.Event)
 	if err != nil {
 		return nil, err

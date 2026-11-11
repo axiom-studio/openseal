@@ -466,6 +466,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateRemoveEventWaits(ctx, tx); err != nil {
 		return fmt.Errorf("event wait removal migration: %w", err)
 	}
+	if err := s.migrateAgentBuilderDrafts(ctx, tx); err != nil {
+		return fmt.Errorf("agent builder draft migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

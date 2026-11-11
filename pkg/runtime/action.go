@@ -534,6 +534,9 @@ type ActionExecutionRecord struct {
 	WorkerID            string
 	Now                 time.Time
 	Event               *ActivityEvent
+	// CreatedFromBuilderConversationID is the builder conversation whose
+	// Agent or Team this outcome created; it stops being a draft.
+	CreatedFromBuilderConversationID string
 }
 
 type ActionExecutionResult struct {

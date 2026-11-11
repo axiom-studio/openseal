@@ -3667,6 +3667,16 @@ func (e *Engine) ListConversations(ctx context.Context, filter runtime.Conversat
 	return e.conversations.ListConversations(ctx, filter)
 }
 
+// LastConversationActivity returns, by owner id, the newest UpdatedAt of each
+// owner's active conversations that hold a message; an owner with none is
+// absent. One store query answers for every owner.
+func (e *Engine) LastConversationActivity(ctx context.Context, scope runtime.Scope, ownerType runtime.OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.LastConversationActivity(ctx, scope, ownerType, ownerIDs)
+}
+
 var errSpacesUnsupported = errors.New("spaces are not supported by this store")
 
 // ListSpaces returns the scope's spaces by position, creating its Default

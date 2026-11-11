@@ -19,7 +19,6 @@ const (
 	agentBuilderPromptKeyPrefix       = "agent-builder-prompt:"
 	defaultAgentBuilderDraftLimit     = 50
 	maximumAgentBuilderDraftLimit     = 100
-	agentBuilderDraftScanPage         = 100
 	agentBuilderDraftRunScan          = 20
 	agentBuilderDraftApprovalScan     = 100
 	agentBuilderDraftMessageScan      = 50
@@ -172,12 +171,12 @@ type AgentBuilderDraftReader interface {
 	ListChannelMessages(context.Context, ChannelMessageFilter) ([]*ChannelMessage, error)
 	ListAgentRuns(context.Context, AgentRunFilter) ([]*AgentRun, error)
 	ListApprovals(context.Context, ApprovalFilter) ([]*ApprovalCheckpoint, error)
-	GetActionCall(context.Context, Scope, string) (*ActionCall, error)
 }
 
 // ListAgentBuilderDrafts lists the requester's active builder conversations,
 // newest first, that have not produced their Agent or Team, with the status
-// the drafts rail shows. Offset and limit apply after filtering.
+// the drafts rail shows. The store selects the page; only its conversations
+// are read for status.
 func ListAgentBuilderDrafts(ctx context.Context, reader AgentBuilderDraftReader, filter AgentBuilderDraftFilter) ([]AgentBuilderDraft, error) {
 	if reader == nil {
 		return nil, errors.New("conversation store is not configured")
@@ -196,56 +195,30 @@ func ListAgentBuilderDrafts(ctx context.Context, reader AgentBuilderDraftReader,
 		return nil, fmt.Errorf("%w: limit must be 1 to %d and offset cannot be negative", ErrInvalidConversation, maximumAgentBuilderDraftLimit)
 	}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: AgentBuilderDeploymentID}
-	drafts := make([]AgentBuilderDraft, 0, limit)
-	skipped := 0
-	for offset := 0; ; offset += agentBuilderDraftScanPage {
-		conversations, err := reader.ListConversations(ctx, ConversationFilter{
-			Scope: filter.Scope, Owner: &owner, OriginKind: ConversationReferenceAgentBuilder, SpaceID: strings.TrimSpace(filter.SpaceID),
-			Statuses: []ConversationStatus{ConversationStatusActive}, Limit: agentBuilderDraftScanPage, Offset: offset,
-		})
+	conversations, err := reader.ListConversations(ctx, ConversationFilter{
+		Scope: filter.Scope, Owner: &owner, OriginKind: ConversationReferenceAgentBuilder, AgentBuilderDraftOf: filter.Requester.ID,
+		SpaceID: strings.TrimSpace(filter.SpaceID), Statuses: []ConversationStatus{ConversationStatusActive}, Limit: limit, Offset: filter.Offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+	drafts := make([]AgentBuilderDraft, 0, len(conversations))
+	for _, conversation := range conversations {
+		draft, err := agentBuilderDraft(ctx, reader, filter, conversation)
 		if err != nil {
 			return nil, err
 		}
-		for _, conversation := range conversations {
-			draft, keep, err := agentBuilderDraft(ctx, reader, filter, conversation)
-			if err != nil {
-				return nil, err
-			}
-			if !keep {
-				continue
-			}
-			if skipped < filter.Offset {
-				skipped++
-				continue
-			}
-			drafts = append(drafts, draft)
-			if len(drafts) == limit {
-				return drafts, nil
-			}
-		}
-		if len(conversations) < agentBuilderDraftScanPage {
-			return drafts, nil
-		}
+		drafts = append(drafts, draft)
 	}
+	return drafts, nil
 }
 
-func agentBuilderDraft(ctx context.Context, reader AgentBuilderDraftReader, filter AgentBuilderDraftFilter, conversation *Conversation) (AgentBuilderDraft, bool, error) {
-	if conversation == nil || conversation.Status != ConversationStatusActive || conversation.Origin == nil ||
-		conversation.Origin.Kind != ConversationReferenceAgentBuilder {
-		return AgentBuilderDraft{}, false, nil
-	}
-	first, err := reader.ListChannelMessages(ctx, ChannelMessageFilter{Scope: filter.Scope, ConversationID: conversation.ID, Limit: 1})
-	if err != nil {
-		return AgentBuilderDraft{}, false, err
-	}
-	if len(first) == 0 || first[0].Sender != filter.Requester {
-		return AgentBuilderDraft{}, false, nil
-	}
+func agentBuilderDraft(ctx context.Context, reader AgentBuilderDraftReader, filter AgentBuilderDraftFilter, conversation *Conversation) (AgentBuilderDraft, error) {
 	approvals, err := reader.ListApprovals(ctx, ApprovalFilter{
 		Scope: filter.Scope, ConversationID: conversation.ID, NewestFirst: true, Limit: agentBuilderDraftApprovalScan,
 	})
 	if err != nil {
-		return AgentBuilderDraft{}, false, err
+		return AgentBuilderDraft{}, err
 	}
 	var newestCard, pendingCard *ApprovalCheckpoint
 	for _, approval := range approvals {
@@ -258,22 +231,13 @@ func agentBuilderDraft(ctx context.Context, reader AgentBuilderDraftReader, filt
 		if pendingCard == nil && approval.Status == ApprovalStatusPending {
 			pendingCard = approval
 		}
-		if approval.Status == ApprovalStatusApproved && agentBuilderCreatesResource(approval) {
-			call, err := reader.GetActionCall(ctx, filter.Scope, approval.ActionCallID)
-			if err != nil && !errors.Is(err, ErrActionNotFound) {
-				return AgentBuilderDraft{}, false, err
-			}
-			if call != nil && call.Status == ActionCallStatusSucceeded {
-				return AgentBuilderDraft{}, false, nil
-			}
-		}
 	}
 	runs, err := reader.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: filter.Scope, ConversationID: conversation.ID, AssignedAgentID: AgentBuilderDeploymentID,
 		Order: AgentRunOrderCreatedDesc, Limit: agentBuilderDraftRunScan,
 	})
 	if err != nil {
-		return AgentBuilderDraft{}, false, err
+		return AgentBuilderDraft{}, err
 	}
 	var run *AgentRun
 	for _, candidate := range runs {
@@ -286,14 +250,16 @@ func agentBuilderDraft(ctx context.Context, reader AgentBuilderDraftReader, filt
 		Scope: filter.Scope, ConversationID: conversation.ID, Descending: true, Limit: agentBuilderDraftMessageScan,
 	})
 	if err != nil {
-		return AgentBuilderDraft{}, false, err
+		return AgentBuilderDraft{}, err
 	}
 	question := pendingAgentBuilderQuestion(recent)
 
 	draft := AgentBuilderDraft{ConversationID: conversation.ID, SpaceID: conversation.SpaceID, UpdatedAt: conversation.UpdatedAt}
 	draft.Title = agentBuilderCardDisplayName(newestCard)
 	if draft.Title == "" {
-		draft.Title = agentBuilderParameterName(recent, first[0])
+		if draft.Title, err = agentBuilderParameterName(ctx, reader, filter.Scope, conversation.ID, recent); err != nil {
+			return AgentBuilderDraft{}, err
+		}
 	}
 	if run != nil {
 		draft.RunID = run.ID
@@ -322,7 +288,7 @@ func agentBuilderDraft(ctx context.Context, reader AgentBuilderDraftReader, filt
 	default:
 		draft.Status = AgentBuilderDraftIdle
 	}
-	return draft, true, nil
+	return draft, nil
 }
 
 func agentBuilderRunDrafting(status AgentRunStatus) bool {
@@ -357,17 +323,58 @@ func agentBuilderCardDisplayName(approval *ApprovalCheckpoint) string {
 }
 
 // agentBuilderParameterName is the newest name the person set in the form:
-// from the newest page of messages, else the first message.
-func agentBuilderParameterName(recent []*ChannelMessage, first *ChannelMessage) string {
+// from the newest page of messages, else the first message, which is read
+// only when that page does not reach it.
+func agentBuilderParameterName(ctx context.Context, reader AgentBuilderDraftReader, scope Scope, conversationID string, recent []*ChannelMessage) (string, error) {
 	for _, message := range recent {
 		if message != nil && message.Sender.Type == ConversationParticipantUser && message.BuilderParameters != nil && message.BuilderParameters.Name != "" {
-			return message.BuilderParameters.Name
+			return message.BuilderParameters.Name, nil
 		}
 	}
-	if first != nil && first.BuilderParameters != nil {
-		return first.BuilderParameters.Name
+	if len(recent) < agentBuilderDraftMessageScan {
+		return "", nil
 	}
-	return ""
+	first, err := reader.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversationID, Limit: 1})
+	if err != nil || len(first) == 0 || first[0].BuilderParameters == nil {
+		return "", err
+	}
+	return first[0].BuilderParameters.Name, nil
+}
+
+// agentBuilderDraftStarter is the person whose first message makes a
+// builder conversation their draft, else "".
+func agentBuilderDraftStarter(conversation *Conversation, message *ChannelMessage) string {
+	if conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceAgentBuilder ||
+		message.Sequence != 1 || message.Sender.Type != ConversationParticipantUser {
+		return ""
+	}
+	return message.Sender.ID
+}
+
+// createdAgentBuilderConversation is the conversation whose approved card
+// call, now succeeded, creates an Agent or Team; "" for any other call.
+func createdAgentBuilderConversation(ctx context.Context, store KernelStore, call *ActionCall, run *AgentRun) (string, error) {
+	if call.ApprovalID == "" {
+		return "", nil
+	}
+	approval, err := store.GetApproval(ctx, call.Scope, call.ApprovalID)
+	if err != nil && !errors.Is(err, ErrApprovalNotFound) {
+		return "", err
+	}
+	if approval == nil || approval.Status != ApprovalStatusApproved || !agentBuilderCreatesResource(approval) {
+		return "", nil
+	}
+	// The same conversation ListApprovals reports for the card: the Run's
+	// own, else its root Run's.
+	if id, _ := run.Context["conversationId"].(string); id != "" || run.RootRunID == run.ID {
+		return id, nil
+	}
+	root, err := store.GetAgentRun(ctx, run.Scope, run.RootRunID)
+	if err != nil || root == nil {
+		return "", err
+	}
+	id, _ := root.Context["conversationId"].(string)
+	return id, nil
 }
 
 // pendingAgentBuilderQuestion returns the newest question of the newest

@@ -784,6 +784,12 @@ func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution Acti
 			return nil, ErrRevisionConflict
 		}
 	}
+	if execution.CreatedFromBuilderConversationID != "" {
+		if _, err := conn.ExecContext(ctx, `UPDATE conversations SET builder_draft_requester = NULL WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+			execution.Call.Scope.Kind, execution.Call.Scope.ID, execution.CreatedFromBuilderConversationID); err != nil {
+			return nil, err
+		}
+	}
 	event := cloneActivityEvent(execution.Event)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
 		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&event.Sequence); err != nil {
