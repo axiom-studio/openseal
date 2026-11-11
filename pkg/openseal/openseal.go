@@ -2103,10 +2103,9 @@ var (
 // Agent, Team, objective, collaboration, action, approval, and Skill services.
 type Engine struct {
 	store runtime.KernelStore
-	// defaultStore is the in-memory store New opens. The Engine owns it even
-	// when WithStore replaces e.store, because services the replacement does
-	// not implement keep using it, and Close frees it.
-	defaultStore                  *runtime.SQLiteStore
+	// ownedStore is the in-memory store New opened, either as e.store or as
+	// the fallback for services a partial store lacks. Close frees it.
+	ownedStore                    *runtime.SQLiteStore
 	portfolio                     *runtime.PortfolioService
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
@@ -2237,62 +2236,44 @@ type actionWorkerSupervisorSpec struct {
 type Option func(*Engine) error
 
 // New creates an Engine with the given options.
-// The default store is an in-memory SQLite store whose state ends with the
-// Engine; durable worker pools are opt-in. Callers must Close the Engine to
-// free that store.
+//
+// The Engine's store is the one WithStore or WithPersistentStore gives (the
+// last one wins). Without one, New opens an in-memory SQLite store whose
+// state ends with the Engine. Every store-backed service is wired once, after
+// all options ran, from that one store:
+//   - Runs, turns, activity and other runtime.KernelStore services always
+//     use it.
+//   - Dependencies, conversations, embeds, spaces, collaboration, artifacts,
+//     Run audits and Skill reference upgrades exist only when it implements
+//     their store interface; otherwise they are unavailable.
+//   - Agents, Teams and the Skill catalog never go without a store: each one
+//     whose interface it lacks is kept in an in-memory store New opens, and
+//     Teams kept there resolve Agents from that store too.
+//   - WithSkillCatalog and WithSkillSourceArtifactStore win over the store
+//     whatever their order; skill sources are otherwise unavailable unless
+//     the store implements them.
+//
+// Durable worker pools are opt-in. Callers must Close the Engine to free a
+// store New opened; a store passed in stays open for its owner to close.
 func New(opts ...Option) (_ *Engine, err error) {
 	logger, _ := zap.NewProduction()
-	sugar := logger.Sugar()
-
-	store, err := runtime.NewInMemorySQLiteStore()
-	if err != nil {
-		return nil, fmt.Errorf("default store: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			store.Close()
-		}
-	}()
-	conversationChanges, _ := runtime.NewConversationChangeService(store, store)
-
-	// Agents and Teams share the kernel store so channel activation and Team
-	// upgrades commit in one transaction with it.
-	agentRegistry := kernelagent.NewRegistryWithStore(store)
 	e := &Engine{
-		store:               store,
-		defaultStore:        store,
-		workSignals:         runtime.NewWorkSignalStatus(),
-		portfolio:           runtime.NewPortfolioService(store),
-		activity:            runtime.NewRunActivityService(store, store),
-		dependencies:        runtime.NewDependencyCoordinator(store),
-		conversations:       runtime.NewConversationService(store),
-		spaces:              runtime.NewSpaceService(store),
-		conversationChanges: conversationChanges,
-		collaboration:       runtime.NewCollaborationService(store),
-		turns:               runtime.NewAgentTurnService(store, store),
-		runQueue:            runtime.NewAgentRunScheduler(store),
-		wake:                runtime.NewAgentRunWakeService(store, store),
-		artifacts:           runtime.NewArtifactCatalog(store).WithPlacement(runtime.NewStoreArtifactPlacement(store)),
-		skills:              skill.NewCatalogWithStore(store),
-		agents:              agentRegistry,
-		teams:               kernelteam.NewRegistryWithStore(store, agentRegistry),
-		actionPolicy:        nil,
-		approvalAuth:        runtime.EligibleApprovalAuthorizer{},
-		logger:              sugar,
+		workSignals:  runtime.NewWorkSignalStatus(),
+		approvalAuth: runtime.EligibleApprovalAuthorizer{},
+		logger:       logger.Sugar(),
 	}
-	conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
-	e.collaboration.SetAcceptedRunExecutionPreparer(e)
-	e.embeds, _ = runtime.NewEmbedSessionService(store, store)
-	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills)
-	e.progression = progression.NewService(e.agents, e.teams)
-	if err := e.spaces.UseTeams(e.teams); err != nil {
-		return nil, err
-	}
-
 	for _, opt := range opts {
 		if err := opt(e); err != nil {
 			return nil, fmt.Errorf("engine option: %w", err)
 		}
+	}
+	defer func() {
+		if err != nil {
+			e.closeOwnedStore()
+		}
+	}()
+	if err := e.wireStore(); err != nil {
+		return nil, err
 	}
 	if e.actionPolicy == nil {
 		e.actionPolicy = runtime.ActionPolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
@@ -2445,17 +2426,12 @@ func (e *Engine) Stop() {
 	}
 }
 
-// Close stops the Engine and frees the default store New opened. A store
-// passed with WithStore or WithPersistentStore stays open; its owner closes
-// it. The Engine must not be used after Close.
+// Close stops the Engine and frees the in-memory store New opened, if any. A
+// store passed with WithStore or WithPersistentStore stays open; its owner
+// closes it. The Engine must not be used after Close.
 func (e *Engine) Close() error {
 	e.Stop()
-	if e.defaultStore == nil {
-		return nil
-	}
-	err := e.defaultStore.Close()
-	e.defaultStore = nil
-	return err
+	return e.closeOwnedStore()
 }
 
 // Store returns the execution store.
@@ -2474,79 +2450,15 @@ func (e *Engine) Logger() *zap.SugaredLogger {
 	return e.logger
 }
 
-// WithStore replaces the default in-memory store.
+// WithStore sets the Engine's store in place of the default in-memory one.
+// See New for which services a store that implements only part of the
+// durable contract gets.
 func WithStore(store runtime.KernelStore) Option {
 	return func(e *Engine) error {
+		if store == nil {
+			return fmt.Errorf("store is required")
+		}
 		e.store = store
-		e.portfolio = runtime.NewPortfolioService(store)
-		e.activity = runtime.NewRunActivityService(store, store)
-		if dependencyStore, ok := store.(runtime.DependencyKernelStore); ok {
-			e.dependencies = runtime.NewDependencyCoordinator(dependencyStore)
-		} else {
-			e.dependencies = nil
-		}
-		if conversationStore, ok := store.(runtime.ConversationStore); ok {
-			e.conversations = runtime.NewConversationService(conversationStore)
-			e.conversations.SetReactionProjector(e.ReactionProjector())
-			e.conversationChanges, _ = runtime.NewConversationChangeService(conversationStore, store)
-			e.conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
-			if embedStore, supported := store.(runtime.EmbedStore); supported {
-				e.embeds, _ = runtime.NewEmbedSessionService(embedStore, conversationStore)
-			} else {
-				e.embeds = nil
-			}
-		} else {
-			e.conversations = nil
-			e.conversationChanges = nil
-			e.embeds = nil
-		}
-		if spaceStore, ok := store.(runtime.SpaceStore); ok {
-			e.spaces = runtime.NewSpaceService(spaceStore)
-		} else {
-			e.spaces = nil
-		}
-		if collaborationStore, ok := store.(runtime.CollaborationKernelStore); ok {
-			e.collaboration = runtime.NewCollaborationService(collaborationStore)
-			e.collaboration.SetAcceptedRunExecutionPreparer(e)
-		} else {
-			e.collaboration = nil
-		}
-		e.turns = runtime.NewAgentTurnService(store, store)
-		e.runQueue = runtime.NewAgentRunScheduler(store)
-		e.wake = runtime.NewAgentRunWakeService(store, store)
-		if artifactStore, ok := store.(runtime.ArtifactStore); ok {
-			e.artifacts = runtime.NewArtifactCatalog(artifactStore).WithPlacement(runtime.NewStoreArtifactPlacement(store))
-		} else {
-			e.artifacts = nil
-		}
-		if agentStore, ok := store.(kernelagent.Store); ok {
-			e.agents = kernelagent.NewRegistryWithStore(agentStore)
-		}
-		if auditStore, ok := store.(runtime.RunbookExecutionAuditStore); ok && e.agents != nil {
-			e.runbookAudits = runtime.NewRunbookExecutionAuditService(auditStore, e.agents)
-		} else {
-			e.runbookAudits = nil
-		}
-		if teamStore, ok := store.(kernelteam.Store); ok && e.agents != nil {
-			e.teams = kernelteam.NewRegistryWithStore(teamStore, e.agents)
-		}
-		if e.spaces != nil && e.teams != nil {
-			if err := e.spaces.UseTeams(e.teams); err != nil {
-				return err
-			}
-		}
-		e.progression = progression.NewService(e.agents, e.teams)
-		if skillStore, ok := store.(skill.CatalogStore); ok {
-			e.skills = skill.NewCatalogWithStore(skillStore)
-		}
-		if upgradeStore, ok := store.(runtime.SkillReferenceUpgradeStore); ok && e.skills != nil {
-			e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(upgradeStore, e.skills)
-		} else {
-			e.skillReferenceUpgrades = nil
-		}
-		if sourceStore, ok := store.(sourceartifact.Store); ok {
-			e.skillSources, _ = sourceartifact.NewService(sourceStore)
-		}
 		return nil
 	}
 }
