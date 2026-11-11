@@ -27,12 +27,16 @@ type workerTaskProducer struct {
 func (*workerTaskProducer) Kind() StepProducerKind { return StepProducerModel }
 
 func (p *workerTaskProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
+	p.mu.Lock()
 	p.calls++
 	call := p.calls
+	p.mu.Unlock()
 	return p.reply(ctx, call, in)
 }
 
 func (p *workerTaskProducer) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.calls
 }
 

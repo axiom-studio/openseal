@@ -745,4 +745,3 @@ func TestRunCommandsHandoffUnavailableReceiptReaderFailsClosed(t *testing.T) {
 // Keep the fixture's composed backend contract checked without widening the
 // production RunCommandStore interface for a test-only handoff dependency.
 var _ handoffCommandTestStore = (*SQLiteStore)(nil)
-var _ handoffCommandTestStore = (*SQLiteStore)(nil)
