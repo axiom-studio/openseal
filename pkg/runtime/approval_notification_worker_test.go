@@ -86,11 +86,14 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	}
 	// A tenant's immutable approval history must not starve current,
 	// deadline-bearing work when the worker uses a bounded page.
-	historyCall := &ActionCall{ID: "historical-call", Scope: endpoint.Scope, RunID: claimed.ID, Status: ActionCallStatusSucceeded, Revision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
-	putStoredAction(t, store, historyCall)
+	// The store holds one approval per action call, so each historical
+	// approval belongs to its own succeeded call.
 	for index := range 11 {
+		suffix := string(rune('a' + index))
+		historyCall := &ActionCall{ID: "historical-call-" + suffix, Scope: endpoint.Scope, RunID: claimed.ID, Status: ActionCallStatusSucceeded, Revision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
+		putStoredAction(t, store, historyCall)
 		historical := &ApprovalCheckpoint{
-			ID: "historical-approval-" + string(rune('a'+index)), Scope: endpoint.Scope, RunID: claimed.ID,
+			ID: "historical-approval-" + suffix, Scope: endpoint.Scope, RunID: claimed.ID,
 			ActionCallID: historyCall.ID, Status: ApprovalStatusApproved, Revision: 1,
 			CreatedAt: now.Add(-time.Hour).Add(time.Duration(index) * time.Second), UpdatedAt: now.Add(-time.Hour),
 		}
@@ -229,8 +232,9 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if decisionDelivery.Correlation == nil || decisionDelivery.Correlation.Phase != "card_update" {
 		t.Fatalf("decision correlation = %#v", decisionDelivery.Correlation)
 	}
+	// Stored delivery parameters are JSON, so the card holds plain strings.
 	decisionCard, _ := decisionDelivery.Parameters["approval"].(map[string]interface{})
-	if decisionCard["status"] != ApprovalStatusApproved || decisionCard["actionStatus"] != ActionCallStatusReady || decisionCard["providerApproverId"] != "U1" {
+	if decisionCard["status"] != string(ApprovalStatusApproved) || decisionCard["actionStatus"] != string(ActionCallStatusReady) || decisionCard["providerApproverId"] != "U1" {
 		t.Fatalf("decision card = %#v in %#v", decisionCard, decisionDelivery)
 	}
 	if err := consumer.ConsumeCallbackEvent(ctx, registration, subscription, callbackEvent); err != nil {
@@ -267,7 +271,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		}
 		if delivery.Operation == capability.ConversationDeliveryMessageUpdate {
 			projected, _ := delivery.Parameters["approval"].(map[string]interface{})
-			if projected["actionStatus"] == ActionCallStatusSucceeded {
+			if projected["actionStatus"] == string(ActionCallStatusSucceeded) {
 				outcomeCard = true
 			}
 		}
@@ -620,8 +624,9 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 	if update.Operation != capability.ConversationDeliveryMessageUpdate || update.Parameters["providerMessageId"] != delivered.ProviderMessageID {
 		t.Fatalf("expiry update = %#v", update)
 	}
+	// Stored delivery parameters are JSON, so the card holds plain strings.
 	card, _ := update.Parameters["approval"].(map[string]interface{})
-	if card["status"] != ApprovalStatusExpired {
+	if card["status"] != string(ApprovalStatusExpired) {
 		t.Fatalf("expiry card = %#v", card)
 	}
 }

@@ -115,7 +115,8 @@ func TestApprovalPaginationUsesIDToBreakTimestampTies(t *testing.T) {
 	scope := Scope{Kind: "local", ID: "review-pagination"}
 	now := time.Now().UTC()
 	for _, id := range []string{"approval-c", "approval-a", "approval-b"} {
-		putStoredApproval(t, store, &ApprovalCheckpoint{ID: id, Scope: scope, Status: ApprovalStatusPending, CreatedAt: now})
+		// The store holds one approval per action call.
+		putStoredApproval(t, store, &ApprovalCheckpoint{ID: id, Scope: scope, ActionCallID: "call-" + id, Status: ApprovalStatusPending, CreatedAt: now})
 	}
 	for _, newest := range []bool{false, true} {
 		for i := 0; i < 20; i++ {
