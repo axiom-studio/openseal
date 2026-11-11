@@ -324,7 +324,7 @@ func (f *conversationTaskClarificationFixture) readWork(t *testing.T) *AgentRun 
 
 func (f *conversationTaskClarificationFixture) assertWorkUnchanged(t *testing.T, before *AgentRun) {
 	t.Helper()
-	// SQL and memory clones may normalize JSON numbers differently.
+	// A SQL read may decode JSON numbers differently, so compare JSON.
 	want, err := json.Marshal(before)
 	if err != nil {
 		t.Fatal(err)

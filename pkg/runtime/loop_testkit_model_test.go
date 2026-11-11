@@ -538,7 +538,7 @@ type kernelStoreCase struct {
 	open func(*testing.T) KernelStore
 }
 
-// kernelStoreMatrix is memory and SQLite always, plus Postgres when
+// kernelStoreMatrix is SQLite always, plus Postgres when
 // OPENSEAL_TEST_POSTGRES_DSN is set (schema prefix+"_"+uuid[:8], dropped in
 // Cleanup). SQLite files go under t.TempDir, which follows TMPDIR (tmpfs).
 func kernelStoreMatrix(t *testing.T, prefix string) []kernelStoreCase {

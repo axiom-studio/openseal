@@ -19,7 +19,7 @@ type startTaskTestStore interface {
 	AgentRunScheduleStore
 }
 
-// forStartTaskStores runs test on memory and SQLite.
+// forStartTaskStores runs test on SQLite.
 func forStartTaskStores(t *testing.T, test func(*testing.T, startTaskTestStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {

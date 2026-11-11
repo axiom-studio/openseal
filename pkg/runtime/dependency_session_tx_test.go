@@ -17,7 +17,7 @@ type dependencySessionStore interface {
 	RunDependencyStore
 }
 
-// forEachDependencySessionStore runs fn against memory, SQLite and, when
+// forEachDependencySessionStore runs fn against SQLite and, when
 // OPENSEAL_TEST_POSTGRES_DSN is set, Postgres.
 func forEachDependencySessionStore(t *testing.T, fn func(f *sessionConformance, store dependencySessionStore)) {
 	t.Helper()

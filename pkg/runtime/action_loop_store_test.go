@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// runLoopStoreScenario runs scenario on memory and SQLite, and on Postgres
+// runLoopStoreScenario runs scenario on SQLite, and on Postgres
 // when OPENSEAL_TEST_POSTGRES_DSN is set (Postgres-only checks live in
 // action_loop_postgres_integration_test.go).
 func runLoopStoreScenario(t *testing.T, scenario func(*testing.T, KernelStore)) {

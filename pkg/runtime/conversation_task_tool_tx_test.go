@@ -17,7 +17,7 @@ type conversationTaskToolTestStore interface {
 	AgentSessionStore
 }
 
-// forConversationTaskToolStores runs test on memory, SQLite and (with
+// forConversationTaskToolStores runs test on SQLite and (with
 // OPENSEAL_TEST_POSTGRES_DSN) Postgres.
 func forConversationTaskToolStores(t *testing.T, test func(*testing.T, conversationTaskToolTestStore)) {
 	t.Helper()

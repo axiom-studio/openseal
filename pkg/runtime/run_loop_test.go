@@ -2,7 +2,7 @@ package runtime
 
 // RunLoop scenario suite (run-loop section 02 §13) on the shared loop kit:
 // every scenario drives the real RunLoop with the production bindings
-// (loopFixture) over memory and SQLite, plus Postgres when
+// (loopFixture) over SQLite, plus Postgres when
 // OPENSEAL_TEST_POSTGRES_DSN is set. Only the model, the host tools, the
 // action dispatcher and the policy are fakes.
 

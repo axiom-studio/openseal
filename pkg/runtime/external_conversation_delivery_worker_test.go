@@ -298,7 +298,7 @@ func externalConversationDeliveryFixtureWithOperations(
 }
 
 // externalConversationEndpointFixtureOn creates the fixture endpoint in any
-// endpoint store (memory, SQLite or PostgreSQL).
+// endpoint store (SQLite or PostgreSQL).
 func externalConversationEndpointFixtureOn(
 	t *testing.T,
 	ctx context.Context,

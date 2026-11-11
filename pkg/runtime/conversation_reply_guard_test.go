@@ -18,8 +18,8 @@ type replyGuardFixture struct {
 	conversation  *Conversation
 }
 
-// replyGuardScenario runs scenario on memory, SQLite and (with a DSN)
-// Postgres, all of which hold Runs and conversations in one store.
+// replyGuardScenario runs scenario on SQLite and (with a DSN) Postgres,
+// both of which hold Runs and conversations in one store.
 func replyGuardScenario(t *testing.T, scenario func(*testing.T, *replyGuardFixture)) {
 	t.Helper()
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) { scenario(t, newReplyGuardFixture(t, store)) })
