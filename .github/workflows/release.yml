@@ -1,10 +1,18 @@
 name: Release
 
-# Triggered by pushing a semver tag, e.g. v0.1.0 or v0.1.0-rc1.
+# Triggered by pushing a release tag, e.g. v0.1.0 or v0.1.0-rc1.
+#
+# Development tags (v1.0.20-dev.N) are not releases. They exist so cortex can
+# pin a commit of this module, and one is cut for nearly every change, so
+# building binaries, the container and the desktop installers (the macOS .dmg
+# alone takes most of the run) for each of them was a full release per commit.
+# Their commits are tested by ci.yml on the push to develop; installers are
+# built once, for the release.
 on:
   push:
     tags:
       - 'v*.*.*'
+      - '!v*.*.*-dev.*'
 
 # Tags are immutable, so cancelling an in-progress run buys nothing and risks
 # half-publishing. Default token scope is read-only; jobs opt into their writes.

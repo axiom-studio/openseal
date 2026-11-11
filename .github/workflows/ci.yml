@@ -1,7 +1,11 @@
 name: CI
 
+# Every commit is tested: pull requests into develop, and each commit pushed to
+# develop itself (work is often pushed there directly and tagged from there).
 on:
   pull_request:
+    branches: [develop]
+  push:
     branches: [develop]
 
 # CI only reads the repository. Nothing here publishes an artifact — building
@@ -11,8 +15,10 @@ permissions:
   contents: read
 
 # A pull request that is pushed to repeatedly should not queue a run per push.
+# A commit on develop always finishes its own run: its group is the commit, so
+# a later push never cancels it.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 # The axiom-studio org Actions policy is reported (in a sibling repository's
