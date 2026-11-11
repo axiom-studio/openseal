@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -40,8 +42,26 @@ func newRoutineEventHarness(t *testing.T) *routineEventHarness {
 	h.matcher.now = h.clock
 	h.dispatcher = NewRoutineEventDispatcher(h.store, h.matcher)
 	h.dispatcher.now = h.clock
+	h.deployAgent()
 	h.conversation, h.message = h.chat("Inbox")
 	return h
+}
+
+// deployAgent deploys the routines' assigned Agent. The store checks the
+// assigned Agent before each start and pauses a routine whose Agent is gone.
+func (h *routineEventHarness) deployAgent() {
+	h.t.Helper()
+	agents := kernelagent.NewRegistryWithStore(h.store)
+	definition := sqliteAgentDefinition("1.0.0")
+	if _, err := agents.RegisterDefinition(h.ctx, definition); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, _, err := agents.CreateDeployment(h.ctx, &kernelagent.AgentDeployment{
+		ID: h.owner.ID, Scope: capability.ScopeReference{Kind: h.scope.Kind, ID: h.scope.ID}, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "user-1", "test"); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 // chat creates a chat with one user request and returns their IDs.
