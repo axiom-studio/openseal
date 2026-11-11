@@ -647,12 +647,6 @@ func truncateExternalReplyError(value string) string {
 	return value
 }
 
-// externalConversationReplyDue reports whether an applied item still needs
-// reply projection at now.
-func externalConversationReplyDue(item *ExternalConversationInboxItem, now time.Time) bool {
-	return item != nil && item.ReplyState == "" && (item.ReplyAvailableAt == nil || !item.ReplyAvailableAt.After(now))
-}
-
 func (i *ExternalConversationInboxItem) Validate() error {
 	if i == nil || i.Scope.Validate() != nil || !validOpaqueIdentifier(i.ID, 256) ||
 		!validOpaqueIdentifier(i.EndpointID, 256) || i.EndpointRevision < 1 ||
@@ -1050,14 +1044,6 @@ func cloneExternalConversationMapping(value *ExternalConversationMapping) *Exter
 }
 
 func cloneExternalParticipantMapping(value *ExternalParticipantMapping) *ExternalParticipantMapping {
-	if value == nil {
-		return nil
-	}
-	copy := *value
-	return &copy
-}
-
-func cloneExternalMessageMapping(value *ExternalMessageMapping) *ExternalMessageMapping {
 	if value == nil {
 		return nil
 	}

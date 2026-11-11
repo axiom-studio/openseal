@@ -127,17 +127,6 @@ func conversationTaskFinishedBeforePromotion(step *AgentTurn) bool {
 	return step != nil && step.Final
 }
 
-// latestConversationTaskStep is the step row with the highest sequence.
-func latestConversationTaskStep(steps map[string]*AgentTurn) *AgentTurn {
-	var latest *AgentTurn
-	for _, step := range steps {
-		if step != nil && (latest == nil || step.Sequence > latest.Sequence) {
-			latest = step
-		}
-	}
-	return latest
-}
-
 // conversationTaskPromotionFork is the session half of a promotion (SPEC
 // §4.5): the child session the promoted Run moves to, and the task_promoted
 // note on the chat session after the fork point. Note is nil when the chat

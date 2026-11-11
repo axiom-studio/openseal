@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -185,13 +184,6 @@ func routineEventSubscriptionOf(activation *RunbookActivation) (RoutineEventSubs
 	}
 	subscription.Channels = routineEventNamedChannels(activation.Task.Event)
 	return subscription, true
-}
-
-func routineEventMaxPerHour(activation *RunbookActivation) int {
-	if activation == nil || activation.Task == nil || activation.Task.Event == nil {
-		return 0
-	}
-	return activation.Task.Event.MaxPerHour
 }
 
 // prepareRoutineEventRecord checks a record before insert and fills its
@@ -391,17 +383,7 @@ func validateRoutineEventScopeActivation(scope Scope, activationID string) error
 	return nil
 }
 
-func sortRoutineEventSourceKeys(keys []RoutineEventSourceKey) {
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].Kind != keys[j].Kind {
-			return keys[i].Kind < keys[j].Kind
-		}
-		return keys[i].SourceRef < keys[j].SourceRef
-	})
-}
-
 var (
-	_ RoutineEventStore = (*MemoryStore)(nil)
 	_ RoutineEventStore = (*SQLiteStore)(nil)
 	_ RoutineEventStore = (*PostgresStore)(nil)
 )

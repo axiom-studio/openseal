@@ -40,24 +40,6 @@ func (s *ExternalConversationEndpointService) channelActivationCommit(next *Exte
 			return store.activateAmendment(ctx, amendment, amendmentRevision, definition, deployment, deploymentRevision, activation, func(tx *sql.Tx) error {
 				return store.updateExternalConversationEndpoint(ctx, tx, next, expectedRevision)
 			})
-		case *MemoryStore:
-			// Hold endpoint access until the all-or-nothing memory registry commit
-			// succeeds. Everything after that commit is an infallible map update.
-			if _, ok := registryStore.(*kernelagent.MemoryStore); !ok {
-				return errors.New("Agent and channel activation stores cannot commit atomically")
-			}
-			store.mu.Lock()
-			defer store.mu.Unlock()
-			key := externalConversationEndpointKey(next.Scope, next.ID)
-			current := store.externalEndpoints[key]
-			if current == nil || current.Revision != expectedRevision || current.IngressRoute != next.IngressRoute {
-				return ErrExternalConversationConflict
-			}
-			if err := registryStore.ActivateAmendment(ctx, amendment, amendmentRevision, definition, deployment, deploymentRevision, activation); err != nil {
-				return err
-			}
-			store.externalEndpoints[key] = cloneExternalConversationEndpoint(next)
-			return nil
 		default:
 			return errors.New("Agent and channel activation store does not support atomic commits")
 		}

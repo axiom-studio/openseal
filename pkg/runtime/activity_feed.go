@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 )
@@ -172,74 +171,4 @@ func decodeActivityFeedCursor(value string) (*activityFeedCursor, error) {
 		return nil, errors.New("invalid activity feed cursor")
 	}
 	return &cursor, nil
-}
-
-func matchesActivityFilter(event *ActivityEvent, filter ActivityFilter) bool {
-	if event == nil || event.Scope != filter.Scope || filter.RunID != "" && event.RunID != filter.RunID ||
-		len(filter.RunIDs) > 0 && !activityStringAllowed(activityStreamID(event), filter.RunIDs) ||
-		filter.AgentID != "" && event.AgentID != filter.AgentID || filter.ObjectiveID != "" && event.ObjectiveID != filter.ObjectiveID ||
-		filter.TeamID != "" && event.TeamID != filter.TeamID || !activityStringAllowed(event.EventType, filter.EventTypes) ||
-		!activitySeverityAllowed(event.Severity, filter.Severities) || !activityVisibilityAllowed(event.Visibility, filter.Visibilities) {
-		return false
-	}
-	if filter.BeforeCreatedAt != nil {
-		if event.CreatedAt.After(*filter.BeforeCreatedAt) {
-			return false
-		}
-		if event.CreatedAt.Equal(*filter.BeforeCreatedAt) && (filter.BeforeID == "" || event.ID >= filter.BeforeID) {
-			return false
-		}
-	}
-	return true
-}
-
-func sortActivityEvents(events []*ActivityEvent, descending bool) {
-	sort.Slice(events, func(i, j int) bool {
-		if !events[i].CreatedAt.Equal(events[j].CreatedAt) {
-			if descending {
-				return events[i].CreatedAt.After(events[j].CreatedAt)
-			}
-			return events[i].CreatedAt.Before(events[j].CreatedAt)
-		}
-		if descending {
-			return events[i].ID > events[j].ID
-		}
-		return events[i].ID < events[j].ID
-	})
-}
-
-func activityStringAllowed(value string, allowed []string) bool {
-	if len(allowed) == 0 {
-		return true
-	}
-	for _, candidate := range allowed {
-		if value == candidate {
-			return true
-		}
-	}
-	return false
-}
-
-func activitySeverityAllowed(value ActivitySeverity, allowed []ActivitySeverity) bool {
-	if len(allowed) == 0 {
-		return true
-	}
-	for _, candidate := range allowed {
-		if value == candidate {
-			return true
-		}
-	}
-	return false
-}
-
-func activityVisibilityAllowed(value ActivityVisibility, allowed []ActivityVisibility) bool {
-	if len(allowed) == 0 {
-		return true
-	}
-	for _, candidate := range allowed {
-		if value == candidate {
-			return true
-		}
-	}
-	return false
 }

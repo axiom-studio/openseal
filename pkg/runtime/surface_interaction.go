@@ -271,14 +271,6 @@ func cloneSurfaceInteraction(in *SurfaceInteraction) *SurfaceInteraction {
 	return &out
 }
 
-func cloneSurfaceInteractions(in []*SurfaceInteraction) []*SurfaceInteraction {
-	out := make([]*SurfaceInteraction, 0, len(in))
-	for _, interaction := range in {
-		out = append(out, cloneSurfaceInteraction(interaction))
-	}
-	return out
-}
-
 func decodeSurfaceInteraction(payload string) (*SurfaceInteraction, error) {
 	var value SurfaceInteraction
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {

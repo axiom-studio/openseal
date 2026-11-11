@@ -160,24 +160,6 @@ func (s *PostgresStore) MarkArtifactFiles(ctx context.Context, scope Scope, work
 	return tx.Commit()
 }
 
-func (s *MemoryStore) MarkArtifactFiles(_ context.Context, scope Scope, working, results []string) error {
-	if err := scope.Validate(); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.workingFiles == nil {
-		s.workingFiles = make(map[string]bool)
-	}
-	for _, id := range working {
-		s.workingFiles[artifactStorageKey(scope, id)] = true
-	}
-	for _, id := range results {
-		delete(s.workingFiles, artifactStorageKey(scope, id))
-	}
-	return nil
-}
-
 // workingArtifactIDs reads a scope's working files for the list paths that
 // filter in Go.
 func workingArtifactIDs(ctx context.Context, db *sql.DB, query string, scope Scope) (map[string]bool, error) {
@@ -200,5 +182,4 @@ func workingArtifactIDs(ctx context.Context, db *sql.DB, query string, scope Sco
 var (
 	_ ArtifactWorkingFileStore = (*SQLiteStore)(nil)
 	_ ArtifactWorkingFileStore = (*PostgresStore)(nil)
-	_ ArtifactWorkingFileStore = (*MemoryStore)(nil)
 )

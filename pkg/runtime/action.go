@@ -500,24 +500,6 @@ func (c ActionClaim) Validate() error {
 	return nil
 }
 
-// claimSelects reports whether a claim may take call, apart from its status,
-// availability, paused dependency and maintenance, which every store checks.
-// run is the call's Run row (nil when missing).
-func (c ActionClaim) claimSelects(call *ActionCall, run *AgentRun) bool {
-	if c.OwnActionID != "" {
-		return call.ID == c.OwnActionID && (call.Execution == ActionExecutionHost || call.Execution == ActionExecutionLoop)
-	}
-	switch call.Execution {
-	case ActionExecutionHost:
-		return call.Status != ActionCallStatusReady || !call.AvailableAt.After(c.hostReadyCutoff())
-	case ActionExecutionLoop:
-		// Only the loop runs its calls. A worker takes one only after its Run
-		// ended, to close it without dispatch.
-		return run == nil || isTerminalAgentRunStatus(run.Status)
-	}
-	return true
-}
-
 // hostReadyCutoff is the latest time a ready host call became available for
 // an action worker to recover it.
 func (c ActionClaim) hostReadyCutoff() time.Time {

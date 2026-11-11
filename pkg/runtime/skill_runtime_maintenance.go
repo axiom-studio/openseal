@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -248,14 +247,6 @@ func AddSkillRuntimeMaintenanceBindingDigest(h hash.Hash, b SkillRuntimeMaintena
 		return ErrSkillRuntimeMaintenanceConflict
 	}
 	return json.NewEncoder(h).Encode([]interface{}{b.DeploymentID, b.BindingID, b.Revision})
-}
-
-func skillRuntimeMaintenanceBindingDigest(records []SkillRuntimeMaintenanceBindingRevision) string {
-	h := sha256.New()
-	for _, b := range records {
-		_ = AddSkillRuntimeMaintenanceBindingDigest(h, b)
-	}
-	return fmt.Sprintf("sha256:%x", h.Sum(nil))
 }
 
 func logicalSkillRuntimeUsage(ctx context.Context, q skillRuntimeUsageQuerier, scope Scope, skillID, actions, runs string, postgres bool) (bool, error) {

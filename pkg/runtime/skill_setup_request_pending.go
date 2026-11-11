@@ -4,39 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"sort"
 )
 
-// Worker-only pending projection. App reads still require an exact deployment
-// and conversation, and all stores require a tenant scope.
-func (s *MemoryStore) ListPendingSkillSetupRequests(_ context.Context, scope Scope, limit, offset int) ([]*SkillSetupRequest, error) {
-	if scope.Validate() != nil {
-		return nil, ErrInvalidSkillSetup
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var result []*SkillSetupRequest
-	for _, request := range s.skillSetupRequests {
-		if request.Scope == scope && request.Status == "pending" {
-			result = append(result, cloneSkillSetupRequest(request))
-		}
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].CreatedAt.Equal(result[j].CreatedAt) {
-			return result[i].ID < result[j].ID
-		}
-		return result[i].CreatedAt.Before(result[j].CreatedAt)
-	})
-	limit, offset = normalizeExternalConversationPage(limit, offset)
-	if offset >= len(result) {
-		return []*SkillSetupRequest{}, nil
-	}
-	end := offset + limit
-	if end > len(result) {
-		end = len(result)
-	}
-	return result[offset:end], nil
-}
 func (s *PostgresStore) ListPendingSkillSetupRequests(ctx context.Context, scope Scope, limit, offset int) ([]*SkillSetupRequest, error) {
 	return listPendingSkillSetupRequests(ctx, s.db, s.table("skill_setup_requests"), scope, limit, offset)
 }

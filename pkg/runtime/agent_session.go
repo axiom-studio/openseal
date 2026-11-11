@@ -16,7 +16,7 @@ import (
 // Agent session log (run-loop SPEC §2.1, section 01). A session is the
 // append-only log one Agent's loop renders into provider messages. This file
 // holds the shared types, validation, caps, deterministic ids, the transition
-// table and the pure path builder; the memory, SQLite and Postgres backends use
+// table and the pure path builder; the SQLite and Postgres backends use
 // these and never redeclare them.
 
 type AgentSessionKind string

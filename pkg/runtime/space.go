@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -661,31 +660,12 @@ func cloneSpace(space *Space) *Space {
 	return &cloned
 }
 
-// spaceVisibleTo is the rule VisibleSpaces applies to one space; invited
-// reports whether the person was added to it.
-func spaceVisibleTo(space *Space, userID string, invited bool) bool {
-	return (userID != "" && space.OwnerID == userID) || space.Access == SpaceAccessEveryone ||
-		(space.Access == SpaceAccessInvited && invited)
-}
-
 func cloneSpaceMember(member *SpaceMember) *SpaceMember {
 	if member == nil {
 		return nil
 	}
 	cloned := *member
 	return &cloned
-}
-
-func sortSpaces(spaces []*Space) {
-	sort.SliceStable(spaces, func(i, j int) bool {
-		if spaces[i].Position != spaces[j].Position {
-			return spaces[i].Position < spaces[j].Position
-		}
-		if !spaces[i].CreatedAt.Equal(spaces[j].CreatedAt) {
-			return spaces[i].CreatedAt.Before(spaces[j].CreatedAt)
-		}
-		return spaces[i].ID < spaces[j].ID
-	})
 }
 
 // moveSpace returns the new position of every space after moving spaceID to
@@ -723,19 +703,4 @@ func applySpacePatch(space *Space, patch SpacePatch, now time.Time) {
 		space.Look = *patch.Look
 	}
 	space.UpdatedAt = now
-}
-
-func sortSpaceMembers(members []*SpaceMember) {
-	sort.SliceStable(members, func(i, j int) bool {
-		if members[i].Position != members[j].Position {
-			return members[i].Position < members[j].Position
-		}
-		if !members[i].AddedAt.Equal(members[j].AddedAt) {
-			return members[i].AddedAt.Before(members[j].AddedAt)
-		}
-		if members[i].Type != members[j].Type {
-			return members[i].Type < members[j].Type
-		}
-		return members[i].ID < members[j].ID
-	})
 }

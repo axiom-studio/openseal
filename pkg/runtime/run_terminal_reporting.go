@@ -114,20 +114,3 @@ func runNeedsTerminalReporting(run *AgentRun) bool {
 	}
 	return runReportsMilestone(run, milestone)
 }
-
-func cloneRunTerminalReport(report *RunTerminalReport) *RunTerminalReport {
-	if report == nil {
-		return nil
-	}
-	copy := *report
-	copy.Run = cloneAgentRun(report.Run)
-	if report.LeaseExpiresAt != nil {
-		at := *report.LeaseExpiresAt
-		copy.LeaseExpiresAt = &at
-	}
-	if report.DeliveredAt != nil {
-		at := *report.DeliveredAt
-		copy.DeliveredAt = &at
-	}
-	return &copy
-}

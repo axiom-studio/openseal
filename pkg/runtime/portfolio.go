@@ -578,7 +578,7 @@ type ObjectiveScopeStore interface {
 
 // KernelStore is the complete persistence contract required by the OpenSeal
 // Engine. Embedding applications can supply an implementation; standalone
-// OpenSeal ships memory and SQLite implementations.
+// OpenSeal ships a SQLite implementation.
 type KernelStore interface {
 	SkillSetupRequestStore
 	CredentialRequestStore

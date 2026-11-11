@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -368,47 +367,4 @@ func cloneExternalConversationGateway(value *ExternalConversationGatewayRegistra
 	}
 	copy.Lifecycle = append([]ExternalConversationGatewayLifecycleEntry(nil), value.Lifecycle...)
 	return &copy
-}
-
-func externalConversationGatewayStatusMatches(
-	status ExternalConversationGatewayStatus,
-	statuses []ExternalConversationGatewayStatus,
-) bool {
-	if len(statuses) == 0 {
-		return true
-	}
-	for _, candidate := range statuses {
-		if status == candidate {
-			return true
-		}
-	}
-	return false
-}
-
-func paginateExternalConversationGateways(
-	values []*ExternalConversationGatewayRegistration,
-	limit, offset int,
-) []*ExternalConversationGatewayRegistration {
-	limit, offset = normalizeExternalConversationPage(limit, offset)
-	if offset >= len(values) {
-		return []*ExternalConversationGatewayRegistration{}
-	}
-	end := offset + limit
-	if end > len(values) {
-		end = len(values)
-	}
-	result := make([]*ExternalConversationGatewayRegistration, 0, end-offset)
-	for _, value := range values[offset:end] {
-		result = append(result, cloneExternalConversationGateway(value))
-	}
-	return result
-}
-
-func sortExternalConversationGateways(values []*ExternalConversationGatewayRegistration) {
-	sort.Slice(values, func(i, j int) bool {
-		if !values[i].UpdatedAt.Equal(values[j].UpdatedAt) {
-			return values[i].UpdatedAt.After(values[j].UpdatedAt)
-		}
-		return values[i].ID < values[j].ID
-	})
 }

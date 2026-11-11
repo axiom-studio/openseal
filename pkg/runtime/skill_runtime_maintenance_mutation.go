@@ -6,20 +6,6 @@ import (
 	"time"
 )
 
-// WithSkillRuntimeMaintenanceMutation fences publication in an external host
-// store against controller takeover and canonical binding changes. The trusted
-// callback must honor its context and must not reenter this kernel store. All
-// immutable catalog registration and binding Plan/Apply happen outside it.
-func (s *MemoryStore) WithSkillRuntimeMaintenanceMutation(ctx context.Context, proof *SkillRuntimeMaintenance, mutation func(context.Context) error) error {
-	if err := validateMaintenanceMutationArguments(proof, mutation); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	current := s.memorySkillRuntimeMaintenanceActiveLocked(proof.Scope, proof.SkillID)
-	return executeSkillRuntimeMaintenanceMutation(ctx, proof, current, mutation)
-}
-
 func (s *SQLiteStore) WithSkillRuntimeMaintenanceMutation(ctx context.Context, proof *SkillRuntimeMaintenance, mutation func(context.Context) error) error {
 	if err := validateMaintenanceMutationArguments(proof, mutation); err != nil {
 		return err

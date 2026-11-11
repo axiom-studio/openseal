@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 )
 
@@ -14,70 +13,6 @@ const skillRuntimeMaintenanceCheckpointKey = "_kernelSkillRuntimeMaintenance"
 
 type skillRuntimeMaintenanceWaiterStore interface {
 	ListCompletedSkillRuntimeMaintenanceWaiters(context.Context, Scope, int) ([]*AgentRun, error)
-}
-
-func (s *MemoryStore) refreshMemorySkillRuntimeMaintenanceWaiterLocked(runKey string) {
-	if s.skillRuntimeMaintenanceWaiters == nil {
-		s.skillRuntimeMaintenanceWaiters = make(map[string]map[string]struct{})
-	}
-	if s.skillRuntimeMaintenanceWaiterKeys == nil {
-		s.skillRuntimeMaintenanceWaiterKeys = make(map[string]string)
-	}
-	if old := s.skillRuntimeMaintenanceWaiterKeys[runKey]; old != "" {
-		delete(s.skillRuntimeMaintenanceWaiters[old], runKey)
-		if len(s.skillRuntimeMaintenanceWaiters[old]) == 0 {
-			delete(s.skillRuntimeMaintenanceWaiters, old)
-		}
-		delete(s.skillRuntimeMaintenanceWaiterKeys, runKey)
-	}
-	run := s.agentRuns[runKey]
-	if run == nil || run.Status != AgentRunStatusWaitingForDependency || run.WakeCondition == nil || run.WakeCondition.Type != skillRuntimeMaintenanceWakeType {
-		return
-	}
-	key := skillRuntimeMaintenanceLockKey(run.Scope, run.WakeCondition.Reference)
-	if s.skillRuntimeMaintenanceWaiters[key] == nil {
-		s.skillRuntimeMaintenanceWaiters[key] = make(map[string]struct{})
-	}
-	s.skillRuntimeMaintenanceWaiters[key][runKey] = struct{}{}
-	s.skillRuntimeMaintenanceWaiterKeys[runKey] = key
-}
-
-func (s *MemoryStore) ListCompletedSkillRuntimeMaintenanceWaiters(_ context.Context, scope Scope, limit int) ([]*AgentRun, error) {
-	if err := scope.Validate(); err != nil {
-		return nil, err
-	}
-	if limit <= 0 || limit > 200 {
-		return nil, ErrSkillRuntimeMaintenanceConflict
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]*AgentRun, 0, limit)
-	for key, waiters := range s.skillRuntimeMaintenanceWaiters {
-		g := s.skillRuntimeMaintenance[key]
-		if g == nil || g.Scope != scope || g.Active {
-			continue
-		}
-		for runKey := range waiters {
-			run := s.agentRuns[runKey]
-			if run == nil || run.Scope != scope || run.Status != AgentRunStatusWaitingForDependency {
-				continue
-			}
-			at := sort.Search(len(result), func(i int) bool { return result[i].ID >= run.ID })
-			if at >= limit {
-				continue
-			}
-			result = append(result, nil)
-			copy(result[at+1:], result[at:])
-			result[at] = run
-			if len(result) > limit {
-				result = result[:limit]
-			}
-		}
-	}
-	for i, r := range result {
-		result[i] = cloneAgentRun(r)
-	}
-	return result, nil
 }
 
 func listCompletedMaintenanceWaiters(ctx context.Context, q maintenanceSQLQuery, runs, gates string, scope Scope, limit int, postgres bool) ([]*AgentRun, error) {

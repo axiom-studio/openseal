@@ -5,58 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"sort"
 )
 
 const credentialRequestMigrationVersion int64 = 62
-
-func (s *MemoryStore) GetCredentialRequest(_ context.Context, scope Scope, id string) (*CredentialRequest, error) {
-	if scope.Validate() != nil {
-		return nil, ErrInvalidCredentialRequest
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return cloneCredentialRequest(s.credentialRequests[portfolioKey(scope, id)]), nil
-}
-
-func (s *MemoryStore) ListCredentialRequests(_ context.Context, scope Scope, deploymentID, conversationID string) ([]*CredentialRequest, error) {
-	if scope.Validate() != nil || deploymentID == "" || conversationID == "" {
-		return nil, ErrInvalidCredentialRequest
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := []*CredentialRequest{}
-	for _, r := range s.credentialRequests {
-		if r.Scope == scope && r.DeploymentID == deploymentID && r.ConversationID == conversationID {
-			result = append(result, cloneCredentialRequest(r))
-		}
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].CreatedAt.Equal(result[j].CreatedAt) {
-			return result[i].ID < result[j].ID
-		}
-		return result[i].CreatedAt.Before(result[j].CreatedAt)
-	})
-	return result, nil
-}
-
-func (s *MemoryStore) SaveCredentialRequest(_ context.Context, r *CredentialRequest, expected int64) error {
-	if err := r.Validate(); err != nil {
-		return err
-	}
-	if r.Revision != expected+1 {
-		return ErrInvalidCredentialRequest
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := portfolioKey(r.Scope, r.ID)
-	current := s.credentialRequests[key]
-	if current == nil && expected != 0 || current != nil && (current.Revision != expected || current.Status != CredentialRequestStatusPending) {
-		return ErrCredentialRequestConflict
-	}
-	s.credentialRequests[key] = cloneCredentialRequest(r)
-	return nil
-}
 
 func (s *PostgresStore) migrateCredentialRequests(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, credentialRequestMigrationVersion)

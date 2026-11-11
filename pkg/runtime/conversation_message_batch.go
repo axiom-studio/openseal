@@ -18,7 +18,6 @@ type ChannelMessageBatchStore interface {
 }
 
 var (
-	_ ChannelMessageBatchStore = (*MemoryStore)(nil)
 	_ ChannelMessageBatchStore = (*SQLiteStore)(nil)
 	_ ChannelMessageBatchStore = (*PostgresStore)(nil)
 )

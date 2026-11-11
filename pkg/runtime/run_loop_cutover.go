@@ -6,7 +6,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -31,7 +30,7 @@ type RunLoopCutoverRef struct {
 	ID    string
 }
 
-// RunLoopCutoverStore is the store the cutover needs. The memory, SQLite and
+// RunLoopCutoverStore is the store the cutover needs. The SQLite and
 // PostgreSQL stores implement it; a wrapper that embeds one of them does too.
 type RunLoopCutoverStore interface {
 	RunCommandStore
@@ -328,7 +327,7 @@ func (c *runLoopCutover) requestResolved(ctx context.Context, scope Scope, conve
 }
 
 // runLoopCutoverLocalMu serializes the cutover inside one process for the
-// memory and SQLite stores. A SQLite store is opened by one process (the
+// SQLite store. A SQLite store is opened by one process (the
 // desktop daemon); its write lock cannot be held across the cutover's own
 // writes, which use other connections.
 var runLoopCutoverLocalMu sync.Mutex
@@ -337,32 +336,6 @@ func withRunLoopCutoverLocalLock(ctx context.Context, fn func(context.Context) e
 	runLoopCutoverLocalMu.Lock()
 	defer runLoopCutoverLocalMu.Unlock()
 	return fn(ctx)
-}
-
-func (s *MemoryStore) WithRunLoopCutoverLock(ctx context.Context, fn func(context.Context) error) error {
-	return withRunLoopCutoverLocalLock(ctx, fn)
-}
-
-func (s *MemoryStore) ListRunLoopCutoverCandidates(_ context.Context) ([]RunLoopCutoverRef, error) {
-	s.mu.RLock()
-	runs := make([]*AgentRun, 0)
-	for _, run := range s.agentRuns {
-		if run != nil && run.Engine == "" && !isTerminalAgentRunStatus(run.Status) {
-			runs = append(runs, run)
-		}
-	}
-	sort.Slice(runs, func(i, j int) bool {
-		if !runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
-			return runs[i].CreatedAt.Before(runs[j].CreatedAt)
-		}
-		return runs[i].ID < runs[j].ID
-	})
-	refs := make([]RunLoopCutoverRef, 0, len(runs))
-	for _, run := range runs {
-		refs = append(refs, RunLoopCutoverRef{Scope: run.Scope, ID: run.ID})
-	}
-	s.mu.RUnlock()
-	return refs, nil
 }
 
 func (s *SQLiteStore) WithRunLoopCutoverLock(ctx context.Context, fn func(context.Context) error) error {

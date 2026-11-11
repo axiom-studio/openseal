@@ -360,33 +360,6 @@ func persistedConversationTaskSchedulingOrigin(ctx context.Context, store Portfo
 	return task, nil
 }
 
-func (s *MemoryStore) prepareConversationTaskAdmissionLocked(ctx context.Context, claim *AgentRunClaim, runs []*AgentRun) error {
-	return prepareConversationTaskAdmission(ctx, claim, runs, conversationTaskAdmissionLookup{
-		task: func(_ context.Context, scope Scope, id string) (*ConversationTask, error) {
-			return s.conversationTasks[s.conversationTaskWorkRuns[portfolioKey(scope, id)]], nil
-		},
-		run: func(_ context.Context, scope Scope, id string) (*AgentRun, error) {
-			return s.agentRuns[portfolioKey(scope, id)], nil
-		},
-		conversation: func(_ context.Context, scope Scope, id string) (*Conversation, error) {
-			return s.conversations[conversationStoreKey(scope, id)], nil
-		},
-		message: func(_ context.Context, scope Scope, conversationID, id string) (*ChannelMessage, error) {
-			return s.channelMessageIDs[channelMessageStoreKey(scope, conversationID, id)], nil
-		},
-		request: func(_ context.Context, scope Scope, id string) (*AgentRequest, error) {
-			return s.requests[requestStoreKey(scope, id)], nil
-		},
-		round: func(_ context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
-			id := s.participationKeys[channelMessageIdempotencyKey(scope, conversationID, key)]
-			if result := s.participationRounds[channelMessageStoreKey(scope, conversationID, id)]; result != nil {
-				return result.Round, nil
-			}
-			return nil, nil
-		},
-	})
-}
-
 func (s *SQLiteStore) prepareConversationTaskAdmissionConn(ctx context.Context, conn *sql.Conn, claim *AgentRunClaim, runs []*AgentRun) error {
 	return prepareConversationTaskAdmission(ctx, claim, runs, conversationTaskAdmissionLookup{
 		task: func(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {

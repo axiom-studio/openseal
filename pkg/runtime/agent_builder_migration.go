@@ -63,8 +63,7 @@ type AgentBuilderCutoverPlacement struct {
 }
 
 // AgentBuilderCutoverStore holds the drafts migration 76 kept. The
-// PostgreSQL and SQLite stores read agent_builder_cutover_drafts; the memory
-// store has none.
+// PostgreSQL and SQLite stores read agent_builder_cutover_drafts.
 type AgentBuilderCutoverStore interface {
 	// ListAgentBuilderCutoverDrafts lists every kept draft across scopes,
 	// oldest first. It returns none when the table is absent.
