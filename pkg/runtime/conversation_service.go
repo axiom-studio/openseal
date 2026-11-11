@@ -38,9 +38,12 @@ type UpdateConversationRequest struct {
 }
 
 type ConversationFilter struct {
-	Scope    Scope
-	Owner    *ObjectiveOwner
-	SpaceID  string
+	Scope   Scope
+	Owner   *ObjectiveOwner
+	SpaceID string
+	// SpaceIDs, when not nil, keeps only conversations in these spaces; an
+	// empty list keeps none.
+	SpaceIDs []string
 	Statuses []ConversationStatus
 	// OriginKind keeps only conversations whose Origin has this kind; empty
 	// lists every origin.

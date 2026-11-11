@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -182,6 +183,24 @@ func exerciseSpaceStore(t *testing.T, store spaceConversationStore) {
 		t.Fatalf("stored = %+v %v", stored, err)
 	}
 	assertSpaceConversations(t, conversations, scope, work.ID, inWork.ID, teamChat.ID)
+	inSpace := func(spaceID string) int {
+		t.Helper()
+		listed, err := conversations.ListConversations(ctx, ConversationFilter{Scope: scope, SpaceID: spaceID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(listed)
+	}
+	all := inSpace("")
+	for _, test := range []struct {
+		spaceIDs []string
+		want     int
+	}{{[]string{work.ID}, 2}, {[]string{home.ID, "missing"}, inSpace(home.ID)}, {[]string{work.ID, home.ID}, 2 + inSpace(home.ID)}, {[]string{}, 0}, {nil, all}} {
+		listed, err := conversations.ListConversations(ctx, ConversationFilter{Scope: scope, SpaceIDs: test.spaceIDs})
+		if err != nil || len(listed) != test.want || (test.spaceIDs != nil && slices.ContainsFunc(listed, func(c *Conversation) bool { return !slices.Contains(test.spaceIDs, c.SpaceID) })) {
+			t.Fatalf("SpaceIDs %v listed %d, err = %v; want %d", test.spaceIDs, len(listed), err, test.want)
+		}
+	}
 
 	title := "Renamed"
 	updated, err := conversations.UpdateConversation(ctx, UpdateConversationRequest{Scope: scope, ConversationID: inWork.ID, ExpectedRevision: inWork.Revision, Title: &title})

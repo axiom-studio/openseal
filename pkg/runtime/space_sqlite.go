@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -514,19 +515,69 @@ func (s *SQLiteStore) SetSpaceOwner(ctx context.Context, scope Scope, spaceID, o
 		if err != nil {
 			return err
 		}
-		// Both owners give up their default, the space changes hands, and
-		// each owner's oldest space becomes their default again.
-		for _, step := range []struct {
-			statement string
-			args      []interface{}
-		}{
-			{`UPDATE spaces SET is_default = 0 WHERE scope_kind = ? AND scope_id = ? AND owner_id IN (?, ?) AND is_default = 1`,
-				[]interface{}{scope.Kind, scope.ID, current.OwnerID, ownerID}},
-			{`UPDATE spaces SET owner_id = ?, updated_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
-				[]interface{}{ownerID, now, scope.Kind, scope.ID, spaceID}},
-			{markOwnerDefaultSpaces("spaces", "1") + ` AND s.scope_kind = ? AND s.scope_id = ?`, []interface{}{scope.Kind, scope.ID}},
-		} {
-			if _, err := conn.ExecContext(ctx, step.statement, step.args...); err != nil {
+		if err := setSQLiteSpaceOwner(ctx, conn, current, ownerID, now); err != nil {
+			return err
+		}
+		space, err = getSQLiteSpace(ctx, conn, scope, spaceID)
+		return err
+	})
+	return space, err
+}
+
+// setSQLiteSpaceOwner hands the space to ownerID. Both owners give up their
+// default, the space changes hands, and each owner's oldest space becomes
+// their default again.
+func setSQLiteSpaceOwner(ctx context.Context, conn *sql.Conn, current *Space, ownerID string, now time.Time) error {
+	scope := current.Scope
+	for _, step := range []struct {
+		statement string
+		args      []interface{}
+	}{
+		{`UPDATE spaces SET is_default = 0 WHERE scope_kind = ? AND scope_id = ? AND owner_id IN (?, ?) AND is_default = 1`,
+			[]interface{}{scope.Kind, scope.ID, current.OwnerID, ownerID}},
+		{`UPDATE spaces SET owner_id = ?, updated_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+			[]interface{}{ownerID, now, scope.Kind, scope.ID, current.ID}},
+		{markOwnerDefaultSpaces("spaces", "1") + ` AND s.scope_kind = ? AND s.scope_id = ?`, []interface{}{scope.Kind, scope.ID}},
+	} {
+		if _, err := conn.ExecContext(ctx, step.statement, step.args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SQLiteStore) SetSpaceAccessState(ctx context.Context, scope Scope, spaceID string, state SpaceAccessState, now time.Time) (*Space, error) {
+	var space *Space
+	err := s.withSQLiteSpaceTx(ctx, func(conn *sql.Conn) error {
+		current, err := getSQLiteSpace(ctx, conn, scope, spaceID)
+		if err != nil {
+			return err
+		}
+		if state.OwnerID != "" && state.OwnerID != current.OwnerID {
+			if err := setSQLiteSpaceOwner(ctx, conn, current, state.OwnerID, now); err != nil {
+				return err
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE spaces SET access = ?, updated_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+			state.Access, now, scope.Kind, scope.ID, spaceID); err != nil {
+			return err
+		}
+		existing, err := listSQLiteSpacePeople(ctx, conn, scope, spaceID)
+		if err != nil {
+			return err
+		}
+		for _, person := range existing {
+			if slices.ContainsFunc(state.People, func(want *SpacePerson) bool { return want.UserID == person.UserID }) {
+				continue
+			}
+			if _, err := conn.ExecContext(ctx, `DELETE FROM space_people WHERE scope_kind = ? AND scope_id = ? AND space_id = ? AND user_id = ?`,
+				scope.Kind, scope.ID, spaceID, person.UserID); err != nil {
+				return err
+			}
+		}
+		for _, person := range state.People {
+			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO space_people (scope_kind, scope_id, `+postgresSpacePersonColumns+`)
+				VALUES (?, ?, ?, ?, ?, ?)`, scope.Kind, scope.ID, spaceID, person.UserID, person.AddedBy, person.AddedAt); err != nil {
 				return err
 			}
 		}
@@ -579,7 +630,11 @@ func (s *SQLiteStore) ListSpacePeople(ctx context.Context, scope Scope, spaceID 
 	if _, err := getSQLiteSpace(ctx, s.db, scope, spaceID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+postgresSpacePersonColumns+` FROM space_people
+	return listSQLiteSpacePeople(ctx, s.db, scope, spaceID)
+}
+
+func listSQLiteSpacePeople(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, spaceID string) ([]*SpacePerson, error) {
+	rows, err := queryer.QueryContext(ctx, `SELECT `+postgresSpacePersonColumns+` FROM space_people
 		WHERE scope_kind = ? AND scope_id = ? AND space_id = ? ORDER BY added_at, user_id`, scope.Kind, scope.ID, spaceID)
 	if err != nil {
 		return nil, err

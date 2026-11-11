@@ -205,6 +205,9 @@ type SpaceStore interface {
 	// default space of the owner it left and of the owner it joined becomes
 	// the oldest space each of them owns.
 	SetSpaceOwner(ctx context.Context, scope Scope, spaceID, ownerID string, now time.Time) (*Space, error)
+	// SetSpaceAccessState writes the space's whole access in one
+	// transaction. An owner change is SetSpaceOwner's, defaults included.
+	SetSpaceAccessState(ctx context.Context, scope Scope, spaceID string, state SpaceAccessState, now time.Time) (*Space, error)
 	// PutSpacePerson is idempotent: an existing person is returned unchanged.
 	PutSpacePerson(ctx context.Context, scope Scope, person *SpacePerson) (*SpacePerson, bool, error)
 	DeleteSpacePerson(ctx context.Context, scope Scope, spaceID, userID string) error
@@ -228,6 +231,27 @@ type CreateSpaceRequest struct {
 	Name    string
 	Look    SpaceLook
 	OwnerID string
+}
+
+// SpaceAccessState is the whole of who may see a space. An empty OwnerID
+// leaves the owner as it is. People becomes the space's whole list of
+// people: those already on it keep when and by whom they were added.
+type SpaceAccessState struct {
+	OwnerID string
+	Access  SpaceAccess
+	People  []*SpacePerson
+}
+
+// SetSpaceAccessStateRequest is the whole of who may see a space: its owner,
+// its access and the people added to it. An empty OwnerID leaves the owner as
+// it is, for an owner the host cannot name yet.
+type SetSpaceAccessStateRequest struct {
+	Scope   Scope
+	SpaceID string
+	OwnerID string
+	Access  SpaceAccess
+	People  []string
+	AddedBy string
 }
 
 type AddSpacePersonRequest struct {
@@ -646,6 +670,33 @@ func (s *SpaceService) SetSpaceOwner(ctx context.Context, scope Scope, spaceID, 
 		return nil, fmt.Errorf("%w: owner is invalid", ErrInvalidSpace)
 	}
 	return s.store.SetSpaceOwner(ctx, scope, strings.TrimSpace(spaceID), ownerID, s.now().UTC())
+}
+
+// SetSpaceAccessState replaces the space's owner, access and people in one
+// write; the host must have verified the people belong to the scope. A new
+// owner moves defaults as SetSpaceOwner does. Repeating it changes nothing.
+func (s *SpaceService) SetSpaceAccessState(ctx context.Context, req SetSpaceAccessStateRequest) (*Space, error) {
+	if err := req.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	if !req.Access.Valid() {
+		return nil, fmt.Errorf("%w: access must be owner, invited or everyone", ErrInvalidSpace)
+	}
+	ownerID, spaceID, now := strings.TrimSpace(req.OwnerID), strings.TrimSpace(req.SpaceID), s.now().UTC()
+	if ownerID != "" && !validOpaqueIdentifier(ownerID, 128) {
+		return nil, fmt.Errorf("%w: owner must be a person's id", ErrInvalidSpace)
+	}
+	state := SpaceAccessState{OwnerID: ownerID, Access: req.Access, People: make([]*SpacePerson, 0, len(req.People))}
+	for _, userID := range req.People {
+		person := &SpacePerson{SpaceID: spaceID, UserID: strings.TrimSpace(userID), AddedBy: strings.TrimSpace(req.AddedBy), AddedAt: now}
+		if err := person.Validate(); err != nil {
+			return nil, err
+		}
+		if !slices.ContainsFunc(state.People, func(existing *SpacePerson) bool { return existing.UserID == person.UserID }) {
+			state.People = append(state.People, person)
+		}
+	}
+	return s.store.SetSpaceAccessState(ctx, req.Scope, spaceID, state, now)
 }
 
 // AddSpacePerson adds a person to the space; the host must have verified

@@ -134,6 +134,7 @@ func (s *MemoryStore) ListConversations(_ context.Context, filter ConversationFi
 		if conversation.Scope != filter.Scope || (filter.Owner != nil && conversation.Owner != *filter.Owner) ||
 			(filter.AgentBuilderDraftOf != "" && s.agentBuilderDrafts[key] != filter.AgentBuilderDraftOf) ||
 			(filter.SpaceID != "" && conversation.SpaceID != filter.SpaceID) ||
+			(filter.SpaceIDs != nil && !slices.Contains(filter.SpaceIDs, conversation.SpaceID)) ||
 			(len(filter.Statuses) > 0 && !containsConversationStatus(filter.Statuses, conversation.Status)) ||
 			(filter.OriginKind != "" && (conversation.Origin == nil || conversation.Origin.Kind != filter.OriginKind)) {
 			continue

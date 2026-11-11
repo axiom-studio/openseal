@@ -421,6 +421,7 @@ type (
 	SpaceAccess                          = runtime.SpaceAccess
 	SpacePerson                          = runtime.SpacePerson
 	AddSpacePersonRequest                = runtime.AddSpacePersonRequest
+	SetSpaceAccessStateRequest           = runtime.SetSpaceAccessStateRequest
 	SpaceStore                           = runtime.SpaceStore
 	SpacePatch                           = runtime.SpacePatch
 	CreateSpaceRequest                   = runtime.CreateSpaceRequest
@@ -3826,6 +3827,15 @@ func (e *Engine) SetSpaceOwner(ctx context.Context, scope runtime.Scope, spaceID
 		return nil, errSpacesUnsupported
 	}
 	return e.spaces.SetSpaceOwner(ctx, scope, spaceID, ownerID)
+}
+
+// SetSpaceAccessState replaces the space's owner, access and people at once.
+// The host must first verify the owner and people belong to the scope.
+func (e *Engine) SetSpaceAccessState(ctx context.Context, request runtime.SetSpaceAccessStateRequest) (*runtime.Space, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.SetSpaceAccessState(ctx, request)
 }
 
 // AddSpacePerson adds a person to a space. The host must first verify the

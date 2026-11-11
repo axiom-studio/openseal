@@ -8,6 +8,7 @@ import (
 	"time"
 
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/lib/pq"
 )
 
 const spacesMigrationVersion int64 = 67
@@ -483,19 +484,68 @@ func (s *PostgresStore) SetSpaceOwner(ctx context.Context, scope Scope, spaceID,
 	if err != nil {
 		return nil, err
 	}
-	spaces := s.table("spaces")
-	// Both owners give up their default, the space changes hands, and each
-	// owner's oldest space becomes their default again.
+	if err := s.setPostgresSpaceOwnerTx(ctx, tx, space, ownerID, now); err != nil {
+		return nil, err
+	}
+	if space, err = s.getPostgresSpace(ctx, tx, scope, spaceID); err != nil {
+		return nil, err
+	}
+	return space, tx.Commit()
+}
+
+// setPostgresSpaceOwnerTx hands the space to ownerID. Both owners give up
+// their default, the space changes hands, and each owner's oldest space
+// becomes their default again.
+func (s *PostgresStore) setPostgresSpaceOwnerTx(ctx context.Context, tx *sql.Tx, space *Space, ownerID string, now time.Time) error {
+	spaces, scope := s.table("spaces"), space.Scope
 	if _, err := tx.ExecContext(ctx, `UPDATE `+spaces+` SET is_default = FALSE
 		WHERE scope_kind = $1 AND scope_id = $2 AND owner_id IN ($3, $4) AND is_default`, scope.Kind, scope.ID, space.OwnerID, ownerID); err != nil {
-		return nil, err
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE `+spaces+` SET owner_id = $1, updated_at = $2
-		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5`, ownerID, now, scope.Kind, scope.ID, spaceID); err != nil {
+		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5`, ownerID, now, scope.Kind, scope.ID, space.ID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, markOwnerDefaultSpaces(spaces, "TRUE")+` AND s.scope_kind = $1 AND s.scope_id = $2`, scope.Kind, scope.ID)
+	return err
+}
+
+func (s *PostgresStore) SetSpaceAccessState(ctx context.Context, scope Scope, spaceID string, state SpaceAccessState, now time.Time) (*Space, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, markOwnerDefaultSpaces(spaces, "TRUE")+` AND s.scope_kind = $1 AND s.scope_id = $2`, scope.Kind, scope.ID); err != nil {
+	defer tx.Rollback()
+	if err := s.spacesLock(ctx, tx, scope); err != nil {
 		return nil, err
+	}
+	space, err := s.getPostgresSpace(ctx, tx, scope, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	if state.OwnerID != "" && state.OwnerID != space.OwnerID {
+		if err := s.setPostgresSpaceOwnerTx(ctx, tx, space, state.OwnerID, now); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("spaces")+` SET access = $1, updated_at = $2
+		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5`, state.Access, now, scope.Kind, scope.ID, spaceID); err != nil {
+		return nil, err
+	}
+	people := s.table("space_people")
+	keep := make([]string, 0, len(state.People))
+	for _, person := range state.People {
+		keep = append(keep, person.UserID)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM `+people+` WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3
+		AND NOT (user_id = ANY($4::text[]))`, scope.Kind, scope.ID, spaceID, pq.Array(keep)); err != nil {
+		return nil, err
+	}
+	for _, person := range state.People {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO `+people+` (scope_kind, scope_id, `+postgresSpacePersonColumns+`)
+			VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, scope.Kind, scope.ID, spaceID, person.UserID, person.AddedBy, person.AddedAt); err != nil {
+			return nil, err
+		}
 	}
 	if space, err = s.getPostgresSpace(ctx, tx, scope, spaceID); err != nil {
 		return nil, err

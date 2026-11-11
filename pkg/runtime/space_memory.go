@@ -317,8 +317,39 @@ func (s *MemoryStore) SetSpaceOwner(_ context.Context, scope Scope, spaceID, own
 	if space == nil {
 		return nil, ErrSpaceNotFound
 	}
-	// Both owners give up their default, the space changes hands, and each
-	// owner's oldest space becomes their default again.
+	s.setSpaceOwnerLocked(scope, space, ownerID, now)
+	return cloneSpace(space), nil
+}
+
+func (s *MemoryStore) SetSpaceAccessState(_ context.Context, scope Scope, spaceID string, state SpaceAccessState, now time.Time) (*Space, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	space := s.spaces[scope][spaceID]
+	if space == nil {
+		return nil, ErrSpaceNotFound
+	}
+	if state.OwnerID != "" && state.OwnerID != space.OwnerID {
+		s.setSpaceOwnerLocked(scope, space, state.OwnerID, now)
+	}
+	kept := slices.DeleteFunc(slices.Clone(s.spacePeople[scope]), func(person *SpacePerson) bool {
+		return person.SpaceID == spaceID && !slices.ContainsFunc(state.People, func(want *SpacePerson) bool { return want.UserID == person.UserID })
+	})
+	for _, want := range state.People {
+		if !slices.ContainsFunc(kept, func(person *SpacePerson) bool { return person.SpaceID == spaceID && person.UserID == want.UserID }) {
+			added := *want
+			added.SpaceID = spaceID
+			kept = append(kept, &added)
+		}
+	}
+	s.spacePeople[scope] = kept
+	space.Access, space.UpdatedAt = state.Access, now
+	return cloneSpace(space), nil
+}
+
+// setSpaceOwnerLocked hands the space to ownerID. Both owners give up their
+// default, the space changes hands, and each owner's oldest space becomes
+// their default again.
+func (s *MemoryStore) setSpaceOwnerLocked(scope Scope, space *Space, ownerID string, now time.Time) {
 	owners := []string{space.OwnerID, ownerID}
 	space.OwnerID, space.UpdatedAt = ownerID, now
 	oldest := map[string]*Space{}
@@ -335,7 +366,6 @@ func (s *MemoryStore) SetSpaceOwner(_ context.Context, scope Scope, spaceID, own
 	for _, first := range oldest {
 		first.IsDefault = true
 	}
-	return cloneSpace(space), nil
 }
 
 func (s *MemoryStore) PutSpacePerson(_ context.Context, scope Scope, person *SpacePerson) (*SpacePerson, bool, error) {
