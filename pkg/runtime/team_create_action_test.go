@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
@@ -276,7 +278,7 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	teamID := teamBuilderDefinitionID(f.scope, "Launch Crew", "call-team")
+	teamID := builtTeamDefinitionID(f.scope, "Launch Crew", "call-team")
 	if !strings.HasPrefix(teamID, "team-launch-crew-") || len(teamID) != len("team-launch-crew-")+8 {
 		t.Fatalf("team id = %q", teamID)
 	}
@@ -346,7 +348,7 @@ func TestTeamCreateWithoutPurposeUsesComposerDefault(t *testing.T) {
 	if _, err := f.executeTeam(t, "call-plain", arguments, agentBuilderApprover); err != nil {
 		t.Fatal(err)
 	}
-	teamID := teamBuilderDefinitionID(f.scope, "Launch Crew", "call-plain")
+	teamID := builtTeamDefinitionID(f.scope, "Launch Crew", "call-plain")
 	definition, err := f.teams.GetDefinition(ctx, teamID, "1")
 	if err != nil {
 		t.Fatal(err)
@@ -390,7 +392,7 @@ func TestTeamCreateFailsWhenNameTakenWhileWaiting(t *testing.T) {
 	if _, err := f.executeTeam(t, "call-second", arguments, agentBuilderApprover); err == nil || !strings.Contains(err.Error(), "already used") {
 		t.Fatalf("second create err = %v", err)
 	}
-	if _, err := f.teams.GetDefinition(ctx, teamBuilderDefinitionID(f.scope, "Launch Crew", "call-second"), "1"); !errors.Is(err, kernelteam.ErrDefinitionNotFound) {
+	if _, err := f.teams.GetDefinition(ctx, builtTeamDefinitionID(f.scope, "Launch Crew", "call-second"), "1"); !errors.Is(err, kernelteam.ErrDefinitionNotFound) {
 		t.Fatalf("second definition err = %v", err)
 	}
 }
@@ -424,4 +426,13 @@ func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
 	if f.teamProvision.teamCreates != 0 {
 		t.Fatalf("team creates = %d", f.teamProvision.teamCreates)
 	}
+}
+
+// builtTeamDefinitionID is the id create_team gives the Team definition it
+// builds: the name's slug and a digest of the scope and the call, so a
+// replay of the call converges on the same Team. The tests spell it out to
+// pin that id.
+func builtTeamDefinitionID(scope Scope, displayName, callID string) string {
+	digest := sha256.Sum256([]byte(scope.Kind + ":" + scope.ID + ":" + callID))
+	return "team-" + kernelteam.MemberSlug(displayName) + "-" + hex.EncodeToString(digest[:])[:8]
 }
