@@ -20,7 +20,7 @@ func main() {
 	if *db == "" || *source == "" {
 		panic("-db and -source required")
 	}
-	store, err := sqlite.NewSQLiteStore(*db)
+	store, err := sqlite.New(*db)
 	check(err)
 	defer store.Close()
 	registry := agent.NewRegistryWithStore(store)

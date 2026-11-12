@@ -18,7 +18,7 @@ import (
 
 func TestSQLiteSpaceAccess(t *testing.T) {
 	t.Parallel()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "access.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "access.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func exerciseSpaceAccessState(t *testing.T, spaces *portfolio.SpaceService, scop
 func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "legacy.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		reopened, err := sqlite.NewSQLiteStore(path)
+		reopened, err := sqlite.New(path)
 		if err != nil {
 			t.Fatal(err)
 		}

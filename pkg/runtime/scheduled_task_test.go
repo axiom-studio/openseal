@@ -77,7 +77,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 			t.Run(kind+"/"+limit, func(t *testing.T) {
 				var store models.KernelStore = newTestKernelStore(t)
 				if kind == "sqlite" {
-					s, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "tasks.db"))
+					s, err := sqlite.New(filepath.Join(t.TempDir(), "tasks.db"))
 					if err != nil {
 						t.Fatal(err)
 					}

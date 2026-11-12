@@ -103,7 +103,7 @@ func TestSQLiteCredentialRedemptionOfHostBindings(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "host-redemption.db")
-			store, err := sqlite.NewSQLiteStore(path)
+			store, err := sqlite.New(path)
 			if err != nil {
 				t.Fatal(err)
 			}

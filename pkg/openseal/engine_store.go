@@ -137,7 +137,7 @@ func (e *Engine) openOwnedStore() (*sqlite.Store, error) {
 	if e.ownedStore != nil {
 		return e.ownedStore, nil
 	}
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		return nil, fmt.Errorf("default store: %w", err)
 	}

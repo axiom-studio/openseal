@@ -96,7 +96,7 @@ type cutoverTestRow struct {
 func seedCutoverDraftStore(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	fresh, err := sqlite.NewSQLiteStore(path)
+	fresh, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func seedCutoverDraftStore(t *testing.T) string {
 
 func openCutoverEngine(t *testing.T, path string, options ...Option) (*Engine, *sqlite.Store) {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

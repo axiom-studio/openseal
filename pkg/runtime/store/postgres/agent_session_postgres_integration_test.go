@@ -29,7 +29,7 @@ func newAgentSessionPostgresStores(t *testing.T, n int) []*Store {
 	ctx := context.Background()
 	stores := make([]*Store, n)
 	for i := range stores {
-		store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+		store, err := New(ctx, dsn, WithSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}

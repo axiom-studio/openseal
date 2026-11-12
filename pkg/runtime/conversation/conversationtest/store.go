@@ -20,7 +20,7 @@ import (
 // both.
 func NewStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func forSQLStores(t *testing.T, test func(t *testing.T, store sqlStore, reopen f
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "conversation-tasks.db")
 		open := func(t *testing.T) sqlStore {
-			store, err := sqlite.NewSQLiteStore(path)
+			store, err := sqlite.New(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +84,7 @@ func forSQLStores(t *testing.T, test func(t *testing.T, store sqlStore, reopen f
 		dsn := pgSchema.DSN
 		schema := pgSchema.Name
 		open := func(t *testing.T) sqlStore {
-			store, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
+			store, err := postgres.New(t.Context(), dsn, postgres.WithSchema(schema))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -22,7 +22,7 @@ import (
 
 func newAgentBuilderTestServer(t *testing.T, withBuilder bool) (*Server, *sqlite.Store) {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "builder.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "builder.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

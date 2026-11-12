@@ -194,7 +194,7 @@ func TestProgressionProposalRetrySurvivesSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "7"}
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestProgressionProposalRetrySurvivesSQLiteRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

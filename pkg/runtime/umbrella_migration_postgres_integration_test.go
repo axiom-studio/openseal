@@ -21,7 +21,7 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	store, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	store, err = postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

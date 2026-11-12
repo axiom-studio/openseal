@@ -12,7 +12,7 @@ import (
 
 func TestSQLiteTeamMembersMigrationReplacesRoleSlots(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "teams.db")
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestSQLiteTeamMembersMigrationReplacesRoleSlots(t *testing.T) {
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if store, err = NewSQLiteStore(path); err != nil {
+		if store, err = New(path); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -25,7 +25,7 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 	primary, pgSchema := openTestPostgresStore(t, "openseal_grouped_collaboration_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 		t.Fatalf("completion failures = %d, observed wakes = %d", failures.Load(), wakes.Load())
 	}
 
-	restarted, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	restarted, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	primary, pgSchema := openTestPostgresStore(t, "openseal_team_bids_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	if successes.Load() != 1 {
 		t.Fatalf("concurrent successful bids = %d, want 1", successes.Load())
 	}
-	restarted, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	restarted, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

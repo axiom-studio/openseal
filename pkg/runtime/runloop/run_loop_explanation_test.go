@@ -38,7 +38,7 @@ func (f *explanationFinal) Deliver(context.Context, agentrun.FinalDelivery) (age
 func explanationStores(t *testing.T, test func(*testing.T, models.KernelStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "run-loop-explanation.db"))
+		store, err := sqlite.New(filepath.Join(t.TempDir(), "run-loop-explanation.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

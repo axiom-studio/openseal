@@ -22,7 +22,7 @@ func TestPostgresSkillSourceArtifactsAreReplicaSafeScopedDurableAndCollectable(t
 	primary, pgSchema := openTestPostgresStore(t, "openseal_skill_source_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestPostgresSkillSourceArtifactsAreReplicaSafeScopedDurableAndCollectable(t
 	if err := replica.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restartedStore, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	restartedStore, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

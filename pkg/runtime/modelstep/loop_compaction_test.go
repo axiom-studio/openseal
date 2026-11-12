@@ -730,7 +730,7 @@ func TestCompactionModelPrefersStepThenBindingThenNewest(t *testing.T) {
 // ends.
 func newModelStepTestStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}

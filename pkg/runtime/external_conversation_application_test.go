@@ -45,7 +45,7 @@ func checkApplicationRouteMatching(t *testing.T, store models.ExternalConversati
 }
 
 func TestSQLiteApplicationRouteMatching(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "routes.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "routes.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

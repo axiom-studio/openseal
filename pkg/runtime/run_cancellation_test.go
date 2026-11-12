@@ -25,7 +25,7 @@ func TestCancelWaitingApprovalClosesAction(t *testing.T) {
 		store func(*testing.T) cancellationStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) cancellationStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "cancel.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "cancel.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

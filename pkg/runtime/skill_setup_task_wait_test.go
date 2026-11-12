@@ -44,7 +44,7 @@ func forSkillSetupTaskStores(t *testing.T, test func(*testing.T, skillSetupTaskT
 				}
 			}
 			var err error
-			current, err = sqlite.NewSQLiteStore(path)
+			current, err = sqlite.New(path)
 			if err != nil {
 				t.Fatal(err)
 			}

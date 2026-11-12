@@ -17,9 +17,9 @@ func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing
 	schema := pgSchema.Name
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, dsn,
-		WithPostgresSchema(schema),
-		WithPostgresPool(PostgresPoolConfig{
+	store, err := New(ctx, dsn,
+		WithSchema(schema),
+		WithPool(PoolConfig{
 			MaxOpenConnections: 4, MaxIdleConnections: 2,
 			ConnectionLifetime: time.Minute, ConnectionIdleTime: time.Minute,
 		}),
@@ -64,15 +64,15 @@ func TestPostgresPoolBudgetBoundsTwoOverlappingReplicas(t *testing.T) {
 	schema := pgSchema.Name
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pool := PostgresPoolConfig{
+	pool := PoolConfig{
 		MaxOpenConnections: 3, MaxIdleConnections: 1,
 		ConnectionLifetime: time.Minute, ConnectionIdleTime: time.Minute,
 	}
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema), WithPostgresPool(pool))
+	primary, err := New(ctx, dsn, WithSchema(schema), WithPool(pool))
 	if err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema), WithPostgresPool(pool))
+	replacement, err := New(ctx, dsn, WithSchema(schema), WithPool(pool))
 	if err != nil {
 		_ = primary.Close()
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestPostgresPoolBudgetBoundsTwoOverlappingReplicas(t *testing.T) {
 		}
 	}
 	primaryStats, replacementStats := primary.PoolStats(), replacement.PoolStats()
-	for name, stats := range map[string]PostgresPoolStats{"primary": primaryStats, "replacement": replacementStats} {
+	for name, stats := range map[string]PoolStats{"primary": primaryStats, "replacement": replacementStats} {
 		if stats.MaxOpenConnections != 3 || stats.OpenConnections > 3 || stats.InUseConnections > 3 || stats.IdleConnections > 1 || stats.WaitCount < callersPerReplica-3 || stats.WaitDuration <= 0 {
 			t.Fatalf("%s replica pool stats = %#v", name, stats)
 		}

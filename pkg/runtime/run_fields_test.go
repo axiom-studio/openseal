@@ -22,7 +22,7 @@ type runFieldsStore interface {
 
 func runFieldsBackends(t *testing.T, test func(t *testing.T, store runFieldsStore)) {
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "runtime.db"))
+		store, err := sqlite.New(filepath.Join(t.TempDir(), "runtime.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

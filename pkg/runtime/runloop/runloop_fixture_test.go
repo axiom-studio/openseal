@@ -158,12 +158,12 @@ func executeLoopPersonAction(t *testing.T, worker *action.ActionWorker, scope mo
 
 // openLoopPostgresStore opens a Postgres store on a fresh schema (see
 // storetest.NewPostgresSchema) and returns it with the schema.
-func openLoopPostgresStore(t testing.TB, prefix string, options ...postgres.PostgresStoreOption) (*postgres.Store, storetest.PostgresSchema) {
+func openLoopPostgresStore(t testing.TB, prefix string, options ...postgres.Option) (*postgres.Store, storetest.PostgresSchema) {
 	t.Helper()
 	schema := storetest.NewPostgresSchema(t, prefix)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	store, err := postgres.NewPostgresStore(ctx, schema.DSN, append([]postgres.PostgresStoreOption{postgres.WithPostgresSchema(schema.Name)}, options...)...)
+	store, err := postgres.New(ctx, schema.DSN, append([]postgres.Option{postgres.WithSchema(schema.Name)}, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func loopStoreMatrix(t *testing.T, prefix string) []loopStoreCase {
 	t.Helper()
 	cases := []loopStoreCase{
 		{name: "sqlite", open: func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), prefix+".db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), prefix+".db"))
 			if err != nil {
 				t.Fatal(err)
 			}

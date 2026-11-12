@@ -141,7 +141,7 @@ func (r *countedChannelMessageSQLReader) QueryContext(ctx context.Context, query
 
 func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "exact-batch.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestConversationMessageBatchChunksAndDeduplicatesExactIDs(t *testing.T) {
 }
 
 func BenchmarkConversationMessageVisibilityHistory(b *testing.B) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(b.TempDir(), "poll-batch.db"))
+	store, err := sqlite.New(filepath.Join(b.TempDir(), "poll-batch.db"))
 	if err != nil {
 		b.Fatal(err)
 	}

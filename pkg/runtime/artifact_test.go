@@ -24,7 +24,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 		open func(*testing.T) (models.ArtifactStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.ArtifactStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "artifacts.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -167,7 +167,7 @@ func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T)
 
 func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 // then by version, newest first.
 func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	ctx := context.Background()
-	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
+	sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

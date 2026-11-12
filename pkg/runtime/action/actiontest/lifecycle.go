@@ -61,7 +61,7 @@ func ForEachBackend(t *testing.T, test func(*testing.T, models.KernelStore, Back
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, Backend) {
 			path := filepath.Join(t.TempDir(), "action-lifecycle.db")
-			store, err := sqlite.NewSQLiteStore(path)
+			store, err := sqlite.New(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,7 +70,7 @@ func ForEachBackend(t *testing.T, test func(*testing.T, models.KernelStore, Back
 				if err := store.Close(); err != nil {
 					t.Fatal(err)
 				}
-				reopened, err := sqlite.NewSQLiteStore(path)
+				reopened, err := sqlite.New(path)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -83,7 +83,7 @@ func ForEachBackend(t *testing.T, test func(*testing.T, models.KernelStore, Back
 			dsn := pgSchema.DSN
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
+			store, err := postgres.New(ctx, dsn, postgres.WithSchema(pgSchema.Name))
 			if err != nil {
 				t.Fatal(err)
 			}

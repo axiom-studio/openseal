@@ -29,7 +29,7 @@ func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 		}
 	}
 	for _, store := range []models.ExternalConversationGatewayStore{newTestKernelStore(t), func() models.ExternalConversationGatewayStore {
-		sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "gateways.db"))
+		sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "gateways.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +55,7 @@ func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 
 func TestSQLiteChannelUmbrellaBackfill(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestSQLiteChannelUmbrellaBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

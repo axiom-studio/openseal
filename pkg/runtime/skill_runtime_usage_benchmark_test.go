@@ -16,7 +16,7 @@ func BenchmarkSkillRuntimeUsageTerminalHistory(b *testing.B) {
 	for _, size := range []int{100, 10000} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
 			path := b.TempDir() + "/history.db"
-			store, err := sqlite.NewSQLiteStore(path)
+			store, err := sqlite.New(path)
 			if err != nil {
 				b.Fatal(err)
 			}

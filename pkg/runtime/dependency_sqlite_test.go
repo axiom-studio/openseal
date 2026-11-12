@@ -32,7 +32,7 @@ func TestSQLiteDependencyFanInSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "dependencies.db")
 	scope := models.Scope{Kind: "tenant", ID: "restart"}
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestSQLiteDependencyFanInSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restarted, err := sqlite.NewSQLiteStore(path)
+	restarted, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestSQLiteDependencyFanInSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verified, err := sqlite.NewSQLiteStore(path)
+	verified, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,12 +119,12 @@ func TestSQLiteDependencyConcurrentStoresEmitOneWake(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "concurrent-dependencies.db")
 	scope := models.Scope{Kind: "tenant", ID: "sqlite-concurrent"}
-	primary, err := sqlite.NewSQLiteStore(path)
+	primary, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer primary.Close()
-	replica, err := sqlite.NewSQLiteStore(path)
+	replica, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

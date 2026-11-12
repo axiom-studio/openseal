@@ -72,7 +72,7 @@ func TestActionReadyDeferralIsNotRunningRecovery(t *testing.T) {
 
 func TestActionRunningRecoveryProvenanceSurvivesSQLiteRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "action-recovery.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestActionRunningRecoveryProvenanceSurvivesSQLiteRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,7 @@ func TestPostgresDeploymentIdentitiesReserveAndBackfillFailsOnCollision(t *testi
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	store, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestPostgresDeploymentIdentitiesReserveAndBackfillFailsOnCollision(t *testi
 	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version = $1`, deploymentIdentityMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema)); !errors.Is(err, workforce.ErrDeploymentIDTaken) {
+	if reopened, err := New(ctx, dsn, WithSchema(schema)); !errors.Is(err, workforce.ErrDeploymentIDTaken) {
 		if reopened != nil {
 			_ = reopened.Close()
 		}

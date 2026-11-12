@@ -22,7 +22,7 @@ func TestDefaultStoreTeamRostersFollowSpaces(t *testing.T) {
 }
 
 func TestSQLiteTeamRostersFollowSpaces(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "team-spaces.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "team-spaces.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

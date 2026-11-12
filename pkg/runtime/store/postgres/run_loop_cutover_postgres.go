@@ -69,7 +69,7 @@ func (s *Store) acquireRunLoopCutoverLock(ctx context.Context, conn *sql.Conn, k
 			}
 		}
 		if errors.Is(lockContext.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-			return fmt.Errorf("acquire cutover lock: %w after %s", ErrPostgresMigrationLockTimeout, time.Since(startedAt).Round(time.Millisecond))
+			return fmt.Errorf("acquire cutover lock: %w after %s", ErrMigrationLockTimeout, time.Since(startedAt).Round(time.Millisecond))
 		}
 		return fmt.Errorf("acquire cutover lock: %w", err)
 	}

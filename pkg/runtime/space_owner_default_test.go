@@ -21,7 +21,7 @@ import (
 
 func TestSQLiteOwnerDefaultSpaces(t *testing.T) {
 	t.Parallel()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "owner-default.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "owner-default.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ type ownerDefaultSpaceRow struct {
 func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "owner-default-migration.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	}
 
 	// The migration runs on every open.
-	again, err := sqlite.NewSQLiteStore(path)
+	again, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func assertSQLiteOwnerDefaults(t *testing.T, db *sql.DB, wantRows int, wantDefau
 // a default back, and an automatic pick skips a space shared with everyone.
 func TestSQLiteSetSpaceOwnerKeepsDefaults(t *testing.T) {
 	t.Parallel()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "owner-change.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "owner-change.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

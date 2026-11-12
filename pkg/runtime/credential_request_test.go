@@ -33,7 +33,7 @@ func credentialRequestFixture() *models.CredentialRequest {
 
 func TestCredentialRequestStoresScopeCASAndTerminalState(t *testing.T) {
 	ctx := context.Background()
-	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "credentials.db"))
+	sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "credentials.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,11 +22,11 @@ import (
 func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "credential-redemption.db")
-	primary, err := sqlite.NewSQLiteStore(path)
+	primary, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replica, err := sqlite.NewSQLiteStore(path)
+	replica, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 	if err := primary.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := sqlite.NewSQLiteStore(path)
+	restarted, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "authority.db")
-			store, err := sqlite.NewSQLiteStore(path)
+			store, err := sqlite.New(path)
 			if err != nil {
 				t.Fatal(err)
 			}

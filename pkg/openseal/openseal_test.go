@@ -161,7 +161,7 @@ func TestEngineExposesExternalConversationEndpointLifecycle(t *testing.T) {
 
 func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

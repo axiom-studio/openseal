@@ -14,11 +14,11 @@ import (
 
 // openPostgresStoreOn opens another store on schema s, closed when the
 // test ends.
-func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...PostgresStoreOption) *Store {
+func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...Option) *Store {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, s.DSN, append([]PostgresStoreOption{WithPostgresSchema(s.Name)}, options...)...)
+	store, err := New(ctx, s.DSN, append([]Option{WithSchema(s.Name)}, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...Po
 
 // openTestPostgresStore opens a store on a fresh schema (see
 // storetest.NewPostgresSchema) and returns it with the schema.
-func openTestPostgresStore(t testing.TB, prefix string, options ...PostgresStoreOption) (*Store, storetest.PostgresSchema) {
+func openTestPostgresStore(t testing.TB, prefix string, options ...Option) (*Store, storetest.PostgresSchema) {
 	t.Helper()
 	schema := storetest.NewPostgresSchema(t, prefix)
 	return openPostgresStoreOn(t, schema, options...), schema

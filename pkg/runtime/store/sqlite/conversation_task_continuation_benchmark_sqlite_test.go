@@ -12,7 +12,7 @@ import (
 
 func BenchmarkConversationTaskContinuationDueSQLite(b *testing.B) {
 	storetest.BenchmarkConversationTaskDue(b, func(b *testing.B) (storetest.ConversationTaskDueStore, storetest.ConversationTaskDueExplain) {
-		store, err := NewSQLiteStore(filepath.Join(b.TempDir(), "continuation-due.db"))
+		store, err := New(filepath.Join(b.TempDir(), "continuation-due.db"))
 		if err != nil {
 			b.Fatal(err)
 		}

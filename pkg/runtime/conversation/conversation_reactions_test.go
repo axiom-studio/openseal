@@ -24,7 +24,7 @@ func TestConversationReactionsAcrossStores(t *testing.T) {
 	t.Parallel()
 	stores := map[string]func(t *testing.T) models.ConversationStore{
 		"sqlite": func(t *testing.T) models.ConversationStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "reactions.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "reactions.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

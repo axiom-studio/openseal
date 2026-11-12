@@ -19,7 +19,7 @@ import (
 func TestSQLiteOpenSystemSpacesMigration(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "spaces.db")
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestSQLiteOpenSystemSpacesMigration(t *testing.T) {
 	type row struct{ owner, access string }
 	assertSpaces := func(when string, want map[string]row) {
 		t.Helper()
-		reopened, err := NewSQLiteStore(path)
+		reopened, err := New(path)
 		if err != nil {
 			t.Fatal(err)
 		}

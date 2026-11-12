@@ -18,7 +18,7 @@ func main() {
 	if *path == "" {
 		panic("-db required")
 	}
-	store, err := sqlite.NewSQLiteStore(*path)
+	store, err := sqlite.New(*path)
 	check(err)
 	defer store.Close()
 	ctx := context.Background()

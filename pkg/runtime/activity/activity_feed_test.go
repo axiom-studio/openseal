@@ -16,7 +16,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 		store models.KernelStore
 		close func()
 	}{}
-	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "activity.db"))
+	sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "activity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func activityFeedRun(id string, scope models.Scope, agentID string, now time.Tim
 // not depend on runtime's test helpers and can live with the activity code.
 func newActivityTestStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}

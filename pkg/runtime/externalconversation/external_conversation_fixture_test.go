@@ -164,7 +164,7 @@ func (d *crashAfterDispatch) DispatchExternalConversation(
 func newFileStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func forEachRunStore(t *testing.T, test func(*testing.T, runStoreFixture)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "contract.db")
-		current, err := sqlite.NewSQLiteStore(path)
+		current, err := sqlite.New(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -204,7 +204,7 @@ func forEachRunStore(t *testing.T, test func(*testing.T, runStoreFixture)) {
 			if err := current.Close(); err != nil {
 				t.Fatal(err)
 			}
-			current, err = sqlite.NewSQLiteStore(path)
+			current, err = sqlite.New(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -214,7 +214,7 @@ func forEachRunStore(t *testing.T, test func(*testing.T, runStoreFixture)) {
 	t.Run("postgres", func(t *testing.T) {
 		pgSchema := storetest.NewPostgresSchema(t, "run_store_contract_")
 		schema, dsn := pgSchema.Name, pgSchema.DSN
-		current, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
+		current, err := postgres.New(t.Context(), dsn, postgres.WithSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +223,7 @@ func forEachRunStore(t *testing.T, test func(*testing.T, runStoreFixture)) {
 			if err := current.Close(); err != nil {
 				t.Fatal(err)
 			}
-			current, err = postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
+			current, err = postgres.New(t.Context(), dsn, postgres.WithSchema(schema))
 			if err != nil {
 				t.Fatal(err)
 			}

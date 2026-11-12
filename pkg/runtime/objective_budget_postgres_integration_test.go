@@ -21,7 +21,7 @@ func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 	primary, pgSchema := openTestPostgresStore(t, "openseal_budget_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

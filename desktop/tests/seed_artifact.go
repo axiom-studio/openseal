@@ -22,7 +22,7 @@ func main() {
 	if *db == "" {
 		panic("-db required")
 	}
-	store, err := sqlite.NewSQLiteStore(*db)
+	store, err := sqlite.New(*db)
 	check(err)
 	defer store.Close()
 	content, err := artifact.NewLocalStore(filepath.Join(filepath.Dir(*db), "artifacts"))

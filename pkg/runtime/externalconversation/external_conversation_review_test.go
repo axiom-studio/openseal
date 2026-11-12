@@ -131,7 +131,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 	}
 }
 func TestPendingSetupProjectionIsTenantScoped(t *testing.T) {
-	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "pending.db"))
+	sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "pending.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

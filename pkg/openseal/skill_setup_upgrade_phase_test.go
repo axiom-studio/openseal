@@ -21,7 +21,7 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 			}
 			path := filepath.Join(t.TempDir(), "setup.db")
 			if kind == "sqlite" {
-				sqlite, err := sqlite.NewSQLiteStore(path)
+				sqlite, err := sqlite.New(path)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -85,7 +85,7 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 			}
 			if kind == "sqlite" {
 				// A restarted catalog must load the persisted canonical provenance.
-				reopened, err := sqlite.NewSQLiteStore(path)
+				reopened, err := sqlite.New(path)
 				if err != nil {
 					t.Fatal(err)
 				}

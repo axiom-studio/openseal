@@ -19,7 +19,7 @@ func BenchmarkConversationTaskContinuationDuePostgres(b *testing.B) {
 	}
 	storetest.BenchmarkConversationTaskDue(b, func(b *testing.B) (storetest.ConversationTaskDueStore, storetest.ConversationTaskDueExplain) {
 		schema := fmt.Sprintf("conversation_continuation_benchmark_%x", time.Now().UnixNano())
-		store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(schema))
+		store, err := New(context.Background(), dsn, WithSchema(schema))
 		if err != nil {
 			b.Fatal(err)
 		}

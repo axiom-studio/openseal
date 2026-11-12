@@ -11,7 +11,7 @@ import (
 
 func TestSQLiteConnectOnceMigration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "connect-once.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestSQLiteConnectOnceMigration(t *testing.T) {
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if store, err = sqlite.NewSQLiteStore(path); err != nil {
+		if store, err = sqlite.New(path); err != nil {
 			t.Fatal(err)
 		}
 	})

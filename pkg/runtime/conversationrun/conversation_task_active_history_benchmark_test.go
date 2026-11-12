@@ -27,7 +27,7 @@ import (
 func BenchmarkConversationTaskSQLiteActiveHistory(b *testing.B) {
 	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) (storetest.ConversationTaskStore, conversationTaskBenchmarkExplainPlans) {
 		path := filepath.Join(b.TempDir(), "tasks.db")
-		store, err := sqlite.NewSQLiteStore(path)
+		store, err := sqlite.New(path)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -51,7 +51,7 @@ func BenchmarkConversationTaskPostgresActiveHistory(b *testing.B) {
 			b.Fatal(err)
 		}
 		schema := storetest.PostgresSchema{DSN: dsn, Name: fmt.Sprintf("conversation_task_benchmark_%x", time.Now().UnixNano()), DB: db}
-		store, err := postgres.NewPostgresStore(context.Background(), dsn, postgres.WithPostgresSchema(schema.Name))
+		store, err := postgres.New(context.Background(), dsn, postgres.WithSchema(schema.Name))
 		if err != nil {
 			b.Fatal(err)
 		}

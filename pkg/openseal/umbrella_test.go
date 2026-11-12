@@ -95,7 +95,7 @@ func TestDeploymentIDsShareOneNamespaceInDefaultStore(t *testing.T) {
 }
 
 func TestDeploymentIDsShareOneNamespaceInSQLite(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "ids.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "ids.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestDeploymentIDsShareOneNamespaceInSQLite(t *testing.T) {
 
 func TestDeploymentIdentityBackfillFailsOnCollision(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "collision.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestDeploymentIdentityBackfillFailsOnCollision(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if reopened, err := sqlite.NewSQLiteStore(path); !errors.Is(err, ErrDeploymentIDTaken) {
+	if reopened, err := sqlite.New(path); !errors.Is(err, ErrDeploymentIDTaken) {
 		if reopened != nil {
 			_ = reopened.Close()
 		}

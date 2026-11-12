@@ -33,7 +33,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "contract.db")
-		current, err := sqlite.NewSQLiteStore(path)
+		current, err := sqlite.New(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -42,7 +42,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 			if err := current.Close(); err != nil {
 				t.Fatal(err)
 			}
-			current, err = sqlite.NewSQLiteStore(path)
+			current, err = sqlite.New(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -52,7 +52,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 	t.Run("postgres", func(t *testing.T) {
 		pgSchema := storetest.NewPostgresSchema(t, "run_store_contract_")
 		schema, dsn := pgSchema.Name, pgSchema.DSN
-		current, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
+		current, err := postgres.New(t.Context(), dsn, postgres.WithSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +61,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 			if err := current.Close(); err != nil {
 				t.Fatal(err)
 			}
-			current, err = postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
+			current, err = postgres.New(t.Context(), dsn, postgres.WithSchema(schema))
 			if err != nil {
 				t.Fatal(err)
 			}

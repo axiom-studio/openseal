@@ -9,7 +9,7 @@ import (
 )
 
 func TestFreshSQLiteStoreDoesNotCreateRetiredRunsTable(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := New(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestSQLiteStoreOpensExistingDatabaseWithoutReadingRetiredRunsTable(t *testi
 		t.Fatal(err)
 	}
 
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

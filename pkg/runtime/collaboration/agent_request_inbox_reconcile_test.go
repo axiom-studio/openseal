@@ -390,7 +390,7 @@ func TestAgentRequestInboxUsesDeterministicTeamMemberAndAcceptancePolicy(t *test
 func newInboxSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

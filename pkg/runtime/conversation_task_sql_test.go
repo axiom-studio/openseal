@@ -29,7 +29,7 @@ func forConversationTaskSQLStores(t *testing.T, test func(*testing.T, conversati
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "conversation-tasks.db")
 		open := func(t *testing.T) conversationTaskSQLTestStore {
-			store, err := sqlite.NewSQLiteStore(path)
+			store, err := sqlite.New(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -43,7 +43,7 @@ func forConversationTaskSQLStores(t *testing.T, test func(*testing.T, conversati
 		dsn := pgSchema.DSN
 		schema := pgSchema.Name
 		open := func(t *testing.T) conversationTaskSQLTestStore {
-			store, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
+			store, err := postgres.New(t.Context(), dsn, postgres.WithSchema(schema))
 			if err != nil {
 				t.Fatal(err)
 			}

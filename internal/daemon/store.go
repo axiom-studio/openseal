@@ -23,7 +23,7 @@ func OpenKernelStore(config StorageConfig, configDir string) (*sqlite.Store, str
 	if err := ensureParentDirectory(path); err != nil {
 		return nil, "", err
 	}
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		return nil, "", err
 	}

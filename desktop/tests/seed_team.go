@@ -19,7 +19,7 @@ func main() {
 	if *db == "" {
 		panic("-db required")
 	}
-	store, err := sqlite.NewSQLiteStore(*db)
+	store, err := sqlite.New(*db)
 	check(err)
 	defer store.Close()
 	registry := team.NewRegistryWithStore(store, agent.NewRegistryWithStore(store))

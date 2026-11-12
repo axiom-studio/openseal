@@ -41,7 +41,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COALESCE(payload->>'approvalMode', '') FROM `+pgSchema.Table("conversations")).Scan(&raw); err != nil || raw != "" {
 		t.Fatalf("rolled back approval mode = %q, %v", raw, err)
 	}
-	reopened, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	reopened, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

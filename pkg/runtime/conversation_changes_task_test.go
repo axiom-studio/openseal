@@ -16,7 +16,7 @@ import (
 
 func conversationTaskChangeStore(t *testing.T, backend string) models.KernelStore {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "task-changes.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "task-changes.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

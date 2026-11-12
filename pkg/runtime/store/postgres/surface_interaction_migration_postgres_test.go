@@ -14,7 +14,7 @@ func newSurfaceInteractionPostgresStore(t *testing.T) (context.Context, *Store) 
 	dsn := pgSchema.DSN
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
+	store, err := New(ctx, dsn, WithSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

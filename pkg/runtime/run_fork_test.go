@@ -18,7 +18,7 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 		open func(*testing.T) (atomicForkStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (atomicForkStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "coordinator.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "coordinator.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

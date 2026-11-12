@@ -12,7 +12,7 @@ import (
 
 func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reporting-upgrade.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = sqlite.NewSQLiteStore(path)
+	store, err = sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = sqlite.NewSQLiteStore(path)
+	store, err = sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

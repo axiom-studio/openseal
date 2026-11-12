@@ -19,7 +19,7 @@ func TestPostgresMigration79DropsEventSources(t *testing.T) {
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	store, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestPostgresMigration79DropsEventSources(t *testing.T) {
 		t.Fatalf("a database at 78 looks current: %v, %v", current, err)
 	}
 	_ = store.Close()
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestPostgresMigration79DropsEventSources(t *testing.T) {
 	}
 	assertNoEventSourceTables(t, ctx, reopened)
 	_ = reopened.Close()
-	again, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	again, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

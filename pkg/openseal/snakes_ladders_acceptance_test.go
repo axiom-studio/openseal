@@ -193,7 +193,7 @@ func runSnakesAndLaddersAcceptance(t *testing.T, commentator moveCommentator) {
 		t.Fatal(err)
 	}
 
-	finalStore, err := sqlite.NewSQLiteStore(harness.path)
+	finalStore, err := sqlite.New(harness.path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func runSnakesAndLaddersAcceptance(t *testing.T, commentator moveCommentator) {
 
 func (h *snakesAcceptance) open(ctx context.Context) *Engine {
 	h.t.Helper()
-	store, err := sqlite.NewSQLiteStore(h.path)
+	store, err := sqlite.New(h.path)
 	if err != nil {
 		h.t.Fatal(err)
 	}

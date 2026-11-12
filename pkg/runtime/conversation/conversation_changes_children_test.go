@@ -62,7 +62,7 @@ func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var store models.KernelStore = newTestKernelStore(t)
 			if backend == "sqlite" {
-				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "children.db"))
+				db, err := sqlite.New(filepath.Join(t.TempDir(), "children.db"))
 				if err != nil {
 					t.Fatal(err)
 				}

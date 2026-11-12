@@ -91,11 +91,11 @@ func slackConversationCatalog(t *testing.T, ctx context.Context) (*sqlite.Store,
 
 // openPostgresTestStoreOn opens another store on schema s, closed when the
 // test ends.
-func openPostgresTestStoreOn(t testing.TB, s storetest.PostgresSchema, options ...postgres.PostgresStoreOption) *postgres.Store {
+func openPostgresTestStoreOn(t testing.TB, s storetest.PostgresSchema, options ...postgres.Option) *postgres.Store {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	store, err := postgres.NewPostgresStore(ctx, s.DSN, append([]postgres.PostgresStoreOption{postgres.WithPostgresSchema(s.Name)}, options...)...)
+	store, err := postgres.New(ctx, s.DSN, append([]postgres.Option{postgres.WithSchema(s.Name)}, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func openPostgresTestStoreOn(t testing.TB, s storetest.PostgresSchema, options .
 
 // openPostgresTestStore opens a Postgres store on a fresh schema (see
 // storetest.NewPostgresSchema) and returns it with the schema.
-func openPostgresTestStore(t testing.TB, prefix string, options ...postgres.PostgresStoreOption) (*postgres.Store, storetest.PostgresSchema) {
+func openPostgresTestStore(t testing.TB, prefix string, options ...postgres.Option) (*postgres.Store, storetest.PostgresSchema) {
 	t.Helper()
 	schema := storetest.NewPostgresSchema(t, prefix)
 	return openPostgresTestStoreOn(t, schema, options...), schema

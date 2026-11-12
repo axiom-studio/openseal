@@ -38,7 +38,7 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "portfolio-capacity.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "portfolio-capacity.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,7 +154,7 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-policy.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "objective-policy.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -230,7 +230,7 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "admission-decision.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "admission-decision.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -300,7 +300,7 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-resources.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "objective-resources.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

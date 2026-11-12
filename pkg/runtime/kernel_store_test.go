@@ -18,7 +18,7 @@ import (
 // cycle); change them together.
 func newTestKernelStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func getStoredRun(t testing.TB, store *sqlite.Store, scope models.Scope, id stri
 func newTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func newTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 // when the test ends.
 func openTestSQLiteSessionStore(t *testing.T) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "sessions.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

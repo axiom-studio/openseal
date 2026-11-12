@@ -29,7 +29,7 @@ func TestPostgresSkillDefinitionIdentityProbeUsesLiveIndexedMetadata(t *testing.
 	defer cancel()
 	open := func(schema string) *Store {
 		t.Helper()
-		store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+		store, err := New(ctx, dsn, WithSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}

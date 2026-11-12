@@ -18,7 +18,7 @@ func TestPostgresTeamRostersFollowSpaces(t *testing.T) {
 		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
 	}
 	schema := "openseal_team_spaces_" + uuid.NewString()[:8]
-	store, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
+	store, err := postgres.New(t.Context(), dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

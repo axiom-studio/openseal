@@ -19,7 +19,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "initiator.db")
 			if backend == "sqlite" {
 				var err error
-				disk, err = sqlite.NewSQLiteStore(path)
+				disk, err = sqlite.New(path)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -53,7 +53,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 				if err := disk.Close(); err != nil {
 					t.Fatal(err)
 				}
-				disk, err = sqlite.NewSQLiteStore(path)
+				disk, err = sqlite.New(path)
 				if err != nil {
 					t.Fatal(err)
 				}

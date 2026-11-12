@@ -17,7 +17,7 @@ import (
 func conversationOriginFilterStores() map[string]func(*testing.T) models.ConversationStore {
 	return map[string]func(*testing.T) models.ConversationStore{
 		"sqlite": func(t *testing.T) models.ConversationStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "origin-filter.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "origin-filter.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -29,7 +29,7 @@ func conversationOriginFilterStores() map[string]func(*testing.T) models.Convers
 			dsn := pgSchema.DSN
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
-			store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
+			store, err := postgres.New(ctx, dsn, postgres.WithSchema(pgSchema.Name))
 			if err != nil {
 				t.Fatal(err)
 			}

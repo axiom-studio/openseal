@@ -175,7 +175,7 @@ func TestAgentBuilderDraftsAreSelectedByTheStore(t *testing.T) {
 func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "drafts.db")
-		store, err := sqlite.NewSQLiteStore(path)
+		store, err := sqlite.New(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -186,7 +186,7 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
-		reopened, err := sqlite.NewSQLiteStore(path)
+		reopened, err := sqlite.New(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -198,7 +198,7 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 		dsn := pgSchema.DSN
 		schema := pgSchema.Name
 		ctx := context.Background()
-		store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+		store, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +220,7 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 			WHERE table_schema = $1 AND table_name = 'conversations' AND column_name = 'builder_draft_requester'`, schema).Scan(&columns); err != nil || columns != 0 {
 			t.Fatalf("rollback kept the column: %d, %v", columns, err)
 		}
-		reopened, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+		reopened, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}

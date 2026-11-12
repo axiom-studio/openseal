@@ -15,7 +15,7 @@ import (
 
 func TestSQLiteAgentRunClaimsAreAtomicAndRecoverAfterRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent-runs.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestSQLiteAgentRunClaimsAreAtomicAndRecoverAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestSQLiteAgentRunClaimsAreAtomicAndRecoverAfterRestart(t *testing.T) {
 
 func TestSQLiteAgentRunAttemptBudgetPersistsAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "attempt-budget.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestSQLiteAgentRunAttemptBudgetPersistsAcrossRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestSQLiteAgentRunAttemptBudgetPersistsAcrossRestart(t *testing.T) {
 }
 
 func TestSQLiteAgentRunClaimHonorsAgingCapacityAndScope(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "portfolio-schedule.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "portfolio-schedule.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestSQLiteAgentRunClaimHonorsAgingCapacityAndScope(t *testing.T) {
 
 func TestSQLiteAgentRunClaimHonorsConcurrencyKeyAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "conversation-capacity.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestSQLiteAgentRunClaimHonorsConcurrencyKeyAcrossRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestSQLiteAgentRunClaimHonorsConcurrencyKeyAcrossRestart(t *testing.T) {
 
 func TestSQLiteAgentRunClaimIsolatesKindsAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-kinds.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestSQLiteAgentRunClaimIsolatesKindsAcrossRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

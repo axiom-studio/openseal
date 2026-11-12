@@ -19,7 +19,7 @@ func TestObjectiveBudgetAllocatesConcurrentTopLevelRunsAtomically(t *testing.T) 
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-budget.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "objective-budget.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +85,7 @@ func TestObjectiveBudgetRejectsConcurrentOverAllocation(t *testing.T) {
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-budget-race.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "objective-budget-race.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -20,7 +20,7 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "bounded-schedule.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "bounded-schedule.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

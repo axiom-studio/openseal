@@ -21,7 +21,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	primary, pgSchema := openTestPostgresStore(t, "openseal_natural_channels_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		t.Fatalf("failed = %d, committed = %d", failed.Load(), committed.Load())
 	}
 
-	restarted, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	restarted, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,7 @@ import (
 // when the test ends.
 func newTestKernelStore(t testing.TB) *Store {
 	t.Helper()
-	store, err := NewInMemorySQLiteStore()
+	store, err := NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
 // when the test ends.
 func openTestSQLiteSessionStore(t *testing.T) *Store {
 	t.Helper()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "sessions.db"))
+	store, err := New(filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

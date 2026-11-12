@@ -27,7 +27,7 @@ func TestPostgresSkillSetupLifecycleAndMigration(t *testing.T) {
 	}
 	defer db.Close()
 	defer db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`)
-	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	store, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestPostgresSkillSetupLifecycleAndMigration(t *testing.T) {
 	if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != 44 {
 		t.Fatalf("rollback schema: %d %v", version, err)
 	}
-	reopened, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	reopened, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

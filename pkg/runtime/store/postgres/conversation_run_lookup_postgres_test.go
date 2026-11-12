@@ -17,7 +17,7 @@ func TestPostgresConversationRunLookupUpgrade(t *testing.T) {
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	store, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestPostgresConversationRunLookupUpgrade(t *testing.T) {
 	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname=$1 AND indexname='agent_runs_concurrency_idx'`, schema).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("rollback index count=%d: %v", count, err)
 	}
-	upgraded, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	upgraded, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ import (
 // the test ends.
 func openControlSessionStore(t *testing.T) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "sessions.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

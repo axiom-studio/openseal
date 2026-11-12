@@ -96,7 +96,7 @@ func TestPostgresOwnerDefaultSpaceMigration(t *testing.T) {
 	}
 	assertDefaults(store, "after rollback", legacyID, solo.ID)
 
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestPostgresOwnerDefaultSpaceMigration(t *testing.T) {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}
-	again, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	again, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

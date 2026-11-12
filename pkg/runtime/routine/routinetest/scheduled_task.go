@@ -19,7 +19,7 @@ import (
 // NewFileStore is a SQLite kernel store for routine action tests.
 func NewFileStore(t *testing.T, kind string) models.KernelStore {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "routines.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "routines.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

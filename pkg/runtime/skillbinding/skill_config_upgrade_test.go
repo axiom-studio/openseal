@@ -135,7 +135,7 @@ func TestSkillUpgradeFirstConfigDeclarationNeedsNoApproval(t *testing.T) {
 }
 
 func TestSkillConfigPersistsWithDefinitionAcrossStores(t *testing.T) {
-	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ import (
 // the test ends.
 func NewKernelStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}

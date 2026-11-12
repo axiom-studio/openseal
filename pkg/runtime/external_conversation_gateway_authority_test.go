@@ -125,7 +125,7 @@ func TestSQLiteGatewayAuthorityBackfillSurvivesRestartAndRejectsAmbiguity(t *tes
 		Actor:   models.ActivityActor{Type: "test", ID: "operator"}, Reason: "Create pre-migration provider routing",
 	})
 	path := filepath.Join(t.TempDir(), "authority.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestSQLiteGatewayAuthorityBackfillSurvivesRestartAndRejectsAmbiguity(t *tes
 		t.Fatal(err)
 	}
 	for restart := 0; restart < 2; restart++ {
-		store, err = sqlite.NewSQLiteStore(path)
+		store, err = sqlite.New(path)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -18,7 +18,7 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 		open func(*testing.T) (models.CollaborationKernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.CollaborationKernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "grouped-collaboration.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "grouped-collaboration.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

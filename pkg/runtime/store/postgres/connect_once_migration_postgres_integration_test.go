@@ -15,7 +15,7 @@ func TestPostgresConnectOnceMigration(t *testing.T) {
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	store, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestPostgresConnectOnceMigration(t *testing.T) {
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if store, err = NewPostgresStore(ctx, dsn, WithPostgresSchema(schema)); err != nil {
+		if store, err = New(ctx, dsn, WithSchema(schema)); err != nil {
 			t.Fatal(err)
 		}
 	})

@@ -163,7 +163,7 @@ func TestExternalConversationReplyProgressDurableStores(t *testing.T) {
 		open func(*testing.T) replyProgressTestStore
 	}{
 		{name: "sqlite", open: func(t *testing.T) replyProgressTestStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,7 +175,7 @@ func TestExternalConversationReplyProgressDurableStores(t *testing.T) {
 			dsn := pgSchema.DSN
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
+			store, err := postgres.New(ctx, dsn, postgres.WithSchema(pgSchema.Name))
 			if err != nil {
 				t.Fatal(err)
 			}

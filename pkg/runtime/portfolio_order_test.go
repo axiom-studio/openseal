@@ -13,7 +13,7 @@ import (
 func TestAgentRunCreatedDescendingOrderPrecedesPagination(t *testing.T) {
 	stores := map[string]func(*testing.T) models.PortfolioStore{
 		"sqlite": func(t *testing.T) models.PortfolioStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "runs.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -54,7 +54,7 @@ func TestAgentRunSearchPrecedesPaginationAndIsLiteral(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			var store models.PortfolioStore = newTestKernelStore(t)
 			if kind == "sqlite" {
-				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "search.db"))
+				db, err := sqlite.New(filepath.Join(t.TempDir(), "search.db"))
 				if err != nil {
 					t.Fatal(err)
 				}

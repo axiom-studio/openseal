@@ -22,7 +22,7 @@ import (
 func TestSourceArtifactSQLiteRestartRoundTripIsolationConcurrencyStagingAndGC(t *testing.T) {
 	ctx := context.Background()
 	database := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.NewSQLiteStore(database)
+	store, err := sqlite.New(database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestSourceArtifactSQLiteRestartRoundTripIsolationConcurrencyStagingAndGC(t 
 		t.Fatal(err)
 	}
 
-	reopened, err := sqlite.NewSQLiteStore(database)
+	reopened, err := sqlite.New(database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestSourceArtifactSQLiteRestartRoundTripIsolationConcurrencyStagingAndGC(t 
 
 func TestSourceArtifactDeduplicatesBytesAndDisambiguatesPublisherProvenance(t *testing.T) {
 	ctx := context.Background()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestSourceArtifactDeduplicatesBytesAndDisambiguatesPublisherProvenance(t *t
 
 func TestSourceArtifactReferenceMovesAtomicallyAcrossSkillUpdate(t *testing.T) {
 	ctx := context.Background()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

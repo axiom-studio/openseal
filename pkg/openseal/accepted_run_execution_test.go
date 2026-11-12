@@ -20,7 +20,7 @@ func TestEngineAcceptedRunExecutionPinsDefinitionAndReplaysOriginalIntent(t *tes
 			t.Run(name, func(t *testing.T) {
 				var store models.KernelStore
 				if backend == "sqlite" {
-					sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "accepted-engine.db"))
+					sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "accepted-engine.db"))
 					if err != nil {
 						t.Fatal(err)
 					}

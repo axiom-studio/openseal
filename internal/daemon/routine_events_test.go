@@ -20,7 +20,7 @@ import (
 func TestDaemonDispatcherStartsEventRoutineRuns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

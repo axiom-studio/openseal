@@ -22,7 +22,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	primary, pgSchema := openTestPostgresStore(t, "openseal_team_registry_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 		t.Fatalf("successful concurrent amendment activations = %d, want 1", amendmentActivated.Load())
 	}
 
-	restarted, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	restarted, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,7 +23,7 @@ type conversationTaskToolTestStore interface {
 func forConversationTaskToolStores(t *testing.T, test func(*testing.T, conversationTaskToolTestStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-task-tool.db"))
+		store, err := sqlite.New(filepath.Join(t.TempDir(), "conversation-task-tool.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -33,7 +33,7 @@ func forConversationTaskToolStores(t *testing.T, test func(*testing.T, conversat
 	t.Run("postgres", func(t *testing.T) {
 		pgSchema := storetest.NewPostgresSchema(t, "openseal_task_tool_")
 		dsn := pgSchema.DSN
-		store, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(pgSchema.Name))
+		store, err := postgres.New(t.Context(), dsn, postgres.WithSchema(pgSchema.Name))
 		if err != nil {
 			t.Fatal(err)
 		}

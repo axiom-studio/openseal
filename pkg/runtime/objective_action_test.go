@@ -238,7 +238,7 @@ func numericRevision(value interface{}) (int64, bool) {
 func objectiveActionStores() []objectiveActionStoreCase {
 	return []objectiveActionStoreCase{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objectives.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "objectives.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

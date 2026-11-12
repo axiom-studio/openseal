@@ -19,7 +19,7 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 		store func(*testing.T) models.RunCommandStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) models.RunCommandStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "commands.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "commands.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -137,7 +137,7 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 		store func(*testing.T) models.RunCommandStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) models.RunCommandStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "cascade.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "cascade.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -373,7 +373,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 		Scope: models.Scope{Kind: "tenant", ID: "restart"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 		AssignedAgentID: "agent", Goal: "Survive restart", Source: models.RunSourceManual, IdempotencyKey: "stable-request",
 	}
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

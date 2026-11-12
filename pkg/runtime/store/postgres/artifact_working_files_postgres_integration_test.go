@@ -25,7 +25,7 @@ func TestPostgresWorkingFilesTableIsCreatedOnAnExistingDatabase(t *testing.T) {
 	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version = $1`, artifactWorkingFilesMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

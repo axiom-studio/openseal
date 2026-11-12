@@ -312,7 +312,7 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 		open func(*testing.T) (models.CollaborationKernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.CollaborationKernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "delegation-capacity.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "delegation-capacity.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -388,7 +388,7 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "completion-review.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +438,7 @@ func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T)
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := sqlite.NewSQLiteStore(path)
+	restarted, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 		open func(*testing.T) (models.CollaborationKernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.CollaborationKernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "collaboration.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "collaboration.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -682,7 +682,7 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 	t.Parallel()
 	ctx := context.Background()
 	database := filepath.Join(t.TempDir(), "team-offers.db")
-	store, err := sqlite.NewSQLiteStore(database)
+	store, err := sqlite.New(database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +736,7 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := sqlite.NewSQLiteStore(database)
+	restarted, err := sqlite.New(database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1074,7 +1074,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "collaboration-restart.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1099,7 +1099,7 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

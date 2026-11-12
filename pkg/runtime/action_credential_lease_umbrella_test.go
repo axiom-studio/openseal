@@ -118,7 +118,7 @@ func leaseUmbrellaRequest(t *testing.T, ctx context.Context, store models.Kernel
 func TestSQLiteActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "lease-umbrella.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestPostgresActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *t
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_lease_umbrella_")
 	dsn := pgSchema.DSN
 	ctx := context.Background()
-	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
+	store, err := postgres.New(ctx, dsn, postgres.WithSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

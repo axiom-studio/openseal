@@ -191,7 +191,7 @@ func queryRows(t *testing.T, db *sql.DB, query string) []string {
 
 func BenchmarkNewInMemorySQLiteStore(b *testing.B) {
 	for b.Loop() {
-		store, err := NewInMemorySQLiteStore()
+		store, err := NewInMemory()
 		if err != nil {
 			b.Fatal(err)
 		}

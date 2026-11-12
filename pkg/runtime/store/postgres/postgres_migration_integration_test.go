@@ -34,17 +34,17 @@ func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) 
 	start := make(chan struct{})
 	stores := make(chan *Store, replicas)
 	errorsFound := make(chan error, replicas)
-	events := make(chan PostgresMigrationEvent, replicas*3)
+	events := make(chan MigrationEvent, replicas*3)
 	var wait sync.WaitGroup
 	for range replicas {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
 			<-start
-			store, openErr := NewPostgresStore(ctx, dsn,
-				WithPostgresSchema(schema),
-				WithPostgresMigrationLock(30*time.Second, 10*time.Millisecond),
-				WithPostgresMigrationObserver(func(event PostgresMigrationEvent) { events <- event }),
+			store, openErr := New(ctx, dsn,
+				WithSchema(schema),
+				WithMigrationLock(30*time.Second, 10*time.Millisecond),
+				WithMigrationObserver(func(event MigrationEvent) { events <- event }),
 			)
 			if openErr != nil {
 				errorsFound <- openErr
@@ -78,9 +78,9 @@ func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) 
 	completed, current := 0, 0
 	for event := range events {
 		switch event.Phase {
-		case PostgresMigrationComplete:
+		case MigrationComplete:
 			completed++
-		case PostgresMigrationCurrent:
+		case MigrationCurrent:
 			current++
 		}
 	}
@@ -96,12 +96,12 @@ func TestPostgresCurrentSchemaStartupIsBounded(t *testing.T) {
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 
-	events := make(chan PostgresMigrationEvent, 4)
+	events := make(chan MigrationEvent, 4)
 	startedAt := time.Now()
-	reopened, err := NewPostgresStore(ctx, dsn,
-		WithPostgresSchema(schema),
-		WithPostgresMigrationLock(5*time.Second, 10*time.Millisecond),
-		WithPostgresMigrationObserver(func(event PostgresMigrationEvent) { events <- event }),
+	reopened, err := New(ctx, dsn,
+		WithSchema(schema),
+		WithMigrationLock(5*time.Second, 10*time.Millisecond),
+		WithMigrationObserver(func(event MigrationEvent) { events <- event }),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -110,8 +110,8 @@ func TestPostgresCurrentSchemaStartupIsBounded(t *testing.T) {
 	if elapsed := time.Since(startedAt); elapsed >= 2*time.Second {
 		t.Fatalf("current-schema startup took %s, want under 2s", elapsed)
 	}
-	if acquired, outcome := <-events, <-events; acquired.Phase != PostgresMigrationAcquired ||
-		outcome.Phase != PostgresMigrationCurrent || outcome.SchemaVersion != currentPostgresSchemaVersion {
+	if acquired, outcome := <-events, <-events; acquired.Phase != MigrationAcquired ||
+		outcome.Phase != MigrationCurrent || outcome.SchemaVersion != currentPostgresSchemaVersion {
 		t.Fatalf("current-schema events = %#v, %#v", acquired, outcome)
 	}
 	if stats := reopened.MigrationStats(); stats.SchemaVersion != currentPostgresSchemaVersion ||
@@ -144,7 +144,7 @@ func TestPostgresLaterMigrationDoesNotReplayActivityProjectionBackfill(t *testin
 	}
 
 	startedAt := time.Now()
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatalf("later migration replayed an applied activity backfill: %v", err)
 	}
@@ -181,21 +181,21 @@ func TestPostgresMigrationLockWaitIsObservableAndBounded(t *testing.T) {
 		_ = blocker.Close()
 	})
 
-	events := make(chan PostgresMigrationEvent, 8)
+	events := make(chan MigrationEvent, 8)
 	result := make(chan *Store, 1)
 	openErrors := make(chan error, 1)
 	go func() {
-		store, openErr := NewPostgresStore(ctx, dsn,
-			WithPostgresSchema(schema),
-			WithPostgresMigrationLock(5*time.Second, 10*time.Millisecond),
-			WithPostgresMigrationObserver(func(event PostgresMigrationEvent) { events <- event }),
+		store, openErr := New(ctx, dsn,
+			WithSchema(schema),
+			WithMigrationLock(5*time.Second, 10*time.Millisecond),
+			WithMigrationObserver(func(event MigrationEvent) { events <- event }),
 		)
 		result <- store
 		openErrors <- openErr
 	}()
 	select {
 	case event := <-events:
-		if event.Phase != PostgresMigrationWaiting {
+		if event.Phase != MigrationWaiting {
 			t.Fatalf("first event = %#v", event)
 		}
 	case <-time.After(2 * time.Second):
@@ -212,7 +212,7 @@ func TestPostgresMigrationLockWaitIsObservableAndBounded(t *testing.T) {
 	if stats := store.MigrationStats(); stats.WaitDuration <= 0 || stats.SchemaVersion != currentPostgresSchemaVersion {
 		t.Fatalf("migration stats = %#v", stats)
 	}
-	phases := []PostgresMigrationPhase{PostgresMigrationAcquired, PostgresMigrationComplete}
+	phases := []MigrationPhase{MigrationAcquired, MigrationComplete}
 	for _, phase := range phases {
 		select {
 		case event := <-events:
@@ -230,16 +230,16 @@ func TestPostgresMigrationLockWaitIsObservableAndBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer connection.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, timeoutLock)
-	timeoutEvents := make(chan PostgresMigrationEvent, 4)
-	_, err = NewPostgresStore(ctx, dsn,
-		WithPostgresSchema(timeoutSchema),
-		WithPostgresMigrationLock(150*time.Millisecond, 10*time.Millisecond),
-		WithPostgresMigrationObserver(func(event PostgresMigrationEvent) { timeoutEvents <- event }),
+	timeoutEvents := make(chan MigrationEvent, 4)
+	_, err = New(ctx, dsn,
+		WithSchema(timeoutSchema),
+		WithMigrationLock(150*time.Millisecond, 10*time.Millisecond),
+		WithMigrationObserver(func(event MigrationEvent) { timeoutEvents <- event }),
 	)
-	if !errors.Is(err, ErrPostgresMigrationLockTimeout) {
+	if !errors.Is(err, ErrMigrationLockTimeout) {
 		t.Fatalf("timeout error = %v", err)
 	}
-	if first, second := <-timeoutEvents, <-timeoutEvents; first.Phase != PostgresMigrationWaiting || second.Phase != PostgresMigrationTimeout {
+	if first, second := <-timeoutEvents, <-timeoutEvents; first.Phase != MigrationWaiting || second.Phase != MigrationTimeout {
 		t.Fatalf("timeout events = %#v, %#v", first, second)
 	}
 }
@@ -271,7 +271,7 @@ func TestPostgresSkillCatalogSourceVariantsMigrateAndRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

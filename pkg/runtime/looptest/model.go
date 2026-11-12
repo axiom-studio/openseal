@@ -549,7 +549,7 @@ func StoreMatrix(t *testing.T, prefix string) []StoreCase {
 	t.Helper()
 	cases := []StoreCase{
 		{Name: "sqlite", Open: func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), prefix+".db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), prefix+".db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -562,7 +562,7 @@ func StoreMatrix(t *testing.T, prefix string) []StoreCase {
 			schema := storetest.NewPostgresSchema(t, prefix+"_")
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
-			store, err := postgres.NewPostgresStore(ctx, schema.DSN, postgres.WithPostgresSchema(schema.Name))
+			store, err := postgres.New(ctx, schema.DSN, postgres.WithSchema(schema.Name))
 			if err != nil {
 				t.Fatal(err)
 			}

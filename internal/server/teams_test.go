@@ -19,7 +19,7 @@ import (
 
 func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 	ctx := context.Background()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "teams.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "teams.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

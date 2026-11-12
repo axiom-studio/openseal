@@ -227,7 +227,7 @@ func forkTestLease() *models.AgentRunLeaseGuard {
 // when the test ends.
 func newForkTestStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,7 @@ import (
 )
 
 func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agents.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "agents.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *tes
 }
 
 func TestAgentDeploymentCatalogExcludesStatusesOnlyWhenRequested(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "deployment-filters.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "deployment-filters.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestAgentDeploymentCatalogExcludesStatusesOnlyWhenRequested(t *testing.T) {
 }
 
 func TestPortableAgentManifestInstallationCreatesReplaysAndRejectsDrift(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-install.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "agent-install.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestPortableAgentManifestInstallationCreatesReplaysAndRejectsDrift(t *testi
 }
 
 func TestAgentDefinitionLifecycleIsCASGuardedScopedAndAudited(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-lifecycle.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "agent-lifecycle.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

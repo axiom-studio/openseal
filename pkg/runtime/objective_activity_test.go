@@ -13,7 +13,7 @@ import (
 func TestObjectiveLifecycleIsAtomicallyAudited(t *testing.T) {
 	stores := map[string]func(*testing.T) models.KernelStore{
 		"sqlite": func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

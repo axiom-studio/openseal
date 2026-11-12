@@ -289,9 +289,9 @@ type (
 	PortfolioStore                       = models.PortfolioStore
 	KernelStore                          = models.KernelStore
 	PostgresStore                        = postgres.Store
-	PostgresStoreOption                  = postgres.PostgresStoreOption
-	PostgresPoolConfig                   = postgres.PostgresPoolConfig
-	PostgresPoolStats                    = postgres.PostgresPoolStats
+	PostgresStoreOption                  = postgres.Option
+	PostgresPoolConfig                   = postgres.PoolConfig
+	PostgresPoolStats                    = postgres.PoolStats
 	WorkerLimiter                        = workqueue.WorkerLimiter
 	WorkerLimiterStats                   = workqueue.WorkerLimiterStats
 	Scope                                = models.Scope
@@ -1526,47 +1526,47 @@ func DefaultConversationCoordinatorConfig() conversation.ConversationCoordinator
 
 // NewPostgresStore opens the production-grade shared persistence adapter and
 // applies OpenSeal's versioned schema migrations.
-func NewPostgresStore(ctx context.Context, dsn string, options ...postgres.PostgresStoreOption) (*postgres.Store, error) {
-	return postgres.NewPostgresStore(ctx, dsn, options...)
+func NewPostgresStore(ctx context.Context, dsn string, options ...postgres.Option) (*postgres.Store, error) {
+	return postgres.New(ctx, dsn, options...)
 }
 
-type PostgresMigrationEvent = postgres.PostgresMigrationEvent
-type PostgresMigrationPhase = postgres.PostgresMigrationPhase
-type PostgresMigrationStats = postgres.PostgresMigrationStats
+type PostgresMigrationEvent = postgres.MigrationEvent
+type PostgresMigrationPhase = postgres.MigrationPhase
+type PostgresMigrationStats = postgres.MigrationStats
 
 const (
-	PostgresMigrationWaiting  = postgres.PostgresMigrationWaiting
-	PostgresMigrationAcquired = postgres.PostgresMigrationAcquired
-	PostgresMigrationCurrent  = postgres.PostgresMigrationCurrent
-	PostgresMigrationComplete = postgres.PostgresMigrationComplete
-	PostgresMigrationTimeout  = postgres.PostgresMigrationTimeout
+	PostgresMigrationWaiting  = postgres.MigrationWaiting
+	PostgresMigrationAcquired = postgres.MigrationAcquired
+	PostgresMigrationCurrent  = postgres.MigrationCurrent
+	PostgresMigrationComplete = postgres.MigrationComplete
+	PostgresMigrationTimeout  = postgres.MigrationTimeout
 )
 
-var ErrPostgresMigrationLockTimeout = postgres.ErrPostgresMigrationLockTimeout
+var ErrPostgresMigrationLockTimeout = postgres.ErrMigrationLockTimeout
 
 // NewSQLiteStore opens the standalone durable kernel store.
 func NewSQLiteStore(path string) (*sqlite.Store, error) {
-	return sqlite.NewSQLiteStore(path)
+	return sqlite.New(path)
 }
 
-func WithPostgresSchema(schema string) postgres.PostgresStoreOption {
-	return postgres.WithPostgresSchema(schema)
+func WithPostgresSchema(schema string) postgres.Option {
+	return postgres.WithSchema(schema)
 }
 
-func DefaultPostgresPoolConfig() postgres.PostgresPoolConfig {
-	return postgres.DefaultPostgresPoolConfig()
+func DefaultPostgresPoolConfig() postgres.PoolConfig {
+	return postgres.DefaultPoolConfig()
 }
 
-func WithPostgresPool(pool postgres.PostgresPoolConfig) postgres.PostgresStoreOption {
-	return postgres.WithPostgresPool(pool)
+func WithPostgresPool(pool postgres.PoolConfig) postgres.Option {
+	return postgres.WithPool(pool)
 }
 
-func WithPostgresMigrationLock(timeout, pollInterval time.Duration) postgres.PostgresStoreOption {
-	return postgres.WithPostgresMigrationLock(timeout, pollInterval)
+func WithPostgresMigrationLock(timeout, pollInterval time.Duration) postgres.Option {
+	return postgres.WithMigrationLock(timeout, pollInterval)
 }
 
-func WithPostgresMigrationObserver(observer postgres.PostgresMigrationObserver) postgres.PostgresStoreOption {
-	return postgres.WithPostgresMigrationObserver(observer)
+func WithPostgresMigrationObserver(observer postgres.MigrationObserver) postgres.Option {
+	return postgres.WithMigrationObserver(observer)
 }
 
 func CompileOpenClawSkill(bundle skillopenclaw.Bundle) (*skillopenclaw.Compilation, error) {

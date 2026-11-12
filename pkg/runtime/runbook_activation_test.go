@@ -126,7 +126,7 @@ func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 
 func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 	ctx := t.Context()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "verification.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "verification.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T)
 func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := sqlite.NewSQLiteStore(path)
+	restarted, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func newWorkSignalPostgresStore(t *testing.T, schema string) (context.Context, *
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	store, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,7 +23,7 @@ func TestDependencyFanOutAtomicallyCreatesTargetRuns(t *testing.T) {
 		open func(*testing.T) (atomicForkStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (atomicForkStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "fork.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "fork.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

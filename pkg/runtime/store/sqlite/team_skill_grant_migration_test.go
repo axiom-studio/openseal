@@ -15,7 +15,7 @@ import (
 func TestSQLiteMigrationStripsTeamSkillGrantsAndRecomputesDigest(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "grants.db")
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestSQLiteMigrationStripsTeamSkillGrantsAndRecomputesDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

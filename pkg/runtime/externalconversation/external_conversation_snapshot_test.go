@@ -88,7 +88,7 @@ func postSnapshotCanonicalReply(t *testing.T, store models.ConversationStore, en
 func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing.T) {
 	ctx := t.Context()
 	_, memoryCatalog, original, item := externalConversationFailureReplyFixture(t, "slack", models.AgentRunStatusCompleted)
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "snapshot-upgrade.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "snapshot-upgrade.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

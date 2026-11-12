@@ -18,7 +18,7 @@ import (
 // the moment a later reply hands them over.
 func TestWorkingFilesAreLeftOutOfResultsUntilHandedOver(t *testing.T) {
 	ctx := context.Background()
-	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
+	sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

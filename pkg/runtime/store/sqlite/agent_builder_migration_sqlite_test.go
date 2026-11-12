@@ -21,7 +21,7 @@ import (
 // deployments carrying an activation continuation.
 func seedSQLiteChangeSets(t *testing.T, path string) string {
 	t.Helper()
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func sqliteObjectNames(t *testing.T, db *sql.DB, kind, prefix string) []string {
 func TestAgentBuilderMigrationSQLiteKeepsLeafDraftsAndRetiresChangeSets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	runID := seedSQLiteChangeSets(t, path)
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestAgentBuilderMigrationSQLiteKeepsLeafDraftsAndRetiresChangeSets(t *testi
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = NewSQLiteStore(path)
+	store, err = New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestAgentBuilderMigrationSQLiteKeepsLeafDraftsAndRetiresChangeSets(t *testi
 
 func TestAgentBuilderMigrationSQLiteFreshStoreHasNoChangeSets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fresh.db")
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

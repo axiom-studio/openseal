@@ -18,7 +18,7 @@ func TestTeamOwnedRunEventsPopulateCanonicalTeamProjection(t *testing.T) {
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "team-activity.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "team-activity.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -25,7 +25,7 @@ func TestSQLiteActionCredentialLeaseClockResolutionAndExpiry(t *testing.T) {
 	t.Run("expired lease fails closed without consuming nonce", func(t *testing.T) {
 		ctx := context.Background()
 		path := filepath.Join(t.TempDir(), "expired.db")
-		store, err := NewSQLiteStore(path)
+		store, err := New(path)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -19,7 +19,7 @@ import (
 // cannot import this package without a cycle); change both.
 func NewStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ type StoreBackend struct {
 func Stores(t *testing.T) []StoreBackend {
 	stores := []StoreBackend{
 		{Name: "sqlite", Open: func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "nested.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "nested.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -56,11 +56,11 @@ func Stores(t *testing.T) []StoreBackend {
 
 // openPostgresStoreOn opens another store on schema s, closed when the
 // test ends.
-func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...postgres.PostgresStoreOption) *postgres.Store {
+func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...postgres.Option) *postgres.Store {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	store, err := postgres.NewPostgresStore(ctx, s.DSN, append([]postgres.PostgresStoreOption{postgres.WithPostgresSchema(s.Name)}, options...)...)
+	store, err := postgres.New(ctx, s.DSN, append([]postgres.Option{postgres.WithSchema(s.Name)}, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...po
 
 // openTestPostgresStore opens a Postgres store on a fresh schema (see
 // storetest.NewPostgresSchema) and returns it with the schema.
-func openTestPostgresStore(t testing.TB, prefix string, options ...postgres.PostgresStoreOption) (*postgres.Store, storetest.PostgresSchema) {
+func openTestPostgresStore(t testing.TB, prefix string, options ...postgres.Option) (*postgres.Store, storetest.PostgresSchema) {
 	t.Helper()
 	schema := storetest.NewPostgresSchema(t, prefix)
 	return openPostgresStoreOn(t, schema, options...), schema

@@ -21,7 +21,7 @@ import (
 
 func newBuilderSeedEngine(t *testing.T) *opensealkernel.Engine {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestBuilderAgentBindingsUpgradedOnVersionChange(t *testing.T) {
 func writeV75DaemonStore(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	fresh, err := sqlite.NewSQLiteStore(path)
+	fresh, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func seedLocalOperatorSpace(t *testing.T, store models.SpaceStore) *models.Space
 // host, and runs one Engine.Start.
 func startDaemonEngine(t *testing.T, path string) (*opensealkernel.Engine, *sqlite.Store) {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

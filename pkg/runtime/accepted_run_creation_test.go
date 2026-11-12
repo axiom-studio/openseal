@@ -60,7 +60,7 @@ func (p *acceptedCreationTestPreparer) PrepareAcceptedRunExecution(_ context.Con
 func acceptedCreationStores(t *testing.T, test func(*testing.T, models.KernelStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "accepted-creation.db"))
+		store, err := sqlite.New(filepath.Join(t.TempDir(), "accepted-creation.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

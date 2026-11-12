@@ -16,11 +16,11 @@ import (
 func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "natural-channels.db")
-	primary, err := sqlite.NewSQLiteStore(path)
+	primary, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replica, err := sqlite.NewSQLiteStore(path)
+	replica, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		t.Fatal(err)
 	}
 
-	restarted, err := sqlite.NewSQLiteStore(path)
+	restarted, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

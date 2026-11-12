@@ -36,7 +36,7 @@ func sqliteSessionLeasePtr() *models.AgentRunLeaseGuard {
 func TestSQLiteAgentSessionLogMigrationReplays(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "replay.db")
 	for i := 0; i < 2; i++ {
-		store, err := NewSQLiteStore(path)
+		store, err := New(path)
 		if err != nil {
 			t.Fatalf("open %d: %v", i, err)
 		}

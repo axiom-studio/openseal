@@ -15,7 +15,7 @@ import (
 func TestSkillReferenceUpgradeStoreRollsBackEveryResourceOnConflict(t *testing.T) {
 	tests := map[string]func(*testing.T) models.SkillReferenceUpgradeStore{
 		"sqlite": func(t *testing.T) models.SkillReferenceUpgradeStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "upgrade.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "upgrade.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

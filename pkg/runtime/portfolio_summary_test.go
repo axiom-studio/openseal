@@ -16,7 +16,7 @@ func TestPortfolioSummarizesRunsByRequestedOwner(t *testing.T) {
 		store func(*testing.T) models.KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "summary.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "summary.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

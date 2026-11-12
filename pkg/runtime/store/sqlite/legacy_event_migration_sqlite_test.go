@@ -30,7 +30,7 @@ func TestSQLiteStoreDropsEventSources(t *testing.T) {
 	}
 	_ = db.Close()
 	for range 2 {
-		store, err := NewSQLiteStore(path)
+		store, err := New(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +62,7 @@ func TestSQLiteStoreDropsEventWaits(t *testing.T) {
 	}
 	_ = db.Close()
 	for range 2 {
-		store, err := NewSQLiteStore(path)
+		store, err := New(path)
 		if err != nil {
 			t.Fatal(err)
 		}

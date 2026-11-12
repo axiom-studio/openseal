@@ -24,7 +24,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "approval.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "approval.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -124,7 +124,7 @@ func TestApprovalCoordinatorAppliesReviewedTimeoutApprovalAcrossStores(t *testin
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "approval-timeout.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "approval-timeout.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -198,7 +198,7 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 		open func(*testing.T) (models.KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "approval-rejection.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "approval-rejection.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

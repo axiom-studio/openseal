@@ -50,7 +50,7 @@ func openDependencySessionPostgres(t *testing.T) dependencySessionStore {
 	pgSchema := storetest.NewPostgresSchema(t, "dependency_session_")
 	dsn := pgSchema.DSN
 	ctx := context.Background()
-	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
+	store, err := postgres.New(ctx, dsn, postgres.WithSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

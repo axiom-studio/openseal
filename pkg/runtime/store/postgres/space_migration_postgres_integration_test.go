@@ -62,7 +62,7 @@ func TestPostgresSpaceAccessBackfillAndRollback(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, `SELECT created_by FROM `+store.table("spaces")+` WHERE id = $1`, work.ID).Scan(&creator); err != nil || creator != "7" {
 		t.Fatalf("created_by after rollback = %q, err = %v", creator, err)
 	}
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestPostgresSpacesBackfillAndRollback(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

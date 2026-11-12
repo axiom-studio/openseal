@@ -18,7 +18,7 @@ import (
 func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "actions.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = sqlite.NewSQLiteStore(path)
+	store, err = sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 
 func TestSQLiteActionProposalRollsBackEveryRecordOnActivityFailure(t *testing.T) {
 	ctx := context.Background()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "rollback.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "rollback.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestSQLiteActionProposalRollsBackEveryRecordOnActivityFailure(t *testing.T)
 func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "external-receipts.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = sqlite.NewSQLiteStore(path)
+	store, err = sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,7 +21,7 @@ import (
 func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "team-skills.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restartedStore, err := sqlite.NewSQLiteStore(path)
+	restartedStore, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

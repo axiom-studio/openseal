@@ -315,7 +315,7 @@ func proposeWithArgumentsForApprovalMode(t *testing.T, store *sqlite.Store, coor
 func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "approval-mode.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testin
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = sqlite.NewSQLiteStore(path)
+	store, err = sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestApprovalModeChangeAppearsInConversationChangeFeed(t *testing.T) {
 
 func mustSQLiteApprovalModeStore(t *testing.T) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "changes.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "changes.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

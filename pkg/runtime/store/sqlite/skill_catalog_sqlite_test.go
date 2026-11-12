@@ -15,7 +15,7 @@ import (
 func TestSQLiteSkillCatalogRestoresSourceQualifiedVariants(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "skill-variants.db")
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestSQLiteSkillCatalogRestoresSourceQualifiedVariants(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestSQLiteSkillCatalogMigratesLegacyIdentitySchema(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestSQLiteSkillCatalogMigratesLegacyIdentitySchema(t *testing.T) {
 
 func TestSQLiteSkillCatalogRestoresBindingsAndEnforcesRevisions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "skills.db")
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestSQLiteSkillCatalogRestoresBindingsAndEnforcesRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestSQLiteSkillCatalogRestoresBindingsAndEnforcesRevisions(t *testing.T) {
 
 func TestSQLiteSkillCatalogRestoresPromptCredentialContract(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prompt-credentials.db")
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestSQLiteSkillCatalogRestoresPromptCredentialContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

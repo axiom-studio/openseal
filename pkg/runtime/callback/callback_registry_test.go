@@ -148,7 +148,7 @@ func registerCallbackFixture(t *testing.T, ctx context.Context, catalog *skill.C
 // when the test ends.
 func newCallbackTestStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func newCallbackTestStore(t testing.TB) *sqlite.Store {
 func newCallbackTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

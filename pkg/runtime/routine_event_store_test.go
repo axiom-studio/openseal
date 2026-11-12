@@ -13,7 +13,7 @@ import (
 func TestSQLiteRoutineEventStore(t *testing.T) {
 	storetest.RunRoutineEventContract(t, func(t *testing.T) (models.KernelStore, storetest.RoutineEventPayloadProbe) {
 		path := filepath.Join(t.TempDir(), "routine-events.db")
-		store, err := sqlite.NewSQLiteStore(path)
+		store, err := sqlite.New(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -34,7 +34,7 @@ func TestSQLiteRoutineEventStore(t *testing.T) {
 // event Task written before them is filled in.
 func TestSQLiteRoutineEventsMigrationFillsIndexColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestSQLiteRoutineEventsMigrationFillsIndexColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = store.Close()
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

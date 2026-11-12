@@ -197,7 +197,7 @@ func TestReplyRunGuardMissingRunAndNilGuard(t *testing.T) {
 func TestGuardedReplyLocksRunBeforeConversation(t *testing.T) {
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_reply_guard_")
 	dsn := pgSchema.DSN
-	store, err := postgres.NewPostgresStore(context.Background(), dsn, postgres.WithPostgresSchema(pgSchema.Name))
+	store, err := postgres.New(context.Background(), dsn, postgres.WithSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

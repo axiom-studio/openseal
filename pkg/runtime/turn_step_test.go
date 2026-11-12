@@ -27,7 +27,7 @@ type turnStepBackend struct {
 func turnStepBackends() []turnStepBackend {
 	return []turnStepBackend{
 		{name: "sqlite", open: func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "turn-steps.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "turn-steps.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -39,7 +39,7 @@ func turnStepBackends() []turnStepBackend {
 			dsn := pgSchema.DSN
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
+			store, err := postgres.New(ctx, dsn, postgres.WithSchema(pgSchema.Name))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -11,7 +11,7 @@ import (
 )
 
 func TestSQLiteSkillBindingLifecycleRepairRestoresUpgradedWorkforceBinding(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "runtime.db"))
+	store, err := New(filepath.Join(t.TempDir(), "runtime.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

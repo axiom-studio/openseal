@@ -24,8 +24,8 @@ type Store struct {
 // failing at once; the pool holds several connections to one database.
 const sqliteBusyTimeout = "_busy_timeout=5000"
 
-// NewSQLiteStore opens (and creates) a SQLite-backed canonical kernel store.
-func NewSQLiteStore(path string) (*Store, error) {
+// New opens (and creates) a SQLite-backed canonical kernel store.
+func New(path string) (*Store, error) {
 	db, err := sql.Open("sqlite3", path+"?"+sqliteBusyTimeout+"&_journal_mode=WAL")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -38,7 +38,7 @@ func NewSQLiteStore(path string) (*Store, error) {
 
 var inMemorySQLiteStores atomic.Uint64
 
-// NewInMemorySQLiteStore opens a Store whose database lives only in
+// NewInMemory opens a Store whose database lives only in
 // process memory and is discarded by Close.
 //
 // It uses SQLite's memdb VFS under a name unique to this store. A memdb name
@@ -53,7 +53,7 @@ var inMemorySQLiteStores atomic.Uint64
 // Running every migration takes tens of milliseconds, and tests open a store
 // each, so the schema is migrated once per process into a template database
 // and each new store starts as a page-for-page copy of it.
-func NewInMemorySQLiteStore() (*Store, error) {
+func NewInMemory() (*Store, error) {
 	template, err := migratedTemplate()
 	if err != nil {
 		return nil, err

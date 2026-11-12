@@ -12,7 +12,7 @@ import (
 )
 
 func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "portfolio.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "portfolio.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

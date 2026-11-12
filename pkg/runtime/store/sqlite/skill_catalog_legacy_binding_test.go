@@ -10,7 +10,7 @@ import (
 )
 
 func TestCatalogCanDisableLegacyBindingAfterSourceBecomesAmbiguous(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "legacy-binding.db"))
+	store, err := New(filepath.Join(t.TempDir(), "legacy-binding.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

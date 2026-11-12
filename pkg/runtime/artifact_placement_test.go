@@ -128,7 +128,7 @@ func TestArtifactPlacementFailsOnConversationLookupErrors(t *testing.T) {
 
 func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 	ctx := context.Background()
-	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
+	sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestArtifactRejectsInvalidPlacementIdentifiers(t *testing.T) {
 }
 
 func TestKernelStoresProvideArtifactPlacementLookups(t *testing.T) {
-	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

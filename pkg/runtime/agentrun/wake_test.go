@@ -20,7 +20,7 @@ func TestWakeSignalsRequeueRunsExactlyOnce(t *testing.T) {
 		store func(*testing.T) models.KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "wake.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "wake.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,7 +140,7 @@ func TestWakeConditionHonorsDueTimeReferenceAndPredicate(t *testing.T) {
 
 func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wake-restart.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

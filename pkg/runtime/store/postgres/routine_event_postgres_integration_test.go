@@ -23,7 +23,7 @@ func openPostgresRoutineEventStore(t *testing.T) *Store {
 	pgSchema := storetest.NewPostgresSchema(t, "routine_events_")
 	dsn := pgSchema.DSN
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
+	store, err := New(ctx, dsn, WithSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestPostgresMigration80RoutineEvents(t *testing.T) {
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	store, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestPostgresMigration80RoutineEvents(t *testing.T) {
 	}
 	_ = store.Close()
 
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

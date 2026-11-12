@@ -16,7 +16,7 @@ func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testin
 	store, pgSchema := openTestPostgresStore(t, "gateway_authority_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
+	replica, err := New(t.Context(), dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

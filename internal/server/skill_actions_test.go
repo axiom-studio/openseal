@@ -13,7 +13,7 @@ import (
 )
 
 func TestSkillActionDiscoveryReturnsExactSecretSafeSemanticBindings(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

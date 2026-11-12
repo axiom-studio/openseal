@@ -18,7 +18,7 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "external_conversation_")
 	dsn, schema := pgSchema.DSN, pgSchema.Name
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 	if err := replica.Close(); err != nil {
 		t.Fatal(err)
 	}
-	replica, err = NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err = New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

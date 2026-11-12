@@ -41,7 +41,7 @@ func actingUserPostgresStore(t *testing.T) *Store {
 	dsn := pgSchema.DSN
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
+	store, err := New(ctx, dsn, WithSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

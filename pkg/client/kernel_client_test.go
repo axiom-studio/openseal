@@ -36,7 +36,7 @@ import (
 )
 
 func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel-client.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "kernel-client.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestKernelHTTPClientUsesConversationGatewayLifecyclePaths(t *testing.T) {
 }
 
 func TestKernelHTTPClientUpdatesAgentDeploymentThroughCanonicalAPI(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-update.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "agent-update.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,7 @@ func TestKernelHTTPClientStreamsArtifactsThroughHostedRoot(t *testing.T) {
 }
 
 func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "compilations.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "compilations.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +526,7 @@ func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
 }
 
 func TestKernelHTTPClientGovernsAgentDefinitionLifecycle(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-lifecycle.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "agent-lifecycle.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,7 +600,7 @@ func TestKernelHTTPClientGovernsAgentDefinitionLifecycle(t *testing.T) {
 }
 
 func TestKernelHTTPClientListsExactAgentSkillActions(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "skills.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "skills.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +723,7 @@ func TestKernelHTTPClientDiscoversAgentDeploymentCapabilitiesThroughHostedRoot(t
 }
 
 func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "teams.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "teams.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,7 @@ import (
 // legacy migrations and query plans.
 
 func TestSkillUpgradeDrainQueriesUseIndexedMetadataWithoutPayloads(t *testing.T) {
-	store, err := NewSQLiteStore(t.TempDir() + "/metadata.db")
+	store, err := New(t.TempDir() + "/metadata.db")
 	if err != nil {
 		t.Fatal(err)
 	}

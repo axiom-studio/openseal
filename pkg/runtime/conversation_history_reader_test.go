@@ -105,7 +105,7 @@ func TestConversationHistoryStores(t *testing.T) {
 			}
 			switch name {
 			case "sqlite":
-				s, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "history.db"))
+				s, err := sqlite.New(filepath.Join(t.TempDir(), "history.db"))
 				if err != nil {
 					t.Fatal(err)
 				}

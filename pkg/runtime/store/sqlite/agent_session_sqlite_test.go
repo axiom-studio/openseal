@@ -14,7 +14,7 @@ import (
 // (storetest.RunAgentSessionContract) against the SQLite backend.
 func TestSQLiteAgentSessionStore(t *testing.T) {
 	storetest.RunAgentSessionContract(t, func(t *testing.T) (storetest.AgentSessionContractStore, storetest.CreateRunSessionInOwnTx) {
-		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "sessions.db"))
+		store, err := sqlite.New(filepath.Join(t.TempDir(), "sessions.db"))
 		if err != nil {
 			t.Fatalf("open sqlite: %v", err)
 		}

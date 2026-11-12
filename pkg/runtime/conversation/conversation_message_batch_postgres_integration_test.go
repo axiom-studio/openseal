@@ -19,7 +19,7 @@ func TestConversationMessageBatchPostgresScopesExactIDsAndBoundsHistoricalReads(
 	dsn := pgSchema.DSN
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
+	store, err := postgres.New(ctx, dsn, postgres.WithSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

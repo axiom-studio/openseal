@@ -45,7 +45,7 @@ func workerLoopStores() []struct {
 		store func(*testing.T) models.KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "workers.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "workers.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

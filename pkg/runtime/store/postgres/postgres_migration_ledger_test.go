@@ -13,7 +13,7 @@ func TestPostgresMigrationLedgerAllowsOnlyRetiredGap(t *testing.T) {
 	pgSchema := storetest.NewPostgresSchema(t, "migration_ledger_")
 	dsn := pgSchema.DSN
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
+	store, err := New(ctx, dsn, WithSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

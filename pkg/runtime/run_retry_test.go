@@ -19,7 +19,7 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 		t.Run(backend, func(t *testing.T) {
 			var store models.RunCommandStore = newTestKernelStore(t)
 			if backend == "sqlite" {
-				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "retry.db"))
+				db, err := sqlite.New(filepath.Join(t.TempDir(), "retry.db"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -97,7 +97,7 @@ func TestRetryConversationRunRejectsAnAlreadyExplainedProposalFailure(t *testing
 		t.Run(backend, func(t *testing.T) {
 			var store models.RunCommandStore = newTestKernelStore(t)
 			if backend == "sqlite" {
-				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "explained-retry.db"))
+				db, err := sqlite.New(filepath.Join(t.TempDir(), "explained-retry.db"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -131,7 +131,7 @@ func TestRetryClearsFailureExplanation(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var store models.RunCommandStore = newTestKernelStore(t)
 			if backend == "sqlite" {
-				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "retry-failure.db"))
+				db, err := sqlite.New(filepath.Join(t.TempDir(), "retry-failure.db"))
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -25,7 +25,7 @@ type handoffCommandTestStore interface {
 func forHandoffCommandStores(t *testing.T, test func(*testing.T, handoffCommandTestStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "handoff.db"))
+		store, err := sqlite.New(filepath.Join(t.TempDir(), "handoff.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

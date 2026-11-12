@@ -36,7 +36,7 @@ const loopAgent = "analyst"
 
 func newDesktopLoop(t *testing.T, provider *fakeProvider, wrap func(models.ArtifactContentStore) models.ArtifactContentStore) *desktopLoop {
 	t.Helper()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

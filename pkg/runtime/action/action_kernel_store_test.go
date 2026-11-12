@@ -12,7 +12,7 @@ import (
 // actiontest (it imports action). Change the copies together.
 func newActionTestStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}

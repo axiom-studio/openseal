@@ -23,7 +23,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	store, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 		}
 	}
 	_ = store.Close()
-	reopened, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
+	reopened, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

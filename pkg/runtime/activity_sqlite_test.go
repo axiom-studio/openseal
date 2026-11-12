@@ -18,7 +18,7 @@ import (
 
 func TestSQLiteActivityIsOrderedAndDurable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "activity.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestSQLiteActivityIsOrderedAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestSQLiteMigratesAgentRunRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestSQLiteMigratesAgentRunRevision(t *testing.T) {
 
 func TestSQLiteRunTransitionIsAtomicAndDurable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transition.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestSQLiteRunTransitionIsAtomicAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

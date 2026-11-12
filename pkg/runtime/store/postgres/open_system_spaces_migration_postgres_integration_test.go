@@ -67,7 +67,7 @@ func TestPostgresOpenSystemSpacesMigration(t *testing.T) {
 
 	reopen := func() *Store {
 		t.Helper()
-		reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+		reopened, err := New(ctx, dsn, WithSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -15,7 +15,7 @@ import (
 )
 
 func TestAgentCompilationAPIIsCapabilityAdvertisedAndScopeIsolated(t *testing.T) {
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "compilations.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "compilations.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

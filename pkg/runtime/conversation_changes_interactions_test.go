@@ -37,7 +37,7 @@ func interactionChangeStores() []struct {
 		store func(*testing.T) models.KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "interaction-changes.db"))
+			store, err := sqlite.New(filepath.Join(t.TempDir(), "interaction-changes.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

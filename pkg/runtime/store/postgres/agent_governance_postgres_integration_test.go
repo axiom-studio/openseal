@@ -20,7 +20,7 @@ func TestPostgresAgentGovernanceIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	primary, pgSchema := openTestPostgresStore(t, "openseal_agent_governance_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestPostgresAgentGovernanceIsConcurrentRestartSafeAndScoped(t *testing.T) {
 		t.Fatalf("successful concurrent Agent amendment activations = %d, want 1", activated.Load())
 	}
 
-	restarted, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	restarted, err := New(ctx, dsn, WithSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

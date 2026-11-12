@@ -22,7 +22,7 @@ func TestSkillDefinitionIdentityProbeIsLiveExactAndIsolated(t *testing.T) {
 		open func(*testing.T) storetest.SkillIdentityProbeStore
 	}{
 		{name: "sqlite", open: func(t *testing.T) storetest.SkillIdentityProbeStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "identities.db"))
+			store, err := New(filepath.Join(t.TempDir(), "identities.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -39,7 +39,7 @@ func TestSkillDefinitionIdentityProbeIsLiveExactAndIsolated(t *testing.T) {
 func TestSQLiteSkillDefinitionIdentityProbeDoesNotDecodePayload(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "corrupt-definition.db")
-	store, err := NewSQLiteStore(path)
+	store, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestSkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t *test
 }
 
 func TestSQLiteSkillDefinitionIdentityProbeReturnsClosedStoreError(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "closed.db"))
+	store, err := New(filepath.Join(t.TempDir(), "closed.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,12 +141,12 @@ func TestSQLiteSkillDefinitionIdentityProbeReturnsClosedStoreError(t *testing.T)
 func TestSQLiteSkillDefinitionIdentityProbeSeesReplicaPublisherAndRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "replica-identities.db")
-	primary, err := NewSQLiteStore(path)
+	primary, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer primary.Close()
-	replica, err := NewSQLiteStore(path)
+	replica, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestSQLiteSkillDefinitionIdentityProbeSeesReplicaPublisherAndRestart(t *tes
 	if err := primary.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

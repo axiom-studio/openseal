@@ -21,7 +21,7 @@ func openLoopActionPostgresStore(t *testing.T) *postgres.Store {
 	t.Helper()
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_loop_actions_")
 	dsn := pgSchema.DSN
-	store, err := postgres.NewPostgresStore(context.Background(), dsn, postgres.WithPostgresSchema(pgSchema.Name))
+	store, err := postgres.New(context.Background(), dsn, postgres.WithSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

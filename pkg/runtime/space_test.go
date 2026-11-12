@@ -18,7 +18,7 @@ import (
 
 func TestSQLiteSpaceStore(t *testing.T) {
 	t.Parallel()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "spaces.db"))
+	store, err := sqlite.New(filepath.Join(t.TempDir(), "spaces.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func assertSpaceConversations(t *testing.T, conversations *conversation.Conversa
 func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "backfill.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "default.db")
-	store, err := sqlite.NewSQLiteStore(path)
+	store, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.NewSQLiteStore(path)
+	reopened, err := sqlite.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
