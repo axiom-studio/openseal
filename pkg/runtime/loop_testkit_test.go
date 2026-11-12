@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -55,7 +56,7 @@ func kitUserView(seq int64, text string, author *EntryAuthor) SessionEntryView {
 
 func TestLoopTestkitUnmatchedStepFailsLoudly(t *testing.T) {
 	rec := &recordingTB{TB: t}
-	model := newScriptedModel(rec, &modelRule{name: "never", when: func(stepView) bool { return false }, reply: func(stepView) ModelStepResult { return say("no") }})
+	model := looptest.NewScriptedModel(rec, &looptest.ModelRule{Name: "never", When: func(looptest.StepView) bool { return false }, Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("no") }})
 
 	done := make(chan error, 1)
 	go func() {
@@ -74,16 +75,16 @@ func TestLoopTestkitUnmatchedStepFailsLoudly(t *testing.T) {
 	if len(errs) != 1 || !strings.Contains(errs[0], "no scripted rule for step step-1") || !strings.Contains(errs[0], `lastUser="hello"`) {
 		t.Fatalf("recorded errors = %q", errs)
 	}
-	if got := len(model.calls("")); got != 1 {
+	if got := len(model.Calls("")); got != 1 {
 		t.Fatalf("recorded requests = %d, want 1", got)
 	}
 }
 
 func TestLoopTestkitRulesAreOrderedAndCounted(t *testing.T) {
-	model := newScriptedModel(t,
-		&modelRule{name: "first", times: 1, reply: func(stepView) ModelStepResult { return say("one") }},
-		&modelRule{name: "second", reply: func(stepView) ModelStepResult { return say("two") }},
-		&modelRule{name: "shadowed", reply: func(stepView) ModelStepResult { return say("three") }},
+	model := looptest.NewScriptedModel(t,
+		&looptest.ModelRule{Name: "first", Times: 1, Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("one") }},
+		&looptest.ModelRule{Name: "second", Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("two") }},
+		&looptest.ModelRule{Name: "shadowed", Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("three") }},
 	)
 	var got []string
 	for i := 0; i < 3; i++ {
@@ -98,8 +99,8 @@ func TestLoopTestkitRulesAreOrderedAndCounted(t *testing.T) {
 	}
 
 	failing := &modelstep.TurnHostFailure{Code: modelstep.TurnHostContextExceeded, Message: "too long"}
-	model = newScriptedModel(t, &modelRule{name: "step", when: func(v stepView) bool { return v.Purpose() == ModelStepPurposeStep }, reply: func(stepView) ModelStepResult { return say("ok") }})
-	model.add(&modelRule{name: "overflow", when: func(v stepView) bool { return v.Purpose() == ModelStepPurposeSummary }, err: failing})
+	model = looptest.NewScriptedModel(t, &looptest.ModelRule{Name: "step", When: func(v looptest.StepView) bool { return v.Purpose() == ModelStepPurposeStep }, Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("ok") }})
+	model.Add(&looptest.ModelRule{Name: "overflow", When: func(v looptest.StepView) bool { return v.Purpose() == ModelStepPurposeSummary }, Err: failing})
 	summary := kitStepRequest("step-sum")
 	summary.Purpose = ModelStepPurposeSummary
 	if _, err := model.ExecuteModelStep(context.Background(), summary); !errors.Is(err, failing) {
@@ -108,10 +109,10 @@ func TestLoopTestkitRulesAreOrderedAndCounted(t *testing.T) {
 	if _, err := model.ExecuteModelStep(context.Background(), kitStepRequest("step-4")); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(model.calls(ModelStepPurposeSummary)); got != 1 {
+	if got := len(model.Calls(ModelStepPurposeSummary)); got != 1 {
 		t.Fatalf("summary calls = %d, want 1", got)
 	}
-	if got := len(model.calls(ModelStepPurposeStep)); got != 1 {
+	if got := len(model.Calls(ModelStepPurposeStep)); got != 1 {
 		t.Fatalf("step calls = %d, want 1", got)
 	}
 }
@@ -119,8 +120,8 @@ func TestLoopTestkitRulesAreOrderedAndCounted(t *testing.T) {
 func TestLoopTestkitBeforeHookAndCancellation(t *testing.T) {
 	release := make(chan struct{})
 	entered := make(chan struct{})
-	model := newScriptedModel(t, &modelRule{name: "block",
-		before: func(ctx context.Context, v stepView) error {
+	model := looptest.NewScriptedModel(t, &looptest.ModelRule{Name: "block",
+		Before: func(ctx context.Context, v looptest.StepView) error {
 			close(entered)
 			select {
 			case <-release:
@@ -129,7 +130,7 @@ func TestLoopTestkitBeforeHookAndCancellation(t *testing.T) {
 				return errors.New("released by cancel")
 			}
 		},
-		reply: func(stepView) ModelStepResult { return say("late") },
+		Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("late") },
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -158,14 +159,14 @@ func TestLoopTestkitStepViewReadsRenderedEntries(t *testing.T) {
 	req := kitStepRequest("step-3",
 		SessionEntryView{ID: "e0", Sequence: 1, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "earlier work"}},
 		kitUserView(2, "find issue 7", &EntryAuthor{Kind: EntryAuthorPerson, ID: "ana", Label: "Ana"}),
-		SessionEntryView{ID: "e3", Sequence: 3, Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: kitModelProvider, Model: kitModelName,
+		SessionEntryView{ID: "e3", Sequence: 3, Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: looptest.ModelProvider, Model: looptest.ModelName,
 			ToolCalls: []ModelToolCall{{ID: "c1-1", Name: "lookup", Arguments: args}}, StopReason: ModelStopToolCalls}},
 		SessionEntryView{ID: "e4", Sequence: 4, Type: SessionEntryTool, Tool: &ToolEntryView{CallID: "c1-1", Name: "lookup", Arguments: args,
 			State: ToolEntryCompleted, Result: ToolResultView{Content: []ContentPart{{Type: "json", Value: []byte(`{"status":"open"}`)}}}}},
 		SessionEntryView{ID: "e5", Sequence: 5, Type: SessionEntryNote, Note: &NoteEntryView{Kind: "repeat", Text: "you already looked"}},
 		kitUserView(6, "and close it", nil),
 	)
-	v := stepView{req: req}
+	v := looptest.StepView{Req: req}
 	if v.Step() != 2 {
 		t.Fatalf("Step = %d, want 2", v.Step())
 	}
@@ -193,20 +194,20 @@ func TestLoopTestkitStepViewReadsRenderedEntries(t *testing.T) {
 	if last := v.LastEntry(); last == nil || last.ID != "e6" {
 		t.Fatalf("LastEntry = %#v", last)
 	}
-	if d := v.describe(); !strings.Contains(d, "compaction user assistant tool:lookup:completed note:repeat user") {
+	if d := v.Describe(); !strings.Contains(d, "compaction user assistant tool:lookup:completed note:repeat user") {
 		t.Fatalf("describe = %s", d)
 	}
 }
 
 func TestLoopTestkitResultBuildersPassValidation(t *testing.T) {
 	cases := map[string]ModelStepResult{
-		"say":       withUsage(say("done"), 10, 2),
-		"act":       withReasoning(act("Looking it up.", call("lookup", map[string]any{"id": "7"}), call("list_items", nil)), "think-1"),
-		"final":     finalAnswer(map[string]any{"answer": "Closed."}),
-		"emptyText": act(""),
+		"say":       looptest.WithUsage(looptest.Say("done"), 10, 2),
+		"act":       looptest.WithReasoning(looptest.Act("Looking it up.", looptest.Call("lookup", map[string]any{"id": "7"}), looptest.Call("list_items", nil)), "think-1"),
+		"final":     looptest.FinalAnswer(map[string]any{"answer": "Closed."}),
+		"emptyText": looptest.Act(""),
 	}
 	for name, built := range cases {
-		model := newScriptedModel(t, &modelRule{name: name, reply: func(stepView) ModelStepResult { return built }})
+		model := looptest.NewScriptedModel(t, &looptest.ModelRule{Name: name, Reply: func(looptest.StepView) ModelStepResult { return built }})
 		req := kitStepRequest("step-x", kitUserView(1, "go", nil))
 		res, err := model.ExecuteModelStep(context.Background(), req)
 		if err != nil {
@@ -215,17 +216,17 @@ func TestLoopTestkitResultBuildersPassValidation(t *testing.T) {
 		if err := modelstep.ValidateModelStepResult(req, res); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if res.Model.ContextTokens != kitDefaultContextWindow || res.Assistant.Model != "fake-model" {
+		if res.Model.ContextTokens != looptest.DefaultContextWindow || res.Assistant.Model != "fake-model" {
 			t.Fatalf("%s: model info = %#v", name, res.Model)
 		}
 	}
 
-	model := newScriptedModel(t, &modelRule{reply: func(stepView) ModelStepResult {
-		return act("two", call("lookup", map[string]any{"id": "1"}), call("lookup", map[string]any{"id": "2"}))
+	model := looptest.NewScriptedModel(t, &looptest.ModelRule{Reply: func(looptest.StepView) ModelStepResult {
+		return looptest.Act("two", looptest.Call("lookup", map[string]any{"id": "1"}), looptest.Call("lookup", map[string]any{"id": "2"}))
 	}})
-	model.setContextWindow(4096)
+	model.SetContextWindow(4096)
 	res, err := model.ExecuteModelStep(context.Background(), kitStepRequest("step-2", kitUserView(1, "go", nil),
-		SessionEntryView{ID: "a", Sequence: 2, Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: kitModelProvider, Model: kitModelName, StopReason: ModelStopEnd}}))
+		SessionEntryView{ID: "a", Sequence: 2, Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: looptest.ModelProvider, Model: looptest.ModelName, StopReason: ModelStopEnd}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,20 +236,20 @@ func TestLoopTestkitResultBuildersPassValidation(t *testing.T) {
 	if res.Narration != "two" || res.Assistant.StopReason != ModelStopToolCalls || res.Model.ContextTokens != 4096 {
 		t.Fatalf("result = %#v", res)
 	}
-	if res := finalAnswer(nil); res.Assistant.ToolCalls[0].Name != string(ControlToolFinalAnswer) {
+	if res := looptest.FinalAnswer(nil); res.Assistant.ToolCalls[0].Name != string(ControlToolFinalAnswer) {
 		t.Fatalf("finalAnswer calls %s", res.Assistant.ToolCalls[0].Name)
 	}
 }
 
 func TestLoopTestkitFakeHostTools(t *testing.T) {
 	rec := &recordingTB{TB: t}
-	tools := newFakeHostTools(rec)
+	tools := looptest.NewFakeHostTools(rec)
 	release := make(chan struct{})
-	tools.handle("read_file", func(ctx context.Context, req HostToolRequest) (HostToolResult, error) {
+	tools.Handle("read_file", func(ctx context.Context, req HostToolRequest) (HostToolResult, error) {
 		<-release
-		return hostText("contents of " + fmt.Sprint(req.Arguments["path"])), nil
+		return looptest.HostText("contents of " + fmt.Sprint(req.Arguments["path"])), nil
 	})
-	host := fakeStepHost{scriptedModel: newScriptedModel(t), fakeHostTools: tools}
+	host := looptest.FakeStepHost{ScriptedModel: looptest.NewScriptedModel(t), FakeHostTools: tools}
 
 	var wg sync.WaitGroup
 	results := make([]HostToolResult, 2)
@@ -264,7 +265,7 @@ func TestLoopTestkitFakeHostTools(t *testing.T) {
 		}(i)
 	}
 	deadline := time.After(5 * time.Second)
-	for tools.peakInFlight() < 2 {
+	for tools.PeakInFlight() < 2 {
 		select {
 		case <-deadline:
 			t.Fatal("host tool calls did not overlap")
@@ -274,7 +275,7 @@ func TestLoopTestkitFakeHostTools(t *testing.T) {
 	}
 	close(release)
 	wg.Wait()
-	if results[0].APIVersion != HostToolAPIVersion || results[1].InvocationID != "entry-1" || kitPartsText(results[0].Content) != "contents of a.txt" {
+	if results[0].APIVersion != HostToolAPIVersion || results[1].InvocationID != "entry-1" || looptest.PartsText(results[0].Content) != "contents of a.txt" {
 		t.Fatalf("results = %#v", results)
 	}
 
@@ -285,14 +286,14 @@ func TestLoopTestkitFakeHostTools(t *testing.T) {
 	if errs := rec.recorded(); len(errs) != 1 || !strings.Contains(errs[0], `"rm_rf"`) {
 		t.Fatalf("recorded = %q", errs)
 	}
-	if got := len(tools.requests("read_file")); got != 2 {
+	if got := len(tools.Requests("read_file")); got != 2 {
 		t.Fatalf("read_file requests = %d", got)
 	}
 }
 
 func TestLoopTestkitFakeClock(t *testing.T) {
 	start := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
-	clock := newFakeClock(start)
+	clock := looptest.NewFakeClock(start)
 	clock.Advance(90 * time.Second)
 	if got := clock.Now(); !got.Equal(start.Add(90 * time.Second)) {
 		t.Fatalf("Now = %v", got)
@@ -305,7 +306,7 @@ func TestLoopTestkitStoreMatrixRunsEveryAvailableStore(t *testing.T) {
 		want = append(want, "postgres")
 	}
 	var got []string
-	eachStore(t, "kit_matrix", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "kit_matrix", func(t *testing.T, store KernelStore) {
 		if store == nil {
 			t.Fatal("nil store")
 		}
@@ -320,11 +321,11 @@ func TestLoopTestkitStoreMatrixRunsEveryAvailableStore(t *testing.T) {
 }
 
 func TestLoopTestkitCrashStoreRefusesWritesAfterArm(t *testing.T) {
-	eachStore(t, "kit_crash", func(t *testing.T, base KernelStore) {
+	looptest.EachStore(t, "kit_crash", func(t *testing.T, base KernelStore) {
 		ctx := context.Background()
 		scope := Scope{Kind: "tenant", ID: "kit-crash"}
 		now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
-		store := newCrashStore(t, base)
+		store := looptest.NewCrashStore(t, base)
 		portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 		create := func() (*AgentRun, error) {
 			return portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -338,26 +339,26 @@ func TestLoopTestkitCrashStoreRefusesWritesAfterArm(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create before arm: %v", err)
 		}
-		store.arm()
-		if _, err := create(); !errors.Is(err, errSimulatedCrash) {
+		store.Arm()
+		if _, err := create(); !errors.Is(err, looptest.ErrSimulatedCrash) {
 			t.Fatalf("create after arm = %v, want errSimulatedCrash", err)
 		}
-		if _, err := store.ClaimNextAgentRun(ctx, claim); !errors.Is(err, errSimulatedCrash) {
+		if _, err := store.ClaimNextAgentRun(ctx, claim); !errors.Is(err, looptest.ErrSimulatedCrash) {
 			t.Fatalf("claim after arm = %v", err)
 		}
-		if _, err := store.CreateRunAgentSession(ctx, CreateRunAgentSessionRequest{}); !errors.Is(err, errSimulatedCrash) {
+		if _, err := store.CreateRunAgentSession(ctx, CreateRunAgentSessionRequest{}); !errors.Is(err, looptest.ErrSimulatedCrash) {
 			t.Fatalf("create session after arm = %v", err)
 		}
-		if _, err := store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{}); !errors.Is(err, errSimulatedCrash) {
+		if _, err := store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{}); !errors.Is(err, looptest.ErrSimulatedCrash) {
 			t.Fatalf("append after arm = %v", err)
 		}
-		if _, err := store.TransitionToolEntry(ctx, ToolEntryTransitionRequest{}); !errors.Is(err, errSimulatedCrash) {
+		if _, err := store.TransitionToolEntry(ctx, ToolEntryTransitionRequest{}); !errors.Is(err, looptest.ErrSimulatedCrash) {
 			t.Fatalf("transition after arm = %v", err)
 		}
-		if err := store.RecordAgentTurnStepModel(ctx, &AgentTurn{}, 0, nil); !errors.Is(err, errSimulatedCrash) {
+		if err := store.RecordAgentTurnStepModel(ctx, &AgentTurn{}, 0, nil); !errors.Is(err, looptest.ErrSimulatedCrash) {
 			t.Fatalf("record step after arm = %v", err)
 		}
-		if _, err := store.PersistActionExecution(ctx, ActionExecutionRecord{}); !errors.Is(err, errSimulatedCrash) {
+		if _, err := store.PersistActionExecution(ctx, ActionExecutionRecord{}); !errors.Is(err, looptest.ErrSimulatedCrash) {
 			t.Fatalf("persist action after arm = %v", err)
 		}
 		if got, err := store.GetAgentRun(ctx, scope, run.ID); err != nil || got.ID != run.ID {
@@ -366,11 +367,11 @@ func TestLoopTestkitCrashStoreRefusesWritesAfterArm(t *testing.T) {
 		if runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope}); err != nil || len(runs) != 1 {
 			t.Fatalf("list after arm = %d, %v", len(runs), err)
 		}
-		if _, err := store.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: scope, SessionID: "none"}); errors.Is(err, errSimulatedCrash) {
+		if _, err := store.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: scope, SessionID: "none"}); errors.Is(err, looptest.ErrSimulatedCrash) {
 			t.Fatalf("session read refused after arm")
 		}
 
-		store.disarm()
+		store.Disarm()
 		claimed, err := store.ClaimNextAgentRun(ctx, claim)
 		if err != nil || claimed == nil || claimed.ID != run.ID {
 			t.Fatalf("claim after disarm = %#v, %v", claimed, err)
@@ -392,7 +393,7 @@ func TestLoopTestkitHasNoCheckpointAccess(t *testing.T) {
 	}
 	exempt := map[string]bool{"loop_scenario_child_test.go": true}
 	var files []string
-	for _, pattern := range []string{"loop_testkit_*_test.go", "loop_testkit_test.go", "loop_scenario_*_test.go"} {
+	for _, pattern := range []string{"looptest/*.go", "loop_testkit_test.go", "loop_scenario_*_test.go", "runworker/loop_scenario_*_test.go"} {
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
 			t.Fatal(err)
@@ -419,125 +420,129 @@ func TestLoopTestkitHasNoCheckpointAccess(t *testing.T) {
 }
 
 func TestLoopTestkitFixtureObjectiveRunReadsThenAnswers(t *testing.T) {
-	eachStore(t, "kit_fixture_objective", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", times: 1,
-				reply: func(v stepView) ModelStepResult {
-					return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "7"}))
+	looptest.EachStore(t, "kit_fixture_objective", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", Times: 1,
+				Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "7"}))
 				}},
-			&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
+			&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
 				for _, e := range v.ToolResultsSinceUser() {
-					if strings.Contains(kitPartsText(e.Tool.Result.Content), "Issue 7") {
-						return finalAnswer(map[string]any{"answer": "Issue 7 is open."})
+					if strings.Contains(looptest.PartsText(e.Tool.Result.Content), "Issue 7") {
+						return looptest.FinalAnswer(map[string]any{"answer": "Issue 7 is open."})
 					}
 				}
-				return say("I could not find it.")
+				return looptest.Say("I could not find it.")
 			}},
 		))
-		run := f.startRun(RunKindAgentWork, "Check issue 7")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
-		if got, want := strings.Join(f.entryTypes(run.ID), ","), "user,assistant,tool:completed,assistant,tool:completed"; got != want {
+		run := f.StartRun(RunKindAgentWork, "Check issue 7")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
+		if got, want := strings.Join(f.EntryTypes(run.ID), ","), "user,assistant,tool:completed,assistant,tool:completed"; got != want {
 			t.Fatalf("log = %s, want %s", got, want)
 		}
-		if f.dispatch.count("lookup") != 1 {
-			t.Fatalf("lookup dispatched %d times, want 1", f.dispatch.count("lookup"))
+		if f.Dispatch.Count("lookup") != 1 {
+			t.Fatalf("lookup dispatched %d times, want 1", f.Dispatch.Count("lookup"))
 		}
-		if calls := f.calls(run.ID); len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded {
+		if calls := f.Calls(run.ID); len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded {
 			t.Fatalf("action calls = %#v", calls)
 		}
-		if steps := f.steps(run.ID); len(steps) != 2 {
+		if steps := f.Steps(run.ID); len(steps) != 2 {
 			t.Fatalf("steps = %d, want 2", len(steps))
 		}
-		if len(f.events(run.ID, "turn.narration")) != 1 {
-			t.Fatalf("narration events = %d, want 1", len(f.events(run.ID, "turn.narration")))
+		if len(f.Events(run.ID, "turn.narration")) != 1 {
+			t.Fatalf("narration events = %d, want 1", len(f.Events(run.ID, "turn.narration")))
 		}
-		if users := f.model.calls(ModelStepPurposeStep)[0]; !strings.Contains(stepView{req: users}.LastUserText(), "Check issue 7") {
-			t.Fatalf("first step did not see the goal: %s", stepView{req: users}.describe())
+		if users := f.Model.Calls(ModelStepPurposeStep)[0]; !strings.Contains(looptest.StepView{Req: users}.LastUserText(), "Check issue 7") {
+			t.Fatalf("first step did not see the goal: %s", looptest.StepView{Req: users}.Describe())
 		}
 	})
 }
 
 func TestLoopTestkitFixtureChatPostsTheAnswer(t *testing.T) {
-	eachStore(t, "kit_fixture_chat", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(&modelRule{name: "hello",
-			when:  func(v stepView) bool { return strings.Contains(v.LastUserText(), "hello") },
-			reply: func(stepView) ModelStepResult { return say("Hi Ana.") }}))
-		conversation, run := f.startChat("hello finn")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
-		messages := f.messages(conversation.ID)
-		if len(messages) != 2 || messages[1].Sender.ID != loopFixtureAgent || !strings.Contains(messages[1].Content, "Hi Ana.") {
-			t.Fatalf("channel = %s", kitDescribeMessages(messages))
+	looptest.EachStore(t, "kit_fixture_chat", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "hello",
+			When:  func(v looptest.StepView) bool { return strings.Contains(v.LastUserText(), "hello") },
+			Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("Hi Ana.") }}))
+		conversation, run := f.StartChat("hello finn")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
+		messages := f.Messages(conversation.ID)
+		if len(messages) != 2 || messages[1].Sender.ID != looptest.FixtureAgent || !strings.Contains(messages[1].Content, "Hi Ana.") {
+			t.Fatalf("channel = %s", looptest.DescribeMessages(messages))
 		}
-		if first := (stepView{req: f.model.calls(ModelStepPurposeStep)[0]}); !strings.Contains(first.LastUserText(), "hello finn") {
-			t.Fatalf("first step did not see the trigger: %s", first.describe())
+		if first := (looptest.StepView{Req: f.Model.Calls(ModelStepPurposeStep)[0]}); !strings.Contains(first.LastUserText(), "hello finn") {
+			t.Fatalf("first step did not see the trigger: %s", first.Describe())
 		}
 	})
 }
 
 func TestLoopTestkitFixtureApprovalParksAndResumes(t *testing.T) {
-	eachStore(t, "kit_fixture_approval", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withApprovalForWrites(), withRules(
-			&modelRule{name: "update", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Closing it.", reviewedCall(kitGovernedTool(v, "update_status"), map[string]any{"id": "7", "status": "closed"}, "Close issue 7"))
+	looptest.EachStore(t, "kit_fixture_approval", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithApprovalForWrites(), looptest.WithRules(
+			&looptest.ModelRule{Name: "update", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Closing it.", looptest.ReviewedCall(looptest.GovernedTool(v, "update_status"), map[string]any{"id": "7", "status": "closed"}, "Close issue 7"))
 			}},
-			&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Closed issue 7."}) }},
+			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Closed issue 7."})
+			}},
 		))
-		run := f.startRun(RunKindAgentWork, "Close issue 7")
-		parked := f.driveToRest(run.ID, 3)
-		f.mustStatus(parked, AgentRunStatusWaitingForApproval)
-		if f.dispatch.count("update_status") != 0 {
+		run := f.StartRun(RunKindAgentWork, "Close issue 7")
+		parked := f.DriveToRest(run.ID, 3)
+		f.MustStatus(parked, AgentRunStatusWaitingForApproval)
+		if f.Dispatch.Count("update_status") != 0 {
 			t.Fatal("the write ran before approval")
 		}
-		f.decide(run.ID, ApprovalDecisionApprove, "go ahead")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
-		if f.dispatch.count("update_status") != 1 {
-			t.Fatalf("update_status dispatched %d times, want 1", f.dispatch.count("update_status"))
+		f.Decide(run.ID, ApprovalDecisionApprove, "go ahead")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
+		if f.Dispatch.Count("update_status") != 1 {
+			t.Fatalf("update_status dispatched %d times, want 1", f.Dispatch.Count("update_status"))
 		}
 	})
 }
 
 func TestLoopTestkitFixtureCrashResumesOnSecondWorker(t *testing.T) {
-	eachStore(t, "kit_fixture_crash", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "kit_fixture_crash", func(t *testing.T, store KernelStore) {
 		entered := make(chan struct{})
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "9"}))
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "9"}))
 			}},
-			&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Issue 9 is open."}) }},
+			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Issue 9 is open."})
+			}},
 		))
-		release := f.dispatch.hold("lookup")
-		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		release := f.Dispatch.Hold("lookup")
+		f.Dispatch.On("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"id": "9", "status": "open", "title": "Issue 9"}, nil
 		})
 		go func() {
-			for f.dispatch.count("lookup") == 0 {
+			for f.Dispatch.Count("lookup") == 0 {
 				time.Sleep(time.Millisecond)
 			}
 			close(entered)
 		}()
-		run := f.startRun(RunKindAgentWork, "Check issue 9")
+		run := f.StartRun(RunKindAgentWork, "Check issue 9")
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			f.runClaimContext(ctx, run.ID)
+			f.RunClaimContext(ctx, run.ID)
 		}()
 		select {
 		case <-entered:
 		case <-time.After(5 * time.Second):
 			t.Fatal("dispatch never started")
 		}
-		f.crash(cancel, done)
+		f.Crash(cancel, done)
 		close(release)
-		if f.workerID != loopFixtureWorker2 {
-			t.Fatalf("worker after crash = %s", f.workerID)
+		if f.WorkerID != looptest.FixtureWorker2 {
+			t.Fatalf("worker after crash = %s", f.WorkerID)
 		}
-		final := f.driveToRest(run.ID, 4)
-		f.mustStatus(final, AgentRunStatusCompleted)
-		if final.LeaseOwner != "" && final.LeaseOwner != loopFixtureWorker2 {
+		final := f.DriveToRest(run.ID, 4)
+		f.MustStatus(final, AgentRunStatusCompleted)
+		if final.LeaseOwner != "" && final.LeaseOwner != looptest.FixtureWorker2 {
 			t.Fatalf("lease owner = %s", final.LeaseOwner)
 		}
 	})

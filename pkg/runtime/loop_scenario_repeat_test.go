@@ -16,6 +16,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -25,7 +26,7 @@ import (
 var repeatLookupArgs = map[string]any{"id": "6815"}
 
 // stepPurpose matches ordinary model steps (not the explanation step).
-func stepPurpose(v stepView) bool { return v.Purpose() == ModelStepPurposeStep }
+func stepPurpose(v looptest.StepView) bool { return v.Purpose() == ModelStepPurposeStep }
 
 // rawCall is a tool call whose argument JSON is sent byte for byte, so a
 // scenario can vary whitespace and key order.
@@ -41,10 +42,10 @@ func rawCall(narration, name, arguments string) ModelStepResult {
 
 // repeatToolEntries is the Run's tool entries whose tool name ends in action,
 // in log order.
-func repeatToolEntries(f *loopFixture, runID, action string) []*SessionEntry {
-	f.t.Helper()
+func repeatToolEntries(f *looptest.Fixture, runID, action string) []*SessionEntry {
+	f.T.Helper()
 	var out []*SessionEntry
-	for _, entry := range f.entries(runID) {
+	for _, entry := range f.Entries(runID) {
 		if entry.Type == SessionEntryTool && entry.Tool != nil && strings.HasSuffix(entry.Tool.Name, action) && entry.RunID == runID {
 			out = append(out, entry)
 		}
@@ -53,10 +54,10 @@ func repeatToolEntries(f *loopFixture, runID, action string) []*SessionEntry {
 }
 
 // repeatNotes is the Run's D9 notes, in log order.
-func repeatNotes(f *loopFixture, runID string) []*SessionEntry {
-	f.t.Helper()
+func repeatNotes(f *looptest.Fixture, runID string) []*SessionEntry {
+	f.T.Helper()
 	var out []*SessionEntry
-	for _, entry := range f.entries(runID) {
+	for _, entry := range f.Entries(runID) {
 		if entry.Type == SessionEntryNote && entry.Note != nil && entry.Note.Kind == NoteRepeat && entry.RunID == runID {
 			out = append(out, entry)
 		}
@@ -65,8 +66,8 @@ func repeatNotes(f *loopFixture, runID string) []*SessionEntry {
 }
 
 // repeatNoteAfter is the D9 note written after tool entry id, if any.
-func repeatNoteAfter(f *loopFixture, runID, entryID string) *SessionEntry {
-	f.t.Helper()
+func repeatNoteAfter(f *looptest.Fixture, runID, entryID string) *SessionEntry {
+	f.T.Helper()
 	for _, note := range repeatNotes(f, runID) {
 		if note.SourceKey == runloop.RepeatNoteSourceKey(entryID) {
 			return note
@@ -79,7 +80,7 @@ func repeatResultText(entry *SessionEntry) string {
 	if entry == nil || entry.Tool == nil || entry.Tool.Result == nil {
 		return ""
 	}
-	return kitPartsText(entry.Tool.Result.Content)
+	return looptest.PartsText(entry.Tool.Result.Content)
 }
 
 func repeatGuard(entry *SessionEntry) string {
@@ -90,10 +91,10 @@ func repeatGuard(entry *SessionEntry) string {
 }
 
 // repeatCallsByStatus is the Run's action_calls rows of action with status.
-func repeatCallsByStatus(f *loopFixture, runID, action string, status ActionCallStatus) []*ActionCall {
-	f.t.Helper()
+func repeatCallsByStatus(f *looptest.Fixture, runID, action string, status ActionCallStatus) []*ActionCall {
+	f.T.Helper()
 	var out []*ActionCall
-	for _, call := range f.calls(runID) {
+	for _, call := range f.Calls(runID) {
 		if call.Action == action && call.Status == status {
 			out = append(out, call)
 		}
@@ -132,21 +133,21 @@ func describeRepeatEntries(entries []*SessionEntry) string {
 // refused with refused action_calls rows, the 5th fails the Run with
 // repeat_limit, and the chat gets the explanation.
 func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
-	eachStore(t, "repeat_doom", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", when: stepPurpose, reply: func(v stepView) ModelStepResult {
-				return act("Checking.", call(kitGovernedTool(v, "lookup"), repeatLookupArgs))
+	looptest.EachStore(t, "repeat_doom", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
 			}},
-			&modelRule{name: "explain", when: func(v stepView) bool { return v.Purpose() == ModelStepPurposeExplanation },
-				reply: func(stepView) ModelStepResult {
-					return say("I kept looking up issue 6815 and got the same answer, so I stopped.")
+			&looptest.ModelRule{Name: "explain", When: func(v looptest.StepView) bool { return v.Purpose() == ModelStepPurposeExplanation },
+				Reply: func(looptest.StepView) ModelStepResult {
+					return looptest.Say("I kept looking up issue 6815 and got the same answer, so I stopped.")
 				}},
 		))
-		conversation, run := f.startChat("what is the status of 6815?")
-		done := f.driveToRest(run.ID, 4)
-		f.mustStatus(done, AgentRunStatusFailed)
+		conversation, run := f.StartChat("what is the status of 6815?")
+		done := f.DriveToRest(run.ID, 4)
+		f.MustStatus(done, AgentRunStatusFailed)
 
-		if got := f.dispatch.count("lookup"); got != 2 {
+		if got := f.Dispatch.Count("lookup"); got != 2 {
 			t.Fatalf("lookup dispatched %d times, want 2", got)
 		}
 		lookups := repeatToolEntries(f, run.ID, "lookup")
@@ -163,7 +164,7 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 		}
 		note := repeatNoteAfter(f, run.ID, lookups[1].ID)
 		if note == nil {
-			t.Fatalf("the second identical call got no note; log %v", f.entryTypes(run.ID))
+			t.Fatalf("the second identical call got no note; log %v", f.EntryTypes(run.ID))
 		}
 		if want := wantRepeatNote(lookups[0].Step); !strings.HasPrefix(note.Note.Text, want) {
 			t.Fatalf("note = %q, want it to start with %q", note.Note.Text, want)
@@ -215,11 +216,11 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 				t.Fatalf("refused call %d names no action_calls row", i+3)
 			}
 		}
-		if len(f.events(run.ID, action.ActivityEventActionRefused)) != len(refused) {
-			t.Fatalf("action.refused events = %d, want %d", len(f.events(run.ID, action.ActivityEventActionRefused)), len(refused))
+		if len(f.Events(run.ID, action.ActivityEventActionRefused)) != len(refused) {
+			t.Fatalf("action.refused events = %d, want %d", len(f.Events(run.ID, action.ActivityEventActionRefused)), len(refused))
 		}
 
-		final := f.mustRun(run.ID)
+		final := f.MustRun(run.ID)
 		if final.FailureExplanation == nil || final.FailureExplanation.Code != action.RunFailureCodeRepeatLimit ||
 			final.FailureExplanation.Kind != modelstep.RunFailureKindRepeatLimit || !final.FailureExplanation.Explained {
 			t.Fatalf("failure = %#v, want an explained repeat_limit", final.FailureExplanation)
@@ -228,12 +229,12 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 		if final.Error != repeatLimitMessage {
 			t.Fatalf("run error = %q, want %q", final.Error, repeatLimitMessage)
 		}
-		messages := f.messages(conversation.ID)
+		messages := f.Messages(conversation.ID)
 		last := messages[len(messages)-1]
-		if last.Sender.ID != loopFixtureAgent || !strings.Contains(last.Content, "so I stopped") {
-			t.Fatalf("channel = %s, want the explanation posted", kitDescribeMessages(messages))
+		if last.Sender.ID != looptest.FixtureAgent || !strings.Contains(last.Content, "so I stopped") {
+			t.Fatalf("channel = %s, want the explanation posted", looptest.DescribeMessages(messages))
 		}
-		if steps := len(f.model.calls(ModelStepPurposeStep)); steps != 5 {
+		if steps := len(f.Model.Calls(ModelStepPurposeStep)); steps != 5 {
 			t.Fatalf("model steps = %d, want 5", steps)
 		}
 	})
@@ -242,27 +243,29 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 // TestLoopIdenticalReadCountsResetAfterASuccessfulWrite: a successful write
 // between identical reads starts the count again.
 func TestLoopIdenticalReadCountsResetAfterASuccessfulWrite(t *testing.T) {
-	eachStore(t, "repeat_reset", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", times: 2, reply: func(v stepView) ModelStepResult {
-				return act("Checking.", call(kitGovernedTool(v, "lookup"), repeatLookupArgs))
+	looptest.EachStore(t, "repeat_reset", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", Times: 2, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
 			}},
-			&modelRule{name: "update", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Reopening it.", reviewedCall(kitGovernedTool(v, "update_status"), map[string]any{"id": "6815", "status": "open"}, "Reopen 6815"))
+			&looptest.ModelRule{Name: "update", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Reopening it.", looptest.ReviewedCall(looptest.GovernedTool(v, "update_status"), map[string]any{"id": "6815", "status": "open"}, "Reopen 6815"))
 			}},
-			&modelRule{name: "lookup again", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Checking again.", call(kitGovernedTool(v, "lookup"), repeatLookupArgs))
+			&looptest.ModelRule{Name: "lookup again", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Checking again.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
 			}},
-			&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "6815 is open."}) }},
+			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "6815 is open."})
+			}},
 		))
-		run := f.startRun(RunKindAgentWork, "Reopen 6815 and confirm it")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
+		run := f.StartRun(RunKindAgentWork, "Reopen 6815 and confirm it")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
 
-		if got := f.dispatch.count("lookup"); got != 3 {
+		if got := f.Dispatch.Count("lookup"); got != 3 {
 			t.Fatalf("lookup dispatched %d times, want 3", got)
 		}
-		if got := f.dispatch.count("update_status"); got != 1 {
+		if got := f.Dispatch.Count("update_status"); got != 1 {
 			t.Fatalf("update_status dispatched %d times, want 1", got)
 		}
 		lookups := repeatToolEntries(f, run.ID, "lookup")
@@ -292,27 +295,29 @@ func TestLoopIdenticalReadCountsResetAfterASuccessfulWrite(t *testing.T) {
 // TestLoopIdenticalReadWithChangedResultIsNotARepeat: an identical read whose
 // result changed is progress, not a repeat.
 func TestLoopIdenticalReadWithChangedResultIsNotARepeat(t *testing.T) {
-	eachStore(t, "repeat_changed", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", times: 4, reply: func(v stepView) ModelStepResult {
-				return act("Checking.", call(kitGovernedTool(v, "lookup"), repeatLookupArgs))
+	looptest.EachStore(t, "repeat_changed", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", Times: 4, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
 			}},
-			&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "6815 keeps changing."}) }},
+			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "6815 keeps changing."})
+			}},
 		))
 		var mu sync.Mutex
 		statuses := []string{"open", "closed", "open", "closed"}
-		f.dispatch.on("lookup", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		f.Dispatch.On("lookup", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			status := statuses[0]
 			statuses = statuses[1:]
 			return map[string]interface{}{"id": "6815", "status": status}, nil
 		})
-		run := f.startRun(RunKindAgentWork, "Watch 6815")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
+		run := f.StartRun(RunKindAgentWork, "Watch 6815")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
 
-		if got := f.dispatch.count("lookup"); got != 4 {
+		if got := f.Dispatch.Count("lookup"); got != 4 {
 			t.Fatalf("lookup dispatched %d times, want 4", got)
 		}
 		lookups := repeatToolEntries(f, run.ID, "lookup")
@@ -333,30 +338,32 @@ func TestLoopIdenticalReadWithChangedResultIsNotARepeat(t *testing.T) {
 // TestLoopIdenticalReadsAreCanonicalisedByArguments: whitespace and key order
 // do not make a call different; another value does.
 func TestLoopIdenticalReadsAreCanonicalisedByArguments(t *testing.T) {
-	eachStore(t, "repeat_canonical", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "compact", times: 1, reply: func(v stepView) ModelStepResult {
-				return rawCall("Checking.", kitGovernedTool(v, "lookup"), `{"id":"6815"}`)
+	looptest.EachStore(t, "repeat_canonical", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "compact", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return rawCall("Checking.", looptest.GovernedTool(v, "lookup"), `{"id":"6815"}`)
 			}},
-			&modelRule{name: "spaced", times: 1, reply: func(v stepView) ModelStepResult {
-				return rawCall("Checking again.", kitGovernedTool(v, "lookup"), "{ \"id\" :\n \"6815\" }")
+			&looptest.ModelRule{Name: "spaced", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return rawCall("Checking again.", looptest.GovernedTool(v, "lookup"), "{ \"id\" :\n \"6815\" }")
 			}},
-			&modelRule{name: "other", times: 1, reply: func(v stepView) ModelStepResult {
-				return rawCall("Checking the next one.", kitGovernedTool(v, "lookup"), `{"id":"6816"}`)
+			&looptest.ModelRule{Name: "other", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return rawCall("Checking the next one.", looptest.GovernedTool(v, "lookup"), `{"id":"6816"}`)
 			}},
-			&modelRule{name: "close", times: 1, reply: func(v stepView) ModelStepResult {
-				return rawCall("Closing it.", kitGovernedTool(v, "update_status"),
+			&looptest.ModelRule{Name: "close", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return rawCall("Closing it.", looptest.GovernedTool(v, "update_status"),
 					`{"arguments":{"id":"6816","status":"closed"},"reviewContext":{"summary":"Close 6816","content":"Close 6816"}}`)
 			}},
-			&modelRule{name: "close reordered", times: 1, reply: func(v stepView) ModelStepResult {
-				return rawCall("Closing it again.", kitGovernedTool(v, "update_status"),
+			&looptest.ModelRule{Name: "close reordered", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return rawCall("Closing it again.", looptest.GovernedTool(v, "update_status"),
 					`{ "reviewContext" : {"content":"Close 6816","summary":"Close 6816"}, "arguments" : {"status":"closed","id":"6816"} }`)
 			}},
-			&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Done."}) }},
+			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Done."})
+			}},
 		))
-		run := f.startRun(RunKindAgentWork, "Check 6815 and close 6816")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
+		run := f.StartRun(RunKindAgentWork, "Check 6815 and close 6816")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
 
 		lookups := repeatToolEntries(f, run.ID, "lookup")
 		if len(lookups) != 3 {
@@ -374,7 +381,7 @@ func TestLoopIdenticalReadsAreCanonicalisedByArguments(t *testing.T) {
 		if note := repeatNoteAfter(f, run.ID, lookups[2].ID); note != nil {
 			t.Fatalf("the lookup of 6816 got a note: %q", note.Note.Text)
 		}
-		if got := f.dispatch.count("lookup"); got != 3 {
+		if got := f.Dispatch.Count("lookup"); got != 3 {
 			t.Fatalf("lookup dispatched %d times, want 3", got)
 		}
 
@@ -388,7 +395,7 @@ func TestLoopIdenticalReadsAreCanonicalisedByArguments(t *testing.T) {
 		if updates[1].State != ToolEntryError || repeatGuard(updates[1]) != action.RefusedLoopCallDuplicateSuppressed {
 			t.Fatalf("reordered write = %s, want duplicate_suppressed", describeRepeatEntries(updates))
 		}
-		if got := f.dispatch.count("update_status"); got != 1 {
+		if got := f.Dispatch.Count("update_status"); got != 1 {
 			t.Fatalf("update_status dispatched %d times, want 1", got)
 		}
 	})
@@ -397,25 +404,27 @@ func TestLoopIdenticalReadsAreCanonicalisedByArguments(t *testing.T) {
 // TestLoopIdenticalWriteAfterSuccessIsSuppressed: a write identical to one
 // that succeeded is not run again; the model gets step 1's result.
 func TestLoopIdenticalWriteAfterSuccessIsSuppressed(t *testing.T) {
-	eachStore(t, "repeat_write_ok", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "repeat_write_ok", func(t *testing.T, store KernelStore) {
 		sendArgs := map[string]any{"to": "ops", "text": "6815 is fixed"}
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "send", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Telling ops.", reviewedCall(kitGovernedTool(v, "send"), sendArgs, "Tell ops 6815 is fixed"))
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "send", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Telling ops.", looptest.ReviewedCall(looptest.GovernedTool(v, "send"), sendArgs, "Tell ops 6815 is fixed"))
 			}},
-			&modelRule{name: "lookup", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Checking.", call(kitGovernedTool(v, "lookup"), repeatLookupArgs))
+			&looptest.ModelRule{Name: "lookup", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
 			}},
-			&modelRule{name: "send again", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Telling ops again.", reviewedCall(kitGovernedTool(v, "send"), sendArgs, "Tell ops 6815 is fixed"))
+			&looptest.ModelRule{Name: "send again", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Telling ops again.", looptest.ReviewedCall(looptest.GovernedTool(v, "send"), sendArgs, "Tell ops 6815 is fixed"))
 			}},
-			&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Ops know."}) }},
+			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Ops know."})
+			}},
 		))
-		run := f.startRun(RunKindAgentWork, "Tell ops 6815 is fixed")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
+		run := f.StartRun(RunKindAgentWork, "Tell ops 6815 is fixed")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
 
-		if got := f.dispatch.count("send"); got != 1 {
+		if got := f.Dispatch.Count("send"); got != 1 {
 			t.Fatalf("send dispatched %d times, want 1", got)
 		}
 		sends := repeatToolEntries(f, run.ID, "send")
@@ -442,7 +451,7 @@ func TestLoopIdenticalWriteAfterSuccessIsSuppressed(t *testing.T) {
 		if len(succeeded) != 1 || rows[0].DuplicateOfActionCallID != succeeded[0].ID {
 			t.Fatalf("suppressed row duplicates %q, want the succeeded send", rows[0].DuplicateOfActionCallID)
 		}
-		if refusedEvents := f.events(run.ID, action.ActivityEventActionRefused); len(refusedEvents) != 1 || refusedEvents[0].Summary != "Already done; not repeated" {
+		if refusedEvents := f.Events(run.ID, action.ActivityEventActionRefused); len(refusedEvents) != 1 || refusedEvents[0].Summary != "Already done; not repeated" {
 			t.Fatalf("action.refused events = %d", len(refusedEvents))
 		}
 	})
@@ -451,17 +460,19 @@ func TestLoopIdenticalWriteAfterSuccessIsSuppressed(t *testing.T) {
 // TestLoopIdenticalWriteAfterFailureMayRetry: a write that failed was not
 // done, so the identical call runs again.
 func TestLoopIdenticalWriteAfterFailureMayRetry(t *testing.T) {
-	eachStore(t, "repeat_write_failed", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "repeat_write_failed", func(t *testing.T, store KernelStore) {
 		sendArgs := map[string]any{"to": "ops", "text": "6815 is fixed"}
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "send", times: 2, reply: func(v stepView) ModelStepResult {
-				return act("Telling ops.", reviewedCall(kitGovernedTool(v, "send"), sendArgs, "Tell ops 6815 is fixed"))
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "send", Times: 2, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Telling ops.", looptest.ReviewedCall(looptest.GovernedTool(v, "send"), sendArgs, "Tell ops 6815 is fixed"))
 			}},
-			&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Ops know."}) }},
+			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Ops know."})
+			}},
 		))
 		var mu sync.Mutex
 		attempts := 0
-		f.dispatch.on("send", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		f.Dispatch.On("send", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			attempts++
@@ -470,11 +481,11 @@ func TestLoopIdenticalWriteAfterFailureMayRetry(t *testing.T) {
 			}
 			return map[string]interface{}{"sent": true}, nil
 		})
-		run := f.startRun(RunKindAgentWork, "Tell ops 6815 is fixed")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
+		run := f.StartRun(RunKindAgentWork, "Tell ops 6815 is fixed")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
 
-		if got := f.dispatch.count("send"); got != 2 {
+		if got := f.Dispatch.Count("send"); got != 2 {
 			t.Fatalf("send dispatched %d times, want 2", got)
 		}
 		sends := repeatToolEntries(f, run.ID, "send")
@@ -494,18 +505,20 @@ func TestLoopIdenticalWriteAfterFailureMayRetry(t *testing.T) {
 // TestLoopRepeatsAreCountedAcrossClaimsAndParks: the count comes from the
 // session log, so a yield between claims does not reset it.
 func TestLoopRepeatsAreCountedAcrossClaimsAndParks(t *testing.T) {
-	eachStore(t, "repeat_claims", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withMaxSteps(2), withRules(
-			&modelRule{name: "done", when: func(v stepView) bool {
-				_, isError, ok := v.ToolResult(kitGovernedTool(v, "lookup"))
+	looptest.EachStore(t, "repeat_claims", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithMaxSteps(2), looptest.WithRules(
+			&looptest.ModelRule{Name: "done", When: func(v looptest.StepView) bool {
+				_, isError, ok := v.ToolResult(looptest.GovernedTool(v, "lookup"))
 				return ok && isError
-			}, reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "6815 is open."}) }},
-			&modelRule{name: "lookup", reply: func(v stepView) ModelStepResult {
-				return act("Checking.", call(kitGovernedTool(v, "lookup"), repeatLookupArgs))
+			}, Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "6815 is open."})
+			}},
+			&looptest.ModelRule{Name: "lookup", Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
 			}},
 		))
-		run := f.startRun(RunKindAgentWork, "Check 6815")
-		exit, after := f.runClaim(run.ID)
+		run := f.StartRun(RunKindAgentWork, "Check 6815")
+		exit, after := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitYielded || after.Status != AgentRunStatusQueued {
 			t.Fatalf("first claim exited %s with %s, want a yield", exit.Reason, after.Status)
 		}
@@ -513,12 +526,12 @@ func TestLoopRepeatsAreCountedAcrossClaimsAndParks(t *testing.T) {
 			t.Fatalf("lookups in the first claim = %d, want 2", got)
 		}
 		// A new worker process: nothing survives in memory.
-		f.workerID = loopFixtureWorker2
-		f.build()
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
+		f.WorkerID = looptest.FixtureWorker2
+		f.Build()
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
 
-		if got := f.dispatch.count("lookup"); got != 2 {
+		if got := f.Dispatch.Count("lookup"); got != 2 {
 			t.Fatalf("lookup dispatched %d times, want 2", got)
 		}
 		lookups := repeatToolEntries(f, run.ID, "lookup")
@@ -537,12 +550,12 @@ func TestLoopRepeatsAreCountedAcrossClaimsAndParks(t *testing.T) {
 // TestLoopVMNestedCallsAreNotCountedAsRepeats: identical calls made through
 // the VM bridge inside one run_command are not loop tool calls.
 func TestLoopVMNestedCallsAreNotCountedAsRepeats(t *testing.T) {
-	eachStore(t, "repeat_vm", func(t *testing.T, store KernelStore) {
-		var f *loopFixture
+	looptest.EachStore(t, "repeat_vm", func(t *testing.T, store KernelStore) {
+		var f *looptest.Fixture
 		var nestedErr error
 		command := modelstep.HostToolName(workspace.OperationRunCommand)
-		f = newLoopFixture(t, store,
-			withHostTool(workspace.OperationRunCommand, func(ctx context.Context, req HostToolRequest) (HostToolResult, error) {
+		f = looptest.NewFixture(t, store,
+			looptest.WithHostTool(workspace.OperationRunCommand, func(ctx context.Context, req HostToolRequest) (HostToolResult, error) {
 				capabilityName := ""
 				for _, tool := range req.VMTools {
 					if strings.HasSuffix(tool.Name, "lookup") {
@@ -551,47 +564,49 @@ func TestLoopVMNestedCallsAreNotCountedAsRepeats(t *testing.T) {
 				}
 				if capabilityName == "" {
 					nestedErr = errors.New("run_command was offered no lookup VM tool")
-					return hostText("no lookup tool"), nil
+					return looptest.HostText("no lookup tool"), nil
 				}
 				for i := 1; i <= 3; i++ {
-					nested, err := f.actions.ProposeNested(ctx, action.NestedActionRequest{
+					nested, err := f.Actions.ProposeNested(ctx, action.NestedActionRequest{
 						Scope: req.Scope, RunID: req.RunID, TurnID: req.StepID, Capability: capabilityName,
 						Arguments: map[string]interface{}{"id": "6815"}, Origin: ActionOriginVM,
 						OriginRef: req.CommandRef, IdempotencyKey: fmt.Sprintf("bridge-%d", i),
 					})
 					if err != nil {
 						nestedErr = fmt.Errorf("nested lookup %d: %w", i, err)
-						return hostText("bridge failed"), nil
+						return looptest.HostText("bridge failed"), nil
 					}
 					if nested.Call.Status != ActionCallStatusReady {
 						nestedErr = fmt.Errorf("nested lookup %d is %s, want ready", i, nested.Call.Status)
-						return hostText("bridge failed"), nil
+						return looptest.HostText("bridge failed"), nil
 					}
-					if _, err := f.executor.RunOnce(ctx, req.Scope, "vm-action-worker", loopFixtureLease); err != nil {
+					if _, err := f.Executor.RunOnce(ctx, req.Scope, "vm-action-worker", looptest.FixtureLease); err != nil {
 						nestedErr = fmt.Errorf("run nested lookup %d: %w", i, err)
-						return hostText("bridge failed"), nil
+						return looptest.HostText("bridge failed"), nil
 					}
 				}
-				return hostText("looked 6815 up three times: open"), nil
+				return looptest.HostText("looked 6815 up three times: open"), nil
 			}),
-			withRules(
-				&modelRule{name: "command", times: 1, reply: func(stepView) ModelStepResult {
-					return act("Running the script.", call(command, map[string]any{"command": "for i in 1 2 3; do seal call lookup 6815; done"}))
+			looptest.WithRules(
+				&looptest.ModelRule{Name: "command", Times: 1, Reply: func(looptest.StepView) ModelStepResult {
+					return looptest.Act("Running the script.", looptest.Call(command, map[string]any{"command": "for i in 1 2 3; do seal call lookup 6815; done"}))
 				}},
-				&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "6815 is open."}) }},
+				&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) ModelStepResult {
+					return looptest.FinalAnswer(map[string]any{"answer": "6815 is open."})
+				}},
 			))
-		run := f.startRun(RunKindAgentWork, "Look 6815 up from a script")
-		done := f.driveToRest(run.ID, 3)
+		run := f.StartRun(RunKindAgentWork, "Look 6815 up from a script")
+		done := f.DriveToRest(run.ID, 3)
 		if nestedErr != nil {
 			t.Fatal(nestedErr)
 		}
-		f.mustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, AgentRunStatusCompleted)
 
-		if got := f.dispatch.count("lookup"); got != 3 {
+		if got := f.Dispatch.Count("lookup"); got != 3 {
 			t.Fatalf("lookup dispatched %d times, want 3", got)
 		}
 		var nested []*ActionCall
-		for _, row := range f.calls(run.ID) {
+		for _, row := range f.Calls(run.ID) {
 			if row.Action == "lookup" {
 				nested = append(nested, row)
 			}
@@ -614,7 +629,7 @@ func TestLoopVMNestedCallsAreNotCountedAsRepeats(t *testing.T) {
 		if notes := repeatNotes(f, run.ID); len(notes) != 0 {
 			t.Fatalf("repeat notes = %d, want 0", len(notes))
 		}
-		if len(f.events(run.ID, action.ActivityEventActionRefused)) != 0 {
+		if len(f.Events(run.ID, action.ActivityEventActionRefused)) != 0 {
 			t.Fatal("a nested call was refused")
 		}
 	})

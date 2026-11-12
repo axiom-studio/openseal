@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -25,7 +26,7 @@ import (
 // armed and that write and every later one are refused. The trap fires at
 // most once.
 type resumeTrapStore struct {
-	*crashStore
+	*looptest.CrashStore
 	mu    sync.Mutex
 	trap  func(method string, arg any) bool
 	fired bool
@@ -36,11 +37,11 @@ type resumeTrapStore struct {
 
 // installResumeTrap puts a trap store under the fixture's worker-bound
 // services. crash() rebuilds them over the same trap store.
-func installResumeTrap(f *loopFixture, trap func(method string, arg any) bool) *resumeTrapStore {
-	f.t.Helper()
-	s := &resumeTrapStore{crashStore: f.crashes, trap: trap}
-	f.store = s
-	f.build()
+func installResumeTrap(f *looptest.Fixture, trap func(method string, arg any) bool) *resumeTrapStore {
+	f.T.Helper()
+	s := &resumeTrapStore{CrashStore: f.Crashes, trap: trap}
+	f.Store = s
+	f.Build()
 	return s
 }
 
@@ -51,7 +52,7 @@ func (s *resumeTrapStore) didFire() bool {
 }
 
 func (s *resumeTrapStore) hit(method string, arg any) error {
-	if err := s.crashStore.refused(); err != nil {
+	if err := s.CrashStore.Refused(); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -65,8 +66,8 @@ func (s *resumeTrapStore) hit(method string, arg any) error {
 		return nil
 	}
 	s.fired = true
-	s.crashStore.arm()
-	return errSimulatedCrash
+	s.CrashStore.Arm()
+	return looptest.ErrSimulatedCrash
 }
 
 var _ KernelStore = (*resumeTrapStore)(nil)
@@ -76,133 +77,133 @@ func (s *resumeTrapStore) OpenConversationAgentSession(ctx context.Context, req 
 	if err := s.hit("OpenConversationAgentSession", req); err != nil {
 		return nil, err
 	}
-	return s.crashStore.OpenConversationAgentSession(ctx, req)
+	return s.CrashStore.OpenConversationAgentSession(ctx, req)
 }
 
 func (s *resumeTrapStore) CreateRunAgentSession(ctx context.Context, req CreateRunAgentSessionRequest) (*OpenAgentSessionResult, error) {
 	if err := s.hit("CreateRunAgentSession", req); err != nil {
 		return nil, err
 	}
-	return s.crashStore.CreateRunAgentSession(ctx, req)
+	return s.CrashStore.CreateRunAgentSession(ctx, req)
 }
 
 func (s *resumeTrapStore) AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
 	if err := s.hit("AppendAgentSessionEntries", req); err != nil {
 		return nil, err
 	}
-	return s.crashStore.AppendAgentSessionEntries(ctx, req)
+	return s.CrashStore.AppendAgentSessionEntries(ctx, req)
 }
 
 func (s *resumeTrapStore) TransitionToolEntry(ctx context.Context, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
 	if err := s.hit("TransitionToolEntry", req); err != nil {
 		return nil, err
 	}
-	return s.crashStore.TransitionToolEntry(ctx, req)
+	return s.CrashStore.TransitionToolEntry(ctx, req)
 }
 
 func (s *resumeTrapStore) CreateAgentRun(ctx context.Context, run *AgentRun) error {
 	if err := s.hit("CreateAgentRun", run); err != nil {
 		return err
 	}
-	return s.crashStore.CreateAgentRun(ctx, run)
+	return s.CrashStore.CreateAgentRun(ctx, run)
 }
 
 func (s *resumeTrapStore) CreateAgentRunWithEvent(ctx context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error) {
 	if err := s.hit("CreateAgentRunWithEvent", run); err != nil {
 		return nil, err
 	}
-	return s.crashStore.CreateAgentRunWithEvent(ctx, run, event)
+	return s.CrashStore.CreateAgentRunWithEvent(ctx, run, event)
 }
 
 func (s *resumeTrapStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error) {
 	if err := s.hit("UpdateAgentRunWithEvent", run); err != nil {
 		return nil, err
 	}
-	return s.crashStore.UpdateAgentRunWithEvent(ctx, run, expectedRevision, event, lease)
+	return s.CrashStore.UpdateAgentRunWithEvent(ctx, run, expectedRevision, event, lease)
 }
 
 func (s *resumeTrapStore) AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error) {
 	if err := s.hit("AppendActivity", event); err != nil {
 		return nil, err
 	}
-	return s.crashStore.AppendActivity(ctx, event)
+	return s.CrashStore.AppendActivity(ctx, event)
 }
 
 func (s *resumeTrapStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
 	if err := s.hit("ClaimNextAgentRun", claim); err != nil {
 		return nil, err
 	}
-	return s.crashStore.ClaimNextAgentRun(ctx, claim)
+	return s.CrashStore.ClaimNextAgentRun(ctx, claim)
 }
 
 func (s *resumeTrapStore) RenewAgentRunLease(ctx context.Context, scope Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentRun, error) {
 	if err := s.hit("RenewAgentRunLease", runID); err != nil {
 		return nil, err
 	}
-	return s.crashStore.RenewAgentRunLease(ctx, scope, runID, workerID, now, leaseDuration)
+	return s.CrashStore.RenewAgentRunLease(ctx, scope, runID, workerID, now, leaseDuration)
 }
 
 func (s *resumeTrapStore) CreateAgentTurn(ctx context.Context, turn *AgentTurn) (*AgentTurn, error) {
 	if err := s.hit("CreateAgentTurn", turn); err != nil {
 		return nil, err
 	}
-	return s.crashStore.CreateAgentTurn(ctx, turn)
+	return s.CrashStore.CreateAgentTurn(ctx, turn)
 }
 
 func (s *resumeTrapStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error {
 	if err := s.hit("UpdateAgentTurn", turn); err != nil {
 		return err
 	}
-	return s.crashStore.UpdateAgentTurn(ctx, turn, expectedRevision, workerID)
+	return s.CrashStore.UpdateAgentTurn(ctx, turn, expectedRevision, workerID)
 }
 
 func (s *resumeTrapStore) ClaimAgentTurn(ctx context.Context, scope Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentTurn, error) {
 	if err := s.hit("ClaimAgentTurn", turnID); err != nil {
 		return nil, err
 	}
-	return s.crashStore.ClaimAgentTurn(ctx, scope, turnID, workerID, now, leaseDuration)
+	return s.CrashStore.ClaimAgentTurn(ctx, scope, turnID, workerID, now, leaseDuration)
 }
 
 func (s *resumeTrapStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentTurn, expectedRevision int64, events []*ActivityEvent) error {
 	if err := s.hit("RecordAgentTurnStepModel", turn); err != nil {
 		return err
 	}
-	return s.crashStore.RecordAgentTurnStepModel(ctx, turn, expectedRevision, events)
+	return s.CrashStore.RecordAgentTurnStepModel(ctx, turn, expectedRevision, events)
 }
 
 func (s *resumeTrapStore) CreateActionProposal(ctx context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error) {
 	if err := s.hit("CreateActionProposal", proposal); err != nil {
 		return nil, err
 	}
-	return s.crashStore.CreateActionProposal(ctx, proposal)
+	return s.CrashStore.CreateActionProposal(ctx, proposal)
 }
 
 func (s *resumeTrapStore) ResolveApproval(ctx context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error) {
 	if err := s.hit("ResolveApproval", resolution); err != nil {
 		return nil, err
 	}
-	return s.crashStore.ResolveApproval(ctx, resolution)
+	return s.CrashStore.ResolveApproval(ctx, resolution)
 }
 
 func (s *resumeTrapStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
 	if err := s.hit("ClaimNextAction", claim); err != nil {
 		return nil, err
 	}
-	return s.crashStore.ClaimNextAction(ctx, claim)
+	return s.CrashStore.ClaimNextAction(ctx, claim)
 }
 
 func (s *resumeTrapStore) RenewActionLease(ctx context.Context, scope Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*ActionCall, error) {
 	if err := s.hit("RenewActionLease", actionID); err != nil {
 		return nil, err
 	}
-	return s.crashStore.RenewActionLease(ctx, scope, actionID, workerID, now, leaseDuration)
+	return s.CrashStore.RenewActionLease(ctx, scope, actionID, workerID, now, leaseDuration)
 }
 
 func (s *resumeTrapStore) PersistActionExecution(ctx context.Context, execution ActionExecutionRecord) (*ActionExecutionResult, error) {
 	if err := s.hit("PersistActionExecution", execution); err != nil {
 		return nil, err
 	}
-	return s.crashStore.PersistActionExecution(ctx, execution)
+	return s.CrashStore.PersistActionExecution(ctx, execution)
 }
 
 // ---------------------------------------------------------------------------
@@ -210,12 +211,12 @@ func (s *resumeTrapStore) PersistActionExecution(ctx context.Context, execution 
 
 // resumeStartClaim runs one claim of the Run in a goroutine; done closes when it
 // returns.
-func resumeStartClaim(f *loopFixture, runID string) (context.CancelFunc, <-chan struct{}) {
+func resumeStartClaim(f *looptest.Fixture, runID string) (context.CancelFunc, <-chan struct{}) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		f.runClaimContext(ctx, runID)
+		f.RunClaimContext(ctx, runID)
 	}()
 	return cancel, done
 }
@@ -243,11 +244,11 @@ func resumeEventually(t *testing.T, what string, cond func() bool) {
 }
 
 // resumeDispatchesWithID counts dispatches of action whose id argument is id.
-func resumeDispatchesWithID(d *fakeDispatcher, action, id string) int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func resumeDispatchesWithID(d *looptest.FakeDispatcher, action, id string) int {
+	d.Mu.Lock()
+	defer d.Mu.Unlock()
 	n := 0
-	for _, in := range d.calls {
+	for _, in := range d.Calls {
 		if in.Bound != nil && in.Bound.Action.Name == action && in.Arguments["id"] == id {
 			n++
 		}
@@ -256,10 +257,10 @@ func resumeDispatchesWithID(d *fakeDispatcher, action, id string) int {
 }
 
 // resumeToolEntries is the Run's tool entries whose name ends with action.
-func resumeToolEntries(f *loopFixture, runID, action string) []*SessionEntry {
-	f.t.Helper()
+func resumeToolEntries(f *looptest.Fixture, runID, action string) []*SessionEntry {
+	f.T.Helper()
 	var out []*SessionEntry
-	for _, e := range f.entries(runID) {
+	for _, e := range f.Entries(runID) {
 		if e.Type == SessionEntryTool && e.Tool != nil && strings.HasSuffix(e.Tool.Name, action) {
 			out = append(out, e)
 		}
@@ -268,10 +269,10 @@ func resumeToolEntries(f *loopFixture, runID, action string) []*SessionEntry {
 }
 
 // resumeActionCalls is the Run's action calls of action.
-func resumeActionCalls(f *loopFixture, runID, action string) []*ActionCall {
-	f.t.Helper()
+func resumeActionCalls(f *looptest.Fixture, runID, action string) []*ActionCall {
+	f.T.Helper()
 	var out []*ActionCall
-	for _, c := range f.calls(runID) {
+	for _, c := range f.Calls(runID) {
 		if c.Action == action {
 			out = append(out, c)
 		}
@@ -283,39 +284,39 @@ func resumeEntryText(e *SessionEntry) string {
 	if e == nil || e.Tool == nil || e.Tool.Result == nil {
 		return ""
 	}
-	return kitPartsText(e.Tool.Result.Content)
+	return looptest.PartsText(e.Tool.Result.Content)
 }
 
-func resumeLog(f *loopFixture, runID string) string {
-	return strings.Join(f.entryTypes(runID), ",")
+func resumeLog(f *looptest.Fixture, runID string) string {
+	return strings.Join(f.EntryTypes(runID), ",")
 }
 
-func resumeMustLog(t *testing.T, f *loopFixture, runID, want string) {
+func resumeMustLog(t *testing.T, f *looptest.Fixture, runID, want string) {
 	t.Helper()
 	if got := resumeLog(f, runID); got != want {
 		t.Fatalf("log = %s, want %s", got, want)
 	}
 }
 
-func resumeHasToolResult(v stepView, action string) bool {
-	_, _, ok := v.ToolResult(kitGovernedTool(v, action))
+func resumeHasToolResult(v looptest.StepView, action string) bool {
+	_, _, ok := v.ToolResult(looptest.GovernedTool(v, action))
 	return ok
 }
 
 // sendRules: step 1 sends, then the model answers from what the send
 // returned.
-func sendRules() []*modelRule {
-	return []*modelRule{
-		{name: "send", when: func(v stepView) bool { return !resumeHasToolResult(v, "send") },
-			reply: func(v stepView) ModelStepResult {
-				return act("Sending it.", reviewedCall(kitGovernedTool(v, "send"), map[string]any{"to": "bo", "text": "hi"}, "Send hi to bo"))
+func sendRules() []*looptest.ModelRule {
+	return []*looptest.ModelRule{
+		{Name: "send", When: func(v looptest.StepView) bool { return !resumeHasToolResult(v, "send") },
+			Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Sending it.", looptest.ReviewedCall(looptest.GovernedTool(v, "send"), map[string]any{"to": "bo", "text": "hi"}, "Send hi to bo"))
 			}},
-		{name: "answer", reply: func(v stepView) ModelStepResult {
-			content, isError, _ := v.ToolResult(kitGovernedTool(v, "send"))
+		{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
+			content, isError, _ := v.ToolResult(looptest.GovernedTool(v, "send"))
 			if isError {
-				return finalAnswer(map[string]any{"answer": "I may have sent it; please check: " + content})
+				return looptest.FinalAnswer(map[string]any{"answer": "I may have sent it; please check: " + content})
 			}
-			return finalAnswer(map[string]any{"answer": "Sent."})
+			return looptest.FinalAnswer(map[string]any{"answer": "Sent."})
 		}},
 	}
 }
@@ -325,51 +326,53 @@ func sendRules() []*modelRule {
 
 // resumeScenario runs one crash-resume subtest on a fresh store of every kind.
 func resumeScenario(t *testing.T, name string, test func(t *testing.T, store KernelStore)) {
-	t.Run(name, func(t *testing.T) { eachStore(t, "loop_resume_"+name, test) })
+	t.Run(name, func(t *testing.T) { looptest.EachStore(t, "loop_resume_"+name, test) })
 }
 
 func TestLoopResumeAfterCrash(t *testing.T) {
 	resumeScenario(t, "assistant_missing_redoes_model_call", func(t *testing.T, store KernelStore) {
 		entered := make(chan struct{})
 		var once sync.Once
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", when: func(v stepView) bool { return v.Step() == 1 },
-				reply: func(v stepView) ModelStepResult {
-					return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "1"}))
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", When: func(v looptest.StepView) bool { return v.Step() == 1 },
+				Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "1"}))
 				}},
-			&modelRule{name: "blocked", times: 1, when: func(v stepView) bool { return v.Step() == 2 },
-				before: func(ctx context.Context, _ stepView) error {
+			&looptest.ModelRule{Name: "blocked", Times: 1, When: func(v looptest.StepView) bool { return v.Step() == 2 },
+				Before: func(ctx context.Context, _ looptest.StepView) error {
 					once.Do(func() { close(entered) })
 					<-ctx.Done()
 					return ctx.Err()
 				},
-				reply: func(stepView) ModelStepResult { return say("never") }},
-			&modelRule{name: "answer", when: func(v stepView) bool { return v.Step() == 2 },
-				reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Issue 1 is open."}) }},
+				Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("never") }},
+			&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool { return v.Step() == 2 },
+				Reply: func(looptest.StepView) ModelStepResult {
+					return looptest.FinalAnswer(map[string]any{"answer": "Issue 1 is open."})
+				}},
 		))
-		run := f.startRun(RunKindAgentWork, "Check issue 1")
+		run := f.StartRun(RunKindAgentWork, "Check issue 1")
 		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, entered, "step 2's model call")
-		f.crash(cancel, done)
+		f.Crash(cancel, done)
 
-		final := f.driveToRest(run.ID, 4)
-		f.mustStatus(final, AgentRunStatusCompleted)
-		requests := f.model.calls(ModelStepPurposeStep)
+		final := f.DriveToRest(run.ID, 4)
+		f.MustStatus(final, AgentRunStatusCompleted)
+		requests := f.Model.Calls(ModelStepPurposeStep)
 		if len(requests) != 3 {
 			t.Fatalf("model step requests = %d, want 3 (step 1, step 2 unanswered, step 2 again)", len(requests))
 		}
-		if v := (stepView{req: requests[1]}); v.Step() != 2 || (stepView{req: requests[2]}).Step() != 2 {
-			t.Fatalf("redo requests are not both step 2: %s / %s", v.describe(), stepView{req: requests[2]}.describe())
+		if v := (looptest.StepView{Req: requests[1]}); v.Step() != 2 || (looptest.StepView{Req: requests[2]}).Step() != 2 {
+			t.Fatalf("redo requests are not both step 2: %s / %s", v.Describe(), looptest.StepView{Req: requests[2]}.Describe())
 		}
 		if requests[1].StepID != requests[2].StepID {
 			t.Fatalf("redo used step %s, the crashed call step %s: the running step row is reused", requests[2].StepID, requests[1].StepID)
 		}
 		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant,tool:completed")
-		if steps := f.steps(run.ID); len(steps) != 2 {
+		if steps := f.Steps(run.ID); len(steps) != 2 {
 			t.Fatalf("step rows = %d, want 2", len(steps))
 		}
-		if f.dispatch.count("lookup") != 1 {
-			t.Fatalf("lookup dispatched %d times, want 1", f.dispatch.count("lookup"))
+		if f.Dispatch.Count("lookup") != 1 {
+			t.Fatalf("lookup dispatched %d times, want 1", f.Dispatch.Count("lookup"))
 		}
 	})
 
@@ -377,17 +380,17 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		entered := make(chan struct{})
 		unblock := make(chan struct{})
 		var blockOnce sync.Once
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookups", when: func(v stepView) bool { return v.Step() == 1 },
-				reply: func(v stepView) ModelStepResult {
-					name := kitGovernedTool(v, "lookup")
-					return act("Looking both up.", call(name, map[string]any{"id": "1"}), call(name, map[string]any{"id": "2"}))
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookups", When: func(v looptest.StepView) bool { return v.Step() == 1 },
+				Reply: func(v looptest.StepView) ModelStepResult {
+					name := looptest.GovernedTool(v, "lookup")
+					return looptest.Act("Looking both up.", looptest.Call(name, map[string]any{"id": "1"}), looptest.Call(name, map[string]any{"id": "2"}))
 				}},
-			&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
-				return finalAnswer(map[string]any{"answer": fmt.Sprintf("%d issues looked up.", len(v.ToolResultsSinceUser()))})
+			&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": fmt.Sprintf("%d issues looked up.", len(v.ToolResultsSinceUser()))})
 			}},
 		))
-		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		f.Dispatch.On("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			id, _ := in.Arguments["id"].(string)
 			blocked := false
 			if id == "2" {
@@ -400,7 +403,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			}
 			return map[string]interface{}{"id": id, "status": "open", "title": "Issue " + id}, nil
 		})
-		run := f.startRun(RunKindAgentWork, "Check issues 1 and 2")
+		run := f.StartRun(RunKindAgentWork, "Check issues 1 and 2")
 		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, entered, "lookup{2} dispatch")
 		resumeEventually(t, "lookup{1} to succeed", func() bool {
@@ -413,17 +416,17 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		})
 		// Kill the worker before the blocked dispatch returns, so nothing
 		// it does afterwards is written.
-		f.crashes.arm()
+		f.Crashes.Arm()
 		cancel()
 		close(unblock)
-		f.crash(nil, done)
+		f.Crash(nil, done)
 
-		final := f.driveToRest(run.ID, 4)
-		f.mustStatus(final, AgentRunStatusCompleted)
-		if n := resumeDispatchesWithID(f.dispatch, "lookup", "1"); n != 1 {
+		final := f.DriveToRest(run.ID, 4)
+		f.MustStatus(final, AgentRunStatusCompleted)
+		if n := resumeDispatchesWithID(f.Dispatch, "lookup", "1"); n != 1 {
 			t.Fatalf("lookup{1} dispatched %d times, want 1: its finished call is not redispatched", n)
 		}
-		if n := resumeDispatchesWithID(f.dispatch, "lookup", "2"); n != 2 {
+		if n := resumeDispatchesWithID(f.Dispatch, "lookup", "2"); n != 2 {
 			t.Fatalf("lookup{2} dispatched %d times, want 2: an interrupted read runs again", n)
 		}
 		calls := resumeActionCalls(f, run.ID, "lookup")
@@ -447,17 +450,17 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 	})
 
 	resumeScenario(t, "write_running_becomes_interrupted", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(sendRules()...))
-		release := f.dispatch.hold("send")
+		f := looptest.NewFixture(t, store, looptest.WithRules(sendRules()...))
+		release := f.Dispatch.Hold("send")
 		defer close(release)
-		run := f.startRun(RunKindAgentWork, "Send hi to bo")
+		run := f.StartRun(RunKindAgentWork, "Send hi to bo")
 		cancel, done := resumeStartClaim(f, run.ID)
-		resumeEventually(t, "send dispatch", func() bool { return f.dispatch.count("send") == 1 })
-		f.crash(cancel, done)
+		resumeEventually(t, "send dispatch", func() bool { return f.Dispatch.Count("send") == 1 })
+		f.Crash(cancel, done)
 
-		final := f.driveToRest(run.ID, 4)
-		f.mustStatus(final, AgentRunStatusCompleted)
-		if n := f.dispatch.count("send"); n != 1 {
+		final := f.DriveToRest(run.ID, 4)
+		f.MustStatus(final, AgentRunStatusCompleted)
+		if n := f.Dispatch.Count("send"); n != 1 {
 			t.Fatalf("send dispatched %d times, want 1 (the blocked one): a write whose outcome is unknown is never sent again", n)
 		}
 		resumeMustLog(t, f, run.ID, "user,assistant,tool:interrupted,assistant,tool:completed")
@@ -473,9 +476,9 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if c.Status != ActionCallStatusFailed || c.ErrorCode != ActionErrorCodeInterrupted || !c.RecoveredRunning || c.FailurePhase != ActionFailureAfterDispatch {
 			t.Fatalf("send call = status %s code %q recovered %v phase %q, want failed interrupted recovered after_dispatch", c.Status, c.ErrorCode, c.RecoveredRunning, c.FailurePhase)
 		}
-		last := stepView{req: f.model.calls(ModelStepPurposeStep)[len(f.model.calls(ModelStepPurposeStep))-1]}
-		if _, isError, ok := last.ToolResult(kitGovernedTool(last, "send")); !ok || !isError {
-			t.Fatalf("the model's next step did not see the interrupted send as an error: %s", last.describe())
+		last := looptest.StepView{Req: f.Model.Calls(ModelStepPurposeStep)[len(f.Model.Calls(ModelStepPurposeStep))-1]}
+		if _, isError, ok := last.ToolResult(looptest.GovernedTool(last, "send")); !ok || !isError {
+			t.Fatalf("the model's next step did not see the interrupted send as an error: %s", last.Describe())
 		}
 		if answer := resumeFinalAnswer(f, run.ID); !strings.Contains(answer, "I may have sent it; please check") {
 			t.Fatalf("final answer = %q", answer)
@@ -483,9 +486,9 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 	})
 
 	resumeScenario(t, "write_pending_without_call_is_proposed", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(sendRules()...))
+		f := looptest.NewFixture(t, store, looptest.WithRules(sendRules()...))
 		trap := installResumeTrap(f, func(method string, _ any) bool { return method == "CreateActionProposal" })
-		run := f.startRun(RunKindAgentWork, "Send hi to bo")
+		run := f.StartRun(RunKindAgentWork, "Send hi to bo")
 		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, done, "the trapped claim")
 		if !trap.didFire() {
@@ -497,14 +500,14 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if entries := resumeToolEntries(f, run.ID, "send"); len(entries) != 1 || entries[0].ActionCallID != "" {
 			t.Fatalf("send entry at the crash = %#v, want one with no action call", entries)
 		}
-		if calls := f.calls(run.ID); len(calls) != 0 {
+		if calls := f.Calls(run.ID); len(calls) != 0 {
 			t.Fatalf("action calls at the crash = %d, want 0", len(calls))
 		}
-		f.crash(cancel, done)
+		f.Crash(cancel, done)
 
-		final := f.driveToRest(run.ID, 4)
-		f.mustStatus(final, AgentRunStatusCompleted)
-		if n := f.dispatch.count("send"); n != 1 {
+		final := f.DriveToRest(run.ID, 4)
+		f.MustStatus(final, AgentRunStatusCompleted)
+		if n := f.Dispatch.Count("send"); n != 1 {
 			t.Fatalf("send dispatched %d times, want 1", n)
 		}
 		calls := resumeActionCalls(f, run.ID, "send")
@@ -518,12 +521,12 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 	})
 
 	resumeScenario(t, "finished_call_appends_result", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(sendRules()...))
+		f := looptest.NewFixture(t, store, looptest.WithRules(sendRules()...))
 		trap := installResumeTrap(f, func(method string, arg any) bool {
 			req, ok := arg.(ToolEntryTransitionRequest)
 			return ok && method == "TransitionToolEntry" && req.To == ToolEntryCompleted
 		})
-		run := f.startRun(RunKindAgentWork, "Send hi to bo")
+		run := f.StartRun(RunKindAgentWork, "Send hi to bo")
 		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, done, "the trapped claim")
 		if !trap.didFire() {
@@ -533,13 +536,13 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			t.Fatalf("send calls at the crash = %#v, want one succeeded", calls)
 		}
 		if entries := resumeToolEntries(f, run.ID, "send"); len(entries) != 1 || entries[0].State.Terminal() {
-			t.Fatalf("send entry at the crash = %v, want it still open", f.entryTypes(run.ID))
+			t.Fatalf("send entry at the crash = %v, want it still open", f.EntryTypes(run.ID))
 		}
-		f.crash(cancel, done)
+		f.Crash(cancel, done)
 
-		final := f.driveToRest(run.ID, 4)
-		f.mustStatus(final, AgentRunStatusCompleted)
-		if n := f.dispatch.count("send"); n != 1 {
+		final := f.DriveToRest(run.ID, 4)
+		f.MustStatus(final, AgentRunStatusCompleted)
+		if n := f.Dispatch.Count("send"); n != 1 {
 			t.Fatalf("send dispatched %d times, want 1", n)
 		}
 		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant,tool:completed")
@@ -553,13 +556,13 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 	})
 
 	resumeScenario(t, "completed_step_is_not_redone", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", when: func(v stepView) bool { return v.Step() == 1 },
-				reply: func(v stepView) ModelStepResult {
-					return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "4"}))
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", When: func(v looptest.StepView) bool { return v.Step() == 1 },
+				Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "4"}))
 				}},
-			&modelRule{name: "answer", reply: func(stepView) ModelStepResult {
-				return finalAnswer(map[string]any{"answer": "Issue 4 is open."})
+			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Issue 4 is open."})
 			}},
 		))
 		var rows int
@@ -570,32 +573,32 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			rows++
 			return rows == 2
 		})
-		run := f.startRun(RunKindAgentWork, "Check issue 4")
+		run := f.StartRun(RunKindAgentWork, "Check issue 4")
 		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, done, "the trapped claim")
 		if !trap.didFire() {
 			t.Fatal("step 2 never started")
 		}
 		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed")
-		f.crash(cancel, done)
+		f.Crash(cancel, done)
 
-		final := f.driveToRest(run.ID, 4)
-		f.mustStatus(final, AgentRunStatusCompleted)
-		requests := f.model.calls(ModelStepPurposeStep)
+		final := f.DriveToRest(run.ID, 4)
+		f.MustStatus(final, AgentRunStatusCompleted)
+		requests := f.Model.Calls(ModelStepPurposeStep)
 		stepOne := 0
 		for _, req := range requests {
-			if (stepView{req: req}).Step() == 1 {
+			if (looptest.StepView{Req: req}).Step() == 1 {
 				stepOne++
 			}
 		}
 		if stepOne != 1 || len(requests) != 2 {
 			t.Fatalf("model step requests = %d with %d for step 1, want 2 with 1", len(requests), stepOne)
 		}
-		if f.dispatch.count("lookup") != 1 {
-			t.Fatalf("lookup dispatched %d times, want 1", f.dispatch.count("lookup"))
+		if f.Dispatch.Count("lookup") != 1 {
+			t.Fatalf("lookup dispatched %d times, want 1", f.Dispatch.Count("lookup"))
 		}
 		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant,tool:completed")
-		if steps := f.steps(run.ID); len(steps) != 2 {
+		if steps := f.Steps(run.ID); len(steps) != 2 {
 			t.Fatalf("step rows = %d, want 2", len(steps))
 		}
 	})
@@ -606,13 +609,15 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		// final_answer never settles. The next step refuses it as not run
 		// and the model answers again.
 		sawRefusal := false
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "first", when: func(v stepView) bool { return v.Step() == 1 },
-				reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "First."}) }},
-			&modelRule{name: "second", reply: func(v stepView) ModelStepResult {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "first", When: func(v looptest.StepView) bool { return v.Step() == 1 },
+				Reply: func(looptest.StepView) ModelStepResult {
+					return looptest.FinalAnswer(map[string]any{"answer": "First."})
+				}},
+			&looptest.ModelRule{Name: "second", Reply: func(v looptest.StepView) ModelStepResult {
 				_, isError, ok := v.ToolResult(string(ControlToolFinalAnswer))
 				sawRefusal = ok && isError
-				return finalAnswer(map[string]any{"answer": "Second."})
+				return looptest.FinalAnswer(map[string]any{"answer": "Second."})
 			}},
 		))
 		appended := false
@@ -627,13 +632,13 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			}
 			return appended && method == "RecordAgentTurnStepModel"
 		})
-		run := f.startRun(RunKindAgentWork, "Say something")
+		run := f.StartRun(RunKindAgentWork, "Say something")
 		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, done, "the trapped claim")
 		if !trap.didFire() {
 			t.Fatal("step 1 never recorded its model call")
 		}
-		f.crash(cancel, done)
+		f.Crash(cancel, done)
 		failed := false
 		trap.fail = func(method string, _ any) error {
 			if method != "RecordAgentTurnStepModel" || failed {
@@ -643,12 +648,12 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			return fmt.Errorf("record step: %w", modelstep.ErrTurnHostUnavailable)
 		}
 
-		final := f.driveToRest(run.ID, 6)
-		f.mustStatus(final, AgentRunStatusCompleted)
+		final := f.DriveToRest(run.ID, 6)
+		f.MustStatus(final, AgentRunStatusCompleted)
 		if !failed {
 			t.Fatal("the resumed step never failed")
 		}
-		steps := f.steps(run.ID)
+		steps := f.Steps(run.ID)
 		if len(steps) != 2 || steps[0].Status != AgentTurnStatusFailed || steps[1].Status != AgentTurnStatusCompleted {
 			t.Fatalf("steps = %#v, want failed then completed", steps)
 		}
@@ -662,7 +667,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if !sawRefusal {
 			t.Fatal("step 2's model call did not see the refused final_answer")
 		}
-		if requests := f.model.calls(ModelStepPurposeStep); len(requests) != 2 {
+		if requests := f.Model.Calls(ModelStepPurposeStep); len(requests) != 2 {
 			t.Fatalf("model step requests = %d, want 2", len(requests))
 		}
 		if answer := resumeFinalAnswer(f, run.ID); answer != "Second." {
@@ -671,25 +676,25 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 	})
 
 	resumeScenario(t, "approval_answered_while_owner_dead", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withApprovalForWrites(), withRules(sendRules()...))
-		run := f.startRun(RunKindAgentWork, "Send hi to bo")
-		parked := f.driveToRest(run.ID, 3)
-		f.mustStatus(parked, AgentRunStatusWaitingForApproval)
+		f := looptest.NewFixture(t, store, looptest.WithApprovalForWrites(), looptest.WithRules(sendRules()...))
+		run := f.StartRun(RunKindAgentWork, "Send hi to bo")
+		parked := f.DriveToRest(run.ID, 3)
+		f.MustStatus(parked, AgentRunStatusWaitingForApproval)
 		if parked.LeaseOwner != "" {
 			t.Fatalf("parked Run still leased by %s", parked.LeaseOwner)
 		}
-		f.crash(nil, nil)
-		f.decide(run.ID, ApprovalDecisionApprove, "go ahead")
-		if f.dispatch.count("send") != 0 {
+		f.Crash(nil, nil)
+		f.Decide(run.ID, ApprovalDecisionApprove, "go ahead")
+		if f.Dispatch.Count("send") != 0 {
 			t.Fatal("the approval dispatched the send without a worker")
 		}
 
-		final := f.driveToRest(run.ID, 4)
-		f.mustStatus(final, AgentRunStatusCompleted)
-		if f.workerID != loopFixtureWorker2 {
-			t.Fatalf("worker = %s, want %s", f.workerID, loopFixtureWorker2)
+		final := f.DriveToRest(run.ID, 4)
+		f.MustStatus(final, AgentRunStatusCompleted)
+		if f.WorkerID != looptest.FixtureWorker2 {
+			t.Fatalf("worker = %s, want %s", f.WorkerID, looptest.FixtureWorker2)
 		}
-		if n := f.dispatch.count("send"); n != 1 {
+		if n := f.Dispatch.Count("send"); n != 1 {
 			t.Fatalf("send dispatched %d times, want 1", n)
 		}
 		calls := resumeActionCalls(f, run.ID, "send")
@@ -703,8 +708,8 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 }
 
 // resumeFinalAnswer is the answer argument of the Run's final answer call.
-func resumeFinalAnswer(f *loopFixture, runID string) string {
-	f.t.Helper()
+func resumeFinalAnswer(f *looptest.Fixture, runID string) string {
+	f.T.Helper()
 	entries := resumeToolEntries(f, runID, string(ControlToolFinalAnswer))
 	if len(entries) == 0 {
 		return ""
@@ -713,7 +718,7 @@ func resumeFinalAnswer(f *loopFixture, runID string) string {
 		Answer string `json:"answer"`
 	}
 	if err := json.Unmarshal(entries[len(entries)-1].Tool.Arguments, &args); err != nil {
-		f.t.Fatalf("final answer arguments: %v", err)
+		f.T.Fatalf("final answer arguments: %v", err)
 	}
 	return args.Answer
 }
@@ -725,17 +730,19 @@ func resumeFinalAnswer(f *loopFixture, runID string) string {
 // the spec asks for, so every one of them is tried; every store in the
 // matrix runs it, Postgres when OPENSEAL_TEST_POSTGRES_DSN is set.
 func TestLoopResumeNeverDispatchesAWriteTwice(t *testing.T) {
-	rules := func() []*modelRule {
-		return []*modelRule{
-			{name: "lookup", when: func(v stepView) bool { return !resumeHasToolResult(v, "lookup") },
-				reply: func(v stepView) ModelStepResult {
-					return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "3"}))
+	rules := func() []*looptest.ModelRule {
+		return []*looptest.ModelRule{
+			{Name: "lookup", When: func(v looptest.StepView) bool { return !resumeHasToolResult(v, "lookup") },
+				Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "3"}))
 				}},
-			{name: "send", when: func(v stepView) bool { return !resumeHasToolResult(v, "send") },
-				reply: func(v stepView) ModelStepResult {
-					return act("Sending it.", reviewedCall(kitGovernedTool(v, "send"), map[string]any{"to": "bo", "text": "issue 3 is open"}, "Tell bo"))
+			{Name: "send", When: func(v looptest.StepView) bool { return !resumeHasToolResult(v, "send") },
+				Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.Act("Sending it.", looptest.ReviewedCall(looptest.GovernedTool(v, "send"), map[string]any{"to": "bo", "text": "issue 3 is open"}, "Tell bo"))
 				}},
-			{name: "answer", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Done."}) }},
+			{Name: "answer", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Done."})
+			}},
 		}
 	}
 	// Writes the fixture's own helpers make (the claim and the first-claim
@@ -747,28 +754,28 @@ func TestLoopResumeNeverDispatchesAWriteTwice(t *testing.T) {
 		}
 		return true
 	}
-	for _, c := range kernelStoreMatrix(t, "loop_resume_write") {
+	for _, c := range looptest.StoreMatrix(t, "loop_resume_write") {
 		c := c
-		t.Run(c.name, func(t *testing.T) {
+		t.Run(c.Name, func(t *testing.T) {
 			// A clean run measures how many crash points the script has.
 			var writes int
 			{
-				f := newLoopFixture(t, c.open(t), withRules(rules()...))
+				f := looptest.NewFixture(t, c.Open(t), looptest.WithRules(rules()...))
 				installResumeTrap(f, func(method string, _ any) bool {
 					if eligible(method) {
 						writes++
 					}
 					return false
 				})
-				run := f.startRun(RunKindAgentWork, "Check issue 3 and tell bo")
-				f.mustStatus(f.driveToRest(run.ID, 4), AgentRunStatusCompleted)
+				run := f.StartRun(RunKindAgentWork, "Check issue 3 and tell bo")
+				f.MustStatus(f.DriveToRest(run.ID, 4), AgentRunStatusCompleted)
 				if writes < 5 {
 					t.Fatalf("clean run made %d writes", writes)
 				}
 			}
 			for offset := 1; offset <= writes; offset++ {
 				t.Run(fmt.Sprintf("crash_at_write_%02d", offset), func(t *testing.T) {
-					f := newLoopFixture(t, c.open(t), withRules(rules()...))
+					f := looptest.NewFixture(t, c.Open(t), looptest.WithRules(rules()...))
 					seen := 0
 					var crashedAt string
 					trap := installResumeTrap(f, func(method string, _ any) bool {
@@ -782,31 +789,31 @@ func TestLoopResumeNeverDispatchesAWriteTwice(t *testing.T) {
 						}
 						return false
 					})
-					run := f.startRun(RunKindAgentWork, "Check issue 3 and tell bo")
+					run := f.StartRun(RunKindAgentWork, "Check issue 3 and tell bo")
 					for claims := 0; !trap.didFire(); claims++ {
 						if claims == 6 {
 							t.Fatalf("the trap at write %d never fired", offset)
 						}
-						if isTerminalAgentRunStatus(f.mustRun(run.ID).Status) {
+						if isTerminalAgentRunStatus(f.MustRun(run.ID).Status) {
 							t.Fatalf("the Run ended before write %d", offset)
 						}
 						cancel, done := resumeStartClaim(f, run.ID)
 						resumeWait(t, done, "the claim")
 						if trap.didFire() {
-							f.crash(cancel, done)
+							f.Crash(cancel, done)
 						} else {
 							cancel()
-							if current := f.mustRun(run.ID); current.AvailableAt.After(f.clock.Now()) {
-								f.clock.Advance(current.AvailableAt.Sub(f.clock.Now()) + time.Millisecond)
+							if current := f.MustRun(run.ID); current.AvailableAt.After(f.Clock.Now()) {
+								f.Clock.Advance(current.AvailableAt.Sub(f.Clock.Now()) + time.Millisecond)
 							}
 						}
 					}
 
-					final := f.driveToRest(run.ID, 6)
+					final := f.DriveToRest(run.ID, 6)
 					if final.Status != AgentRunStatusCompleted {
 						t.Fatalf("crash at %s (write %d): run %s (%#v), log %s", crashedAt, offset, final.Status, final.FailureExplanation, resumeLog(f, run.ID))
 					}
-					if n := f.dispatch.count("send"); n > 1 {
+					if n := f.Dispatch.Count("send"); n > 1 {
 						t.Fatalf("crash at %s (write %d): send dispatched %d times", crashedAt, offset, n)
 					}
 					terminal := 0

@@ -2,7 +2,7 @@ package runtime
 
 // RunLoop scenario suite (run-loop section 02 §13) on the shared loop kit:
 // every scenario drives the real RunLoop with the production bindings
-// (loopFixture) over SQLite, plus Postgres when
+// (looptest.Fixture) over SQLite, plus Postgres when
 // OPENSEAL_TEST_POSTGRES_DSN is set. Only the model, the host tools, the
 // action dispatcher and the policy are fakes.
 
@@ -17,6 +17,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
@@ -26,45 +27,45 @@ import (
 
 // lookupRule calls the governed lookup with the step number as the id, so
 // repeated steps never trip the repeat guard.
-func lookupRule(name string, times int, when func(stepView) bool, before func(context.Context, stepView) error) *modelRule {
-	return &modelRule{name: name, times: times, when: when, before: before, reply: func(v stepView) ModelStepResult {
+func lookupRule(name string, times int, when func(looptest.StepView) bool, before func(context.Context, looptest.StepView) error) *looptest.ModelRule {
+	return &looptest.ModelRule{Name: name, Times: times, When: when, Before: before, Reply: func(v looptest.StepView) ModelStepResult {
 		id := fmt.Sprint(v.Step())
-		return act("Looking up issue "+id+".", call(kitGovernedTool(v, "lookup"), map[string]any{"id": id}))
+		return looptest.Act("Looking up issue "+id+".", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": id}))
 	}}
 }
 
-func purposeIs(purpose ModelStepPurpose) func(stepView) bool {
-	return func(v stepView) bool { return v.Purpose() == purpose }
+func purposeIs(purpose ModelStepPurpose) func(looptest.StepView) bool {
+	return func(v looptest.StepView) bool { return v.Purpose() == purpose }
 }
 
-func stepAtMost(n int) func(stepView) bool {
-	return func(v stepView) bool { return v.Purpose() == ModelStepPurposeStep && v.Step() <= n }
+func stepAtMost(n int) func(looptest.StepView) bool {
+	return func(v looptest.StepView) bool { return v.Purpose() == ModelStepPurposeStep && v.Step() <= n }
 }
 
 // ---------------------------------------------------------------------------
 // Steps, narration and previews
 
 func TestRunLoopMultiStepToFinal(t *testing.T) {
-	eachStore(t, "rl_multi_step", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
+	looptest.EachStore(t, "rl_multi_step", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
 			lookupRule("lookup", 2, nil, nil),
-			&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
+			&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
 				if len(v.ToolResultsSinceUser()) != 2 {
-					t.Errorf("answer step saw %s", v.describe())
+					t.Errorf("answer step saw %s", v.Describe())
 				}
-				return say("Issues 1 and 2 are open.")
+				return looptest.Say("Issues 1 and 2 are open.")
 			}},
 		))
-		conversation, run := f.startChat("check issues 1 and 2")
-		exit, done := f.runClaim(run.ID)
+		conversation, run := f.StartChat("check issues 1 and 2")
+		exit, done := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil || exit.Steps != 3 {
 			t.Fatalf("exit = %s steps %d err %v, want final after 3 steps", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, AgentRunStatusCompleted)
 		if done.LastAppliedTurn != 3 {
 			t.Fatalf("LastAppliedTurn = %d, want 3", done.LastAppliedTurn)
 		}
-		steps := f.sortedSteps(run.ID)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 3 {
 			t.Fatalf("steps = %d, want 3", len(steps))
 		}
@@ -79,15 +80,15 @@ func TestRunLoopMultiStepToFinal(t *testing.T) {
 		if steps[2].OutputSummary != "" {
 			t.Fatalf("final step narration = %q, want empty", steps[2].OutputSummary)
 		}
-		if got, want := strings.Join(f.entryTypes(run.ID), ","), "assistant,tool:completed,assistant,tool:completed,assistant"; !strings.HasSuffix(got, want) {
+		if got, want := strings.Join(f.EntryTypes(run.ID), ","), "assistant,tool:completed,assistant,tool:completed,assistant"; !strings.HasSuffix(got, want) {
 			t.Fatalf("log = %s, want it to end %s", got, want)
 		}
-		messages := f.messages(conversation.ID)
-		if last := messages[len(messages)-1]; last.Sender.ID != loopFixtureAgent || !strings.Contains(last.Content, "Issues 1 and 2 are open.") {
-			t.Fatalf("channel = %s", kitDescribeMessages(messages))
+		messages := f.Messages(conversation.ID)
+		if last := messages[len(messages)-1]; last.Sender.ID != looptest.FixtureAgent || !strings.Contains(last.Content, "Issues 1 and 2 are open.") {
+			t.Fatalf("channel = %s", looptest.DescribeMessages(messages))
 		}
-		if f.dispatch.count("lookup") != 2 {
-			t.Fatalf("lookup dispatched %d times, want 2", f.dispatch.count("lookup"))
+		if f.Dispatch.Count("lookup") != 2 {
+			t.Fatalf("lookup dispatched %d times, want 2", f.Dispatch.Count("lookup"))
 		}
 	})
 }
@@ -96,54 +97,56 @@ func TestRunLoopMultiStepToFinal(t *testing.T) {
 // turn.narration event is written with it, and the Run holds one running
 // step at a time.
 func TestRunLoopNarrationRecordedBeforeTools(t *testing.T) {
-	eachStore(t, "rl_narration", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Checking issue 4 first.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "4"}))
+	looptest.EachStore(t, "rl_narration", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Checking issue 4 first.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "4"}))
 			}},
-			&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Issue 4 is open."}) }},
+			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Issue 4 is open."})
+			}},
 		))
-		run := f.startRun(RunKindAgentWork, "Check issue 4")
+		run := f.StartRun(RunKindAgentWork, "Check issue 4")
 		var checked atomic.Bool
-		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		f.Dispatch.On("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			checked.Store(true)
-			step := f.runningStep(run.ID)
+			step := f.RunningStep(run.ID)
 			if step == nil {
 				t.Errorf("no running step while the tool runs")
 			} else if step.OutputSummary != "Checking issue 4 first." {
 				t.Errorf("running step narration = %q, want it before the tool runs", step.OutputSummary)
 			}
-			if len(f.events(run.ID, ActivityEventTurnNarration)) != 1 {
-				t.Errorf("turn.narration events before the tool = %d, want 1", len(f.events(run.ID, ActivityEventTurnNarration)))
+			if len(f.Events(run.ID, ActivityEventTurnNarration)) != 1 {
+				t.Errorf("turn.narration events before the tool = %d, want 1", len(f.Events(run.ID, ActivityEventTurnNarration)))
 			}
-			current := f.mustRun(run.ID)
+			current := f.MustRun(run.ID)
 			// A second worker's step service, on the same store.
-			turns := NewAgentTurnService(f.store, f.store, models.WithClock(f.clock.Now))
-			if _, err := turns.BeginTurn(f.ctx, BeginAgentTurnRequest{
+			turns := NewAgentTurnService(f.Store, f.Store, models.WithClock(f.Clock.Now))
+			if _, err := turns.BeginTurn(f.Ctx, BeginAgentTurnRequest{
 				Scope: current.Scope, RunID: current.ID, SessionID: current.SessionID, Producer: StepProducerModel,
-				WorkerID: f.workerID, LeaseDuration: loopFixtureLease,
+				WorkerID: f.WorkerID, LeaseDuration: looptest.FixtureLease,
 			}); !errors.Is(err, ErrActiveTurnExists) {
 				t.Errorf("second BeginTurn while a step runs = %v, want ErrActiveTurnExists", err)
 			}
 			return map[string]interface{}{"id": "4", "status": "open", "title": "Issue 4"}, nil
 		})
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
 		if !checked.Load() {
 			t.Fatal("the lookup never ran")
 		}
-		narration := f.events(run.ID, ActivityEventTurnNarration)
-		if len(narration) != 1 || narration[0].Summary != "Checking issue 4 first." || narration[0].TurnID != f.sortedSteps(run.ID)[0].ID {
+		narration := f.Events(run.ID, ActivityEventTurnNarration)
+		if len(narration) != 1 || narration[0].Summary != "Checking issue 4 first." || narration[0].TurnID != f.SortedSteps(run.ID)[0].ID {
 			t.Fatalf("turn.narration = %#v", narration)
 		}
 	})
 }
 
 func TestRunLoopPreviewResetOnToolStep(t *testing.T) {
-	eachStore(t, "rl_preview_reset", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "preview then tool", times: 1,
-				before: func(ctx context.Context, v stepView) error {
+	looptest.EachStore(t, "rl_preview_reset", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "preview then tool", Times: 1,
+				Before: func(ctx context.Context, v looptest.StepView) error {
 					if !v.Request().Stream.AnswerPreview {
 						t.Errorf("step request does not ask for previews")
 					}
@@ -154,15 +157,17 @@ func TestRunLoopPreviewResetOnToolStep(t *testing.T) {
 					}
 					return nil
 				},
-				reply: func(v stepView) ModelStepResult {
-					return act("Let me check.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "3"}))
+				Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.Act("Let me check.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "3"}))
 				}},
-			&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Issue 3 is open."}) }},
+			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Issue 3 is open."})
+			}},
 		))
-		run := f.startRun(RunKindAgentWork, "Check issue 3")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
-		previews := f.events(run.ID, "turn.answer_preview")
+		run := f.StartRun(RunKindAgentWork, "Check issue 3")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
+		previews := f.Events(run.ID, "turn.answer_preview")
 		if len(previews) != 3 {
 			t.Fatalf("previews = %d, want 2 host frames and 1 reset", len(previews))
 		}
@@ -170,13 +175,13 @@ func TestRunLoopPreviewResetOnToolStep(t *testing.T) {
 		if fmt.Sprint(reset.Payload["reset"]) != "true" || fmt.Sprint(reset.Payload["attemptId"]) != "attempt-1" || fmt.Sprint(reset.Payload["sequence"]) != "3" {
 			t.Fatalf("reset preview payload = %#v, want attempt-1 sequence 3 reset", reset.Payload)
 		}
-		first := f.sortedSteps(run.ID)[0]
+		first := f.SortedSteps(run.ID)[0]
 		if reset.TurnID != first.ID {
 			t.Fatalf("reset is on step %s, want the tool step %s", reset.TurnID, first.ID)
 		}
 		// The reset follows the step's narration: it is written once the tool
 		// calls are recorded.
-		narration := f.events(run.ID, ActivityEventTurnNarration)
+		narration := f.Events(run.ID, ActivityEventTurnNarration)
 		if len(narration) != 1 || narration[0].Sequence > reset.Sequence {
 			t.Fatalf("narration %#v must precede the reset (sequence %d)", narration, reset.Sequence)
 		}
@@ -187,38 +192,38 @@ func TestRunLoopPreviewResetOnToolStep(t *testing.T) {
 // Fairness
 
 func TestRunLoopFairnessYieldAfter50Steps(t *testing.T) {
-	eachStore(t, "rl_yield_steps", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
+	looptest.EachStore(t, "rl_yield_steps", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
 			lookupRule("lookup", 0, stepAtMost(runloop.RunLoopMaxStepsPerClaim), nil),
-			&modelRule{name: "answer", when: func(v stepView) bool { return v.Step() == runloop.RunLoopMaxStepsPerClaim+1 },
-				reply: func(stepView) ModelStepResult {
-					return finalAnswer(map[string]any{"answer": "All 50 issues are open."})
+			&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool { return v.Step() == runloop.RunLoopMaxStepsPerClaim+1 },
+				Reply: func(looptest.StepView) ModelStepResult {
+					return looptest.FinalAnswer(map[string]any{"answer": "All 50 issues are open."})
 				}},
 		))
-		run := f.startRun(RunKindAgentWork, "Check the 50 issues")
-		exit, yielded := f.runClaim(run.ID)
+		run := f.StartRun(RunKindAgentWork, "Check the 50 issues")
+		exit, yielded := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitYielded || exit.Err != nil || exit.Steps != runloop.RunLoopMaxStepsPerClaim {
 			t.Fatalf("first claim = %s after %d steps (%v), want yielded after 50", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(yielded, AgentRunStatusQueued)
-		events := f.events(run.ID, "run.yielded")
+		f.MustStatus(yielded, AgentRunStatusQueued)
+		events := f.Events(run.ID, "run.yielded")
 		if len(events) != 1 || fmt.Sprint(events[0].Payload["steps"]) != "50" {
 			t.Fatalf("run.yielded = %#v", events)
 		}
-		if steps := f.sortedSteps(run.ID); len(steps) != 50 || steps[49].Status != AgentTurnStatusCompleted || f.runningStep(run.ID) != nil {
-			t.Fatalf("after the yield: %d steps, running %v", len(steps), f.runningStep(run.ID))
+		if steps := f.SortedSteps(run.ID); len(steps) != 50 || steps[49].Status != AgentTurnStatusCompleted || f.RunningStep(run.ID) != nil {
+			t.Fatalf("after the yield: %d steps, running %v", len(steps), f.RunningStep(run.ID))
 		}
-		exit, done := f.runClaim(run.ID)
+		exit, done := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitFinal || exit.Steps != 1 {
 			t.Fatalf("second claim = %s after %d steps (%v)", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(done, AgentRunStatusCompleted)
-		steps := f.sortedSteps(run.ID)
+		f.MustStatus(done, AgentRunStatusCompleted)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 51 || steps[50].Sequence != 51 || done.LastAppliedTurn != 51 {
 			t.Fatalf("steps = %d, last sequence %d, LastAppliedTurn %d; want 51", len(steps), steps[len(steps)-1].Sequence, done.LastAppliedTurn)
 		}
-		if f.dispatch.count("lookup") != 50 {
-			t.Fatalf("lookup dispatched %d times, want 50", f.dispatch.count("lookup"))
+		if f.Dispatch.Count("lookup") != 50 {
+			t.Fatalf("lookup dispatched %d times, want 50", f.Dispatch.Count("lookup"))
 		}
 	})
 }
@@ -226,19 +231,19 @@ func TestRunLoopFairnessYieldAfter50Steps(t *testing.T) {
 // Each step takes 50s on the fake clock; the claim yields at the first step
 // boundary at or past 8 minutes, never inside a step.
 func TestRunLoopFairnessYieldAfterClaimDuration(t *testing.T) {
-	eachStore(t, "rl_yield_duration", func(t *testing.T, store KernelStore) {
-		var f *loopFixture
-		slow := func(ctx context.Context, v stepView) error {
-			f.clock.Advance(50 * time.Second)
+	looptest.EachStore(t, "rl_yield_duration", func(t *testing.T, store KernelStore) {
+		var f *looptest.Fixture
+		slow := func(ctx context.Context, v looptest.StepView) error {
+			f.Clock.Advance(50 * time.Second)
 			// The worker's Run heartbeat, which the fixture does not run.
-			_, err := f.raw.RenewAgentRunLease(ctx, f.scope, v.Request().RunID, f.workerID, f.clock.Now(), loopFixtureLease)
+			_, err := f.Raw.RenewAgentRunLease(ctx, f.Scope, v.Request().RunID, f.WorkerID, f.Clock.Now(), looptest.FixtureLease)
 			return err
 		}
-		f = newLoopFixture(t, store, withRules(
+		f = looptest.NewFixture(t, store, looptest.WithRules(
 			lookupRule("lookup", 0, purposeIs(ModelStepPurposeStep), slow),
 		))
-		run := f.startRun(RunKindAgentWork, "Keep checking issues")
-		exit, yielded := f.runClaim(run.ID)
+		run := f.StartRun(RunKindAgentWork, "Keep checking issues")
+		exit, yielded := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitYielded || exit.Err != nil {
 			t.Fatalf("claim = %s (%v), want yielded", exit.Reason, exit.Err)
 		}
@@ -246,11 +251,11 @@ func TestRunLoopFairnessYieldAfterClaimDuration(t *testing.T) {
 		if exit.Steps != 10 {
 			t.Fatalf("steps in the claim = %d, want 10", exit.Steps)
 		}
-		f.mustStatus(yielded, AgentRunStatusQueued)
-		if len(f.events(run.ID, "run.yielded")) != 1 {
-			t.Fatalf("run.yielded events = %d, want 1", len(f.events(run.ID, "run.yielded")))
+		f.MustStatus(yielded, AgentRunStatusQueued)
+		if len(f.Events(run.ID, "run.yielded")) != 1 {
+			t.Fatalf("run.yielded events = %d, want 1", len(f.Events(run.ID, "run.yielded")))
 		}
-		steps := f.sortedSteps(run.ID)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 10 || yielded.LastAppliedTurn != 10 {
 			t.Fatalf("steps = %d, LastAppliedTurn %d; want 10 applied", len(steps), yielded.LastAppliedTurn)
 		}
@@ -259,7 +264,7 @@ func TestRunLoopFairnessYieldAfterClaimDuration(t *testing.T) {
 				t.Fatalf("step %d is %s: the yield must come at a step boundary", step.Sequence, step.Status)
 			}
 		}
-		for _, entry := range f.entries(run.ID) {
+		for _, entry := range f.Entries(run.ID) {
 			if entry.Type == SessionEntryTool && entry.State != ToolEntryCompleted {
 				t.Fatalf("tool entry %s is %s at the yield", entry.ID, entry.State)
 			}
@@ -274,40 +279,42 @@ func TestRunLoopFairnessYieldAfterClaimDuration(t *testing.T) {
 // park's CAS conflicts; the loop re-plans the same approval park and moves
 // the Run once.
 func TestRunLoopParkConflictReplansAndTransitionsOnce(t *testing.T) {
-	eachStore(t, "rl_park_replan", func(t *testing.T, store KernelStore) {
-		var f *loopFixture
-		f = newLoopFixture(t, store, withApprovalForWrites(), withRules(
-			&modelRule{name: "update", times: 1,
-				before: func(ctx context.Context, v stepView) error {
-					_, err := f.raw.RenewAgentRunLease(ctx, f.scope, v.Request().RunID, f.workerID, f.clock.Now(), loopFixtureLease)
+	looptest.EachStore(t, "rl_park_replan", func(t *testing.T, store KernelStore) {
+		var f *looptest.Fixture
+		f = looptest.NewFixture(t, store, looptest.WithApprovalForWrites(), looptest.WithRules(
+			&looptest.ModelRule{Name: "update", Times: 1,
+				Before: func(ctx context.Context, v looptest.StepView) error {
+					_, err := f.Raw.RenewAgentRunLease(ctx, f.Scope, v.Request().RunID, f.WorkerID, f.Clock.Now(), looptest.FixtureLease)
 					return err
 				},
-				reply: func(v stepView) ModelStepResult {
-					return act("Closing it.", reviewedCall(kitGovernedTool(v, "update_status"), map[string]any{"id": "8", "status": "closed"}, "Close issue 8"))
+				Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.Act("Closing it.", looptest.ReviewedCall(looptest.GovernedTool(v, "update_status"), map[string]any{"id": "8", "status": "closed"}, "Close issue 8"))
 				}},
-			&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Closed issue 8."}) }},
+			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Closed issue 8."})
+			}},
 		))
-		run := f.startRun(RunKindAgentWork, "Close issue 8")
-		exit, parked := f.runClaim(run.ID)
+		run := f.StartRun(RunKindAgentWork, "Close issue 8")
+		exit, parked := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitParked || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want parked", exit.Reason, exit.Err)
 		}
-		f.mustStatus(parked, AgentRunStatusWaitingForApproval)
-		steps := f.sortedSteps(run.ID)
+		f.MustStatus(parked, AgentRunStatusWaitingForApproval)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 1 || steps[0].Status != AgentTurnStatusCompleted {
 			t.Fatalf("steps = %#v", steps)
 		}
-		if transitions := f.stepTransitions(run.ID, steps[0].ID); len(transitions) != 1 {
+		if transitions := f.StepTransitions(run.ID, steps[0].ID); len(transitions) != 1 {
 			t.Fatalf("transitions applying the step = %d, want 1", len(transitions))
 		}
 		if parked.LastAppliedTurn != 1 || parked.WakeCondition == nil || parked.WakeCondition.Type != "approval" {
 			t.Fatalf("parked run = applied %d wake %#v", parked.LastAppliedTurn, parked.WakeCondition)
 		}
-		f.decide(run.ID, ApprovalDecisionApprove, "go ahead")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
-		if f.dispatch.count("update_status") != 1 {
-			t.Fatalf("update_status dispatched %d times, want 1", f.dispatch.count("update_status"))
+		f.Decide(run.ID, ApprovalDecisionApprove, "go ahead")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, AgentRunStatusCompleted)
+		if f.Dispatch.Count("update_status") != 1 {
+			t.Fatalf("update_status dispatched %d times, want 1", f.Dispatch.Count("update_status"))
 		}
 	})
 }
@@ -332,48 +339,48 @@ func (x afterInlineTools) ExecuteStepTools(ctx context.Context, in agentrun.Step
 // the park's CAS conflicts, the re-plan supersedes the held approval for the
 // new message, and the next step answers it instead of parking.
 func TestRunLoopParkReplanSupersededByMessage(t *testing.T) {
-	eachStore(t, "rl_park_superseded", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withApprovalForWrites(), withRules(
-			&modelRule{name: "update", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Closing it.", reviewedCall(kitGovernedTool(v, "update_status"), map[string]any{"id": "8", "status": "closed"}, "Close issue 8"))
+	looptest.EachStore(t, "rl_park_superseded", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithApprovalForWrites(), looptest.WithRules(
+			&looptest.ModelRule{Name: "update", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Closing it.", looptest.ReviewedCall(looptest.GovernedTool(v, "update_status"), map[string]any{"id": "8", "status": "closed"}, "Close issue 8"))
 			}},
-			&modelRule{name: "leave it", when: func(v stepView) bool { return strings.Contains(v.LastUserText(), "leave issue 8 open") },
-				reply: func(stepView) ModelStepResult { return say("Okay, issue 8 stays open.") }},
+			&looptest.ModelRule{Name: "leave it", When: func(v looptest.StepView) bool { return strings.Contains(v.LastUserText(), "leave issue 8 open") },
+				Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("Okay, issue 8 stays open.") }},
 		))
-		conversation, run := f.startChat("close issue 8")
+		conversation, run := f.StartChat("close issue 8")
 		posted := false
-		exit, done := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) {
+		exit, done := f.RunClaimWith(f.Ctx, run.ID, func(b *agentrun.TurnRunnerBinding) {
 			b.Tools = afterInlineTools{ClaimToolExecutor: b.Tools.(*runloop.ClaimToolExecutor), after: func() {
 				if !posted {
 					posted = true
-					f.clock.Advance(time.Second) // the message is newer than the approval request
-					f.postUser(conversation.ID, loopFixtureUser, "actually, leave issue 8 open")
+					f.Clock.Advance(time.Second) // the message is newer than the approval request
+					f.PostUser(conversation.ID, looptest.FixtureUser, "actually, leave issue 8 open")
 				}
 			}}
 		})
 		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
 			t.Fatalf("exit = %s after %d steps (%v), want final after 2", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(done, AgentRunStatusCompleted)
-		if f.dispatch.count("update_status") != 0 {
+		f.MustStatus(done, AgentRunStatusCompleted)
+		if f.Dispatch.Count("update_status") != 0 {
 			t.Fatal("the superseded write ran")
 		}
-		approvals, err := f.raw.ListApprovals(f.ctx, ApprovalFilter{Scope: f.scope, RunID: run.ID})
+		approvals, err := f.Raw.ListApprovals(f.Ctx, ApprovalFilter{Scope: f.Scope, RunID: run.ID})
 		if err != nil || len(approvals) != 1 || approvals[0].Status == ApprovalStatusPending {
 			t.Fatalf("approvals = %#v (%v), want the one request closed", approvals, err)
 		}
-		steps := f.sortedSteps(run.ID)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 2 {
 			t.Fatalf("steps = %d, want 2", len(steps))
 		}
-		for _, event := range f.stepTransitions(run.ID, steps[0].ID) {
+		for _, event := range f.StepTransitions(run.ID, steps[0].ID) {
 			if strings.Contains(strings.ToLower(event.Summary), "approval") {
 				t.Fatalf("the Run parked for approval: %s", event.Summary)
 			}
 		}
-		messages := f.messages(conversation.ID)
+		messages := f.Messages(conversation.ID)
 		if last := messages[len(messages)-1]; !strings.Contains(last.Content, "stays open") {
-			t.Fatalf("channel = %s", kitDescribeMessages(messages))
+			t.Fatalf("channel = %s", looptest.DescribeMessages(messages))
 		}
 	})
 }
@@ -383,24 +390,24 @@ func TestRunLoopParkReplanSupersededByMessage(t *testing.T) {
 
 // Three rejected final tool calls in a row fail the Run final_answer_rejected.
 func TestRunLoopFinalToolRejectedThreeTimesFails(t *testing.T) {
-	eachStore(t, "rl_final_rejected", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(&modelRule{name: "bad final", reply: func(stepView) ModelStepResult {
-			return finalAnswer(map[string]any{"answer": 42})
+	looptest.EachStore(t, "rl_final_rejected", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "bad final", Reply: func(looptest.StepView) ModelStepResult {
+			return looptest.FinalAnswer(map[string]any{"answer": 42})
 		}}))
-		run := f.startRun(RunKindAgentWork, "Answer badly")
-		exit, failed := f.runClaim(run.ID)
+		run := f.StartRun(RunKindAgentWork, "Answer badly")
+		exit, failed := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil || exit.Steps != 3 {
 			t.Fatalf("exit = %s after %d steps (%v), want failed after 3", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(failed, AgentRunStatusFailed)
+		f.MustStatus(failed, AgentRunStatusFailed)
 		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != "final_answer_rejected" || failed.FailureExplanation.Explained {
 			t.Fatalf("failure = %#v, want unexplained final_answer_rejected", failed.FailureExplanation)
 		}
-		if got := strings.Join(f.entryTypes(run.ID), ","); got != "user,assistant,tool:error,assistant,tool:error,assistant,tool:error" {
+		if got := strings.Join(f.EntryTypes(run.ID), ","); got != "user,assistant,tool:error,assistant,tool:error,assistant,tool:error" {
 			t.Fatalf("log = %s", got)
 		}
-		if len(f.model.calls(ModelStepPurposeStep)) != 3 {
-			t.Fatalf("model steps = %d, want 3", len(f.model.calls(ModelStepPurposeStep)))
+		if len(f.Model.Calls(ModelStepPurposeStep)) != 3 {
+			t.Fatalf("model steps = %d, want 3", len(f.Model.Calls(ModelStepPurposeStep)))
 		}
 	})
 }
@@ -408,30 +415,30 @@ func TestRunLoopFinalToolRejectedThreeTimesFails(t *testing.T) {
 // An empty plain reply is rejected with a final_rejection note the next step
 // reads; the third rejection ends the Run.
 func TestRunLoopPlainFinalRejectedThenFails(t *testing.T) {
-	eachStore(t, "rl_plain_rejected", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(&modelRule{name: "empty", reply: func(v stepView) ModelStepResult {
+	looptest.EachStore(t, "rl_plain_rejected", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "empty", Reply: func(v looptest.StepView) ModelStepResult {
 			if notes := v.Notes(); v.Step() > 1 && (len(notes) == 0 || !strings.Contains(notes[len(notes)-1], "empty reply")) {
-				t.Errorf("step %d does not see the rejection: %s", v.Step(), v.describe())
+				t.Errorf("step %d does not see the rejection: %s", v.Step(), v.Describe())
 			}
-			return say("")
+			return looptest.Say("")
 		}}))
-		conversation, run := f.startChat("hello?")
-		exit, failed := f.runClaim(run.ID)
+		conversation, run := f.StartChat("hello?")
+		exit, failed := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil || exit.Steps != 3 {
 			t.Fatalf("exit = %s after %d steps (%v), want failed after 3", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(failed, AgentRunStatusFailed)
+		f.MustStatus(failed, AgentRunStatusFailed)
 		// The control executor's own limit for empty replies ends the Run
 		// at the same third rejection as the loop's bound.
 		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != "empty_answer" {
 			t.Fatalf("failure = %#v, want empty_answer", failed.FailureExplanation)
 		}
-		if notes := f.entriesOfType(run.ID, "note:"+string(NoteFinalRejection)); len(notes) != 3 {
+		if notes := f.EntriesOfType(run.ID, "note:"+string(NoteFinalRejection)); len(notes) != 3 {
 			t.Fatalf("final_rejection notes = %d, want one per rejected step", len(notes))
 		}
-		for _, message := range f.messages(conversation.ID)[1:] {
-			if message.Sender.ID == loopFixtureAgent && strings.TrimSpace(message.Content) == "" {
-				t.Fatalf("an empty reply was posted: %s", kitDescribeMessages(f.messages(conversation.ID)))
+		for _, message := range f.Messages(conversation.ID)[1:] {
+			if message.Sender.ID == looptest.FixtureAgent && strings.TrimSpace(message.Content) == "" {
+				t.Fatalf("an empty reply was posted: %s", looptest.DescribeMessages(f.Messages(conversation.ID)))
 			}
 		}
 	})
@@ -441,18 +448,18 @@ func TestRunLoopPlainFinalRejectedThenFails(t *testing.T) {
 // Host retry and compaction
 
 func TestRunLoopHostUnavailableRetriesThenFails(t *testing.T) {
-	eachStore(t, "rl_host_retry", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(&modelRule{name: "down",
-			err: &modelstep.TurnHostFailure{Code: "host_draining", Message: "The step host is restarting.", Retryable: true}}))
-		run := f.startRun(RunKindAgentWork, "Check issue 1")
+	looptest.EachStore(t, "rl_host_retry", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "down",
+			Err: &modelstep.TurnHostFailure{Code: "host_draining", Message: "The step host is restarting.", Retryable: true}}))
+		run := f.StartRun(RunKindAgentWork, "Check issue 1")
 		// The step host is retried after 2s, 5s and 15s.
 		for i, delay := range []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second} {
-			exit, requeued := f.runClaim(run.ID)
+			exit, requeued := f.RunClaim(run.ID)
 			if exit.Reason != runloop.RunLoopExitRequeued {
 				t.Fatalf("claim %d = %s (%v), want requeued", i+1, exit.Reason, exit.Err)
 			}
-			f.mustStatus(requeued, AgentRunStatusQueued)
-			steps := f.sortedSteps(run.ID)
+			f.MustStatus(requeued, AgentRunStatusQueued)
+			steps := f.SortedSteps(run.ID)
 			last := steps[len(steps)-1]
 			if last.Status != AgentTurnStatusFailed || last.FailureCode != runloop.StepFailureHostUnavailable || last.CompletedAt == nil {
 				t.Fatalf("step %d = %s %q", last.Sequence, last.Status, last.FailureCode)
@@ -460,22 +467,22 @@ func TestRunLoopHostUnavailableRetriesThenFails(t *testing.T) {
 			if !requeued.AvailableAt.Equal(last.CompletedAt.Add(delay)) {
 				t.Fatalf("claim %d AvailableAt = %v, want step end + %s", i+1, requeued.AvailableAt, delay)
 			}
-			f.clock.Advance(delay + time.Millisecond)
+			f.Clock.Advance(delay + time.Millisecond)
 			// A new worker counts the retries from the step rows alone.
-			f.build()
+			f.Build()
 		}
-		exit, failed := f.runClaim(run.ID)
+		exit, failed := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil {
 			t.Fatalf("fourth claim = %s (%v), want failed", exit.Reason, exit.Err)
 		}
-		f.mustStatus(failed, AgentRunStatusFailed)
+		f.MustStatus(failed, AgentRunStatusFailed)
 		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != runloop.StepFailureHostUnavailable || failed.FailureExplanation.Explained {
 			t.Fatalf("failure = %#v", failed.FailureExplanation)
 		}
-		if steps := f.sortedSteps(run.ID); len(steps) != 4 {
+		if steps := f.SortedSteps(run.ID); len(steps) != 4 {
 			t.Fatalf("steps = %d, want 4", len(steps))
 		}
-		if got := len(f.model.calls("")); got != 4 {
+		if got := len(f.Model.Calls("")); got != 4 {
 			t.Fatalf("model calls = %d, want 4 (no explanation)", got)
 		}
 		if failed.LastAppliedTurn != 4 || failed.BudgetUsage.Turns != 0 {
@@ -492,28 +499,30 @@ func bigLookup(in agentrun.ActionDispatchInput) (map[string]interface{}, error) 
 }
 
 func TestRunLoopContextExceededCompactsOnce(t *testing.T) {
-	eachStore(t, "rl_compact_retry", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
+	looptest.EachStore(t, "rl_compact_retry", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
 			lookupRule("lookup", 5, nil, nil),
-			&modelRule{name: "too long", times: 1, when: func(v stepView) bool { return v.Purpose() == ModelStepPurposeStep && v.Request().Attempt == 0 },
-				err: contextExceeded()},
-			&modelRule{name: "summary", when: purposeIs(ModelStepPurposeSummary),
-				reply: func(stepView) ModelStepResult { return say("Issues 1 to 3 were looked up; all are open.") }},
-			&modelRule{name: "answer", when: func(v stepView) bool { return v.Request().Attempt == 1 }, reply: func(v stepView) ModelStepResult {
+			&looptest.ModelRule{Name: "too long", Times: 1, When: func(v looptest.StepView) bool { return v.Purpose() == ModelStepPurposeStep && v.Request().Attempt == 0 },
+				Err: contextExceeded()},
+			&looptest.ModelRule{Name: "summary", When: purposeIs(ModelStepPurposeSummary),
+				Reply: func(looptest.StepView) ModelStepResult {
+					return looptest.Say("Issues 1 to 3 were looked up; all are open.")
+				}},
+			&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool { return v.Request().Attempt == 1 }, Reply: func(v looptest.StepView) ModelStepResult {
 				if summary, ok := v.Compaction(); !ok || !strings.Contains(summary, "all are open") {
-					t.Errorf("retry does not start from the compaction: %s", v.describe())
+					t.Errorf("retry does not start from the compaction: %s", v.Describe())
 				}
-				return finalAnswer(map[string]any{"answer": "Issues 1 to 5 are open."})
+				return looptest.FinalAnswer(map[string]any{"answer": "Issues 1 to 5 are open."})
 			}},
 		))
-		f.dispatch.on("lookup", bigLookup)
-		run := f.startRun(RunKindAgentWork, "Check issues 1 to 5")
-		exit, done := f.runClaimWith(f.ctx, run.ID, f.withLoopCompactor)
+		f.Dispatch.On("lookup", bigLookup)
+		run := f.StartRun(RunKindAgentWork, "Check issues 1 to 5")
+		exit, done := f.RunClaimWith(f.Ctx, run.ID, f.WithLoopCompactor)
 		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want final", exit.Reason, exit.Err)
 		}
-		f.mustStatus(done, AgentRunStatusCompleted)
-		steps := f.model.calls(ModelStepPurposeStep)
+		f.MustStatus(done, AgentRunStatusCompleted)
+		steps := f.Model.Calls(ModelStepPurposeStep)
 		if len(steps) != 7 {
 			t.Fatalf("step calls = %d, want 5 lookups, the rejected attempt and its retry", len(steps))
 		}
@@ -521,45 +530,45 @@ func TestRunLoopContextExceededCompactsOnce(t *testing.T) {
 		if rejected.StepID != retried.StepID || rejected.Attempt != 0 || retried.Attempt != 1 {
 			t.Fatalf("attempts = %s:%d then %s:%d, want one step at attempts 0 and 1", rejected.StepID, rejected.Attempt, retried.StepID, retried.Attempt)
 		}
-		if summaries := f.model.calls(ModelStepPurposeSummary); len(summaries) != 1 || summaries[0].StepID != rejected.StepID {
+		if summaries := f.Model.Calls(ModelStepPurposeSummary); len(summaries) != 1 || summaries[0].StepID != rejected.StepID {
 			t.Fatalf("summary calls = %d, want 1 for the rejected step", len(summaries))
 		}
-		if compactions := f.entriesOfType(run.ID, string(SessionEntryCompaction)); len(compactions) != 1 {
+		if compactions := f.EntriesOfType(run.ID, string(SessionEntryCompaction)); len(compactions) != 1 {
 			t.Fatalf("compaction entries = %d, want 1", len(compactions))
 		}
-		if rows := f.sortedSteps(run.ID); len(rows) != 6 || rows[5].ID != rejected.StepID || rows[5].Status != AgentTurnStatusCompleted {
+		if rows := f.SortedSteps(run.ID); len(rows) != 6 || rows[5].ID != rejected.StepID || rows[5].Status != AgentTurnStatusCompleted {
 			t.Fatalf("step rows = %d; the retried step must be one completed row", len(rows))
 		}
 	})
 }
 
 func TestRunLoopContextExceededTwiceFails(t *testing.T) {
-	eachStore(t, "rl_compact_fail", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
+	looptest.EachStore(t, "rl_compact_fail", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
 			lookupRule("lookup", 5, nil, nil),
-			&modelRule{name: "summary", when: purposeIs(ModelStepPurposeSummary),
-				reply: func(stepView) ModelStepResult { return say("Issues 1 to 5 were looked up.") }},
-			&modelRule{name: "too long", when: purposeIs(ModelStepPurposeStep), err: contextExceeded()},
+			&looptest.ModelRule{Name: "summary", When: purposeIs(ModelStepPurposeSummary),
+				Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("Issues 1 to 5 were looked up.") }},
+			&looptest.ModelRule{Name: "too long", When: purposeIs(ModelStepPurposeStep), Err: contextExceeded()},
 		))
-		f.dispatch.on("lookup", bigLookup)
-		run := f.startRun(RunKindAgentWork, "Check issues 1 to 5")
-		exit, failed := f.runClaimWith(f.ctx, run.ID, f.withLoopCompactor)
+		f.Dispatch.On("lookup", bigLookup)
+		run := f.StartRun(RunKindAgentWork, "Check issues 1 to 5")
+		exit, failed := f.RunClaimWith(f.Ctx, run.ID, f.WithLoopCompactor)
 		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want failed", exit.Reason, exit.Err)
 		}
-		f.mustStatus(failed, AgentRunStatusFailed)
+		f.MustStatus(failed, AgentRunStatusFailed)
 		if failed.FailureExplanation == nil || failed.FailureExplanation.Explained {
 			t.Fatalf("failure = %#v, want an unexplained failure", failed.FailureExplanation)
 		}
-		steps := f.model.calls(ModelStepPurposeStep)
+		steps := f.Model.Calls(ModelStepPurposeStep)
 		if len(steps) != 7 || steps[5].Attempt != 0 || steps[6].Attempt != 1 || steps[5].StepID != steps[6].StepID {
 			t.Fatalf("step calls = %d, want the lookups, attempt 0 and attempt 1 only", len(steps))
 		}
-		if len(f.model.calls(ModelStepPurposeSummary)) != 1 || len(f.model.calls(ModelStepPurposeExplanation)) != 0 {
+		if len(f.Model.Calls(ModelStepPurposeSummary)) != 1 || len(f.Model.Calls(ModelStepPurposeExplanation)) != 0 {
 			t.Fatalf("summary calls = %d, explanation calls = %d; want 1 and 0",
-				len(f.model.calls(ModelStepPurposeSummary)), len(f.model.calls(ModelStepPurposeExplanation)))
+				len(f.Model.Calls(ModelStepPurposeSummary)), len(f.Model.Calls(ModelStepPurposeExplanation)))
 		}
-		rows := f.sortedSteps(run.ID)
+		rows := f.SortedSteps(run.ID)
 		if last := rows[len(rows)-1]; last.Status != AgentTurnStatusFailed || last.FailureCode != runloop.StepFailureContextExceeded {
 			t.Fatalf("last step = %s %q, want failed %s", last.Status, last.FailureCode, runloop.StepFailureContextExceeded)
 		}
@@ -570,66 +579,66 @@ func TestRunLoopContextExceededTwiceFails(t *testing.T) {
 // Failure, explanation and credits
 
 func TestRunLoopFailureExplanationStep(t *testing.T) {
-	eachStore(t, "rl_explanation", func(t *testing.T, store KernelStore) {
-		var f *loopFixture
+	looptest.EachStore(t, "rl_explanation", func(t *testing.T, store KernelStore) {
+		var f *looptest.Fixture
 		var runID string
-		f = newLoopFixture(t, store, withRules(
-			&modelRule{name: "broken", times: 1, when: purposeIs(ModelStepPurposeStep),
-				err: &modelstep.TurnHostFailure{Code: "model_output_invalid", Message: "The model's reply could not be read."}},
-			&modelRule{name: "explain", when: purposeIs(ModelStepPurposeExplanation),
-				before: func(context.Context, stepView) error {
-					run := f.mustRun(runID)
+		f = looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "broken", Times: 1, When: purposeIs(ModelStepPurposeStep),
+				Err: &modelstep.TurnHostFailure{Code: "model_output_invalid", Message: "The model's reply could not be read."}},
+			&looptest.ModelRule{Name: "explain", When: purposeIs(ModelStepPurposeExplanation),
+				Before: func(context.Context, looptest.StepView) error {
+					run := f.MustRun(runID)
 					if run.Status != AgentRunStatusRunning || run.FailureExplanation == nil || run.FailureExplanation.Explained {
 						t.Errorf("before the explanation: status %s failure %#v, want running and unexplained", run.Status, run.FailureExplanation)
 					}
 					return nil
 				},
-				reply: func(v stepView) ModelStepResult {
+				Reply: func(v looptest.StepView) ModelStepResult {
 					if len(v.Request().Tools) != 0 {
 						t.Errorf("explanation step offers %d tools, want none", len(v.Request().Tools))
 					}
-					return say("Sorry, I could not read my own reply, so I stopped.")
+					return looptest.Say("Sorry, I could not read my own reply, so I stopped.")
 				}},
 		))
-		conversation, run := f.startChat("summarize the backlog")
+		conversation, run := f.StartChat("summarize the backlog")
 		runID = run.ID
-		exit, failed := f.runClaim(run.ID)
+		exit, failed := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
 			t.Fatalf("exit = %s after %d steps (%v), want final after the explanation", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(failed, AgentRunStatusFailed)
+		f.MustStatus(failed, AgentRunStatusFailed)
 		explanation := failed.FailureExplanation
 		if explanation == nil || !explanation.Explained || explanation.Message == "" || failed.Error != explanation.Message {
 			t.Fatalf("run error %q explanation %#v, want explained with Error = its message", failed.Error, explanation)
 		}
-		if len(f.model.calls(ModelStepPurposeExplanation)) != 1 {
-			t.Fatalf("explanation calls = %d, want 1", len(f.model.calls(ModelStepPurposeExplanation)))
+		if len(f.Model.Calls(ModelStepPurposeExplanation)) != 1 {
+			t.Fatalf("explanation calls = %d, want 1", len(f.Model.Calls(ModelStepPurposeExplanation)))
 		}
-		steps := f.sortedSteps(run.ID)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 2 || steps[0].Status != AgentTurnStatusFailed || steps[1].Status != AgentTurnStatusCompleted {
 			t.Fatalf("steps = %d (%s, %s)", len(steps), steps[0].Status, steps[len(steps)-1].Status)
 		}
-		messages := f.messages(conversation.ID)
-		if last := messages[len(messages)-1]; last.Sender.ID != loopFixtureAgent || !strings.Contains(last.Content, "could not read my own reply") {
-			t.Fatalf("channel = %s", kitDescribeMessages(messages))
+		messages := f.Messages(conversation.ID)
+		if last := messages[len(messages)-1]; last.Sender.ID != looptest.FixtureAgent || !strings.Contains(last.Content, "could not read my own reply") {
+			t.Fatalf("channel = %s", looptest.DescribeMessages(messages))
 		}
 	})
 }
 
 func TestRunLoopUnexplainableFailureEndsDirectly(t *testing.T) {
-	eachStore(t, "rl_unexplainable", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(&modelRule{name: "provider down",
-			err: &modelstep.TurnHostFailure{Code: "provider_unavailable", Message: "The model provider is unavailable."}}))
-		_, run := f.startChat("hello")
-		exit, failed := f.runClaim(run.ID)
+	looptest.EachStore(t, "rl_unexplainable", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "provider down",
+			Err: &modelstep.TurnHostFailure{Code: "provider_unavailable", Message: "The model provider is unavailable."}}))
+		_, run := f.StartChat("hello")
+		exit, failed := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil || exit.Steps != 1 {
 			t.Fatalf("exit = %s after %d steps (%v), want failed after 1", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(failed, AgentRunStatusFailed)
+		f.MustStatus(failed, AgentRunStatusFailed)
 		if failed.FailureExplanation == nil || failed.FailureExplanation.Explained || failed.FailureExplanation.Code != "provider_unavailable" {
 			t.Fatalf("failure = %#v, want unexplained provider_unavailable", failed.FailureExplanation)
 		}
-		if got := len(f.model.calls("")); got != 1 {
+		if got := len(f.Model.Calls("")); got != 1 {
 			t.Fatalf("model calls = %d, want 1", got)
 		}
 		if failed.CreditError != nil {
@@ -639,19 +648,19 @@ func TestRunLoopUnexplainableFailureEndsDirectly(t *testing.T) {
 }
 
 func TestRunLoopCreditErrorFromFailureExplanation(t *testing.T) {
-	eachStore(t, "rl_credit_error", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(&modelRule{name: "no credits",
-			err: &modelstep.TurnHostFailure{Code: RunCreditErrorWorkspaceCreditsExhausted, Message: "The workspace has no credits left."}}))
-		_, run := f.startChat("hello")
-		exit, failed := f.runClaim(run.ID)
+	looptest.EachStore(t, "rl_credit_error", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "no credits",
+			Err: &modelstep.TurnHostFailure{Code: RunCreditErrorWorkspaceCreditsExhausted, Message: "The workspace has no credits left."}}))
+		_, run := f.StartChat("hello")
+		exit, failed := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want failed", exit.Reason, exit.Err)
 		}
-		f.mustStatus(failed, AgentRunStatusFailed)
+		f.MustStatus(failed, AgentRunStatusFailed)
 		if failed.CreditError == nil || failed.CreditError.Code != RunCreditErrorWorkspaceCreditsExhausted {
 			t.Fatalf("credit error = %#v, failure %#v", failed.CreditError, failed.FailureExplanation)
 		}
-		if got := len(f.model.calls("")); got != 1 {
+		if got := len(f.Model.Calls("")); got != 1 {
 			t.Fatalf("model calls = %d, want 1 (credits stop the explanation)", got)
 		}
 	})
@@ -675,13 +684,13 @@ func stepReservations(run *AgentRun) int {
 // A bounded Run reserves each step under the step id with Turns 1, settles it
 // when the step applies, and pauses when a step uses up the budget.
 func TestRunLoopBudgetExhaustionPausesAfterStep(t *testing.T) {
-	eachStore(t, "rl_budget_steps", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(lookupRule("lookup", 0, purposeIs(ModelStepPurposeStep), nil)))
-		run := f.startBoundedRun("Check issues", BudgetPolicy{MaxTurns: 2})
+	looptest.EachStore(t, "rl_budget_steps", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(lookupRule("lookup", 0, purposeIs(ModelStepPurposeStep), nil)))
+		run := f.StartBoundedRun("Check issues", BudgetPolicy{MaxTurns: 2})
 		var reserved []string
-		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
-			step := f.runningStep(run.ID)
-			current := f.mustRun(run.ID)
+		f.Dispatch.On("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+			step := f.RunningStep(run.ID)
+			current := f.MustRun(run.ID)
 			if step == nil {
 				t.Errorf("no running step during the lookup")
 			} else if reservation, ok := current.BudgetReservations[step.ID]; !ok || reservation.Usage.Turns != 1 || stepReservations(current) != 1 {
@@ -691,18 +700,18 @@ func TestRunLoopBudgetExhaustionPausesAfterStep(t *testing.T) {
 			}
 			return map[string]interface{}{"id": in.Arguments["id"], "status": "open"}, nil
 		})
-		exit, paused := f.runClaim(run.ID)
+		exit, paused := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitPaused || exit.Err != nil || exit.Steps != 2 {
 			t.Fatalf("exit = %s after %d steps (%v), want paused after 2", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(paused, AgentRunStatusPaused)
+		f.MustStatus(paused, AgentRunStatusPaused)
 		if paused.BudgetUsage.Turns != 2 || len(paused.BudgetReservations) != 0 || paused.BudgetState != BudgetStateExhausted {
 			t.Fatalf("budget = usage %#v reservations %#v state %s", paused.BudgetUsage, paused.BudgetReservations, paused.BudgetState)
 		}
 		if len(reserved) != 2 {
 			t.Fatalf("reserved steps = %v", reserved)
 		}
-		exhausted := f.events(run.ID, "budget.exhausted")
+		exhausted := f.Events(run.ID, "budget.exhausted")
 		if len(exhausted) != 1 || exhausted[0].TurnID != reserved[1] {
 			t.Fatalf("budget.exhausted = %#v, want one on the second step", exhausted)
 		}
@@ -710,15 +719,15 @@ func TestRunLoopBudgetExhaustionPausesAfterStep(t *testing.T) {
 }
 
 func TestRunLoopBudgetAdmissionRefusesModelStep(t *testing.T) {
-	eachStore(t, "rl_budget_admission", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(lookupRule("lookup", 0, nil, nil)))
-		run := f.startBoundedRun("Check issues", BudgetPolicy{MaxInputTokens: 10})
-		exit, paused := f.runClaim(run.ID)
+	looptest.EachStore(t, "rl_budget_admission", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(lookupRule("lookup", 0, nil, nil)))
+		run := f.StartBoundedRun("Check issues", BudgetPolicy{MaxInputTokens: 10})
+		exit, paused := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitPaused || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want paused", exit.Reason, exit.Err)
 		}
-		f.mustStatus(paused, AgentRunStatusPaused)
-		steps := f.sortedSteps(run.ID)
+		f.MustStatus(paused, AgentRunStatusPaused)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 1 {
 			t.Fatalf("steps = %d, want 1", len(steps))
 		}
@@ -726,39 +735,39 @@ func TestRunLoopBudgetAdmissionRefusesModelStep(t *testing.T) {
 		if step.Status != AgentTurnStatusCanceled || step.FailureCode != runloop.StepFailureBudgetExhausted || step.BudgetAdmission == nil || step.BudgetAdmission.TurnID != step.ID {
 			t.Fatalf("step = %s %q admission %#v", step.Status, step.FailureCode, step.BudgetAdmission)
 		}
-		if got := len(f.model.calls("")); got != 0 {
+		if got := len(f.Model.Calls("")); got != 0 {
 			t.Fatalf("model calls = %d, want none", got)
 		}
-		if len(f.events(run.ID, "budget.exhausted")) != 1 || paused.BudgetUsage.Turns != 0 {
-			t.Fatalf("budget.exhausted = %d, turns %d", len(f.events(run.ID, "budget.exhausted")), paused.BudgetUsage.Turns)
+		if len(f.Events(run.ID, "budget.exhausted")) != 1 || paused.BudgetUsage.Turns != 0 {
+			t.Fatalf("budget.exhausted = %d, turns %d", len(f.Events(run.ID, "budget.exhausted")), paused.BudgetUsage.Turns)
 		}
 	})
 }
 
 func TestRunLoopDurationBudgetCancelsStep(t *testing.T) {
-	eachStore(t, "rl_budget_duration", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(&modelRule{name: "slow",
-			before: func(ctx context.Context, _ stepView) error {
+	looptest.EachStore(t, "rl_budget_duration", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "slow",
+			Before: func(ctx context.Context, _ looptest.StepView) error {
 				<-ctx.Done()
 				return ctx.Err()
 			},
-			reply: func(v stepView) ModelStepResult {
-				return act("Too late.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "1"}))
+			Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Too late.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "1"}))
 			}}))
-		run := f.startBoundedRun("Check issue 1", BudgetPolicy{MaxDurationMS: 200})
-		exit, paused := f.runClaim(run.ID)
+		run := f.StartBoundedRun("Check issue 1", BudgetPolicy{MaxDurationMS: 200})
+		exit, paused := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitPaused || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want paused", exit.Reason, exit.Err)
 		}
-		f.mustStatus(paused, AgentRunStatusPaused)
-		steps := f.sortedSteps(run.ID)
+		f.MustStatus(paused, AgentRunStatusPaused)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 1 || steps[0].Status != AgentTurnStatusCanceled || steps[0].FailureCode != runloop.StepFailureDurationBudget {
 			t.Fatalf("steps = %#v", steps)
 		}
-		if got := strings.Join(f.entryTypes(run.ID), ","); got != "user" {
+		if got := strings.Join(f.EntryTypes(run.ID), ","); got != "user" {
 			t.Fatalf("log = %s, want only the goal: nothing of the cut step is appended", got)
 		}
-		if f.dispatch.count("") != 0 {
+		if f.Dispatch.Count("") != 0 {
 			t.Fatal("a tool ran after the deadline")
 		}
 	})
@@ -768,49 +777,49 @@ func TestRunLoopDurationBudgetCancelsStep(t *testing.T) {
 // Cancel and lease loss
 
 func TestRunLoopCanceledRunDiscardsOutput(t *testing.T) {
-	eachStore(t, "rl_cancel", func(t *testing.T, store KernelStore) {
-		var f *loopFixture
-		f = newLoopFixture(t, store, withRules(&modelRule{name: "canceled meanwhile",
-			before: func(ctx context.Context, v stepView) error {
-				current := f.mustRun(v.Request().RunID)
-				_, err := agentrun.NewRunCommandService(f.chats).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-					Scope: f.scope, RunID: current.ID, ExpectedRevision: current.Revision, Kind: agentrun.AgentRunCommandCancel,
-					Actor: ActivityActor{Type: "user", ID: loopFixtureUser}, Summary: "Stop",
+	looptest.EachStore(t, "rl_cancel", func(t *testing.T, store KernelStore) {
+		var f *looptest.Fixture
+		f = looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "canceled meanwhile",
+			Before: func(ctx context.Context, v looptest.StepView) error {
+				current := f.MustRun(v.Request().RunID)
+				_, err := agentrun.NewRunCommandService(f.Chats).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+					Scope: f.Scope, RunID: current.ID, ExpectedRevision: current.Revision, Kind: agentrun.AgentRunCommandCancel,
+					Actor: ActivityActor{Type: "user", ID: looptest.FixtureUser}, Summary: "Stop",
 				})
 				return err
 			},
-			reply: func(v stepView) ModelStepResult {
-				return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "1"}))
+			Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "1"}))
 			}}))
-		run := f.startRun(RunKindAgentWork, "Check issue 1")
-		exit, canceled := f.runClaim(run.ID)
+		run := f.StartRun(RunKindAgentWork, "Check issue 1")
+		exit, canceled := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitEnded {
 			t.Fatalf("exit = %s (%v), want ended", exit.Reason, exit.Err)
 		}
-		f.mustStatus(canceled, AgentRunStatusCanceled)
-		steps := f.sortedSteps(run.ID)
+		f.MustStatus(canceled, AgentRunStatusCanceled)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 1 || steps[0].Status != AgentTurnStatusCanceled || steps[0].FailureCode != agentrun.StepFailureRunEnded {
 			t.Fatalf("steps = %#v", steps)
 		}
-		if assistants := f.entriesOfType(run.ID, string(SessionEntryAssistant)); len(assistants) != 0 {
+		if assistants := f.EntriesOfType(run.ID, string(SessionEntryAssistant)); len(assistants) != 0 {
 			t.Fatalf("assistant entries = %d, want the output discarded", len(assistants))
 		}
-		if f.dispatch.count("") != 0 {
+		if f.Dispatch.Count("") != 0 {
 			t.Fatal("a tool ran for a canceled Run")
 		}
 	})
 }
 
 func TestRunLoopLeaseLostWritesNothing(t *testing.T) {
-	eachStore(t, "rl_lease_lost", func(t *testing.T, store KernelStore) {
-		var f *loopFixture
+	looptest.EachStore(t, "rl_lease_lost", func(t *testing.T, store KernelStore) {
+		var f *looptest.Fixture
 		var entriesAtSteal int
 		var revisionAtSteal int64
-		f = newLoopFixture(t, store, withRules(&modelRule{name: "stolen meanwhile",
-			before: func(ctx context.Context, v stepView) error {
-				f.clock.Advance(loopFixtureLease + time.Second)
-				stolen, err := f.raw.ClaimNextAgentRun(ctx, AgentRunClaim{
-					Scope: f.scope, WorkerID: loopFixtureWorker2, Now: f.clock.Now(), LeaseDuration: loopFixtureLease, AgingInterval: time.Minute,
+		f = looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "stolen meanwhile",
+			Before: func(ctx context.Context, v looptest.StepView) error {
+				f.Clock.Advance(looptest.FixtureLease + time.Second)
+				stolen, err := f.Raw.ClaimNextAgentRun(ctx, AgentRunClaim{
+					Scope: f.Scope, WorkerID: looptest.FixtureWorker2, Now: f.Clock.Now(), LeaseDuration: looptest.FixtureLease, AgingInterval: time.Minute,
 				})
 				if err != nil {
 					return err
@@ -819,30 +828,30 @@ func TestRunLoopLeaseLostWritesNothing(t *testing.T) {
 					t.Errorf("the second worker did not take the Run: %#v", stolen)
 					return errors.New("steal failed")
 				}
-				entriesAtSteal = len(f.entries(stolen.ID))
+				entriesAtSteal = len(f.Entries(stolen.ID))
 				revisionAtSteal = stolen.Revision
 				return nil
 			},
-			reply: func(v stepView) ModelStepResult {
-				return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "1"}))
+			Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "1"}))
 			}}))
-		run := f.startRun(RunKindAgentWork, "Check issue 1")
-		exit, after := f.runClaim(run.ID)
+		run := f.StartRun(RunKindAgentWork, "Check issue 1")
+		exit, after := f.RunClaim(run.ID)
 		if exit.Reason != runloop.RunLoopExitLeaseLost {
 			t.Fatalf("exit = %s (%v), want lease_lost", exit.Reason, exit.Err)
 		}
-		if after.Status != AgentRunStatusRunning || after.LeaseOwner != loopFixtureWorker2 || after.Revision != revisionAtSteal {
+		if after.Status != AgentRunStatusRunning || after.LeaseOwner != looptest.FixtureWorker2 || after.Revision != revisionAtSteal {
 			t.Fatalf("run after = %s owner %s revision %d, want untouched since the steal (revision %d)",
 				after.Status, after.LeaseOwner, after.Revision, revisionAtSteal)
 		}
-		if got := len(f.entries(run.ID)); got != entriesAtSteal {
+		if got := len(f.Entries(run.ID)); got != entriesAtSteal {
 			t.Fatalf("session entries %d -> %d after the lease was lost", entriesAtSteal, got)
 		}
-		if f.dispatch.count("") != 0 {
+		if f.Dispatch.Count("") != 0 {
 			t.Fatal("a tool ran after the lease was lost")
 		}
-		for _, event := range f.events(run.ID) {
-			if event.Actor.ID == loopFixtureWorker1 && event.CreatedAt.After(f.clock.Now().Add(-time.Second)) {
+		for _, event := range f.Events(run.ID) {
+			if event.Actor.ID == looptest.FixtureWorker1 && event.CreatedAt.After(f.Clock.Now().Add(-time.Second)) {
 				t.Fatalf("worker 1 wrote %s after losing the lease", event.EventType)
 			}
 		}
@@ -853,55 +862,55 @@ func TestRunLoopLeaseLostWritesNothing(t *testing.T) {
 // Deterministic producers
 
 func TestRunLoopDeterministicProducerKernelState(t *testing.T) {
-	eachStore(t, "rl_deterministic", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store)
-		producer := f.scriptedRunbook(false)
-		run := f.startRun(RunKindAgentWork, "Run the issue runbook")
-		exit, done := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) { b.Producer = producer })
+	looptest.EachStore(t, "rl_deterministic", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store)
+		producer := f.ScriptedRunbook(false)
+		run := f.StartRun(RunKindAgentWork, "Run the issue runbook")
+		exit, done := f.RunClaimWith(f.Ctx, run.ID, func(b *agentrun.TurnRunnerBinding) { b.Producer = producer })
 		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
 			t.Fatalf("exit = %s after %d steps (%v), want final after 2", exit.Reason, exit.Steps, exit.Err)
 		}
-		f.mustStatus(done, AgentRunStatusCompleted)
-		if len(f.model.calls("")) != 0 {
+		f.MustStatus(done, AgentRunStatusCompleted)
+		if len(f.Model.Calls("")) != 0 {
 			t.Fatal("a deterministic Run called the model")
 		}
-		if producer.result == nil || producer.result.State != ToolEntryCompleted || producer.result.Output["title"] != "Issue 5" {
-			t.Fatalf("second step read %#v, want the lookup result", producer.result)
+		if producer.Result == nil || producer.Result.State != ToolEntryCompleted || producer.Result.Output["title"] != "Issue 5" {
+			t.Fatalf("second step read %#v, want the lookup result", producer.Result)
 		}
-		if len(producer.steps) != 2 || producer.steps[1]["phase"] != "lookup" {
-			t.Fatalf("engine state seen by the steps = %#v, want step 1's state before step 2", producer.steps)
+		if len(producer.Steps) != 2 || producer.Steps[1]["phase"] != "lookup" {
+			t.Fatalf("engine state seen by the steps = %#v, want step 1's state before step 2", producer.Steps)
 		}
 		if done.Checkpoint["phase"] != "done" || done.Output["title"] != "Issue 5" {
 			t.Fatalf("run checkpoint %#v output %#v", done.Checkpoint, done.Output)
 		}
-		steps := f.sortedSteps(run.ID)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 2 || steps[0].Producer != StepProducerDeterministic || steps[0].ToolCallCount != 1 {
 			t.Fatalf("steps = %#v", steps)
 		}
-		if f.dispatch.count("lookup") != 1 {
-			t.Fatalf("lookup dispatched %d times, want 1", f.dispatch.count("lookup"))
+		if f.Dispatch.Count("lookup") != 1 {
+			t.Fatalf("lookup dispatched %d times, want 1", f.Dispatch.Count("lookup"))
 		}
-		if got := strings.Join(f.entryTypes(run.ID), ","); !strings.HasSuffix(got, "tool:completed") || strings.Contains(got, "assistant") {
+		if got := strings.Join(f.EntryTypes(run.ID), ","); !strings.HasSuffix(got, "tool:completed") || strings.Contains(got, "assistant") {
 			t.Fatalf("log = %s, want tool entries only after the goal", got)
 		}
 	})
 }
 
 func TestRunLoopDeterministicParkUsesLoopTransition(t *testing.T) {
-	eachStore(t, "rl_deterministic_park", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store)
-		producer := f.scriptedRunbook(true)
-		run := f.startRun(RunKindAgentWork, "Wait for the requester")
-		exit, parked := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) { b.Producer = producer })
+	looptest.EachStore(t, "rl_deterministic_park", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store)
+		producer := f.ScriptedRunbook(true)
+		run := f.StartRun(RunKindAgentWork, "Wait for the requester")
+		exit, parked := f.RunClaimWith(f.Ctx, run.ID, func(b *agentrun.TurnRunnerBinding) { b.Producer = producer })
 		if exit.Reason != runloop.RunLoopExitParked || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want parked", exit.Reason, exit.Err)
 		}
-		f.mustStatus(parked, AgentRunStatusWaitingForEvent)
-		steps := f.sortedSteps(run.ID)
+		f.MustStatus(parked, AgentRunStatusWaitingForEvent)
+		steps := f.SortedSteps(run.ID)
 		if len(steps) != 1 || steps[0].Status != AgentTurnStatusCompleted {
 			t.Fatalf("steps = %#v", steps)
 		}
-		if transitions := f.stepTransitions(run.ID, steps[0].ID); len(transitions) != 1 {
+		if transitions := f.StepTransitions(run.ID, steps[0].ID); len(transitions) != 1 {
 			t.Fatalf("transitions applying the step = %d, want 1", len(transitions))
 		}
 		if parked.Checkpoint["phase"] != "waiting" || parked.WakeCondition == nil || parked.WakeCondition.Type != "user_message" || parked.LastAppliedTurn != 1 {

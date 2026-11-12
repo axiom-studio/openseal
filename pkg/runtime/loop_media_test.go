@@ -29,6 +29,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
@@ -76,66 +77,66 @@ func mediaDigest(data []byte) string {
 
 // mediaFixture is a loop fixture whose chats read attachments from content.
 type mediaFixture struct {
-	*loopFixture
+	*looptest.Fixture
 	content *mediaContent
 	vision  bool
 }
 
-func newMediaFixture(t *testing.T, store KernelStore, vision bool, rules ...*modelRule) *mediaFixture {
+func newMediaFixture(t *testing.T, store KernelStore, vision bool, rules ...*looptest.ModelRule) *mediaFixture {
 	t.Helper()
-	f := &mediaFixture{loopFixture: newLoopFixture(t, store, withRules(rules...)), content: &mediaContent{byRef: map[string][]byte{}}, vision: vision}
+	f := &mediaFixture{Fixture: looptest.NewFixture(t, store, looptest.WithRules(rules...)), content: &mediaContent{byRef: map[string][]byte{}}, vision: vision}
 	// The kit's conversation turn runner, reading attachments from content.
-	runner, err := conversationrun.NewConversationRunTurnRunner(f.chats, f.coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
-		AttachmentContent: f.content, AgentTurns: runtimeconversation.TurnRunnerResolverFunc(f.agentBinding),
-	}, models.WithClock(f.clock.Now))
+	runner, err := conversationrun.NewConversationRunTurnRunner(f.Chats, f.Coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
+		AttachmentContent: f.content, AgentTurns: runtimeconversation.TurnRunnerResolverFunc(f.AgentBinding),
+	}, models.WithClock(f.Clock.Now))
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.runner = runner
+	f.Runner = runner
 	return f
 }
 
 // putArtifact stores version 1 of an artifact whose record says mediaType and
 // digest, served with data.
 func (f *mediaFixture) putArtifact(id, mediaType string, data []byte, recordDigest string) ConversationReference {
-	f.t.Helper()
-	artifacts, ok := f.raw.(ArtifactStore)
+	f.T.Helper()
+	artifacts, ok := f.Raw.(ArtifactStore)
 	if !ok {
-		f.t.Fatalf("%T is not an artifact store", f.raw)
+		f.T.Fatalf("%T is not an artifact store", f.Raw)
 	}
 	ref := "object-store:" + id
 	f.content.set(ref, data)
 	artifact := &Artifact{
-		ID: id, Version: 1, Scope: f.scope, Name: id + ".png", MediaType: mediaType, ContentRef: ref,
+		ID: id, Version: 1, Scope: f.Scope, Name: id + ".png", MediaType: mediaType, ContentRef: ref,
 		SizeBytes: int64(len(data)), Digest: recordDigest, Classification: ArtifactClassificationInternal,
-		Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "user", ID: loopFixtureUser}}, CreatedAt: f.clock.Now(),
+		Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "user", ID: looptest.FixtureUser}}, CreatedAt: f.Clock.Now(),
 	}
-	if err := artifacts.CreateArtifactVersion(f.ctx, artifact, 0); err != nil {
-		f.t.Fatalf("store artifact %s: %v", id, err)
+	if err := artifacts.CreateArtifactVersion(f.Ctx, artifact, 0); err != nil {
+		f.T.Fatalf("store artifact %s: %v", id, err)
 	}
 	return ConversationReference{Kind: ConversationReferenceArtifact, ID: id, Version: 1}
 }
 
 // startChatWithAttachments posts text with references as ana and schedules it.
 func (f *mediaFixture) startChatWithAttachments(text string, refs ...ConversationReference) (*Conversation, *AgentRun) {
-	f.t.Helper()
-	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
-		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}, Title: "Media chat",
-		IdempotencyKey: "media-chat-" + fmt.Sprint(f.clock.Now().UnixNano()),
+	f.T.Helper()
+	conversation, _, err := f.Convs.CreateConversation(f.Ctx, runtimeconversation.CreateConversationRequest{
+		Scope: f.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: looptest.FixtureAgent}, Title: "Media chat",
+		IdempotencyKey: "media-chat-" + fmt.Sprint(f.Clock.Now().UnixNano()),
 	})
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
-	posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
-		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser}, Intent: MessageIntentQuestion,
+	posted, err := f.Convs.PostChannelMessage(f.Ctx, runtimeconversation.PostChannelMessageRequest{
+		Scope: f.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: looptest.FixtureUser}, Intent: MessageIntentQuestion,
 		Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, References: refs,
 		IdempotencyKey: "media-post-" + conversation.ID,
 	})
 	if err != nil {
-		f.t.Fatalf("post message: %v", err)
+		f.T.Fatalf("post message: %v", err)
 	}
-	return conversation, f.chatRun(conversation, posted.Message)
+	return conversation, f.ChatRun(conversation, posted.Message)
 }
 
 // bind gives the claim's model producer the artifact sources and the
@@ -143,34 +144,34 @@ func (f *mediaFixture) startChatWithAttachments(text string, refs ...Conversatio
 func (f *mediaFixture) bind(binding *agentrun.TurnRunnerBinding) {
 	producer, ok := binding.Producer.(*modelstep.ModelStepProducer)
 	if !ok {
-		f.t.Fatalf("producer is %T", binding.Producer)
+		f.T.Fatalf("producer is %T", binding.Producer)
 	}
 	vision := f.vision
 	producer.Media = modelstep.ModelStepMedia{
-		Artifacts: f.raw.(ArtifactStore), Content: f.content,
+		Artifacts: f.Raw.(ArtifactStore), Content: f.content,
 		ImageInput: func(context.Context, agentrun.StepInput, ModelStepRequest) bool { return vision },
 	}
 }
 
 // drive claims until the Run is terminal or waiting.
 func (f *mediaFixture) drive(runID string, maxClaims int) *AgentRun {
-	f.t.Helper()
+	f.T.Helper()
 	for i := 0; i < maxClaims; i++ {
-		exit, run := f.runClaimWith(f.ctx, runID, f.bind)
+		exit, run := f.RunClaimWith(f.Ctx, runID, f.bind)
 		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
-			f.t.Fatalf("claim %d exited %s: %v", i+1, exit.Reason, exit.Err)
+			f.T.Fatalf("claim %d exited %s: %v", i+1, exit.Reason, exit.Err)
 		}
 		if run.Status != AgentRunStatusQueued {
 			return run
 		}
-		f.clock.Advance(time.Second)
+		f.Clock.Advance(time.Second)
 	}
-	f.t.Fatalf("run %s not at rest after %d claims", runID, maxClaims)
+	f.T.Fatalf("run %s not at rest after %d claims", runID, maxClaims)
 	return nil
 }
 
 // imageParts is every image part of the view's user and tool entries.
-func viewImageParts(v stepView) (user, tool []ContentPart) {
+func viewImageParts(v looptest.StepView) (user, tool []ContentPart) {
 	for _, e := range v.Request().Entries {
 		switch {
 		case e.Type == SessionEntryUser && e.User != nil:
@@ -191,23 +192,23 @@ func viewImageParts(v stepView) (user, tool []ContentPart) {
 }
 
 // viewText is the text of every user and tool entry of the view.
-func viewText(v stepView) string {
+func viewText(v looptest.StepView) string {
 	var b strings.Builder
 	for _, e := range v.Request().Entries {
 		switch {
 		case e.Type == SessionEntryUser && e.User != nil:
-			b.WriteString(kitPartsText(e.User.Content) + "\n")
+			b.WriteString(looptest.PartsText(e.User.Content) + "\n")
 		case e.Type == SessionEntryTool && e.Tool != nil:
-			b.WriteString(kitPartsText(e.Tool.Result.Content) + "\n")
+			b.WriteString(looptest.PartsText(e.Tool.Result.Content) + "\n")
 		}
 	}
 	return b.String()
 }
 
 // storedImageParts is every image part of the Run's stored entries.
-func storedImageParts(f *loopFixture, runID string) (user, tool []ContentPart) {
-	f.t.Helper()
-	for _, entry := range f.entries(runID) {
+func storedImageParts(f *looptest.Fixture, runID string) (user, tool []ContentPart) {
+	f.T.Helper()
+	for _, entry := range f.Entries(runID) {
 		switch {
 		case entry.Type == SessionEntryUser && entry.User != nil:
 			for _, p := range entry.User.Content {
@@ -227,9 +228,9 @@ func storedImageParts(f *loopFixture, runID string) (user, tool []ContentPart) {
 }
 
 // requireNoStoredBytes fails when any stored entry of the Run holds encoded.
-func requireNoStoredBytes(t *testing.T, f *loopFixture, runID string, encoded ...string) {
+func requireNoStoredBytes(t *testing.T, f *looptest.Fixture, runID string, encoded ...string) {
 	t.Helper()
-	raw, err := json.Marshal(f.entries(runID))
+	raw, err := json.Marshal(f.Entries(runID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,106 +261,112 @@ func screenshotOutput(data []byte) func(agentrun.ActionDispatchInput) (map[strin
 // "[image omitted]" placeholder. The session never stores the bytes.
 func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 	t.Run("attachment", func(t *testing.T) {
-		eachStore(t, "media_attachment", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "media_attachment", func(t *testing.T, store KernelStore) {
 			chart := mediaPNG(t, 3, 2)
 			encoded := base64.StdEncoding.EncodeToString(chart)
-			f := newMediaFixture(t, store, true, &modelRule{name: "look", when: stepPurpose, reply: func(v stepView) ModelStepResult {
+			f := newMediaFixture(t, store, true, &looptest.ModelRule{Name: "look", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
 				user, _ := viewImageParts(v)
 				if len(user) != 1 || user[0].DataBase64 != encoded || user[0].ArtifactID != "chart" || user[0].ArtifactVersion != "1" || user[0].SHA256 != mediaDigest(chart) {
 					t.Errorf("step image parts = %#v", user)
 				}
-				return say("A blank chart.")
+				return looptest.Say("A blank chart.")
 			}})
 			ref := f.putArtifact("chart", "image/png", chart, "sha256:"+mediaDigest(chart))
 			conversation, run := f.startChatWithAttachments("What is in this chart?", ref)
 			done := f.drive(run.ID, 3)
-			f.mustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, AgentRunStatusCompleted)
 
-			user, _ := storedImageParts(f.loopFixture, run.ID)
+			user, _ := storedImageParts(f.Fixture, run.ID)
 			if len(user) != 1 {
 				t.Fatalf("stored image parts = %#v", user)
 			}
 			if got := user[0]; got.ArtifactID != "chart" || got.ArtifactVersion != "1" || got.ActionCallID != "" || got.SHA256 != mediaDigest(chart) || got.MediaType != "image/png" {
 				t.Fatalf("stored image reference = %#v", got)
 			}
-			requireNoStoredBytes(t, f.loopFixture, run.ID, encoded)
-			if replies := f.agentReplies(conversation.ID); !slices.Equal(replies, []string{"A blank chart."}) {
+			requireNoStoredBytes(t, f.Fixture, run.ID, encoded)
+			if replies := f.AgentReplies(conversation.ID); !slices.Equal(replies, []string{"A blank chart."}) {
 				t.Fatalf("replies = %q", replies)
 			}
 		})
 	})
 
 	t.Run("governed_screenshot", func(t *testing.T) {
-		eachStore(t, "media_screenshot", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "media_screenshot", func(t *testing.T, store KernelStore) {
 			shot := mediaPNG(t, 4, 4)
 			encoded := base64.StdEncoding.EncodeToString(shot)
 			f := newMediaFixture(t, store, true,
-				&modelRule{name: "answer", when: func(v stepView) bool { _, _, ok := v.ToolResult(kitGovernedTool(v, "lookup")); return ok }, reply: func(v stepView) ModelStepResult {
+				&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool {
+					_, _, ok := v.ToolResult(looptest.GovernedTool(v, "lookup"))
+					return ok
+				}, Reply: func(v looptest.StepView) ModelStepResult {
 					_, tool := viewImageParts(v)
 					if len(tool) != 1 || tool[0].DataBase64 != encoded || tool[0].ActionCallID == "" || tool[0].ArtifactID != "" || tool[0].SHA256 != mediaDigest(shot) {
 						t.Errorf("step tool image parts = %#v", tool)
 					}
-					if content, _, _ := v.ToolResult(kitGovernedTool(v, "lookup")); strings.Contains(content, "modelMedia") || strings.Contains(content, encoded) {
+					if content, _, _ := v.ToolResult(looptest.GovernedTool(v, "lookup")); strings.Contains(content, "modelMedia") || strings.Contains(content, encoded) {
 						t.Errorf("the screenshot is in the tool result text: %q", content)
 					}
-					return say("The page shows issue 9.")
+					return looptest.Say("The page shows issue 9.")
 				}},
-				&modelRule{name: "lookup", when: stepPurpose, reply: func(v stepView) ModelStepResult {
-					return act("Looking.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "9"}))
+				&looptest.ModelRule{Name: "lookup", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.Act("Looking.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "9"}))
 				}},
 			)
-			f.dispatch.on("lookup", screenshotOutput(shot))
+			f.Dispatch.On("lookup", screenshotOutput(shot))
 			conversation, run := f.startChatWithAttachments("Show me issue 9")
 			done := f.drive(run.ID, 3)
-			f.mustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, AgentRunStatusCompleted)
 
-			calls := f.calls(run.ID)
+			calls := f.Calls(run.ID)
 			if len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded {
 				t.Fatalf("calls = %#v", calls)
 			}
-			_, tool := storedImageParts(f.loopFixture, run.ID)
+			_, tool := storedImageParts(f.Fixture, run.ID)
 			if len(tool) != 1 || tool[0].ActionCallID != calls[0].ID || tool[0].ArtifactID != "" || tool[0].SHA256 != mediaDigest(shot) || tool[0].Detail != "low" {
 				t.Fatalf("stored tool image reference = %#v (call %s)", tool, calls[0].ID)
 			}
-			requireNoStoredBytes(t, f.loopFixture, run.ID, encoded)
-			if replies := f.agentReplies(conversation.ID); !slices.Equal(replies, []string{"The page shows issue 9."}) {
+			requireNoStoredBytes(t, f.Fixture, run.ID, encoded)
+			if replies := f.AgentReplies(conversation.ID); !slices.Equal(replies, []string{"The page shows issue 9."}) {
 				t.Fatalf("replies = %q", replies)
 			}
 		})
 	})
 
 	t.Run("text_only_model", func(t *testing.T) {
-		eachStore(t, "media_text_only", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "media_text_only", func(t *testing.T, store KernelStore) {
 			chart, shot := mediaPNG(t, 3, 2), mediaPNG(t, 4, 4)
 			omitted := "[image omitted: image/png]"
 			f := newMediaFixture(t, store, false,
-				&modelRule{name: "answer", when: func(v stepView) bool { _, _, ok := v.ToolResult(kitGovernedTool(v, "lookup")); return ok }, reply: func(v stepView) ModelStepResult {
+				&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool {
+					_, _, ok := v.ToolResult(looptest.GovernedTool(v, "lookup"))
+					return ok
+				}, Reply: func(v looptest.StepView) ModelStepResult {
 					if user, tool := viewImageParts(v); len(user)+len(tool) != 0 {
 						t.Errorf("a text-only step got image parts: %#v %#v", user, tool)
 					}
 					if got := strings.Count(viewText(v), omitted); got != 2 {
 						t.Errorf("placeholders = %d, want 2: %s", got, viewText(v))
 					}
-					return say("I can't see images here.")
+					return looptest.Say("I can't see images here.")
 				}},
-				&modelRule{name: "lookup", when: stepPurpose, reply: func(v stepView) ModelStepResult {
+				&looptest.ModelRule{Name: "lookup", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
 					if user, _ := viewImageParts(v); len(user) != 0 || !strings.Contains(viewText(v), omitted) {
 						t.Errorf("a text-only step saw the attachment: %#v / %s", user, viewText(v))
 					}
-					return act("Looking.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "9"}))
+					return looptest.Act("Looking.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "9"}))
 				}},
 			)
-			f.dispatch.on("lookup", screenshotOutput(shot))
+			f.Dispatch.On("lookup", screenshotOutput(shot))
 			ref := f.putArtifact("chart", "image/png", chart, "sha256:"+mediaDigest(chart))
 			_, run := f.startChatWithAttachments("What is in this chart?", ref)
 			done := f.drive(run.ID, 3)
-			f.mustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, AgentRunStatusCompleted)
 			// The references are stored either way; only the render differs.
-			user, tool := storedImageParts(f.loopFixture, run.ID)
+			user, tool := storedImageParts(f.Fixture, run.ID)
 			if len(user) != 1 || len(tool) != 1 {
 				t.Fatalf("stored image parts = %#v %#v", user, tool)
 			}
-			requireNoStoredBytes(t, f.loopFixture, run.ID, base64.StdEncoding.EncodeToString(chart), base64.StdEncoding.EncodeToString(shot))
+			requireNoStoredBytes(t, f.Fixture, run.ID, base64.StdEncoding.EncodeToString(chart), base64.StdEncoding.EncodeToString(shot))
 		})
 	})
 }
@@ -372,22 +379,25 @@ func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 // exactly one source and never carry bytes.
 func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 	t.Run("attachments", func(t *testing.T) {
-		eachStore(t, "media_provenance", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "media_provenance", func(t *testing.T, store KernelStore) {
 			good, other := mediaPNG(t, 3, 2), mediaPNG(t, 5, 5)
 			encoded := base64.StdEncoding.EncodeToString(good)
 			unavailable := "[image unavailable: image/png]"
 			var f *mediaFixture
 			f = newMediaFixture(t, store, true,
-				&modelRule{name: "after_swap", when: func(v stepView) bool { _, _, ok := v.ToolResult(kitGovernedTool(v, "lookup")); return ok }, reply: func(v stepView) ModelStepResult {
+				&looptest.ModelRule{Name: "after_swap", When: func(v looptest.StepView) bool {
+					_, _, ok := v.ToolResult(looptest.GovernedTool(v, "lookup"))
+					return ok
+				}, Reply: func(v looptest.StepView) ModelStepResult {
 					if user, _ := viewImageParts(v); len(user) != 0 {
 						t.Errorf("changed bytes rendered as the pinned image: %#v", user)
 					}
 					if !strings.Contains(viewText(v), unavailable) {
 						t.Errorf("no unavailable placeholder: %s", viewText(v))
 					}
-					return say("The chart is no longer available.")
+					return looptest.Say("The chart is no longer available.")
 				}},
-				&modelRule{name: "first", when: stepPurpose, reply: func(v stepView) ModelStepResult {
+				&looptest.ModelRule{Name: "first", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
 					user, _ := viewImageParts(v)
 					if len(user) != 1 || user[0].ArtifactID != "good" || user[0].DataBase64 != encoded {
 						t.Errorf("first step image parts = %#v", user)
@@ -400,7 +410,7 @@ func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 					}
 					// The bytes behind the pinned version change before the next step.
 					f.content.set("object-store:good", other)
-					return act("Checking.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "1"}))
+					return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "1"}))
 				}},
 			)
 			refs := []ConversationReference{
@@ -410,13 +420,13 @@ func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 			}
 			_, run := f.startChatWithAttachments("Compare these", refs...)
 			done := f.drive(run.ID, 3)
-			f.mustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, AgentRunStatusCompleted)
 
-			user, _ := storedImageParts(f.loopFixture, run.ID)
+			user, _ := storedImageParts(f.Fixture, run.ID)
 			if len(user) != 1 || user[0].ArtifactID != "good" || user[0].ArtifactVersion != "1" || user[0].SHA256 != mediaDigest(good) {
 				t.Fatalf("stored image references = %#v", user)
 			}
-			requireNoStoredBytes(t, f.loopFixture, run.ID, encoded)
+			requireNoStoredBytes(t, f.Fixture, run.ID, encoded)
 		})
 	})
 
@@ -425,7 +435,7 @@ func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 		entry := func(part ContentPart) *SessionEntry {
 			return &SessionEntry{
 				ID: "entry", Scope: Scope{Kind: "tenant", ID: "loop"}, SessionID: "session", RunID: "run", Type: SessionEntryUser,
-				User: &UserEntry{Origin: UserEntryGoal, Author: SessionAuthor{Type: "user", ID: loopFixtureUser},
+				User: &UserEntry{Origin: UserEntryGoal, Author: SessionAuthor{Type: "user", ID: looptest.FixtureUser},
 					Content: []ContentPart{{Type: ContentPartText, Text: "look"}, part}},
 				Tokens: 1, CreatedAt: time.Now(),
 			}

@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
@@ -25,44 +26,44 @@ import (
 // poolFixturePool is a worker pool over the loop fixture's store whose
 // resolver hands out the fixture's production binding. Claims are driven
 // one at a time with executeClaim, as the fixture's worker.
-func poolFixturePool(t *testing.T, f *loopFixture, maxSteps int) *AgentRunWorkerPool {
+func poolFixturePool(t *testing.T, f *looptest.Fixture, maxSteps int) *AgentRunWorkerPool {
 	t.Helper()
 	if maxSteps <= 0 {
 		maxSteps = runloop.RunLoopMaxStepsPerClaim
 	}
-	pool, err := newAgentRunWorkerPool(f.store, conversation.TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
-		return f.binding(run), nil
-	}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease}, maxSteps, models.WithClock(f.clock.Now))
+	pool, err := newAgentRunWorkerPool(f.Store, conversation.TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		return f.Binding(run), nil
+	}), nil, AgentRunWorkerConfig{Scope: f.Scope, LeaseDuration: looptest.FixtureLease, TurnLeaseDuration: looptest.FixtureLease}, maxSteps, models.WithClock(f.Clock.Now))
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool.SetActionCoordinator(f.actions)
+	pool.SetActionCoordinator(f.Actions)
 	return pool
 }
 
 // poolClaim claims runID through the pool's scheduler as the fixture worker
 // and executes the claim. It returns the Run as stored afterwards.
-func poolClaim(t *testing.T, f *loopFixture, pool *AgentRunWorkerPool, runID string) *models.AgentRun {
+func poolClaim(t *testing.T, f *looptest.Fixture, pool *AgentRunWorkerPool, runID string) *models.AgentRun {
 	t.Helper()
-	claimed, err := pool.scheduler.ClaimNext(f.ctx, agentrun.AgentRunClaimRequest{
-		Scope: f.scope, WorkerID: f.workerID, LeaseDuration: loopFixtureLease,
+	claimed, err := pool.scheduler.ClaimNext(f.Ctx, agentrun.AgentRunClaimRequest{
+		Scope: f.Scope, WorkerID: f.WorkerID, LeaseDuration: looptest.FixtureLease,
 	})
 	if err != nil || claimed == nil || claimed.ID != runID {
 		t.Fatalf("claim %s: %#v %v", runID, claimed, err)
 	}
-	pool.executeClaim(f.ctx, f.workerID, claimed)
-	return f.mustRun(runID)
+	pool.executeClaim(f.Ctx, f.WorkerID, claimed)
+	return f.MustRun(runID)
 }
 
 // lookupSteps answers a lookup of a distinct issue on each of the first n
 // steps, then gives the final answer.
-func lookupSteps(n int) []*modelRule {
-	return []*modelRule{
-		{name: "lookup", when: func(v stepView) bool { return v.Step() <= n },
-			reply: func(v stepView) models.ModelStepResult {
-				return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": fmt.Sprint(6800 + v.Step())}))
+func lookupSteps(n int) []*looptest.ModelRule {
+	return []*looptest.ModelRule{
+		{Name: "lookup", When: func(v looptest.StepView) bool { return v.Step() <= n },
+			Reply: func(v looptest.StepView) models.ModelStepResult {
+				return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": fmt.Sprint(6800 + v.Step())}))
 			}},
-		{name: "answer", reply: func(stepView) models.ModelStepResult { return say("Done.") }},
+		{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult { return looptest.Say("Done.") }},
 	}
 }
 
@@ -70,31 +71,31 @@ func lookupSteps(n int) []*modelRule {
 // resolves once, the loop runs a read step and the final step, and nothing
 // yields.
 func TestLoopPoolClaimsAndRunsToRest(t *testing.T) {
-	eachStore(t, "loop_pool_rest", func(t *testing.T, store models.KernelStore) {
-		f := newLoopFixture(t, store, withRules(lookupSteps(2)...))
+	looptest.EachStore(t, "loop_pool_rest", func(t *testing.T, store models.KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(lookupSteps(2)...))
 		var resolved atomic.Int32
-		pool, err := NewAgentRunWorkerPool(f.store, conversation.TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		pool, err := NewAgentRunWorkerPool(f.Store, conversation.TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			resolved.Add(1)
-			return f.binding(run), nil
-		}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease}, models.WithClock(f.clock.Now))
+			return f.Binding(run), nil
+		}), nil, AgentRunWorkerConfig{Scope: f.Scope, LeaseDuration: looptest.FixtureLease, TurnLeaseDuration: looptest.FixtureLease}, models.WithClock(f.Clock.Now))
 		if err != nil {
 			t.Fatal(err)
 		}
-		pool.SetActionCoordinator(f.actions)
-		run := f.startRun(models.RunKindAgentWork, "Check two issues")
+		pool.SetActionCoordinator(f.Actions)
+		run := f.StartRun(models.RunKindAgentWork, "Check two issues")
 
 		done := poolClaim(t, f, pool, run.ID)
-		f.mustStatus(done, models.AgentRunStatusCompleted)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
 		if resolved.Load() != 1 {
 			t.Fatalf("resolutions = %d, want 1", resolved.Load())
 		}
-		if steps := f.steps(run.ID); len(steps) != 3 || done.LastAppliedTurn != 3 {
+		if steps := f.Steps(run.ID); len(steps) != 3 || done.LastAppliedTurn != 3 {
 			t.Fatalf("steps = %d, last applied %d; want 3", len(steps), done.LastAppliedTurn)
 		}
-		if f.dispatch.count("lookup") != 2 {
-			t.Fatalf("lookup dispatched %d times, want 2", f.dispatch.count("lookup"))
+		if f.Dispatch.Count("lookup") != 2 {
+			t.Fatalf("lookup dispatched %d times, want 2", f.Dispatch.Count("lookup"))
 		}
-		if claims, yields := len(f.events(run.ID, "run.claimed")), len(f.events(run.ID, "run.yielded")); claims != 1 || yields != 0 {
+		if claims, yields := len(f.Events(run.ID, "run.claimed")), len(f.Events(run.ID, "run.yielded")); claims != 1 || yields != 0 {
 			t.Fatalf("claimed %d, yielded %d; want one claim and no yield", claims, yields)
 		}
 	})
@@ -103,27 +104,27 @@ func TestLoopPoolClaimsAndRunsToRest(t *testing.T) {
 // A claim ends after its step slice: the Run goes back to the queue with a
 // run.yielded event, and the next claim continues from the log.
 func TestLoopPoolYieldsAfterItsStepSlice(t *testing.T) {
-	eachStore(t, "loop_pool_yield", func(t *testing.T, store models.KernelStore) {
-		f := newLoopFixture(t, store, withRules(lookupSteps(1)...))
+	looptest.EachStore(t, "loop_pool_yield", func(t *testing.T, store models.KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(lookupSteps(1)...))
 		pool := poolFixturePool(t, f, 1)
-		run := f.startRun(models.RunKindAgentWork, "Check one issue")
+		run := f.StartRun(models.RunKindAgentWork, "Check one issue")
 
 		yielded := poolClaim(t, f, pool, run.ID)
-		f.mustStatus(yielded, models.AgentRunStatusQueued)
-		if yielded.LastAppliedTurn != 1 || len(f.events(run.ID, "run.yielded")) != 1 {
-			t.Fatalf("first claim: last applied %d, yields %d", yielded.LastAppliedTurn, len(f.events(run.ID, "run.yielded")))
+		f.MustStatus(yielded, models.AgentRunStatusQueued)
+		if yielded.LastAppliedTurn != 1 || len(f.Events(run.ID, "run.yielded")) != 1 {
+			t.Fatalf("first claim: last applied %d, yields %d", yielded.LastAppliedTurn, len(f.Events(run.ID, "run.yielded")))
 		}
 		done := poolClaim(t, f, pool, run.ID)
-		f.mustStatus(done, models.AgentRunStatusCompleted)
-		if done.Attempt != 2 || done.LastAppliedTurn != 2 || len(f.model.calls(models.ModelStepPurposeStep)) != 2 {
-			t.Fatalf("second claim: attempt %d, last applied %d, model calls %d", done.Attempt, done.LastAppliedTurn, len(f.model.calls(models.ModelStepPurposeStep)))
+		f.MustStatus(done, models.AgentRunStatusCompleted)
+		if done.Attempt != 2 || done.LastAppliedTurn != 2 || len(f.Model.Calls(models.ModelStepPurposeStep)) != 2 {
+			t.Fatalf("second claim: attempt %d, last applied %d, model calls %d", done.Attempt, done.LastAppliedTurn, len(f.Model.Calls(models.ModelStepPurposeStep)))
 		}
-		for _, event := range f.events(run.ID, "run.claimed") {
+		for _, event := range f.Events(run.ID, "run.claimed") {
 			if event.UsageDelta != nil {
 				t.Fatalf("run.claimed duplicated scheduler-owned attempt usage: %#v", event)
 			}
 		}
-		if claims := len(f.events(run.ID, "run.claimed")); claims != 2 {
+		if claims := len(f.Events(run.ID, "run.claimed")); claims != 2 {
 			t.Fatalf("claims = %d, want 2", claims)
 		}
 	})
@@ -133,25 +134,25 @@ func TestLoopPoolYieldsAfterItsStepSlice(t *testing.T) {
 // instead of going back to the queue: the model is never called past the
 // attempt limit, and the paused Run is not claimed again.
 func TestLoopPoolNeverChargesPastAttemptLimit(t *testing.T) {
-	f := newLoopFixture(t, newTestKernelStore(t), withRules(lookupSteps(4)...))
+	f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(lookupSteps(4)...))
 	pool := poolFixturePool(t, f, 1)
-	run, err := f.portfolio.CreateAgentRun(f.ctx, models.CreateAgentRunRequest{
-		Scope: f.scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: loopFixtureAgent}, AssignedAgentID: loopFixtureAgent,
+	run, err := f.Portfolio.CreateAgentRun(f.Ctx, models.CreateAgentRunRequest{
+		Scope: f.Scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: looptest.FixtureAgent}, AssignedAgentID: looptest.FixtureAgent,
 		Goal: "use exactly one autonomous attempt", Source: models.RunSourceObjective, Budget: &models.BudgetPolicy{MaxAttempts: 1, MaxTurns: 5},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	paused := poolClaim(t, f, pool, run.ID)
-	f.mustStatus(paused, models.AgentRunStatusPaused)
-	if next, err := pool.scheduler.ClaimNext(f.ctx, agentrun.AgentRunClaimRequest{Scope: f.scope, WorkerID: f.workerID, LeaseDuration: loopFixtureLease}); err != nil || next != nil {
+	f.MustStatus(paused, models.AgentRunStatusPaused)
+	if next, err := pool.scheduler.ClaimNext(f.Ctx, agentrun.AgentRunClaimRequest{Scope: f.Scope, WorkerID: f.WorkerID, LeaseDuration: looptest.FixtureLease}); err != nil || next != nil {
 		t.Fatalf("paused Run was claimed again: %#v %v", next, err)
 	}
-	if paused.BudgetUsage.Attempts != 1 || len(f.model.calls(models.ModelStepPurposeStep)) != 1 || len(f.steps(run.ID)) != 1 {
-		t.Fatalf("attempt ceiling: attempts %d, model calls %d, steps %d", paused.BudgetUsage.Attempts, len(f.model.calls(models.ModelStepPurposeStep)), len(f.steps(run.ID)))
+	if paused.BudgetUsage.Attempts != 1 || len(f.Model.Calls(models.ModelStepPurposeStep)) != 1 || len(f.Steps(run.ID)) != 1 {
+		t.Fatalf("attempt ceiling: attempts %d, model calls %d, steps %d", paused.BudgetUsage.Attempts, len(f.Model.Calls(models.ModelStepPurposeStep)), len(f.Steps(run.ID)))
 	}
-	if len(f.events(run.ID, "budget.exhausted")) != 1 {
-		t.Fatalf("budget.exhausted events = %d, want 1", len(f.events(run.ID, "budget.exhausted")))
+	if len(f.Events(run.ID, "budget.exhausted")) != 1 {
+		t.Fatalf("budget.exhausted events = %d, want 1", len(f.Events(run.ID, "budget.exhausted")))
 	}
 }
 
@@ -169,28 +170,28 @@ func TestLoopTurnsBudgetCountsModelSteps(t *testing.T) {
 		{name: "fourth_step_refused", lookups: 3, want: models.AgentRunStatusPaused},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			eachStore(t, "loop_turns_budget", func(t *testing.T, store models.KernelStore) {
-				outage := &modelRule{name: "outage", times: 1, when: func(v stepView) bool { return v.Step() == 2 }, err: modelstep.ErrTurnHostUnavailable}
-				f := newLoopFixture(t, store, withRules(append([]*modelRule{outage}, lookupSteps(c.lookups)...)...))
-				run, err := f.portfolio.CreateAgentRun(f.ctx, models.CreateAgentRunRequest{
-					Scope: f.scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: loopFixtureAgent},
-					AssignedAgentID: loopFixtureAgent, Goal: "Check the issues", Source: models.RunSourceObjective, Budget: &models.BudgetPolicy{MaxTurns: 3},
+			looptest.EachStore(t, "loop_turns_budget", func(t *testing.T, store models.KernelStore) {
+				outage := &looptest.ModelRule{Name: "outage", Times: 1, When: func(v looptest.StepView) bool { return v.Step() == 2 }, Err: modelstep.ErrTurnHostUnavailable}
+				f := looptest.NewFixture(t, store, looptest.WithRules(append([]*looptest.ModelRule{outage}, lookupSteps(c.lookups)...)...))
+				run, err := f.Portfolio.CreateAgentRun(f.Ctx, models.CreateAgentRunRequest{
+					Scope: f.Scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: looptest.FixtureAgent},
+					AssignedAgentID: looptest.FixtureAgent, Goal: "Check the issues", Source: models.RunSourceObjective, Budget: &models.BudgetPolicy{MaxTurns: 3},
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
-				done := f.driveToRest(run.ID, 5)
-				f.mustStatus(done, c.want)
-				if outage.used != 1 {
-					t.Fatalf("outage rule used %d times, want 1", outage.used)
+				done := f.DriveToRest(run.ID, 5)
+				f.MustStatus(done, c.want)
+				if outage.Used != 1 {
+					t.Fatalf("outage rule used %d times, want 1", outage.Used)
 				}
 				if done.BudgetUsage.Turns != 3 {
 					t.Fatalf("budget usage = %#v, want 3 Turns", done.BudgetUsage)
 				}
 				if done.Status == models.AgentRunStatusPaused {
-					if len(f.events(run.ID, "budget.exhausted")) != 1 || len(f.model.calls(models.ModelStepPurposeStep)) != 4 {
+					if len(f.Events(run.ID, "budget.exhausted")) != 1 || len(f.Model.Calls(models.ModelStepPurposeStep)) != 4 {
 						t.Fatalf("exhausted: events %d, model calls %d (3 steps + 1 outage)",
-							len(f.events(run.ID, "budget.exhausted")), len(f.model.calls(models.ModelStepPurposeStep)))
+							len(f.Events(run.ID, "budget.exhausted")), len(f.Model.Calls(models.ModelStepPurposeStep)))
 					}
 				}
 				if done.Status == models.AgentRunStatusCompleted && len(done.BudgetReservations) != 0 {
@@ -203,18 +204,18 @@ func TestLoopTurnsBudgetCountsModelSteps(t *testing.T) {
 
 // Chat Runs are unbounded: five steps reserve nothing and leave no budget.
 func TestLoopChatRunsAcquireNoBudget(t *testing.T) {
-	eachStore(t, "loop_chat_budget", func(t *testing.T, store models.KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", when: func(v stepView) bool { return v.Step() <= 4 },
-				reply: func(v stepView) models.ModelStepResult {
-					return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": fmt.Sprint(6800 + v.Step())}))
+	looptest.EachStore(t, "loop_chat_budget", func(t *testing.T, store models.KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", When: func(v looptest.StepView) bool { return v.Step() <= 4 },
+				Reply: func(v looptest.StepView) models.ModelStepResult {
+					return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": fmt.Sprint(6800 + v.Step())}))
 				}},
-			&modelRule{name: "answer", reply: func(stepView) models.ModelStepResult { return say("All four are open.") }},
+			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult { return looptest.Say("All four are open.") }},
 		))
-		_, run := f.startChat("check issues 6801 to 6804")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, models.AgentRunStatusCompleted)
-		if steps := f.steps(run.ID); len(steps) != 5 {
+		_, run := f.StartChat("check issues 6801 to 6804")
+		done := f.DriveToRest(run.ID, 3)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
+		if steps := f.Steps(run.ID); len(steps) != 5 {
 			t.Fatalf("steps = %d, want 5", len(steps))
 		}
 		if done.Budget != nil || len(done.BudgetReservations) != 0 {

@@ -1,7 +1,7 @@
 package runtime
 
 // External channel journeys on the run loop (run-loop section 12 §5.10,
-// tests-T13). The loopFixture drives real chat Runs; an external endpoint on
+// tests-T13). The looptest.Fixture drives real chat Runs; an external endpoint on
 // the same store stands for the connector (Slack or webchat) that the Run's
 // conversation came from. The external workers then project what the loop
 // wrote: step narration stays the step's activity summary, turn_report_progress
@@ -26,6 +26,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -37,10 +38,10 @@ type externalLoopStore interface {
 	ExternalConversationReplyStore
 }
 
-// externalLoopFixture is a loopFixture whose chats arrive through an external
+// externalLoopFixture is a looptest.Fixture whose chats arrive through an external
 // endpoint of the Run's owner.
 type externalLoopFixture struct {
-	*loopFixture
+	*looptest.Fixture
 	ext      externalLoopStore
 	adapters *skill.Catalog
 	endpoint *ExternalConversationEndpoint
@@ -59,27 +60,27 @@ type externalChat struct {
 }
 
 // newExternalLoopFixture creates the endpoint (owned by finn, or by Team
-// "team" withTeam) and moves the loop fixture into the endpoint's scope.
+// "team" looptest.WithTeam) and moves the loop fixture into the endpoint's scope.
 // renderer is the progress worker's acknowledgement renderer; nil refuses to
 // render.
-func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, operations []capability.ConversationDeliveryOperation, renderer agentrun.RunProgressAcknowledgementRenderer, opts ...loopOption) *externalLoopFixture {
+func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, operations []capability.ConversationDeliveryOperation, renderer agentrun.RunProgressAcknowledgementRenderer, opts ...looptest.Option) *externalLoopFixture {
 	t.Helper()
 	ext, ok := store.(externalLoopStore)
 	if !ok {
 		t.Fatalf("%T is not an external conversation store", store)
 	}
-	f := &externalLoopFixture{loopFixture: newLoopFixture(t, store, opts...), ext: ext, host: &externalconversationtest.StreamChatHost{Messages: map[string]string{}}}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}
-	if len(f.config.team) > 0 {
+	f := &externalLoopFixture{Fixture: looptest.NewFixture(t, store, opts...), ext: ext, host: &externalconversationtest.StreamChatHost{Messages: map[string]string{}}}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: looptest.FixtureAgent}
+	if len(f.Config.Team) > 0 {
 		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}
 	}
-	f.adapters, f.endpoint = externalconversationtest.EndpointFixtureOwnedBy(t, f.ctx, ext, provider, operations, owner)
+	f.adapters, f.endpoint = externalconversationtest.EndpointFixtureOwnedBy(t, f.Ctx, ext, provider, operations, owner)
 	// The endpoint fixture fixes the scope ({tenant, <provider>}); the
 	// fixture Skill is bound there too so governed calls resolve.
-	f.scope = f.endpoint.Scope
-	if err := f.catalog.Bind(f.ctx, &skill.Binding{
-		ID: loopFixtureBindingID, Scope: skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, DeploymentID: loopFixtureAgent,
-		SkillID: loopFixtureSkillID, SkillVersion: loopFixtureSkillVer,
+	f.Scope = f.endpoint.Scope
+	if err := f.Catalog.Bind(f.Ctx, &skill.Binding{
+		ID: looptest.FixtureBindingID, Scope: skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}, DeploymentID: looptest.FixtureAgent,
+		SkillID: looptest.FixtureSkillID, SkillVersion: looptest.FixtureSkillVer,
 		AllowedActions: []string{"lookup", "list_items", "update_status", "send", "explode"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1,
 	}); err != nil {
 		t.Fatal(err)
@@ -92,13 +93,13 @@ func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, op
 	var err error
 	if f.progress, err = externalconversation.NewRunProgressAcknowledgementWorker(ext, f.adapters, renderer, externalconversation.RunProgressAcknowledgementWorkerConfig{
 		MinimumRunAge: time.Nanosecond, MinimumInterval: time.Nanosecond,
-	}, models.WithClock(f.clock.Now)); err != nil {
+	}, models.WithClock(f.Clock.Now)); err != nil {
 		t.Fatal(err)
 	}
-	if f.replies, err = externalconversation.NewExternalConversationReplyWorker(ext, f.adapters, models.WithClock(f.clock.Now)); err != nil {
+	if f.replies, err = externalconversation.NewExternalConversationReplyWorker(ext, f.adapters, models.WithClock(f.Clock.Now)); err != nil {
 		t.Fatal(err)
 	}
-	if f.delivery, err = externalconversation.NewExternalConversationDeliveryWorker(ext, f.adapters, f.host, externalconversation.ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}, models.WithClock(f.clock.Now)); err != nil {
+	if f.delivery, err = externalconversation.NewExternalConversationDeliveryWorker(ext, f.adapters, f.host, externalconversation.ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}, models.WithClock(f.Clock.Now)); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -107,40 +108,40 @@ func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, op
 // startExternal posts text from the provider into a new external-origin
 // conversation, schedules its Run and records the applied inbox item.
 func (f *externalLoopFixture) startExternal(text string) externalChat {
-	f.t.Helper()
-	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
-		Scope: f.scope, Owner: f.endpoint.Owner, Title: "Provider thread",
+	f.T.Helper()
+	conversation, _, err := f.Convs.CreateConversation(f.Ctx, runtimeconversation.CreateConversationRequest{
+		Scope: f.Scope, Owner: f.endpoint.Owner, Title: "Provider thread",
 		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: f.endpoint.ID, Version: f.endpoint.Revision},
 		IdempotencyKey: "external-loop-chat",
 	})
 	if err != nil {
-		f.t.Fatalf("create conversation: %v", err)
+		f.T.Fatalf("create conversation: %v", err)
 	}
-	posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
-		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser}, Intent: MessageIntentQuestion,
+	posted, err := f.Convs.PostChannelMessage(f.Ctx, runtimeconversation.PostChannelMessageRequest{
+		Scope: f.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: looptest.FixtureUser}, Intent: MessageIntentQuestion,
 		Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
 		IdempotencyKey: "external-loop-inbound",
 	})
 	if err != nil {
-		f.t.Fatalf("post inbound: %v", err)
+		f.T.Fatalf("post inbound: %v", err)
 	}
-	run := f.chatRun(conversation, posted.Message)
-	now := f.clock.Now()
+	run := f.ChatRun(conversation, posted.Message)
+	now := f.Clock.Now()
 	item := &ExternalConversationInboxItem{
-		ID: "external-loop-inbox", Scope: f.scope, EndpointID: f.endpoint.ID,
+		ID: "external-loop-inbox", Scope: f.Scope, EndpointID: f.endpoint.ID,
 		EndpointRevision: f.endpoint.Revision, Adapter: f.endpoint.Adapter,
 		Event: NormalizedExternalConversationEvent{
 			ID: "external-loop-event", Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "conversation", ExternalThreadID: "thread", ExternalMessageID: "message",
-			ExternalParticipantID: loopFixtureUser, Text: text, OrderingKey: "conversation:message", OccurredAt: now,
+			ExternalParticipantID: looptest.FixtureUser, Text: text, OrderingKey: "conversation:message", OccurredAt: now,
 		},
 		Status: ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
 		ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID, RunID: run.ID,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, AppliedAt: now,
 	}
-	if _, replayed, err := f.ext.ReceiveExternalConversationEvent(f.ctx, item); err != nil || replayed {
-		f.t.Fatalf("store inbox item: replayed=%t err=%v", replayed, err)
+	if _, replayed, err := f.ext.ReceiveExternalConversationEvent(f.Ctx, item); err != nil || replayed {
+		f.T.Fatalf("store inbox item: replayed=%t err=%v", replayed, err)
 	}
 	return externalChat{conversation: conversation, inbound: posted.Message, run: run, item: item}
 }
@@ -149,14 +150,14 @@ func (f *externalLoopFixture) startExternal(text string) externalChat {
 // stream, thread status). It returns an error instead of failing, so model
 // rules can call it from inside a step.
 func (f *externalLoopFixture) commentary() ([]*ExternalConversationDelivery, error) {
-	return f.progress.ProcessCommentaryScope(f.ctx, f.scope)
+	return f.progress.ProcessCommentaryScope(f.Ctx, f.Scope)
 }
 
 func (f *externalLoopFixture) mustCommentary() []*ExternalConversationDelivery {
-	f.t.Helper()
+	f.T.Helper()
 	deliveries, err := f.commentary()
 	if err != nil {
-		f.t.Fatalf("commentary pass: %v", err)
+		f.T.Fatalf("commentary pass: %v", err)
 	}
 	return deliveries
 }
@@ -164,7 +165,7 @@ func (f *externalLoopFixture) mustCommentary() []*ExternalConversationDelivery {
 // deliverAll drains the outbox through the fake provider chat.
 func (f *externalLoopFixture) deliverAll() error {
 	for range 20 {
-		delivery, err := f.delivery.ProcessOne(f.ctx, f.scope)
+		delivery, err := f.delivery.ProcessOne(f.Ctx, f.Scope)
 		if err != nil {
 			return err
 		}
@@ -176,17 +177,17 @@ func (f *externalLoopFixture) deliverAll() error {
 }
 
 func (f *externalLoopFixture) mustDeliverAll() {
-	f.t.Helper()
+	f.T.Helper()
 	if err := f.deliverAll(); err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 }
 
 func (f *externalLoopFixture) reply() []*ExternalConversationDelivery {
-	f.t.Helper()
-	deliveries, err := f.replies.ProcessScope(f.ctx, f.scope, 10)
+	f.T.Helper()
+	deliveries, err := f.replies.ProcessScope(f.Ctx, f.Scope, 10)
 	if err != nil {
-		f.t.Fatalf("reply pass: %v", err)
+		f.T.Fatalf("reply pass: %v", err)
 	}
 	return deliveries
 }
@@ -194,10 +195,10 @@ func (f *externalLoopFixture) reply() []*ExternalConversationDelivery {
 // outbox is every delivery of the endpoint whose correlation kind is kind
 // ("" = all).
 func (f *externalLoopFixture) outbox(kind string) []*ExternalConversationDelivery {
-	f.t.Helper()
-	deliveries, err := f.ext.ListExternalConversationDeliveries(f.ctx, ExternalConversationDeliveryFilter{Scope: f.scope, EndpointID: f.endpoint.ID, Limit: 100})
+	f.T.Helper()
+	deliveries, err := f.ext.ListExternalConversationDeliveries(f.Ctx, ExternalConversationDeliveryFilter{Scope: f.Scope, EndpointID: f.endpoint.ID, Limit: 100})
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 	var out []*ExternalConversationDelivery
 	for _, delivery := range deliveries {
@@ -211,14 +212,14 @@ func (f *externalLoopFixture) outbox(kind string) []*ExternalConversationDeliver
 // replyDelivery is the delivery of the reply to the inbox item: the one
 // whose idempotency key names the item, nil when there is none.
 func (f *externalLoopFixture) replyDelivery(itemID string) *ExternalConversationDelivery {
-	f.t.Helper()
+	f.T.Helper()
 	var found *ExternalConversationDelivery
 	for _, delivery := range f.outbox("") {
 		if delivery.IdempotencyKey != "external-conversation-reply-delivery:"+itemID {
 			continue
 		}
 		if found != nil {
-			f.t.Fatalf("two reply deliveries for item %s: %s and %s", itemID, found.ID, delivery.ID)
+			f.T.Fatalf("two reply deliveries for item %s: %s and %s", itemID, found.ID, delivery.ID)
 		}
 		found = delivery
 	}
@@ -237,7 +238,7 @@ func (f *externalLoopFixture) operations() []capability.ConversationDeliveryOper
 // external conversation tables.
 func eachExternalStore(t *testing.T, prefix string, test func(t *testing.T, store KernelStore)) {
 	t.Helper()
-	eachStore(t, prefix, func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, prefix, func(t *testing.T, store KernelStore) {
 		if _, ok := store.(externalLoopStore); !ok {
 			t.Skipf("%T has no external conversation store", store)
 		}
@@ -264,16 +265,16 @@ func lastAgentMessage(messages []*ChannelMessage, intent ConversationMessageInte
 func TestLoopNarrationIsTheStepSummaryNotCommentary(t *testing.T) {
 	const narration = "Looking up issue 7."
 	eachExternalStore(t, "external_narration", func(t *testing.T, store KernelStore) {
-		f := newExternalLoopFixture(t, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend}, nil, withRules(
-			&modelRule{name: "lookup", times: 1, reply: func(v stepView) ModelStepResult {
-				return act(narration, call(kitGovernedTool(v, "lookup"), map[string]any{"id": "7"}))
+		f := newExternalLoopFixture(t, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend}, nil, looptest.WithRules(
+			&looptest.ModelRule{Name: "lookup", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				return looptest.Act(narration, looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "7"}))
 			}},
-			&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return say("Issue 7 is open.") }},
+			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("Issue 7 is open.") }},
 		))
 		chat := f.startExternal("Is issue 7 open?")
-		f.mustStatus(f.driveToRest(chat.run.ID, 4), AgentRunStatusCompleted)
+		f.MustStatus(f.DriveToRest(chat.run.ID, 4), AgentRunStatusCompleted)
 
-		steps := f.steps(chat.run.ID)
+		steps := f.Steps(chat.run.ID)
 		if len(steps) != 2 {
 			t.Fatalf("steps = %d, want 2", len(steps))
 		}
@@ -283,11 +284,11 @@ func TestLoopNarrationIsTheStepSummaryNotCommentary(t *testing.T) {
 		if steps[1].OutputSummary != "" {
 			t.Fatalf("the final step has narration %q", steps[1].OutputSummary)
 		}
-		narrations := f.events(chat.run.ID, ActivityEventTurnNarration)
+		narrations := f.Events(chat.run.ID, ActivityEventTurnNarration)
 		if len(narrations) != 1 || narrations[0].Summary != narration || narrations[0].TurnID != steps[0].ID {
 			t.Fatalf("turn.narration events = %#v", narrations)
 		}
-		if commentary := f.events(chat.run.ID, "turn.commentary"); len(commentary) != 0 {
+		if commentary := f.Events(chat.run.ID, "turn.commentary"); len(commentary) != 0 {
 			t.Fatalf("narration became commentary: %#v", commentary)
 		}
 
@@ -297,14 +298,14 @@ func TestLoopNarrationIsTheStepSummaryNotCommentary(t *testing.T) {
 		if forwarded := f.outbox("run_commentary"); len(forwarded) != 0 {
 			t.Fatalf("narration was forwarded: %#v", forwarded)
 		}
-		messages := f.messages(chat.conversation.ID)
+		messages := f.Messages(chat.conversation.ID)
 		for _, message := range messages {
 			if strings.Contains(message.Content, narration) {
-				t.Fatalf("narration reached the channel: %s", kitDescribeMessages(messages))
+				t.Fatalf("narration reached the channel: %s", looptest.DescribeMessages(messages))
 			}
 		}
 		if answer := lastAgentMessage(messages, MessageIntentAnswer); answer == nil || answer.Content != "Issue 7 is open." || len(messages) != 2 {
-			t.Fatalf("channel = %s", kitDescribeMessages(messages))
+			t.Fatalf("channel = %s", looptest.DescribeMessages(messages))
 		}
 	})
 }
@@ -315,32 +316,32 @@ func TestLoopNarrationIsTheStepSummaryNotCommentary(t *testing.T) {
 func TestLoopReportProgressStaysCommentaryAndReachesSlack(t *testing.T) {
 	const update = "Found the failing health check; fixing it now."
 	for _, team := range []bool{false, true} {
-		name, speaker := "agent", loopFixtureAgent
-		var opts []loopOption
+		name, speaker := "agent", looptest.FixtureAgent
+		var opts []looptest.Option
 		if team {
 			name, speaker = "team_member", "agent-a"
-			opts = append(opts, withTeam("agent-a"))
+			opts = append(opts, looptest.WithTeam("agent-a"))
 		}
 		t.Run(name, func(t *testing.T) {
 			eachExternalStore(t, "external_progress", func(t *testing.T, store KernelStore) {
-				f := newExternalLoopFixture(t, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend}, nil, append(opts, withRules(
-					&modelRule{name: "progress", times: 1, reply: func(v stepView) ModelStepResult {
+				f := newExternalLoopFixture(t, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend}, nil, append(opts, looptest.WithRules(
+					&looptest.ModelRule{Name: "progress", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
 						if !v.HasTool(string(ControlToolReportProgress)) {
-							t.Errorf("turn_report_progress is not offered: %s", v.describe())
+							t.Errorf("turn_report_progress is not offered: %s", v.Describe())
 						}
-						return act("", call(string(ControlToolReportProgress), map[string]any{"summary": update}))
+						return looptest.Act("", looptest.Call(string(ControlToolReportProgress), map[string]any{"summary": update}))
 					}},
-					&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return say("The health check is fixed.") }},
+					&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("The health check is fixed.") }},
 				))...)
 				chat := f.startExternal("Why is the deploy failing?")
-				f.mustStatus(f.driveToRest(chat.run.ID, 4), AgentRunStatusCompleted)
+				f.MustStatus(f.DriveToRest(chat.run.ID, 4), AgentRunStatusCompleted)
 
-				commentary := f.events(chat.run.ID, "turn.commentary")
+				commentary := f.Events(chat.run.ID, "turn.commentary")
 				if len(commentary) != 1 || commentary[0].Summary != update || commentary[0].AgentID != speaker {
 					t.Fatalf("turn.commentary events = %#v", commentary)
 				}
-				if entries := f.toolEntries(chat.run.ID); len(entries) != 1 || entries[0].State != ToolEntryCompleted {
-					t.Fatalf("progress tool entries = %v", f.entryTypes(chat.run.ID))
+				if entries := f.ToolEntries(chat.run.ID); len(entries) != 1 || entries[0].State != ToolEntryCompleted {
+					t.Fatalf("progress tool entries = %v", f.EntryTypes(chat.run.ID))
 				}
 
 				first := f.mustCommentary()
@@ -354,11 +355,11 @@ func TestLoopReportProgressStaysCommentaryAndReachesSlack(t *testing.T) {
 				if len(forwarded) != 1 {
 					t.Fatalf("commentary forwarded %d times, want 1", len(forwarded))
 				}
-				message, err := f.ext.GetChannelMessage(f.ctx, f.scope, chat.conversation.ID, forwarded[0].ChannelMessageID)
+				message, err := f.ext.GetChannelMessage(f.Ctx, f.Scope, chat.conversation.ID, forwarded[0].ChannelMessageID)
 				if err != nil || message == nil || message.Content != update || message.Sender.ID != speaker || message.Intent != MessageIntentAcknowledgment {
 					t.Fatalf("forwarded message = %#v, %v", message, err)
 				}
-				if answer := lastAgentMessage(f.messages(chat.conversation.ID), MessageIntentAnswer); answer == nil || answer.Content != "The health check is fixed." || answer.Sender.ID != speaker {
+				if answer := lastAgentMessage(f.Messages(chat.conversation.ID), MessageIntentAnswer); answer == nil || answer.Content != "The health check is fixed." || answer.Sender.ID != speaker {
 					t.Fatalf("answer = %#v", answer)
 				}
 			})
@@ -371,8 +372,8 @@ func TestLoopReportProgressStaysCommentaryAndReachesSlack(t *testing.T) {
 
 // previewRule reports an answer preview from inside the model step, as atlas
 // does while it streams, and then replies.
-func previewRule(name, attempt, text string, reply func(stepView) ModelStepResult, after func(context.Context) error) *modelRule {
-	return &modelRule{name: name, times: 1, reply: reply, before: func(ctx context.Context, _ stepView) error {
+func previewRule(name, attempt, text string, reply func(looptest.StepView) ModelStepResult, after func(context.Context) error) *looptest.ModelRule {
+	return &looptest.ModelRule{Name: name, Times: 1, Reply: reply, Before: func(ctx context.Context, _ looptest.StepView) error {
 		if !HasTurnAnswerPreview(ctx) {
 			return errors.New("the loop installed no answer preview observer for the step")
 		}
@@ -390,34 +391,34 @@ func previewRule(name, attempt, text string, reply func(stepView) ModelStepResul
 // calls tools has its preview reset by the kernel; only the final step's
 // preview stands, and the canonical answer replaces it.
 func TestLoopAnswerPreviewOnlyForTheFinalStep(t *testing.T) {
-	eachStore(t, "external_preview", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			previewRule("step-1", "attempt-1", "Checking…", func(v stepView) ModelStepResult {
-				return act("Checking issue 7.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "7"}))
+	looptest.EachStore(t, "external_preview", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			previewRule("step-1", "attempt-1", "Checking…", func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Checking issue 7.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "7"}))
 			}, nil),
-			previewRule("step-2", "attempt-2", "Issue is open", func(stepView) ModelStepResult { return say("Issue 7 is open.") }, nil),
+			previewRule("step-2", "attempt-2", "Issue is open", func(looptest.StepView) ModelStepResult { return looptest.Say("Issue 7 is open.") }, nil),
 		))
-		conversation, run := f.startChat("Is issue 7 open?")
-		f.mustStatus(f.driveToRest(run.ID, 4), AgentRunStatusCompleted)
+		conversation, run := f.StartChat("Is issue 7 open?")
+		f.MustStatus(f.DriveToRest(run.ID, 4), AgentRunStatusCompleted)
 
-		frames := f.previewFrames(run.ID)
-		want := []previewFrame{
-			{attempt: "attempt-1", sequence: "1", text: "Checking…"},
-			{attempt: "attempt-1", sequence: "2", reset: true},
-			{attempt: "attempt-2", sequence: "1", text: "Issue is open"},
+		frames := f.PreviewFrames(run.ID)
+		want := []looptest.PreviewFrame{
+			{Attempt: "attempt-1", Sequence: "1", Text: "Checking…"},
+			{Attempt: "attempt-1", Sequence: "2", Reset: true},
+			{Attempt: "attempt-2", Sequence: "1", Text: "Issue is open"},
 		}
 		if fmt.Sprint(frames) != fmt.Sprint(want) {
 			t.Fatalf("preview frames = %v, want %v", frames, want)
 		}
-		steps := f.steps(run.ID)
-		events := f.events(run.ID, "turn.answer_preview")
+		steps := f.Steps(run.ID)
+		events := f.Events(run.ID, "turn.answer_preview")
 		if len(steps) != 2 || events[0].TurnID != steps[0].ID || events[1].TurnID != steps[0].ID || events[2].TurnID != steps[1].ID {
 			t.Fatalf("preview frames are not on their steps: steps=%d events=%#v", len(steps), events)
 		}
-		messages := f.messages(conversation.ID)
+		messages := f.Messages(conversation.ID)
 		answer := lastAgentMessage(messages, MessageIntentAnswer)
 		if answer == nil || answer.Content != "Issue 7 is open." || len(messages) != 2 {
-			t.Fatalf("channel = %s", kitDescribeMessages(messages))
+			t.Fatalf("channel = %s", looptest.DescribeMessages(messages))
 		}
 	})
 }
@@ -452,15 +453,15 @@ func TestExternalAnswerStreamFollowsTheLoopPreview(t *testing.T) {
 		}
 		f = newExternalLoopFixture(t, store, "webchat", []capability.ConversationDeliveryOperation{
 			capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryMessageUpdate,
-		}, nil, withRules(
-			previewRule("step-1", "attempt-1", firstPreview, func(v stepView) ModelStepResult {
-				return act("Checking issue 7.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "7"}))
+		}, nil, looptest.WithRules(
+			previewRule("step-1", "attempt-1", firstPreview, func(v looptest.StepView) ModelStepResult {
+				return looptest.Act("Checking issue 7.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "7"}))
 			}, func(context.Context) error { return stream(capability.ConversationDeliveryMessageSend) }),
-			&modelRule{name: "step-2", times: 1,
-				before: func(ctx context.Context, _ stepView) error {
+			&looptest.ModelRule{Name: "step-2", Times: 1,
+				Before: func(ctx context.Context, _ looptest.StepView) error {
 					// The step-1 reset is the newest preview: nothing is posted
 					// and the streamed message keeps its text.
-					f.clock.Advance(5 * time.Second)
+					f.Clock.Advance(5 * time.Second)
 					if err := stream(); err != nil {
 						return err
 					}
@@ -472,10 +473,10 @@ func TestExternalAnswerStreamFollowsTheLoopPreview(t *testing.T) {
 					}
 					return stream(capability.ConversationDeliveryMessageUpdate)
 				},
-				reply: func(stepView) ModelStepResult { return say(finalAnswer) }},
+				Reply: func(looptest.StepView) ModelStepResult { return looptest.Say(finalAnswer) }},
 		))
 		chat := f.startExternal("Is issue 7 open?")
-		f.mustStatus(f.driveToRest(chat.run.ID, 4), AgentRunStatusCompleted)
+		f.MustStatus(f.DriveToRest(chat.run.ID, 4), AgentRunStatusCompleted)
 		if len(f.host.Messages) != 1 || f.host.Messages["chat-1"] != secondPreview {
 			t.Fatalf("chat before the reply = %#v", f.host.Messages)
 		}
@@ -494,7 +495,7 @@ func TestExternalAnswerStreamFollowsTheLoopPreview(t *testing.T) {
 			final.Status != ExternalConversationDeliveryDelivered {
 			t.Fatalf("committed reply = %#v", final)
 		}
-		answer := lastAgentMessage(f.messages(chat.conversation.ID), MessageIntentAnswer)
+		answer := lastAgentMessage(f.Messages(chat.conversation.ID), MessageIntentAnswer)
 		if answer == nil || answer.Content != finalAnswer || final.ChannelMessageID != answer.ID {
 			t.Fatalf("committed reply message = %#v, answer %#v", final, answer)
 		}
@@ -536,45 +537,45 @@ func TestProgressAcknowledgementIsOneToolFreeStepWithoutSession(t *testing.T) {
 			eachExternalStore(t, "external_ack_"+c.provider, func(t *testing.T, store KernelStore) {
 				var f *externalLoopFixture
 				renderer := &lateProgressAckRenderer{}
-				f = newExternalLoopFixture(t, store, c.provider, c.operations, renderer, withRules(
-					&modelRule{name: "ack",
-						when: func(v stepView) bool { return v.Purpose() == ModelStepPurposeAcknowledgement },
-						reply: func(v stepView) ModelStepResult {
+				f = newExternalLoopFixture(t, store, c.provider, c.operations, renderer, looptest.WithRules(
+					&looptest.ModelRule{Name: "ack",
+						When: func(v looptest.StepView) bool { return v.Purpose() == ModelStepPurposeAcknowledgement },
+						Reply: func(v looptest.StepView) ModelStepResult {
 							if c.toolCall {
-								return act("", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "7"}))
+								return looptest.Act("", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "7"}))
 							}
-							return say(ack)
+							return looptest.Say(ack)
 						}},
-					&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return say("The deployment is healthy.") }},
+					&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("The deployment is healthy.") }},
 				))
-				renderer.inner = externalconversation.NewProgressAcknowledgementRenderer(fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}, loopFixtureAgent,
-					loopFixtureDefinition, "1", nil, []string{"You are finn, the fixture Agent."}, models.WithClock(f.clock.Now))
+				renderer.inner = externalconversation.NewProgressAcknowledgementRenderer(looptest.FakeStepHost{ScriptedModel: f.Model, FakeHostTools: f.Tools}, looptest.FixtureAgent,
+					looptest.FixtureDefinition, "1", nil, []string{"You are finn, the fixture Agent."}, models.WithClock(f.Clock.Now))
 				chat := f.startExternal("Can you check the deployment?")
-				f.clock.Advance(time.Minute)
+				f.Clock.Advance(time.Minute)
 
-				deliveries, err := f.progress.ProcessScope(f.ctx, f.scope)
-				acks := f.model.calls(ModelStepPurposeAcknowledgement)
-				if len(acks) != 1 || len(f.model.calls("")) != 1 {
-					t.Fatalf("model calls = %d (acknowledgements %d), want exactly one acknowledgement", len(f.model.calls("")), len(acks))
+				deliveries, err := f.progress.ProcessScope(f.Ctx, f.Scope)
+				acks := f.Model.Calls(ModelStepPurposeAcknowledgement)
+				if len(acks) != 1 || len(f.Model.Calls("")) != 1 {
+					t.Fatalf("model calls = %d (acknowledgements %d), want exactly one acknowledgement", len(f.Model.Calls("")), len(acks))
 				}
 				req := acks[0]
-				if req.SessionID != "" || len(req.Tools) != 0 || req.RunID != chat.run.ID || req.AgentID != loopFixtureAgent || len(req.Entries) != 1 {
-					t.Fatalf("acknowledgement request is not a sessionless tool-free step: %s session=%q run=%q", stepView{req: req}.describe(), req.SessionID, req.RunID)
+				if req.SessionID != "" || len(req.Tools) != 0 || req.RunID != chat.run.ID || req.AgentID != looptest.FixtureAgent || len(req.Entries) != 1 {
+					t.Fatalf("acknowledgement request is not a sessionless tool-free step: %s session=%q run=%q", looptest.StepView{Req: req}.Describe(), req.SessionID, req.RunID)
 				}
 				// The chat Run names its lane session from creation; the
 				// acknowledgement must not have created it, nor any step row.
-				current := f.mustRun(chat.run.ID)
-				if session, err := f.raw.(AgentSessionStore).GetAgentSession(f.ctx, f.scope, current.SessionID); err == nil && session != nil {
+				current := f.MustRun(chat.run.ID)
+				if session, err := f.Raw.(AgentSessionStore).GetAgentSession(f.Ctx, f.Scope, current.SessionID); err == nil && session != nil {
 					t.Fatalf("the acknowledgement created session %s", session.ID)
 				}
-				if steps := f.steps(chat.run.ID); len(steps) != 0 {
+				if steps := f.Steps(chat.run.ID); len(steps) != 0 {
 					t.Fatalf("the acknowledgement wrote %d step rows", len(steps))
 				}
 				acknowledgements := f.outbox("run_acknowledgement")
-				messages := f.messages(chat.conversation.ID)
+				messages := f.Messages(chat.conversation.ID)
 				if c.toolCall {
 					if err == nil || !strings.Contains(err.Error(), "actionable progress acknowledgement") || len(deliveries) != 0 || len(acknowledgements) != 0 || len(messages) != 1 {
-						t.Fatalf("a tool-call acknowledgement was accepted: deliveries=%#v err=%v channel=%s", deliveries, err, kitDescribeMessages(messages))
+						t.Fatalf("a tool-call acknowledgement was accepted: deliveries=%#v err=%v channel=%s", deliveries, err, looptest.DescribeMessages(messages))
 					}
 				} else {
 					if err != nil || len(deliveries) != 1 || deliveries[0].Operation != c.want || len(acknowledgements) != 1 {
@@ -583,28 +584,28 @@ func TestProgressAcknowledgementIsOneToolFreeStepWithoutSession(t *testing.T) {
 					switch c.want {
 					case capability.ConversationDeliveryTypingIndicator:
 						if deliveries[0].Parameters["status"] != ack || len(messages) != 1 {
-							t.Fatalf("native status = %#v, channel %s", deliveries[0].Parameters, kitDescribeMessages(messages))
+							t.Fatalf("native status = %#v, channel %s", deliveries[0].Parameters, looptest.DescribeMessages(messages))
 						}
 					default:
 						posted := lastAgentMessage(messages, MessageIntentAcknowledgment)
-						if posted == nil || posted.Content != ack || posted.Sender.ID != loopFixtureAgent || len(messages) != 2 {
-							t.Fatalf("text acknowledgement channel = %s", kitDescribeMessages(messages))
+						if posted == nil || posted.Content != ack || posted.Sender.ID != looptest.FixtureAgent || len(messages) != 2 {
+							t.Fatalf("text acknowledgement channel = %s", looptest.DescribeMessages(messages))
 						}
 					}
 				}
 
 				// The Run itself then works through the loop as usual: one step,
 				// one session, and the acknowledgement left no entry in it.
-				f.mustStatus(f.driveToRest(chat.run.ID, 4), AgentRunStatusCompleted)
-				if steps := f.steps(chat.run.ID); len(steps) != 1 {
+				f.MustStatus(f.DriveToRest(chat.run.ID, 4), AgentRunStatusCompleted)
+				if steps := f.Steps(chat.run.ID); len(steps) != 1 {
 					t.Fatalf("steps = %d, want 1", len(steps))
 				}
-				if got := f.model.calls(ModelStepPurposeStep); len(got) != 1 {
+				if got := f.Model.Calls(ModelStepPurposeStep); len(got) != 1 {
 					t.Fatalf("chat steps = %d, want 1", len(got))
 				}
-				for _, entry := range f.entries(chat.run.ID) {
+				for _, entry := range f.Entries(chat.run.ID) {
 					if entry.Type == SessionEntryAssistant && entry.Assistant != nil && strings.Contains(entry.Assistant.Text, ack) {
-						t.Fatalf("the acknowledgement reached the session: %v", f.entryTypes(chat.run.ID))
+						t.Fatalf("the acknowledgement reached the session: %v", f.EntryTypes(chat.run.ID))
 					}
 				}
 			})

@@ -26,6 +26,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -36,81 +37,81 @@ import (
 // config (Places, ImageStyle, HumanParticipants, participation opt-in), on
 // the fixture's clock. It resolves the Agent's own binding through the
 // fixture, as the fixture's runner does.
-func convRunner(f *loopFixture, config conversationrun.ConversationRunTurnRunnerConfig) {
-	f.t.Helper()
+func convRunner(f *looptest.Fixture, config conversationrun.ConversationRunTurnRunnerConfig) {
+	f.T.Helper()
 	if config.AttachmentContent == nil {
-		config.AttachmentContent = &answerVisualContent{}
+		config.AttachmentContent = &looptest.AnswerVisualContent{}
 	}
-	config.AgentTurns = runtimeconversation.TurnRunnerResolverFunc(f.agentBinding)
-	runner, err := conversationrun.NewConversationRunTurnRunner(f.chats, f.coordinator(), config, models.WithClock(f.clock.Now))
+	config.AgentTurns = runtimeconversation.TurnRunnerResolverFunc(f.AgentBinding)
+	runner, err := conversationrun.NewConversationRunTurnRunner(f.Chats, f.Coordinator(), config, models.WithClock(f.Clock.Now))
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
-	f.runner = runner
+	f.Runner = runner
 }
 
 // convAnswer answers every chat step with a final answer whose text names the
 // newest user message.
-func convAnswer(prefix string) *modelRule {
-	return &modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
-		return finalAnswer(map[string]any{"answer": prefix + steerText(v.LastUserText())})
+func convAnswer(prefix string) *looptest.ModelRule {
+	return &looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
+		return looptest.FinalAnswer(map[string]any{"answer": prefix + steerText(v.LastUserText())})
 	}}
 }
 
 // convAsk posts text as ana in conversation, schedules it and drives the new
 // Run to rest; it returns the Run.
-func convAsk(f *loopFixture, conversationID, text string) *AgentRun {
-	f.t.Helper()
-	message := f.post(conversationID, loopFixtureUser, text)
-	conversation, err := f.convs.GetConversation(f.ctx, f.scope, conversationID)
+func convAsk(f *looptest.Fixture, conversationID, text string) *AgentRun {
+	f.T.Helper()
+	message := f.Post(conversationID, looptest.FixtureUser, text)
+	conversation, err := f.Convs.GetConversation(f.Ctx, f.Scope, conversationID)
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
-	run := f.chatRun(conversation, message)
+	run := f.ChatRun(conversation, message)
 	return convDrive(f, run.ID)
 }
 
 // convDrive drives runID to rest and requires it completed.
-func convDrive(f *loopFixture, runID string) *AgentRun {
-	f.t.Helper()
+func convDrive(f *looptest.Fixture, runID string) *AgentRun {
+	f.T.Helper()
 	run := steerToRest(f, runID, 6)
 	if run.Status != AgentRunStatusCompleted {
-		f.t.Fatalf("run %s = %s (%#v), log %s", runID, run.Status, run.FailureExplanation, steerShape(f, runID))
+		f.T.Fatalf("run %s = %s (%#v), log %s", runID, run.Status, run.FailureExplanation, steerShape(f, runID))
 	}
 	return run
 }
 
 // convFirstStep is the first model step request of runID.
-func convFirstStep(f *loopFixture, runID string) ModelStepRequest {
-	f.t.Helper()
-	for _, req := range f.model.calls(ModelStepPurposeStep) {
+func convFirstStep(f *looptest.Fixture, runID string) ModelStepRequest {
+	f.T.Helper()
+	for _, req := range f.Model.Calls(ModelStepPurposeStep) {
 		if req.RunID == runID {
 			return req
 		}
 	}
-	f.t.Fatalf("run %s made no model step", runID)
+	f.T.Fatalf("run %s made no model step", runID)
 	return ModelStepRequest{}
 }
 
 // convRunContext is the run_context note a request renders for its own Run
 // (the newest one).
-func convRunContext(f *loopFixture, req ModelStepRequest) string {
-	f.t.Helper()
+func convRunContext(f *looptest.Fixture, req ModelStepRequest) string {
+	f.T.Helper()
 	for i := len(req.Entries) - 1; i >= 0; i-- {
 		e := req.Entries[i]
 		if e.Type == SessionEntryNote && e.Note != nil && e.Note.Kind == string(NoteRunContext) {
 			return e.Note.Text
 		}
 	}
-	f.t.Fatalf("request of %s renders no run_context note: %s", req.RunID, stepView{req: req}.describe())
+	f.T.Fatalf("request of %s renders no run_context note: %s", req.RunID, looptest.StepView{Req: req}.Describe())
 	return ""
 }
 
 // convRunContextNotes is the number of run_context notes runID wrote.
-func convRunContextNotes(f *loopFixture, runID string) int {
-	f.t.Helper()
+func convRunContextNotes(f *looptest.Fixture, runID string) int {
+	f.T.Helper()
 	n := 0
-	for _, entry := range f.entries(runID) {
+	for _, entry := range f.Entries(runID) {
 		if entry.RunID == runID && entry.Type == SessionEntryNote && entry.Note != nil && entry.Note.Kind == NoteRunContext {
 			n++
 		}
@@ -132,11 +133,11 @@ func convSection(text, header string) string {
 	return section
 }
 
-func convSystem(f *loopFixture, req ModelStepRequest) string {
-	f.t.Helper()
+func convSystem(f *looptest.Fixture, req ModelStepRequest) string {
+	f.T.Helper()
 	raw, err := json.Marshal(req.System)
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 	return string(raw)
 }
@@ -154,22 +155,22 @@ func convArtifactOf(t *testing.T, message *ChannelMessage) string {
 }
 
 // convAgentAnswer is the newest agent message of the conversation.
-func convAgentAnswer(f *loopFixture, conversationID string) *ChannelMessage {
-	f.t.Helper()
+func convAgentAnswer(f *looptest.Fixture, conversationID string) *ChannelMessage {
+	f.T.Helper()
 	answers := steerAgentMessages(f, conversationID)
 	if len(answers) == 0 {
-		f.t.Fatalf("conversation %s has no agent message: %s", conversationID, kitDescribeMessages(f.messages(conversationID)))
+		f.T.Fatalf("conversation %s has no agent message: %s", conversationID, looptest.DescribeMessages(f.Messages(conversationID)))
 	}
 	return answers[len(answers)-1]
 }
 
-func convRecord(f *loopFixture, conversationID string, card *ChannelMessage, request runtimeconversation.RecordSurfaceInteractionRequest) {
-	f.t.Helper()
-	artifactID := convArtifactOf(f.t, card)
-	request.Scope, request.ConversationID, request.MessageID = f.scope, conversationID, card.ID
+func convRecord(f *looptest.Fixture, conversationID string, card *ChannelMessage, request runtimeconversation.RecordSurfaceInteractionRequest) {
+	f.T.Helper()
+	artifactID := convArtifactOf(f.T, card)
+	request.Scope, request.ConversationID, request.MessageID = f.Scope, conversationID, card.ID
 	request.SurfaceArtifactID, request.SurfaceID, request.SurfaceVersion = artifactID, artifactID, 1
-	if _, _, err := f.convs.RecordSurfaceInteraction(f.ctx, request); err != nil {
-		f.t.Fatal(err)
+	if _, _, err := f.Convs.RecordSurfaceInteraction(f.Ctx, request); err != nil {
+		f.T.Fatal(err)
 	}
 }
 
@@ -188,18 +189,18 @@ func convActor(id string) ConversationParticipant {
 // conversation_places_test.go and conversation_image_style_test.go.
 func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	t.Run("card_state", func(t *testing.T) {
-		eachStore(t, "conv-cards", func(t *testing.T, store KernelStore) {
-			f := newLoopFixture(t, store)
+		looptest.EachStore(t, "conv-cards", func(t *testing.T, store KernelStore) {
+			f := looptest.NewFixture(t, store)
 			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{})
 			first := true
-			f.model.add(&modelRule{name: "card", reply: func(v stepView) ModelStepResult {
+			f.Model.Add(&looptest.ModelRule{Name: "card", Reply: func(v looptest.StepView) ModelStepResult {
 				if first {
 					first = false
-					return finalAnswer(map[string]any{"answer": "Here is your list.", "visual": scenarioChecklistVisual()})
+					return looptest.FinalAnswer(map[string]any{"answer": "Here is your list.", "visual": scenarioChecklistVisual()})
 				}
-				return finalAnswer(map[string]any{"answer": "Noted."})
+				return looptest.FinalAnswer(map[string]any{"answer": "Noted."})
 			}})
-			conversation, run := f.startChat("Packing list please")
+			conversation, run := f.StartChat("Packing list please")
 			convDrive(f, run.ID)
 			card := convAgentAnswer(f, conversation.ID)
 			if text := convRunContext(f, convFirstStep(f, run.ID)); strings.Contains(text, "What people did on cards") {
@@ -213,12 +214,12 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 				})
 			}
 			for index := 0; index < 7; index++ {
-				record(loopFixtureUser, fmt.Sprintf("k%d", index), "a", `{"checked":true}`, fmt.Sprintf("tick-%d", index), true)
+				record(looptest.FixtureUser, fmt.Sprintf("k%d", index), "a", `{"checked":true}`, fmt.Sprintf("tick-%d", index), true)
 			}
 			record("partner", "k0", "b", `{"checked":true}`, "tick-b", true)
-			record(loopFixtureUser, "k0", "b", `{"checked":false}`, "untick-b", true)
-			record(loopFixtureUser, "q", "", `{"selected":["cbr"]}`, "quiz", false)
-			f.clock.Advance(time.Second)
+			record(looptest.FixtureUser, "k0", "b", `{"checked":false}`, "untick-b", true)
+			record(looptest.FixtureUser, "q", "", `{"selected":["cbr"]}`, "quiz", false)
+			f.Clock.Advance(time.Second)
 
 			second := convAsk(f, conversation.ID, "Anything missing?")
 			want := []string{"- Packing list: 1/3 ticked (unticked: Charger, Towel)"}
@@ -250,22 +251,22 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("flashcards_and_recipe", func(t *testing.T) {
-		f := newLoopFixture(t, newTestKernelStore(t))
+		f := looptest.NewFixture(t, newTestKernelStore(t))
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{})
 		first := true
-		f.model.add(&modelRule{name: "card", reply: func(v stepView) ModelStepResult {
+		f.Model.Add(&looptest.ModelRule{Name: "card", Reply: func(v looptest.StepView) ModelStepResult {
 			if first {
 				first = false
-				return finalAnswer(map[string]any{"answer": "Learn and cook.", "visual": scenarioFlashcardRecipeVisual()})
+				return looptest.FinalAnswer(map[string]any{"answer": "Learn and cook.", "visual": scenarioFlashcardRecipeVisual()})
 			}
-			return finalAnswer(map[string]any{"answer": "Noted."})
+			return looptest.FinalAnswer(map[string]any{"answer": "Noted."})
 		}})
-		conversation, run := f.startChat("Teach me and feed me")
+		conversation, run := f.StartChat("Teach me and feed me")
 		convDrive(f, run.ID)
 		card := convAgentAnswer(f, conversation.ID)
 		record := func(component, action, item, values, key string) {
 			convRecord(f, conversation.ID, card, runtimeconversation.RecordSurfaceInteractionRequest{
-				ComponentID: component, ActionID: action, ItemKey: item, Actor: convActor(loopFixtureUser), Repeatable: true,
+				ComponentID: component, ActionID: action, ItemKey: item, Actor: convActor(looptest.FixtureUser), Repeatable: true,
 				Values: json.RawMessage(values), IdempotencyKey: key,
 			})
 		}
@@ -273,7 +274,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		record("deck", "mark", "pain", `{"result":"got"}`, "mark-2")
 		record("deck", "mark", "eau", `{"result":"again"}`, "mark-3")
 		record("pancakes", "", "flour", `{"checked":true}`, "tick-1")
-		f.clock.Advance(time.Second)
+		f.Clock.Advance(time.Second)
 
 		second := convAsk(f, conversation.ID, "How am I doing?")
 		section := convSection(convRunContext(f, convFirstStep(f, second.ID)), "What people did on cards")
@@ -288,7 +289,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("poll", func(t *testing.T) {
-		f := newLoopFixture(t, newTestKernelStore(t))
+		f := looptest.NewFixture(t, newTestKernelStore(t))
 		people := []ConversationParticipant{convActor("ana"), convActor("ben"), convActor("cy")}
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{
 			HumanParticipants: func(_ context.Context, _ *Conversation) ([]ConversationParticipant, error) { return people, nil },
@@ -302,14 +303,14 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 			Outputs: []presentation.ExplorerOutput{{ID: "y", Label: "Y", Expr: "if(x, 1, 2)"}},
 		}}
 		first := true
-		f.model.add(&modelRule{name: "poll", reply: func(v stepView) ModelStepResult {
+		f.Model.Add(&looptest.ModelRule{Name: "poll", Reply: func(v looptest.StepView) ModelStepResult {
 			if first {
 				first = false
-				return finalAnswer(map[string]any{"answer": "Vote here.", "visual": &presentation.Visual{Title: "Dinner", Components: []presentation.Component{poll, explorer}}})
+				return looptest.FinalAnswer(map[string]any{"answer": "Vote here.", "visual": &presentation.Visual{Title: "Dinner", Components: []presentation.Component{poll, explorer}}})
 			}
-			return finalAnswer(map[string]any{"answer": "Noted."})
+			return looptest.FinalAnswer(map[string]any{"answer": "Noted."})
 		}})
-		conversation, run := f.startChat("Ask everyone where to eat")
+		conversation, run := f.StartChat("Ask everyone where to eat")
 		convDrive(f, run.ID)
 		card := convAgentAnswer(f, conversation.ID)
 		record := func(actor, component, action, values, key string) {
@@ -322,7 +323,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		record("ben", "vote", presentation.PollVoteAction, `{"optionIds":["thai"]}`, "vote-2")
 		record("ana", "vote", presentation.PollVoteAction, `{"optionIds":["thai"]}`, "vote-3")
 		record("ana", "calc", presentation.ExplorerShareAction, `{"inputs":{"x":1}}`, "share-1")
-		f.clock.Advance(time.Second)
+		f.Clock.Advance(time.Second)
 
 		second := convAsk(f, conversation.ID, "Who wants what?")
 		section := convSection(convRunContext(f, convFirstStep(f, second.ID)), "What people did on cards")
@@ -336,14 +337,14 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("places", func(t *testing.T) {
-		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
 		found := map[string][]runtimeconversation.ConversationPlace{}
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{Places: func(_ context.Context, run *AgentRun) []runtimeconversation.ConversationPlace {
 			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 			return found[conversationID]
 		}})
 		// A chat that already found places lists them, capped.
-		conversation, run := f.startChat("Driving directions please")
+		conversation, run := f.StartChat("Driving directions please")
 		for i := 0; i < runtimeconversation.MaximumConversationPlaces+5; i++ {
 			found[conversation.ID] = append(found[conversation.ID], runtimeconversation.ConversationPlace{Place: fmt.Sprintf("place:%012x", i), Name: fmt.Sprintf("Stop %d", i), Lat: 37.4, Lon: -121.9})
 		}
@@ -355,8 +356,8 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 			t.Fatalf("places section = %q", section)
 		}
 		// A chat without places has no places section, and the same prompt.
-		f.clock.Advance(time.Second) // a new chat
-		_, otherRun := f.startChat("Hello")
+		f.Clock.Advance(time.Second) // a new chat
+		_, otherRun := f.StartChat("Hello")
 		convDrive(f, otherRun.ID)
 		otherRequest := convFirstStep(f, otherRun.ID)
 		if text := convRunContext(f, otherRequest); strings.Contains(text, "Places already found") {
@@ -374,26 +375,26 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("image_style", func(t *testing.T) {
-		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
 		// The host reads the style saved by the sender of the Run's trigger.
 		styles := map[string]string{"Draw a fox": " cartoon "}
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{ImageStyle: func(_ context.Context, run *AgentRun) string {
 			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
-			message, err := f.convs.GetChannelMessage(f.ctx, f.scope, conversationID, triggerID)
+			message, err := f.Convs.GetChannelMessage(f.Ctx, f.Scope, conversationID, triggerID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			return styles[message.Content]
 		}})
-		_, fox := f.startChat("Draw a fox")
+		_, fox := f.StartChat("Draw a fox")
 		convDrive(f, fox.ID)
 		foxRequest := convFirstStep(f, fox.ID)
 		if text := convRunContext(f, foxRequest); !strings.Contains(text, "Preferred picture style: cartoon. generate_image applies it automatically; pass style only to override it for one image when asked.") {
 			t.Fatalf("style not in the run_context note: %q", text)
 		}
-		f.clock.Advance(time.Second) // a new chat
-		_, owl := f.startChat("Draw an owl")
+		f.Clock.Advance(time.Second) // a new chat
+		_, owl := f.StartChat("Draw an owl")
 		convDrive(f, owl.ID)
 		owlRequest := convFirstStep(f, owl.ID)
 		if text := convRunContext(f, owlRequest); strings.Contains(text, "picture style") {
@@ -409,63 +410,63 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 // Posting and reading
 
 // convChat creates a chat owned by owner (finn when empty) without posting.
-func convChat(f *loopFixture, owner ObjectiveOwner, origin *ConversationReference) *Conversation {
-	f.t.Helper()
+func convChat(f *looptest.Fixture, owner ObjectiveOwner, origin *ConversationReference) *Conversation {
+	f.T.Helper()
 	if owner.ID == "" {
-		owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}
+		owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: looptest.FixtureAgent}
 	}
-	f.clock.Advance(time.Millisecond)
-	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
-		Scope: f.scope, Owner: owner, Title: "Journey chat", Origin: origin,
-		IdempotencyKey: "conv-chat-" + fmt.Sprint(f.clock.Now().UnixNano()),
+	f.Clock.Advance(time.Millisecond)
+	conversation, _, err := f.Convs.CreateConversation(f.Ctx, runtimeconversation.CreateConversationRequest{
+		Scope: f.Scope, Owner: owner, Title: "Journey chat", Origin: origin,
+		IdempotencyKey: "conv-chat-" + fmt.Sprint(f.Clock.Now().UnixNano()),
 	})
 	if err != nil {
-		f.t.Fatalf("create conversation: %v", err)
+		f.T.Fatalf("create conversation: %v", err)
 	}
 	return conversation
 }
 
 // convPost posts a message; edit fills in what the default user question
 // (ana, channel audience) does not say.
-func convPost(f *loopFixture, conversationID, text string, edit func(*runtimeconversation.PostChannelMessageRequest)) *ChannelMessage {
-	f.t.Helper()
-	conversation, err := f.convs.GetConversation(f.ctx, f.scope, conversationID)
+func convPost(f *looptest.Fixture, conversationID, text string, edit func(*runtimeconversation.PostChannelMessageRequest)) *ChannelMessage {
+	f.T.Helper()
+	conversation, err := f.Convs.GetConversation(f.Ctx, f.Scope, conversationID)
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 	request := runtimeconversation.PostChannelMessageRequest{
-		Scope: f.scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
-		Sender: convActor(loopFixtureUser), Intent: MessageIntentQuestion, Content: text,
+		Scope: f.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
+		Sender: convActor(looptest.FixtureUser), Intent: MessageIntentQuestion, Content: text,
 		Audience:       ConversationAudience{Kind: ConversationAudienceChannel},
 		IdempotencyKey: fmt.Sprintf("conv-post-%d", conversation.Revision),
 	}
 	if edit != nil {
 		edit(&request)
 	}
-	posted, err := f.convs.PostChannelMessage(f.ctx, request)
+	posted, err := f.Convs.PostChannelMessage(f.Ctx, request)
 	if err != nil {
-		f.t.Fatalf("post %q: %v", text, err)
+		f.T.Fatalf("post %q: %v", text, err)
 	}
-	f.clock.Advance(time.Millisecond)
+	f.Clock.Advance(time.Millisecond)
 	return posted.Message
 }
 
 // convSchedule schedules message through the production scheduler and
 // returns the Run that took it.
-func convSchedule(f *loopFixture, conversationID string, message *ChannelMessage) *AgentRun {
-	f.t.Helper()
-	result, _, err := f.scheduler.ScheduleMessage(f.ctx, f.scope, conversationID, message.ID)
+func convSchedule(f *looptest.Fixture, conversationID string, message *ChannelMessage) *AgentRun {
+	f.T.Helper()
+	result, _, err := f.Scheduler.ScheduleMessage(f.Ctx, f.Scope, conversationID, message.ID)
 	if err != nil || result == nil || result.Run == nil {
-		f.t.Fatalf("schedule %s: %#v, %v", message.ID, result, err)
+		f.T.Fatalf("schedule %s: %#v, %v", message.ID, result, err)
 	}
 	return result.Run
 }
 
 // convRunEntries is the entries runID wrote, in log order.
-func convRunEntries(f *loopFixture, runID string) []*SessionEntry {
-	f.t.Helper()
+func convRunEntries(f *looptest.Fixture, runID string) []*SessionEntry {
+	f.T.Helper()
 	var out []*SessionEntry
-	for _, entry := range f.entries(runID) {
+	for _, entry := range f.Entries(runID) {
 		if entry.RunID == runID {
 			out = append(out, entry)
 		}
@@ -483,8 +484,8 @@ func convAuthor(entry *SessionEntry) string {
 
 // convUserBeforeAssistant is the user entries runID appended before its first
 // assistant entry.
-func convUserBeforeAssistant(f *loopFixture, runID string) []*SessionEntry {
-	f.t.Helper()
+func convUserBeforeAssistant(f *looptest.Fixture, runID string) []*SessionEntry {
+	f.T.Helper()
 	var out []*SessionEntry
 	for _, entry := range convRunEntries(f, runID) {
 		if entry.Type == SessionEntryAssistant {
@@ -530,103 +531,103 @@ func (convTeamCatalog) GetTeamDefinition(context.Context, string, string) (*kern
 // with its thread root (the fixture opens the chat's unthreaded lane). The
 // conversation turn runner adds the conversation loop seams on top of
 // convMemberAgentBinding, as it does for the fixture's own binding.
-func convMemberBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerBinding {
-	f.t.Helper()
-	return f.conversationBinding(run, func(run *AgentRun) *agentrun.TurnRunnerBinding { return convMemberAgentBinding(f, run) })
+func convMemberBinding(f *looptest.Fixture, run *AgentRun) *agentrun.TurnRunnerBinding {
+	f.T.Helper()
+	return f.ConversationBinding(run, func(run *AgentRun) *agentrun.TurnRunnerBinding { return convMemberAgentBinding(f, run) })
 }
 
 // convMemberAgentBinding is the member or thread Run's own Agent binding:
 // its lane session, its control authority, the model producer, the run-start
 // preparer and the claim tool executor.
-func convMemberAgentBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerBinding {
-	f.t.Helper()
-	sessions := f.store.(AgentSessionStore)
+func convMemberAgentBinding(f *looptest.Fixture, run *AgentRun) *agentrun.TurnRunnerBinding {
+	f.T.Helper()
+	sessions := f.Store.(AgentSessionStore)
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	root, _ := run.Context["threadRootMessageId"].(string)
-	opened, err := sessions.OpenConversationAgentSession(f.ctx, OpenConversationAgentSessionRequest{
-		Scope: f.scope, ConversationID: conversationID, ThreadRootID: root, AgentID: run.AssignedAgentID, RunID: run.ID,
-		Lease: AgentRunLeaseGuard{WorkerID: f.workerID, Now: f.clock.Now()}, Now: f.clock.Now(),
+	opened, err := sessions.OpenConversationAgentSession(f.Ctx, OpenConversationAgentSessionRequest{
+		Scope: f.Scope, ConversationID: conversationID, ThreadRootID: root, AgentID: run.AssignedAgentID, RunID: run.ID,
+		Lease: AgentRunLeaseGuard{WorkerID: f.WorkerID, Now: f.Clock.Now()}, Now: f.Clock.Now(),
 	})
 	if err != nil {
-		f.t.Fatalf("open conversation session: %v", err)
+		f.T.Fatalf("open conversation session: %v", err)
 	}
 	session := opened.Session
-	control, err := control.ResolveControlAuthority(f.ctx, control.ControlAuthorityInput{
-		Run: run, DeploymentID: run.AssignedAgentID, Runs: f.store, Conversations: f.chats, Catalog: convTeamCatalog{},
+	control, err := control.ResolveControlAuthority(f.Ctx, control.ControlAuthorityInput{
+		Run: run, DeploymentID: run.AssignedAgentID, Runs: f.Store, Conversations: f.Chats, Catalog: convTeamCatalog{},
 	})
 	if err != nil {
-		f.t.Fatalf("resolve member authority: %v", err)
+		f.T.Fatalf("resolve member authority: %v", err)
 	}
 	preparer := runloop.NewCatalogModelStepPreparer(runloop.CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 	})
-	host := fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}
-	producer, err := modelstep.NewModelStepProducer(host, preparer, f.store)
+	host := looptest.FakeStepHost{ScriptedModel: f.Model, FakeHostTools: f.Tools}
+	producer, err := modelstep.NewModelStepProducer(host, preparer, f.Store)
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 	binding := &agentrun.TurnRunnerBinding{
-		DeploymentID: run.AssignedAgentID, ActionDeploymentID: loopFixtureAgent,
-		DefinitionID: loopFixtureDefinition, DefinitionVersion: "1",
-		ModelProvider: string(kitModelProvider), Model: kitModelName,
-		ModelActions: append([]capability.ModelAction(nil), f.offered...),
+		DeploymentID: run.AssignedAgentID, ActionDeploymentID: looptest.FixtureAgent,
+		DefinitionID: looptest.FixtureDefinition, DefinitionVersion: "1",
+		ModelProvider: string(looptest.ModelProvider), Model: looptest.ModelName,
+		ModelActions: append([]capability.ModelAction(nil), f.Offered...),
 		Producer:     producer, Session: session, Host: host, Authority: control,
-		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(sessions, f.store)},
-		Tools:     f.dispatcher.ForClaim(runloop.LoopToolClaim{}),
+		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(sessions, f.Store)},
+		Tools:     f.Dispatcher.ForClaim(runloop.LoopToolClaim{}),
 	}
 	return binding
 }
 
 // convDriveNextMember claims the next queued Run (a Team member or thread
 // Run) and drives it to completion with convMemberBinding.
-func convDriveNextMember(f *loopFixture) *AgentRun {
-	f.t.Helper()
-	claimed, err := f.store.ClaimNextAgentRun(f.ctx, AgentRunClaim{
-		Scope: f.scope, WorkerID: f.workerID, Now: f.clock.Now(), LeaseDuration: loopFixtureLease, AgingInterval: time.Minute,
+func convDriveNextMember(f *looptest.Fixture) *AgentRun {
+	f.T.Helper()
+	claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, AgentRunClaim{
+		Scope: f.Scope, WorkerID: f.WorkerID, Now: f.Clock.Now(), LeaseDuration: looptest.FixtureLease, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil {
-		f.t.Fatalf("claim next member: %#v, %v", claimed, err)
+		f.T.Fatalf("claim next member: %#v, %v", claimed, err)
 	}
 	for i := 0; ; i++ {
 		binding := convMemberBinding(f, claimed)
 		if binding.Session != nil && claimed.SessionID != binding.Session.ID {
-			claimed = f.mustRun(claimed.ID)
+			claimed = f.MustRun(claimed.ID)
 		}
-		exit := f.loop.Drive(f.ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
+		exit := f.Loop.Drive(f.Ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.WorkerID, Binding: binding})
 		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
-			f.t.Fatalf("member %s exited %s: %v", claimed.ID, exit.Reason, exit.Err)
+			f.T.Fatalf("member %s exited %s: %v", claimed.ID, exit.Reason, exit.Err)
 		}
-		run := f.mustRun(claimed.ID)
+		run := f.MustRun(claimed.ID)
 		if run.Status == AgentRunStatusCompleted {
 			return run
 		}
 		if run.Status != AgentRunStatusQueued || i == 5 {
-			f.t.Fatalf("member %s = %s (%#v), log %s", run.ID, run.Status, run.FailureExplanation, steerShape(f, run.ID))
+			f.T.Fatalf("member %s = %s (%#v), log %s", run.ID, run.Status, run.FailureExplanation, steerShape(f, run.ID))
 		}
-		if run.AvailableAt.After(f.clock.Now()) {
-			f.clock.Advance(run.AvailableAt.Sub(f.clock.Now()) + time.Millisecond)
+		if run.AvailableAt.After(f.Clock.Now()) {
+			f.Clock.Advance(run.AvailableAt.Sub(f.Clock.Now()) + time.Millisecond)
 		}
-		claimed = f.claim(run.ID)
+		claimed = f.Claim(run.ID)
 	}
 }
 
 // convRoute schedules a Team message, drives its routing Run (the conversation
 // runner's deterministic routing binding) and returns the routing Run.
-func convRoute(f *loopFixture, conversationID string, trigger *ChannelMessage) *AgentRun {
-	f.t.Helper()
+func convRoute(f *looptest.Fixture, conversationID string, trigger *ChannelMessage) *AgentRun {
+	f.T.Helper()
 	routing := convSchedule(f, conversationID, trigger)
 	if routing.AssignedAgentID != "" || routing.SessionID != "" {
-		f.t.Fatalf("routing Run = %#v", routing)
+		f.T.Fatalf("routing Run = %#v", routing)
 	}
-	claimed := f.claim(routing.ID)
-	binding, err := f.runner.ResolveTurnRunner(f.ctx, claimed)
+	claimed := f.Claim(routing.ID)
+	binding, err := f.Runner.ResolveTurnRunner(f.Ctx, claimed)
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
-	if exit := f.loop.Drive(f.ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding}); exit.Reason != runloop.RunLoopExitFinal {
-		f.t.Fatalf("routing exit = %#v", exit)
+	if exit := f.Loop.Drive(f.Ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.WorkerID, Binding: binding}); exit.Reason != runloop.RunLoopExitFinal {
+		f.T.Fatalf("routing exit = %#v", exit)
 	}
-	return f.mustRun(routing.ID)
+	return f.MustRun(routing.ID)
 }
 
 // TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone: a Team message
@@ -635,10 +636,10 @@ func convRoute(f *loopFixture, conversationID string, trigger *ChannelMessage) *
 // session, and the second member sees the first member's answer as a user
 // entry attributed to that teammate.
 func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
-	eachStore(t, "conv-team", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withTeam("finn", "scout"))
-		f.model.add(&modelRule{name: "member", reply: func(v stepView) ModelStepResult {
-			return finalAnswer(map[string]any{"answer": v.Request().AgentID + " checked the canary."})
+	looptest.EachStore(t, "conv-team", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithTeam("finn", "scout"))
+		f.Model.Add(&looptest.ModelRule{Name: "member", Reply: func(v looptest.StepView) ModelStepResult {
+			return looptest.FinalAnswer(map[string]any{"answer": v.Request().AgentID + " checked the canary."})
 		}})
 		team := ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}
 		conversation := convChat(f, team, nil)
@@ -652,15 +653,15 @@ func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 		if routed.Status != AgentRunStatusCompleted || routed.SessionID != "" || len(ids) != 2 {
 			t.Fatalf("routing Run = %s session %q output %#v", routed.Status, routed.SessionID, routed.Output)
 		}
-		for _, req := range f.model.calls("") {
+		for _, req := range f.Model.Calls("") {
 			if req.RunID == routing.ID {
-				t.Fatalf("the routing Run called the model: %s", stepView{req: req}.describe())
+				t.Fatalf("the routing Run called the model: %s", looptest.StepView{Req: req}.Describe())
 			}
 		}
 
 		members := map[string]*AgentRun{}
 		for _, id := range ids {
-			run := f.mustRun(fmt.Sprint(id))
+			run := f.MustRun(fmt.Sprint(id))
 			members[run.AssignedAgentID] = run
 		}
 		if members["finn"] == nil || members["scout"] == nil {
@@ -683,8 +684,8 @@ func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 		for _, run := range []*AgentRun{finn, scout} {
 			agent := run.AssignedAgentID
 			lane := ConversationRunLane(conversation.ID, "", agent)
-			session := f.session(run.ID)
-			if run.ConcurrencyKey != lane || session.ID != conversationSessionID(f.scope, lane) || session.AgentID != agent || session.ConversationID != conversation.ID {
+			session := f.Session(run.ID)
+			if run.ConcurrencyKey != lane || session.ID != conversationSessionID(f.Scope, lane) || session.AgentID != agent || session.ConversationID != conversation.ID {
 				t.Fatalf("%s session = %#v (run lane %q)", agent, session, run.ConcurrencyKey)
 			}
 		}
@@ -713,18 +714,18 @@ func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 			t.Fatalf("second member caught up %v, want [%s %s] (its own answer %s skipped)", ids, finnAnswer.ID, again.ID, scoutAnswer.ID)
 		}
 		if seen := caught[0]; convAuthor(seen) != "agent:"+finn.AssignedAgentID ||
-			!strings.Contains(kitPartsText(seen.User.Content), "(agent, teammate "+finn.AssignedAgentID+")") {
-			t.Fatalf("view of the teammate's answer = %s %q", convAuthor(seen), kitPartsText(seen.User.Content))
+			!strings.Contains(looptest.PartsText(seen.User.Content), "(agent, teammate "+finn.AssignedAgentID+")") {
+			t.Fatalf("view of the teammate's answer = %s %q", convAuthor(seen), looptest.PartsText(seen.User.Content))
 		}
 		var scoutRequest ModelStepRequest
-		for _, req := range f.model.calls(ModelStepPurposeStep) {
+		for _, req := range f.Model.Calls(ModelStepPurposeStep) {
 			if req.RunID == scoutAgain.ID {
 				scoutRequest = req
 				break
 			}
 		}
-		if !slices.ContainsFunc(stepView{req: scoutRequest}.UserTexts(), func(text string) bool { return strings.Contains(text, finnAnswer.Content) }) {
-			t.Fatalf("the teammate's answer is not rendered: %s", stepView{req: scoutRequest}.describe())
+		if !slices.ContainsFunc(looptest.StepView{Req: scoutRequest}.UserTexts(), func(text string) bool { return strings.Contains(text, finnAnswer.Content) }) {
+			t.Fatalf("the teammate's answer is not rendered: %s", looptest.StepView{Req: scoutRequest}.Describe())
 		}
 		if text := convRunContext(f, convFirstStep(f, scout.ID)); !strings.Contains(text, "Team roster:") {
 			t.Fatalf("member run_context has no team roster: %q", text)
@@ -733,7 +734,7 @@ func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 		// finn's session holds its own answer once: as the assistant entry,
 		// never caught up again as a user entry.
 		assistant := 0
-		for _, entry := range f.entries(finn.ID) {
+		for _, entry := range f.Entries(finn.ID) {
 			if entry.Type == SessionEntryUser && entry.User != nil && entry.User.MessageID == finnAnswer.ID {
 				t.Fatalf("finn caught up its own answer: %#v", entry)
 			}
@@ -755,11 +756,11 @@ func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 // each message a user entry attributed to its sender; its own Runs' posts and
 // a private message to someone else are skipped, and the watermark moves.
 func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
-	eachStore(t, "conv-catch-up", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(convAnswer("ok: ")))
-		conversation, first := f.startChat("Start the release checklist")
+	looptest.EachStore(t, "conv-catch-up", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(convAnswer("ok: ")))
+		conversation, first := f.StartChat("Start the release checklist")
 		first = convDrive(f, first.ID)
-		watermark := f.session(first.ID).ChannelWatermark
+		watermark := f.Session(first.ID).ChannelWatermark
 		if watermark == 0 {
 			t.Fatal("first Run left no watermark")
 		}
@@ -777,7 +778,7 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 		// finn's own Run posted this (a progress note of the first Run): the
 		// session already holds it.
 		own := convPost(f, conversation.ID, "finn: still on it", func(r *runtimeconversation.PostChannelMessageRequest) {
-			r.Sender = ConversationParticipant{Type: ConversationParticipantAgent, ID: loopFixtureAgent}
+			r.Sender = ConversationParticipant{Type: ConversationParticipantAgent, ID: looptest.FixtureAgent}
 			r.Intent = MessageIntentUpdate
 			r.References = []ConversationReference{{Kind: ConversationReferenceRun, ID: first.ID}}
 		})
@@ -785,7 +786,7 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 			r.Audience = ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{convActor("ben")}}
 		})
 		trigger := convPost(f, conversation.ID, "What is left?", nil)
-		run := f.chatRun(conversation, trigger)
+		run := f.ChatRun(conversation, trigger)
 		run = convDrive(f, run.ID)
 		if run.SessionID != first.SessionID {
 			t.Fatalf("second Run session %s, want the lane session %s", run.SessionID, first.SessionID)
@@ -804,18 +805,18 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 			t.Fatalf("authors = %v", authors)
 		}
 		for i, header := range []string{"(user ana)", "(user ben)", "(service routine-nightly)", "(agent scout)", "(user ana)"} {
-			if text := kitPartsText(caught[i].User.Content); !strings.HasPrefix(text, "[") || !strings.Contains(strings.SplitN(text, "\n", 2)[0], header) {
+			if text := looptest.PartsText(caught[i].User.Content); !strings.HasPrefix(text, "[") || !strings.Contains(strings.SplitN(text, "\n", 2)[0], header) {
 				t.Fatalf("entry %d header = %q, want %s", i, text, header)
 			}
 		}
-		if got := f.session(run.ID).ChannelWatermark; got < trigger.Sequence || got <= watermark {
+		if got := f.Session(run.ID).ChannelWatermark; got < trigger.Sequence || got <= watermark {
 			t.Fatalf("watermark = %d, want at least the trigger's %d (was %d)", got, trigger.Sequence, watermark)
 		}
 		// The second Run's step renders the first exchange, then the caught-up
 		// messages: one session, one log.
-		view := stepView{req: convFirstStep(f, run.ID)}
+		view := looptest.StepView{Req: convFirstStep(f, run.ID)}
 		if texts := view.UserTexts(); len(texts) < 6 || !strings.Contains(texts[0], "Start the release checklist") {
-			t.Fatalf("second Run's step = %s", view.describe())
+			t.Fatalf("second Run's step = %s", view.Describe())
 		}
 	})
 
@@ -823,7 +824,7 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 		// A message in a local thread runs in the thread's lane and session:
 		// the canonical trigger is the thread message, the session holds only
 		// the thread, and the answer goes back into the thread.
-		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
 		conversation := convChat(f, ObjectiveOwner{}, nil)
 		root := convPost(f, conversation.ID, "Call one started", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.Sender = ConversationParticipant{Type: ConversationParticipantService, ID: "calls"}
@@ -835,13 +836,13 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 			r.RequiresResponse = true
 		})
 		run := convSchedule(f, conversation.ID, inThread)
-		lane := ConversationRunLane(conversation.ID, root.ID, loopFixtureAgent)
+		lane := ConversationRunLane(conversation.ID, root.ID, looptest.FixtureAgent)
 		if run.Context["threadRootMessageId"] != root.ID || run.ConcurrencyKey != lane {
 			t.Fatalf("thread Run = key %q context %#v", run.ConcurrencyKey, run.Context)
 		}
 		run = convDriveNextMember(f)
-		session := f.session(run.ID)
-		if session.ThreadRootID != root.ID || session.ID != conversationSessionID(f.scope, lane) {
+		session := f.Session(run.ID)
+		if session.ThreadRootID != root.ID || session.ID != conversationSessionID(f.Scope, lane) {
 			t.Fatalf("thread session = %#v", session)
 		}
 		ids := convMessageIDs(convUserBeforeAssistant(f, run.ID))
@@ -858,7 +859,7 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 		// The unthreaded chat has its own lane: the outside message starts a
 		// Run there, not in the thread's.
 		ordinary := convSchedule(f, conversation.ID, outside)
-		if ordinary.ConcurrencyKey != ConversationRunLane(conversation.ID, "", loopFixtureAgent) || ordinary.ID == run.ID {
+		if ordinary.ConcurrencyKey != ConversationRunLane(conversation.ID, "", looptest.FixtureAgent) || ordinary.ID == run.ID {
 			t.Fatalf("unthreaded Run = %#v", ordinary)
 		}
 	})
@@ -870,20 +871,20 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 // same Agent, posted without a session, are user entries attributed to it
 // ("you, elsewhere"), not assistant entries (spec 12 decision issue 6).
 func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
-	eachStore(t, "conv-seed", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(convAnswer("ok: ")))
+	looptest.EachStore(t, "conv-seed", func(t *testing.T, store KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(convAnswer("ok: ")))
 		conversation := convChat(f, ObjectiveOwner{}, nil)
 		var messages []*ChannelMessage
 		for i := 1; i <= 45; i++ {
-			sender, intent := convActor(loopFixtureUser), MessageIntentQuestion
+			sender, intent := convActor(looptest.FixtureUser), MessageIntentQuestion
 			if i%2 == 0 {
-				sender, intent = ConversationParticipant{Type: ConversationParticipantAgent, ID: loopFixtureAgent}, MessageIntentAnswer
+				sender, intent = ConversationParticipant{Type: ConversationParticipantAgent, ID: looptest.FixtureAgent}, MessageIntentAnswer
 			}
 			messages = append(messages, convPost(f, conversation.ID, fmt.Sprintf("message #%d", i), func(r *runtimeconversation.PostChannelMessageRequest) {
 				r.Sender, r.Intent = sender, intent
 			}))
 		}
-		run := convDrive(f, f.chatRun(conversation, messages[44]).ID)
+		run := convDrive(f, f.ChatRun(conversation, messages[44]).ID)
 
 		entries := convRunEntries(f, run.ID)
 		var users []*SessionEntry
@@ -910,10 +911,10 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 		}
 		for _, entry := range users {
 			author := convAuthor(entry)
-			header := strings.SplitN(kitPartsText(entry.User.Content), "\n", 2)[0]
+			header := strings.SplitN(looptest.PartsText(entry.User.Content), "\n", 2)[0]
 			switch author {
-			case "user:" + loopFixtureUser:
-			case "agent:" + loopFixtureAgent:
+			case "user:" + looptest.FixtureUser:
+			case "agent:" + looptest.FixtureAgent:
 				if !strings.Contains(header, "(you, elsewhere finn)") {
 					t.Fatalf("earlier finn answer header = %q", header)
 				}
@@ -928,7 +929,7 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 		// reply root there is not a thread. The reply's Run works in the
 		// chat's own lane, and its seed holds the whole chat, not only the
 		// quoted message's "thread".
-		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
 		conversation := convChat(f, ObjectiveOwner{}, &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "telegram-endpoint"})
 		source := func(id, thread string) *ExternalMessageSource {
 			return &ExternalMessageSource{Provider: "telegram", ChannelType: "private", ChannelID: "chat-7", ThreadID: thread, MessageID: id, ParticipantID: "kev"}
@@ -944,7 +945,7 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 			t.Fatalf("a Telegram DM reply root became a thread: %s", root)
 		}
 		run := convSchedule(f, conversation.ID, reply)
-		if run.ConcurrencyKey != ConversationRunLane(conversation.ID, "", loopFixtureAgent) || run.Context["threadRootMessageId"] != nil {
+		if run.ConcurrencyKey != ConversationRunLane(conversation.ID, "", looptest.FixtureAgent) || run.Context["threadRootMessageId"] != nil {
 			t.Fatalf("Telegram DM reply Run = key %q context %#v", run.ConcurrencyKey, run.Context)
 		}
 		run = steerToRest(f, run.ID, 6)
@@ -952,7 +953,7 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 		if !slices.Contains(ids, earlier.ID) || !slices.Contains(ids, quoted.ID) || !slices.Contains(ids, reply.ID) {
 			t.Fatalf("Telegram DM seed = %v, want the whole chat (%s %s %s)", ids, earlier.ID, quoted.ID, reply.ID)
 		}
-		if session := f.session(run.ID); session.ThreadRootID != "" {
+		if session := f.Session(run.ID); session.ThreadRootID != "" {
 			t.Fatalf("Telegram DM session is a thread session: %#v", session)
 		}
 	})
@@ -962,22 +963,22 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 // react, participation, spoken replies
 
 // convParticipation turns the chat's participation opt-in on or off.
-func convParticipation(f *loopFixture, conversationID string, enabled bool) {
-	f.t.Helper()
-	conversation, err := f.convs.GetConversation(f.ctx, f.scope, conversationID)
+func convParticipation(f *looptest.Fixture, conversationID string, enabled bool) {
+	f.T.Helper()
+	conversation, err := f.Convs.GetConversation(f.Ctx, f.Scope, conversationID)
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
-	if _, err := f.convs.UpdateConversation(f.ctx, runtimeconversation.UpdateConversationRequest{
-		Scope: f.scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision, ParticipationEnabled: &enabled,
+	if _, err := f.Convs.UpdateConversation(f.Ctx, runtimeconversation.UpdateConversationRequest{
+		Scope: f.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision, ParticipationEnabled: &enabled,
 	}); err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 }
 
 // convToolEntries is runID's tool entries named name.
-func convToolEntries(f *loopFixture, runID, name string) []*SessionEntry {
-	f.t.Helper()
+func convToolEntries(f *looptest.Fixture, runID, name string) []*SessionEntry {
+	f.T.Helper()
 	var out []*SessionEntry
 	for _, entry := range convRunEntries(f, runID) {
 		if entry.Type == SessionEntryTool && entry.Tool != nil && entry.Tool.Name == name {
@@ -994,34 +995,34 @@ func convToolEntries(f *loopFixture, runID, name string) []*SessionEntry {
 // but keeps the usage it spent.
 func TestReactAndParticipationAreTools(t *testing.T) {
 	t.Run("react", func(t *testing.T) {
-		eachStore(t, "conv-react", func(t *testing.T, store KernelStore) {
-			f := newLoopFixture(t, store)
+		looptest.EachStore(t, "conv-react", func(t *testing.T, store KernelStore) {
+			f := looptest.NewFixture(t, store)
 			var triggerID string
-			f.model.add(
-				&modelRule{name: "react", when: func(v stepView) bool { _, _, ok := v.ToolResult(string(ControlToolReact)); return !ok },
-					reply: func(v stepView) ModelStepResult {
+			f.Model.Add(
+				&looptest.ModelRule{Name: "react", When: func(v looptest.StepView) bool { _, _, ok := v.ToolResult(string(ControlToolReact)); return !ok },
+					Reply: func(v looptest.StepView) ModelStepResult {
 						if !v.HasTool(string(ControlToolReact)) {
-							t.Errorf("react is not offered: %s", v.describe())
+							t.Errorf("react is not offered: %s", v.Describe())
 						}
-						return act("Picking it up.", call(string(ControlToolReact), map[string]any{"messageId": triggerID, "emoji": "👀"}))
+						return looptest.Act("Picking it up.", looptest.Call(string(ControlToolReact), map[string]any{"messageId": triggerID, "emoji": "👀"}))
 					}},
-				&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
-					return finalAnswer(map[string]any{"answer": "On it: the deploy is green."})
+				&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.FinalAnswer(map[string]any{"answer": "On it: the deploy is green."})
 				}},
 			)
 			conversation := convChat(f, ObjectiveOwner{}, nil)
 			trigger := convPost(f, conversation.ID, "Is the deploy green?", nil)
 			triggerID = trigger.ID
-			run := convDrive(f, f.chatRun(conversation, trigger).ID)
+			run := convDrive(f, f.ChatRun(conversation, trigger).ID)
 			reacts := convToolEntries(f, run.ID, string(ControlToolReact))
 			if len(reacts) != 1 || reacts[0].State != ToolEntryCompleted || reacts[0].Tool.Result.IsError {
 				t.Fatalf("react entries = %#v", reacts)
 			}
-			reacted, err := f.convs.GetChannelMessage(f.ctx, f.scope, conversation.ID, trigger.ID)
+			reacted, err := f.Convs.GetChannelMessage(f.Ctx, f.Scope, conversation.ID, trigger.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: loopFixtureAgent}
+			agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: looptest.FixtureAgent}
 			if len(reacted.Reactions) != 1 || reacted.Reactions[0].Emoji != "👀" || !slices.Contains(reacted.Reactions[0].Actors, agent) {
 				t.Fatalf("reactions = %#v", reacted.Reactions)
 			}
@@ -1032,28 +1033,28 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 	})
 
 	t.Run("participation_opt_in", func(t *testing.T) {
-		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
 		conversation := convChat(f, ObjectiveOwner{}, nil)
 
 		// Not opted in: the Run ends at once, with no model call and no post.
 		quiet := convPost(f, conversation.ID, "anyone there?", nil)
-		skipped := convDrive(f, f.chatRun(conversation, quiet).ID)
+		skipped := convDrive(f, f.ChatRun(conversation, quiet).ID)
 		if skipped.Output["participationSkipped"] != true || len(steerAgentMessages(f, conversation.ID)) != 0 {
-			t.Fatalf("Run outside the opt-in = %#v, messages %s", skipped.Output, kitDescribeMessages(f.messages(conversation.ID)))
+			t.Fatalf("Run outside the opt-in = %#v, messages %s", skipped.Output, looptest.DescribeMessages(f.Messages(conversation.ID)))
 		}
-		if len(f.model.calls("")) != 0 {
-			t.Fatalf("a Run outside the opt-in called the model %d times", len(f.model.calls("")))
+		if len(f.Model.Calls("")) != 0 {
+			t.Fatalf("a Run outside the opt-in called the model %d times", len(f.Model.Calls("")))
 		}
 
 		// Opted in: a later message is answered; the earlier one stays unanswered.
 		convParticipation(f, conversation.ID, true)
 		asked := convPost(f, conversation.ID, "now?", nil)
-		answered := convDrive(f, f.chatRun(conversation, asked).ID)
+		answered := convDrive(f, f.ChatRun(conversation, asked).ID)
 		if answered.Output["participationSkipped"] == true || convAgentAnswer(f, conversation.ID).ReplyToMessageID != asked.ID {
-			t.Fatalf("opted-in Run = %#v, messages %s", answered.Output, kitDescribeMessages(f.messages(conversation.ID)))
+			t.Fatalf("opted-in Run = %#v, messages %s", answered.Output, looptest.DescribeMessages(f.Messages(conversation.ID)))
 		}
-		current, err := f.convs.GetConversation(f.ctx, f.scope, conversation.ID)
+		current, err := f.Convs.GetConversation(f.Ctx, f.Scope, conversation.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1063,36 +1064,36 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 	})
 
 	t.Run("participation_opt_out_discards_the_answer", func(t *testing.T) {
-		eachStore(t, "conv-optout", func(t *testing.T, store KernelStore) {
-			f := newLoopFixture(t, store)
+		looptest.EachStore(t, "conv-optout", func(t *testing.T, store KernelStore) {
+			f := looptest.NewFixture(t, store)
 			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
 			conversation := convChat(f, ObjectiveOwner{}, nil)
 			convParticipation(f, conversation.ID, true)
-			f.dispatch.on("list_items", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+			f.Dispatch.On("list_items", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				return map[string]interface{}{"items": []interface{}{"a", "b"}}, nil
 			})
-			f.model.add(
-				&modelRule{name: "read", times: 1, reply: func(v stepView) ModelStepResult {
-					return withUsage(act("Reading the items.", call(kitGovernedTool(v, "list_items"), nil)), 1200, 40)
+			f.Model.Add(
+				&looptest.ModelRule{Name: "read", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.WithUsage(looptest.Act("Reading the items.", looptest.Call(looptest.GovernedTool(v, "list_items"), nil)), 1200, 40)
 				}},
-				&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
-					return withUsage(finalAnswer(map[string]any{"answer": "There are two items."}), 1300, 30)
-				}, before: func(_ context.Context, _ stepView) error {
+				&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
+					return looptest.WithUsage(looptest.FinalAnswer(map[string]any{"answer": "There are two items."}), 1300, 30)
+				}, Before: func(_ context.Context, _ looptest.StepView) error {
 					// The channel opts out while the Run works.
 					convParticipation(f, conversation.ID, false)
 					return nil
 				}},
 			)
 			trigger := convPost(f, conversation.ID, "How many items?", nil)
-			run := convDrive(f, f.chatRun(conversation, trigger).ID)
+			run := convDrive(f, f.ChatRun(conversation, trigger).ID)
 			if run.Output["participationSkipped"] != true {
 				t.Fatalf("opted-out Run output = %#v", run.Output)
 			}
 			if messages := steerAgentMessages(f, conversation.ID); len(messages) != 0 {
-				t.Fatalf("the discarded answer was posted: %s", kitDescribeMessages(messages))
+				t.Fatalf("the discarded answer was posted: %s", looptest.DescribeMessages(messages))
 			}
 			var in, out int64
-			for _, step := range f.steps(run.ID) {
+			for _, step := range f.Steps(run.ID) {
 				in += int64(step.Usage.InputTokens)
 				out += int64(step.Usage.OutputTokens)
 			}
@@ -1107,7 +1108,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 // response mode from its trigger: the run_context names a spoken reply, the
 // spoken system section is offered, and the answer is posted spoken.
 func TestSpokenTriggerKeepsItsResponseMode(t *testing.T) {
-	f := newLoopFixture(t, newTestKernelStore(t), withRules(&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
+	f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
 		args := map[string]any{"answer": "Leave at seven."}
 		// The spoken final tool requires silent.
 		for _, tool := range v.Request().Tools {
@@ -1115,7 +1116,7 @@ func TestSpokenTriggerKeepsItsResponseMode(t *testing.T) {
 				args["silent"] = false
 			}
 		}
-		return finalAnswer(args)
+		return looptest.FinalAnswer(args)
 	}}))
 	conversation := convChat(f, ObjectiveOwner{}, nil)
 	spoken := convPost(f, conversation.ID, "when should I leave?", func(r *runtimeconversation.PostChannelMessageRequest) {
