@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -305,7 +306,7 @@ func boundedCallbackError(err error) string {
 	return value
 }
 
-func normalizeStoredCallbackReceipt(value *CallbackEventReceipt) *CallbackEventReceipt {
+func normalizeStoredCallbackReceipt(value *models.CallbackEventReceipt) *models.CallbackEventReceipt {
 	if value != nil && value.AvailableAt.IsZero() {
 		value.AvailableAt = value.CreatedAt
 	}

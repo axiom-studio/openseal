@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -958,20 +959,20 @@ func normalizeExternalConversationPage(limit, offset int) (int, int) {
 	return limit, offset
 }
 
-func validExternalConversationInboxSave(current, next *ExternalConversationInboxItem, expectedRevision int64, leaseOwner string) bool {
+func validExternalConversationInboxSave(current, next *models.ExternalConversationInboxItem, expectedRevision int64, leaseOwner string) bool {
 	return current != nil && next != nil && current.Revision == expectedRevision && next.Revision == expectedRevision+1 &&
-		current.Status == ExternalConversationInboxLeased && current.LeaseOwner == strings.TrimSpace(leaseOwner) &&
+		current.Status == models.ExternalConversationInboxLeased && current.LeaseOwner == strings.TrimSpace(leaseOwner) &&
 		!next.UpdatedAt.Before(current.UpdatedAt) && !next.UpdatedAt.After(current.LeaseExpiresAt) &&
 		current.EndpointID == next.EndpointID && current.EndpointRevision == next.EndpointRevision &&
-		current.Adapter == next.Adapter && sameExternalConversationInboxIntent(current, next) &&
+		current.Adapter == next.Adapter && models.SameExternalConversationInboxIntent(current, next) &&
 		current.CreatedAt.Equal(next.CreatedAt)
 }
 
-func validExternalConversationDeliverySave(current, next *ExternalConversationDelivery, expectedRevision int64, leaseOwner string) bool {
+func validExternalConversationDeliverySave(current, next *models.ExternalConversationDelivery, expectedRevision int64, leaseOwner string) bool {
 	return current != nil && next != nil && current.Revision == expectedRevision && next.Revision == expectedRevision+1 &&
-		current.Status == ExternalConversationDeliveryLeased && current.LeaseOwner == strings.TrimSpace(leaseOwner) &&
+		current.Status == models.ExternalConversationDeliveryLeased && current.LeaseOwner == strings.TrimSpace(leaseOwner) &&
 		!next.UpdatedAt.Before(current.UpdatedAt) && !next.UpdatedAt.After(current.LeaseExpiresAt) &&
-		sameExternalConversationDeliveryIntent(current, next) && current.CreatedAt.Equal(next.CreatedAt)
+		models.SameExternalConversationDeliveryIntent(current, next) && current.CreatedAt.Equal(next.CreatedAt)
 }
 
 func (s *SQLiteStore) SaveExternalConversationReplyProgress(ctx context.Context, scope Scope, id string, expectedRevision int64, progress ExternalConversationReplyProgress) error {

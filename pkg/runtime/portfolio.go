@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -22,12 +23,12 @@ const RunCreditErrorWorkspaceCreditsExhausted = "workspace_credits_exhausted"
 // RunEngineLoop is AgentRun.Engine for Runs created by the run loop.
 const RunEngineLoop = "loop"
 
-func summarizeAgentRunOwners(runs []*AgentRun, owners []ObjectiveOwner) []AgentRunOwnerSummary {
-	requested := make(map[string]ObjectiveOwner, len(owners))
+func summarizeAgentRunOwners(runs []*models.AgentRun, owners []models.ObjectiveOwner) []models.AgentRunOwnerSummary {
+	requested := make(map[string]models.ObjectiveOwner, len(owners))
 	for _, owner := range owners {
 		requested[string(owner.Type)+"\x1f"+owner.ID] = owner
 	}
-	summaries := make(map[string]AgentRunOwnerSummary, len(owners))
+	summaries := make(map[string]models.AgentRunOwnerSummary, len(owners))
 	for _, run := range runs {
 		key := string(run.Owner.Type) + "\x1f" + run.Owner.ID
 		owner, ok := requested[key]
@@ -44,7 +45,7 @@ func summarizeAgentRunOwners(runs []*AgentRun, owners []ObjectiveOwner) []AgentR
 		}
 		summaries[key] = summary
 	}
-	result := make([]AgentRunOwnerSummary, 0, len(summaries))
+	result := make([]models.AgentRunOwnerSummary, 0, len(summaries))
 	for _, owner := range owners {
 		if summary, ok := summaries[string(owner.Type)+"\x1f"+owner.ID]; ok {
 			result = append(result, summary)

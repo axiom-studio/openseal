@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func skillRuntimeDependencyTable(runs string) string {
@@ -12,14 +14,14 @@ func skillRuntimeDependencyTable(runs string) string {
 }
 
 func normalizeRunSkillDependencyError(err error) error {
-	if err != nil && strings.Contains(err.Error(), ErrSkillRuntimeMaintenance.Error()) {
-		return ErrSkillRuntimeMaintenance
+	if err != nil && strings.Contains(err.Error(), models.ErrSkillRuntimeMaintenance.Error()) {
+		return models.ErrSkillRuntimeMaintenance
 	}
-	if err != nil && strings.Contains(err.Error(), ErrRunSkillDependencyUnavailable.Error()) {
-		return ErrRunSkillDependencyUnavailable
+	if err != nil && strings.Contains(err.Error(), models.ErrRunSkillDependencyUnavailable.Error()) {
+		return models.ErrRunSkillDependencyUnavailable
 	}
-	if err != nil && strings.Contains(err.Error(), ErrAcceptedRunExecution.Error()) {
-		return ErrAcceptedRunExecution
+	if err != nil && strings.Contains(err.Error(), models.ErrAcceptedRunExecution.Error()) {
+		return models.ErrAcceptedRunExecution
 	}
 	return err
 }

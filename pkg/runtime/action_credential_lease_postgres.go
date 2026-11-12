@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -197,11 +198,11 @@ func digestActionCredentialFieldSelection(fields map[string][]string) (string, e
 	return hex.EncodeToString(digest[:]), nil
 }
 
-func actionCredentialLeaseNonceDigest(lease ActionCredentialLease) [sha256.Size]byte {
+func actionCredentialLeaseNonceDigest(lease models.ActionCredentialLease) [sha256.Size]byte {
 	return sha256.Sum256([]byte(lease.Issuer + "\x00" + lease.Audience + "\x00" + lease.Nonce))
 }
 
-func matchCurrentActionCredentialBinding(lease ActionCredentialLease, call *ActionCall, binding *skill.Binding) error {
+func matchCurrentActionCredentialBinding(lease models.ActionCredentialLease, call *models.ActionCall, binding *skill.Binding) error {
 	if call == nil || binding == nil || binding.Disabled ||
 		binding.Scope.Kind != lease.Scope.Kind || binding.Scope.ID != lease.Scope.ID ||
 		binding.DeploymentID != lease.BindingOwnerID || binding.ID != lease.BindingID || binding.Revision != lease.BindingRevision ||
@@ -209,7 +210,7 @@ func matchCurrentActionCredentialBinding(lease ActionCredentialLease, call *Acti
 		!stringSliceContains(binding.AllowedActions, lease.Action) ||
 		riskLevelRank(call.Risk) < 0 || riskLevelRank(binding.MaximumRisk) < riskLevelRank(call.Risk) ||
 		!credentialReferencesContainExact(binding.Credentials, call.CredentialRefs) {
-		return ErrActionCredentialLeaseMismatch
+		return models.ErrActionCredentialLeaseMismatch
 	}
 	return nil
 }

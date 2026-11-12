@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -178,19 +179,19 @@ func (v *ActionCredentialLeaseValidator) Validate(ctx context.Context, request A
 // MatchActionCredentialLease rechecks a signed lease against current durable
 // state and the host's exact field allowlist. It is suitable for an
 // ActionCredentialLeaseRedeemer implementation inside its atomic boundary.
-func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string, credentialFields map[string][]string) error {
+func MatchActionCredentialLease(lease models.ActionCredentialLease, call *models.ActionCall, run *models.AgentRun, transport string, credentialFields map[string][]string) error {
 	if err := lease.Validate(); err != nil {
 		return err
 	}
-	if err := matchActionCredentialLeaseCore(lease, call, run, transport); err != nil {
+	if err := models.CheckActionCredentialLeaseCore(lease, call, run, transport); err != nil {
 		return err
 	}
-	expectedFields, err := actionCredentialFields(call.CredentialRefs, credentialFields)
+	expectedFields, err := models.ActionCredentialFieldReferences(call.CredentialRefs, credentialFields)
 	if err != nil {
 		return err
 	}
 	if !reflect.DeepEqual(lease.Credentials, expectedFields) {
-		return ErrActionCredentialLeaseMismatch
+		return models.ErrActionCredentialLeaseMismatch
 	}
 	return nil
 }
@@ -228,10 +229,10 @@ func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease,
 // or supplied by the host, to belong to the run's umbrella: the Agent of a
 // 1:1 run or the Team of a Team run. A run delegated to another Agent has no
 // umbrella and redeems nothing.
-func matchActionCredentialLeaseUmbrella(lease ActionCredentialLease, run *AgentRun, binding *skill.Binding) error {
-	actor := RunSkillActor(run)
+func matchActionCredentialLeaseUmbrella(lease models.ActionCredentialLease, run *models.AgentRun, binding *skill.Binding) error {
+	actor := models.RunSkillActor(run)
 	if binding == nil || !actor.Valid() || binding.DeploymentID != lease.BindingOwnerID || binding.DeploymentID != actor.Umbrella.ID {
-		return ErrActionCredentialLeaseMismatch
+		return models.ErrActionCredentialLeaseMismatch
 	}
 	return nil
 }
