@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -20,12 +21,12 @@ func setupUpgradeProof(from, to string, revision int64) skill.BindingLifecycleEn
 		}}
 }
 
-func setupUpgradeFixture() (*SkillSetupRequest, *skill.Binding) {
+func setupUpgradeFixture() (*models.SkillSetupRequest, *skill.Binding) {
 	now := time.Now().UTC()
-	r := &SkillSetupRequest{ID: "setup", Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat",
+	r := &models.SkillSetupRequest{ID: "setup", Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat",
 		TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: "reauthorize", SkillID: "connector", SkillVersion: "1.1.0",
 		SourceIdentity: "verified-publisher", SkillName: "Connector", BindingID: "account", BindingRevision: 7,
-		Phase: SkillSetupPhaseBindingUpgrade, BindingVersion: "1.0.0", RequiredActions: []string{"read"}, Reason: "Reconnect the account",
+		Phase: models.SkillSetupPhaseBindingUpgrade, BindingVersion: "1.0.0", RequiredActions: []string{"read"}, Reason: "Reconnect the account",
 		Status: "pending", Revision: 3, CreatedAt: now, UpdatedAt: now}
 	b := &skill.Binding{ID: r.BindingID, Scope: skill.ScopeReference{Kind: r.Scope.Kind, ID: r.Scope.ID}, DeploymentID: r.DeploymentID,
 		SkillID: r.SkillID, SkillVersion: r.SkillVersion, SourceIdentity: r.SourceIdentity, Revision: 8,
@@ -35,12 +36,12 @@ func setupUpgradeFixture() (*SkillSetupRequest, *skill.Binding) {
 
 func TestSkillSetupUpgradeRebaseRequiresCanonicalProofAndFreshConfiguration(t *testing.T) {
 	r, b := setupUpgradeFixture()
-	before := cloneSkillSetupRequest(r)
+	before := models.CloneSkillSetupRequest(r)
 	rebased, err := RebaseSkillSetupRequestAfterBindingUpgrade(r, 3, b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rebased.Phase != SkillSetupPhaseConfiguration || rebased.BindingVersion != "1.1.0" || rebased.BindingRevision != 8 ||
+	if rebased.Phase != models.SkillSetupPhaseConfiguration || rebased.BindingVersion != "1.1.0" || rebased.BindingRevision != 8 ||
 		rebased.Revision != 4 || rebased.Status != "pending" || rebased.Kind != "reauthorize" || !reflect.DeepEqual(r, before) {
 		t.Fatalf("unsafe setup transition: %#v", rebased)
 	}
@@ -66,7 +67,7 @@ func TestSkillSetupUpgradeRejectsUnprovedOrForeignTransitions(t *testing.T) {
 			case "stale":
 				expected = 2
 			case "phase":
-				r.Phase = SkillSetupPhaseConfiguration
+				r.Phase = models.SkillSetupPhaseConfiguration
 			case "ordinary":
 				b.Lifecycle[0].SkillUpgrade = nil
 			case "scope":
@@ -123,14 +124,14 @@ func TestSkillSetupValidationDiagnosticsAreSafeAndMatchUnicodeSchema(t *testing.
 	r.Reason += "海"
 	args["reason"] = r.Reason
 	for _, err := range []error{r.Validate(), func() error { _, err := decodeSkillSetupArguments(args); return err }()} {
-		var diagnostic *SkillSetupValidationError
-		if !errors.Is(err, ErrInvalidSkillSetup) || !errors.As(err, &diagnostic) || diagnostic.Field != "reason" || strings.Contains(err.Error(), "海") {
+		var diagnostic *models.SkillSetupValidationError
+		if !errors.Is(err, models.ErrInvalidSkillSetup) || !errors.As(err, &diagnostic) || diagnostic.Field != "reason" || strings.Contains(err.Error(), "海") {
 			t.Fatalf("unsafe or opaque diagnostic: %v", err)
 		}
 	}
 	r, _ = setupUpgradeFixture()
 	r.Phase = "unrecognized"
-	var diagnostic *SkillSetupValidationError
+	var diagnostic *models.SkillSetupValidationError
 	if err := r.Validate(); !errors.As(err, &diagnostic) || diagnostic.Field != "phase" {
 		t.Fatalf("phase diagnostic: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestSkillSetupLegacyConfigurationPendingRequestIsReused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := cloneSkillSetupRequest(request)
+	legacy := models.CloneSkillSetupRequest(request)
 	legacy.Phase, legacy.BindingVersion = "", ""
 	legacy.Revision++
 	if err := f.store.SaveSkillSetupRequest(f.ctx, legacy, request.Revision); err != nil {

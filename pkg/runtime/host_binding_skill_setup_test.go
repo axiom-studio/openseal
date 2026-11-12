@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -15,7 +16,7 @@ import (
 func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "a"}
+	scope := models.Scope{Kind: "tenant", ID: "a"}
 	catalog := skillActionCatalog(t, ctx, scope, "agent")
 	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
@@ -36,9 +37,9 @@ func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	setup := func(callID, skillID string, run *AgentRun) (map[string]interface{}, error) {
-		return dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &ActionCall{ID: callID, Scope: scope, RunID: run.ID},
-			Arguments: map[string]interface{}{"kind": "configure", "skillId": skillID, "skillVersion": "latest", "reason": "File a ticket"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
+	setup := func(callID, skillID string, run *models.AgentRun) (map[string]interface{}, error) {
+		return dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: callID, Scope: scope, RunID: run.ID},
+			Arguments: map[string]interface{}{"kind": "configure", "skillId": skillID, "skillVersion": "latest", "reason": "File a ticket"}}, run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 	}
 	_, err = setup("call-linear", "linear", run)
 	var refusal *interactionRequestRefusal
@@ -54,7 +55,7 @@ func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 	if result, err := setup("call-reddit", "reddit.reader", run); err != nil || result["setupRequest"] == nil {
 		t.Fatalf("unrelated setup = %#v, %v", result, err)
 	}
-	other := cloneAgentRun(run)
+	other := models.CloneAgentRun(run)
 	other.ID = "other-users-run"
 	if result, err := setup("call-other", "linear", other); err != nil || result["setupRequest"] == nil {
 		t.Fatalf("setup for a run without the connection = %#v, %v", result, err)

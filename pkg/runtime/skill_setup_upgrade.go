@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -13,14 +14,14 @@ import (
 // upgrade provenance. It does not apply an upgrade or complete configuration.
 // The host authenticates the caller and verifies current target authority;
 // the setup store still applies the returned request with revision CAS.
-func RebaseSkillSetupRequestAfterBindingUpgrade(request *SkillSetupRequest, expected int64, binding *skill.Binding) (*SkillSetupRequest, error) {
-	if request == nil || request.Status != "pending" || request.Revision != expected || request.Phase != SkillSetupPhaseBindingUpgrade {
-		return nil, ErrSkillSetupConflict
+func RebaseSkillSetupRequestAfterBindingUpgrade(request *models.SkillSetupRequest, expected int64, binding *skill.Binding) (*models.SkillSetupRequest, error) {
+	if request == nil || request.Status != "pending" || request.Revision != expected || request.Phase != models.SkillSetupPhaseBindingUpgrade {
+		return nil, models.ErrSkillSetupConflict
 	}
 	if binding == nil || binding.Disabled || binding.ID != request.BindingID || binding.DeploymentID != request.DeploymentID ||
 		binding.Scope.Kind != request.Scope.Kind || binding.Scope.ID != request.Scope.ID || binding.SkillID != request.SkillID ||
 		binding.SourceIdentity != request.SourceIdentity || binding.SkillVersion != request.SkillVersion || binding.Revision <= request.BindingRevision {
-		return nil, ErrSkillSetupConflict
+		return nil, models.ErrSkillSetupConflict
 	}
 	version, revision, upgraded := request.BindingVersion, request.BindingRevision, false
 	for _, entry := range binding.Lifecycle {
@@ -28,7 +29,7 @@ func RebaseSkillSetupRequestAfterBindingUpgrade(request *SkillSetupRequest, expe
 			continue
 		}
 		if entry.Revision <= revision || entry.Revision > binding.Revision {
-			return nil, ErrSkillSetupConflict
+			return nil, models.ErrSkillSetupConflict
 		}
 		revision = entry.Revision
 		proof := entry.SkillUpgrade
@@ -40,15 +41,15 @@ func RebaseSkillSetupRequestAfterBindingUpgrade(request *SkillSetupRequest, expe
 			proof.From.ID != request.SkillID || proof.To.ID != request.SkillID ||
 			proof.From.SourceIdentity != request.SourceIdentity || proof.To.SourceIdentity != request.SourceIdentity ||
 			proof.From.Version != version || proof.To.Version == "" || proof.To.Version == version {
-			return nil, ErrSkillSetupConflict
+			return nil, models.ErrSkillSetupConflict
 		}
 		version, upgraded = proof.To.Version, true
 	}
 	if !upgraded || version != request.SkillVersion {
 		return nil, errors.New("the account has no verified canonical upgrade to the requested Skill version")
 	}
-	rebased := cloneSkillSetupRequest(request)
-	rebased.Phase = SkillSetupPhaseConfiguration
+	rebased := models.CloneSkillSetupRequest(request)
+	rebased.Phase = models.SkillSetupPhaseConfiguration
 	rebased.BindingVersion = binding.SkillVersion
 	rebased.BindingRevision = binding.Revision
 	if rebased.Kind == "install" {

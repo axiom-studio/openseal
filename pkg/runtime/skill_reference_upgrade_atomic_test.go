@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestSkillReferenceUpgradeStoreRollsBackEveryResourceOnConflict(t *testing.T) {
-	tests := map[string]func(*testing.T) SkillReferenceUpgradeStore{
-		"sqlite": func(t *testing.T) SkillReferenceUpgradeStore {
+	tests := map[string]func(*testing.T) models.SkillReferenceUpgradeStore{
+		"sqlite": func(t *testing.T) models.SkillReferenceUpgradeStore {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "upgrade.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -29,11 +30,11 @@ func TestSkillReferenceUpgradeStoreRollsBackEveryResourceOnConflict(t *testing.T
 	}
 }
 
-func assertSkillReferenceUpgradeRollback(t *testing.T, store SkillReferenceUpgradeStore) {
+func assertSkillReferenceUpgradeRollback(t *testing.T, store models.SkillReferenceUpgradeStore) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC)
-	scope := Scope{Kind: "tenant", ID: "atomic"}
+	scope := models.Scope{Kind: "tenant", ID: "atomic"}
 	bindingScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	binding := &skill.Binding{
 		ID: "source", Scope: bindingScope, DeploymentID: "researcher", SkillID: "source",
@@ -43,9 +44,9 @@ func assertSkillReferenceUpgradeRollback(t *testing.T, store SkillReferenceUpgra
 	if err := store.SaveSkillBinding(ctx, binding, 0); err != nil {
 		t.Fatal(err)
 	}
-	objective := &Objective{
-		ID: "objective", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
-		Title: "Observe", Goal: "Observe safely", Status: ObjectiveStatusActive, Revision: 1,
+	objective := &models.Objective{
+		ID: "objective", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"},
+		Title: "Observe", Goal: "Observe safely", Status: models.ObjectiveStatusActive, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := store.CreateObjective(ctx, objective); err != nil {
@@ -55,35 +56,35 @@ func assertSkillReferenceUpgradeRollback(t *testing.T, store SkillReferenceUpgra
 	nextBinding.SkillVersion = "1.1.0"
 	nextBinding.Revision = 2
 	nextBinding.UpdatedAt = now.Add(time.Minute)
-	nextObjective := cloneObjective(objective)
+	nextObjective := models.CloneObjective(objective)
 	// The reviewed expected revision is deliberately stale. The candidate is
 	// internally valid for that expectation so the conflict occurs in storage
 	// after the binding update statement has run.
 	nextObjective.Revision = 3
 	nextObjective.UpdatedAt = nextBinding.UpdatedAt
-	plan := &SkillReferenceUpgradePlan{
+	plan := &models.SkillReferenceUpgradePlan{
 		APIVersion: SkillReferenceUpgradeAPIVersion, Scope: scope, DeploymentID: binding.DeploymentID,
 		BindingID: binding.ID, ExpectedBindingRevision: 1,
-		From:       SkillReferenceIdentity{ID: binding.SkillID, Version: binding.SkillVersion},
-		To:         SkillReferenceIdentity{ID: binding.SkillID, Version: nextBinding.SkillVersion},
-		Objectives: []SkillReferenceObjectiveImpact{{ID: objective.ID, ExpectedRevision: 2}},
+		From:       models.SkillReferenceIdentity{ID: binding.SkillID, Version: binding.SkillVersion},
+		To:         models.SkillReferenceIdentity{ID: binding.SkillID, Version: nextBinding.SkillVersion},
+		Objectives: []models.SkillReferenceObjectiveImpact{{ID: objective.ID, ExpectedRevision: 2}},
 		Digest:     "sha256:reviewed",
 	}
-	objectiveEvent := objectiveActivityEvent(nextObjective, ActivityActor{Type: "user", ID: "operator"},
-		ActivityVisibilityScope, "objective.skill_reference_upgraded", "Upgrade Objective reference",
+	objectiveEvent := models.ObjectiveActivityEvent(nextObjective, models.ActivityActor{Type: "user", ID: "operator"},
+		models.ActivityVisibilityScope, "objective.skill_reference_upgraded", "Upgrade Objective reference",
 		nextObjective.UpdatedAt, map[string]interface{}{"planDigest": plan.Digest})
-	mutation := &SkillReferenceUpgradeMutation{
+	mutation := &models.SkillReferenceUpgradeMutation{
 		Plan: plan, Binding: nextBinding,
-		Objectives: []SkillReferenceObjectiveMutation{{
+		Objectives: []models.SkillReferenceObjectiveMutation{{
 			Value: nextObjective, ExpectedRevision: 2, Event: objectiveEvent,
 		}},
-		Receipt: &SkillReferenceUpgradeReceipt{
+		Receipt: &models.SkillReferenceUpgradeReceipt{
 			APIVersion: SkillReferenceUpgradeAPIVersion, PlanDigest: plan.Digest, Scope: scope,
 			DeploymentID: binding.DeploymentID, BindingID: binding.ID, BindingRevision: 2,
 			From: plan.From, To: plan.To, AppliedAt: nextBinding.UpdatedAt,
 		},
 	}
-	if err := store.ApplySkillReferenceUpgrade(ctx, mutation); !errors.Is(err, ErrSkillReferenceUpgradeConflict) {
+	if err := store.ApplySkillReferenceUpgrade(ctx, mutation); !errors.Is(err, models.ErrSkillReferenceUpgradeConflict) {
 		t.Fatalf("expected atomic revision conflict, got %v", err)
 	}
 	bindings, err := store.ListSkillBindings(ctx, bindingScope, binding.DeploymentID)

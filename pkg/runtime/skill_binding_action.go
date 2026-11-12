@@ -13,6 +13,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	inferschema "github.com/invopop/jsonschema"
@@ -70,7 +71,7 @@ func SkillManagementSkill() *skill.Definition {
 		SkillActionTargetAgentArgument: skillActionTargetAgentProperty(),
 	}
 	return &skill.Definition{
-		ID: SkillManagementSkillID, Version: SkillManagementSkillVersion,
+		ID: models.SkillManagementSkillID, Version: SkillManagementSkillVersion,
 		Name: "Skills", Description: "Propose governed changes to the Skill access of this chat's Agent or Team.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: SkillManagementEndpoint},
 		Actions: map[string]skill.Action{
@@ -294,14 +295,14 @@ type skillDiscoveryArguments struct {
 // exact registered Skill before a proposal can become an approval request.
 type SkillBindingActionValidator struct {
 	catalog *skill.Catalog
-	roster  TeamRosterReader
+	roster  models.TeamRosterReader
 	agents  *kernelagent.Registry
 }
 
 // NewSkillBindingActionValidator checks Skill management proposals. roster
 // reads Team (and, when it can, Agent) deployments to derive the run's
 // umbrella, which every binding change targets.
-func NewSkillBindingActionValidator(catalog *skill.Catalog, roster TeamRosterReader) (*SkillBindingActionValidator, error) {
+func NewSkillBindingActionValidator(catalog *skill.Catalog, roster models.TeamRosterReader) (*SkillBindingActionValidator, error) {
 	if catalog == nil {
 		return nil, errors.New("skill catalog is required")
 	}
@@ -349,7 +350,7 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 	default:
 		return nil, errors.New("unsupported skill binding action")
 	}
-	owner, err := RunUmbrella(ctx, v.roster, input.Run)
+	owner, err := models.RunUmbrella(ctx, v.roster, input.Run)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +392,7 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 // SkillBindingActionDispatcher materializes approved proposals through the
 // existing CAS-protected, audited Skill binding lifecycle.
 type SkillBindingActionDispatcher struct {
-	store     KernelStore
+	store     models.KernelStore
 	catalog   *skill.Catalog
 	discovery skill.DiscoveryProvider
 	fallback  agentrun.ActionDispatcher
@@ -408,9 +409,11 @@ func (d *SkillBindingActionDispatcher) UseAgentRegistry(agents *kernelagent.Regi
 }
 
 // roster reads the Team and Agent deployments RunUmbrella checks.
-func (d *SkillBindingActionDispatcher) roster() TeamRosterReader { return teamRosterReader(d.store) }
+func (d *SkillBindingActionDispatcher) roster() models.TeamRosterReader {
+	return teamRosterReader(d.store)
+}
 
-func NewSkillBindingActionDispatcher(store KernelStore, catalog *skill.Catalog, fallback agentrun.ActionDispatcher, discovery ...skill.DiscoveryProvider) (*SkillBindingActionDispatcher, error) {
+func NewSkillBindingActionDispatcher(store models.KernelStore, catalog *skill.Catalog, fallback agentrun.ActionDispatcher, discovery ...skill.DiscoveryProvider) (*SkillBindingActionDispatcher, error) {
 	if store == nil || catalog == nil {
 		return nil, errors.New("kernel store and skill catalog are required")
 	}
@@ -440,7 +443,7 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 	run, err := d.store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil || run == nil {
 		if err == nil {
-			err = ErrRunNotFound
+			err = models.ErrRunNotFound
 		}
 		return nil, err
 	}
@@ -454,7 +457,7 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 	// Every target is the run's umbrella: the Agent of a 1:1 chat, the Team
 	// of a Team chat, task or hand-off. A builder in its own chat may name
 	// another Agent instead (targetAgentId).
-	umbrella, err := RunUmbrella(ctx, d.roster(), run)
+	umbrella, err := models.RunUmbrella(ctx, d.roster(), run)
 	if err != nil {
 		return nil, err
 	}
@@ -574,12 +577,12 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 	}
 }
 
-func approvedSkillActionCheckpoint(ctx context.Context, store ActionStore, call *ActionCall) (*ApprovalCheckpoint, error) {
+func approvedSkillActionCheckpoint(ctx context.Context, store models.ActionStore, call *models.ActionCall) (*models.ApprovalCheckpoint, error) {
 	approval, err := store.GetApproval(ctx, call.Scope, call.ApprovalID)
 	if err != nil {
 		return nil, err
 	}
-	if approval.Status != ApprovalStatusApproved || approval.DecisionBy == nil {
+	if approval.Status != models.ApprovalStatusApproved || approval.DecisionBy == nil {
 		return nil, errors.New("Skill management action requires an approved checkpoint with a decision principal")
 	}
 	return approval, nil
@@ -777,7 +780,7 @@ func skillBindingCandidate(scope skill.ScopeReference, deploymentID string, args
 
 // skillActionMember is the acting member: the Agent whose own management
 // binding the action runs through.
-func skillActionMember(run *AgentRun) (string, error) {
+func skillActionMember(run *models.AgentRun) (string, error) {
 	if run == nil {
 		return "", errors.New("Agent Run is required")
 	}
@@ -793,8 +796,8 @@ type skillTargetAgent struct {
 	DisplayName string
 }
 
-func (t *skillTargetAgent) owner() ObjectiveOwner {
-	return ObjectiveOwner{Type: OwnerTypeAgent, ID: t.ID}
+func (t *skillTargetAgent) owner() models.ObjectiveOwner {
+	return models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: t.ID}
 }
 
 func (t *skillTargetAgent) preview() map[string]interface{} {
@@ -807,7 +810,7 @@ func (t *skillTargetAgent) preview() map[string]interface{} {
 // it is always reviewed and approved only by a person in the app, in every
 // approval mode.
 func isTargetedSkillBindingAction(bound *skill.BoundAction, arguments map[string]interface{}) bool {
-	if bound == nil || bound.Definition == nil || bound.Definition.ID != SkillManagementSkillID {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != models.SkillManagementSkillID {
 		return false
 	}
 	if bound.Action.Name != SkillActionUpsertBinding && bound.Action.Name != SkillActionDisableBinding {
@@ -831,7 +834,7 @@ func skillActionTargetable(action string) bool {
 // binding that allows create_agent or update_agent) may name one, and only
 // in a reply in its own chat. The target exists in scope, is not retired,
 // is not the builder and is not fixed-policy, the same rule as update_agent.
-func skillActionTarget(ctx context.Context, catalog *skill.Catalog, agents *kernelagent.Registry, run *AgentRun, member string, arguments map[string]interface{}) (*skillTargetAgent, error) {
+func skillActionTarget(ctx context.Context, catalog *skill.Catalog, agents *kernelagent.Registry, run *models.AgentRun, member string, arguments map[string]interface{}) (*skillTargetAgent, error) {
 	raw, present := arguments[SkillActionTargetAgentArgument]
 	if !present {
 		return nil, nil
@@ -860,8 +863,8 @@ func skillActionTarget(ctx context.Context, catalog *skill.Catalog, agents *kern
 	if !slices.ContainsFunc(bindings, agentBuilderBinding) {
 		return nil, errors.New("only an Agent that builds Agents can act for another Agent; omit targetAgentId")
 	}
-	_, taskHint := run.Context[ConversationTaskContextKey]
-	if run.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: member}) || run.Kind != RunKindConversation || taskHint || strings.HasPrefix(run.ConcurrencyKey, "task:") {
+	_, taskHint := run.Context[models.ConversationTaskContextKey]
+	if run.Owner != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: member}) || run.Kind != models.RunKindConversation || taskHint || strings.HasPrefix(run.ConcurrencyKey, "task:") {
 		return nil, errors.New("targetAgentId is only available in a reply in your own chat")
 	}
 	if agents == nil {
@@ -926,11 +929,11 @@ func activationHasAgentBuilder(activation *skill.ActivationSnapshot) bool {
 		return false
 	}
 	for _, activated := range activation.Skills {
-		if activated.SkillID != AgentManagementSkillID || activated.SkillVersion != AgentManagementSkillVersion || activated.SourceIdentity != "" {
+		if activated.SkillID != models.AgentManagementSkillID || activated.SkillVersion != models.AgentManagementSkillVersion || activated.SourceIdentity != "" {
 			continue
 		}
 		for _, action := range activated.Actions {
-			if action.Action == AgentActionCreateAgent || action.Action == AgentActionUpdateAgent {
+			if action.Action == models.AgentActionCreateAgent || action.Action == models.AgentActionUpdateAgent {
 				return true
 			}
 		}
@@ -943,7 +946,7 @@ func activationHasAgentBuilder(activation *skill.ActivationSnapshot) bool {
 const targetAgentConnectionSentence = " With targetAgentId, the card still appears in this chat and the app is connected for that Agent."
 
 func hasTargetAgentProperty(action capability.ModelAction) bool {
-	if action.SkillID != SkillManagementSkillID || !skillActionTargetable(action.Action) {
+	if action.SkillID != models.SkillManagementSkillID || !skillActionTargetable(action.Action) {
 		return false
 	}
 	properties, _ := action.InputSchema["properties"].(map[string]interface{})
@@ -954,8 +957,8 @@ func hasTargetAgentProperty(action capability.ModelAction) bool {
 // agentBuilderBinding reports an enabled openseal.agents binding that lets
 // its Agent create or change other Agents.
 func agentBuilderBinding(binding *skill.Binding) bool {
-	return binding != nil && !binding.Disabled && binding.SkillID == AgentManagementSkillID && binding.SkillVersion == AgentManagementSkillVersion &&
-		binding.SourceIdentity == "" && (slices.Contains(binding.AllowedActions, AgentActionCreateAgent) || slices.Contains(binding.AllowedActions, AgentActionUpdateAgent))
+	return binding != nil && !binding.Disabled && binding.SkillID == models.AgentManagementSkillID && binding.SkillVersion == models.AgentManagementSkillVersion &&
+		binding.SourceIdentity == "" && (slices.Contains(binding.AllowedActions, models.AgentActionCreateAgent) || slices.Contains(binding.AllowedActions, models.AgentActionUpdateAgent))
 }
 
 func decodeSkillBindingArguments(arguments map[string]interface{}, target interface{}) error {
@@ -1030,7 +1033,7 @@ func skillBindingActionResult(operation string, binding *skill.Binding, replayed
 }
 
 func isSkillBindingAction(bound *skill.BoundAction) bool {
-	if bound == nil || bound.Definition == nil || bound.Definition.ID != SkillManagementSkillID || skill.DefinitionSourceIdentity(bound.Definition) != "" {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != models.SkillManagementSkillID || skill.DefinitionSourceIdentity(bound.Definition) != "" {
 		return false
 	}
 	if bound.Definition.Version != SkillManagementSkillVersion {

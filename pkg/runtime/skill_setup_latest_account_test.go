@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -19,10 +20,10 @@ type latestSetupTestLocation struct {
 
 type latestSetupTestFixture struct {
 	ctx        context.Context
-	scope      Scope
+	scope      models.Scope
 	store      *sqlite.Store
 	catalog    *skill.Catalog
-	run        *AgentRun
+	run        *models.AgentRun
 	dispatcher *SkillBindingActionDispatcher
 	source     string
 	candidates []skill.DiscoveryCandidate
@@ -31,7 +32,7 @@ type latestSetupTestFixture struct {
 
 func newLatestSetupTestFixture(t *testing.T, source string) *latestSetupTestFixture {
 	t.Helper()
-	f := &latestSetupTestFixture{ctx: context.Background(), scope: Scope{Kind: "tenant", ID: "a"}, store: newTestKernelStore(t), source: source}
+	f := &latestSetupTestFixture{ctx: context.Background(), scope: models.Scope{Kind: "tenant", ID: "a"}, store: newTestKernelStore(t), source: source}
 	f.catalog = skillActionCatalog(t, f.ctx, f.scope, "agent")
 	f.locations = []latestSetupTestLocation{{scope: skill.ScopeReference{Kind: "tenant", ID: "a"}, deploymentID: "agent"}}
 	if source != "" {
@@ -121,10 +122,10 @@ func (f *latestSetupTestFixture) snapshotBindings(t *testing.T) [][]*skill.Bindi
 
 // A setup request is an interaction. Verify both successful and rejected requests
 // leave local and foreign account credentials, revisions and permissions intact.
-func (f *latestSetupTestFixture) request(t *testing.T, callID string, args map[string]interface{}) (*SkillSetupRequest, map[string]interface{}, error) {
+func (f *latestSetupTestFixture) request(t *testing.T, callID string, args map[string]interface{}) (*models.SkillSetupRequest, map[string]interface{}, error) {
 	t.Helper()
 	before := f.snapshotBindings(t)
-	result, err := f.dispatcher.requestSkillSetup(f.ctx, agentrun.ActionDispatchInput{Call: &ActionCall{ID: callID, Scope: f.scope, RunID: f.run.ID}, Arguments: args}, f.run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
+	result, err := f.dispatcher.requestSkillSetup(f.ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: callID, Scope: f.scope, RunID: f.run.ID}, Arguments: args}, f.run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 	if after := f.snapshotBindings(t); !reflect.DeepEqual(before, after) {
 		t.Fatalf("setup changed account authority:\nbefore %#v\nafter %#v", before, after)
 	}
@@ -178,7 +179,7 @@ func TestSkillSetupLatestAccountRetainsExactSavedIdentity(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if record.SkillVersion != "2.0.0" || record.SourceIdentity != source || record.BindingID != account.ID || record.BindingRevision != account.Revision || record.BindingVersion != "1.0.0" || record.Phase != SkillSetupPhaseBindingUpgrade || record.Status != "pending" {
+					if record.SkillVersion != "2.0.0" || record.SourceIdentity != source || record.BindingID != account.ID || record.BindingRevision != account.Revision || record.BindingVersion != "1.0.0" || record.Phase != models.SkillSetupPhaseBindingUpgrade || record.Status != "pending" {
 						t.Fatalf("latest lost retained account or upgrade phase: %#v", record)
 					}
 					if value["phase"] != "binding_upgrade" || value["bindingVersion"] != "1.0.0" || value["skillVersion"] != "2.0.0" || !reflect.DeepEqual(record.RequiredActions, []string{"read_latest"}) {
@@ -209,7 +210,7 @@ func TestSkillSetupLatestAccountConfigurationPhase(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if record.Phase != SkillSetupPhaseConfiguration || record.SkillVersion != "2.0.0" || record.BindingID != bindingID || record.BindingRevision != revision || record.BindingVersion != bindingVersion {
+			if record.Phase != models.SkillSetupPhaseConfiguration || record.SkillVersion != "2.0.0" || record.BindingID != bindingID || record.BindingRevision != revision || record.BindingVersion != bindingVersion {
 				t.Fatalf("configuration identity: %#v", record)
 			}
 		})
@@ -239,7 +240,7 @@ func TestSkillSetupLatestAccountAmbiguityIncludesRetainedVersions(t *testing.T) 
 	}
 	f.assertRequestCount(t, 0)
 	record, _, err := f.request(t, "explicit", f.args("configure", "latest", old.ID))
-	if err != nil || record == nil || record.BindingID != old.ID || record.BindingVersion != "1.0.0" || record.Phase != SkillSetupPhaseBindingUpgrade {
+	if err != nil || record == nil || record.BindingID != old.ID || record.BindingVersion != "1.0.0" || record.Phase != models.SkillSetupPhaseBindingUpgrade {
 		t.Fatalf("explicit retained account could not resolve ambiguity: %#v %v", record, err)
 	}
 }
@@ -288,7 +289,7 @@ func TestSkillSetupLatestAccountForeignScopeIsNeverRetained(t *testing.T) {
 			}
 			f.assertRequestCount(t, 0)
 			record, _, err := f.request(t, "configure", f.args("configure", "latest", ""))
-			if err != nil || record == nil || record.BindingID != "" || record.BindingRevision != 0 || record.BindingVersion != "" || record.Phase != SkillSetupPhaseConfiguration {
+			if err != nil || record == nil || record.BindingID != "" || record.BindingRevision != 0 || record.BindingVersion != "" || record.Phase != models.SkillSetupPhaseConfiguration {
 				t.Fatalf("new local configuration retained foreign account: %#v %v", record, err)
 			}
 		})
@@ -311,13 +312,13 @@ func TestSkillSetupLatestAccountDisabledBehavior(t *testing.T) {
 	}
 	f.assertRequestCount(t, 0)
 	newRecord, _, err := f.request(t, "implicit-configure", f.args("configure", "latest", ""))
-	if err != nil || newRecord == nil || newRecord.BindingID != "" || newRecord.Phase != SkillSetupPhaseConfiguration {
+	if err != nil || newRecord == nil || newRecord.BindingID != "" || newRecord.Phase != models.SkillSetupPhaseConfiguration {
 		t.Fatalf("disabled account was not excluded from implicit configuration: %#v %v", newRecord, err)
 	}
 	args := f.args("configure", "1.0.0", account.ID)
 	args["requiredActions"] = []interface{}{"read"}
 	sameVersion, _, err := f.request(t, "same-version", args)
-	if err != nil || sameVersion == nil || sameVersion.BindingID != account.ID || sameVersion.BindingRevision != account.Revision+1 || sameVersion.BindingVersion != "1.0.0" || sameVersion.Phase != SkillSetupPhaseConfiguration {
+	if err != nil || sameVersion == nil || sameVersion.BindingID != account.ID || sameVersion.BindingRevision != account.Revision+1 || sameVersion.BindingVersion != "1.0.0" || sameVersion.Phase != models.SkillSetupPhaseConfiguration {
 		t.Fatalf("same-version disabled configuration changed existing semantics: %#v %v", sameVersion, err)
 	}
 }
@@ -362,7 +363,7 @@ func TestSkillSetupLatestAccountAllowsAdvertisedMarketplaceNamespace(t *testing.
 	args := f.args("configure", "latest", "")
 	args["skillId"], args["sourceIdentity"] = skillID, source
 	record, _, err := f.request(t, "authorized", args)
-	if err != nil || record == nil || record.SkillID != skillID || record.SourceIdentity != source || record.SkillVersion != "2.0.0" || record.Phase != SkillSetupPhaseConfiguration {
+	if err != nil || record == nil || record.SkillID != skillID || record.SourceIdentity != source || record.SkillVersion != "2.0.0" || record.Phase != models.SkillSetupPhaseConfiguration {
 		t.Fatalf("advertised marketplace Skill was blocked by its namespace: %#v %v", record, err)
 	}
 	f.assertRequestCount(t, 1)
@@ -378,7 +379,7 @@ func TestSkillSetupCompletedSetupDoesNotReappear(t *testing.T) {
 		t.Fatalf("first request: %#v %v", first, err)
 	}
 	account := f.bindAccount(t, "saved", "2.0.0", "", f.locations[0], false)
-	resolved := cloneSkillSetupRequest(first)
+	resolved := models.CloneSkillSetupRequest(first)
 	resolved.Status, resolved.ResolvedBy, resolved.ResolvedBindingID, resolved.ResolvedBindingRevision = "resolved", "user", account.ID, account.Revision
 	resolved.Revision++
 	if err := f.store.SaveSkillSetupRequest(f.ctx, resolved, first.Revision); err != nil {

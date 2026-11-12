@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -44,7 +45,7 @@ func (BindingActionArgumentResolver) ValidateActionProposal(context.Context, age
 	return nil, nil
 }
 
-func resolveBindingActionArgument(run *AgentRun, binding skill.BindingArgumentValue) (interface{}, error) {
+func resolveBindingActionArgument(run *models.AgentRun, binding skill.BindingArgumentValue) (interface{}, error) {
 	switch binding.Source {
 	case skill.BindingArgumentLiteral:
 		return cloneBindingArgumentValue(binding.Literal), nil
@@ -54,7 +55,7 @@ func resolveBindingActionArgument(run *AgentRun, binding skill.BindingArgumentVa
 			return nil, err
 		}
 		id, _ := session[sessionContextIDKey].(string)
-		if !validOpaqueIdentifier(id, 128) {
+		if !models.IsValidOpaqueIdentifier(id, 128) {
 			return nil, errors.New("durable session id is missing or invalid")
 		}
 		return id, nil
@@ -87,7 +88,7 @@ func cloneBindingArgumentValue(value interface{}) interface{} {
 	return result
 }
 
-func trustedRunSessionContext(run *AgentRun) (map[string]interface{}, error) {
+func trustedRunSessionContext(run *models.AgentRun) (map[string]interface{}, error) {
 	if run == nil {
 		return nil, errors.New("durable Run is required")
 	}
@@ -98,7 +99,7 @@ func trustedRunSessionContext(run *AgentRun) (map[string]interface{}, error) {
 	return session, nil
 }
 
-func bindingResolvedArgumentProvenance(bound *skill.BoundAction) map[string]ResolvedActionArgument {
+func bindingResolvedArgumentProvenance(bound *skill.BoundAction) map[string]models.ResolvedActionArgument {
 	if bound == nil || bound.Binding == nil {
 		return nil
 	}
@@ -106,9 +107,9 @@ func bindingResolvedArgumentProvenance(bound *skill.BoundAction) map[string]Reso
 	if len(bindings) == 0 {
 		return nil
 	}
-	result := make(map[string]ResolvedActionArgument, len(bindings))
+	result := make(map[string]models.ResolvedActionArgument, len(bindings))
 	for name, binding := range bindings {
-		result[name] = ResolvedActionArgument{Source: binding.Source, Claim: strings.TrimSpace(binding.Claim)}
+		result[name] = models.ResolvedActionArgument{Source: binding.Source, Claim: strings.TrimSpace(binding.Claim)}
 	}
 	return result
 }
@@ -133,7 +134,7 @@ func (EmbedSessionActionAuthorityValidator) ValidateActionProposal(_ context.Con
 	return map[string]interface{}{"embedSessionAuthority": "granted"}, nil
 }
 
-func constrainEmbedSessionActions(run *AgentRun, actions []skill.ModelAction) []skill.ModelAction {
+func constrainEmbedSessionActions(run *models.AgentRun, actions []skill.ModelAction) []skill.ModelAction {
 	if run == nil {
 		return actions
 	}

@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/mcp"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -58,16 +59,16 @@ type AppCatalogEntry struct {
 // AppCatalog is the host's shared catalog of connectable apps. Entries with
 // no connectable endpoint are left out.
 type AppCatalog interface {
-	FindApps(ctx context.Context, scope Scope, query string, limit int) ([]AppCatalogEntry, error)
+	FindApps(ctx context.Context, scope models.Scope, query string, limit int) ([]AppCatalogEntry, error)
 	// GetApp returns nil, nil when no entry has the slug.
-	GetApp(ctx context.Context, scope Scope, slug string) (*AppCatalogEntry, error)
+	GetApp(ctx context.Context, scope models.Scope, slug string) (*AppCatalogEntry, error)
 }
 
 // isCatalogApp reports whether id is the slug of an app in the host's
 // catalog, so a Skill setup naming an app can say how to connect it.
-func (d *SkillBindingActionDispatcher) isCatalogApp(ctx context.Context, scope Scope, id string) bool {
+func (d *SkillBindingActionDispatcher) isCatalogApp(ctx context.Context, scope models.Scope, id string) bool {
 	catalog := d.apps.get()
-	if catalog == nil || !validAppSlug(id) {
+	if catalog == nil || !models.IsValidAppSlug(id) {
 		return false
 	}
 	entry, err := catalog.GetApp(ctx, scope, id)
@@ -131,7 +132,7 @@ func requestConnectionAction() skill.Action {
 			"app": map[string]interface{}{"anyOf": []interface{}{
 				map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128, "description": "Catalog slug copied from find_apps."},
 				map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
-					"address": map[string]interface{}{"type": "string", "minLength": 9, "maxLength": maximumAppAddress, "description": "The MCP server's https address."},
+					"address": map[string]interface{}{"type": "string", "minLength": 9, "maxLength": models.MaximumAppAddress, "description": "The MCP server's https address."},
 				}, "required": []interface{}{"address"}},
 			}},
 			"reason":                       map[string]interface{}{"type": "string", "maxLength": 1000, "description": "Optional; shown on the card, for example \"Connect Linear so I can list your open issues\"."},
@@ -149,7 +150,7 @@ type findAppsArguments struct {
 	Limit int    `json:"limit,omitempty"`
 }
 
-func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun, umbrella ObjectiveOwner) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
 	var a findAppsArguments
 	if err := decodeSkillBindingArguments(input.Arguments, &a); err != nil {
 		return nil, err
@@ -186,7 +187,7 @@ func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input agent
 		if summary := strings.TrimSpace(entry.Summary); summary != "" {
 			item["summary"] = truncateRunes(summary, 240)
 		}
-		if binding := ConnectedAppBinding(set, ConnectAppTarget{CatalogSlug: entry.Slug}); binding != nil {
+		if binding := ConnectedAppBinding(set, models.ConnectAppTarget{CatalogSlug: entry.Slug}); binding != nil {
 			tools, toolErr := ConnectedAppToolNames(ctx, d.catalog, binding)
 			if toolErr != nil {
 				return nil, toolErr
@@ -201,7 +202,7 @@ func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input agent
 
 // findSetupSkills lists the Skills that discovery offers for the query and
 // that the user can set up from chat, so one search covers apps and Skills.
-func (d *SkillBindingActionDispatcher) findSetupSkills(ctx context.Context, run *AgentRun, deploymentID, query string, limit int) ([]interface{}, error) {
+func (d *SkillBindingActionDispatcher) findSetupSkills(ctx context.Context, run *models.AgentRun, deploymentID, query string, limit int) ([]interface{}, error) {
 	skills := []interface{}{}
 	if d.discovery == nil {
 		return skills, nil
@@ -256,14 +257,14 @@ type requestConnectionArguments struct {
 	TargetAgentID string      `json:"targetAgentId,omitempty"`
 }
 
-func decodeRequestConnectionArguments(arguments map[string]interface{}) (ConnectAppTarget, string, error) {
+func decodeRequestConnectionArguments(arguments map[string]interface{}) (models.ConnectAppTarget, string, error) {
 	var a requestConnectionArguments
 	if err := decodeSkillBindingArguments(arguments, &a); err != nil {
-		return ConnectAppTarget{}, "", refuseInteraction("the connection request arguments do not match the action schema")
+		return models.ConnectAppTarget{}, "", refuseInteraction("the connection request arguments do not match the action schema")
 	}
 	reason := strings.TrimSpace(a.Reason)
 	if utf8.RuneCountInString(reason) > 1000 {
-		return ConnectAppTarget{}, "", refuseInteraction("reason must contain at most 1000 characters")
+		return models.ConnectAppTarget{}, "", refuseInteraction("reason must contain at most 1000 characters")
 	}
 	switch value := a.App.(type) {
 	case string:
@@ -271,33 +272,33 @@ func decodeRequestConnectionArguments(arguments map[string]interface{}) (Connect
 		if strings.HasPrefix(strings.ToLower(slug), "https://") {
 			return decodeAppAddress(slug, reason)
 		}
-		if !validAppSlug(slug) {
-			return ConnectAppTarget{}, "", refuseInteraction("app must be a slug copied from find_apps")
+		if !models.IsValidAppSlug(slug) {
+			return models.ConnectAppTarget{}, "", refuseInteraction("app must be a slug copied from find_apps")
 		}
-		return ConnectAppTarget{CatalogSlug: slug}, reason, nil
+		return models.ConnectAppTarget{CatalogSlug: slug}, reason, nil
 	case map[string]interface{}:
 		address, _ := value["address"].(string)
 		if len(value) != 1 || address == "" {
-			return ConnectAppTarget{}, "", refuseInteraction("app must be a catalog slug or {\"address\": \"https://...\"}")
+			return models.ConnectAppTarget{}, "", refuseInteraction("app must be a catalog slug or {\"address\": \"https://...\"}")
 		}
 		return decodeAppAddress(address, reason)
 	}
-	return ConnectAppTarget{}, "", refuseInteraction("app must be a catalog slug or {\"address\": \"https://...\"}")
+	return models.ConnectAppTarget{}, "", refuseInteraction("app must be a catalog slug or {\"address\": \"https://...\"}")
 }
 
-func decodeAppAddress(value, reason string) (ConnectAppTarget, string, error) {
-	address, err := NormalizeAppAddress(value)
+func decodeAppAddress(value, reason string) (models.ConnectAppTarget, string, error) {
+	address, err := models.NormalizeAppAddress(value)
 	if err != nil {
-		return ConnectAppTarget{}, "", refuseInteraction(err.Error())
+		return models.ConnectAppTarget{}, "", refuseInteraction(err.Error())
 	}
 	parsed, _ := url.Parse(address)
-	return ConnectAppTarget{Address: address, Name: parsed.Hostname(), SignIn: AppSignInUnknown}, reason, nil
+	return models.ConnectAppTarget{Address: address, Name: parsed.Hostname(), SignIn: models.AppSignInUnknown}, reason, nil
 }
 
 // requestConnection saves a connect card in the run's chat (under umbrella)
 // for owner, the Agent or Team the app is connected for: the umbrella, or
 // the Agent a builder names with targetAgentId.
-func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun, member string, umbrella, owner ObjectiveOwner) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella, owner models.ObjectiveOwner) (map[string]interface{}, error) {
 	target, reason, err := decodeRequestConnectionArguments(input.Arguments)
 	if err != nil {
 		return nil, err
@@ -314,14 +315,14 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 		if entry == nil {
 			return nil, refuseInteraction("no catalog app has the slug " + target.CatalogSlug + "; call find_apps and copy the slug of a result with type mcp-server. A Skill (type skill) is not connected: set it up with request_setup")
 		}
-		target = ConnectAppTarget{CatalogSlug: entry.Slug, Name: strings.TrimSpace(entry.Name), Official: entry.Official, SignIn: appSignIn(entry.SignIn), LogoSHA256: entry.LogoSHA256, LogoMonochrome: entry.LogoMonochrome}
+		target = models.ConnectAppTarget{CatalogSlug: entry.Slug, Name: strings.TrimSpace(entry.Name), Official: entry.Official, SignIn: appSignIn(entry.SignIn), LogoSHA256: entry.LogoSHA256, LogoMonochrome: entry.LogoMonochrome}
 		if target.Name == "" {
 			target.Name = entry.Slug
 		}
 		if len(target.Name) > 256 {
 			target.Name = truncateRunes(target.Name, 64)
 		}
-		if !validLogoDigest(target.LogoSHA256) {
+		if !models.IsValidLogoDigest(target.LogoSHA256) {
 			target.LogoSHA256, target.LogoMonochrome = "", false
 		}
 	}
@@ -344,7 +345,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 	// a run with no person cannot ask anyone to.
 	mode := ""
 	if _, personal := set.PersonalApps[ConnectAppKey(target)]; personal {
-		mode = skillSetupModePerPerson
+		mode = models.SkillSetupModePerPerson
 		if run.ActingUser == "" {
 			return nil, refuseInteraction(target.Name + " uses each person's own account, and no person asked for this run. Ask someone who manages " + umbrellaLabel(owner) + " to share an account with it")
 		}
@@ -366,7 +367,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 		return nil, err
 	}
 	for _, r := range current {
-		if r.Kind != SkillSetupKindConnectApp || r.App == nil || !sameConnectAppTarget(*r.App, target) || r.RunID != run.ID || r.RequestedFor != run.ActingUser {
+		if r.Kind != models.SkillSetupKindConnectApp || r.App == nil || !sameConnectAppTarget(*r.App, target) || r.RunID != run.ID || r.RequestedFor != run.ActingUser {
 			continue
 		}
 		if r.Status == "pending" {
@@ -380,11 +381,11 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 		reason = "Connect " + target.Name + " to continue in this chat."
 	}
 	now := time.Now().UTC()
-	r := &SkillSetupRequest{ID: id, Scope: run.Scope, Owner: owner, DeploymentID: owner.ID, AgentID: member, ConversationID: conversationID, TriggerMessageID: messageID,
-		RunID: run.ID, ActionCallID: input.Call.ID, Kind: SkillSetupKindConnectApp, SkillID: mcp.SkillID, SkillVersion: mcp.SkillVersion,
+	r := &models.SkillSetupRequest{ID: id, Scope: run.Scope, Owner: owner, DeploymentID: owner.ID, AgentID: member, ConversationID: conversationID, TriggerMessageID: messageID,
+		RunID: run.ID, ActionCallID: input.Call.ID, Kind: models.SkillSetupKindConnectApp, SkillID: mcp.SkillID, SkillVersion: mcp.SkillVersion,
 		SkillName: target.Name, App: &target, RequestedFor: run.ActingUser, Mode: mode, Reason: reason, Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := d.store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
-		if errors.Is(err, ErrSkillSetupConflict) {
+		if errors.Is(err, models.ErrSkillSetupConflict) {
 			if replay, readErr := d.store.GetSkillSetupRequest(ctx, run.Scope, id); readErr == nil && replay != nil {
 				return skillSetupResult(replay)
 			}
@@ -398,26 +399,26 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 // run uses them: the run's umbrella, or the Agent a builder in its own chat
 // acts for (skillActionTarget checked it), read as that Agent for the
 // person the run acts for.
-func (d *SkillBindingActionDispatcher) runHostBindings(ctx context.Context, run *AgentRun, owner ObjectiveOwner) (*skill.HostBindingSet, error) {
+func (d *SkillBindingActionDispatcher) runHostBindings(ctx context.Context, run *models.AgentRun, owner models.ObjectiveOwner) (*skill.HostBindingSet, error) {
 	if run == nil {
 		return &skill.HostBindingSet{}, nil
 	}
-	actor := RunSkillActor(run)
-	if OwnerOfSkillUmbrella(actor.Umbrella) != owner {
-		if owner.Type != OwnerTypeAgent || run.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}) {
+	actor := models.RunSkillActor(run)
+	if models.OwnerOfSkillUmbrella(actor.Umbrella) != owner {
+		if owner.Type != models.OwnerTypeAgent || run.Owner != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: run.AssignedAgentID}) {
 			return &skill.HostBindingSet{}, nil
 		}
-		actor = skill.RunActor{RunID: run.ID, AgentID: owner.ID, Umbrella: SkillUmbrella(owner), ActingUser: run.ActingUser}
+		actor = skill.RunActor{RunID: run.ID, AgentID: owner.ID, Umbrella: models.SkillUmbrella(owner), ActingUser: run.ActingUser}
 	}
 	return d.catalog.HostBindings(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, owner.ID, actor)
 }
 
 func appSignIn(value string) string {
 	switch value {
-	case AppSignInOAuth, AppSignInAPIKey, AppSignInNone:
+	case models.AppSignInOAuth, models.AppSignInAPIKey, models.AppSignInNone:
 		return value
 	}
-	return AppSignInUnknown
+	return models.AppSignInUnknown
 }
 
 func truncateRunes(value string, limit int) string {
@@ -429,7 +430,7 @@ func truncateRunes(value string, limit int) string {
 
 // ConnectAppKey is the host's key of an app: its catalog slug, or for an
 // address "custom:" and the first 24 hex digits of the address's SHA-256.
-func ConnectAppKey(target ConnectAppTarget) string {
+func ConnectAppKey(target models.ConnectAppTarget) string {
 	if target.CatalogSlug != "" {
 		return target.CatalogSlug
 	}
@@ -437,7 +438,7 @@ func ConnectAppKey(target ConnectAppTarget) string {
 	return "custom:" + hex.EncodeToString(sum[:])[:24]
 }
 
-func sameConnectAppTarget(left, right ConnectAppTarget) bool {
+func sameConnectAppTarget(left, right models.ConnectAppTarget) bool {
 	if left.CatalogSlug != "" || right.CatalogSlug != "" {
 		return strings.EqualFold(left.CatalogSlug, right.CatalogSlug)
 	}
@@ -447,7 +448,7 @@ func sameConnectAppTarget(left, right ConnectAppTarget) bool {
 // ConnectedAppBinding returns the host binding (a connected app) in set that
 // connects target: the connection made from that catalog entry, or to that
 // address. Nil when none does.
-func ConnectedAppBinding(set *skill.HostBindingSet, target ConnectAppTarget) *skill.Binding {
+func ConnectedAppBinding(set *skill.HostBindingSet, target models.ConnectAppTarget) *skill.Binding {
 	if set == nil {
 		return nil
 	}
@@ -464,7 +465,7 @@ func ConnectedAppBinding(set *skill.HostBindingSet, target ConnectAppTarget) *sk
 			continue
 		}
 		endpoint, _ := binding.Config["endpoint"].(string)
-		if normalized, err := NormalizeAppAddress(endpoint); err == nil && target.Address != "" && normalized == target.Address {
+		if normalized, err := models.NormalizeAppAddress(endpoint); err == nil && target.Address != "" && normalized == target.Address {
 			return binding
 		}
 	}
@@ -507,8 +508,8 @@ func listedToolNames(tools []string) []interface{} {
 // pendingConnectAppRequestFromAction returns the request a succeeded
 // request_connection call created for its own Run when it still waits for
 // the user.
-func pendingConnectAppRequestFromAction(ctx context.Context, store SkillSetupRequestStore, call *ActionCall) *SkillSetupRequest {
-	if call == nil || store == nil || call.Status != ActionCallStatusSucceeded || call.SkillID != SkillManagementSkillID || call.Action != agentrun.SkillActionRequestConnection {
+func pendingConnectAppRequestFromAction(ctx context.Context, store models.SkillSetupRequestStore, call *models.ActionCall) *models.SkillSetupRequest {
+	if call == nil || store == nil || call.Status != models.ActionCallStatusSucceeded || call.SkillID != models.SkillManagementSkillID || call.Action != agentrun.SkillActionRequestConnection {
 		return nil
 	}
 	id := agentrun.InteractionRequestID(call, "setupRequest")
@@ -518,21 +519,21 @@ func pendingConnectAppRequestFromAction(ctx context.Context, store SkillSetupReq
 	// Read the durable record: the user may have connected the app between
 	// dispatch and this commit, and a settled request must not park the Run.
 	current, err := store.GetSkillSetupRequest(ctx, call.Scope, id)
-	if err != nil || current == nil || current.Kind != SkillSetupKindConnectApp || current.RunID != call.RunID || current.Status != "pending" {
+	if err != nil || current == nil || current.Kind != models.SkillSetupKindConnectApp || current.RunID != call.RunID || current.Status != "pending" {
 		return nil
 	}
 	return current
 }
 
 // IsExactConnectAppWait reports whether the Run waits for this request.
-func IsExactConnectAppWait(run *AgentRun, requestID string) bool {
-	return run != nil && run.Status == AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
+func IsExactConnectAppWait(run *models.AgentRun, requestID string) bool {
+	return run != nil && run.Status == models.AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
 		run.WakeCondition.Type == ConnectAppWakeType && run.WakeCondition.Reference == requestID
 }
 
 // ConnectAppResolutionInstruction is the durable guidance given to a Run
 // woken by its connect card. tools are the app's model tool names.
-func ConnectAppResolutionInstruction(r *SkillSetupRequest, tools []string) string {
+func ConnectAppResolutionInstruction(r *models.SkillSetupRequest, tools []string) string {
 	name := r.SkillName
 	if r.Status == "dismissed" {
 		return "The user chose not to connect " + name + " now. Do not ask again in this reply; explain what remains blocked and offer an alternative."

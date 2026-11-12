@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -21,12 +22,12 @@ func TestSkillBindingTargetRefusesInvalidTargets(t *testing.T) {
 	}
 	// Only a reply in the builder's own chat may act for another Agent.
 	teamRun := *run
-	teamRun.Owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "ops-team"}
+	teamRun.Owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "ops-team"}
 	if _, err := skillActionTarget(f.ctx, f.catalog, f.agents, &teamRun, "finn", readerUpsertArguments("researcher")); err == nil {
 		t.Fatal("a Team chat Run acted for another Agent")
 	}
 	taskRun := *run
-	taskRun.Context = map[string]interface{}{ConversationTaskContextKey: "task-1"}
+	taskRun.Context = map[string]interface{}{models.ConversationTaskContextKey: "task-1"}
 	if _, err := skillActionTarget(f.ctx, f.catalog, f.agents, &taskRun, "finn", readerUpsertArguments("researcher")); err == nil {
 		t.Fatal("a conversation task Run acted for another Agent")
 	}

@@ -30,11 +30,11 @@ var (
 )
 
 type PlanSkillReferenceUpgradeRequest struct {
-	Scope            Scope  `json:"scope"`
-	DeploymentID     string `json:"deploymentId"`
-	BindingID        string `json:"bindingId"`
-	ToVersion        string `json:"toVersion"`
-	ToSourceIdentity string `json:"toSourceIdentity,omitempty"`
+	Scope            models.Scope `json:"scope"`
+	DeploymentID     string       `json:"deploymentId"`
+	BindingID        string       `json:"bindingId"`
+	ToVersion        string       `json:"toVersion"`
+	ToSourceIdentity string       `json:"toSourceIdentity,omitempty"`
 	// GrantActions names actions to add to the moved bindings when the target
 	// version introduces them. Only kernel Skills accept it; the plan keeps the
 	// granted actions that are new in the target as AddedActions.
@@ -42,23 +42,23 @@ type PlanSkillReferenceUpgradeRequest struct {
 }
 
 type ApplySkillReferenceUpgradeRequest struct {
-	Plan     *SkillReferenceUpgradePlan     `json:"plan"`
-	Actor    ActivityActor                  `json:"actor"`
-	Reason   string                         `json:"reason"`
-	Approval *SkillReferenceUpgradeApproval `json:"approval,omitempty"`
+	Plan     *models.SkillReferenceUpgradePlan     `json:"plan"`
+	Actor    models.ActivityActor                  `json:"actor"`
+	Reason   string                                `json:"reason"`
+	Approval *models.SkillReferenceUpgradeApproval `json:"approval,omitempty"`
 }
 
 type SkillReferenceUpgradeService struct {
-	store   SkillReferenceUpgradeStore
+	store   models.SkillReferenceUpgradeStore
 	catalog *skill.Catalog
 	now     func() time.Time
 }
 
-func NewSkillReferenceUpgradeService(store SkillReferenceUpgradeStore, catalog *skill.Catalog, opts ...models.ServiceOption) *SkillReferenceUpgradeService {
+func NewSkillReferenceUpgradeService(store models.SkillReferenceUpgradeStore, catalog *skill.Catalog, opts ...models.ServiceOption) *SkillReferenceUpgradeService {
 	return &SkillReferenceUpgradeService{store: store, catalog: catalog, now: models.ClockFrom(opts)}
 }
 
-func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillReferenceUpgradeRequest) (*SkillReferenceUpgradePlan, error) {
+func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradePlan, error) {
 	if s == nil || s.store == nil || s.catalog == nil {
 		return nil, ErrSkillReferenceUpgradeUnavailable
 	}
@@ -70,7 +70,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	req.ToVersion = strings.TrimSpace(req.ToVersion)
 	req.ToSourceIdentity = strings.TrimSpace(req.ToSourceIdentity)
 	if req.DeploymentID == "" || req.BindingID == "" || req.ToVersion == "" {
-		return nil, fmt.Errorf("%w: deployment, binding, and target version are required", ErrSkillReferenceUpgradeInvalid)
+		return nil, fmt.Errorf("%w: deployment, binding, and target version are required", models.ErrSkillReferenceUpgradeInvalid)
 	}
 	scope := skill.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}
 	bindings, err := s.store.ListSkillBindings(ctx, scope, req.DeploymentID)
@@ -88,17 +88,17 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		return nil, skill.ErrBindingNotFound
 	}
 	if current.Disabled {
-		return nil, fmt.Errorf("%w: disabled binding cannot be upgraded", ErrSkillReferenceUpgradeInvalid)
+		return nil, fmt.Errorf("%w: disabled binding cannot be upgraded", models.ErrSkillReferenceUpgradeInvalid)
 	}
 	if current.SkillVersion == req.ToVersion && current.SourceIdentity == req.ToSourceIdentity {
-		return nil, fmt.Errorf("%w: %w", ErrSkillReferenceUpgradeInvalid, ErrSkillReferenceUpgradeCurrent)
+		return nil, fmt.Errorf("%w: %w", models.ErrSkillReferenceUpgradeInvalid, ErrSkillReferenceUpgradeCurrent)
 	}
 	target, err := exactUpgradeDefinition(ctx, s.catalog, current.SkillID, req.ToVersion, req.ToSourceIdentity)
 	if err != nil {
 		return nil, err
 	}
 	if target == nil {
-		return nil, fmt.Errorf("%w: exact target Skill definition is not installed", ErrSkillReferenceUpgradeInvalid)
+		return nil, fmt.Errorf("%w: exact target Skill definition is not installed", models.ErrSkillReferenceUpgradeInvalid)
 	}
 	targetSource := skill.DefinitionSourceIdentity(target)
 	previous, err := exactUpgradeDefinition(ctx, s.catalog, current.SkillID, current.SkillVersion, current.SourceIdentity)
@@ -106,7 +106,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		return nil, err
 	}
 	if previous == nil {
-		return nil, fmt.Errorf("%w: current Skill definition is not installed", ErrSkillReferenceUpgradeInvalid)
+		return nil, fmt.Errorf("%w: current Skill definition is not installed", models.ErrSkillReferenceUpgradeInvalid)
 	}
 	addedActions, err := grantedUpgradeActions(req.GrantActions, previous, target)
 	if err != nil {
@@ -122,14 +122,14 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 			continue
 		}
 		if candidate.SourceIdentity != current.SourceIdentity {
-			return nil, fmt.Errorf("%w: durable references are ambiguous across bindings %s and %s", ErrSkillReferenceUpgradeInvalid, current.ID, candidate.ID)
+			return nil, fmt.Errorf("%w: durable references are ambiguous across bindings %s and %s", models.ErrSkillReferenceUpgradeInvalid, current.ID, candidate.ID)
 		}
 		members = append(members, cloneUpgradeBinding(candidate))
 	}
 	sort.Slice(members[1:], func(i, j int) bool { return members[1+i].ID < members[1+j].ID })
-	siblings := make([]SkillReferenceBindingRevision, 0, len(members)-1)
+	siblings := make([]models.SkillReferenceBindingRevision, 0, len(members)-1)
 	for _, member := range members[1:] {
-		siblings = append(siblings, SkillReferenceBindingRevision{ID: member.ID, ExpectedRevision: member.Revision})
+		siblings = append(siblings, models.SkillReferenceBindingRevision{ID: member.ID, ExpectedRevision: member.Revision})
 	}
 	unionActions := make([]string, 0)
 	seenActions := map[string]bool{}
@@ -147,7 +147,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		}
 		addBindingActions(candidateBinding, addedActions)
 		if err := s.catalog.ValidateBindingCandidate(ctx, candidateBinding); err != nil {
-			return nil, fmt.Errorf("%w: target binding contract for %s: %v", ErrSkillReferenceUpgradeInvalid, member.ID, err)
+			return nil, fmt.Errorf("%w: target binding contract for %s: %v", models.ErrSkillReferenceUpgradeInvalid, member.ID, err)
 		}
 		for _, action := range candidateBinding.AllowedActions {
 			if !seenActions[action] {
@@ -161,7 +161,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	if err != nil {
 		return nil, err
 	}
-	conversationImpacts := make([]SkillReferenceConversationEndpointImpact, 0)
+	conversationImpacts := make([]models.SkillReferenceConversationEndpointImpact, 0)
 	for _, endpoint := range conversationEndpoints {
 		if endpoint == nil || endpoint.DeploymentID != req.DeploymentID ||
 			!upgradeConversationReferenceMatchesAny(endpoint.Adapter, members) {
@@ -170,9 +170,9 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		adapter, ok := target.ConversationAdapters[endpoint.Adapter.AdapterID]
 		if !ok || adapter.Provider != endpoint.Provider || !containsConversationEndpointMode(adapter.EndpointModes, endpoint.Mode) ||
 			endpoint.Policy.Validate(endpoint.Mode, adapter.Features) != nil {
-			return nil, fmt.Errorf("%w: conversation endpoint %s is incompatible with target adapter %s", ErrSkillReferenceUpgradeInvalid, endpoint.ID, endpoint.Adapter.AdapterID)
+			return nil, fmt.Errorf("%w: conversation endpoint %s is incompatible with target adapter %s", models.ErrSkillReferenceUpgradeInvalid, endpoint.ID, endpoint.Adapter.AdapterID)
 		}
-		conversationImpacts = append(conversationImpacts, SkillReferenceConversationEndpointImpact{
+		conversationImpacts = append(conversationImpacts, models.SkillReferenceConversationEndpointImpact{
 			ID: endpoint.ID, ExpectedRevision: endpoint.Revision, AdapterID: endpoint.Adapter.AdapterID,
 		})
 	}
@@ -180,7 +180,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	if err != nil {
 		return nil, err
 	}
-	callbackImpacts := make([]SkillReferenceCallbackRegistrationImpact, 0)
+	callbackImpacts := make([]models.SkillReferenceCallbackRegistrationImpact, 0)
 	for _, registration := range callbackRegistrations {
 		if registration == nil || registration.DeploymentID != req.DeploymentID ||
 			!upgradeCallbackReferenceMatchesAny(registration.Adapter, members) {
@@ -189,14 +189,14 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		adapter, ok := target.CallbackAdapters[registration.Adapter.AdapterID]
 		if !ok || adapter.Provider != registration.Provider || strings.TrimSpace(adapter.Transport.IngressEndpoint) == "" ||
 			!callbackSubscriptionsSupported(registration.Subscriptions, adapter.EventTypes) {
-			return nil, fmt.Errorf("%w: callback registration %s is incompatible with target adapter %s", ErrSkillReferenceUpgradeInvalid, registration.ID, registration.Adapter.AdapterID)
+			return nil, fmt.Errorf("%w: callback registration %s is incompatible with target adapter %s", models.ErrSkillReferenceUpgradeInvalid, registration.ID, registration.Adapter.AdapterID)
 		}
-		callbackImpacts = append(callbackImpacts, SkillReferenceCallbackRegistrationImpact{
+		callbackImpacts = append(callbackImpacts, models.SkillReferenceCallbackRegistrationImpact{
 			ID: registration.ID, ExpectedRevision: registration.Revision, AdapterID: registration.Adapter.AdapterID,
 		})
 	}
 
-	objectiveImpacts := make([]SkillReferenceObjectiveImpact, 0)
+	objectiveImpacts := make([]models.SkillReferenceObjectiveImpact, 0)
 	referencedActions := make(map[string]bool)
 	sort.Strings(removedActions)
 	sort.Slice(objectiveImpacts, func(i, j int) bool { return objectiveImpacts[i].ID < objectiveImpacts[j].ID })
@@ -208,13 +208,13 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		findings = append(findings, compareUpgradeAdapterContracts(previous, target, member)...)
 	}
 	if current.SourceIdentity != targetSource {
-		findings = append(findings, SkillReferenceUpgradeFinding{Code: "source_identity_changed", From: current.SourceIdentity, To: targetSource, Message: "Skill publisher identity changed"})
+		findings = append(findings, models.SkillReferenceUpgradeFinding{Code: "source_identity_changed", From: current.SourceIdentity, To: targetSource, Message: "Skill publisher identity changed"})
 	}
-	plan := &SkillReferenceUpgradePlan{
+	plan := &models.SkillReferenceUpgradePlan{
 		APIVersion: SkillReferenceUpgradeAPIVersion, Scope: req.Scope, DeploymentID: req.DeploymentID,
 		BindingID: current.ID, ExpectedBindingRevision: current.Revision, Siblings: siblings,
-		From:       SkillReferenceIdentity{ID: current.SkillID, Version: current.SkillVersion, SourceIdentity: current.SourceIdentity},
-		To:         SkillReferenceIdentity{ID: target.ID, Version: target.Version, SourceIdentity: targetSource},
+		From:       models.SkillReferenceIdentity{ID: current.SkillID, Version: current.SkillVersion, SourceIdentity: current.SourceIdentity},
+		To:         models.SkillReferenceIdentity{ID: target.ID, Version: target.Version, SourceIdentity: targetSource},
 		Objectives: objectiveImpacts, ConversationEndpoints: conversationImpacts,
 		CallbackRegistrations: callbackImpacts, RemovedActions: removedActions, AddedActions: addedActions, Findings: findings,
 		ApprovalRequired: len(findings) > 0, GeneratedAt: s.now().UTC(),
@@ -226,12 +226,12 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	return plan, nil
 }
 
-func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkillReferenceUpgradeRequest) (*SkillReferenceUpgradeReceipt, error) {
+func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradeReceipt, error) {
 	if req.Plan == nil || strings.TrimSpace(req.Plan.Digest) == "" {
-		return nil, fmt.Errorf("%w: reviewed plan is required", ErrSkillReferenceUpgradeInvalid)
+		return nil, fmt.Errorf("%w: reviewed plan is required", models.ErrSkillReferenceUpgradeInvalid)
 	}
 	if strings.TrimSpace(req.Actor.Type) == "" || strings.TrimSpace(req.Actor.ID) == "" || strings.TrimSpace(req.Reason) == "" {
-		return nil, fmt.Errorf("%w: actor and reason are required", ErrSkillReferenceUpgradeInvalid)
+		return nil, fmt.Errorf("%w: actor and reason are required", models.ErrSkillReferenceUpgradeInvalid)
 	}
 	current, err := s.Plan(ctx, PlanSkillReferenceUpgradeRequest{
 		Scope: req.Plan.Scope, DeploymentID: req.Plan.DeploymentID, BindingID: req.Plan.BindingID,
@@ -241,7 +241,7 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 		return nil, err
 	}
 	if current.Digest != req.Plan.Digest {
-		return nil, ErrSkillReferenceUpgradeConflict
+		return nil, models.ErrSkillReferenceUpgradeConflict
 	}
 	if current.ApprovalRequired {
 		if req.Approval == nil || strings.TrimSpace(req.Approval.Principal.Type) == "" ||
@@ -263,7 +263,7 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 		}
 	}
 	if binding == nil || binding.Revision != current.ExpectedBindingRevision {
-		return nil, ErrSkillReferenceUpgradeConflict
+		return nil, models.ErrSkillReferenceUpgradeConflict
 	}
 	upgradeBinding(binding, current, current.ExpectedBindingRevision, req, now)
 	movedBindings := map[string]*skill.Binding{binding.ID: binding}
@@ -278,7 +278,7 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 			}
 		}
 		if sibling == nil || sibling.Revision != expected.ExpectedRevision {
-			return nil, ErrSkillReferenceUpgradeConflict
+			return nil, models.ErrSkillReferenceUpgradeConflict
 		}
 		upgradeBinding(sibling, current, expected.ExpectedRevision, req, now)
 		movedBindings[sibling.ID] = sibling
@@ -286,55 +286,55 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 		siblingBindings = append(siblingBindings, sibling)
 	}
 
-	objectiveCandidates := make([]SkillReferenceObjectiveMutation, 0, len(current.Objectives))
+	objectiveCandidates := make([]models.SkillReferenceObjectiveMutation, 0, len(current.Objectives))
 	activityIDs := make([]string, 0, len(current.Objectives))
-	conversationCandidates := make([]SkillReferenceConversationEndpointMutation, 0, len(current.ConversationEndpoints))
+	conversationCandidates := make([]models.SkillReferenceConversationEndpointMutation, 0, len(current.ConversationEndpoints))
 	for _, impact := range current.ConversationEndpoints {
 		endpoint, loadErr := s.store.GetExternalConversationEndpoint(ctx, current.Scope, impact.ID)
 		if loadErr != nil || endpoint == nil || endpoint.Revision != impact.ExpectedRevision {
-			return nil, ErrSkillReferenceUpgradeConflict
+			return nil, models.ErrSkillReferenceUpgradeConflict
 		}
 		owner := movedBindings[endpoint.Adapter.BindingID]
 		if owner == nil || !upgradeConversationReferenceMatches(endpoint.Adapter, bindingBeforeUpgrade(owner, current, previousRevisions[owner.ID])) {
-			return nil, ErrSkillReferenceUpgradeConflict
+			return nil, models.ErrSkillReferenceUpgradeConflict
 		}
-		next := cloneExternalConversationEndpoint(endpoint)
+		next := models.CloneExternalConversationEndpoint(endpoint)
 		next.Adapter.SkillVersion = current.To.Version
 		next.Adapter.SourceIdentity = current.To.SourceIdentity
 		next.Adapter.BindingRevision = owner.Revision
 		next.Revision++
 		next.UpdatedAt = now
-		conversationCandidates = append(conversationCandidates, SkillReferenceConversationEndpointMutation{Value: next, ExpectedRevision: impact.ExpectedRevision})
+		conversationCandidates = append(conversationCandidates, models.SkillReferenceConversationEndpointMutation{Value: next, ExpectedRevision: impact.ExpectedRevision})
 	}
-	callbackCandidates := make([]SkillReferenceCallbackRegistrationMutation, 0, len(current.CallbackRegistrations))
+	callbackCandidates := make([]models.SkillReferenceCallbackRegistrationMutation, 0, len(current.CallbackRegistrations))
 	for _, impact := range current.CallbackRegistrations {
 		registration, loadErr := s.store.GetCallbackRegistration(ctx, current.Scope, impact.ID)
 		if loadErr != nil || registration == nil || registration.Revision != impact.ExpectedRevision {
-			return nil, ErrSkillReferenceUpgradeConflict
+			return nil, models.ErrSkillReferenceUpgradeConflict
 		}
 		owner := movedBindings[registration.Adapter.BindingID]
 		if owner == nil || !upgradeCallbackReferenceMatches(registration.Adapter, bindingBeforeUpgrade(owner, current, previousRevisions[owner.ID])) {
-			return nil, ErrSkillReferenceUpgradeConflict
+			return nil, models.ErrSkillReferenceUpgradeConflict
 		}
-		next := cloneCallbackRegistration(registration)
+		next := models.CloneCallbackRegistration(registration)
 		next.Adapter.SkillVersion = current.To.Version
 		next.Adapter.SourceIdentity = current.To.SourceIdentity
 		next.Adapter.BindingRevision = owner.Revision
 		next.Revision++
 		next.UpdatedAt = now
-		next.Lifecycle = append(next.Lifecycle, CallbackRegistrationLifecycleEntry{
-			Revision: next.Revision, Action: CallbackRegistrationUpdated, Actor: req.Actor, Reason: req.Reason, At: now,
+		next.Lifecycle = append(next.Lifecycle, models.CallbackRegistrationLifecycleEntry{
+			Revision: next.Revision, Action: models.CallbackRegistrationUpdated, Actor: req.Actor, Reason: req.Reason, At: now,
 		})
-		callbackCandidates = append(callbackCandidates, SkillReferenceCallbackRegistrationMutation{Value: next, ExpectedRevision: impact.ExpectedRevision})
+		callbackCandidates = append(callbackCandidates, models.SkillReferenceCallbackRegistrationMutation{Value: next, ExpectedRevision: impact.ExpectedRevision})
 	}
-	receipt := &SkillReferenceUpgradeReceipt{
+	receipt := &models.SkillReferenceUpgradeReceipt{
 		APIVersion: SkillReferenceUpgradeAPIVersion, PlanDigest: current.Digest, Scope: current.Scope,
 		DeploymentID: current.DeploymentID, BindingID: current.BindingID, BindingRevision: binding.Revision, Siblings: current.Siblings,
 		From: current.From, To: current.To, Objectives: current.Objectives,
 		ConversationEndpoints: current.ConversationEndpoints, CallbackRegistrations: current.CallbackRegistrations,
 		Actor: req.Actor, Reason: req.Reason, Approval: req.Approval, ActivityIDs: activityIDs, AppliedAt: now,
 	}
-	if err := s.store.ApplySkillReferenceUpgrade(ctx, &SkillReferenceUpgradeMutation{
+	if err := s.store.ApplySkillReferenceUpgrade(ctx, &models.SkillReferenceUpgradeMutation{
 		Plan: current, Binding: binding, Siblings: siblingBindings, Objectives: objectiveCandidates,
 		ConversationEndpoints: conversationCandidates, CallbackRegistrations: callbackCandidates, Receipt: receipt,
 	}); err != nil {
@@ -347,13 +347,13 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 // identity. Account configuration updates can advance its revision before the
 // next Skill upgrade; those older references must move with it as well. The
 // caller verifies scope, deployment and adapter compatibility independently.
-func upgradeConversationReferenceMatches(ref ExternalConversationAdapterReference, binding *skill.Binding) bool {
+func upgradeConversationReferenceMatches(ref models.ExternalConversationAdapterReference, binding *skill.Binding) bool {
 	return binding != nil && ref.SkillID == binding.SkillID && ref.SkillVersion == binding.SkillVersion &&
 		ref.SourceIdentity == binding.SourceIdentity && ref.BindingID == binding.ID &&
 		ref.BindingRevision >= 1 && ref.BindingRevision <= binding.Revision
 }
 
-func bindingBeforeUpgrade(binding *skill.Binding, plan *SkillReferenceUpgradePlan, expectedRevision int64) *skill.Binding {
+func bindingBeforeUpgrade(binding *skill.Binding, plan *models.SkillReferenceUpgradePlan, expectedRevision int64) *skill.Binding {
 	previous := cloneUpgradeBinding(binding)
 	previous.SkillVersion = plan.From.Version
 	previous.SourceIdentity = plan.From.SourceIdentity
@@ -363,7 +363,7 @@ func bindingBeforeUpgrade(binding *skill.Binding, plan *SkillReferenceUpgradePla
 
 // upgradeBinding moves one binding to the plan's target identity and records
 // the upgrade in its lifecycle with that binding's own prior revision.
-func upgradeBinding(binding *skill.Binding, plan *SkillReferenceUpgradePlan, expectedRevision int64, req ApplySkillReferenceUpgradeRequest, now time.Time) {
+func upgradeBinding(binding *skill.Binding, plan *models.SkillReferenceUpgradePlan, expectedRevision int64, req ApplySkillReferenceUpgradeRequest, now time.Time) {
 	binding.SkillVersion = plan.To.Version
 	binding.SourceIdentity = plan.To.SourceIdentity
 	dropBindingActions(binding, plan.RemovedActions)
@@ -413,7 +413,7 @@ func grantedUpgradeActions(grant []string, previous, target *skill.Definition) (
 		return nil, nil
 	}
 	if target.Transport.Kind != "kernel" {
-		return nil, fmt.Errorf("%w: only kernel Skills accept granted actions", ErrSkillReferenceUpgradeInvalid)
+		return nil, fmt.Errorf("%w: only kernel Skills accept granted actions", models.ErrSkillReferenceUpgradeInvalid)
 	}
 	seen := make(map[string]bool, len(grant))
 	added := make([]string, 0, len(grant))
@@ -481,7 +481,7 @@ func dropBindingActions(binding *skill.Binding, actions []string) {
 	}
 }
 
-func upgradeConversationReferenceMatchesAny(ref ExternalConversationAdapterReference, members []*skill.Binding) bool {
+func upgradeConversationReferenceMatchesAny(ref models.ExternalConversationAdapterReference, members []*skill.Binding) bool {
 	for _, member := range members {
 		if upgradeConversationReferenceMatches(ref, member) {
 			return true
@@ -490,7 +490,7 @@ func upgradeConversationReferenceMatchesAny(ref ExternalConversationAdapterRefer
 	return false
 }
 
-func upgradeCallbackReferenceMatchesAny(ref CallbackAdapterReference, members []*skill.Binding) bool {
+func upgradeCallbackReferenceMatchesAny(ref models.CallbackAdapterReference, members []*skill.Binding) bool {
 	for _, member := range members {
 		if upgradeCallbackReferenceMatches(ref, member) {
 			return true
@@ -499,13 +499,13 @@ func upgradeCallbackReferenceMatchesAny(ref CallbackAdapterReference, members []
 	return false
 }
 
-func upgradeCallbackReferenceMatches(ref CallbackAdapterReference, binding *skill.Binding) bool {
+func upgradeCallbackReferenceMatches(ref models.CallbackAdapterReference, binding *skill.Binding) bool {
 	return binding != nil && ref.SkillID == binding.SkillID && ref.SkillVersion == binding.SkillVersion &&
 		ref.SourceIdentity == binding.SourceIdentity && ref.BindingID == binding.ID &&
 		ref.BindingRevision >= 1 && ref.BindingRevision <= binding.Revision
 }
 
-func callbackSubscriptionsSupported(subscriptions []CallbackSubscription, eventTypes []string) bool {
+func callbackSubscriptionsSupported(subscriptions []models.CallbackSubscription, eventTypes []string) bool {
 	supported := make(map[string]bool, len(eventTypes))
 	for _, eventType := range eventTypes {
 		supported[eventType] = true
@@ -518,20 +518,20 @@ func callbackSubscriptionsSupported(subscriptions []CallbackSubscription, eventT
 	return true
 }
 
-func listUpgradeConversationEndpoints(ctx context.Context, store ExternalConversationEndpointStore, scope Scope) ([]*ExternalConversationEndpoint, error) {
-	result := make([]*ExternalConversationEndpoint, 0)
+func listUpgradeConversationEndpoints(ctx context.Context, store models.ExternalConversationEndpointStore, scope models.Scope) ([]*models.ExternalConversationEndpoint, error) {
+	result := make([]*models.ExternalConversationEndpoint, 0)
 	for offset := 0; ; offset += 500 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		page, err := store.ListExternalConversationEndpoints(ctx, ExternalConversationEndpointFilter{
-			Scope: scope, Statuses: []ExternalConversationEndpointStatus{ExternalConversationEndpointActive, ExternalConversationEndpointPaused}, Limit: 500, Offset: offset,
+		page, err := store.ListExternalConversationEndpoints(ctx, models.ExternalConversationEndpointFilter{
+			Scope: scope, Statuses: []models.ExternalConversationEndpointStatus{models.ExternalConversationEndpointActive, models.ExternalConversationEndpointPaused}, Limit: 500, Offset: offset,
 		})
 		if err != nil {
 			return nil, err
 		}
 		if len(page) > 500 {
-			return nil, fmt.Errorf("%w: conversation reference page exceeds its requested limit", ErrSkillReferenceUpgradeInvalid)
+			return nil, fmt.Errorf("%w: conversation reference page exceeds its requested limit", models.ErrSkillReferenceUpgradeInvalid)
 		}
 		result = append(result, page...)
 		if len(page) < 500 {
@@ -540,20 +540,20 @@ func listUpgradeConversationEndpoints(ctx context.Context, store ExternalConvers
 	}
 }
 
-func listUpgradeCallbackRegistrations(ctx context.Context, store CallbackRegistrationStore, scope Scope) ([]*CallbackRegistration, error) {
-	result := make([]*CallbackRegistration, 0)
+func listUpgradeCallbackRegistrations(ctx context.Context, store models.CallbackRegistrationStore, scope models.Scope) ([]*models.CallbackRegistration, error) {
+	result := make([]*models.CallbackRegistration, 0)
 	for offset := 0; ; offset += 500 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		page, err := store.ListCallbackRegistrations(ctx, CallbackRegistrationFilter{
-			Scope: scope, Statuses: []CallbackRegistrationStatus{CallbackRegistrationActive, CallbackRegistrationPaused}, Limit: 500, Offset: offset,
+		page, err := store.ListCallbackRegistrations(ctx, models.CallbackRegistrationFilter{
+			Scope: scope, Statuses: []models.CallbackRegistrationStatus{models.CallbackRegistrationActive, models.CallbackRegistrationPaused}, Limit: 500, Offset: offset,
 		})
 		if err != nil {
 			return nil, err
 		}
 		if len(page) > 500 {
-			return nil, fmt.Errorf("%w: callback reference page exceeds its requested limit", ErrSkillReferenceUpgradeInvalid)
+			return nil, fmt.Errorf("%w: callback reference page exceeds its requested limit", models.ErrSkillReferenceUpgradeInvalid)
 		}
 		result = append(result, page...)
 		if len(page) < 500 {
@@ -562,7 +562,7 @@ func listUpgradeCallbackRegistrations(ctx context.Context, store CallbackRegistr
 	}
 }
 
-func referenceOwnedOrAssigned(owner ObjectiveOwner, assignedID, deploymentID string) bool {
+func referenceOwnedOrAssigned(owner models.ObjectiveOwner, assignedID, deploymentID string) bool {
 	return owner.ID == deploymentID || assignedID == deploymentID
 }
 
@@ -573,7 +573,7 @@ func exactUpgradeDefinition(ctx context.Context, catalog *skill.Catalog, id, ver
 	return catalog.GetDefinitionVariant(ctx, id, version, sourceIdentity)
 }
 
-func skillReferenceUpgradeActivityPayload(plan *SkillReferenceUpgradePlan, reason string) map[string]interface{} {
+func skillReferenceUpgradeActivityPayload(plan *models.SkillReferenceUpgradePlan, reason string) map[string]interface{} {
 	return map[string]interface{}{
 		"planDigest":   plan.Digest,
 		"bindingId":    plan.BindingID,
@@ -584,7 +584,7 @@ func skillReferenceUpgradeActivityPayload(plan *SkillReferenceUpgradePlan, reaso
 	}
 }
 
-func compareUpgradeContracts(previous, target *skill.Definition, bindingActions []string, referenced map[string]bool) []SkillReferenceUpgradeFinding {
+func compareUpgradeContracts(previous, target *skill.Definition, bindingActions []string, referenced map[string]bool) []models.SkillReferenceUpgradeFinding {
 	actions := make(map[string]bool, len(bindingActions)+len(referenced))
 	for _, action := range bindingActions {
 		actions[action] = true
@@ -597,9 +597,9 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 		names = append(names, action)
 	}
 	sort.Strings(names)
-	findings := make([]SkillReferenceUpgradeFinding, 0)
+	findings := make([]models.SkillReferenceUpgradeFinding, 0)
 	if len(previous.Requirements.Storage) != len(target.Requirements.Storage) || len(previous.Requirements.Storage) > 0 && !reflect.DeepEqual(previous.Requirements.Storage, target.Requirements.Storage) {
-		findings = append(findings, SkillReferenceUpgradeFinding{
+		findings = append(findings, models.SkillReferenceUpgradeFinding{
 			Code: "storage_contract_changed", Message: "Skill storage requirements changed and need an explicit migration review",
 		})
 	}
@@ -610,7 +610,7 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 			continue
 		}
 		if after.Risk.Rank() > before.Risk.Rank() {
-			findings = append(findings, SkillReferenceUpgradeFinding{
+			findings = append(findings, models.SkillReferenceUpgradeFinding{
 				Code: "risk_increased", Subject: name, From: string(before.Risk), To: string(after.Risk), Message: fmt.Sprintf("%s risk changes from %s to %s", name, before.Risk, after.Risk),
 			})
 		}
@@ -618,7 +618,7 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 			!reflect.DeepEqual(before.Credentials, after.Credentials) || before.SideEffect != after.SideEffect ||
 			before.Idempotency != after.Idempotency || before.ExternalOperationPolicy != after.ExternalOperationPolicy ||
 			!reflect.DeepEqual(before.Transport, after.Transport) || !reflect.DeepEqual(previous.Transport, target.Transport) {
-			findings = append(findings, SkillReferenceUpgradeFinding{
+			findings = append(findings, models.SkillReferenceUpgradeFinding{
 				Code: "action_contract_changed", Subject: name, Message: fmt.Sprintf("%s action contract changed", name),
 			})
 		}
@@ -632,8 +632,8 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 // stored value valid and need no review. A Skill's first config declaration
 // needs no review either: its values are migrated from platform settings, so
 // agents see no behavior change.
-func compareUpgradeConfigContracts(previous, target *skill.Definition) []SkillReferenceUpgradeFinding {
-	findings := make([]SkillReferenceUpgradeFinding, 0)
+func compareUpgradeConfigContracts(previous, target *skill.Definition) []models.SkillReferenceUpgradeFinding {
+	findings := make([]models.SkillReferenceUpgradeFinding, 0)
 	if previous.Config == nil {
 		return findings
 	}
@@ -646,7 +646,7 @@ func compareUpgradeConfigContracts(previous, target *skill.Definition) []SkillRe
 		afterScopes, afterFields = target.Config.Scopes, target.Config.Fields
 	}
 	changed := func(subject, from, to, message string) {
-		findings = append(findings, SkillReferenceUpgradeFinding{Code: "config_contract_changed", Subject: subject, From: from, To: to, Message: message})
+		findings = append(findings, models.SkillReferenceUpgradeFinding{Code: "config_contract_changed", Subject: subject, From: from, To: to, Message: message})
 	}
 	if !reflect.DeepEqual(configScopeStrings(beforeScopes), configScopeStrings(afterScopes)) {
 		changed("config.scopes", strings.Join(configScopeStrings(beforeScopes), ","), strings.Join(configScopeStrings(afterScopes), ","), "Skill config scopes changed")
@@ -758,8 +758,8 @@ func configScopeStrings(scopes []skill.SkillConfigScope) []string {
 // Descriptive text can change without changing an adapter's authority. Every
 // executable adapter field, including receipt projections and credential
 // selection, must remain identical for an unattended upgrade.
-func compareUpgradeAdapterContracts(previous, target *skill.Definition, binding *skill.Binding) []SkillReferenceUpgradeFinding {
-	findings := make([]SkillReferenceUpgradeFinding, 0)
+func compareUpgradeAdapterContracts(previous, target *skill.Definition, binding *skill.Binding) []models.SkillReferenceUpgradeFinding {
+	findings := make([]models.SkillReferenceUpgradeFinding, 0)
 	conversationIDs := append([]string(nil), binding.EnabledConversationAdapters...)
 	sort.Strings(conversationIDs)
 	for _, id := range conversationIDs {
@@ -772,7 +772,7 @@ func compareUpgradeAdapterContracts(previous, target *skill.Definition, binding 
 		}
 
 		if !beforeOK || !afterOK || !reflect.DeepEqual(before, after) {
-			findings = append(findings, SkillReferenceUpgradeFinding{Code: "conversation_adapter_contract_changed", Subject: id, Message: fmt.Sprintf("%s conversation adapter contract changed", id)})
+			findings = append(findings, models.SkillReferenceUpgradeFinding{Code: "conversation_adapter_contract_changed", Subject: id, Message: fmt.Sprintf("%s conversation adapter contract changed", id)})
 		}
 	}
 	callbackIDs := append([]string(nil), binding.EnabledCallbackAdapters...)
@@ -782,7 +782,7 @@ func compareUpgradeAdapterContracts(previous, target *skill.Definition, binding 
 		after, afterOK := target.CallbackAdapters[id]
 		before.Name, before.Description, after.Name, after.Description = "", "", "", ""
 		if !beforeOK || !afterOK || !reflect.DeepEqual(before, after) {
-			findings = append(findings, SkillReferenceUpgradeFinding{Code: "callback_adapter_contract_changed", Subject: id, Message: fmt.Sprintf("%s callback adapter contract changed", id)})
+			findings = append(findings, models.SkillReferenceUpgradeFinding{Code: "callback_adapter_contract_changed", Subject: id, Message: fmt.Sprintf("%s callback adapter contract changed", id)})
 		}
 	}
 	return findings
@@ -851,7 +851,7 @@ func compatibleUpgradeInputSchema(before, after map[string]interface{}) bool {
 	return reflect.DeepEqual(oldRest, newRest)
 }
 
-func skillReferenceUpgradeDigest(plan *SkillReferenceUpgradePlan) (string, error) {
+func skillReferenceUpgradeDigest(plan *models.SkillReferenceUpgradePlan) (string, error) {
 	copy := *plan
 	copy.Digest = ""
 	copy.GeneratedAt = time.Time{}

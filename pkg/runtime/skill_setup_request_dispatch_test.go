@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -14,7 +15,7 @@ import (
 func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "a"}
+	scope := models.Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
 	provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
@@ -30,8 +31,8 @@ func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing
 	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Read the community", "requiredActions": []interface{}{"read"}}
-	input := agentrun.ActionDispatchInput{Call: &ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}
-	result, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID})
+	input := agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}
+	result, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing
 		t.Fatal(request)
 	}
 	input.Call.ID = "call-2"
-	repeated, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID})
+	repeated, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID})
 	if err != nil || repeated["setupRequest"].(map[string]interface{})["id"] != request["id"] {
 		t.Fatalf("duplicate not reused: %#v %v", repeated, err)
 	}
@@ -50,13 +51,13 @@ func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing
 	}
 	args["skillVersion"] = "forged"
 	input.Call.ID = "call-3"
-	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}); err == nil {
+	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}); err == nil {
 		t.Fatal("unverified Skill accepted")
 	}
 	args["skillVersion"] = "1.0.0"
 	args["kind"] = "reauthorize"
 	args["bindingId"] = "foreign-binding"
-	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}); err == nil {
+	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}); err == nil {
 		t.Fatal("unbound reconnect accepted")
 	}
 }
@@ -64,7 +65,7 @@ func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing
 func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "a"}
+	scope := models.Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
 	provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
@@ -80,8 +81,8 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Read the community", "requiredActions": []interface{}{"read"}}
-	input := agentrun.ActionDispatchInput{Call: &ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}
-	result, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID})
+	input := agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}
+	result, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 		t.Fatal(request)
 	}
 	input.Call.ID = "call-2"
-	repeated, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID})
+	repeated, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID})
 	if err != nil || repeated["setupRequest"].(map[string]interface{})["id"] != request["id"] {
 		t.Fatalf("duplicate not reused: %#v %v", repeated, err)
 	}
@@ -100,13 +101,13 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 	}
 	args["skillVersion"] = "forged"
 	input.Call.ID = "call-3"
-	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}); err == nil {
+	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}); err == nil {
 		t.Fatal("unverified Skill accepted")
 	}
 	args["skillVersion"] = "1.0.0"
 	args["kind"] = "reauthorize"
 	args["bindingId"] = "foreign-binding"
-	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}); err == nil {
+	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}); err == nil {
 		t.Fatal("unbound reconnect accepted")
 	}
 }
@@ -114,7 +115,7 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "a"}
+	scope := models.Scope{Kind: "tenant", ID: "a"}
 	catalog := skillActionCatalog(t, ctx, scope, "agent")
 	discoveries := 0
 	provider := skill.DiscoveryProviderFunc(func(context.Context, skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
@@ -129,20 +130,20 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "connect"}
 	now := time.Now().UTC()
-	failed := &ActionCall{ID: "failed", Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "agent", Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup, Status: ActionCallStatusFailed, Arguments: args,
+	failed := &models.ActionCall{ID: "failed", Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "agent", Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+		SkillID: models.SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup, Status: models.ActionCallStatusFailed, Arguments: args,
 		MaxAttempts: 1, Revision: 1, CreatedAt: now, UpdatedAt: now}
-	event := &ActivityEvent{ID: "failed-setup", Scope: scope, RunID: run.ID, EventType: "action.failed", Summary: "Setup failed",
-		Actor: ActivityActor{Type: "worker", ID: "worker"}, Visibility: ActivityVisibilityScope, CreatedAt: now}
-	if _, err := store.CreateActionProposal(ctx, ActionProposalRecord{Call: failed, Event: event, Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
+	event := &models.ActivityEvent{ID: "failed-setup", Scope: scope, RunID: run.ID, EventType: "action.failed", Summary: "Setup failed",
+		Actor: models.ActivityActor{Type: "worker", ID: "worker"}, Visibility: models.ActivityVisibilityScope, CreatedAt: now}
+	if _, err := store.CreateActionProposal(ctx, models.ActionProposalRecord{Call: failed, Event: event, Lease: &models.AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &ActionCall{ID: "retry"}, Arguments: args}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
+	_, err = dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "retry"}, Arguments: args}, run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 	if err == nil || discoveries != 0 {
 		t.Fatalf("repeated failed setup rediscovered: %v %d", err, discoveries)
 	}
 	run.ID = "later-user-run"
-	_, err = dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &ActionCall{ID: "later"}, Arguments: args}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
+	_, err = dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "later"}, Arguments: args}, run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 	if err == nil || discoveries != 1 {
 		t.Fatalf("later run could not retry: %v %d", err, discoveries)
 	}
@@ -154,7 +155,7 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 func TestSkillSetupResolvesAnOmittedSourceFromTheCatalog(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "a"}
+	scope := models.Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
 	sources := []string{"https://github.com/axiom-studio/skills::skill-mcp"}
@@ -173,7 +174,7 @@ func TestSkillSetupResolvesAnOmittedSourceFromTheCatalog(t *testing.T) {
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	// The shape DeepSeek sent: no sourceIdentity.
 	args := map[string]interface{}{"kind": "configure", "skillId": "skill-mcp", "skillVersion": "latest", "reason": "Connect Supabase's MCP server"}
-	result, err := dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID})
+	result, err := dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +183,7 @@ func TestSkillSetupResolvesAnOmittedSourceFromTheCatalog(t *testing.T) {
 		t.Fatal(request)
 	}
 	sources = append(sources, "https://example.com/other::skill-mcp")
-	_, err = dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &ActionCall{ID: "call-2", Scope: scope, RunID: run.ID}, Arguments: args}, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID})
+	_, err = dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call-2", Scope: scope, RunID: run.ID}, Arguments: args}, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID})
 	if err == nil || !strings.Contains(err.Error(), "more than one source supplies skill-mcp") {
 		t.Fatalf("ambiguous source accepted: %v", err)
 	}

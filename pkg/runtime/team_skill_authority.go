@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -32,7 +33,7 @@ type TeamSkillAuthorityCatalog interface {
 // the run's acting member. Every active roster member gets every Team
 // binding as the binding itself allows; the Team's Skill allowlist and the
 // risk ceilings of the Team and of the member Agent still apply.
-func AuthorizeTeamSkillActivation(ctx context.Context, catalog TeamSkillAuthorityCatalog, run *AgentRun, snapshot *skill.ActivationSnapshot) (*skill.ActivationSnapshot, error) {
+func AuthorizeTeamSkillActivation(ctx context.Context, catalog TeamSkillAuthorityCatalog, run *models.AgentRun, snapshot *skill.ActivationSnapshot) (*skill.ActivationSnapshot, error) {
 	authority, err := resolveTeamSkillAuthority(ctx, catalog, run)
 	if err != nil {
 		return nil, err
@@ -96,7 +97,7 @@ func (v *TeamSkillActionValidator) ValidateActionProposal(ctx context.Context, i
 	if binding.Scope != (skill.ScopeReference{Kind: input.Run.Scope.Kind, ID: input.Run.Scope.ID}) {
 		return nil, errors.New("Skill binding scope does not match the Run scope")
 	}
-	if input.Run.Owner.Type != OwnerTypeTeam {
+	if input.Run.Owner.Type != models.OwnerTypeTeam {
 		if binding.DeploymentID != input.Run.AssignedAgentID {
 			return nil, errors.New("Agent Run cannot use a Skill binding owned by another deployment")
 		}
@@ -167,8 +168,8 @@ type teamSkillAuthority struct {
 	agentDefinition *kernelagent.AgentDefinition
 }
 
-func resolveTeamSkillAuthority(ctx context.Context, catalog TeamSkillAuthorityCatalog, run *AgentRun) (*teamSkillAuthority, error) {
-	if catalog == nil || run == nil || run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.Owner.ID) == "" || strings.TrimSpace(run.AssignedAgentID) == "" {
+func resolveTeamSkillAuthority(ctx context.Context, catalog TeamSkillAuthorityCatalog, run *models.AgentRun) (*teamSkillAuthority, error) {
+	if catalog == nil || run == nil || run.Owner.Type != models.OwnerTypeTeam || strings.TrimSpace(run.Owner.ID) == "" || strings.TrimSpace(run.AssignedAgentID) == "" {
 		return nil, errors.New("Team-owned Skills require a Team Run with an assigned roster Agent")
 	}
 	scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
@@ -227,7 +228,7 @@ func (a *teamSkillAuthority) allowsRisk(risk capability.RiskLevel) bool {
 }
 
 // teamRosterReader returns store's Team deployment reader, or nil.
-func teamRosterReader(store any) TeamRosterReader {
-	teams, _ := store.(TeamRosterReader)
+func teamRosterReader(store any) models.TeamRosterReader {
+	teams, _ := store.(models.TeamRosterReader)
 	return teams
 }
