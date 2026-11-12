@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -288,7 +289,7 @@ func TestRoutineEventMatcherIndexesBySource(t *testing.T) {
 		t.Fatal("index lists the source in another scope")
 	}
 	offer, err := h.matcher.OfferRoutineEvent(h.ctx, h.event(first, "gmail:a"))
-	if err != nil || offer != (RoutineEventOffer{Matched: 1, Inserted: 1}) {
+	if err != nil || offer != (externalconversation.RoutineEventOffer{Matched: 1, Inserted: 1}) {
 		t.Fatalf("offer=%#v err=%v", offer, err)
 	}
 	if count, _ := h.store.CountPendingRoutineEvents(h.ctx, h.scope, second.ID); count != 0 {
@@ -296,7 +297,7 @@ func TestRoutineEventMatcherIndexesBySource(t *testing.T) {
 	}
 	// A duplicate is counted, not stored twice.
 	offer, err = h.matcher.OfferRoutineEvent(h.ctx, h.event(first, "gmail:a"))
-	if err != nil || offer != (RoutineEventOffer{Matched: 1, Duplicates: 1}) {
+	if err != nil || offer != (externalconversation.RoutineEventOffer{Matched: 1, Duplicates: 1}) {
 		t.Fatalf("duplicate offer=%#v err=%v", offer, err)
 	}
 	// An event of another kind on the same SourceRef never matches.
@@ -348,7 +349,7 @@ func TestRoutineEventMatcherIndexesBySource(t *testing.T) {
 		return &RoutineEvent{Scope: h.scope, ID: id, Kind: RoutineEventGitHub, SourceRef: activation.Task.Event.SourceRef, OccurredAt: h.now, Summary: "Pull request opened", Fields: map[string][]string{"event": {"pull_request"}}}
 	}
 	owned := github("gh-owned", h.owner.ID, CallbackRegistrationActive)
-	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, githubEvent(owned, "github:1")); err != nil || offer != (RoutineEventOffer{Matched: 1, Inserted: 1}) {
+	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, githubEvent(owned, "github:1")); err != nil || offer != (externalconversation.RoutineEventOffer{Matched: 1, Inserted: 1}) {
 		t.Fatalf("github owned offer=%#v err=%v", offer, err)
 	}
 	otherDeployment := github("gh-foreign", "agent-2", CallbackRegistrationActive)
@@ -387,7 +388,7 @@ func TestRoutineEventMatcherHookOwnerMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	hookEvent := &RoutineEvent{Scope: h.scope, ID: "hs:1", Kind: RoutineEventWebhook, SourceRef: webhook.Task.Event.SourceRef, OccurredAt: h.now, Summary: "Order", Payload: json.RawMessage(`{"order":1}`)}
-	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, hookEvent); err != nil || offer != (RoutineEventOffer{Matched: 1, Inserted: 1}) {
+	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, hookEvent); err != nil || offer != (externalconversation.RoutineEventOffer{Matched: 1, Inserted: 1}) {
 		t.Fatalf("offer=%#v err=%v", offer, err)
 	}
 }
@@ -477,7 +478,7 @@ func TestRoutineEventOverflowStoresNoPayload(t *testing.T) {
 	h.serial++
 	overflowID := fmt.Sprintf("gmail:%06d", h.serial)
 	offer, err := h.matcher.OfferRoutineEvent(h.ctx, h.event(activation, overflowID))
-	if err != nil || offer != (RoutineEventOffer{Matched: 1, Dropped: 1}) {
+	if err != nil || offer != (externalconversation.RoutineEventOffer{Matched: 1, Dropped: 1}) {
 		t.Fatalf("overflow offer=%#v err=%v", offer, err)
 	}
 	var record *storedRoutineEvent
@@ -557,7 +558,7 @@ func TestRoutineTestEventDoesNotConsumeOccurrence(t *testing.T) {
 		t.Fatalf("non-creator test event err = %v", err)
 	}
 	eventID, offer, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-1", nil)
-	if err != nil || offer != (RoutineEventOffer{Matched: 1, Inserted: 1}) || !strings.HasPrefix(eventID, "test:") || !ValidRoutineEventID(eventID) {
+	if err != nil || offer != (externalconversation.RoutineEventOffer{Matched: 1, Inserted: 1}) || !strings.HasPrefix(eventID, "test:") || !ValidRoutineEventID(eventID) {
 		t.Fatalf("test offer=%#v id=%q err=%v", offer, eventID, err)
 	}
 	h.pass()

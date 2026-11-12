@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -29,16 +30,16 @@ type ephemeralRetryHost struct {
 
 func (h *ephemeralRetryHost) LookupExternalConversationDelivery(
 	context.Context,
-	ExternalConversationDeliveryHostRequest,
-) (*ExternalConversationDeliveryAcknowledgement, error) {
+	externalconversation.ExternalConversationDeliveryHostRequest,
+) (*externalconversation.ExternalConversationDeliveryAcknowledgement, error) {
 	h.lookups++
-	return &ExternalConversationDeliveryAcknowledgement{Status: ExternalConversationAcknowledgementUnknown}, nil
+	return &externalconversation.ExternalConversationDeliveryAcknowledgement{Status: externalconversation.ExternalConversationAcknowledgementUnknown}, nil
 }
 
 func (h *ephemeralRetryHost) DeliverExternalConversation(
 	_ context.Context,
-	req ExternalConversationDeliveryHostRequest,
-) (*ExternalConversationDeliveryHostResult, error) {
+	req externalconversation.ExternalConversationDeliveryHostRequest,
+) (*externalconversation.ExternalConversationDeliveryHostResult, error) {
 	h.deliveries++
 	if req.Delivery.Operation != capability.ConversationDeliveryTypingIndicator {
 		return nil, errors.New("expected typing indicator")
@@ -46,32 +47,32 @@ func (h *ephemeralRetryHost) DeliverExternalConversation(
 	if h.deliveries == 1 {
 		return nil, errors.New("temporary provider failure")
 	}
-	return &ExternalConversationDeliveryHostResult{
-		Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: req.Delivery.ExternalThreadID,
+	return &externalconversation.ExternalConversationDeliveryHostResult{
+		Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: req.Delivery.ExternalThreadID,
 	}, nil
 }
 
 func (h *acknowledgementRecoveryHost) LookupExternalConversationDelivery(
 	_ context.Context,
-	req ExternalConversationDeliveryHostRequest,
-) (*ExternalConversationDeliveryAcknowledgement, error) {
+	req externalconversation.ExternalConversationDeliveryHostRequest,
+) (*externalconversation.ExternalConversationDeliveryAcknowledgement, error) {
 	h.lookups++
 	if req.Adapter.Adapter.Provider != h.provider || req.Endpoint.Provider != h.provider {
 		return nil, errors.New("wrong provider adapter")
 	}
 	providerMessageID := h.acknowledged[req.Delivery.IdempotencyKey]
 	if providerMessageID == "" {
-		return &ExternalConversationDeliveryAcknowledgement{Status: ExternalConversationAcknowledgementNotFound}, nil
+		return &externalconversation.ExternalConversationDeliveryAcknowledgement{Status: externalconversation.ExternalConversationAcknowledgementNotFound}, nil
 	}
-	return &ExternalConversationDeliveryAcknowledgement{
-		Status: ExternalConversationAcknowledgementFound, ProviderMessageID: providerMessageID,
+	return &externalconversation.ExternalConversationDeliveryAcknowledgement{
+		Status: externalconversation.ExternalConversationAcknowledgementFound, ProviderMessageID: providerMessageID,
 	}, nil
 }
 
 func (h *acknowledgementRecoveryHost) DeliverExternalConversation(
 	_ context.Context,
-	req ExternalConversationDeliveryHostRequest,
-) (*ExternalConversationDeliveryHostResult, error) {
+	req externalconversation.ExternalConversationDeliveryHostRequest,
+) (*externalconversation.ExternalConversationDeliveryHostResult, error) {
 	h.deliveries++
 	h.address = req.Endpoint.Address
 	if req.Adapter.Adapter.Provider != h.provider || req.Message.Content != "Canonical answer" ||
@@ -113,7 +114,7 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewExternalConversationTransportService(store, catalog).Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+	_, err = externalconversation.NewExternalConversationTransportService(store, catalog).Enqueue(ctx, externalconversation.EnqueueExternalConversationDeliveryRequest{
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID,
 		ExternalConversationID: "C-origin", MaximumAttempts: 1,
@@ -122,7 +123,7 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 		t.Fatal(err)
 	}
 	host := &acknowledgementRecoveryHost{provider: "slack", acknowledged: map[string]string{}}
-	worker, err := NewExternalConversationDeliveryWorker(store, catalog, host, ExternalConversationDeliveryWorkerConfig{WorkerID: "origin-worker"})
+	worker, err := externalconversation.NewExternalConversationDeliveryWorker(store, catalog, host, externalconversation.ExternalConversationDeliveryWorkerConfig{WorkerID: "origin-worker"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewExternalConversationTransportService(store, catalog).Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+	_, err = externalconversation.NewExternalConversationTransportService(store, catalog).Enqueue(ctx, externalconversation.EnqueueExternalConversationDeliveryRequest{
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryTypingIndicator,
 		ConversationID: conversation.ID, ChannelMessageID: message.Message.ID, ExternalThreadID: "thread-1",
 		Parameters: map[string]interface{}{"status": "Checking now."}, MaximumAttempts: 3,
@@ -176,7 +177,7 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	}
 	host := &ephemeralRetryHost{}
 	workerClock := time.Now
-	worker, err := NewExternalConversationDeliveryWorker(store, catalog, host, ExternalConversationDeliveryWorkerConfig{
+	worker, err := externalconversation.NewExternalConversationDeliveryWorker(store, catalog, host, externalconversation.ExternalConversationDeliveryWorkerConfig{
 		WorkerID: "typing-worker", BaseRetry: time.Nanosecond, MaximumRetry: time.Second,
 	}, models.WithClock(func() time.Time { return workerClock() }))
 	if err != nil {
@@ -226,9 +227,9 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 			if err != nil {
 				t.Fatal(err)
 			}
-			enqueued, err := NewExternalConversationTransportService(store, catalog).Enqueue(
+			enqueued, err := externalconversation.NewExternalConversationTransportService(store, catalog).Enqueue(
 				ctx,
-				EnqueueExternalConversationDeliveryRequest{
+				externalconversation.EnqueueExternalConversationDeliveryRequest{
 					Scope: endpoint.Scope, EndpointID: endpoint.ID,
 					Operation:      capability.ConversationDeliveryMessageSend,
 					ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID,
@@ -240,11 +241,11 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 			}
 			host := &acknowledgementRecoveryHost{provider: provider, acknowledged: map[string]string{}}
 			workerClock := time.Now
-			worker, err := NewExternalConversationDeliveryWorker(
+			worker, err := externalconversation.NewExternalConversationDeliveryWorker(
 				store,
 				catalog,
 				host,
-				ExternalConversationDeliveryWorkerConfig{
+				externalconversation.ExternalConversationDeliveryWorkerConfig{
 					WorkerID: "delivery-worker", LeaseDuration: time.Minute,
 					BaseRetry: time.Second, MaximumRetry: time.Minute,
 				},
@@ -365,9 +366,9 @@ func externalConversationEndpointFixtureOwnedBy(
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := NewExternalConversationEndpointService(store, catalog).Create(
+	endpoint, err := externalconversation.NewExternalConversationEndpointService(store, catalog).Create(
 		ctx,
-		CreateExternalConversationEndpointRequest{
+		externalconversation.CreateExternalConversationEndpointRequest{
 			ID: provider + "-endpoint", Scope: scope,
 			Owner: owner, DeploymentID: deploymentID,
 			Name: provider + " endpoint",

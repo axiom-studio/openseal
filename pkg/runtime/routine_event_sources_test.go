@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -29,13 +30,13 @@ type routineTestOffer struct {
 
 func (o *routineTestOfferer) Listening(Scope, RoutineEventKind, string) bool { return false }
 
-func (o *routineTestOfferer) OfferRoutineEvent(context.Context, *RoutineEvent) (RoutineEventOffer, error) {
-	return RoutineEventOffer{}, nil
+func (o *routineTestOfferer) OfferRoutineEvent(context.Context, *RoutineEvent) (externalconversation.RoutineEventOffer, error) {
+	return externalconversation.RoutineEventOffer{}, nil
 }
 
-func (o *routineTestOfferer) OfferRoutineTestEvent(_ context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error) {
+func (o *routineTestOfferer) OfferRoutineTestEvent(_ context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, externalconversation.RoutineEventOffer, error) {
 	o.tests = append(o.tests, routineTestOffer{scope: scope, activationID: activationID, testBy: testBy, payload: payload})
-	return "test:fixed", RoutineEventOffer{Matched: 1, Inserted: 1}, nil
+	return "test:fixed", externalconversation.RoutineEventOffer{Matched: 1, Inserted: 1}, nil
 }
 
 // routineGoogleSourcesForTest returns its options whoever asks, so the

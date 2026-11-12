@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 )
 
 func TestConversationDestinationDiscoveryBuildsBoundedArgumentsAndProjectsOnlyMappedFields(t *testing.T) {
@@ -21,15 +22,15 @@ func TestConversationDestinationDiscoveryBuildsBoundedArgumentsAndProjectsOnlyMa
 		Adapter: capability.ConversationAdapter{DestinationDiscovery: []capability.ConversationDestinationDiscovery{discovery}},
 		Binding: &capability.Binding{Scope: capability.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "agent-1"},
 	}
-	request := ExternalConversationDestinationDiscoveryRequest{
+	request := externalconversation.ExternalConversationDestinationDiscoveryRequest{
 		Scope: Scope{Kind: "tenant", ID: "7"}, DeploymentID: "agent-1", ExecutionDeploymentID: "agent-1", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Cursor: "cursor-1", Query: "product", Limit: 25,
 	}
-	resolved, arguments, err := ConversationDestinationDiscoveryArguments(request)
+	resolved, arguments, err := externalconversation.ConversationDestinationDiscoveryArguments(request)
 	if err != nil || resolved.Action != "list" || !reflect.DeepEqual(arguments, map[string]interface{}{"cursor": "cursor-1", "query": "product", "limit": 25}) {
 		t.Fatalf("discovery = %#v arguments = %#v error = %v", resolved, arguments, err)
 	}
-	page, err := ProjectConversationDestinationPage(discovery, map[string]interface{}{
+	page, err := externalconversation.ProjectConversationDestinationPage(discovery, map[string]interface{}{
 		"connection": map[string]interface{}{"installationId": "workspace-1", "applicationId": "app-1", "displayName": "Product workspace"},
 		"result": map[string]interface{}{
 			"channels": []interface{}{map[string]interface{}{
@@ -53,7 +54,7 @@ func TestConversationDestinationProjectionRejectsDuplicateOrOversizedProviderDat
 		"invalid":   {"items": []interface{}{map[string]interface{}{"id": "one", "name": "line\nbreak"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := ProjectConversationDestinationPage(discovery, output); err == nil {
+			if _, err := externalconversation.ProjectConversationDestinationPage(discovery, output); err == nil {
 				t.Fatal("invalid provider destination output was accepted")
 			}
 		})

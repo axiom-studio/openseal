@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
@@ -19,8 +20,8 @@ func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 	defer cancel()
 	store, pgSchema := openTestPostgresStore(t, "openseal_channel_atomic_")
 	_, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
-	endpoints := NewExternalConversationEndpointService(store, catalog)
-	endpoint, err := endpoints.Create(ctx, CreateExternalConversationEndpointRequest{
+	endpoints := externalconversation.NewExternalConversationEndpointService(store, catalog)
+	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"}, DeploymentID: "slack-agent",
 		Name: "Slack", Adapter: adapter, Mode: capability.ConversationEndpointChannel, Address: "C012345",
 		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
@@ -58,7 +59,7 @@ func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 	}
 	policy := endpoint.Policy
 	policy.MessageSelection = ExternalConversationSelectAllMessages
-	prepared, err := endpoints.PrepareUpdate(ctx, scope, endpoint.ID, UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Policy: &policy})
+	prepared, err := endpoints.PrepareUpdate(ctx, scope, endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Policy: &policy})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	activate := func() error {
-		_, _, _, err := agents.ActivateAmendmentWithCommit(ctx, agentScope, amendment.ID, amendment.Revision, "user", "operator", "reviewed", endpoints.channelActivationCommit(prepared, endpoint.Revision, deployment.Revision))
+		_, _, _, err := agents.ActivateAmendmentWithCommit(ctx, agentScope, amendment.ID, amendment.Revision, "user", "operator", "reviewed", endpoints.ChannelActivationCommit(prepared, endpoint.Revision, deployment.Revision))
 		return err
 	}
 	if err := activate(); err == nil || !strings.Contains(err.Error(), "endpoint write rejected") {
@@ -88,7 +89,7 @@ func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 	}
 	// A concurrent retirement must win even after a prepared, reviewed update.
 	retired := ExternalConversationEndpointRetired
-	retiredEndpoint, err := endpoints.Update(ctx, scope, endpoint.ID, UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Status: &retired})
+	retiredEndpoint, err := endpoints.Update(ctx, scope, endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Status: &retired})
 	if err != nil {
 		t.Fatal(err)
 	}

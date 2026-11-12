@@ -24,6 +24,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -43,9 +44,9 @@ type externalLoopFixture struct {
 	adapters *skill.Catalog
 	endpoint *ExternalConversationEndpoint
 	host     *StreamChatHost
-	progress *RunProgressAcknowledgementWorker
-	replies  *ExternalConversationReplyWorker
-	delivery *ExternalConversationDeliveryWorker
+	progress *externalconversation.RunProgressAcknowledgementWorker
+	replies  *externalconversation.ExternalConversationReplyWorker
+	delivery *externalconversation.ExternalConversationDeliveryWorker
 }
 
 // externalChat is one inbound provider message and the Run answering it.
@@ -83,20 +84,20 @@ func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, op
 		t.Fatal(err)
 	}
 	if renderer == nil {
-		renderer = RunProgressAcknowledgementRendererFunc(func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error) {
+		renderer = externalconversation.RunProgressAcknowledgementRendererFunc(func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error) {
 			return "", errors.New("this scenario renders no progress acknowledgement")
 		})
 	}
 	var err error
-	if f.progress, err = NewRunProgressAcknowledgementWorker(ext, f.adapters, renderer, RunProgressAcknowledgementWorkerConfig{
+	if f.progress, err = externalconversation.NewRunProgressAcknowledgementWorker(ext, f.adapters, renderer, externalconversation.RunProgressAcknowledgementWorkerConfig{
 		MinimumRunAge: time.Nanosecond, MinimumInterval: time.Nanosecond,
 	}, models.WithClock(f.clock.Now)); err != nil {
 		t.Fatal(err)
 	}
-	if f.replies, err = NewExternalConversationReplyWorker(ext, f.adapters, models.WithClock(f.clock.Now)); err != nil {
+	if f.replies, err = externalconversation.NewExternalConversationReplyWorker(ext, f.adapters, models.WithClock(f.clock.Now)); err != nil {
 		t.Fatal(err)
 	}
-	if f.delivery, err = NewExternalConversationDeliveryWorker(ext, f.adapters, f.host, ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}, models.WithClock(f.clock.Now)); err != nil {
+	if f.delivery, err = externalconversation.NewExternalConversationDeliveryWorker(ext, f.adapters, f.host, externalconversation.ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}, models.WithClock(f.clock.Now)); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -575,7 +576,7 @@ func TestProgressAcknowledgementIsOneToolFreeStepWithoutSession(t *testing.T) {
 						}},
 					&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return say("The deployment is healthy.") }},
 				))
-				renderer.inner = newProgressAcknowledgementRenderer(fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}, loopFixtureAgent,
+				renderer.inner = externalconversation.NewProgressAcknowledgementRenderer(fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}, loopFixtureAgent,
 					loopFixtureDefinition, "1", nil, []string{"You are finn, the fixture Agent."}, models.WithClock(f.clock.Now))
 				chat := f.startExternal("Can you check the deployment?")
 				f.clock.Advance(time.Minute)

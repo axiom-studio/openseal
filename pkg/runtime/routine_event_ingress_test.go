@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -38,7 +39,7 @@ func routineConnectionFixture(t *testing.T, h *routineEventHarness, provider str
 	if err := catalog.Bind(h.ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := NewExternalConversationEndpointService(h.store, catalog).Create(h.ctx, CreateExternalConversationEndpointRequest{
+	endpoint, err := externalconversation.NewExternalConversationEndpointService(h.store, catalog).Create(h.ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: provider + "-endpoint", Scope: scope, Owner: h.owner, DeploymentID: h.owner.ID, Name: provider + " endpoint",
 		Adapter: ExternalConversationAdapterReference{
 			SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
@@ -112,8 +113,8 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	// reply; the routine hears them anyway (E14).
 	catalog, endpoint := routineConnectionFixture(t, h, "slack", ExternalConversationSelectMentions)
 	activation := conversationRoutine(h, endpoint, RoutineEventSlackMessage, "channel")
-	gateways := NewExternalConversationGatewayService(h.store, nil)
-	registration := CreateActiveGateway(t, h.ctx, gateways, CreateExternalConversationGatewayRequest{
+	gateways := externalconversation.NewExternalConversationGatewayService(h.store, nil)
+	registration := CreateActiveGateway(t, h.ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "acme-slack", Name: "Acme Slack", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "pinned tenant gateway",
 		Gateway: ExternalConversationIngressGateway{
 			Scope: endpoint.Scope, Owner: h.owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter,
@@ -122,17 +123,17 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	})
 	human := slackRoutineMessage("171.001", "U1", "Ana Ruiz", "The invoice\nis late", false)
 	bot := slackRoutineMessage("171.002", "B1", "Deploy bot", "Deployed", true)
-	host := &GatewayHostStub{Result: &ExternalConversationGatewayHostResult{
+	host := &GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
 		StatusCode: http.StatusOK,
-		Events: []ExternalConversationGatewayEvent{
+		Events: []externalconversation.ExternalConversationGatewayEvent{
 			{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: human},
 			{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: bot},
 		},
 	}}
-	service := NewExternalConversationTransportService(h.store, catalog)
+	service := externalconversation.NewExternalConversationTransportService(h.store, catalog)
 	service.SetRoutineEventOfferer(h.matcher)
 
-	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.ctx, ExternalConversationPublicIngressRequest{
+	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.ctx, externalconversation.ExternalConversationPublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"team_id":"T123"}`),
 	}, host)
 	if err != nil || len(result.Received) != 2 || result.Received[0].Accepted || result.Received[1].Accepted {
@@ -163,7 +164,7 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	}
 
 	// A retry of the same provider request is absorbed by dedupe.
-	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.ctx, ExternalConversationPublicIngressRequest{
+	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.ctx, externalconversation.ExternalConversationPublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"team_id":"T123"}`),
 	}, host); err != nil {
 		t.Fatal(err)
@@ -179,12 +180,12 @@ func TestSlackRoutineIgnoresDirectMessages(t *testing.T) {
 	activation := conversationRoutine(h, endpoint, RoutineEventSlackMessage, "channel")
 	direct := slackRoutineMessage("172.001", "U1", "Ana Ruiz", "private note", false)
 	direct.Direct = true
-	host := &IngressHostStub{Result: &ExternalConversationIngressHostResult{
+	host := &IngressHostStub{Result: &externalconversation.ExternalConversationIngressHostResult{
 		StatusCode: http.StatusOK, Events: []NormalizedExternalConversationEvent{direct},
 	}}
-	service := NewExternalConversationTransportService(h.store, catalog)
+	service := externalconversation.NewExternalConversationTransportService(h.store, catalog)
 	service.SetRoutineEventOfferer(h.matcher)
-	request := ExternalConversationIngressRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: http.MethodPost, Body: []byte(`{}`)}
+	request := externalconversation.ExternalConversationIngressRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: http.MethodPost, Body: []byte(`{}`)}
 
 	if _, err := service.NormalizeExternalConversationIngress(h.ctx, request, host); err != nil {
 		t.Fatal(err)
@@ -217,21 +218,21 @@ func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
 		Attributes:  map[string]interface{}{"chatTitle": "Support desk", "participantUsername": "ana_r"},
 	}
 	// An unpinned gateway: authority comes from each mapped endpoint.
-	gateways := NewExternalConversationGatewayService(h.store, nil)
-	registration := CreateActiveGateway(t, h.ctx, gateways, CreateExternalConversationGatewayRequest{
+	gateways := externalconversation.NewExternalConversationGatewayService(h.store, nil)
+	registration := CreateActiveGateway(t, h.ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "telegram-bot", Name: "Telegram bot", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "unpinned gateway",
 		Gateway: ExternalConversationIngressGateway{
 			Scope: endpoint.Scope, Owner: h.owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: "telegram",
 		},
 	})
-	host := &GatewayHostStub{Result: &ExternalConversationGatewayHostResult{
+	host := &GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
 		StatusCode: http.StatusOK,
-		Events:     []ExternalConversationGatewayEvent{{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: message}},
+		Events:     []externalconversation.ExternalConversationGatewayEvent{{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: message}},
 	}}
-	service := NewExternalConversationTransportService(h.store, catalog)
+	service := externalconversation.NewExternalConversationTransportService(h.store, catalog)
 	service.SetRoutineEventOfferer(h.matcher)
 
-	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.ctx, ExternalConversationPublicIngressRequest{
+	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.ctx, externalconversation.ExternalConversationPublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"update_id":991}`),
 	}, host)
 	if err != nil || len(result.Received) != 1 {
@@ -288,7 +289,7 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 		},
 	}
 	offered := &recordingRoutineOfferer{RoutineEventOfferer: h.matcher}
-	consumer := NewRoutineCallbackConsumer(offered)
+	consumer := externalconversation.NewRoutineCallbackConsumer(offered)
 	subscription := CallbackSubscription{EventType: "github.issues.opened", Consumer: "routines"}
 
 	if err := consumer.ConsumeCallbackEvent(h.ctx, registration, subscription, issue); err != nil {
@@ -356,11 +357,11 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 
 // recordingRoutineOfferer records each event offered to its offerer.
 type recordingRoutineOfferer struct {
-	RoutineEventOfferer
+	externalconversation.RoutineEventOfferer
 	events []*RoutineEvent
 }
 
-func (o *recordingRoutineOfferer) OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (RoutineEventOffer, error) {
+func (o *recordingRoutineOfferer) OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (externalconversation.RoutineEventOffer, error) {
 	o.events = append(o.events, event)
 	return o.RoutineEventOfferer.OfferRoutineEvent(ctx, event)
 }

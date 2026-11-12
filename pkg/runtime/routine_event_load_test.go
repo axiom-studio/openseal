@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 )
 
 // countingRoutineEventStore fails the test on any store call: an offer for
@@ -72,7 +74,7 @@ func TestRoutineEventOfferUnboundAllocFree(t *testing.T) {
 			t.Fatal("unbound source is listening")
 		}
 		offer, err := matcher.OfferRoutineEvent(ctx, event)
-		if err != nil || offer != (RoutineEventOffer{}) {
+		if err != nil || offer != (externalconversation.RoutineEventOffer{}) {
 			t.Fatalf("offer=%#v err=%v", offer, err)
 		}
 	})

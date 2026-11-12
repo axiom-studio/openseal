@@ -1,0 +1,427 @@
+package externalconversation
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"sync"
+	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/callback"
+)
+
+// Producers of routine events from conversation and callback ingress
+// (SPEC §8). Each one asks Listening before it builds anything, so a message
+// on a connection no routine listens to costs a map lookup and nothing else.
+
+const (
+	// routineConversationSourceCacheMax bounds the memo of conversation
+	// SourceRefs. When it is full it starts over.
+	routineConversationSourceCacheMax = 4096
+
+	routineGitHubEventPrefix = "github."
+)
+
+type routineConversationSourceKey struct {
+	deploymentID, bindingID, adapterID, installationID string
+}
+
+// routineConversationSourceRefs memoizes RoutineConversationSourceRef so the
+// ingress path computes no hash and allocates nothing for a connection it
+// has seen before.
+var routineConversationSourceRefs = struct {
+	sync.RWMutex
+	refs map[routineConversationSourceKey]string
+}{refs: map[routineConversationSourceKey]string{}}
+
+func routineConversationSourceRefOf(deploymentID, bindingID, adapterID, installationID string) string {
+	key := routineConversationSourceKey{deploymentID: deploymentID, bindingID: bindingID, adapterID: adapterID, installationID: installationID}
+	routineConversationSourceRefs.RLock()
+	ref, ok := routineConversationSourceRefs.refs[key]
+	routineConversationSourceRefs.RUnlock()
+	if ok {
+		return ref
+	}
+	ref = models.RoutineConversationSourceRef(deploymentID, bindingID, adapterID, installationID)
+	routineConversationSourceRefs.Lock()
+	if len(routineConversationSourceRefs.refs) >= routineConversationSourceCacheMax {
+		routineConversationSourceRefs.refs = make(map[routineConversationSourceKey]string, routineConversationSourceCacheMax)
+	}
+	routineConversationSourceRefs.refs[key] = ref
+	routineConversationSourceRefs.Unlock()
+	return ref
+}
+
+// routineConversationKind maps a conversation provider to its event kind
+// without allocating.
+func routineConversationKind(provider string) (models.RoutineEventKind, bool) {
+	switch {
+	case strings.EqualFold(provider, "slack"):
+		return models.RoutineEventSlackMessage, true
+	case strings.EqualFold(provider, "telegram"):
+		return models.RoutineEventTelegramMessage, true
+	}
+	return "", false
+}
+
+// offerConversationRoutineEvent offers one verified Slack or Telegram message
+// to the routines listening on its connection. Direct messages, other
+// providers and other event types are skipped (E14). It runs before the
+// endpoint's message selection, which governs only the chat reply.
+func offerConversationRoutineEvent(
+	ctx context.Context,
+	offerer RoutineEventOfferer,
+	scope models.Scope,
+	deploymentID string,
+	adapter models.ExternalConversationAdapterReference,
+	provider, installationID string,
+	event *models.NormalizedExternalConversationEvent,
+) error {
+	if offerer == nil || event == nil || event.Type != capability.ConversationEventMessageReceived || event.Direct || installationID == "" {
+		return nil
+	}
+	kind, ok := routineConversationKind(provider)
+	if !ok {
+		return nil
+	}
+	sourceRef := routineConversationSourceRefOf(deploymentID, adapter.BindingID, adapter.AdapterID, installationID)
+	if !offerer.Listening(scope, kind, sourceRef) {
+		return nil
+	}
+	routineEvent := conversationRoutineEvent(scope, kind, sourceRef, event)
+	if _, err := offerer.OfferRoutineEvent(ctx, routineEvent); err != nil {
+		return fmt.Errorf("offer %s to routines: %w", kind, err)
+	}
+	return nil
+}
+
+type conversationRoutinePayload struct {
+	Text              string                          `json:"text"`
+	ExternalMessageID string                          `json:"externalMessageId"`
+	ExternalThreadID  string                          `json:"externalThreadId,omitempty"`
+	Participant       conversationRoutineParticipant  `json:"participant"`
+	Attachments       []conversationRoutineAttachment `json:"attachments,omitempty"`
+}
+
+type conversationRoutineParticipant struct {
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	Username string `json:"username,omitempty"`
+	IsBot    bool   `json:"isBot"`
+}
+
+type conversationRoutineAttachment struct {
+	Name     string `json:"name,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+}
+
+// conversationRoutineEvent maps a normalized conversation message to a
+// routine event (SPEC §3.2, §8.1).
+func conversationRoutineEvent(scope models.Scope, kind models.RoutineEventKind, sourceRef string, event *models.NormalizedExternalConversationEvent) *models.RoutineEvent {
+	senderName := routineEventFieldValue(event.ParticipantDisplayName)
+	username := ""
+	if kind == models.RoutineEventTelegramMessage {
+		username = routineEventFieldValue(conversationAttributeString(event.Attributes, "participantUsername"))
+	}
+	if senderName == "" {
+		senderName = username
+	}
+	sender := routineEventFieldValue(event.ExternalParticipantID)
+	text := strings.ToValidUTF8(event.Text, "")
+	fields := map[string][]string{
+		"sender": {sender},
+		"text":   {models.TruncateUTF8(text, models.RoutineEventTextFieldMaxBytes)},
+		"bot":    {strconv.FormatBool(event.ParticipantIsBot)},
+	}
+	if senderName != "" {
+		fields["senderName"] = []string{senderName}
+	}
+	conversation := routineEventFieldValue(event.ExternalConversationID)
+	switch kind {
+	case models.RoutineEventSlackMessage:
+		fields["channel"] = []string{conversation}
+		thread := strings.TrimSpace(event.ExternalThreadID)
+		fields["inThread"] = []string{strconv.FormatBool(thread != "" && thread != strings.TrimSpace(event.ExternalMessageID))}
+	case models.RoutineEventTelegramMessage:
+		fields["chat"] = []string{conversation}
+		if title := routineEventFieldValue(conversationAttributeString(event.Attributes, "chatTitle")); title != "" {
+			fields["chatTitle"] = []string{title}
+		}
+		if username != "" {
+			fields["senderUsername"] = []string{username}
+		}
+	}
+	payload := conversationRoutinePayload{
+		Text: text, ExternalMessageID: event.ExternalMessageID, ExternalThreadID: event.ExternalThreadID,
+		Participant: conversationRoutineParticipant{ID: event.ExternalParticipantID, Name: event.ParticipantDisplayName, Username: username, IsBot: event.ParticipantIsBot},
+	}
+	for _, attachment := range event.Attachments {
+		payload.Attachments = append(payload.Attachments, conversationRoutineAttachment{Name: attachment.Name, MimeType: attachment.MediaType})
+	}
+	who := senderName
+	if who == "" {
+		who = sender
+	}
+	summary := routineEventOneLine(text)
+	if summary == "" && len(event.Attachments) > 0 {
+		summary = "sent an attachment"
+	}
+	return &models.RoutineEvent{
+		Scope: scope, ID: routineEventIDOf(event.ID), Kind: kind, SourceRef: sourceRef, OccurredAt: event.OccurredAt.UTC(),
+		Subject: models.TruncateUTF8(conversation, models.RoutineEventSubjectMaxBytes),
+		Summary: routineEventSummary(who + ": " + summary), Fields: fields, Payload: routineEventPayload(payload),
+	}
+}
+
+func conversationAttributeString(attributes map[string]interface{}, key string) string {
+	value, _ := attributes[key].(string)
+	return strings.TrimSpace(value)
+}
+
+// RoutineCallbackConsumer is the "routines" callback consumer: it offers
+// GitHub callback events to the routines listening on their registration.
+type RoutineCallbackConsumer struct {
+	offerer RoutineEventOfferer
+}
+
+func NewRoutineCallbackConsumer(offerer RoutineEventOfferer) *RoutineCallbackConsumer {
+	return &RoutineCallbackConsumer{offerer: offerer}
+}
+
+var _ callback.CallbackEventConsumer = (*RoutineCallbackConsumer)(nil)
+
+// ConsumeCallbackEvent offers one GitHub event. Events of other providers
+// are not routine events and are skipped. An offer error fails the receipt,
+// so the callback worker retries it; dedupe absorbs the retry.
+func (c *RoutineCallbackConsumer) ConsumeCallbackEvent(ctx context.Context, registration *models.CallbackRegistration, _ models.CallbackSubscription, event models.EventEnvelope) error {
+	if c == nil || c.offerer == nil {
+		return errors.New("routine events are not available")
+	}
+	if registration == nil || !strings.EqualFold(registration.Provider, "github") {
+		return nil
+	}
+	sourceRef := models.RoutineCallbackSourceRef(registration.ID)
+	if !c.offerer.Listening(registration.Scope, models.RoutineEventGitHub, sourceRef) {
+		return nil
+	}
+	if _, err := c.offerer.OfferRoutineEvent(ctx, gitHubRoutineEvent(registration.Scope, sourceRef, event)); err != nil {
+		return fmt.Errorf("offer github.event to routines: %w", err)
+	}
+	return nil
+}
+
+// gitHubRoutineEvent maps a GitHub callback envelope to a routine event. The
+// payload shape is the GitHub skill's callback adapter output.
+func gitHubRoutineEvent(scope models.Scope, sourceRef string, event models.EventEnvelope) *models.RoutineEvent {
+	eventName := strings.TrimPrefix(strings.TrimSpace(event.Type), routineGitHubEventPrefix)
+	kind, _, _ := strings.Cut(eventName, ".")
+	payload := event.Payload
+	repository := routineEventFieldValue(routineCallbackString(routineCallbackObject(payload, "repository"), "fullName"))
+	if repository == "" {
+		owner := routineCallbackString(event.Attributes, "owner")
+		name := routineCallbackString(event.Attributes, "repository")
+		if owner != "" && name != "" {
+			repository = routineEventFieldValue(owner + "/" + name)
+		}
+	}
+	action := routineEventFieldValue(routineCallbackString(event.Attributes, "action"))
+	fields := map[string][]string{"event": {routineEventFieldValue(eventName)}}
+	add := func(field, value string) {
+		if value = routineEventFieldValue(value); value != "" {
+			fields[field] = []string{value}
+		}
+	}
+	add("repository", repository)
+	add("action", action)
+	add("sender", routineCallbackString(payload, "sender"))
+	title, branch, conclusion := "", "", ""
+	var labels []string
+	switch kind {
+	case "pull_request":
+		pullRequest := routineCallbackObject(payload, "pullRequest")
+		title, branch = routineCallbackString(pullRequest, "title"), routineCallbackString(pullRequest, "head")
+	case "issues", "issue_comment":
+		issue := routineCallbackObject(payload, "issue")
+		title = routineCallbackString(issue, "title")
+		labels = routineCallbackLabelNames(issue["labels"])
+	case "workflow_run":
+		run := routineCallbackObject(payload, "workflowRun")
+		title, branch, conclusion = routineCallbackString(run, "name"), routineCallbackString(run, "branch"), routineCallbackString(run, "conclusion")
+	}
+	add("title", title)
+	add("branch", branch)
+	add("conclusion", conclusion)
+	if len(labels) > 0 {
+		fields["labels"] = labels
+	}
+	number := routineCallbackInteger(event.Attributes["number"])
+	var encoded json.RawMessage
+	if len(payload) > 0 {
+		encoded = routineEventPayload(payload)
+	}
+	return &models.RoutineEvent{
+		Scope: scope, ID: routineEventIDOf(event.ID), Kind: models.RoutineEventGitHub, SourceRef: sourceRef, OccurredAt: event.OccurredAt.UTC(),
+		Subject: models.TruncateUTF8(strings.ToValidUTF8(event.Subject, ""), models.RoutineEventSubjectMaxBytes),
+		Summary: routineEventSummary(gitHubRoutineSummary(kind, action, repository, number, title, conclusion)),
+		Fields:  fields, Payload: encoded,
+	}
+}
+
+// gitHubRoutineSummary is a plain line like "Issue opened in acme/api: #12
+// Fix login".
+func gitHubRoutineSummary(kind, action, repository string, number int64, title, conclusion string) string {
+	if repository == "" {
+		repository = "GitHub"
+	}
+	verb := strings.ReplaceAll(action, "_", " ")
+	item := ""
+	if number > 0 {
+		item = "#" + strconv.FormatInt(number, 10)
+	}
+	if title = routineEventOneLine(title); title != "" {
+		item = strings.TrimSpace(item + " " + title)
+	}
+	var line string
+	switch kind {
+	case "issues":
+		line = "Issue " + verb + " in " + repository
+	case "pull_request":
+		switch action {
+		case "synchronize":
+			verb = "updated"
+		case "ready_for_review":
+			verb = "marked ready for review"
+		}
+		line = "Pull request " + verb + " in " + repository
+	case "issue_comment":
+		if action == "created" {
+			verb = "added"
+		}
+		line = "Comment " + verb + " in " + repository
+	case "workflow_run":
+		if action == "requested" {
+			verb = "started"
+		}
+		line = "Workflow run " + verb + " in " + repository
+		if conclusion != "" {
+			item = strings.TrimSpace(item + " (" + routineEventOneLine(conclusion) + ")")
+		}
+	default:
+		line = "GitHub " + strings.TrimSpace(kind+" "+verb) + " in " + repository
+	}
+	if item != "" {
+		line += ": " + item
+	}
+	return line
+}
+
+func routineCallbackObject(values map[string]interface{}, key string) map[string]interface{} {
+	value, _ := values[key].(map[string]interface{})
+	return value
+}
+
+func routineCallbackString(values map[string]interface{}, key string) string {
+	value, _ := values[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func routineCallbackInteger(value interface{}) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	case json.Number:
+		number, _ := typed.Int64()
+		return number
+	}
+	return 0
+}
+
+// callbackLabelNames reads GitHub's labels list, objects with a name or
+// plain strings, as at most 16 values.
+func routineCallbackLabelNames(value interface{}) []string {
+	items, _ := value.([]interface{})
+	names := []string{}
+	for _, item := range items {
+		name := ""
+		switch typed := item.(type) {
+		case string:
+			name = typed
+		case map[string]interface{}:
+			name, _ = typed["name"].(string)
+		}
+		if name = routineEventFieldValue(name); name != "" {
+			names = append(names, name)
+		}
+		if len(names) == models.RoutineEventMaxFieldValues {
+			break
+		}
+	}
+	return names
+}
+
+// routineEventIDOf keeps a producer's event ID when it is a valid routine
+// event ID and otherwise uses a stable digest of it.
+func routineEventIDOf(id string) string {
+	if models.ValidRoutineEventID(id) {
+		return id
+	}
+	sum := sha256.Sum256([]byte(id))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// routineEventFieldValue is a filterable value: valid UTF-8, trimmed, at most
+// the field value limit.
+func routineEventFieldValue(value string) string {
+	return models.TruncateUTF8(strings.TrimSpace(strings.ToValidUTF8(value, "")), models.RoutineEventFieldValueMaxBytes)
+}
+
+func routineEventOneLine(value string) string {
+	return strings.Join(strings.Fields(strings.ToValidUTF8(value, "")), " ")
+}
+
+// routineEventSummary is one line of at most 280 bytes.
+func routineEventSummary(value string) string {
+	value = models.TruncateUTF8(routineEventOneLine(value), models.RoutineEventSummaryMaxBytes)
+	if !utf8.ValidString(value) || strings.TrimSpace(value) == "" {
+		return "New event"
+	}
+	return value
+}
+
+// routineEventPayload encodes a payload object, or nothing when it does not
+// fit the payload limit; the event's fields still carry its facts.
+func routineEventPayload(value interface{}) json.RawMessage {
+	data, err := json.Marshal(value)
+	if err != nil || len(data) > models.RoutineEventPayloadMaxBytes || len(data) == 0 || data[0] != '{' {
+		return nil
+	}
+	return data
+}
+
+// RoutineEventOfferer is the matcher as seen by actions and ingress.
+type RoutineEventOfferer interface {
+	// Listening is an index lookup only: no I/O and no allocation. Producers call it before they build an event.
+	Listening(scope models.Scope, kind models.RoutineEventKind, sourceRef string) bool
+	OfferRoutineEvent(ctx context.Context, event *models.RoutineEvent) (RoutineEventOffer, error)
+	// OfferRoutineTestEvent returns the stored test event's ID.
+	OfferRoutineTestEvent(ctx context.Context, scope models.Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error)
+}
+
+// RoutineEventOffer counts what one offer did.
+type RoutineEventOffer struct {
+	Matched    int `json:"matched"`
+	Inserted   int `json:"inserted"`
+	Duplicates int `json:"duplicates"`
+	Dropped    int `json:"dropped"`
+}

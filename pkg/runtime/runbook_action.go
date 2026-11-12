@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -138,7 +139,7 @@ type RunbookActionValidator struct {
 // events, sources lists the host's own sources (Google) and hooksAvailable
 // says whether the host can serve webhooks. Without an offerer,
 // send_test_event is refused.
-func (v *RunbookActionValidator) SetRoutineEvents(offerer RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) {
+func (v *RunbookActionValidator) SetRoutineEvents(offerer externalconversation.RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) {
 	if v != nil {
 		v.events = newRoutineEventActions(offerer, sources, hooksAvailable)
 	}
@@ -312,7 +313,7 @@ type RunbookActionDispatcher struct {
 
 // SetRoutineEvents lets routines start on events; see
 // RunbookActionValidator.SetRoutineEvents.
-func (d *RunbookActionDispatcher) SetRoutineEvents(offerer RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) {
+func (d *RunbookActionDispatcher) SetRoutineEvents(offerer externalconversation.RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) {
 	if d != nil {
 		d.events = newRoutineEventActions(offerer, sources, hooksAvailable)
 	}

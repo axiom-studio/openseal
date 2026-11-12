@@ -7,16 +7,17 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type replyAliasDispatcher struct{}
 
-func (replyAliasDispatcher) DispatchExternalConversation(_ context.Context, req ExternalConversationDispatchRequest) (*ExternalConversationDispatchResult, error) {
-	return &ExternalConversationDispatchResult{RunID: "reply-run-" + req.Message.ID}, nil
+func (replyAliasDispatcher) DispatchExternalConversation(_ context.Context, req externalconversation.ExternalConversationDispatchRequest) (*externalconversation.ExternalConversationDispatchResult, error) {
+	return &externalconversation.ExternalConversationDispatchResult{RunID: "reply-run-" + req.Message.ID}, nil
 }
 
-func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *ExternalConversationInboxWorker, endpoint *ExternalConversationEndpoint,
+func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *externalconversation.ExternalConversationInboxWorker, endpoint *ExternalConversationEndpoint,
 	chatID, messageID, threadID, parentID, text string,
 ) *ChannelMessage {
 	t.Helper()
@@ -50,8 +51,8 @@ func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *ExternalC
 func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t *testing.T) {
 	ctx := t.Context()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	host := &RecordingContextHost{Result: &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextUnavailable}}
-	worker, err := NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, ExternalConversationInboxWorkerConfig{
+	host := &RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextUnavailable}}
+	worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{
 		WorkerID: "reply-alias-worker", ContextHost: host, ContextCatalog: ContextHistoryResolver{catalog},
 	})
 	if err != nil {
@@ -122,7 +123,7 @@ func TestExternalConversationReplyAliasesNeverReuseForeignParents(t *testing.T) 
 		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
 			store, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-			worker, err := NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, ExternalConversationInboxWorkerConfig{WorkerID: "reply-alias-worker"})
+			worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{WorkerID: "reply-alias-worker"})
 			if err != nil {
 				t.Fatal(err)
 			}

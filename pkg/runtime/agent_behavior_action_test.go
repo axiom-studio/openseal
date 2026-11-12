@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -54,8 +55,8 @@ func TestAgentManagementExecutorAcceptsActivePreviousContractVersion(t *testing.
 func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
-	endpoints := NewExternalConversationEndpointService(store, catalog)
-	endpoint, err := endpoints.Create(ctx, CreateExternalConversationEndpointRequest{
+	endpoints := externalconversation.NewExternalConversationEndpointService(store, catalog)
+	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Agent approvals", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",

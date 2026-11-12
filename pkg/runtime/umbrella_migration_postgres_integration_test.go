@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -50,7 +51,7 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 	insert("pending-member", "member", "pending")
 	insert("pending-gone", "gone", "pending")
 	insert("history", "member", "resolved")
-	if _, err := NewExternalConversationGatewayService(store, nil).Create(ctx, CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
+	if _, err := externalconversation.NewExternalConversationGatewayService(store, nil).Create(ctx, externalconversation.CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
 		Gateway: storetest.IngressGateway(Scope{Kind: "tenant", ID: "one"}), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
 		t.Fatal(err)
 	}

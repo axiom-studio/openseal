@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 )
 
 func (f *eventRoutineFixture) slackEvent(channels ...string) map[string]interface{} {
@@ -253,7 +254,7 @@ func TestSendTestEventOffers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["activationId"] != activation.ID || result["eventId"] != "test:fixed" || result["offered"] != (RoutineEventOffer{Matched: 1, Inserted: 1}) {
+	if result["activationId"] != activation.ID || result["eventId"] != "test:fixed" || result["offered"] != (externalconversation.RoutineEventOffer{Matched: 1, Inserted: 1}) {
 		t.Fatalf("result=%#v", result)
 	}
 	if len(f.offerer.tests) != 1 || f.offerer.tests[0].activationID != activation.ID || f.offerer.tests[0].testBy != "user" ||

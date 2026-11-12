@@ -1,0 +1,672 @@
+package externalconversation
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"maps"
+	"strings"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/callback"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+)
+
+type ApprovalNotificationWorker struct {
+	store         models.ApprovalNotificationStore
+	conversations *conversation.ConversationService
+	transport     *ExternalConversationTransportService
+	callbacks     *callback.CallbackRegistry
+	now           func() time.Time
+}
+
+const approvalNotificationPostAttempts = 5
+
+func NewApprovalNotificationWorker(
+	store models.ApprovalNotificationStore,
+	transport *ExternalConversationTransportService,
+	callbackResolver callback.CallbackAdapterResolver,
+	opts ...models.ServiceOption,
+) *ApprovalNotificationWorker {
+	return &ApprovalNotificationWorker{
+		store: store, conversations: conversation.NewConversationService(store, opts...), transport: transport,
+		callbacks: callback.NewCallbackRegistry(store, callbackResolver, opts...), now: models.ClockFrom(opts),
+	}
+}
+
+// ProcessScope idempotently materializes pending approvals as canonical
+// approval_request messages and durable endpoint deliveries.
+func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope models.Scope, limit int) (int, error) {
+	if w == nil || w.store == nil || w.transport == nil {
+		return 0, errors.New("approval notification worker is not configured")
+	}
+	// Pending checkpoints are deadline-bearing work and must never queue behind
+	// historical approved checkpoints. Approved outcomes are read newest-first
+	// so a fresh decision is projected even when the tenant has a large audit
+	// history. Delivery idempotency makes repeated reconciliation safe.
+	pending, err := w.store.ListApprovals(ctx, models.ApprovalFilter{Scope: scope, Status: []models.ApprovalStatus{models.ApprovalStatusPending}, Limit: limit})
+	if err != nil {
+		return 0, err
+	}
+	approved, err := w.store.ListApprovals(ctx, models.ApprovalFilter{Scope: scope, Status: []models.ApprovalStatus{models.ApprovalStatusApproved}, Limit: limit, NewestFirst: true})
+	if err != nil {
+		return 0, err
+	}
+	approvals := append(pending, approved...)
+	processed := 0
+	var processErrors []error
+	now := w.now().UTC()
+	for _, approval := range approvals {
+		if approval.Status == models.ApprovalStatusApproved {
+			call, callErr := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
+			if callErr != nil {
+				processErrors = append(processErrors, fmt.Errorf("load approved action %s: %w", approval.ActionCallID, callErr))
+				continue
+			}
+			if !modelstep.IsTerminalApprovalActionStatus(call.Status) {
+				continue
+			}
+			if err := w.notifyInternalOutcome(ctx, approval, call); err != nil {
+				processErrors = append(processErrors, fmt.Errorf("notify internal approval outcome %s: %w", approval.ID, err))
+			}
+			for _, destination := range approval.Destinations {
+				if err := w.notifyOutcome(ctx, approval, call, destination); err != nil {
+					processErrors = append(processErrors, fmt.Errorf("notify approval outcome %s at endpoint %s: %w", approval.ID, destination.EndpointID, err))
+					continue
+				}
+				processed++
+			}
+			continue
+		}
+		if !now.Before(approval.ExpiresAt) {
+			if err := w.resolveTimeout(ctx, approval, now); err != nil {
+				processErrors = append(processErrors, fmt.Errorf("resolve approval timeout %s: %w", approval.ID, err))
+			}
+			continue
+		}
+		if err := w.notifyInternal(ctx, approval); err != nil {
+			processErrors = append(processErrors, fmt.Errorf("notify internal approval %s: %w", approval.ID, err))
+		}
+		for _, destination := range approval.Destinations {
+			if err := w.notify(ctx, approval, destination); err != nil {
+				processErrors = append(processErrors, fmt.Errorf("notify approval %s at endpoint %s: %w", approval.ID, destination.EndpointID, err))
+				continue
+			}
+			processed++
+		}
+	}
+	return processed, errors.Join(processErrors...)
+}
+
+func (w *ApprovalNotificationWorker) notifyInternal(ctx context.Context, approval *models.ApprovalCheckpoint) error {
+	if approval == nil {
+		return errors.New("approval is required")
+	}
+	run, err := w.store.GetAgentRun(ctx, approval.Scope, approval.RunID)
+	if err != nil {
+		return err
+	}
+	call, err := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
+	if err != nil {
+		return err
+	}
+	conversation, err := w.agentApprovalConversation(ctx, approval.Scope, run.Owner, run.ActingUser)
+	if err != nil {
+		return err
+	}
+	_, err = w.postApprovalMessage(ctx, approval, call, conversation.ID, "approval-request:"+approval.ID)
+	return err
+}
+
+func (w *ApprovalNotificationWorker) notifyInternalOutcome(ctx context.Context, approval *models.ApprovalCheckpoint, call *models.ActionCall) error {
+	if approval == nil || call == nil {
+		return errors.New("approval outcome is incomplete")
+	}
+	run, err := w.store.GetAgentRun(ctx, approval.Scope, approval.RunID)
+	if err != nil {
+		return err
+	}
+	key := agentApprovalConversationKey(run.Owner)
+	conversation, err := w.store.FindConversationByIdempotencyKey(ctx, approval.Scope, key)
+	if err != nil || conversation == nil {
+		return err
+	}
+	original, err := w.store.FindChannelMessageByIdempotencyKey(ctx, approval.Scope, conversation.ID, "approval-request:"+approval.ID)
+	if err != nil || original == nil {
+		return err
+	}
+	_, err = w.postOutcomeMessage(ctx, approval, call, conversation.ID, "approval-outcome:"+approval.ID+":"+approvalCardPhase(approval, call))
+	return err
+}
+
+func agentApprovalConversationKey(owner models.ObjectiveOwner) string {
+	return "agent-approvals:" + string(owner.Type) + ":" + owner.ID
+}
+
+// agentApprovalConversation returns the owner's Approvals conversation. The
+// first one is created for person, the one the run acts for.
+func (w *ApprovalNotificationWorker) agentApprovalConversation(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, person string) (*models.Conversation, error) {
+	key := agentApprovalConversationKey(owner)
+	existing, err := w.store.FindConversationByIdempotencyKey(ctx, scope, key)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if existing.Owner != owner {
+			return nil, models.ErrMessageConflict
+		}
+		return existing, nil
+	}
+	conversation, _, err := w.conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
+		Scope: scope, Owner: owner, Title: "Approvals", CreatedBy: person,
+		Origin: &models.ConversationReference{Kind: models.ConversationReferenceAgentApprovals, ID: models.AgentApprovalsConversationReferenceID(owner)}, IdempotencyKey: key,
+	})
+	if !errors.Is(err, models.ErrMessageConflict) {
+		return conversation, err
+	}
+	existing, findErr := w.store.FindConversationByIdempotencyKey(ctx, scope, key)
+	if findErr != nil {
+		return nil, findErr
+	}
+	if existing == nil || existing.Owner != owner {
+		return nil, err
+	}
+	return existing, nil
+}
+
+func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval *models.ApprovalCheckpoint, call *models.ActionCall, destination models.ApprovalDestination) error {
+	destination, endpoint, err := w.resolveApprovalDestination(ctx, approval, destination)
+	if err != nil {
+		return err
+	}
+	original, err := findDeliveredApprovalNotification(ctx, w.store, approval, destination)
+	if err != nil {
+		return err
+	}
+	// A destination that never received the request must not receive a
+	// context-free terminal message during recovery or historical backfill.
+	// Once the request delivery succeeds, a later idempotent pass will project
+	// the outcome.
+	if original == nil {
+		return nil
+	}
+	if err := enqueueApprovalCardUpdate(ctx, w.store, w.transport, approval, call, destination, ""); err != nil {
+		return err
+	}
+	phase := approvalCardPhase(approval, call)
+	deliveryKey := "approval-outcome-delivery:" + approval.ID + ":" + destination.EndpointID + ":" + phase
+	if exists, err := approvalDeliveryExists(ctx, w.store, approval.Scope, destination.EndpointID, deliveryKey); err != nil {
+		return err
+	} else if exists {
+		return nil
+	}
+	conversation, err := w.approvalConversation(ctx, approval.Scope, endpoint)
+	if err != nil {
+		return err
+	}
+	posted, err := w.postOutcomeMessage(ctx, approval, call, conversation.ID, "approval-outcome:"+approval.ID+":"+phase)
+	if err != nil {
+		return err
+	}
+	_, err = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: approval.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
+		ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID,
+		IdempotencyKey: deliveryKey,
+		Correlation:    &models.ExternalConversationDeliveryCorrelation{Kind: "approval", ID: approval.ID, Phase: "outcome"},
+	})
+	return err
+}
+
+func (w *ApprovalNotificationWorker) resolveTimeout(ctx context.Context, approval *models.ApprovalCheckpoint, now time.Time) error {
+	// The timeout rule never approves an agent-builder card (D11): the
+	// coordinator expires it whatever its TimeoutDecision says.
+	coordinator := action.NewApprovalCoordinator(w.store, w.store, action.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now }))
+	resolved, err := coordinator.ResolveTimeout(ctx, approval.Scope, approval.ID, approval.Revision, approval.ID)
+	if err != nil {
+		return err
+	}
+	if resolved == nil || resolved.Approval == nil || (resolved.Approval.Status != models.ApprovalStatusExpired && resolved.Approval.Status != models.ApprovalStatusApproved) {
+		return errors.New("approval timeout did not reach a terminal state")
+	}
+	for _, destination := range approval.Destinations {
+		if err := w.updateTimeoutCard(ctx, resolved.Approval, destination); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireApprovalCallback proves that an interactive approval card has a live,
+// destination-matched ingress path before it is exposed to a person. A
+// provider installation may serve several Agents and destinations, so provider
+// identity alone is never sufficient authority to render an interactive card.
+func (w *ApprovalNotificationWorker) requireApprovalCallback(ctx context.Context, endpoint *models.ExternalConversationEndpoint) error {
+	if w == nil || !w.callbacks.ResolvesAdapters() || endpoint == nil {
+		return errors.New("approval callback coordination is not configured")
+	}
+	for offset := 0; ; offset += 100 {
+		registrations, err := w.store.ListCallbackRegistrations(ctx, models.CallbackRegistrationFilter{
+			Scope: endpoint.Scope, Provider: endpoint.Provider,
+			Statuses: []models.CallbackRegistrationStatus{models.CallbackRegistrationActive}, Limit: 100, Offset: offset,
+		})
+		if err != nil {
+			return err
+		}
+		for _, registration := range registrations {
+			if !callbackRegistrationHandlesApprovals(registration, endpoint) {
+				continue
+			}
+			if err := w.callbacks.VerifyAdapter(ctx, registration); err == nil {
+				return nil
+			}
+		}
+		if len(registrations) < 100 {
+			break
+		}
+	}
+	return fmt.Errorf("%w: approval destination has no active provider callback for approval decisions", models.ErrInvalidExternalConversation)
+}
+
+func callbackRegistrationHandlesApprovals(registration *models.CallbackRegistration, endpoint *models.ExternalConversationEndpoint) bool {
+	if registration == nil || endpoint == nil || registration.Status != models.CallbackRegistrationActive ||
+		registration.Scope != endpoint.Scope || registration.Owner != endpoint.Owner ||
+		strings.TrimSpace(registration.DeploymentID) != strings.TrimSpace(endpoint.DeploymentID) ||
+		strings.TrimSpace(registration.Provider) != strings.TrimSpace(endpoint.Provider) {
+		return false
+	}
+	for _, subscription := range registration.Subscriptions {
+		if subscription.EventType == capability.CallbackEventApprovalDecided &&
+			subscription.Consumer == "approvals" &&
+			strings.TrimSpace(subscription.TargetID) == strings.TrimSpace(endpoint.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *ApprovalNotificationWorker) updateTimeoutCard(ctx context.Context, approval *models.ApprovalCheckpoint, destination models.ApprovalDestination) error {
+	call, err := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
+	if err != nil {
+		return err
+	}
+	destination, _, err = w.resolveApprovalDestination(ctx, approval, destination)
+	if err != nil {
+		return err
+	}
+	return enqueueApprovalCardUpdate(ctx, w.store, w.transport, approval, call, destination, "")
+}
+
+func enqueueApprovalCardUpdate(
+	ctx context.Context,
+	store models.ApprovalNotificationStore,
+	transport *ExternalConversationTransportService,
+	approval *models.ApprovalCheckpoint,
+	call *models.ActionCall,
+	destination models.ApprovalDestination,
+	providerApproverID string,
+) error {
+	if approval == nil || call == nil {
+		return errors.New("approval and action are required")
+	}
+	_, resolved, err := transport.resolveActiveEndpoint(ctx, approval.Scope, destination.EndpointID)
+	if err != nil {
+		return err
+	}
+	if !containsConversationDeliveryOperation(resolved.Adapter.Delivery.Operations, capability.ConversationDeliveryMessageUpdate) {
+		return nil
+	}
+	delivery, err := findDeliveredApprovalNotification(ctx, store, approval, destination)
+	if err != nil {
+		return err
+	}
+	if delivery == nil {
+		// A decision can arrive only after the provider has rendered the original
+		// message, but expiry can race its delivery. Canonical state remains
+		// authoritative when there is not yet a remote card to update.
+		return nil
+	}
+	parameters := map[string]interface{}{
+		"providerMessageId": delivery.ProviderMessageID,
+		"approval":          approvalNotificationPayload(approval, call),
+	}
+	if strings.TrimSpace(providerApproverID) != "" {
+		parameters["providerApproverId"] = strings.TrimSpace(providerApproverID)
+		parameters["approval"].(map[string]interface{})["providerApproverId"] = strings.TrimSpace(providerApproverID)
+	}
+	idempotencyKey := "approval-card-update:" + approval.ID + ":" + destination.EndpointID + ":" + approvalCardPhase(approval, call)
+	if exists, err := approvalDeliveryExists(ctx, store, approval.Scope, destination.EndpointID, idempotencyKey); err != nil {
+		return err
+	} else if exists {
+		return nil
+	}
+	_, err = transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: approval.Scope, EndpointID: destination.EndpointID,
+		Operation:      capability.ConversationDeliveryMessageUpdate,
+		ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,
+		ExternalThreadID: delivery.ExternalThreadID,
+		Parameters:       parameters,
+		IdempotencyKey:   idempotencyKey,
+		Correlation:      &models.ExternalConversationDeliveryCorrelation{Kind: "approval", ID: approval.ID, Phase: "card_update"},
+	})
+	return err
+}
+
+// approvalDeliveryExists treats a durable delivery intent as the ownership
+// boundary for one approval projection phase. The delivery worker owns retries
+// after enqueue; reconciliation must not recreate that phase from later state
+// and turn an idempotent replay into a permanent conflict loop.
+func approvalDeliveryExists(
+	ctx context.Context,
+	store models.ApprovalNotificationStore,
+	scope models.Scope,
+	endpointID string,
+	idempotencyKey string,
+) (bool, error) {
+	id := stableExternalConversationID(scope, strings.TrimSpace(endpointID), "delivery", strings.TrimSpace(idempotencyKey))
+	delivery, err := store.GetExternalConversationDelivery(ctx, scope, id)
+	return delivery != nil, err
+}
+
+func findDeliveredApprovalNotification(
+	ctx context.Context,
+	store models.ApprovalNotificationStore,
+	approval *models.ApprovalCheckpoint,
+	destination models.ApprovalDestination,
+) (*models.ExternalConversationDelivery, error) {
+	if approval == nil {
+		return nil, errors.New("approval is required")
+	}
+	endpointID := strings.TrimSpace(destination.EndpointID)
+	deliveryKey := "approval-delivery:" + approval.ID + ":" + endpointID
+	deliveryID := stableExternalConversationID(approval.Scope, endpointID, "delivery", deliveryKey)
+	delivery, err := store.GetExternalConversationDelivery(ctx, approval.Scope, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	if delivery == nil || delivery.Status != models.ExternalConversationDeliveryDelivered ||
+		delivery.Operation != capability.ConversationDeliveryMessageSend ||
+		strings.TrimSpace(delivery.ProviderMessageID) == "" {
+		return nil, nil
+	}
+	return delivery, nil
+}
+
+func approvalCardPhase(approval *models.ApprovalCheckpoint, call *models.ActionCall) string {
+	if approval.Status != models.ApprovalStatusApproved {
+		return string(approval.Status)
+	}
+	switch call.Status {
+	case models.ActionCallStatusSucceeded:
+		return "succeeded"
+	case models.ActionCallStatusFailed, models.ActionCallStatusDenied:
+		return "failed"
+	case models.ActionCallStatusCanceled, models.ActionCallStatusCompensated:
+		return "canceled"
+	default:
+		return "going-ahead"
+	}
+}
+
+func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *models.ApprovalCheckpoint, destination models.ApprovalDestination) error {
+	destination, endpoint, err := w.resolveApprovalDestination(ctx, approval, destination)
+	if err != nil {
+		return err
+	}
+	deliveryKey := "approval-delivery:" + approval.ID + ":" + destination.EndpointID
+	if exists, err := approvalDeliveryExists(ctx, w.store, approval.Scope, destination.EndpointID, deliveryKey); err != nil {
+		return err
+	} else if exists {
+		return nil
+	}
+	if err := w.requireApprovalCallback(ctx, endpoint); err != nil {
+		return err
+	}
+	call, err := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
+	if err != nil {
+		return err
+	}
+	conversation, err := w.approvalConversation(ctx, approval.Scope, endpoint)
+	if err != nil {
+		return err
+	}
+	messageKey := "approval-request:" + approval.ID
+	posted, err := w.postApprovalMessage(ctx, approval, call, conversation.ID, messageKey)
+	if err != nil {
+		return fmt.Errorf("post canonical approval message: %w", err)
+	}
+	_, err = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: approval.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
+		ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID,
+		Parameters:     map[string]interface{}{"approval": approvalNotificationPayload(approval, call)},
+		IdempotencyKey: deliveryKey,
+		Correlation:    &models.ExternalConversationDeliveryCorrelation{Kind: "approval", ID: approval.ID, Phase: "request"},
+	})
+	if err != nil {
+		return fmt.Errorf("enqueue approval delivery: %w", err)
+	}
+	return nil
+}
+
+// resolveApprovalDestination materializes a portable approval route through
+// the Agent's reviewed callback registration. Older marketplace installations
+// can retain a manifest-local channel key in immutable definitions even after
+// the tenant has attached a concrete provider endpoint. The active callback is
+// the authoritative one-to-one placement for interactive approval decisions;
+// ambiguous registrations fail closed instead of guessing a destination.
+func (w *ApprovalNotificationWorker) resolveApprovalDestination(
+	ctx context.Context,
+	approval *models.ApprovalCheckpoint,
+	destination models.ApprovalDestination,
+) (models.ApprovalDestination, *models.ExternalConversationEndpoint, error) {
+	if w == nil || w.store == nil || approval == nil {
+		return models.ApprovalDestination{}, nil, errors.New("approval destination coordination is unavailable")
+	}
+	destination.EndpointID = strings.TrimSpace(destination.EndpointID)
+	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, approval.Scope, destination.EndpointID)
+	if err != nil {
+		return models.ApprovalDestination{}, nil, err
+	}
+	if endpoint != nil && endpoint.Status == models.ExternalConversationEndpointActive {
+		return destination, endpoint, nil
+	}
+	run, err := w.store.GetAgentRun(ctx, approval.Scope, approval.RunID)
+	if err != nil {
+		return models.ApprovalDestination{}, nil, err
+	}
+	candidates := make(map[string]*models.ExternalConversationEndpoint)
+	for offset := 0; ; offset += 100 {
+		registrations, listErr := w.store.ListCallbackRegistrations(ctx, models.CallbackRegistrationFilter{
+			Scope: approval.Scope, Statuses: []models.CallbackRegistrationStatus{models.CallbackRegistrationActive}, Limit: 100, Offset: offset,
+		})
+		if listErr != nil {
+			return models.ApprovalDestination{}, nil, listErr
+		}
+		for _, registration := range registrations {
+			if registration == nil || registration.Owner != run.Owner ||
+				strings.TrimSpace(registration.DeploymentID) != strings.TrimSpace(run.Owner.ID) {
+				continue
+			}
+			for _, subscription := range registration.Subscriptions {
+				if subscription.EventType != capability.CallbackEventApprovalDecided || subscription.Consumer != "approvals" {
+					continue
+				}
+				targetID := strings.TrimSpace(subscription.TargetID)
+				target, targetErr := w.store.GetExternalConversationEndpoint(ctx, approval.Scope, targetID)
+				if targetErr != nil {
+					return models.ApprovalDestination{}, nil, targetErr
+				}
+				if target != nil && target.Status == models.ExternalConversationEndpointActive && target.Owner == run.Owner &&
+					strings.TrimSpace(target.DeploymentID) == strings.TrimSpace(registration.DeploymentID) &&
+					strings.TrimSpace(target.Provider) == strings.TrimSpace(registration.Provider) {
+					candidates[target.ID] = target
+				}
+			}
+		}
+		if len(registrations) < 100 {
+			break
+		}
+	}
+	if len(candidates) != 1 {
+		return models.ApprovalDestination{}, nil, fmt.Errorf("%w: portable approval destination %q has %d active callback placements", models.ErrInvalidExternalConversation, destination.EndpointID, len(candidates))
+	}
+	for id, candidate := range candidates {
+		return models.ApprovalDestination{EndpointID: id}, candidate, nil
+	}
+	return models.ApprovalDestination{}, nil, fmt.Errorf("%w: approval endpoint is unavailable", models.ErrInvalidExternalConversation)
+}
+
+// approvalConversation returns the stable canonical conversation for an
+// endpoint. Endpoint names are mutable presentation metadata: renaming or
+// moving a destination must not invalidate the durable approval projection
+// keyed by the endpoint identity. Ownership remains invariant so an endpoint
+// cannot adopt another owner's approval history through a rename.
+func (w *ApprovalNotificationWorker) approvalConversation(
+	ctx context.Context,
+	scope models.Scope,
+	endpoint *models.ExternalConversationEndpoint,
+) (*models.Conversation, error) {
+	if endpoint == nil {
+		return nil, fmt.Errorf("%w: approval endpoint is unavailable", models.ErrInvalidExternalConversation)
+	}
+	key := "approval-notifications:" + endpoint.ID
+	existing, err := w.store.FindConversationByIdempotencyKey(ctx, scope, key)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if existing.Owner != endpoint.Owner {
+			return nil, models.ErrMessageConflict
+		}
+		return existing, nil
+	}
+	conversation, _, err := w.conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
+		Scope: scope, Owner: endpoint.Owner, Title: endpoint.Name + " approvals", CreatedBy: endpoint.CreatedBy, IdempotencyKey: key,
+	})
+	if !errors.Is(err, models.ErrMessageConflict) {
+		return conversation, err
+	}
+	// A concurrent creator may have won between the lookup and create. Reload
+	// the stable key and apply the same ownership check before accepting it.
+	existing, findErr := w.store.FindConversationByIdempotencyKey(ctx, scope, key)
+	if findErr != nil {
+		return nil, findErr
+	}
+	if existing == nil || existing.Owner != endpoint.Owner {
+		return nil, err
+	}
+	return existing, nil
+}
+
+func approvalNotificationPayload(approval *models.ApprovalCheckpoint, call *models.ActionCall) map[string]interface{} {
+	proposedAction := maps.Clone(approval.ProposedAction)
+	payload := map[string]interface{}{
+		"id": approval.ID, "revision": approval.Revision, "actionCallId": approval.ActionCallID,
+		"risk": approval.Risk, "summary": approval.Summary, "status": approval.Status,
+		"policyReason": approval.PolicyReason, "proposedAction": proposedAction,
+		"expiresAt": approval.ExpiresAt, "presentation": action.PresentApproval(approval).Payload(),
+	}
+	if approval.TimeoutDecision != "" {
+		payload["timeoutDecision"] = approval.TimeoutDecision
+	}
+	if call != nil {
+		payload["invocationDigest"] = call.InvocationDigest
+		payload["actionStatus"] = call.Status
+		if strings.TrimSpace(call.Error) != "" {
+			payload["actionError"] = call.Error
+		}
+	}
+	if approval.DecisionBy != nil {
+		payload["decisionBy"] = map[string]interface{}{"type": approval.DecisionBy.Type, "id": approval.DecisionBy.ID}
+	}
+	if approval.DecidedAt != nil {
+		payload["decidedAt"] = approval.DecidedAt.UTC()
+	}
+	if strings.TrimSpace(approval.DecisionReason) != "" {
+		payload["decisionReason"] = approval.DecisionReason
+	}
+	return payload
+}
+
+func (w *ApprovalNotificationWorker) postApprovalMessage(
+	ctx context.Context,
+	approval *models.ApprovalCheckpoint,
+	call *models.ActionCall,
+	conversationID string,
+	messageKey string,
+) (*models.ChannelMessageCommitResult, error) {
+	request := conversation.PostChannelMessageRequest{
+		Scope: approval.Scope, ConversationID: conversationID,
+		Sender:            models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "approval-coordinator"},
+		SenderDisplayName: "Approval coordinator", Intent: models.MessageIntentApprovalRequest,
+		Content: approvalNotificationText(approval, call), Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
+		References:       []models.ConversationReference{{Kind: models.ConversationReferenceApproval, ID: approval.ID}, {Kind: models.ConversationReferenceRun, ID: approval.RunID}},
+		RequiresResponse: true, IdempotencyKey: messageKey,
+	}
+	for range approvalNotificationPostAttempts {
+		conversation, err := w.conversations.GetConversation(ctx, approval.Scope, conversationID)
+		if err != nil {
+			return nil, err
+		}
+		request.ExpectedRevision = conversation.Revision
+		posted, err := w.conversations.PostChannelMessage(ctx, request)
+		if err == nil {
+			return posted, nil
+		}
+		if !errors.Is(err, models.ErrRevisionConflict) {
+			return nil, err
+		}
+	}
+	return nil, models.ErrRevisionConflict
+}
+
+func (w *ApprovalNotificationWorker) postOutcomeMessage(
+	ctx context.Context,
+	approval *models.ApprovalCheckpoint,
+	call *models.ActionCall,
+	conversationID string,
+	messageKey string,
+) (*models.ChannelMessageCommitResult, error) {
+	content := "Completed: " + strings.TrimSpace(approval.Summary) + "."
+	if call.Status != models.ActionCallStatusSucceeded {
+		content = "Failed: " + strings.TrimSpace(approval.Summary) + "."
+		if strings.TrimSpace(call.Error) != "" {
+			content += " " + strings.TrimSpace(call.Error)
+		}
+	}
+	request := conversation.PostChannelMessageRequest{
+		Scope: approval.Scope, ConversationID: conversationID,
+		Sender:            models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "approval-coordinator"},
+		SenderDisplayName: "Approval coordinator", Intent: models.MessageIntentUpdate,
+		Content: content, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
+		References:     []models.ConversationReference{{Kind: models.ConversationReferenceApproval, ID: approval.ID}, {Kind: models.ConversationReferenceRun, ID: approval.RunID}},
+		IdempotencyKey: messageKey,
+	}
+	for range approvalNotificationPostAttempts {
+		conversation, err := w.conversations.GetConversation(ctx, approval.Scope, conversationID)
+		if err != nil {
+			return nil, err
+		}
+		request.ExpectedRevision = conversation.Revision
+		posted, err := w.conversations.PostChannelMessage(ctx, request)
+		if err == nil {
+			return posted, nil
+		}
+		if !errors.Is(err, models.ErrRevisionConflict) {
+			return nil, err
+		}
+	}
+	return nil, models.ErrRevisionConflict
+}
+
+func approvalNotificationText(approval *models.ApprovalCheckpoint, call *models.ActionCall) string {
+	deadline := "Expires"
+	if approval.TimeoutDecision == models.ApprovalTimeoutApprove {
+		deadline = "Auto-approves"
+	}
+	return fmt.Sprintf("Approval required: %s (%s.%s, risk %s). %s %s.",
+		approval.Summary, call.SkillID, call.Action, approval.Risk, deadline, approval.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"))
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 )
 
 func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
@@ -17,7 +18,7 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := NewExternalConversationInboxWorker(store, NewCanonicalExternalConversationDispatcher(scheduler), ExternalConversationInboxWorkerConfig{WorkerID: "thread-inbox"})
+	worker, err := externalconversation.NewExternalConversationInboxWorker(store, externalconversation.NewCanonicalExternalConversationDispatcher(scheduler), externalconversation.ExternalConversationInboxWorkerConfig{WorkerID: "thread-inbox"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,18 +11,19 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type quotedPhotoHost struct{ calls int }
 
-func (h *quotedPhotoHost) ReadExternalConversationAttachment(_ context.Context, req ExternalConversationAttachmentHostRequest) (*ExternalConversationAttachmentContent, error) {
+func (h *quotedPhotoHost) ReadExternalConversationAttachment(_ context.Context, req externalconversation.ExternalConversationAttachmentHostRequest) (*externalconversation.ExternalConversationAttachmentContent, error) {
 	if err := req.Event.Validate(); err != nil {
 		return nil, err
 	}
 	h.calls++
 	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=")
-	return &ExternalConversationAttachmentContent{ID: req.Attachment.ID, Name: "photo.png", MediaType: "image/png", Data: data, Status: "supplied"}, nil
+	return &externalconversation.ExternalConversationAttachmentContent{ID: req.Attachment.ID, Name: "photo.png", MediaType: "image/png", Data: data, Status: "supplied"}, nil
 }
 
 func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
@@ -31,11 +32,11 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 	photo := &quotedPhotoHost{}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	item := ReceiveContextEvent(t, store, endpoint, "photo-reply", "reply", "parent", now)
-	history := &RecordingContextHost{Result: &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []ExternalConversationContextMessage{{
+	history := &RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []externalconversation.ExternalConversationContextMessage{{
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: "parent", ExternalMessageID: "parent", ExternalParticipantID: "Kev", ParticipantDisplayName: "Kev", OccurredAt: now.Add(-time.Second),
 		Attachments: []models.ExternalConversationAttachment{{ID: "photo", Name: "photo.png", MediaType: "image/png", SizeBytes: 68}},
 	}}}}
-	worker, err := NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, ExternalConversationInboxWorkerConfig{WorkerID: "photo-worker", ContextHost: history, ContextCatalog: ContextHistoryResolver{catalog}, AttachmentHost: photo, AttachmentContent: content})
+	worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{WorkerID: "photo-worker", ContextHost: history, ContextCatalog: ContextHistoryResolver{catalog}, AttachmentHost: photo, AttachmentContent: content})
 	if err != nil {
 		t.Fatal(err)
 	}

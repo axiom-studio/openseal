@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	_ "github.com/mattn/go-sqlite3"
@@ -34,11 +35,11 @@ func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 		t.Cleanup(func() { _ = sqlite.Close() })
 		return sqlite
 	}()} {
-		service := NewExternalConversationGatewayService(store, nil)
+		service := externalconversation.NewExternalConversationGatewayService(store, nil)
 		team := gateway
 		team.Owner, team.DeploymentID = ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, "crew"
 		for id, value := range map[string]ExternalConversationIngressGateway{"agent-gateway": gateway, "team-gateway": team} {
-			if _, err := service.Create(context.Background(), CreateExternalConversationGatewayRequest{ID: id, Name: id, Gateway: value,
+			if _, err := service.Create(context.Background(), externalconversation.CreateExternalConversationGatewayRequest{ID: id, Name: id, Gateway: value,
 				Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
 				t.Fatal(err)
 			}
@@ -58,7 +59,7 @@ func TestSQLiteChannelUmbrellaBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "tenant-1"}
-	if _, err := NewExternalConversationGatewayService(store, nil).Create(context.Background(), CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
+	if _, err := externalconversation.NewExternalConversationGatewayService(store, nil).Create(context.Background(), externalconversation.CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
 		Gateway: storetest.IngressGateway(scope), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
 		t.Fatal(err)
 	}

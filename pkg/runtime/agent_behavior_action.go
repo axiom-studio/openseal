@@ -13,6 +13,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -50,7 +51,7 @@ type agentChannelActionArguments struct {
 // persistence. It cannot target another Agent.
 type AgentBehaviorActionValidator struct {
 	agents    *kernelagent.Registry
-	endpoints *ExternalConversationEndpointService
+	endpoints *externalconversation.ExternalConversationEndpointService
 	teams     TeamRosterReader
 }
 
@@ -62,7 +63,7 @@ func (v *AgentBehaviorActionValidator) SetTeamRoster(teams TeamRosterReader) {
 	}
 }
 
-func NewAgentBehaviorActionValidator(agents *kernelagent.Registry, endpoints ...*ExternalConversationEndpointService) (*AgentBehaviorActionValidator, error) {
+func NewAgentBehaviorActionValidator(agents *kernelagent.Registry, endpoints ...*externalconversation.ExternalConversationEndpointService) (*AgentBehaviorActionValidator, error) {
 	if agents == nil {
 		return nil, errors.New("agent registry is required")
 	}
@@ -162,11 +163,11 @@ func (v *AgentBehaviorActionValidator) ValidateActionProposal(ctx context.Contex
 type AgentBehaviorActionDispatcher struct {
 	store     KernelStore
 	agents    *kernelagent.Registry
-	endpoints *ExternalConversationEndpointService
+	endpoints *externalconversation.ExternalConversationEndpointService
 	fallback  agentrun.ActionDispatcher
 }
 
-func NewAgentBehaviorActionDispatcher(store KernelStore, agents *kernelagent.Registry, fallback agentrun.ActionDispatcher, endpoints ...*ExternalConversationEndpointService) (*AgentBehaviorActionDispatcher, error) {
+func NewAgentBehaviorActionDispatcher(store KernelStore, agents *kernelagent.Registry, fallback agentrun.ActionDispatcher, endpoints ...*externalconversation.ExternalConversationEndpointService) (*AgentBehaviorActionDispatcher, error) {
 	if store == nil || agents == nil {
 		return nil, errors.New("kernel store and agent registry are required")
 	}
@@ -438,7 +439,7 @@ func (d *AgentBehaviorActionDispatcher) configureChannel(ctx context.Context, in
 		amendment, deployment, activation, err = d.agents.ActivateAmendmentWithCommit(
 			ctx, capability.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}, amendment.ID, amendment.Revision,
 			actorType, actorID, "Approved Agent channel workflow change from conversation",
-			d.endpoints.channelActivationCommit(preparedEndpoint, endpoint.Revision, args.ExpectedDeploymentRevision),
+			d.endpoints.ChannelActivationCommit(preparedEndpoint, endpoint.Revision, args.ExpectedDeploymentRevision),
 		)
 		if err != nil {
 			return nil, err
@@ -470,8 +471,8 @@ func (d *AgentBehaviorActionDispatcher) convergeChannelEndpoint(ctx context.Cont
 	return d.endpoints.Update(ctx, endpoint.Scope, endpoint.ID, request)
 }
 
-func agentChannelEndpointUpdate(endpoint *ExternalConversationEndpoint, definition *kernelagent.AgentDefinition, args agentChannelActionArguments) (UpdateExternalConversationEndpointRequest, error) {
-	request := UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision}
+func agentChannelEndpointUpdate(endpoint *ExternalConversationEndpoint, definition *kernelagent.AgentDefinition, args agentChannelActionArguments) (externalconversation.UpdateExternalConversationEndpointRequest, error) {
+	request := externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision}
 	route := findAgentChannelRoute(definition, endpoint.ID)
 	if route == nil {
 		return request, errors.New("Agent definition does not contain the channel route")
@@ -544,7 +545,7 @@ func resolveAgentBehaviorAction(
 func resolveAgentChannelAction(
 	ctx context.Context,
 	agents *kernelagent.Registry,
-	endpoints *ExternalConversationEndpointService,
+	endpoints *externalconversation.ExternalConversationEndpointService,
 	run *AgentRun,
 	arguments map[string]interface{},
 ) (agentChannelActionArguments, *kernelagent.AgentDeployment, *kernelagent.AgentDefinition, *ExternalConversationEndpoint, *kernelagent.AgentDefinition, map[string]interface{}, error) {

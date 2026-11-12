@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/google/uuid"
 )
 
@@ -52,7 +53,7 @@ type RoutineEventMatcher struct {
 	unregister func()
 }
 
-var _ RoutineEventOfferer = (*RoutineEventMatcher)(nil)
+var _ externalconversation.RoutineEventOfferer = (*RoutineEventMatcher)(nil)
 
 // NewRoutineEventMatcher builds a matcher with an empty index and registers it
 // for activation writes made through RunbookActivationService on this store.
@@ -161,13 +162,13 @@ func isRoutineEventActivation(activation *RunbookActivation) bool {
 }
 
 // OfferRoutineEvent stores the event for every active routine it matches.
-func (m *RoutineEventMatcher) OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (RoutineEventOffer, error) {
+func (m *RoutineEventMatcher) OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (externalconversation.RoutineEventOffer, error) {
 	if m == nil || event == nil {
-		return RoutineEventOffer{}, nil
+		return externalconversation.RoutineEventOffer{}, nil
 	}
 	m.stats.countIn(event.Kind)
 	if !m.index.listening(event.Scope, event.Kind, event.SourceRef) {
-		return RoutineEventOffer{}, nil
+		return externalconversation.RoutineEventOffer{}, nil
 	}
 	started := time.Now()
 	offer, err := m.offer(ctx, event)
@@ -179,8 +180,8 @@ func (m *RoutineEventMatcher) OfferRoutineEvent(ctx context.Context, event *Rout
 	return offer, err
 }
 
-func (m *RoutineEventMatcher) offer(ctx context.Context, event *RoutineEvent) (RoutineEventOffer, error) {
-	offer := RoutineEventOffer{}
+func (m *RoutineEventMatcher) offer(ctx context.Context, event *RoutineEvent) (externalconversation.RoutineEventOffer, error) {
+	offer := externalconversation.RoutineEventOffer{}
 	if err := event.Validate(); err != nil {
 		return offer, err
 	}
@@ -300,8 +301,8 @@ func (m *RoutineEventMatcher) ownsSource(ctx context.Context, activation *Runboo
 // OfferRoutineTestEvent stores one test event for one routine and returns
 // its event ID. Only the routine's creator may send it; the filter is skipped
 // for it.
-func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error) {
-	offer := RoutineEventOffer{}
+func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, externalconversation.RoutineEventOffer, error) {
+	offer := externalconversation.RoutineEventOffer{}
 	if m == nil || m.store == nil {
 		return "", offer, errors.New("routine event matcher is not configured")
 	}

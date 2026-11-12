@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -24,7 +25,7 @@ type channelActionFixture struct {
 	store       *sqlite.Store
 	db          *sql.DB
 	agents      *kernelagent.Registry
-	endpoints   *ExternalConversationEndpointService
+	endpoints   *externalconversation.ExternalConversationEndpointService
 	resolver    *switchableConversationAdapterResolver
 	catalog     *skill.Catalog
 	scope       Scope
@@ -46,8 +47,8 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	db := openTestSQLiteDB(t, path)
 	_, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	resolver := &switchableConversationAdapterResolver{ExternalConversationAdapterResolver: catalog}
-	endpoints := NewExternalConversationEndpointService(store, resolver)
-	endpoint, err := endpoints.Create(ctx, CreateExternalConversationEndpointRequest{
+	endpoints := externalconversation.NewExternalConversationEndpointService(store, resolver)
+	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",
@@ -164,7 +165,7 @@ func TestAgentChannelRejectsRetiredEndpointsBeforeApproval(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			f := newChannelActionFixture(t)
 			retired := ExternalConversationEndpointRetired
-			endpoint, err := f.endpoints.Update(context.Background(), f.scope, f.endpoint.ID, UpdateExternalConversationEndpointRequest{ExpectedRevision: f.endpoint.Revision, Status: &retired})
+			endpoint, err := f.endpoints.Update(context.Background(), f.scope, f.endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: f.endpoint.Revision, Status: &retired})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -209,7 +210,7 @@ func TestAgentChannelRechecksEndpointAndAdapterAfterApproval(t *testing.T) {
 			switch change {
 			case "retirement":
 				retired := ExternalConversationEndpointRetired
-				if _, err := f.endpoints.Update(ctx, f.scope, f.endpoint.ID, UpdateExternalConversationEndpointRequest{ExpectedRevision: f.endpoint.Revision, Status: &retired}); err != nil {
+				if _, err := f.endpoints.Update(ctx, f.scope, f.endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: f.endpoint.Revision, Status: &retired}); err != nil {
 					t.Fatal(err)
 				}
 			case "adapter-unavailable":
@@ -292,7 +293,7 @@ func TestAgentChannelActivationAndReplayPreserveLaterEndpointChanges(t *testing.
 		t.Fatalf("replay: %#v, %v", replay, err)
 	}
 	paused := ExternalConversationEndpointPaused
-	later, err := f.endpoints.Update(ctx, f.scope, endpoint.ID, UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Status: &paused})
+	later, err := f.endpoints.Update(ctx, f.scope, endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Status: &paused})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +361,7 @@ func TestAgentChannelCanActivatePausedEndpoint(t *testing.T) {
 	f := newChannelActionFixture(t)
 	ctx := context.Background()
 	paused := ExternalConversationEndpointPaused
-	if _, err := f.endpoints.Update(ctx, f.scope, f.endpoint.ID, UpdateExternalConversationEndpointRequest{ExpectedRevision: f.endpoint.Revision, Status: &paused}); err != nil {
+	if _, err := f.endpoints.Update(ctx, f.scope, f.endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: f.endpoint.Revision, Status: &paused}); err != nil {
 		t.Fatal(err)
 	}
 	proposal, err := f.propose(t, map[string]interface{}{"status": "active"})

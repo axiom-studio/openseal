@@ -9,10 +9,11 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 )
 
 type crashAfterExternalConversationDispatch struct {
-	next       ExternalConversationDispatcher
+	next       externalconversation.ExternalConversationDispatcher
 	crashOnce  bool
 	dispatches int
 	runID      string
@@ -20,8 +21,8 @@ type crashAfterExternalConversationDispatch struct {
 
 func (d *crashAfterExternalConversationDispatch) DispatchExternalConversation(
 	ctx context.Context,
-	req ExternalConversationDispatchRequest,
-) (*ExternalConversationDispatchResult, error) {
+	req externalconversation.ExternalConversationDispatchRequest,
+) (*externalconversation.ExternalConversationDispatchResult, error) {
 	d.dispatches++
 	result, err := d.next.DispatchExternalConversation(ctx, req)
 	if err != nil {
@@ -62,10 +63,10 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 		t.Fatal(err)
 	}
 	dispatcher := &crashAfterExternalConversationDispatch{
-		next: NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: true,
+		next: externalconversation.NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: true,
 	}
 	workerClock := time.Now
-	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
+	worker, err := externalconversation.NewExternalConversationInboxWorker(store, dispatcher, externalconversation.ExternalConversationInboxWorkerConfig{
 		WorkerID: "inbox-worker", LeaseDuration: time.Minute, BaseRetry: time.Second, MaximumRetry: time.Minute,
 	}, models.WithClock(func() time.Time { return workerClock() }))
 	if err != nil {
@@ -136,7 +137,7 @@ func TestCanonicalExternalConversationDispatcherRefusesRunbookHandler(t *testing
 	if err := handler.Validate(ObjectiveOwner{Type: OwnerTypeAgent, ID: "support"}); !errors.Is(err, ErrInvalidExternalConversation) {
 		t.Fatalf("Runbook handler validated: %v", err)
 	}
-	result, err := NewCanonicalExternalConversationDispatcher(nil).DispatchExternalConversation(t.Context(), ExternalConversationDispatchRequest{
+	result, err := externalconversation.NewCanonicalExternalConversationDispatcher(nil).DispatchExternalConversation(t.Context(), externalconversation.ExternalConversationDispatchRequest{
 		Endpoint: &ExternalConversationEndpoint{Handler: handler}, Conversation: &Conversation{ID: "conversation"},
 		Message: &ChannelMessage{ID: "message"}, IdempotencyKey: "dispatch-key",
 	})

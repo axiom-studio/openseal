@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -109,12 +110,12 @@ type RoutineEventSourceView struct {
 // routineEventActions is what the event routine actions need from the host.
 // The zero value means event routines are not available.
 type routineEventActions struct {
-	offerer        RoutineEventOfferer
+	offerer        externalconversation.RoutineEventOfferer
 	sources        RoutineEventSourceCatalog
 	hooksAvailable bool
 }
 
-func newRoutineEventActions(offerer RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) routineEventActions {
+func newRoutineEventActions(offerer externalconversation.RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) routineEventActions {
 	return routineEventActions{offerer: offerer, sources: sources, hooksAvailable: hooksAvailable}
 }
 

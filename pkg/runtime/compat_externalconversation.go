@@ -1,0 +1,252 @@
+// Re-exports of declarations moved to github.com/axiom-studio/openseal/pkg/runtime/externalconversation,
+// kept so that importers of github.com/axiom-studio/openseal/pkg/runtime continue to compile.
+
+package runtime
+
+import (
+	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/callback"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
+	"go.uber.org/zap"
+)
+
+type ApprovalNotificationWorker = externalconversation.ApprovalNotificationWorker
+
+// NewApprovalNotificationWorker forwards to externalconversation.NewApprovalNotificationWorker.
+func NewApprovalNotificationWorker(store models.ApprovalNotificationStore, transport *externalconversation.ExternalConversationTransportService, callbackResolver callback.CallbackAdapterResolver, opts ...models.ServiceOption) *externalconversation.ApprovalNotificationWorker {
+	return externalconversation.NewApprovalNotificationWorker(store, transport, callbackResolver, opts...)
+}
+
+type ApprovalCallbackConsumer = externalconversation.ApprovalCallbackConsumer
+
+// NewApprovalCallbackConsumer forwards to externalconversation.NewApprovalCallbackConsumer.
+func NewApprovalCallbackConsumer(store interface {
+	models.PortfolioStore
+	models.ActionStore
+}, transport *externalconversation.ExternalConversationTransportService, opts ...models.ServiceOption) *externalconversation.ApprovalCallbackConsumer {
+	return externalconversation.NewApprovalCallbackConsumer(store, transport, opts...)
+}
+
+const MaximumExternalConversationAttachmentBytes = externalconversation.MaximumExternalConversationAttachmentBytes
+
+type ExternalConversationAttachmentContent = externalconversation.ExternalConversationAttachmentContent
+
+type ExternalConversationAttachmentHostRequest = externalconversation.ExternalConversationAttachmentHostRequest
+
+type ExternalConversationAttachmentHost = externalconversation.ExternalConversationAttachmentHost
+
+type ExternalConversationContextHost = externalconversation.ExternalConversationContextHost
+
+type ExternalConversationContextHostRequest = externalconversation.ExternalConversationContextHostRequest
+
+type ExternalConversationContextMessage = externalconversation.ExternalConversationContextMessage
+
+type ExternalConversationContextResult = externalconversation.ExternalConversationContextResult
+
+type ExternalConversationDeliveryHostRequest = externalconversation.ExternalConversationDeliveryHostRequest
+
+type ExternalConversationAcknowledgementStatus = externalconversation.ExternalConversationAcknowledgementStatus
+
+const ExternalConversationAcknowledgementFound = externalconversation.ExternalConversationAcknowledgementFound
+
+const ExternalConversationAcknowledgementNotFound = externalconversation.ExternalConversationAcknowledgementNotFound
+
+const ExternalConversationAcknowledgementUnknown = externalconversation.ExternalConversationAcknowledgementUnknown
+
+type ExternalConversationDeliveryAcknowledgement = externalconversation.ExternalConversationDeliveryAcknowledgement
+
+type ExternalConversationDeliveryOutcome = externalconversation.ExternalConversationDeliveryOutcome
+
+const ExternalConversationDeliveryOutcomeDelivered = externalconversation.ExternalConversationDeliveryOutcomeDelivered
+
+const ExternalConversationDeliveryOutcomeRetry = externalconversation.ExternalConversationDeliveryOutcomeRetry
+
+const ExternalConversationDeliveryOutcomeFailed = externalconversation.ExternalConversationDeliveryOutcomeFailed
+
+type ExternalConversationDeliveryHostResult = externalconversation.ExternalConversationDeliveryHostResult
+
+type ExternalConversationAdapterHost = externalconversation.ExternalConversationAdapterHost
+
+type ExternalConversationDeliveryWorkerConfig = externalconversation.ExternalConversationDeliveryWorkerConfig
+
+type ExternalConversationDeliveryWorker = externalconversation.ExternalConversationDeliveryWorker
+
+// NewExternalConversationDeliveryWorker forwards to externalconversation.NewExternalConversationDeliveryWorker.
+func NewExternalConversationDeliveryWorker(store models.ExternalConversationStore, resolver externalconversation.ExternalConversationAdapterResolver, host externalconversation.ExternalConversationAdapterHost, config externalconversation.ExternalConversationDeliveryWorkerConfig, opts ...models.ServiceOption) (*externalconversation.ExternalConversationDeliveryWorker, error) {
+	return externalconversation.NewExternalConversationDeliveryWorker(store, resolver, host, config, opts...)
+}
+
+const DefaultConversationDestinationLimit = externalconversation.DefaultConversationDestinationLimit
+
+const MaximumConversationDestinationLimit = externalconversation.MaximumConversationDestinationLimit
+
+type ExternalConversationDestination = externalconversation.ExternalConversationDestination
+
+type ExternalConversationDestinationPage = externalconversation.ExternalConversationDestinationPage
+
+type ExternalConversationDestinationDiscoveryRequest = externalconversation.ExternalConversationDestinationDiscoveryRequest
+
+type ExternalConversationDestinationDiscoveryHost = externalconversation.ExternalConversationDestinationDiscoveryHost
+
+// ConversationDestinationDiscoveryArguments forwards to externalconversation.ConversationDestinationDiscoveryArguments.
+func ConversationDestinationDiscoveryArguments(request externalconversation.ExternalConversationDestinationDiscoveryRequest) (capability.ConversationDestinationDiscovery, map[string]interface{}, error) {
+	return externalconversation.ConversationDestinationDiscoveryArguments(request)
+}
+
+// ProjectConversationDestinationPage forwards to externalconversation.ProjectConversationDestinationPage.
+func ProjectConversationDestinationPage(discovery capability.ConversationDestinationDiscovery, output map[string]interface{}) (*externalconversation.ExternalConversationDestinationPage, error) {
+	return externalconversation.ProjectConversationDestinationPage(discovery, output)
+}
+
+type CreateExternalConversationEndpointRequest = externalconversation.CreateExternalConversationEndpointRequest
+
+type UpdateExternalConversationEndpointRequest = externalconversation.UpdateExternalConversationEndpointRequest
+
+type ExternalConversationAdapterResolver = externalconversation.ExternalConversationAdapterResolver
+
+type ExternalConversationEndpointService = externalconversation.ExternalConversationEndpointService
+
+// NewExternalConversationEndpointService forwards to externalconversation.NewExternalConversationEndpointService.
+func NewExternalConversationEndpointService(store models.ExternalConversationEndpointStore, resolver externalconversation.ExternalConversationAdapterResolver, opts ...models.ServiceOption) *externalconversation.ExternalConversationEndpointService {
+	return externalconversation.NewExternalConversationEndpointService(store, resolver, opts...)
+}
+
+type CreateExternalConversationGatewayRequest = externalconversation.CreateExternalConversationGatewayRequest
+
+type UpdateExternalConversationGatewayRequest = externalconversation.UpdateExternalConversationGatewayRequest
+
+type ExternalConversationGatewayService = externalconversation.ExternalConversationGatewayService
+
+// NewExternalConversationGatewayService forwards to externalconversation.NewExternalConversationGatewayService.
+func NewExternalConversationGatewayService(store models.ExternalConversationGatewayStore, resolver externalconversation.ExternalConversationAdapterResolver, opts ...models.ServiceOption) *externalconversation.ExternalConversationGatewayService {
+	return externalconversation.NewExternalConversationGatewayService(store, resolver, opts...)
+}
+
+type ExternalConversationDispatchRequest = externalconversation.ExternalConversationDispatchRequest
+
+type ExternalConversationDispatchResult = externalconversation.ExternalConversationDispatchResult
+
+type ExternalConversationDispatcher = externalconversation.ExternalConversationDispatcher
+
+type CanonicalExternalConversationDispatcher = externalconversation.CanonicalExternalConversationDispatcher
+
+// NewCanonicalExternalConversationDispatcher forwards to externalconversation.NewCanonicalExternalConversationDispatcher.
+func NewCanonicalExternalConversationDispatcher(scheduler *conversationrun.ConversationRunScheduler) *externalconversation.CanonicalExternalConversationDispatcher {
+	return externalconversation.NewCanonicalExternalConversationDispatcher(scheduler)
+}
+
+type ExternalConversationInboxWorkerConfig = externalconversation.ExternalConversationInboxWorkerConfig
+
+type ExternalConversationInboxWorker = externalconversation.ExternalConversationInboxWorker
+
+// NewExternalConversationInboxWorker forwards to externalconversation.NewExternalConversationInboxWorker.
+func NewExternalConversationInboxWorker(store models.ExternalConversationStore, dispatcher externalconversation.ExternalConversationDispatcher, config externalconversation.ExternalConversationInboxWorkerConfig, opts ...models.ServiceOption) (*externalconversation.ExternalConversationInboxWorker, error) {
+	return externalconversation.NewExternalConversationInboxWorker(store, dispatcher, config, opts...)
+}
+
+const MaximumExternalConversationIngressBytes = externalconversation.MaximumExternalConversationIngressBytes
+
+type ExternalConversationIngressRequest = externalconversation.ExternalConversationIngressRequest
+
+type ExternalConversationPublicIngressRequest = externalconversation.ExternalConversationPublicIngressRequest
+
+type ExternalConversationIngressHostResult = externalconversation.ExternalConversationIngressHostResult
+
+type ExternalConversationIngressHostRequest = externalconversation.ExternalConversationIngressHostRequest
+
+type ExternalConversationGatewayEvent = externalconversation.ExternalConversationGatewayEvent
+
+type ExternalConversationGatewayHostRequest = externalconversation.ExternalConversationGatewayHostRequest
+
+type ExternalConversationGatewayHostResult = externalconversation.ExternalConversationGatewayHostResult
+
+type ExternalConversationGatewayAdapterHost = externalconversation.ExternalConversationGatewayAdapterHost
+
+type ExternalConversationGatewayVerificationAdapterHost = externalconversation.ExternalConversationGatewayVerificationAdapterHost
+
+type ExternalConversationIngressAdapterHost = externalconversation.ExternalConversationIngressAdapterHost
+
+type ExternalConversationIngressResult = externalconversation.ExternalConversationIngressResult
+
+type ExternalConversationGatewayIngressResult = externalconversation.ExternalConversationGatewayIngressResult
+
+type ExternalConversationReplyWorker = externalconversation.ExternalConversationReplyWorker
+
+// NewExternalConversationReplyWorker forwards to externalconversation.NewExternalConversationReplyWorker.
+func NewExternalConversationReplyWorker(store models.ExternalConversationReplyStore, resolver externalconversation.ExternalConversationAdapterResolver, opts ...models.ServiceOption) (*externalconversation.ExternalConversationReplyWorker, error) {
+	return externalconversation.NewExternalConversationReplyWorker(store, resolver, opts...)
+}
+
+type ExternalConversationSupervisorConfig = externalconversation.ExternalConversationSupervisorConfig
+
+type ExternalConversationSupervisor = externalconversation.ExternalConversationSupervisor
+
+// NewExternalConversationSupervisor forwards to externalconversation.NewExternalConversationSupervisor.
+func NewExternalConversationSupervisor(inbox *externalconversation.ExternalConversationInboxWorker, replies *externalconversation.ExternalConversationReplyWorker, delivery *externalconversation.ExternalConversationDeliveryWorker, approvals *externalconversation.ApprovalNotificationWorker, scopes workqueue.WorkerScopeSource, logger *zap.SugaredLogger, config externalconversation.ExternalConversationSupervisorConfig) (*externalconversation.ExternalConversationSupervisor, error) {
+	return externalconversation.NewExternalConversationSupervisor(inbox, replies, delivery, approvals, scopes, logger, config)
+}
+
+type ReceiveExternalConversationEventRequest = externalconversation.ReceiveExternalConversationEventRequest
+
+type ReceiveExternalConversationEventResult = externalconversation.ReceiveExternalConversationEventResult
+
+type EnqueueExternalConversationDeliveryRequest = externalconversation.EnqueueExternalConversationDeliveryRequest
+
+type EnqueueExternalConversationDeliveryResult = externalconversation.EnqueueExternalConversationDeliveryResult
+
+type ExternalConversationTransportService = externalconversation.ExternalConversationTransportService
+
+// NewExternalConversationTransportService forwards to externalconversation.NewExternalConversationTransportService.
+func NewExternalConversationTransportService(store models.ExternalConversationStore, resolver externalconversation.ExternalConversationAdapterResolver, opts ...models.ServiceOption) *externalconversation.ExternalConversationTransportService {
+	return externalconversation.NewExternalConversationTransportService(store, resolver, opts...)
+}
+
+type RoutineCallbackConsumer = externalconversation.RoutineCallbackConsumer
+
+// NewRoutineCallbackConsumer forwards to externalconversation.NewRoutineCallbackConsumer.
+func NewRoutineCallbackConsumer(offerer externalconversation.RoutineEventOfferer) *externalconversation.RoutineCallbackConsumer {
+	return externalconversation.NewRoutineCallbackConsumer(offerer)
+}
+
+type RoutineEventOfferer = externalconversation.RoutineEventOfferer
+
+type RoutineEventOffer = externalconversation.RoutineEventOffer
+
+type RunProgressAcknowledgementRendererFunc = externalconversation.RunProgressAcknowledgementRendererFunc
+
+type RunProgressAcknowledgement = externalconversation.RunProgressAcknowledgement
+
+type RunProgressAcknowledgementWorkerConfig = externalconversation.RunProgressAcknowledgementWorkerConfig
+
+type RunProgressAcknowledgementWorker = externalconversation.RunProgressAcknowledgementWorker
+
+// NewRunProgressAcknowledgementWorker forwards to externalconversation.NewRunProgressAcknowledgementWorker.
+func NewRunProgressAcknowledgementWorker(store models.RunProgressAcknowledgementStore, resolver externalconversation.ExternalConversationAdapterResolver, renderer agentrun.RunProgressAcknowledgementRenderer, config externalconversation.RunProgressAcknowledgementWorkerConfig, opts ...models.ServiceOption) (*externalconversation.RunProgressAcknowledgementWorker, error) {
+	return externalconversation.NewRunProgressAcknowledgementWorker(store, resolver, renderer, config, opts...)
+}
+
+type TurnRunnerProgressAcknowledgementRenderer = externalconversation.TurnRunnerProgressAcknowledgementRenderer
+
+// NewTurnRunnerProgressAcknowledgementRenderer forwards to externalconversation.NewTurnRunnerProgressAcknowledgementRenderer.
+func NewTurnRunnerProgressAcknowledgementRenderer(resolver runtimeconversation.TurnRunnerResolver) (*externalconversation.TurnRunnerProgressAcknowledgementRenderer, error) {
+	return externalconversation.NewTurnRunnerProgressAcknowledgementRenderer(resolver)
+}
+
+type RunTerminalReportingWorkerOptions = externalconversation.RunTerminalReportingWorkerOptions
+
+type RunTerminalReportingWorkerStats = externalconversation.RunTerminalReportingWorkerStats
+
+type RunTerminalReportingWorker = externalconversation.RunTerminalReportingWorker
+
+// NewRunTerminalReportingWorker forwards to externalconversation.NewRunTerminalReportingWorker.
+func NewRunTerminalReportingWorker(store interface {
+	models.RunTerminalReportingStore
+	models.ConversationStore
+}, options externalconversation.RunTerminalReportingWorkerOptions, opts ...models.ServiceOption) (*externalconversation.RunTerminalReportingWorker, error) {
+	return externalconversation.NewRunTerminalReportingWorker(store, options, opts...)
+}

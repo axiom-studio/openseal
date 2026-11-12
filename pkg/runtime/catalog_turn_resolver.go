@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -411,7 +412,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 	binding.Tools = r.config.Tools.ForClaim(LoopToolClaim{
 		Workspace: chat, SkillPrompts: prompts, CapabilityConfig: r.config.Capabilities, CommandPins: script.CommandPins(),
 	})
-	binding.ProgressAcknowledgementRenderer = newProgressAcknowledgementRenderer(r.config.Host,
+	binding.ProgressAcknowledgementRenderer = externalconversation.NewProgressAcknowledgementRenderer(r.config.Host,
 		r.deployment.ID, binding.DefinitionID, binding.DefinitionVersion, preparerConfig.ModelCredential,
 		append(append([]string(nil), instructions...), prompt.AgentInstructions...))
 	return binding, nil

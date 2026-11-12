@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
@@ -8,6 +9,6 @@ import (
 // The Postgres store satisfies these runtime-owned interfaces. The checks
 // live in runtime because the store package cannot import it.
 var (
-	_ workqueue.WorkOutboxStore = (*postgres.Store)(nil)
-	_ channelActivationStore    = (*postgres.Store)(nil)
+	_ workqueue.WorkOutboxStore                   = (*postgres.Store)(nil)
+	_ externalconversation.ChannelActivationStore = (*postgres.Store)(nil)
 )

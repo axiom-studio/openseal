@@ -19,6 +19,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -29,36 +30,36 @@ import (
 // and deletes remove them.
 type StreamChatHost struct {
 	Messages  map[string]string
-	Requests  []ExternalConversationDeliveryHostRequest
+	Requests  []externalconversation.ExternalConversationDeliveryHostRequest
 	rejectAll capability.ConversationDeliveryOperation
 	next      int
 }
 
-func (h *StreamChatHost) LookupExternalConversationDelivery(context.Context, ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryAcknowledgement, error) {
-	return &ExternalConversationDeliveryAcknowledgement{Status: ExternalConversationAcknowledgementUnknown}, nil
+func (h *StreamChatHost) LookupExternalConversationDelivery(context.Context, externalconversation.ExternalConversationDeliveryHostRequest) (*externalconversation.ExternalConversationDeliveryAcknowledgement, error) {
+	return &externalconversation.ExternalConversationDeliveryAcknowledgement{Status: externalconversation.ExternalConversationAcknowledgementUnknown}, nil
 }
 
-func (h *StreamChatHost) DeliverExternalConversation(_ context.Context, request ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryHostResult, error) {
+func (h *StreamChatHost) DeliverExternalConversation(_ context.Context, request externalconversation.ExternalConversationDeliveryHostRequest) (*externalconversation.ExternalConversationDeliveryHostResult, error) {
 	h.Requests = append(h.Requests, request)
 	if request.Delivery.Operation == h.rejectAll {
-		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeFailed, ErrorCode: "message_not_found"}, nil
+		return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeFailed, ErrorCode: "message_not_found"}, nil
 	}
 	switch request.Delivery.Operation {
 	case capability.ConversationDeliveryMessageSend:
 		h.next++
 		id := "chat-" + string(rune('0'+h.next))
 		h.Messages[id] = request.Message.Content
-		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+		return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
 	case capability.ConversationDeliveryMessageUpdate:
 		id, _ := request.Delivery.Parameters["providerMessageId"].(string)
 		h.Messages[id] = request.Message.Content
-		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+		return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
 	case capability.ConversationDeliveryMessageDelete:
 		id, _ := request.Delivery.Parameters["providerMessageId"].(string)
 		delete(h.Messages, id)
-		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+		return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
 	}
-	return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: "status"}, nil
+	return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: "status"}, nil
 }
 
 // FileContentStore keeps the one artifact content written to it in memory.
@@ -111,7 +112,7 @@ func FileConversationFixture(t *testing.T) (*sqlite.Store, *skill.Catalog, *mode
 // ContextHistoryResolver resolves adapter bindings through the embedded
 // resolver and adds the context history feature to every adapter.
 type ContextHistoryResolver struct {
-	ExternalConversationAdapterResolver
+	externalconversation.ExternalConversationAdapterResolver
 }
 
 func (r ContextHistoryResolver) ResolveConversationAdapterBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID, adapterID string) (*skill.BoundConversationAdapter, error) {
@@ -127,13 +128,13 @@ func (r ContextHistoryResolver) ResolveConversationAdapterBinding(ctx context.Co
 // RecordingContextHost records context history reads and answers each with
 // Result and Err, calling AfterRead first when it is set.
 type RecordingContextHost struct {
-	requests  []ExternalConversationContextHostRequest
-	Result    *ExternalConversationContextResult
+	requests  []externalconversation.ExternalConversationContextHostRequest
+	Result    *externalconversation.ExternalConversationContextResult
 	err       error
 	AfterRead func()
 }
 
-func (h *RecordingContextHost) ReadExternalConversationContext(_ context.Context, req ExternalConversationContextHostRequest) (*ExternalConversationContextResult, error) {
+func (h *RecordingContextHost) ReadExternalConversationContext(_ context.Context, req externalconversation.ExternalConversationContextHostRequest) (*externalconversation.ExternalConversationContextResult, error) {
 	h.requests = append(h.requests, req)
 	if h.AfterRead != nil {
 		h.AfterRead()
@@ -165,14 +166,14 @@ func ReceiveContextEvent(t *testing.T, store *sqlite.Store, endpoint *models.Ext
 // NewContextWorker is an inbox worker that reads context history from host
 // and dispatches through a conversation run scheduler; with crash the first
 // dispatch fails after its Run is durable.
-func NewContextWorker(t *testing.T, store *sqlite.Store, resolver ExternalConversationAdapterResolver, host ExternalConversationContextHost, crash bool, opts ...models.ServiceOption) (*ExternalConversationInboxWorker, *crashAfterExternalConversationDispatch) {
+func NewContextWorker(t *testing.T, store *sqlite.Store, resolver externalconversation.ExternalConversationAdapterResolver, host externalconversation.ExternalConversationContextHost, crash bool, opts ...models.ServiceOption) (*externalconversation.ExternalConversationInboxWorker, *crashAfterExternalConversationDispatch) {
 	t.Helper()
 	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatcher := &crashAfterExternalConversationDispatch{next: NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: crash}
-	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
+	dispatcher := &crashAfterExternalConversationDispatch{next: externalconversation.NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: crash}
+	worker, err := externalconversation.NewExternalConversationInboxWorker(store, dispatcher, externalconversation.ExternalConversationInboxWorkerConfig{
 		WorkerID: "context-worker", BaseRetry: time.Second, MaximumRetry: time.Minute,
 		ContextHost: host, ContextCatalog: resolver,
 	}, opts...)
@@ -184,19 +185,19 @@ func NewContextWorker(t *testing.T, store *sqlite.Store, resolver ExternalConver
 
 // IngressHostStub records the ingress request and answers it with Result.
 type IngressHostStub struct {
-	Request ExternalConversationIngressHostRequest
-	Result  *ExternalConversationIngressHostResult
+	Request externalconversation.ExternalConversationIngressHostRequest
+	Result  *externalconversation.ExternalConversationIngressHostResult
 }
 
 // GatewayHostStub records the gateway request and answers it with Result.
 type GatewayHostStub struct {
-	Request ExternalConversationGatewayHostRequest
-	Result  *ExternalConversationGatewayHostResult
+	Request externalconversation.ExternalConversationGatewayHostRequest
+	Result  *externalconversation.ExternalConversationGatewayHostResult
 }
 
 // CreateActiveGateway creates the gateway paused and then activates it, as
 // an operator does after reviewing the provider route.
-func CreateActiveGateway(t *testing.T, ctx context.Context, service *ExternalConversationGatewayService, request CreateExternalConversationGatewayRequest) *models.ExternalConversationGatewayRegistration {
+func CreateActiveGateway(t *testing.T, ctx context.Context, service *externalconversation.ExternalConversationGatewayService, request externalconversation.CreateExternalConversationGatewayRequest) *models.ExternalConversationGatewayRegistration {
 	t.Helper()
 	request.Status = models.ExternalConversationGatewayPaused
 	created, err := service.Create(ctx, request)
@@ -204,7 +205,7 @@ func CreateActiveGateway(t *testing.T, ctx context.Context, service *ExternalCon
 		t.Fatal(err)
 	}
 	active := models.ExternalConversationGatewayActive
-	activated, err := service.Update(ctx, request.Gateway.Scope, created.ID, UpdateExternalConversationGatewayRequest{
+	activated, err := service.Update(ctx, request.Gateway.Scope, created.ID, externalconversation.UpdateExternalConversationGatewayRequest{
 		ExpectedRevision: created.Revision, Status: &active,
 		Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "activate reviewed provider route",
 	})
@@ -216,16 +217,16 @@ func CreateActiveGateway(t *testing.T, ctx context.Context, service *ExternalCon
 
 func (h *GatewayHostStub) NormalizeExternalConversationGateway(
 	_ context.Context,
-	request ExternalConversationGatewayHostRequest,
-) (*ExternalConversationGatewayHostResult, error) {
+	request externalconversation.ExternalConversationGatewayHostRequest,
+) (*externalconversation.ExternalConversationGatewayHostResult, error) {
 	h.Request = request
 	return h.Result, nil
 }
 
 func (h *IngressHostStub) NormalizeExternalConversation(
 	_ context.Context,
-	request ExternalConversationIngressHostRequest,
-) (*ExternalConversationIngressHostResult, error) {
+	request externalconversation.ExternalConversationIngressHostRequest,
+) (*externalconversation.ExternalConversationIngressHostResult, error) {
 	h.Request = request
 	return h.Result, nil
 }
@@ -304,16 +305,16 @@ func CompleteTerminalReportingRun(t *testing.T, store TerminalReportingStore, ru
 
 // TerminalReportingWorker is a terminal reporting worker on store whose
 // clock reads at.
-func TerminalReportingWorker(t *testing.T, store TerminalReportingStore, at time.Time) *RunTerminalReportingWorker {
+func TerminalReportingWorker(t *testing.T, store TerminalReportingStore, at time.Time) *externalconversation.RunTerminalReportingWorker {
 	t.Helper()
 	return TerminalReportingWorkerWithClock(t, store, func() time.Time { return at })
 }
 
 // TerminalReportingWorkerWithClock is TerminalReportingWorker reading time
 // from clock.
-func TerminalReportingWorkerWithClock(t *testing.T, store TerminalReportingStore, clock models.Clock) *RunTerminalReportingWorker {
+func TerminalReportingWorkerWithClock(t *testing.T, store TerminalReportingStore, clock models.Clock) *externalconversation.RunTerminalReportingWorker {
 	t.Helper()
-	worker, err := NewRunTerminalReportingWorker(store, RunTerminalReportingWorkerOptions{WorkerID: "report-worker", LeaseDuration: time.Minute, BatchSize: 10, Concurrency: 2}, models.WithClock(clock))
+	worker, err := externalconversation.NewRunTerminalReportingWorker(store, externalconversation.RunTerminalReportingWorkerOptions{WorkerID: "report-worker", LeaseDuration: time.Minute, BatchSize: 10, Concurrency: 2}, models.WithClock(clock))
 	if err != nil {
 		t.Fatal(err)
 	}
