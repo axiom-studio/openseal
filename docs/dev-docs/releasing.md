@@ -2,23 +2,31 @@
 
 This guide describes how a release is cut, what the pipeline produces, and the
 two failure modes that come from starting a release the wrong way. The workflow
-is `.github/workflows/release.yml`.
+is `.github/workflows/manual-release.yml`.
 
 ## The Procedure
 
-Push a semver tag. That is the whole procedure.
+Create and push a semver tag from a commit that contains the manual Release
+workflow, then start the workflow explicitly.
 
 ```bash
 git tag v0.2.0
 git push origin v0.2.0
+gh workflow run manual-release.yml --ref v0.2.0
 ```
 
-The push triggers the Release workflow, which owns the rest of the lifecycle:
-it creates the release, builds every artifact, attaches them, generates one
-checksums file spanning all of them, writes the notes, and publishes.
+You can also select **Run workflow** under **Actions → Release (manual)** on
+`develop` and enter the tag. Leave the tag blank to select the newest release
+tag by version. The tag must point to a commit that contains
+`.github/workflows/manual-release.yml`.
 
-Nothing else needs doing, and nothing else should be done while a run is in
-flight. A release takes roughly 45 minutes.
+Once started, the workflow creates the release, builds and attaches every
+artifact, generates the checksums file, writes the notes, and publishes. A
+release takes roughly 45 minutes.
+
+To run the build and tests without publishing a release, use **Actions → CI
+(manual) → Run workflow** and select the branch you want to check. The branch
+must contain `.github/workflows/manual-ci.yml`.
 
 Pre-release tags carry a suffix and are handled automatically: `v0.2.0-rc1`
 produces a release marked pre-release, and the container `:latest` tag is left
@@ -35,7 +43,8 @@ is not.
 
 ## What The Pipeline Does
 
-Six jobs run in three waves.
+The `pick` job selects the release tag. On the run for that tag, the remaining
+jobs build and publish the release.
 
 | Job | Runs on | Produces |
 | --- | --- | --- |
@@ -67,8 +76,8 @@ the complete asset set.
 
 The GitHub web UI's **Draft a new release** form creates the release *and* its
 tag in a single action, and it creates the release already published rather
-than as a draft. That tag push is what triggers this workflow, so the workflow
-arrives to find a release it did not create.
+than as a draft. Start the workflow manually for the tag. It will find the
+release created through the form.
 
 This is tolerated, but it is not the normal path:
 
@@ -87,8 +96,8 @@ Prefer pushing a tag.
 
 ## Replacing A Release
 
-Cut a new tag. Re-pushing a tag whose release already carries assets is
-refused, and the refusal is deliberate:
+Cut a new tag. The workflow refuses to build a tag whose published release
+already carries assets:
 
 ```text
 release v0.2.0 is published and carries 12 asset(s); refusing to overwrite them.

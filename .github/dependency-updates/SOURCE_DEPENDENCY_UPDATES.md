@@ -22,7 +22,7 @@ command and output allowlist are fixed by the trusted policy. Validation
 regenerates the notices again and rejects any difference. There is no exception
 for the private SDK module and no suppression of compatibility tests.
 
-The existing `.github/workflows/release.yml` verifies tagged release assets
+The existing `.github/workflows/manual-release.yml` verifies tagged release assets
 before publication. Advancing `develop` here does not publish a release,
 promote a latest tag, replace the desktop installation, or deploy a service.
 

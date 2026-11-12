@@ -27,7 +27,7 @@
       "script": ".github/dependency-updates/checks.sh"
     }
   ],
-  "releaseWorkflow": ".github/workflows/release.yml",
+  "releaseWorkflow": ".github/workflows/manual-release.yml",
   "releaseMode": "tag-only",
   "candidateRetentionLimit": 32
 }

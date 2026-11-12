@@ -1,24 +1,15 @@
-name: CI
+name: CI (manual)
 
-# Every commit is tested: pull requests into develop, and each commit pushed to
-# develop itself (work is often pushed there directly and tagged from there).
 on:
-  pull_request:
-    branches: [develop]
-  push:
-    branches: [develop]
+  workflow_dispatch:
 
-# CI only reads the repository. Nothing here publishes an artifact — building
-# and publishing happens on tags, in release.yml, which opts into the writes it
-# needs.
+# CI validates a selected ref. The manual Release workflow builds and
+# publishes release artifacts.
 permissions:
   contents: read
 
-# A pull request that is pushed to repeatedly should not queue a run per push.
-# A commit on develop always finishes its own run: its group is the commit, so
-# a later push never cancels it.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.sha }}
   cancel-in-progress: true
 
 # The axiom-studio org Actions policy is reported (in a sibling repository's
@@ -30,18 +21,7 @@ concurrency:
 # Checkout and Go toolchain setup run as plain shell.
 
 jobs:
-  # GitHub-hosted, and that is a requirement rather than a preference. This
-  # repository is public and the trigger is `pull_request` with no fork guard, so
-  # the job checks out a PR head from any fork and runs `make test` and
-  # `make build` over it — arbitrary code execution by construction. On a
-  # self-hosted runner that lands on a persistent host shared with other
-  # repositories' jobs running as the same user. A hosted runner is a fresh VM
-  # discarded afterwards, so there is no host to compromise and nothing to
-  # persist into the next run.
-  #
-  # A fork guard was the alternative and was rejected: it would leave fork PRs
-  # with no CI at all, which removes the gate from exactly the contributions that
-  # most need it.
+  # Keep the selected ref's build and test code on a disposable hosted runner.
   go:
     name: vet, test, build
     runs-on: ubuntu-26.04
@@ -65,7 +45,7 @@ jobs:
             exit 1
           fi
 
-      - name: Check out the pull request head
+      - name: Check out the selected commit
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -75,11 +55,8 @@ jobs:
           # Auth via GIT_CONFIG_* rather than `git -c`. Both keep the token out
           # of .git/config, but `-c` puts it in argv, and /proc/<pid>/cmdline is
           # world-readable without hidepid — so any process the runner can host
-          # reads it mid-fetch. On a hosted runner that is a smaller set than it
-          # was on the shared fleet, but the job still executes PR-supplied code
-          # in later steps, and a secret that never reaches a command line cannot
-          # be read off one. The env form applies the same config without ever
-          # placing it on argv.
+          # reads it mid-fetch. The environment applies the same config and
+          # keeps the token out of argv.
           GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0="http.extraHeader"
@@ -296,12 +273,8 @@ jobs:
           set -euo pipefail
           make build
           test -x ./openseal
-          # `version`, not `--version`: this CLI is subcommand-based and has no
-          # --version flag; it would be rejected as an unknown command. The
-          # output is asserted below rather than trusting the exit status, so
-          # this proves the binary runs and reports itself. Kept identical in
-          # substance to release.yml's smoke test — two files checking the same
-          # property of the same binary should not disagree about how.
+          # Use the same version subcommand and output check as the release
+          # smoke test.
           OUT="$(./openseal version)"
           echo "$OUT"
           case "$OUT" in
