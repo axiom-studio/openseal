@@ -78,7 +78,7 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 	if target == "" {
 		return false, nil
 	}
-	question, err := s.conversations.store.GetChannelMessage(ctx, conversation.Scope, conversation.ID, target)
+	question, err := s.conversationStore.GetChannelMessage(ctx, conversation.Scope, conversation.ID, target)
 	if errors.Is(err, ErrChannelMessageNotFound) {
 		return false, nil
 	}
@@ -92,12 +92,12 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 		if reference.Kind != ConversationReferenceRun {
 			continue
 		}
-		run, err := s.runs.store.GetAgentRun(ctx, conversation.Scope, reference.ID)
+		run, err := s.runStore.GetAgentRun(ctx, conversation.Scope, reference.ID)
 		if err != nil {
 			return false, err
 		}
 		if run != nil && run.Kind == RunKindConversation && run.ParentRunID == "" {
-			_, origin, _, err := foregroundConversationWorkOrigin(ctx, s.runs.store, s.conversations.store, run)
+			_, origin, _, err := foregroundConversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
 			if err != nil {
 				return false, err
 			}
@@ -105,7 +105,7 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 				return true, nil
 			}
 		}
-		tasks, ok := s.runs.store.(ConversationTaskStore)
+		tasks, ok := s.runStore.(ConversationTaskStore)
 		if !ok {
 			continue
 		}

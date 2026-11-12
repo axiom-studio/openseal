@@ -117,7 +117,16 @@ type ApprovalCoordinator struct {
 }
 
 func NewApprovalCoordinator(portfolio PortfolioStore, actions ActionStore, authorizer ApprovalAuthorizer) *ApprovalCoordinator {
-	return &ApprovalCoordinator{portfolio: portfolio, actions: actions, authorize: authorizer, now: time.Now, newID: uuid.NewString}
+	return newApprovalCoordinatorWithClock(portfolio, actions, authorizer, time.Now)
+}
+
+// newApprovalCoordinatorWithClock is NewApprovalCoordinator stamping times
+// with now (nil: time.Now).
+func newApprovalCoordinatorWithClock(portfolio PortfolioStore, actions ActionStore, authorizer ApprovalAuthorizer, now func() time.Time) *ApprovalCoordinator {
+	if now == nil {
+		now = time.Now
+	}
+	return &ApprovalCoordinator{portfolio: portfolio, actions: actions, authorize: authorizer, now: now, newID: uuid.NewString}
 }
 
 type approvalResolutionKind int

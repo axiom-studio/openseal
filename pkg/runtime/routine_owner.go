@@ -23,7 +23,7 @@ func runbookActionOwner(ctx context.Context, teams RoutineTeamCatalog, run *Agen
 	}
 	var roster TeamRosterReader
 	if teams != nil {
-		roster = routineTeamRoster{teams: teams}
+		roster = newRoutineTeamRoster(teams)
 	} else if run.Owner.Type == OwnerTypeTeam {
 		return errors.New("runbook action requires the current authorized Team roster")
 	}
@@ -39,6 +39,10 @@ func runbookActionOwner(ctx context.Context, teams RoutineTeamCatalog, run *Agen
 
 // routineTeamRoster reads Team deployments through a RoutineTeamCatalog.
 type routineTeamRoster struct{ teams RoutineTeamCatalog }
+
+func newRoutineTeamRoster(teams RoutineTeamCatalog) routineTeamRoster {
+	return routineTeamRoster{teams: teams}
+}
 
 func (r routineTeamRoster) GetTeamDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
 	return r.teams.GetDeployment(ctx, scope, id)

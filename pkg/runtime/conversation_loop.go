@@ -46,14 +46,14 @@ func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Contex
 		CanReact: true,
 		Spoken:   run.Context["responseMode"] == "spoken",
 	}
-	_, conversation, trigger, err := conversationWorkOrigin(ctx, r.portfolio, r.conversations.store, run)
+	_, conversation, trigger, err := conversationWorkOrigin(ctx, r.portfolio, r.conversationStore, run)
 	if err != nil {
 		return ConversationLoopAuthority{}, err
 	}
 	authority.CanAskConversationQuestion = conversation != nil && trigger != nil &&
 		run.AssignedAgentID != "" && run.AssignedAgentID == ConversationRunAgentID(conversation, run)
 	authority.ExternalChannelReply = externalChannelContext(conversation)
-	if _, authority.ApprovalMode, err = RunConversationApprovalMode(ctx, r.portfolio, r.conversations.store, run); err != nil {
+	if _, authority.ApprovalMode, err = RunConversationApprovalMode(ctx, r.portfolio, r.conversationStore, run); err != nil {
 		return ConversationLoopAuthority{}, err
 	}
 	return authority, nil
@@ -152,7 +152,7 @@ func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, ru
 	}
 	loop := &conversationLoop{
 		runner: r, conversation: conversation, trigger: trigger,
-		catchUp:  &conversationCatchUp{conversations: r.conversations, runs: r.portfolio, attachments: r.conversationAttachmentReader()},
+		catchUp:  newConversationCatchUp(r.conversations, r.portfolio, r.conversationAttachmentReader()),
 		sessions: stores.Sessions, actions: stores.Actions,
 	}
 	binding.Session = session
@@ -216,7 +216,7 @@ func (r *ConversationRunTurnRunner) conversationAttachmentReader() *conversation
 	if r.artifacts == nil || r.config.AttachmentContent == nil {
 		return nil
 	}
-	return &conversationAttachmentReader{artifacts: r.artifacts, content: r.config.AttachmentContent}
+	return newConversationAttachmentReader(r.artifacts, r.config.AttachmentContent)
 }
 
 // BeforeStep is the conversation preparer (§13 StartRun / BeforeStep).

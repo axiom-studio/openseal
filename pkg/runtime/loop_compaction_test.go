@@ -596,7 +596,7 @@ func TestCompactChargesBudgetNotTurns(t *testing.T) {
 	fx.UpdateRun(fx.runID, func(run *AgentRun) {
 		run.Budget = &BudgetPolicy{MaxTurns: 10, MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000}
 	})
-	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
+	fx.compactor.Budget = newRunActivityCompactionBudget(fx.store, NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
 	fx.host.script = append(fx.host.script, summaryAnswer("summary", 50500, 900))
 	in := fx.input()
 	before := in.Run.Revision
@@ -629,7 +629,7 @@ func TestCompactSettlesBudgetAfterAHeartbeatDuringTheSummary(t *testing.T) {
 	fx.UpdateRun(fx.runID, func(run *AgentRun) {
 		run.Budget = &BudgetPolicy{MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000}
 	})
-	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
+	fx.compactor.Budget = newRunActivityCompactionBudget(fx.store, NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
 	in := fx.input()
 	// The Run moved on after the step read it: a heartbeat before the
 	// reservation, and another while the summary call runs.
@@ -671,7 +671,7 @@ func TestCompactBudgetExhaustedFailsWithoutCalling(t *testing.T) {
 	fx.UpdateRun(fx.runID, func(run *AgentRun) {
 		run.Budget = &BudgetPolicy{MaxOutputTokens: 1000}
 	})
-	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
+	fx.compactor.Budget = newRunActivityCompactionBudget(fx.store, NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
 	_, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
 	requireLoopFailure(t, err, "budget", "budget_exhausted")
 	if len(fx.host.requests) != 0 || len(fx.compactions()) != 0 {

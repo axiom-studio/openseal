@@ -82,10 +82,7 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	}
 	// EligibleApprovalAuthorizer is no AgentBuilderApprovalAuthorizer, so a
 	// callback can reject but never approve an agent-builder card (D11).
-	coordinator := NewApprovalCoordinator(c.store, c.store, EligibleApprovalAuthorizer{})
-	if c.now != nil {
-		coordinator.now = c.now
-	}
+	coordinator := newApprovalCoordinatorWithClock(c.store, c.store, EligibleApprovalAuthorizer{}, c.now)
 	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: event.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
 		DecisionID: event.ID, Decision: ApprovalDecision(decision),

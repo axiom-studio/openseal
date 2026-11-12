@@ -56,7 +56,16 @@ type RunActivityService struct {
 }
 
 func NewRunActivityService(portfolio PortfolioStore, activity RunActivityStore) *RunActivityService {
-	return &RunActivityService{portfolio: portfolio, activity: activity, now: time.Now}
+	return newRunActivityServiceWithClock(portfolio, activity, time.Now)
+}
+
+// newRunActivityServiceWithClock is NewRunActivityService stamping times
+// with now (nil: time.Now).
+func newRunActivityServiceWithClock(portfolio PortfolioStore, activity RunActivityStore, now func() time.Time) *RunActivityService {
+	if now == nil {
+		now = time.Now
+	}
+	return &RunActivityService{portfolio: portfolio, activity: activity, now: now}
 }
 
 func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, runID string, req RunTransitionRequest) (*AgentRun, *ActivityEvent, error) {

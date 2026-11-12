@@ -105,6 +105,9 @@ type claimToolExecutor struct {
 
 func (x *claimToolExecutor) now() time.Time { return x.cfg.Now().UTC() }
 
+// controlExecutor runs the claim's control calls.
+func (x *claimToolExecutor) controlExecutor() *ControlExecutor { return x.cfg.Control }
+
 // ---------------------------------------------------------------------------
 // Routing
 
@@ -903,11 +906,11 @@ func loadKernelPatch(set *CapabilitySet, actions []capability.ModelAction, loade
 	names := LoopGovernedToolNames(actions)
 	patch := &ToolEntryKernelPatch{}
 	for _, id := range loaded {
-		if action, ok := set.actions[id]; ok {
+		if action, ok := set.catalogAction(id); ok {
 			patch.SurfacedTools = append(patch.SurfacedTools, surfacedTool(id, governedModelStepTool(action, names[action.Name], ModelStepToolLoaded)))
 			continue
 		}
-		if spec, ok := set.hostTools[id]; ok {
+		if spec, ok := set.catalogHostTool(id); ok {
 			patch.SurfacedTools = append(patch.SurfacedTools, surfacedTool(id, hostModelStepTool(spec, ModelStepToolLoaded)))
 			continue
 		}

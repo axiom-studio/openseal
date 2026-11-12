@@ -924,8 +924,8 @@ type runbookDelegateHandler struct{}
 // runbookControlTools are the kernel-only control tools of runbook Runs.
 func runbookControlTools() []controlTool {
 	return []controlTool{
-		{name: ControlToolRunbookFork, handler: runbookForkHandler{}},
-		{name: ControlToolRunbookDelegate, handler: runbookDelegateHandler{}},
+		newControlTool(ControlToolRunbookFork, runbookForkHandler{}),
+		newControlTool(ControlToolRunbookDelegate, runbookDelegateHandler{}),
 	}
 }
 

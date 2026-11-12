@@ -89,7 +89,16 @@ type AgentTurnService struct {
 }
 
 func NewAgentTurnService(portfolio PortfolioStore, turns AgentTurnStore) *AgentTurnService {
-	return &AgentTurnService{portfolio: portfolio, turns: turns, now: time.Now}
+	return newAgentTurnServiceWithClock(portfolio, turns, time.Now)
+}
+
+// newAgentTurnServiceWithClock is NewAgentTurnService stamping times with
+// now (nil: time.Now).
+func newAgentTurnServiceWithClock(portfolio PortfolioStore, turns AgentTurnStore, now func() time.Time) *AgentTurnService {
+	if now == nil {
+		now = time.Now
+	}
+	return &AgentTurnService{portfolio: portfolio, turns: turns, now: now}
 }
 
 func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequest) (*AgentTurn, error) {

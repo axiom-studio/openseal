@@ -54,6 +54,12 @@ func NewCallbackRegistry(store CallbackRegistrationStore, resolver CallbackAdapt
 	return &CallbackRegistry{store: store, resolver: resolver, now: time.Now, newID: uuid.NewString}
 }
 
+// resolvesAdapters reports whether r can resolve a registration's callback
+// adapter (false for a nil registry).
+func (r *CallbackRegistry) resolvesAdapters() bool {
+	return r != nil && r.resolver != nil
+}
+
 func (r *CallbackRegistry) Create(ctx context.Context, request CreateCallbackRegistrationRequest) (*CallbackRegistration, error) {
 	if r == nil || r.store == nil || r.resolver == nil {
 		return nil, errors.New("callback registry is not configured")

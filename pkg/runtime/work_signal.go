@@ -213,6 +213,9 @@ type scopeWakeQueue struct {
 	signal   chan struct{}
 }
 
+// signals receives once after one or more wakeScope calls.
+func (q *scopeWakeQueue) signals() <-chan struct{} { return q.signal }
+
 func newScopeWakeQueue() *scopeWakeQueue {
 	return &scopeWakeQueue{dirty: make(map[Scope]struct{}), lastRun: make(map[Scope]time.Time), failures: make(map[Scope]int), signal: make(chan struct{}, 1)}
 }

@@ -820,3 +820,18 @@ func (c *RunForkCoordinator) cancelLosingChild(ctx context.Context, activity *Ru
 	}
 	return nil, fmt.Errorf("cancel fork child %s after concurrent revisions: %w", edge.TargetRunID, ErrRevisionConflict)
 }
+
+// configured reports whether c has a store (false for a nil coordinator).
+func (c *RunForkCoordinator) configured() bool {
+	return c != nil && c.store != nil
+}
+
+// dependencyGroup reads a fork's dependency group.
+func (c *RunForkCoordinator) dependencyGroup(ctx context.Context, scope Scope, groupID string) (*RunDependencyGroup, error) {
+	return c.store.GetRunDependencyGroup(ctx, scope, groupID)
+}
+
+// dependencies lists the edges of a fork's dependency group.
+func (c *RunForkCoordinator) dependencies(ctx context.Context, scope Scope, groupID string) ([]*RunDependency, error) {
+	return c.store.ListRunDependencies(ctx, scope, groupID)
+}

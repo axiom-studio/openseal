@@ -140,7 +140,10 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	if origin != nil && origin.Mode == ConversationTaskModeIndependent && canonical.ID == origin.WorkRunID {
 		rows = append([]*ConversationTaskResult{{Task: origin, WorkRun: canonical}}, rows...)
 	}
-	proof := &ConversationChangeService{conversations: NewConversationService(store), portfolio: store}
+	proof, err := NewConversationChangeService(store, store)
+	if err != nil {
+		return nil, err
+	}
 	seen := make(map[string]bool, len(rows))
 	for _, row := range rows {
 		if row == nil || row.Task == nil || row.WorkRun == nil || row.Task.AuthenticatedActor != actor ||

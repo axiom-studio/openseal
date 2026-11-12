@@ -35,7 +35,7 @@ func conversationOperationSavedOutput(_ context.Context, _ PortfolioStore, opera
 func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx context.Context, scope Scope, result *ConversationRunReconcileResult) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
-		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation, Statuses: []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed}, Limit: pageSize, Offset: offset})
+		runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation, Statuses: []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed}, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return err
 		}
@@ -46,13 +46,13 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 				continue
 			}
 			key := "conversation-operation-recovered:" + run.ID
-			if existing, err := s.conversations.store.FindChannelMessageByIdempotencyKey(ctx, scope, conversationID, key); err != nil {
+			if existing, err := s.conversationStore.FindChannelMessageByIdempotencyKey(ctx, scope, conversationID, key); err != nil {
 				return err
 			} else if existing != nil {
 				continue
 			}
 			oldKey := conversationRunResponseKey(run, triggerID)
-			old, err := s.conversations.store.FindChannelMessageByIdempotencyKey(ctx, scope, conversationID, oldKey)
+			old, err := s.conversationStore.FindChannelMessageByIdempotencyKey(ctx, scope, conversationID, oldKey)
 			if err != nil {
 				return err
 			}
@@ -69,7 +69,7 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			if operationID == "" {
 				continue
 			}
-			operation, err := s.runs.store.GetAgentRun(ctx, scope, operationID)
+			operation, err := s.runStore.GetAgentRun(ctx, scope, operationID)
 			if err != nil {
 				return err
 			}
@@ -80,7 +80,7 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			if old.Content != label+" completed successfully." && old.Content != label+" failed. Review the Run for the exact failed step and retry when ready." {
 				continue
 			}
-			content, err := conversationOperationSavedOutput(ctx, s.runs.store, operation)
+			content, err := conversationOperationSavedOutput(ctx, s.runStore, operation)
 			if err != nil {
 				return err
 			}
@@ -103,7 +103,7 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			if agentID == "" || old.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}) || operation.AssignedAgentID != agentID {
 				continue
 			}
-			onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(s.runs.store), scope, conversation.Owner, agentID)
+			onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(s.runStore), scope, conversation.Owner, agentID)
 			if err != nil {
 				return err
 			}

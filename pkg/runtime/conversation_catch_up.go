@@ -49,6 +49,10 @@ type conversationCatchUp struct {
 	attachments   *conversationAttachmentReader // nil: message text only
 }
 
+func newConversationCatchUp(conversations *ConversationService, runs PortfolioStore, attachments *conversationAttachmentReader) *conversationCatchUp {
+	return &conversationCatchUp{conversations: conversations, runs: runs, attachments: attachments}
+}
+
 type catchUpRequest struct {
 	Run          *AgentRun
 	Session      *AgentSession

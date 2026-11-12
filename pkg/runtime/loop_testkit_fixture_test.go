@@ -681,7 +681,7 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 		Producer:     producer, Session: session, Host: host, Authority: control,
 		Compactor: &LoopCompactor{
 			Host: host, Sessions: sessions, Requests: preparer,
-			Budget: newRunActivityCompactionBudget(NewRunActivityService(f.store, f.store), f.clock.Now),
+			Budget: newRunActivityCompactionBudget(f.store, NewRunActivityService(f.store, f.store), f.clock.Now),
 			Now:    f.clock.Now,
 		},
 		Preparers: []StepPreparer{newRunStartPreparer(sessions, f.store)},

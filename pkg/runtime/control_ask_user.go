@@ -75,16 +75,6 @@ func askUserPark(entryID string) *LoopPark {
 	}
 }
 
-func (x *ControlExecutor) conversationStore() ConversationStore {
-	if x.Reporting != nil {
-		return x.Reporting
-	}
-	if x.Conversations != nil {
-		return x.Conversations.store
-	}
-	return nil
-}
-
 func (x *ControlExecutor) conversationService() *ConversationService {
 	if x.Conversations != nil {
 		return x.Conversations
@@ -98,11 +88,20 @@ func (x *ControlExecutor) conversationService() *ConversationService {
 // askUserOrigin resolves the conversation the Run may ask in: its canonical
 // origin, answered by this Run's own Agent. nil conversation = cannot ask.
 func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *AgentRun) (*Conversation, *ChannelMessage, error) {
-	store := x.conversationStore()
-	if store == nil || x.Portfolio == nil {
+	if x.Portfolio == nil {
 		return nil, nil, nil
 	}
-	_, conversation, trigger, err := conversationWorkOrigin(ctx, x.Portfolio, store, run)
+	var conversation *Conversation
+	var trigger *ChannelMessage
+	var err error
+	switch {
+	case x.Reporting != nil:
+		_, conversation, trigger, err = conversationWorkOrigin(ctx, x.Portfolio, x.Reporting, run)
+	case x.Conversations != nil:
+		_, conversation, trigger, err = x.Conversations.workOrigin(ctx, x.Portfolio, run)
+	default:
+		return nil, nil, nil
+	}
 	if err != nil || conversation == nil || trigger == nil {
 		return nil, nil, err
 	}

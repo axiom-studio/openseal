@@ -232,7 +232,7 @@ func resolveTeamMemberAction(ctx context.Context, teams *kernelteam.Registry, ru
 	if err != nil {
 		return args, nil, nil, none, err
 	}
-	onRoster, err := AgentOnChatRoster(ctx, routineTeamRoster{teams: teams}, run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
+	onRoster, err := AgentOnChatRoster(ctx, newRoutineTeamRoster(teams), run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
 	if err != nil {
 		return args, nil, nil, none, err
 	}

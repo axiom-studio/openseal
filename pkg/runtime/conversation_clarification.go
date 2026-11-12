@@ -15,6 +15,11 @@ func conversationWorkOrigin(ctx context.Context, runs PortfolioStore, conversati
 	return conversationWorkOriginForState(ctx, runs, conversations, run, false)
 }
 
+// workOrigin is conversationWorkOrigin over the service's store.
+func (s *ConversationService) workOrigin(ctx context.Context, runs PortfolioStore, run *AgentRun) (*AgentRun, *Conversation, *ChannelMessage, error) {
+	return conversationWorkOrigin(ctx, runs, s.store, run)
+}
+
 // Accepted-answer receipts may outlive a completed or paused parent. Resolve
 // their immutable initiating identity without treating it as a fresh Run grant.
 func conversationWorkOriginForState(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun, includeInactiveParents bool) (*AgentRun, *Conversation, *ChannelMessage, error) {
@@ -92,7 +97,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestions(ctx context.Co
 func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx context.Context, scope Scope, result *ConversationRunReconcileResult, kind RunKind) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
-		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: kind, Statuses: []AgentRunStatus{AgentRunStatusWaitingForEvent}, Limit: pageSize, Offset: offset})
+		runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: kind, Statuses: []AgentRunStatus{AgentRunStatusWaitingForEvent}, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return err
 		}
@@ -100,7 +105,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx con
 			if !isConversationQuestionWait(run) {
 				continue
 			}
-			_, conversation, trigger, err := conversationWorkOrigin(ctx, s.runs.store, s.conversations.store, run)
+			_, conversation, trigger, err := conversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
 			if err != nil {
 				return err
 			}
@@ -110,7 +115,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx con
 			if s.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
 				continue
 			}
-			entry, err := conversationQuestionEntry(ctx, s.runs.store, run)
+			entry, err := conversationQuestionEntry(ctx, s.runStore, run)
 			if err != nil {
 				return err
 			}
@@ -174,7 +179,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if ref.Kind != ConversationReferenceRun {
 					continue
 				}
-				run, err := s.runs.store.GetAgentRun(ctx, conversation.Scope, ref.ID)
+				run, err := s.runStore.GetAgentRun(ctx, conversation.Scope, ref.ID)
 				if err != nil {
 					return nil, false, err
 				}
@@ -183,7 +188,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if agentID := ConversationRunAgentID(conversation, run); run == nil || agentID == "" || agentID != question.Sender.ID {
 					continue
 				}
-				source, origin, trigger, err := conversationWorkOriginForState(ctx, s.runs.store, s.conversations.store, run, true)
+				source, origin, trigger, err := conversationWorkOriginForState(ctx, s.runStore, s.conversationStore, run, true)
 				if err != nil {
 					return nil, false, err
 				}
@@ -206,7 +211,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if !isConversationQuestionWait(run) || clarificationQuestionKey(run) != question.IdempotencyKey {
 					continue
 				}
-				_, origin, _, err = conversationWorkOrigin(ctx, s.runs.store, s.conversations.store, run)
+				_, origin, _, err = conversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
 				if err != nil {
 					return nil, false, err
 				}
@@ -243,7 +248,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 		return nil, taskTargeted, nil
 	}
 	q := matches[0]
-	entry, err := conversationQuestionEntry(ctx, s.runs.store, q.run)
+	entry, err := conversationQuestionEntry(ctx, s.runStore, q.run)
 	if err != nil {
 		return nil, false, err
 	}
@@ -272,7 +277,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 		payload["questionTurnSequence"] = receipt.QuestionTurnSequence
 		payload["questionTurnId"] = receipt.QuestionTurnID
 	}
-	activity := NewRunActivityService(s.runs.store, s.runs.store)
+	activity := NewRunActivityService(s.runStore, s.runStore)
 	run, event, err := activity.TransitionRun(ctx, conversation.Scope, q.run.ID, RunTransitionRequest{
 		ExpectedRevision: q.run.Revision, Status: AgentRunStatusQueued,
 		Summary: "Received the user's answer; continuing the task", EventType: conversationAnswerEvent,
@@ -294,7 +299,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 func (s *ConversationRunScheduler) conversationAnswerAccepted(ctx context.Context, run *AgentRun, answerID string) (bool, error) {
 	const pageSize = 100
 	for after := int64(0); ; {
-		events, err := s.runs.store.ListActivity(ctx, ActivityFilter{Scope: run.Scope, RunID: run.ID, EventTypes: []string{conversationAnswerEvent}, AfterSequence: after, Limit: pageSize})
+		events, err := s.runStore.ListActivity(ctx, ActivityFilter{Scope: run.Scope, RunID: run.ID, EventTypes: []string{conversationAnswerEvent}, AfterSequence: after, Limit: pageSize})
 		if err != nil {
 			return false, err
 		}

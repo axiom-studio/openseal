@@ -132,7 +132,7 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 			// While the queue is healthy every change and deadline arrives
 			// per scope, so the fixed tick is only the fallback.
 			full = !healthy
-		case <-r.queue.signal:
+		case <-r.queue.signals():
 		case <-healthChanged:
 			continue
 		}

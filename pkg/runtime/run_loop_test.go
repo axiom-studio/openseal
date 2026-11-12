@@ -52,7 +52,7 @@ func (f *loopFixture) withLoopCompactor(binding *TurnRunnerBinding) {
 	activity.now = f.clock.Now
 	binding.Compactor = &LoopCompactor{
 		Host: binding.Host, Sessions: f.store.(AgentSessionStore), Requests: producer.preparer,
-		Budget: newRunActivityCompactionBudget(activity, f.clock.Now), Now: f.clock.Now,
+		Budget: newRunActivityCompactionBudget(f.store, activity, f.clock.Now), Now: f.clock.Now,
 	}
 }
 

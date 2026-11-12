@@ -50,6 +50,12 @@ func NewRunCommandService(store RunCommandStore) *RunCommandService {
 	return &RunCommandService{store: store, now: time.Now}
 }
 
+// transitionRun applies req to the Run through its activity log, stamped
+// with the service's clock.
+func (s *RunCommandService) transitionRun(ctx context.Context, scope Scope, runID string, req RunTransitionRequest) (*AgentRun, *ActivityEvent, error) {
+	return newRunActivityServiceWithClock(s.store, s.store, s.now).TransitionRun(ctx, scope, runID, req)
+}
+
 // FindCreatedAgentRun recovers an exact accepted request without creating work.
 // Hosts may use it before checking mutable admission state on a delivery retry.
 func (s *RunCommandService) FindCreatedAgentRun(ctx context.Context, req CreateAgentRunRequest) (*AgentRunCommandResult, error) {

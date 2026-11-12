@@ -123,10 +123,8 @@ func NewRunLoop(store KernelStore, actions *ActionCoordinator, logger *zap.Sugar
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	activity := NewRunActivityService(store, store)
-	activity.now = config.Now
-	turns := NewAgentTurnService(store, store)
-	turns.now = config.Now
+	activity := newRunActivityServiceWithClock(store, store, config.Now)
+	turns := newAgentTurnServiceWithClock(store, store, config.Now)
 	return &RunLoop{
 		store: store, sessions: sessions, activity: activity, turns: turns,
 		actions: actions, config: config, logger: logger,
@@ -134,6 +132,9 @@ func NewRunLoop(store KernelStore, actions *ActionCoordinator, logger *zap.Sugar
 }
 
 func (l *RunLoop) now() time.Time { return l.config.Now().UTC() }
+
+// setActionCoordinator opens each step's nested-action window on actions.
+func (l *RunLoop) setActionCoordinator(actions *ActionCoordinator) { l.actions = actions }
 
 type RunLoopClaim struct {
 	Run      *AgentRun // claimed, status running, LeaseOwner == WorkerID

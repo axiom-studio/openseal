@@ -72,9 +72,6 @@ type ConversationRoutingRequest struct {
 	ConversationID   string
 	TriggerMessageID string
 	IdempotencyKey   string
-	// childRunKey derives each responder's child Run idempotency key, so the
-	// round can record the Run id before the Run exists.
-	childRunKey func(ConversationParticipant) string
 }
 
 type ConversationCoordinatorConfig struct {
@@ -128,6 +125,13 @@ func NewConversationCoordinator(
 // Coordinate commits the routing decision for a trigger once. A replay with the
 // same idempotency key returns the saved decision without calling the router.
 func (c *ConversationCoordinator) Coordinate(ctx context.Context, req ConversationRoutingRequest) (*ParticipationRoundResult, error) {
+	return c.coordinateWithChildRuns(ctx, req, nil)
+}
+
+// coordinateWithChildRuns is Coordinate for a Team channel's routing Run.
+// childRunKey derives each responder's child Run idempotency key, so the
+// round records the Run id before the Run exists.
+func (c *ConversationCoordinator) coordinateWithChildRuns(ctx context.Context, req ConversationRoutingRequest, childRunKey func(ConversationParticipant) string) (*ParticipationRoundResult, error) {
 	if c == nil || c.conversations == nil || c.participants == nil || c.router == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
@@ -195,9 +199,9 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 		}
 		responders = []ConversationResponder{routed}
 	}
-	if req.childRunKey != nil {
+	if childRunKey != nil {
 		for index := range responders {
-			responders[index].RunID = runIDForIdempotencyKey(req.Scope, req.childRunKey(responders[index].Participant))
+			responders[index].RunID = runIDForIdempotencyKey(req.Scope, childRunKey(responders[index].Participant))
 		}
 	}
 	for range 3 {
@@ -565,4 +569,10 @@ func reverseChannelMessages(messages []*ChannelMessage) {
 	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
 		messages[left], messages[right] = messages[right], messages[left]
 	}
+}
+
+// resolveParticipants lists the participants who may answer in query's
+// conversation.
+func (c *ConversationCoordinator) resolveParticipants(ctx context.Context, query ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+	return c.participants.ResolveConversationParticipants(ctx, query)
 }

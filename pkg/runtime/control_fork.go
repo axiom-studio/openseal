@@ -364,7 +364,7 @@ func (forkHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlCon
 }
 
 func (x *ControlExecutor) resumeFork(ctx context.Context, cc ControlContext) (ControlResume, error) {
-	if x.Forks == nil || x.Forks.store == nil {
+	if !x.Forks.configured() {
 		return ControlResume{}, errors.New("control executor has no fork coordinator")
 	}
 	meta, err := DecodeControlEntryMeta(cc.Entry)
@@ -378,10 +378,9 @@ func (x *ControlExecutor) resumeFork(ctx context.Context, cc ControlContext) (Co
 	if groupID == "" && cc.Entry.Tool.Wait != nil {
 		groupID = cc.Entry.Tool.Wait.GroupID
 	}
-	store := x.Forks.store
 	var group *RunDependencyGroup
 	if groupID != "" {
-		group, err = store.GetRunDependencyGroup(ctx, cc.Run.Scope, groupID)
+		group, err = x.Forks.dependencyGroup(ctx, cc.Run.Scope, groupID)
 		if err != nil && !errors.Is(err, ErrDependencyGroupNotFound) {
 			return ControlResume{}, err
 		}
@@ -399,7 +398,7 @@ func (x *ControlExecutor) resumeFork(ctx context.Context, cc ControlContext) (Co
 			Summary: "Waiting for forked branches",
 		}}, nil
 	}
-	edges, err := store.ListRunDependencies(ctx, cc.Run.Scope, group.ID)
+	edges, err := x.Forks.dependencies(ctx, cc.Run.Scope, group.ID)
 	if err != nil {
 		return ControlResume{}, err
 	}

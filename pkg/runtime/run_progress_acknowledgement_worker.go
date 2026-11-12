@@ -382,6 +382,17 @@ type modelStepProgressAcknowledgementRenderer struct {
 	now    func() time.Time
 }
 
+// newProgressAcknowledgementRenderer renders through host as the Agent
+// agentID at its definition version, with its model credential and
+// instructions (the system prompt adds the acknowledgement rules).
+func newProgressAcknowledgementRenderer(host StepHost, agentID, definitionID, definitionVersion string, modelCredential *capability.CredentialReference, instructions []string) *modelStepProgressAcknowledgementRenderer {
+	return &modelStepProgressAcknowledgementRenderer{
+		host: host, agentID: agentID, definitionID: definitionID, definitionVersion: definitionVersion,
+		modelCredential: modelCredential,
+		system:          append(append([]string(nil), instructions...), runProgressAcknowledgementSystemInstruction),
+	}
+}
+
 func (r *modelStepProgressAcknowledgementRenderer) RenderRunProgressAcknowledgement(ctx context.Context, request RunProgressAcknowledgementRequest) (string, error) {
 	snapshot := request.Snapshot
 	if r == nil || r.host == nil || snapshot.Scope.Validate() != nil || snapshot.RunID == "" || snapshot.AgentID == "" ||

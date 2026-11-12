@@ -636,3 +636,15 @@ func (s *CapabilitySet) catalogLines() []capabilityNoteItem {
 	}
 	return items
 }
+
+// catalogAction is the authorized governed action with capability id id.
+func (s *CapabilitySet) catalogAction(id string) (capability.ModelAction, bool) {
+	action, ok := s.actions[id]
+	return action, ok
+}
+
+// catalogHostTool is the authorized host tool with capability id id.
+func (s *CapabilitySet) catalogHostTool(id string) (HostToolSpec, bool) {
+	spec, ok := s.hostTools[id]
+	return spec, ok
+}

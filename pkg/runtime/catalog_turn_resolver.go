@@ -410,19 +410,16 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *TurnRunnerBi
 	binding.Producer = producer
 	binding.Compactor = &LoopCompactor{
 		Host: r.config.Host, Sessions: r.config.Store, Requests: preparer,
-		Budget: newRunActivityCompactionBudget(NewRunActivityService(r.config.Store, r.config.Store), r.config.Now),
+		Budget: newRunActivityCompactionBudget(r.config.Store, NewRunActivityService(r.config.Store, r.config.Store), r.config.Now),
 		Now:    r.config.Now,
 	}
 	binding.Preparers = []StepPreparer{newRunStartPreparer(r.config.Store, r.config.Store)}
 	binding.Tools = r.config.Tools.ForClaim(LoopToolClaim{
 		Workspace: chat, SkillPrompts: prompts, CapabilityConfig: r.config.Capabilities, CommandPins: script.CommandPins(),
 	})
-	binding.ProgressAcknowledgementRenderer = &modelStepProgressAcknowledgementRenderer{
-		host: r.config.Host, agentID: r.deployment.ID,
-		definitionID: binding.DefinitionID, definitionVersion: binding.DefinitionVersion,
-		modelCredential: preparerConfig.ModelCredential,
-		system:          append(append(append([]string(nil), instructions...), prompt.AgentInstructions...), runProgressAcknowledgementSystemInstruction),
-	}
+	binding.ProgressAcknowledgementRenderer = newProgressAcknowledgementRenderer(r.config.Host,
+		r.deployment.ID, binding.DefinitionID, binding.DefinitionVersion, preparerConfig.ModelCredential,
+		append(append([]string(nil), instructions...), prompt.AgentInstructions...))
 	return binding, nil
 }
 

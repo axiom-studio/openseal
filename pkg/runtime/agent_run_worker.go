@@ -157,6 +157,7 @@ type AgentRunWorkerPool struct {
 	lastFinalizationScan time.Time
 	dependencyCursor     string
 	forks                *RunForkCoordinator
+	dependencies         *DependencyCoordinator // pages waiting fork groups; nil unless the store indexes them
 	collaboration        *CollaborationService
 	conversationTasks    *ConversationTaskService
 	requestInbox         *AgentRequestInboxReconciler
@@ -182,7 +183,7 @@ type AgentRunWorkerPool struct {
 // command's governed calls) on the pool's ActionCoordinator.
 func (p *AgentRunWorkerPool) SetActionCoordinator(actions *ActionCoordinator) {
 	p.actions = actions
-	p.loop.actions = actions
+	p.loop.setActionCoordinator(actions)
 }
 
 func (p *AgentRunWorkerPool) SetRunTerminalFinalizer(finalizer RunTerminalFinalizer) {
@@ -233,6 +234,9 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	pool.usage.touch()
 	if forkStore, ok := store.(RunForkStore); ok {
 		pool.forks = NewRunForkCoordinator(forkStore)
+		if _, indexed := forkStore.(RunDependencyReconciliationStore); indexed {
+			pool.dependencies = NewDependencyCoordinator(forkStore)
+		}
 	}
 	if collaborationStore, ok := store.(CollaborationKernelStore); ok {
 		pool.collaboration = NewCollaborationService(collaborationStore)
@@ -458,7 +462,7 @@ func workerPlainTextFinal(ctx context.Context, cc ControlContext, text string) (
 	var control *ControlExecutor
 	if cc.Binding != nil {
 		if tools, ok := cc.Binding.Tools.(*claimToolExecutor); ok {
-			control = tools.cfg.Control
+			control = tools.controlExecutor()
 		}
 	}
 	if control == nil {
@@ -920,9 +924,9 @@ func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) (*time.T
 		return nil, false
 	}
 	failed := false
-	if _, ok := p.forks.store.(RunDependencyReconciliationStore); ok {
+	if p.dependencies != nil {
 		const pageSize = 32
-		work, err := NewDependencyCoordinator(p.forks.store).ListWaitingRunDependencyGroups(ctx, p.config.Scope, p.dependencyCursor, pageSize)
+		work, err := p.dependencies.ListWaitingRunDependencyGroups(ctx, p.config.Scope, p.dependencyCursor, pageSize)
 		if err != nil {
 			p.logger.Warnw("failed to list waiting dependency groups", "error", err)
 			return nil, true

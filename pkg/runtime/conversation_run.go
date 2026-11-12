@@ -68,6 +68,10 @@ type ConversationRunScheduler struct {
 	approvals      *ApprovalCoordinator
 	config         ConversationRunSchedulerConfig
 	sessionContext ConversationSessionContextResolver
+	// conversationStore and runStore are the stores behind conversations
+	// and runs, for the reads the services do not offer.
+	conversationStore ConversationStore
+	runStore          RunCommandStore
 }
 
 type ConversationSessionContextResolver interface {
@@ -87,10 +91,12 @@ func NewConversationRunScheduler(
 		return nil, err
 	}
 	return &ConversationRunScheduler{
-		conversations: NewConversationService(conversationStore),
-		runs:          NewRunCommandService(runStore),
-		approvals:     NewApprovalCoordinator(runStore, runStore, nil),
-		config:        normalized,
+		conversations:     NewConversationService(conversationStore),
+		runs:              NewRunCommandService(runStore),
+		conversationStore: conversationStore,
+		runStore:          runStore,
+		approvals:         NewApprovalCoordinator(runStore, runStore, nil),
+		config:            normalized,
 	}, nil
 }
 
@@ -124,7 +130,7 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 	if err != nil {
 		return nil, false, err
 	}
-	current, err := s.runs.store.GetAgentRun(ctx, conversation.Scope, runIDForIdempotencyKey(conversation.Scope, request.IdempotencyKey))
+	current, err := s.runStore.GetAgentRun(ctx, conversation.Scope, runIDForIdempotencyKey(conversation.Scope, request.IdempotencyKey))
 	if err != nil {
 		return nil, false, err
 	}
@@ -292,7 +298,7 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context.Context, scope Scope, result *ConversationRunReconcileResult) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
-		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
+		runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{
 			Scope: scope, Kind: RunKindConversation, Statuses: []AgentRunStatus{AgentRunStatusCanceled}, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
@@ -330,7 +336,7 @@ func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context
 			}
 			content := "This request was canceled before completion."
 			references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
-			approvals, err := s.runs.store.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: run.ID, Status: []ApprovalStatus{ApprovalStatusCanceled}, Limit: 1})
+			approvals, err := s.runStore.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: run.ID, Status: []ApprovalStatus{ApprovalStatusCanceled}, Limit: 1})
 			if err != nil {
 				return err
 			}
@@ -641,6 +647,10 @@ type ConversationRunTurnRunner struct {
 	actions  conversationLoopActions
 	activity activityAppender
 	now      func() time.Time
+	// conversationStore is the store behind conversations; runStore the one
+	// behind runs (nil without runs).
+	conversationStore ConversationStore
+	runStore          RunCommandStore
 }
 
 func NewConversationRunTurnRunner(
@@ -656,11 +666,12 @@ func NewConversationRunTurnRunner(
 		return nil, err
 	}
 	runner := &ConversationRunTurnRunner{
-		conversations: NewConversationService(conversationStore), coordinator: coordinator,
+		conversations: NewConversationService(conversationStore), conversationStore: conversationStore, coordinator: coordinator,
 		config: normalized, agentTurns: normalized.AgentTurns, now: time.Now,
 	}
 	if runs, ok := conversationStore.(RunCommandStore); ok {
 		runner.runs = NewRunCommandService(runs)
+		runner.runStore = runs
 	}
 	if portfolio, ok := conversationStore.(PortfolioStore); ok {
 		runner.portfolio = portfolio
@@ -721,7 +732,7 @@ func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context
 	if err != nil {
 		return err
 	}
-	bindings, err := r.coordinator.participants.ResolveConversationParticipants(ctx, ConversationParticipantQuery{Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger)})
+	bindings, err := r.coordinator.resolveParticipants(ctx, ConversationParticipantQuery{Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger)})
 	if err != nil {
 		return err
 	}

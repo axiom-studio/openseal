@@ -235,7 +235,7 @@ func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
 			// While the queue drives this loop each scope runs when changed or
 			// due, so the fixed tick is only the fallback.
 			full = !queueDriven
-		case <-s.queue.signal:
+		case <-s.queue.signals():
 		case <-healthChanged:
 			continue
 		}

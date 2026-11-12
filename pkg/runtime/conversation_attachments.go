@@ -48,6 +48,10 @@ type conversationAttachmentReader struct {
 	content   ArtifactContentStore
 }
 
+func newConversationAttachmentReader(artifacts ArtifactStore, content ArtifactContentStore) *conversationAttachmentReader {
+	return &conversationAttachmentReader{artifacts: artifacts, content: content}
+}
+
 // conversationMessageAttachments is what a message's references produced:
 // the parts that follow the message text and the artifacts the header's
 // "Attached:" line names.

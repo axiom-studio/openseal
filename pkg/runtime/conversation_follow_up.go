@@ -87,7 +87,7 @@ func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, 
 		(message.ReplyToMessageID != "" && message.ReplyToMessageID != root) {
 		return nil, nil
 	}
-	runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
+	runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation, ConversationID: conversation.ID,
 		Order: AgentRunOrderCreatedDesc, Limit: 50,
 	})
@@ -129,7 +129,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 	}
 	interventionID := conversationFollowUpInterventionID(conversation.Scope, message.ID)
 	for attempt := 0; attempt < 3; attempt++ {
-		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
+		runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{
 			Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation,
 			ConcurrencyKey: lane, Order: AgentRunOrderCreatedDesc, Limit: 50,
 		})
@@ -153,7 +153,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 		}
 		var target *AgentRun
 		for _, run := range runs {
-			eligible, err := conversationFollowUpRunEligible(ctx, s.runs.store, conversation, run)
+			eligible, err := conversationFollowUpRunEligible(ctx, s.runStore, conversation, run)
 			if err != nil {
 				return nil, err
 			}
@@ -184,9 +184,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 			// A retry or schedule timer must not delay fresh human input.
 			status, wake = AgentRunStatusQueued, nil
 		}
-		activity := NewRunActivityService(s.runs.store, s.runs.store)
-		activity.now = s.runs.now
-		run, event, err := activity.TransitionRun(ctx, conversation.Scope, target.ID, RunTransitionRequest{
+		run, event, err := s.runs.transitionRun(ctx, conversation.Scope, target.ID, RunTransitionRequest{
 			ExpectedRevision: target.Revision, Status: status, WakeCondition: wake,
 			Summary: "Received a new message for this request", EventType: "run.intervened",
 			Actor:         ActivityActor{Type: "user", ID: actor.ID},
@@ -303,7 +301,7 @@ func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Contex
 		run.WakeCondition.Type != "approval" || run.WakeCondition.Reference == "" {
 		return nil, nil
 	}
-	approval, err := s.runs.store.GetApproval(ctx, run.Scope, run.WakeCondition.Reference)
+	approval, err := s.runStore.GetApproval(ctx, run.Scope, run.WakeCondition.Reference)
 	if errors.Is(err, ErrApprovalNotFound) {
 		return nil, nil
 	}
@@ -313,7 +311,7 @@ func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Contex
 	if approval == nil || approval.Status != ApprovalStatusPending || approval.RunID != run.ID || !approval.CreatedAt.Before(message.CreatedAt) {
 		return nil, nil
 	}
-	call, err := s.runs.store.GetActionCall(ctx, run.Scope, approval.ActionCallID)
+	call, err := s.runStore.GetActionCall(ctx, run.Scope, approval.ActionCallID)
 	if errors.Is(err, ErrActionNotFound) {
 		return nil, nil
 	}
@@ -346,7 +344,7 @@ func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Conte
 	if !valid {
 		return nil
 	}
-	runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
+	runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation,
 		Statuses: []AgentRunStatus{AgentRunStatusWaitingForApproval}, Order: AgentRunOrderCreatedDesc, Limit: 50,
 	})

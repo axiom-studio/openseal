@@ -162,7 +162,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 	if s == nil || s.runs == nil || scope.Validate() != nil || !validOpaqueIdentifier(requestID, 256) {
 		return nil, false, ErrInvalidSkillSetup
 	}
-	store, ok := s.runs.store.(conversationTaskSetupStore)
+	store, ok := s.runStore.(conversationTaskSetupStore)
 	if !ok {
 		return nil, false, errors.New("conversation task setup reconciliation is unavailable")
 	}
@@ -186,7 +186,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 		return nil, false, nil
 	}
 	result := &AgentRunCommandResult{Run: run}
-	accepted, err := skillSetupTaskAccepted(ctx, s.runs.store, run, request)
+	accepted, err := skillSetupTaskAccepted(ctx, s.runStore, run, request)
 	if err != nil || accepted {
 		return result, true, err
 	}
@@ -196,7 +196,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 	// The request settles without resuming once the run no longer acts for
 	// the umbrella and member that asked, for example after the member left
 	// the Team.
-	if resumable, resumeErr := InteractionRunResumable(ctx, teamRosterReader(s.runs.store), run, request.Owner, request.AgentID); resumeErr != nil || !resumable {
+	if resumable, resumeErr := InteractionRunResumable(ctx, teamRosterReader(s.runStore), run, request.Owner, request.AgentID); resumeErr != nil || !resumable {
 		return result, true, resumeErr
 	}
 	if request.Status != "resolved" && request.Status != "dismissed" {
@@ -209,7 +209,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 	if request.Status == "resolved" {
 		instruction = "The requested Skill configuration was saved. Continue this task from its saved progress. Provider access is not yet verified; use only currently authorized actions to verify it and do not repeat completed work."
 	}
-	updated, event, err := NewRunActivityService(s.runs.store, s.runs.store).TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
+	updated, event, err := NewRunActivityService(s.runStore, s.runStore).TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: AgentRunStatusQueued,
 		Summary: "Received the Skill setup result; continuing the task", EventType: conversationTaskSetupEvent,
 		Actor: ActivityActor{Type: "service", ID: "skill-setup-coordinator"}, CorrelationID: request.ID, CausationID: request.ActionCallID,
@@ -225,7 +225,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 			return nil, true, readErr
 		}
 		if latest != nil {
-			accepted, readErr := skillSetupTaskAccepted(ctx, s.runs.store, latest, request)
+			accepted, readErr := skillSetupTaskAccepted(ctx, s.runStore, latest, request)
 			if readErr != nil {
 				return nil, true, readErr
 			}
@@ -259,14 +259,14 @@ func skillSetupTaskAccepted(ctx context.Context, store RunActivityStore, run *Ag
 }
 
 func (s *ConversationRunScheduler) reconcileSkillSetupTasks(ctx context.Context, scope Scope, result *ConversationRunReconcileResult) error {
-	if _, ok := s.runs.store.(conversationTaskSetupStore); !ok {
+	if _, ok := s.runStore.(conversationTaskSetupStore); !ok {
 		return nil
 	}
 	// Collect identities before changing status so offset pagination does not
 	// skip later waits when the first page becomes queued.
 	var requestIDs []string
 	for offset := 0; ; offset += 100 {
-		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindAgentWork, Statuses: []AgentRunStatus{AgentRunStatusWaitingForEvent}, Limit: 100, Offset: offset})
+		runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindAgentWork, Statuses: []AgentRunStatus{AgentRunStatusWaitingForEvent}, Limit: 100, Offset: offset})
 		if err != nil {
 			return err
 		}

@@ -351,6 +351,11 @@ type controlTool struct {
 	handler controlHandler
 }
 
+// newControlTool names handler as the tool name.
+func newControlTool(name ControlToolName, handler controlHandler) controlTool {
+	return controlTool{name: name, handler: handler}
+}
+
 // newControlRegistry builds the registry of tools. It panics on an unknown
 // tool name or a tool listed twice: the lists are fixed in code.
 func newControlRegistry(tools ...controlTool) controlRegistry {

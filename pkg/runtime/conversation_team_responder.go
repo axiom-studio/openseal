@@ -46,10 +46,10 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 		return nil, err
 	}
 	childKey := func(participant ConversationParticipant) string { return teamMemberRunKey(run, participant.ID) }
-	result, err := r.coordinator.Coordinate(ctx, ConversationRoutingRequest{
+	result, err := r.coordinator.coordinateWithChildRuns(ctx, ConversationRoutingRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, TriggerMessageID: triggerID,
-		IdempotencyKey: conversationRoutingKey(run.Scope, conversation.ID, triggerID), childRunKey: childKey,
-	})
+		IdempotencyKey: conversationRoutingKey(run.Scope, conversation.ID, triggerID),
+	}, childKey)
 	if err != nil {
 		if ctx.Err() != nil || permanentConversationRunError(err) {
 			return nil, err
@@ -58,7 +58,10 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	}
 	// A member already answering this person takes the message as a follow-up,
 	// like a 1:1 chat's active Run; nobody's work is interrupted.
-	followUps := &ConversationRunScheduler{conversations: r.conversations, runs: r.runs, approvals: NewApprovalCoordinator(r.runs.store, r.runs.store, nil)}
+	followUps := &ConversationRunScheduler{
+		conversations: r.conversations, runs: r.runs, conversationStore: r.conversationStore, runStore: r.runStore,
+		approvals: NewApprovalCoordinator(r.runStore, r.runStore, nil),
+	}
 	root, _ := run.Context["threadRootMessageId"].(string)
 	runIDs := make([]interface{}, 0, len(result.Round.Responders))
 	routed := map[string]bool{}
@@ -70,7 +73,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	}
 	for _, responder := range result.Round.Responders {
 		key := childKey(responder.Participant)
-		existing, err := r.runs.store.GetAgentRun(ctx, run.Scope, runIDForIdempotencyKey(run.Scope, key))
+		existing, err := r.runStore.GetAgentRun(ctx, run.Scope, runIDForIdempotencyKey(run.Scope, key))
 		if err != nil {
 			return nil, err
 		}
@@ -147,11 +150,11 @@ type agentConversationTeamMember struct {
 // teamMembers lists the members who may answer in the channel, with the
 // names an @mention uses.
 func (r *ConversationRunTurnRunner) teamMembers(ctx context.Context, conversation *Conversation, trigger *ChannelMessage) (conversationTeamRoster, []ConversationParticipantBinding, error) {
-	roster := loadConversationTeamRoster(ctx, r.conversations.store, conversation)
+	roster := loadConversationTeamRoster(ctx, r.conversationStore, conversation)
 	if r.coordinator == nil {
 		return roster, nil, nil
 	}
-	bindings, err := r.coordinator.participants.ResolveConversationParticipants(ctx, ConversationParticipantQuery{
+	bindings, err := r.coordinator.resolveParticipants(ctx, ConversationParticipantQuery{
 		Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger),
 	})
 	if errors.Is(err, ErrNoConversationParticipants) {
@@ -165,16 +168,22 @@ func (r *ConversationRunTurnRunner) agentConversationTeamContext(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
+	return roster.agentTeam(bindings, run.AssignedAgentID), nil
+}
+
+// agentTeam is the team context of the Agent you: the routing notes and
+// every member who may answer, by binding.
+func (roster conversationTeamRoster) agentTeam(bindings []ConversationParticipantBinding, you string) *agentConversationTeam {
 	team := &agentConversationTeam{Notes: roster.notes, Roster: make([]agentConversationTeamMember, 0, len(bindings))}
 	for _, binding := range bindings {
 		info := roster.members[binding.Participant.ID]
 		member := agentConversationTeamMember{
 			AgentID: binding.Participant.ID, Name: teamMemberName(info, binding), Role: info.role, Owns: info.owns,
-			Lead: binding.Participant.ID == roster.lead, You: binding.Participant.ID == run.AssignedAgentID,
+			Lead: binding.Participant.ID == roster.lead, You: binding.Participant.ID == you,
 		}
 		team.Roster = append(team.Roster, member)
 	}
-	return team, nil
+	return team
 }
 
 func teamMemberName(info conversationTeamMember, binding ConversationParticipantBinding) string {

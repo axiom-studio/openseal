@@ -268,7 +268,7 @@ func controlRejectRecursiveRunbook(ctx context.Context, portfolio PortfolioStore
 // resume: a group still waiting re-parks; otherwise the child's saved output
 // becomes the entry's result.
 func (operationHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
-	if x.Forks == nil || x.Forks.store == nil || x.Portfolio == nil {
+	if !x.Forks.configured() || x.Portfolio == nil {
 		return ControlResume{}, errors.New("control executor has no fork coordinator")
 	}
 	args := cc.Arguments.(*operationArgs)
@@ -285,7 +285,7 @@ func (operationHandler) resume(ctx context.Context, x *ControlExecutor, cc Contr
 	}
 	var group *RunDependencyGroup
 	if groupID != "" {
-		group, err = x.Forks.store.GetRunDependencyGroup(ctx, cc.Run.Scope, groupID)
+		group, err = x.Forks.dependencyGroup(ctx, cc.Run.Scope, groupID)
 		if err != nil && !errors.Is(err, ErrDependencyGroupNotFound) {
 			return ControlResume{}, err
 		}

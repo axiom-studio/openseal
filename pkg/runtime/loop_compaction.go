@@ -70,15 +70,16 @@ type compactionBudget interface {
 // runActivityCompactionBudget is the store-backed compactionBudget: a
 // running→running TransitionRun under the lease, like the step reservation.
 type runActivityCompactionBudget struct {
+	runs     agentRunReader // re-reads the Run before each write
 	activity *RunActivityService
 	now      func() time.Time
 }
 
-func newRunActivityCompactionBudget(activity *RunActivityService, now func() time.Time) compactionBudget {
+func newRunActivityCompactionBudget(runs agentRunReader, activity *RunActivityService, now func() time.Time) compactionBudget {
 	if now == nil {
 		now = time.Now
 	}
-	return &runActivityCompactionBudget{activity: activity, now: now}
+	return &runActivityCompactionBudget{runs: runs, activity: activity, now: now}
 }
 
 // compactionBudgetWriteAttempts bounds the re-read/retry of a budget write
@@ -115,13 +116,13 @@ func (b *runActivityCompactionBudget) SettleCompaction(ctx context.Context, run 
 // transition re-reads the Run before each attempt and writes at its current
 // revision; the lease owner check in TransitionRun is the real fence.
 func (b *runActivityCompactionBudget) transition(ctx context.Context, run *AgentRun, request func(revision int64) RunTransitionRequest) (*AgentRun, error) {
-	if b == nil || b.activity == nil || b.activity.portfolio == nil {
+	if b == nil || b.activity == nil || b.runs == nil {
 		return nil, fmt.Errorf("%w: the compaction budget has no run store", ErrTurnHostConfiguration)
 	}
 	var err error
 	for attempt := 0; attempt < compactionBudgetWriteAttempts; attempt++ {
 		var current *AgentRun
-		current, err = b.activity.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
+		current, err = b.runs.GetAgentRun(ctx, run.Scope, run.ID)
 		if err != nil {
 			return nil, err
 		}
