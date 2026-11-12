@@ -32,6 +32,9 @@ func (i ExternalOperationIdentity) Validate() error {
 	return nil
 }
 
+// CanonicalExternalOperationResource returns the canonical form of an
+// external operation resource: a channel handle, an HTTP(S) URL, a single
+// mailbox or an opaque identifier. It fails for anything else.
 func CanonicalExternalOperationResource(value string) (string, error) {
 	rawValue := value
 	value = strings.TrimSpace(value)
@@ -89,6 +92,9 @@ func CanonicalExternalOperationResource(value string) (string, error) {
 	return value, nil
 }
 
+// ComputeExternalOperationDigest returns the digest that identifies one
+// occurrence of an external operation for its owner, or "" when identity is
+// nil.
 func ComputeExternalOperationDigest(scope models.Scope, owner models.ObjectiveOwner, objectiveID string, identity *ExternalOperationIdentity, idempotencyKey string) (string, error) {
 	if identity == nil {
 		return "", nil
