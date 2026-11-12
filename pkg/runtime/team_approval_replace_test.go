@@ -64,7 +64,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 	// nova's parked Run is queued to see its superseded call; it is not
 	// handed the message as a follow-up.
 	run, err := f.store.GetAgentRun(ctx, scope, nova.Call.RunID)
-	if err != nil || run.Status != AgentRunStatusQueued || conversationRunHasFollowUp(run, next.ID) {
+	if err != nil || run.Status != AgentRunStatusQueued || runHasFollowUp(run, next.ID) {
 		t.Fatalf("nova's Run = %#v, %v", run, err)
 	}
 	if call, err := f.store.GetActionCall(ctx, scope, nova.Call.ID); err != nil || call.Status != ActionCallStatusDenied || call.CompletedAt == nil {

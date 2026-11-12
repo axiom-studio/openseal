@@ -256,7 +256,7 @@ func TestConversationFollowUpsSeparateMembersIncludingDelayedScheduling(t *testi
 			if reverse {
 				first, second = second, first
 			}
-			if memberA.Context[conversationRunContextTriggerID] != first.ID || !conversationRunHasFollowUp(memberA, second.ID) {
+			if memberA.Context[conversationRunContextTriggerID] != first.ID || !runHasFollowUp(memberA, second.ID) {
 				t.Fatalf("member A Run trigger/follow-up = %#v", memberA)
 			}
 			memberB, err := f.store.GetAgentRun(t.Context(), f.conversation.Scope, runs[1].ID)
@@ -315,7 +315,7 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "follow-up-a"})
 	delivered := f.schedule(t, messageA)
 	if delivered.ID != root.ID || delivered.Status != AgentRunStatusQueued || delivered.WakeCondition != nil ||
-		!conversationRunHasFollowUp(delivered, messageA.ID) {
+		!runHasFollowUp(delivered, messageA.ID) {
 		t.Fatalf("follow-up did not resume the waiting Run: %#v", delivered)
 	}
 	approval, err = f.store.GetApproval(t.Context(), scope, proposal.Approval.ID)
@@ -382,7 +382,7 @@ func TestConversationFollowUpUsesVoiceInitiator(t *testing.T) {
 	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
 	f.schedule(t, messageA)
 	current, err := f.store.GetAgentRun(t.Context(), voice.Scope, voice.ID)
-	if err != nil || current.Status != AgentRunStatusQueued || !conversationRunHasFollowUp(current, messageA.ID) {
+	if err != nil || current.Status != AgentRunStatusQueued || !runHasFollowUp(current, messageA.ID) {
 		t.Fatalf("call initiator's message was not delivered to their call Run: %#v, %v", current, err)
 	}
 	f.assertRunUnchanged(t, runB)

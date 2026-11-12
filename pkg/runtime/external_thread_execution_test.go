@@ -47,7 +47,7 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	}
 	// A follow-up in an active thread is delivered to that thread's Run
 	// instead of starting a parallel Run in the same lane.
-	if applied[2].RunID != first.ID || !conversationRunHasFollowUp(first, applied[2].ChannelMessageID) || len(first.PendingInterventions) != 1 ||
+	if applied[2].RunID != first.ID || !runHasFollowUp(first, applied[2].ChannelMessageID) || len(first.PendingInterventions) != 1 ||
 		first.PendingInterventions[0].Instruction != "followup-one" {
 		t.Fatalf("follow-up was not delivered to the active thread Run: item=%#v run=%#v", applied[2], first)
 	}

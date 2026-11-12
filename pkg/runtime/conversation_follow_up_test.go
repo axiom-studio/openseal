@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -157,7 +158,7 @@ func TestConversationFollowUpDeliveryPreservesWaitingStates(t *testing.T) {
 			}
 			message := f.post(t, "user", "Actually use the other card")
 			delivered := f.schedule(t, message)
-			if delivered.ID != run.ID || delivered.Status != test.want || !conversationRunHasFollowUp(delivered, message.ID) {
+			if delivered.ID != run.ID || delivered.Status != test.want || !runHasFollowUp(delivered, message.ID) {
 				t.Fatalf("delivered Run = %#v", delivered)
 			}
 			if test.want == test.status && (test.wake == nil) != (delivered.WakeCondition == nil) {
@@ -413,7 +414,7 @@ func TestTeamFollowUpAppendsToEveryMemberSession(t *testing.T) {
 		f.schedule(followUp)
 		for _, agentID := range members {
 			current := f.run(runs[agentID].ID)
-			if !conversationRunHasFollowUp(current, followUp.ID) || current.Revision <= revisions[agentID] {
+			if !runHasFollowUp(current, followUp.ID) || current.Revision <= revisions[agentID] {
 				t.Fatalf("%s: follow-up not delivered (revision %d, was %d): %#v", agentID, current.Revision, revisions[agentID], current.PendingInterventions)
 			}
 		}
@@ -431,5 +432,13 @@ func TestTeamFollowUpAppendsToEveryMemberSession(t *testing.T) {
 		if runs, err := f.store.ListAgentRuns(f.ctx, AgentRunFilter{Scope: f.conversation.Scope, Kind: RunKindConversation, Owner: &f.conversation.Owner}); err != nil || len(runs) != len(members) {
 			t.Fatalf("the follow-up started new work: %d runs, %v", len(runs), err)
 		}
+	})
+}
+
+// runHasFollowUp reports whether messageID was delivered into run as a
+// follow-up.
+func runHasFollowUp(run *AgentRun, messageID string) bool {
+	return slices.ContainsFunc(models.ConversationRunFollowUps(run), func(delivery ConversationMessageDelivery) bool {
+		return delivery.MessageID == messageID
 	})
 }

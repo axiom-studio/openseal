@@ -138,7 +138,7 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 		}
 		for _, run := range []*AgentRun{rootOneRun, rootTwoRun} {
 			current, err := store.GetAgentRun(t.Context(), conversation.Scope, run.ID)
-			if err != nil || current == nil || conversationRunHasFollowUp(current, newOrdinary.ID) {
+			if err != nil || current == nil || runHasFollowUp(current, newOrdinary.ID) {
 				t.Fatalf("ordinary prompt reached a call thread: %#v, %v", current, err)
 			}
 		}
