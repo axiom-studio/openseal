@@ -8,7 +8,6 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
-	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
@@ -97,16 +96,5 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 	}
 	if _, err := restartedTeams.GetDeployment(ctx, capability.ScopeReference{Kind: "tenant", ID: "other"}, deployment.ID); err == nil {
 		t.Fatal("cross-scope Team deployment should not be visible")
-	}
-}
-
-func sqliteTeamDefinition(version string) *kernelteam.Definition {
-	return &kernelteam.Definition{
-		ID: "research-team", Version: version, DisplayName: "Research Team", Purpose: "Produce evidence-backed findings",
-		Delegation: kernelteam.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 4, RequireAcceptance: true},
-		Approvals:  kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal},
-		Amendments: workforce.AmendmentPolicy{
-			AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"},
-		},
 	}
 }

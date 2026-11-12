@@ -36,7 +36,8 @@ func (s *approvalNotificationConflictStore) CommitChannelMessage(ctx context.Con
 
 func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheckpoint(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []skill.ConversationDeliveryOperation{
+	store, db := newTestSQLiteStore(t)
+	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, "slack", []skill.ConversationDeliveryOperation{
 		skill.ConversationDeliveryMessageSend, skill.ConversationDeliveryMessageUpdate,
 	})
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
@@ -52,6 +53,33 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	// A tenant's immutable approval history must not starve current,
+	// deadline-bearing work when the worker uses a bounded page.
+	// The store holds one approval per action call, so each historical
+	// approval belongs to its own succeeded call.
+	for index := range 11 {
+		suffix := string(rune('a' + index))
+		historyCall := &ActionCall{ID: "historical-call-" + suffix, Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-0", DeploymentID: endpoint.DeploymentID,
+			Origin: ActionOriginLoop, Execution: ActionExecutionLoop, SkillID: "browser", SkillVersion: "1.0.0", Action: "comment",
+			Status: ActionCallStatusSucceeded, ApprovalID: "historical-approval-" + suffix, MaxAttempts: 1, Revision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
+		decided := now.Add(-time.Hour)
+		historical := &ApprovalCheckpoint{
+			ID: "historical-approval-" + suffix, Scope: endpoint.Scope, RunID: claimed.ID,
+			ActionCallID: historyCall.ID, Status: ApprovalStatusApproved, Summary: "Historical comment",
+			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ExpiresAt: decided.Add(24 * time.Hour),
+			DecisionID: "historical-decision-" + suffix, DecisionBy: &ApprovalPrincipal{Type: "user", ID: "operator"}, DecidedAt: &decided, Revision: 1,
+			CreatedAt: now.Add(-time.Hour).Add(time.Duration(index) * time.Second), UpdatedAt: now.Add(-time.Hour),
+		}
+		if index == 0 {
+			historical.Destinations = []ApprovalDestination{{EndpointID: endpoint.ID}}
+		}
+		historyEvent := &ActivityEvent{ID: "historical-event-" + suffix, Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: ActivitySeverityInfo,
+			AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: historical.Summary,
+			Visibility: ActivityVisibilityScope, CreatedAt: now.Add(-time.Hour)}
+		if _, err := store.CreateActionProposal(ctx, ActionProposalRecord{Call: historyCall, Approval: historical, Event: historyEvent, Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	call := &ActionCall{
 		ID: "call-1", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
@@ -84,25 +112,6 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if _, err := store.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: waiting, Event: event, ExpectedRunRevision: claimed.Revision, Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
 		t.Fatal(err)
 	}
-	// A tenant's immutable approval history must not starve current,
-	// deadline-bearing work when the worker uses a bounded page.
-	// The store holds one approval per action call, so each historical
-	// approval belongs to its own succeeded call.
-	for index := range 11 {
-		suffix := string(rune('a' + index))
-		historyCall := &ActionCall{ID: "historical-call-" + suffix, Scope: endpoint.Scope, RunID: claimed.ID, Status: ActionCallStatusSucceeded, Revision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
-		putStoredAction(t, store, historyCall)
-		historical := &ApprovalCheckpoint{
-			ID: "historical-approval-" + suffix, Scope: endpoint.Scope, RunID: claimed.ID,
-			ActionCallID: historyCall.ID, Status: ApprovalStatusApproved, Revision: 1,
-			CreatedAt: now.Add(-time.Hour).Add(time.Duration(index) * time.Second), UpdatedAt: now.Add(-time.Hour),
-		}
-		if index == 0 {
-			historical.Destinations = []ApprovalDestination{{EndpointID: endpoint.ID}}
-		}
-		putStoredApproval(t, store, historical)
-	}
-
 	transport := NewExternalConversationTransportService(store, catalog)
 	transport.now = func() time.Time { return now }
 	workerWithoutCallback := NewApprovalNotificationWorker(store, transport, catalog)
@@ -123,7 +132,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
 	// Marketplace definitions may retain their portable manifest channel key
 	// after the reviewed callback has been placed onto a concrete endpoint.
-	rewriteStoredPayload(t, store, "approval_checkpoints", endpoint.Scope, approval.ID, func(stored *ApprovalCheckpoint) {
+	rewriteRowPayload(t, db, "approval_checkpoints", endpoint.Scope, approval.ID, func(stored *ApprovalCheckpoint) {
 		stored.Destinations = []ApprovalDestination{{EndpointID: "coding-slack-channel"}}
 	})
 	lookupStore := &approvalNotificationDeliveryLookupStore{ApprovalNotificationStore: store}
@@ -290,7 +299,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	}
 	for _, message := range messages {
 		if strings.HasPrefix(message.IdempotencyKey, "approval-outcome:"+approval.ID+":") {
-			execStoreSQL(t, store, `UPDATE channel_messages SET payload = json_set(payload, '$.content', ?)
+			execSQL(t, db, `UPDATE channel_messages SET payload = json_set(payload, '$.content', ?)
 				WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND id = ?`,
 				"historical presentation", message.Scope.Kind, message.Scope.ID, message.ConversationID, message.ID)
 		}

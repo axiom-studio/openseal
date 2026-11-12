@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/google/uuid"
 )
 
 func agentTrialArguments() map[string]interface{} {
@@ -25,10 +26,29 @@ func agentTrialArguments() map[string]interface{} {
 	}
 }
 
-// putAgentTrialRun stores run as given, bypassing transition rules.
+// putAgentTrialRun stores run in whatever state it is in, bypassing
+// transition rules: it creates the Run, or saves it as the next revision of
+// the stored one and sets run.Revision to that revision.
 func putAgentTrialRun(t *testing.T, store *SQLiteStore, run *AgentRun) *AgentRun {
 	t.Helper()
-	putStoredRun(t, store, cloneAgentRun(run))
+	ctx := context.Background()
+	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current == nil {
+		if err := store.CreateAgentRun(ctx, cloneAgentRun(run)); err != nil {
+			t.Fatalf("create run %s: %v", run.ID, err)
+		}
+		return run
+	}
+	run.Revision = current.Revision + 1
+	event := &ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: run.ID, EventType: "run.updated",
+		Summary: "Put agent trial test run", Actor: ActivityActor{Type: "test", ID: "agent-trial"},
+		Visibility: ActivityVisibilityScope, CreatedAt: time.Now().UTC()}
+	if _, err := store.UpdateAgentRunWithEvent(ctx, cloneAgentRun(run), current.Revision, event, nil); err != nil {
+		t.Fatalf("update run %s: %v", run.ID, err)
+	}
 	return run
 }
 
@@ -160,7 +180,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 	store := newTestKernelStore(t)
 	parent := putAgentTrialRun(t, store, &AgentRun{
 		ID: "parent", Scope: scope, Kind: RunKindConversation, RootRunID: "parent", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
-		AssignedAgentID: "finn", Status: AgentRunStatusRunning, Revision: 1, CreatedAt: time.Now().UTC(),
+		AssignedAgentID: "finn", Goal: "Build an Agent", Status: AgentRunStatusRunning, Revision: 1, CreatedAt: time.Now().UTC(),
 	})
 	trial, err := agentTrialContextMap(AgentTrialContext{
 		Profile: agentProfileArguments{

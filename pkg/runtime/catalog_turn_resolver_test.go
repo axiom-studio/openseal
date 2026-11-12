@@ -132,7 +132,9 @@ func claimedBindingRun(t *testing.T, store *SQLiteStore, run *AgentRun) *AgentRu
 	if run.Context == nil {
 		run.Context = map[string]interface{}{}
 	}
-	putStoredRun(t, store, cloneAgentRun(run))
+	if err := store.CreateAgentRun(context.Background(), cloneAgentRun(run)); err != nil {
+		t.Fatalf("create run %s: %v", run.ID, err)
+	}
 	return run
 }
 
@@ -214,7 +216,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 		{name: "runbook child", run: AgentRun{Goal: "Draft the summary", Source: RunSourceRequest, Entrypoint: "draft", Context: map[string]interface{}{
 			DelegationModeContextKey: string(runbook.DelegateReason),
 		}}, producer: "model", fork: true, actions: 1, goalKind: "routine"},
-		{name: "capability invocation", run: AgentRun{Context: map[string]interface{}{
+		{name: "capability invocation", run: AgentRun{Goal: "Reply on the forum", Context: map[string]interface{}{
 			"capabilityInvocation": map[string]interface{}{"skillId": "forum", "skillVersion": "1", "action": "reply"},
 		}}, deterministic: true, producer: "capability", actions: 1},
 	}

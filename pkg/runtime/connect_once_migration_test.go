@@ -287,9 +287,10 @@ func TestSQLiteConnectOnceMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
+	db := openTestSQLiteDB(t, path)
 	h := connectOnceMigrationHarness{
 		sqlite: true,
-		db:     func() *sql.DB { return store.db },
+		db:     func() *sql.DB { return db },
 		table:  func(name string) string { return name },
 		store:  func() connectOnceMigrationStore { return store },
 		rerun:  func(*testing.T) {},

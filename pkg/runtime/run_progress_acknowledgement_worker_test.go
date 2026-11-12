@@ -23,8 +23,15 @@ type runProgressWorkerFixture struct {
 
 func newRunProgressWorkerFixture(t *testing.T, provider string, operations []capability.ConversationDeliveryOperation) runProgressWorkerFixture {
 	t.Helper()
+	return newRunProgressWorkerFixtureOn(t, newTestKernelStore(t), provider, operations)
+}
+
+// newRunProgressWorkerFixtureOn builds the fixture in store, so a test can
+// pass a store it also holds its own connection to (newTestSQLiteStore).
+func newRunProgressWorkerFixtureOn(t *testing.T, store *SQLiteStore, provider string, operations []capability.ConversationDeliveryOperation) runProgressWorkerFixture {
+	t.Helper()
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, provider, operations)
+	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, provider, operations)
 	conversations := NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Support thread",

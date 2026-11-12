@@ -249,8 +249,15 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "connect"}
-	failed := &ActionCall{ID: "failed", Scope: scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, Action: SkillActionRequestSetup, Status: ActionCallStatusFailed, Arguments: args}
-	putStoredAction(t, store, failed)
+	now := time.Now().UTC()
+	failed := &ActionCall{ID: "failed", Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "agent", Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup, Status: ActionCallStatusFailed, Arguments: args,
+		MaxAttempts: 1, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	event := &ActivityEvent{ID: "failed-setup", Scope: scope, RunID: run.ID, EventType: "action.failed", Summary: "Setup failed",
+		Actor: ActivityActor{Type: "worker", ID: "worker"}, Visibility: ActivityVisibilityScope, CreatedAt: now}
+	if _, err := store.CreateActionProposal(ctx, ActionProposalRecord{Call: failed, Event: event, Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
+		t.Fatal(err)
+	}
 	_, err = dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "retry"}, Arguments: args}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err == nil || discoveries != 0 {
 		t.Fatalf("repeated failed setup rediscovered: %v %d", err, discoveries)
