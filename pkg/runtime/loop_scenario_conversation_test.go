@@ -524,19 +524,7 @@ func (convTeamCatalog) GetTeamDefinition(context.Context, string, string) (*kern
 // convMemberAgentBinding, as it does for the fixture's own binding.
 func convMemberBinding(f *loopFixture, run *AgentRun) *TurnRunnerBinding {
 	f.t.Helper()
-	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), ConversationRunTurnRunnerConfig{
-		AttachmentContent: &answerVisualContent{}, AgentTurns: TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
-			return convMemberAgentBinding(f, run), nil
-		}),
-	}, models.WithClock(f.clock.Now))
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	binding, err := runner.ResolveTurnRunner(f.ctx, run)
-	if err != nil {
-		f.t.Fatalf("resolve member conversation turn runner: %v", err)
-	}
-	return binding
+	return f.conversationBinding(run, func(run *AgentRun) *TurnRunnerBinding { return convMemberAgentBinding(f, run) })
 }
 
 // convMemberAgentBinding is the member or thread Run's own Agent binding:

@@ -652,6 +652,28 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 	return binding
 }
 
+// conversationBinding is a chat Run's binding as a conversation turn runner
+// resolves it when agent gives the Run's own Agent binding: the runner adds
+// the conversation loop seams on top. Scenarios use it for the Runs whose
+// Agent binding the fixture cannot build (Team members, threads, children).
+func (f *loopFixture) conversationBinding(run *AgentRun, agent func(*AgentRun) *TurnRunnerBinding) *TurnRunnerBinding {
+	f.t.Helper()
+	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), ConversationRunTurnRunnerConfig{
+		AttachmentContent: &answerVisualContent{},
+		AgentTurns: TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+			return agent(run), nil
+		}),
+	}, models.WithClock(f.clock.Now))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(f.ctx, run)
+	if err != nil {
+		f.t.Fatalf("resolve conversation turn runner: %v", err)
+	}
+	return binding
+}
+
 // agentBinding is the Agent's own TurnRunnerBinding, as the catalog resolver
 // builds it: the model producer over the catalog preparer, the run-start
 // preparer, the claim tool executor, the control authority and the kernel
