@@ -57,6 +57,10 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 			if err != nil || len(deliveries) != 2 {
 				t.Fatalf("duplicate/missing review links: %#v %v", deliveries, err)
 			}
+			scheduler, err := NewConversationRunScheduler(fixture.store, fixture.store, ConversationRunSchedulerConfig{})
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, delivery := range deliveries {
 				if delivery.ExternalThreadID != "thread" || delivery.ExternalConversationID != "conversation" {
 					t.Fatal("review escaped its origin")
@@ -70,9 +74,11 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 				}
 				presentation, _ := review["presentation"].(map[string]interface{})
 				message, err := fixture.store.GetChannelMessage(t.Context(), delivery.Scope, delivery.ConversationID, delivery.ChannelMessageID)
-				if err != nil || message.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: ChannelReviewParticipantID}) ||
-					conversationMessageStartsRun(fixture.conversation, message) {
+				if err != nil || message.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: ChannelReviewParticipantID}) {
 					t.Fatalf("review message = %#v %v", message, err)
+				}
+				if started, _, err := scheduler.ScheduleMessage(t.Context(), delivery.Scope, delivery.ConversationID, delivery.ChannelMessageID); err != nil || started != nil {
+					t.Fatalf("review message started a Run: %#v %v", started, err)
 				}
 				if delivery.Correlation.ID == "approval:"+approval.ID {
 					if presentation["title"] != "Review **this change**" || !strings.HasPrefix(message.Content, "Review **this change**\n\n[Review approval](") {
