@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -90,37 +91,37 @@ type conversationContextSection struct {
 }
 
 type conversationContextInput struct {
-	Run          *AgentRun
-	Session      *AgentSession
-	Sessions     AgentSessionStore // reads the session's entries (path messages, earlier notes)
-	Conversation *Conversation
-	Trigger      *ChannelMessage
-	Viewer       ConversationViewer
-	Recent       []*ChannelMessage // last 50 visible messages ≤ Through, ascending (card state and reactions)
-	CatchUp      *catchUpResult    // the entries appended with this note; nil when none
-	Backdrop     []*ChannelMessage // seed only; CatchUp.Backdrop when nil
-	Step         int64             // the step the note is appended in
+	Run          *models.AgentRun
+	Session      *models.AgentSession
+	Sessions     models.AgentSessionStore // reads the session's entries (path messages, earlier notes)
+	Conversation *models.Conversation
+	Trigger      *models.ChannelMessage
+	Viewer       models.ConversationViewer
+	Recent       []*models.ChannelMessage // last 50 visible messages ≤ Through, ascending (card state and reactions)
+	CatchUp      *catchUpResult           // the entries appended with this note; nil when none
+	Backdrop     []*models.ChannelMessage // seed only; CatchUp.Backdrop when nil
+	Step         int64                    // the step the note is appended in
 }
 
 // previousConversationContextDigests is what the session last saw of each
 // section: the digests of the newest run_context notes after its last
 // compaction, merged newest first. The Run's own note (a rebuilt start) is
 // left out.
-func previousConversationContextDigests(ctx context.Context, sessions AgentSessionStore, session *AgentSession, runID string) (map[string]string, error) {
+func previousConversationContextDigests(ctx context.Context, sessions models.AgentSessionStore, session *models.AgentSession, runID string) (map[string]string, error) {
 	if sessions == nil {
 		return map[string]string{}, nil
 	}
-	entries, err := sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: session.Scope, SessionID: session.ID, Types: []SessionEntryType{SessionEntryNote},
-		NoteKinds: []NoteKind{NoteRunContext}, AfterCompaction: true, Descending: true, Limit: runContextPreviousNotes,
+	entries, err := sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: session.Scope, SessionID: session.ID, Types: []models.SessionEntryType{models.SessionEntryNote},
+		NoteKinds: []models.NoteKind{models.NoteRunContext}, AfterCompaction: true, Descending: true, Limit: runContextPreviousNotes,
 	})
-	if errors.Is(err, ErrAgentSessionNotFound) {
+	if errors.Is(err, models.ErrAgentSessionNotFound) {
 		return map[string]string{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	others := make([]*SessionEntry, 0, len(entries))
+	others := make([]*models.SessionEntry, 0, len(entries))
 	for _, entry := range entries {
 		if entry != nil && entry.RunID != runID {
 			others = append(others, entry)
@@ -147,10 +148,10 @@ func runContextDigest(text string) string {
 
 // latestContextDigests merges the section digests of run_context notes given
 // newest first: the newest note that carries a section wins.
-func latestContextDigests(entries []*SessionEntry) map[string]string {
+func latestContextDigests(entries []*models.SessionEntry) map[string]string {
 	digests := make(map[string]string)
 	for _, entry := range entries {
-		if entry == nil || entry.Type != SessionEntryNote || entry.Note == nil || entry.Note.Kind != NoteRunContext || len(entry.Note.Data) == 0 {
+		if entry == nil || entry.Type != models.SessionEntryNote || entry.Note == nil || entry.Note.Kind != models.NoteRunContext || len(entry.Note.Data) == 0 {
 			continue
 		}
 		var data runContextNoteData
@@ -168,7 +169,7 @@ func latestContextDigests(entries []*SessionEntry) map[string]string {
 
 // conversationContextNote selects the sections to send and builds the note
 // entry of runID in session. It is nil when no section is to be sent.
-func conversationContextNote(session *AgentSession, runID string, sections []conversationContextSection, previous map[string]string) *SessionEntry {
+func conversationContextNote(session *models.AgentSession, runID string, sections []conversationContextSection, previous map[string]string) *models.SessionEntry {
 	if session == nil {
 		return nil
 	}
@@ -212,11 +213,11 @@ func conversationContextNote(session *AgentSession, runID string, sections []con
 	}
 	text := boundRunContextText(order, texts)
 	encoded, _ := json.Marshal(data)
-	key := RunContextSourceKey(runID)
-	entry := &SessionEntry{
-		ID: SessionEntryID(session.ID, key), Scope: session.Scope, SessionID: session.ID, RunID: runID,
-		Type: SessionEntryNote, SourceKey: key,
-		Note: &NoteEntry{Kind: NoteRunContext, Text: text, Data: encoded},
+	key := models.RunContextSourceKey(runID)
+	entry := &models.SessionEntry{
+		ID: models.SessionEntryID(session.ID, key), Scope: session.Scope, SessionID: session.ID, RunID: runID,
+		Type: models.SessionEntryNote, SourceKey: key,
+		Note: &models.NoteEntry{Kind: models.NoteRunContext, Text: text, Data: encoded},
 	}
 	entry.Tokens = modelstep.EstimateEntryTokens(entry)
 	return entry
@@ -302,7 +303,7 @@ func truncateUTF8Bytes(value string, limit int) string {
 
 // boundedRunContextValue is value on one line, at most limit runes.
 func boundedRunContextValue(value string, limit int) string {
-	return truncateRunes(strings.Join(strings.Fields(value), " "), limit)
+	return models.TruncateRunes(strings.Join(strings.Fields(value), " "), limit)
 }
 
 // ---------------------------------------------------------------------------
@@ -323,11 +324,11 @@ func runContextPathMessages(ctx context.Context, in conversationContextInput) (m
 	if in.Sessions == nil {
 		return path, nil
 	}
-	entries, err := in.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: in.Session.Scope, SessionID: in.Session.ID, Types: []SessionEntryType{SessionEntryUser},
+	entries, err := in.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: in.Session.Scope, SessionID: in.Session.ID, Types: []models.SessionEntryType{models.SessionEntryUser},
 		Descending: true, Limit: runContextRecentSessionEntries,
 	})
-	if errors.Is(err, ErrAgentSessionNotFound) {
+	if errors.Is(err, models.ErrAgentSessionNotFound) {
 		return path, nil
 	}
 	if err != nil {
@@ -349,31 +350,31 @@ func runContextRespondTo(in conversationContextInput) string {
 	if name == "" {
 		name = trigger.Sender.ID
 	}
-	attribution := conversationMessageAttribution(trigger, in.Session, in.Conversation.Owner.Type == OwnerTypeTeam)
+	attribution := conversationMessageAttribution(trigger, in.Session, in.Conversation.Owner.Type == models.OwnerTypeTeam)
 	lines := []string{fmt.Sprintf("Reply to message %s from %s (%s %s).", trigger.ID, name, attribution, trigger.Sender.ID)}
 	if trigger.ResponseMode == "spoken" {
 		lines = append(lines, "Spoken reply: answer in words to be spoken.")
 	}
-	if voiceCallStartedMessage(trigger) {
-		lines = append(lines, "Voice call just started. "+voiceCallGreetingBehaviorInstruction)
+	if models.VoiceCallStartedMessage(trigger) {
+		lines = append(lines, "Voice call just started. "+models.VoiceCallGreetingBehaviorInstruction)
 	}
-	if reason, _ := in.Run.Context[routingReasonContextKey].(string); strings.TrimSpace(reason) != "" {
-		lines = append(lines, "You were picked to answer because: "+boundedRunContextValue(reason, MaximumRoutingReasonBytes)+".")
+	if reason, _ := in.Run.Context[models.RoutingReasonContextKey].(string); strings.TrimSpace(reason) != "" {
+		lines = append(lines, "You were picked to answer because: "+boundedRunContextValue(reason, models.MaximumRoutingReasonBytes)+".")
 	}
 	if assignment := conversationRunAssignment(in.Run); assignment != nil {
 		from := strings.TrimSpace(assignment.From)
 		if from == "" {
 			from = "a teammate"
 		}
-		lines = append(lines, fmt.Sprintf("Work handed to you by %s (%s): %s", from, assignment.Kind, truncateRunes(strings.TrimSpace(assignment.Work), runContextAssignmentRunes)))
+		lines = append(lines, fmt.Sprintf("Work handed to you by %s (%s): %s", from, assignment.Kind, models.TruncateRunes(strings.TrimSpace(assignment.Work), runContextAssignmentRunes)))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // runContextMessage is a message's header line and content, the content cut
 // to limit bytes.
-func runContextMessage(in conversationContextInput, message *ChannelMessage, limit int) string {
-	attribution := conversationMessageAttribution(message, in.Session, in.Conversation.Owner.Type == OwnerTypeTeam)
+func runContextMessage(in conversationContextInput, message *models.ChannelMessage, limit int) string {
+	attribution := conversationMessageAttribution(message, in.Session, in.Conversation.Owner.Type == models.OwnerTypeTeam)
 	content := strings.TrimSpace(message.Content)
 	if content == "" {
 		content = conversationMessageNoText
@@ -383,7 +384,7 @@ func runContextMessage(in conversationContextInput, message *ChannelMessage, lim
 	return renderConversationMessageHeader(message, attribution) + "\n" + content
 }
 
-func runContextChannel(conversation *Conversation, trigger *ChannelMessage) string {
+func runContextChannel(conversation *models.Conversation, trigger *models.ChannelMessage) string {
 	text := fmt.Sprintf("Channel %q (%s)", boundedRunContextValue(conversation.Title, 200), conversation.ID)
 	if origin := conversation.Origin; origin != nil {
 		text += fmt.Sprintf("; origin %s %s", origin.Kind, origin.ID)
@@ -401,8 +402,8 @@ func runContextChannel(conversation *Conversation, trigger *ChannelMessage) stri
 	return text + "."
 }
 
-func runContextExternalContext(conversation *Conversation, trigger *ChannelMessage) string {
-	if !externalChannelContext(conversation) || conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceExternalSource {
+func runContextExternalContext(conversation *models.Conversation, trigger *models.ChannelMessage) string {
+	if !models.IsExternalChannelConversation(conversation) || conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceExternalSource {
 		return ""
 	}
 	state := ExternalConversationContextAvailability(trigger, conversation.Origin.ID)
@@ -448,11 +449,11 @@ func runContextTeam(team *agentConversationTeam) string {
 // conversation origin (chat, task and delegated Runs) sees it, and a mode
 // changed mid-Run reaches the next step as a one-line update instead of
 // rewriting the prompt.
-func approvalModeText(mode ConversationApprovalMode) string {
+func approvalModeText(mode models.ConversationApprovalMode) string {
 	switch action.ConversationApprovalModeOrDefault(mode) {
-	case ConversationApprovalManual:
+	case models.ConversationApprovalManual:
 		return "Approval mode: manual. Every action that changes something waits for the user's approval in chat."
-	case ConversationApprovalSkip:
+	case models.ConversationApprovalSkip:
 		return "Approval mode: skip. The user chose to skip approvals in this conversation: complete tasks end to end yourself, including signing in, checkout, placing orders or bookings, accepting terms and sending. Actions whose Skill always asks, and payments, still wait for approval."
 	}
 	return "Approval mode: auto. Reads and ordinary writes run without approval; external, production and destructive actions wait for the user's approval in chat."
@@ -480,7 +481,7 @@ func runContextActiveRuns(active []agentConversationActiveRun) string {
 
 // conversationTaskLister reads the conversation task ledger.
 type conversationTaskLister interface {
-	ListConversationTasks(context.Context, ConversationTaskFilter) ([]*ConversationTaskResult, error)
+	ListConversationTasks(context.Context, models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error)
 }
 
 func runContextLines(lines []string) string {
@@ -500,11 +501,11 @@ func runContextReactions(in conversationContextInput, path map[string]bool) stri
 	if len(reactions) == 0 {
 		return ""
 	}
-	messages := append(append([]*ChannelMessage(nil), in.Recent...), in.Trigger)
+	messages := append(append([]*models.ChannelMessage(nil), in.Recent...), in.Trigger)
 	sort.SliceStable(messages, func(i, j int) bool {
 		return messages[i] != nil && messages[j] != nil && messages[i].Sequence > messages[j].Sequence
 	})
-	self := ConversationParticipant{Type: ConversationParticipantAgent, ID: in.Run.AssignedAgentID}
+	self := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: in.Run.AssignedAgentID}
 	seen := make(map[string]bool)
 	lines := []string{"Reactions:"}
 	for _, message := range messages {
@@ -541,7 +542,7 @@ func runContextPlaces(places []ConversationPlace) string {
 	return strings.Join(lines, "\n")
 }
 
-func runContextBackdrop(in conversationContextInput, backdrop []*ChannelMessage) string {
+func runContextBackdrop(in conversationContextInput, backdrop []*models.ChannelMessage) string {
 	parts := make([]string, 0, len(backdrop)+1)
 	for _, message := range backdrop {
 		if message != nil {

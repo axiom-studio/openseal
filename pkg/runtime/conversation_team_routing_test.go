@@ -7,20 +7,21 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-func teamRoutingAgent(id string) ConversationParticipant {
-	return ConversationParticipant{Type: ConversationParticipantAgent, ID: id}
+func teamRoutingAgent(id string) models.ConversationParticipant {
+	return models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: id}
 }
 
 func TestTeamRoutingAddressingOrder(t *testing.T) {
 	store := newTestKernelStore(t)
 	service := NewConversationService(store)
-	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "routing"})
+	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "routing"})
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
-		Scope: Scope{Kind: "tenant", ID: "routing"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"},
+		Scope: models.Scope{Kind: "tenant", ID: "routing"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "launch"},
 		Title: "Launch", IdempotencyKey: "launch",
 	})
 	if err != nil {
@@ -43,11 +44,11 @@ func TestTeamRoutingAddressingOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	post := func(key string, req PostChannelMessageRequest) *ChannelMessage {
+	post := func(key string, req PostChannelMessageRequest) *models.ChannelMessage {
 		req.IdempotencyKey = key
 		return conversationThreadStartPost(t, service, conversation, req)
 	}
-	route := func(trigger *ChannelMessage) []ConversationResponder {
+	route := func(trigger *models.ChannelMessage) []models.ConversationResponder {
 		t.Helper()
 		result, err := coordinator.Coordinate(t.Context(), ConversationRoutingRequest{
 			Scope: conversation.Scope, ConversationID: conversation.ID, TriggerMessageID: trigger.ID, IdempotencyKey: "route:" + trigger.ID,
@@ -57,7 +58,7 @@ func TestTeamRoutingAddressingOrder(t *testing.T) {
 		}
 		return result.Round.Responders
 	}
-	want := func(name string, got []ConversationResponder, expected ...ConversationResponder) {
+	want := func(name string, got []models.ConversationResponder, expected ...models.ConversationResponder) {
 		t.Helper()
 		if len(expected) == 0 {
 			expected = nil
@@ -69,41 +70,41 @@ func TestTeamRoutingAddressingOrder(t *testing.T) {
 			t.Fatalf("%s: responders = %#v, want %#v", name, got, expected)
 		}
 	}
-	mention := func(id string) ConversationResponder {
-		return ConversationResponder{Participant: teamRoutingAgent(id), Addressed: ConversationAddressedMention}
+	mention := func(id string) models.ConversationResponder {
+		return models.ConversationResponder{Participant: teamRoutingAgent(id), Addressed: models.ConversationAddressedMention}
 	}
 
 	// Mentions win over @everyone and are answered in mention order.
 	mentioned := post("mentions", PostChannelMessageRequest{
-		Mentions: []ConversationParticipant{teamRoutingAgent("otto"), teamRoutingAgent("maya"), teamRoutingAgent("stranger")},
-		Audience: ConversationAudience{Kind: ConversationAudienceEveryone},
+		Mentions: []models.ConversationParticipant{teamRoutingAgent("otto"), teamRoutingAgent("maya"), teamRoutingAgent("stranger")},
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceEveryone},
 	})
 	want("mentions", route(mentioned), mention("otto"), mention("maya"))
 
-	everyone := post("everyone", PostChannelMessageRequest{Audience: ConversationAudience{Kind: ConversationAudienceEveryone}})
+	everyone := post("everyone", PostChannelMessageRequest{Audience: models.ConversationAudience{Kind: models.ConversationAudienceEveryone}})
 	everyoneResponders := route(everyone)
-	if len(everyoneResponders) != 3 || everyoneResponders[0].Addressed != ConversationAddressedEveryone {
+	if len(everyoneResponders) != 3 || everyoneResponders[0].Addressed != models.ConversationAddressedEveryone {
 		t.Fatalf("everyone = %#v", everyoneResponders)
 	}
 
-	answer := post("otto-answer", PostChannelMessageRequest{Sender: teamRoutingAgent("otto"), Intent: MessageIntentAnswer, ReplyToMessageID: everyone.ID})
+	answer := post("otto-answer", PostChannelMessageRequest{Sender: teamRoutingAgent("otto"), Intent: models.MessageIntentAnswer, ReplyToMessageID: everyone.ID})
 	reply := post("reply", PostChannelMessageRequest{QuotedMessageID: answer.ID})
-	want("quoted agent", route(reply), ConversationResponder{Participant: teamRoutingAgent("otto"), Addressed: ConversationAddressedReply})
+	want("quoted agent", route(reply), models.ConversationResponder{Participant: teamRoutingAgent("otto"), Addressed: models.ConversationAddressedReply})
 
-	byRole := post("role", PostChannelMessageRequest{Audience: ConversationAudience{Kind: ConversationAudienceRoles, Roles: []string{"Pricing"}}})
-	want("role", route(byRole), ConversationResponder{Participant: teamRoutingAgent("maya"), Addressed: ConversationAddressedRole})
+	byRole := post("role", PostChannelMessageRequest{Audience: models.ConversationAudience{Kind: models.ConversationAudienceRoles, Roles: []string{"Pricing"}}})
+	want("role", route(byRole), models.ConversationResponder{Participant: teamRoutingAgent("maya"), Addressed: models.ConversationAddressedRole})
 	if len(routed) != 0 {
 		t.Fatalf("addressed messages called the router %d times", len(routed))
 	}
 
 	plain := post("plain", PostChannelMessageRequest{Content: "Can someone draft the launch post?"})
-	want("routed", route(plain), ConversationResponder{Participant: teamRoutingAgent("rio"), Addressed: ConversationAddressedRouted, Reason: "owns the launch copy"})
+	want("routed", route(plain), models.ConversationResponder{Participant: teamRoutingAgent("rio"), Addressed: models.ConversationAddressedRouted, Reason: "owns the launch copy"})
 	if len(routed) != 1 || len(routed[0].Members) != 3 || routed[0].Trigger.ID != plain.ID || routed[0].LastAgentWithUser != "otto" ||
 		len(routed[0].Recent) == 0 || routed[0].Recent[len(routed[0].Recent)-1].Sequence >= plain.Sequence {
 		t.Fatalf("route request = %#v", routed)
 	}
 	// Replays never call the router again.
-	want("replay", route(plain), ConversationResponder{Participant: teamRoutingAgent("rio"), Addressed: ConversationAddressedRouted, Reason: "owns the launch copy"})
+	want("replay", route(plain), models.ConversationResponder{Participant: teamRoutingAgent("rio"), Addressed: models.ConversationAddressedRouted, Reason: "owns the launch copy"})
 	if len(routed) != 1 {
 		t.Fatal("a replayed routing decision called the router")
 	}
@@ -111,17 +112,17 @@ func TestTeamRoutingAddressingOrder(t *testing.T) {
 	// A router failure falls back to who the user was just talking to.
 	routerErr = errors.New("router down")
 	failed := post("failed", PostChannelMessageRequest{Content: "And the press list?"})
-	want("fallback", route(failed), ConversationResponder{Participant: teamRoutingAgent("otto"), Addressed: ConversationAddressedRouted, Reason: "was just talking with you"})
+	want("fallback", route(failed), models.ConversationResponder{Participant: teamRoutingAgent("otto"), Addressed: models.ConversationAddressedRouted, Reason: "was just talking with you"})
 	routerErr = nil
 
 	// An Agent's handoff is addressed only by its mentions, never routed or
 	// fanned out, and never back to itself.
 	handoff := post("handoff", PostChannelMessageRequest{
-		Sender: teamRoutingAgent("rio"), Intent: MessageIntentAnswer,
-		Mentions: []ConversationParticipant{teamRoutingAgent("rio"), teamRoutingAgent("maya")},
+		Sender: teamRoutingAgent("rio"), Intent: models.MessageIntentAnswer,
+		Mentions: []models.ConversationParticipant{teamRoutingAgent("rio"), teamRoutingAgent("maya")},
 	})
 	want("handoff", route(handoff), mention("maya"))
-	silent := post("agent-update", PostChannelMessageRequest{Sender: teamRoutingAgent("rio"), Intent: MessageIntentUpdate, Audience: ConversationAudience{Kind: ConversationAudienceEveryone}})
+	silent := post("agent-update", PostChannelMessageRequest{Sender: teamRoutingAgent("rio"), Intent: models.MessageIntentUpdate, Audience: models.ConversationAudience{Kind: models.ConversationAudienceEveryone}})
 	want("agent without mentions", route(silent))
 	if len(routed) != 2 {
 		t.Fatalf("Agent messages called the router: %d", len(routed))
@@ -140,7 +141,7 @@ func TestTeamRoutingFallbackOrder(t *testing.T) {
 		{"everyone busy", "", "", "maya", []RouteMember{{AgentID: "maya", Busy: true}, {AgentID: "otto", Busy: true}}},
 	} {
 		got := fallbackConversationResponder(ConversationRouteRequest{LastAgentWithUser: tc.last, Lead: tc.lead, Members: tc.members})
-		if got.Participant.ID != tc.want || got.Addressed != ConversationAddressedRouted || got.Validate() != nil {
+		if got.Participant.ID != tc.want || got.Addressed != models.ConversationAddressedRouted || got.Validate() != nil {
 			t.Fatalf("%s: %#v", tc.name, got)
 		}
 	}
@@ -152,7 +153,7 @@ func TestFindHandoffMentions(t *testing.T) {
 	}}
 	bindings := []ConversationParticipantBinding{{Participant: teamRoutingAgent("maya")}, {Participant: teamRoutingAgent("otto")}, {Participant: teamRoutingAgent("rio")}}
 	got := findHandoffMentions("Draft is up. @otto bell can you check the list, then @Maya the pricing? @Riot and @everyone ignored.", "rio", roster, bindings)
-	if !reflect.DeepEqual(got, []ConversationParticipant{teamRoutingAgent("otto"), teamRoutingAgent("maya")}) {
+	if !reflect.DeepEqual(got, []models.ConversationParticipant{teamRoutingAgent("otto"), teamRoutingAgent("maya")}) {
 		t.Fatalf("mentions = %#v", got)
 	}
 	if got := findHandoffMentions("Thanks @Rio!", "rio", roster, bindings); got != nil {
@@ -181,7 +182,7 @@ func TestConversationTeamRosterReadsLeadAndPurposeFromMembers(t *testing.T) {
 	}, workforce.DefinitionActivation{ID: "created"}); err != nil {
 		t.Fatal(err)
 	}
-	roster := loadConversationTeamRoster(ctx, store, &Conversation{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}})
+	roster := loadConversationTeamRoster(ctx, store, &models.Conversation{Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "launch"}})
 	if roster.lead != "maya" || roster.notes != "Maya owns pricing" ||
 		!reflect.DeepEqual(roster.members["maya"], conversationTeamMember{name: "Maya", role: "Owns pricing", owns: []string{"pricing"}}) ||
 		roster.members["otto"].role != "Owns press" {

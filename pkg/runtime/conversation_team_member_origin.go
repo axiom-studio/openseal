@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -16,16 +17,16 @@ import (
 // It names the acting Agent only and is not an authorization proof: Team
 // membership is proved when the member Run is created (verifyTeamMemberRun),
 // and the current roster is checked by AgentOnChatRoster.
-func ConversationRunAgentID(conversation *Conversation, run *AgentRun) string {
+func ConversationRunAgentID(conversation *models.Conversation, run *models.AgentRun) string {
 	if conversation == nil || run == nil || run.Owner != conversation.Owner {
 		return ""
 	}
 	switch run.Owner.Type {
-	case OwnerTypeAgent:
+	case models.OwnerTypeAgent:
 		if run.AssignedAgentID == run.Owner.ID {
 			return run.Owner.ID
 		}
-	case OwnerTypeTeam:
+	case models.OwnerTypeTeam:
 		return strings.TrimSpace(run.AssignedAgentID)
 	}
 	return ""
@@ -33,19 +34,19 @@ func ConversationRunAgentID(conversation *Conversation, run *AgentRun) string {
 
 // teamMemberRunKey is the idempotency key the routing Run creates a member's
 // answer Run with, so the member Run's ID is derived from its routing Run.
-func teamMemberRunKey(routing *AgentRun, memberID string) string {
-	return "team-member-run:" + hashString(routing.Scope.Kind+"\x00"+routing.Scope.ID+"\x00"+routing.ID+"\x00"+memberID)
+func teamMemberRunKey(routing *models.AgentRun, memberID string) string {
+	return "team-member-run:" + models.SHA256DigestString(routing.Scope.Kind+"\x00"+routing.Scope.ID+"\x00"+routing.ID+"\x00"+memberID)
 }
 
 type teamMemberRunReader interface {
-	GetAgentRun(context.Context, Scope, string) (*AgentRun, error)
+	GetAgentRun(context.Context, models.Scope, string) (*models.AgentRun, error)
 }
 
 // verifyTeamMemberRun checks a member's answer Run against kernel-owned
 // lineage: the routing Run scheduled for trigger created it under the derived
 // ID, in the member's lane. Copied context fields alone never pass.
-func verifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversation *Conversation, trigger *ChannelMessage, run *AgentRun) (bool, error) {
-	if runs == nil || conversation == nil || trigger == nil || !isTeamMemberRun(run) || conversation.Owner.Type != OwnerTypeTeam ||
+func verifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversation *models.Conversation, trigger *models.ChannelMessage, run *models.AgentRun) (bool, error) {
+	if runs == nil || conversation == nil || trigger == nil || !models.IsTeamMemberRun(run) || conversation.Owner.Type != models.OwnerTypeTeam ||
 		run.Owner != conversation.Owner || run.Scope != conversation.Scope || trigger.ConversationID != conversation.ID {
 		return false, nil
 	}
@@ -60,13 +61,13 @@ func verifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversa
 	}
 	root, _ := expected.Context["threadRootMessageId"].(string)
 	if routing == nil || routing.ID != routingID || routing.Scope != run.Scope || routing.Owner != run.Owner || routing.AssignedAgentID != "" ||
-		routing.Kind != RunKindConversation || routing.Context[conversationRunContextConversationID] != conversation.ID ||
-		routing.Context[conversationRunContextTriggerID] != trigger.ID {
+		routing.Kind != models.RunKindConversation || routing.Context[models.ConversationRunConversationIDContextKey] != conversation.ID ||
+		routing.Context[models.ConversationRunTriggerIDContextKey] != trigger.ID {
 		return false, nil
 	}
 	return run.ID == agentrun.RunIDForIdempotencyKey(run.Scope, teamMemberRunKey(routing, run.AssignedAgentID)) &&
-		run.ConcurrencyKey == ConversationRunLane(conversation.ID, root, run.AssignedAgentID) &&
-		run.Context[conversationRunContextConversationID] == conversation.ID && run.Context[conversationRunContextTriggerID] == trigger.ID, nil
+		run.ConcurrencyKey == models.ConversationRunLane(conversation.ID, root, run.AssignedAgentID) &&
+		run.Context[models.ConversationRunConversationIDContextKey] == conversation.ID && run.Context[models.ConversationRunTriggerIDContextKey] == trigger.ID, nil
 }
 
 // ResolveTeamHandoffRequest returns the person's message behind a Team
@@ -75,22 +76,22 @@ func verifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversa
 // person. A hand-off is one hop, so the replied-to message must be a person's.
 // It returns nil, nil when run is not a hand-off; a hand-off whose lineage
 // does not verify is an error.
-func ResolveTeamHandoffRequest(ctx context.Context, reader TeamHandoffMessageReader, run *AgentRun, handoff *ChannelMessage) (*ChannelMessage, error) {
-	if !isTeamMemberRun(run) || handoff == nil || handoff.Sender.Type != ConversationParticipantAgent {
+func ResolveTeamHandoffRequest(ctx context.Context, reader models.TeamHandoffMessageReader, run *models.AgentRun, handoff *models.ChannelMessage) (*models.ChannelMessage, error) {
+	if !models.IsTeamMemberRun(run) || handoff == nil || handoff.Sender.Type != models.ConversationParticipantAgent {
 		return nil, nil
 	}
 	denied := errors.New("Team hand-off provenance unavailable")
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	if reader == nil || handoff.ID != triggerID || handoff.ConversationID != conversationID || handoff.Scope != run.Scope ||
-		handoff.Sender.ID == run.AssignedAgentID || handoff.Intent != MessageIntentAnswer || handoff.ReplyToMessageID == "" ||
+		handoff.Sender.ID == run.AssignedAgentID || handoff.Intent != models.MessageIntentAnswer || handoff.ReplyToMessageID == "" ||
 		!strings.HasPrefix(handoff.IdempotencyKey, "agent-channel-response:") ||
-		handoff.ID != stableConversationID(run.Scope, handoff.IdempotencyKey, "message") {
+		handoff.ID != models.StableConversationID(run.Scope, handoff.IdempotencyKey, "message") {
 		return nil, denied
 	}
 	mentioned := false
 	for _, mention := range handoff.Mentions {
-		mentioned = mentioned || mention == (ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID})
+		mentioned = mentioned || mention == (models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID})
 	}
 	if !mentioned {
 		return nil, denied
@@ -101,10 +102,10 @@ func ResolveTeamHandoffRequest(ctx context.Context, reader TeamHandoffMessageRea
 		return nil, denied
 	}
 	actor := request.Sender
-	if voiceCallStartedMessage(request) && request.Initiator != nil {
+	if models.VoiceCallStartedMessage(request) && request.Initiator != nil {
 		actor = *request.Initiator
 	}
-	if actor.Type != ConversationParticipantUser || actor.Validate() != nil {
+	if actor.Type != models.ConversationParticipantUser || actor.Validate() != nil {
 		return nil, denied
 	}
 	return request, nil

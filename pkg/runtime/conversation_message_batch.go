@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"context"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func loadChannelMessageBatches(ctx context.Context, store ChannelMessageBatchStore, scope Scope, conversationID string, ids []string) (map[string]*ChannelMessage, error) {
+func loadChannelMessageBatches(ctx context.Context, store models.ChannelMessageBatchStore, scope models.Scope, conversationID string, ids []string) (map[string]*models.ChannelMessage, error) {
 	unique := make([]string, 0, len(ids))
 	requested := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -13,9 +15,9 @@ func loadChannelMessageBatches(ctx context.Context, store ChannelMessageBatchSto
 			unique = append(unique, id)
 		}
 	}
-	result := make(map[string]*ChannelMessage, len(unique))
-	for offset := 0; offset < len(unique); offset += MaximumChannelMessageBatchSize {
-		end := min(offset+MaximumChannelMessageBatchSize, len(unique))
+	result := make(map[string]*models.ChannelMessage, len(unique))
+	for offset := 0; offset < len(unique); offset += models.MaximumChannelMessageBatchSize {
+		end := min(offset+models.MaximumChannelMessageBatchSize, len(unique))
 		messages, err := store.GetChannelMessagesByIDs(ctx, scope, conversationID, unique[offset:end])
 		if err != nil {
 			return nil, err
@@ -33,10 +35,10 @@ func loadChannelMessageBatches(ctx context.Context, store ChannelMessageBatchSto
 // hidden or missing thread root never causes its reply parent to be read.
 // Ordinary parents retain one-level checks. StartsThread anchors additionally
 // preserve their bounded ancestor restrictions without walking transcripts.
-func filterChannelMessagesWithBatchParents(ctx context.Context, store ChannelMessageBatchStore, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
+func filterChannelMessagesWithBatchParents(ctx context.Context, store models.ChannelMessageBatchStore, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	threadIDs := make([]string, 0, len(messages))
 	for _, message := range messages {
-		if CanViewChannelMessage(message, viewer) && message.ThreadRootID != "" && message.ThreadRootID != message.ID {
+		if models.CanViewChannelMessage(message, viewer) && message.ThreadRootID != "" && message.ThreadRootID != message.ID {
 			threadIDs = append(threadIDs, message.ThreadRootID)
 		}
 	}
@@ -44,13 +46,13 @@ func filterChannelMessagesWithBatchParents(ctx context.Context, store ChannelMes
 	if err != nil {
 		return nil, err
 	}
-	threadVisible := make([]*ChannelMessage, 0, len(messages))
+	threadVisible := make([]*models.ChannelMessage, 0, len(messages))
 	replyIDs := make([]string, 0, len(messages))
 	for _, message := range messages {
-		if !CanViewChannelMessage(message, viewer) {
+		if !models.CanViewChannelMessage(message, viewer) {
 			continue
 		}
-		if message.ThreadRootID != "" && message.ThreadRootID != message.ID && !CanViewChannelMessage(threads[message.ThreadRootID], viewer) {
+		if message.ThreadRootID != "" && message.ThreadRootID != message.ID && !models.CanViewChannelMessage(threads[message.ThreadRootID], viewer) {
 			continue
 		}
 		threadVisible = append(threadVisible, message)
@@ -62,9 +64,9 @@ func filterChannelMessagesWithBatchParents(ctx context.Context, store ChannelMes
 	if err != nil {
 		return nil, err
 	}
-	visible := make([]*ChannelMessage, 0, len(threadVisible))
+	visible := make([]*models.ChannelMessage, 0, len(threadVisible))
 	for _, message := range threadVisible {
-		if linked := message.ReplyToMessageID; linked != "" && linked != message.ID && linked != message.ThreadRootID && !CanViewChannelMessage(replies[linked], viewer) {
+		if linked := message.ReplyToMessageID; linked != "" && linked != message.ID && linked != message.ThreadRootID && !models.CanViewChannelMessage(replies[linked], viewer) {
 			continue
 		}
 		visible = append(visible, message)
@@ -89,7 +91,7 @@ func filterChannelMessagesWithBatchParents(ctx context.Context, store ChannelMes
 	if !hasThreadStart {
 		return visible, nil
 	}
-	known := make(map[string]*ChannelMessage, len(messages)+len(threads)+len(replies))
+	known := make(map[string]*models.ChannelMessage, len(messages)+len(threads)+len(replies))
 	for _, message := range messages {
 		if message != nil {
 			known[message.ID] = message
@@ -102,7 +104,7 @@ func filterChannelMessagesWithBatchParents(ctx context.Context, store ChannelMes
 		known[id] = message
 	}
 	return filterChannelMessageThreadStarts(ctx, scope, conversationID, visible, known,
-		func(ctx context.Context, ids []string) (map[string]*ChannelMessage, error) {
+		func(ctx context.Context, ids []string) (map[string]*models.ChannelMessage, error) {
 			return loadChannelMessageBatches(ctx, store, scope, conversationID, ids)
 		}, viewer)
 }

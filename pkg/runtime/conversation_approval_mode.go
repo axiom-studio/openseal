@@ -20,19 +20,19 @@ const (
 )
 
 type SetConversationApprovalModeRequest struct {
-	Scope            Scope
+	Scope            models.Scope
 	ConversationID   string
 	ExpectedRevision int64
-	Mode             ConversationApprovalMode
-	Actor            ActivityActor
+	Mode             models.ConversationApprovalMode
+	Actor            models.ActivityActor
 	CorrelationID    string
 }
 
 type SetConversationApprovalModeResult struct {
-	Conversation *Conversation `json:"conversation"`
+	Conversation *models.Conversation `json:"conversation"`
 	// Changed is false when the conversation already had the requested mode.
-	Changed bool           `json:"changed"`
-	Event   *ActivityEvent `json:"event,omitempty"`
+	Changed bool                  `json:"changed"`
+	Event   *models.ActivityEvent `json:"event,omitempty"`
 	// ApprovedApprovalIDs lists pending approvals in the conversation that the
 	// new mode allows and that this request approved.
 	ApprovedApprovalIDs []string `json:"approvedApprovalIds"`
@@ -45,16 +45,16 @@ type SetConversationApprovalModeResult struct {
 // approval mode. Hosts authorize the caller (a principal allowed to execute
 // the conversation's Agent) before calling it.
 type ConversationApprovalModeService struct {
-	conversations ConversationStore
-	modes         ConversationApprovalModeStore
-	actions       ActionStore
-	runs          agentRunReader
+	conversations models.ConversationStore
+	modes         models.ConversationApprovalModeStore
+	actions       models.ActionStore
+	runs          models.AgentRunReader
 	approvals     *action.ApprovalCoordinator
 	now           func() time.Time
 	newID         func() string
 }
 
-func NewConversationApprovalModeService(store ConversationApprovalModeKernelStore, opts ...models.ServiceOption) *ConversationApprovalModeService {
+func NewConversationApprovalModeService(store models.ConversationApprovalModeKernelStore, opts ...models.ServiceOption) *ConversationApprovalModeService {
 	return &ConversationApprovalModeService{
 		conversations: store, modes: store, actions: store, runs: store,
 		// Approval modes never approve an agent-builder card (D11): those
@@ -73,49 +73,49 @@ func (s *ConversationApprovalModeService) SetApprovalMode(ctx context.Context, r
 		return nil, err
 	}
 	if !req.Mode.Valid() {
-		return nil, fmt.Errorf("%w: approval mode must be manual, auto, or skip", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: approval mode must be manual, auto, or skip", models.ErrInvalidConversation)
 	}
 	if req.ExpectedRevision <= 0 {
-		return nil, fmt.Errorf("%w: expected revision must be positive", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: expected revision must be positive", models.ErrInvalidConversation)
 	}
 	if strings.TrimSpace(req.Actor.Type) == "" || strings.TrimSpace(req.Actor.ID) == "" {
-		return nil, fmt.Errorf("%w: approval mode actor is required", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: approval mode actor is required", models.ErrInvalidConversation)
 	}
 	conversation, err := s.conversations.GetConversation(ctx, req.Scope, strings.TrimSpace(req.ConversationID))
 	if err != nil {
 		return nil, err
 	}
 	if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	if conversation.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	previous := action.ConversationApprovalModeOrDefault(conversation.ApprovalMode)
-	result := &SetConversationApprovalModeResult{Conversation: cloneConversation(conversation), ApprovedApprovalIDs: []string{}}
+	result := &SetConversationApprovalModeResult{Conversation: models.CloneConversation(conversation), ApprovedApprovalIDs: []string{}}
 	if previous != req.Mode {
-		if conversation.Status != ConversationStatusActive {
-			return nil, fmt.Errorf("%w: approval mode can only change on an active conversation", ErrInvalidConversation)
+		if conversation.Status != models.ConversationStatusActive {
+			return nil, fmt.Errorf("%w: approval mode can only change on an active conversation", models.ErrInvalidConversation)
 		}
 		now := s.now().UTC()
-		updated := cloneConversation(conversation)
+		updated := models.CloneConversation(conversation)
 		updated.ApprovalMode = req.Mode
 		updated.Revision++
 		updated.UpdatedAt = now
 		if err := updated.Validate(); err != nil {
 			return nil, err
 		}
-		event := &ActivityEvent{
-			ID: s.newID(), Scope: req.Scope, EventType: ConversationApprovalModeChangedEvent, Severity: ActivitySeverityInfo,
-			ConversationRefs: []string{updated.ID}, Actor: req.Actor, Visibility: ActivityVisibilityScope,
+		event := &models.ActivityEvent{
+			ID: s.newID(), Scope: req.Scope, EventType: ConversationApprovalModeChangedEvent, Severity: models.ActivitySeverityInfo,
+			ConversationRefs: []string{updated.ID}, Actor: req.Actor, Visibility: models.ActivityVisibilityScope,
 			Summary:       fmt.Sprintf("Approval mode changed from %s to %s", previous, req.Mode),
 			Payload:       map[string]interface{}{"conversationId": updated.ID, "from": string(previous), "to": string(req.Mode)},
 			CorrelationID: req.CorrelationID, CreatedAt: now,
 		}
 		switch updated.Owner.Type {
-		case OwnerTypeAgent:
+		case models.OwnerTypeAgent:
 			event.AgentID = updated.Owner.ID
-		case OwnerTypeTeam:
+		case models.OwnerTypeTeam:
 			event.TeamID = updated.Owner.ID
 		}
 		committed, persisted, err := s.modes.UpdateConversationWithEvent(ctx, updated, conversation.Revision, event)
@@ -137,11 +137,11 @@ func (s *ConversationApprovalModeService) SetApprovalMode(ctx context.Context, r
 // mode allows. Each resolution is revision-checked; a checkpoint a human (or
 // another sweep) resolved first is skipped. The conversation mode is re-read
 // before every resolution so a concurrent tightening stops the sweep.
-func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Context, scope Scope, conversationID string, mode ConversationApprovalMode, correlationID string) ([]string, bool) {
-	pending := make([]*ApprovalCheckpoint, 0)
+func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Context, scope models.Scope, conversationID string, mode models.ConversationApprovalMode, correlationID string) ([]string, bool) {
+	pending := make([]*models.ApprovalCheckpoint, 0)
 	for offset := 0; ; offset += approvalModeSweepPageSize {
-		page, err := s.actions.ListApprovals(ctx, ApprovalFilter{
-			Scope: scope, ConversationID: conversationID, Status: []ApprovalStatus{ApprovalStatusPending},
+		page, err := s.actions.ListApprovals(ctx, models.ApprovalFilter{
+			Scope: scope, ConversationID: conversationID, Status: []models.ApprovalStatus{models.ApprovalStatusPending},
 			Limit: approvalModeSweepPageSize, Offset: offset,
 		})
 		if err != nil {
@@ -160,13 +160,13 @@ func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Cont
 			incomplete = true
 			continue
 		}
-		if call.Status != ActionCallStatusWaitingApproval || !action.ApprovalModeAllowsAction(mode, call.Review, call.Risk, call.SideEffect) {
+		if call.Status != models.ActionCallStatusWaitingApproval || !action.ApprovalModeAllowsAction(mode, call.Review, call.Risk, call.SideEffect) {
 			continue
 		}
 		// An event routine occurrence stays manual whatever the chat's mode,
 		// so loosening the mode never approves its checkpoints.
 		run, err := s.runs.GetAgentRun(ctx, scope, call.RunID)
-		if errors.Is(err, ErrRunNotFound) || err == nil && run == nil {
+		if errors.Is(err, models.ErrRunNotFound) || err == nil && run == nil {
 			continue
 		}
 		if err != nil {
@@ -189,8 +189,8 @@ func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Cont
 			if result != nil && result.Resolved {
 				approved = append(approved, approval.ID)
 			}
-		case errors.Is(err, ErrApprovalResolved), errors.Is(err, ErrRevisionConflict), errors.Is(err, action.ErrApprovalExpired),
-			errors.Is(err, ErrInvalidRunTransition), errors.Is(err, action.ErrAgentBuilderApprovalForbidden):
+		case errors.Is(err, models.ErrApprovalResolved), errors.Is(err, models.ErrRevisionConflict), errors.Is(err, action.ErrApprovalExpired),
+			errors.Is(err, models.ErrInvalidRunTransition), errors.Is(err, action.ErrAgentBuilderApprovalForbidden):
 			// A concurrent decision, expiry, or paused Run owns this checkpoint,
 			// or it is an agent-builder card only a person approves (D11).
 		default:

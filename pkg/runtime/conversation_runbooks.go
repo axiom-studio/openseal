@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // maximumConversationRunbookLinkAttempts bounds retries when the
@@ -20,7 +22,7 @@ const maximumConversationRunbookLinkAttempts = 5
 // call it after a visual with routine components (presentation.
 // RoutineBindings) passes validation and is stored, e.g. from update_visual;
 // answer visuals are linked by the conversation runner.
-func (s *ConversationService) LinkRunbooks(ctx context.Context, scope Scope, conversationID string, activationIDs []string) (*Conversation, error) {
+func (s *ConversationService) LinkRunbooks(ctx context.Context, scope models.Scope, conversationID string, activationIDs []string) (*models.Conversation, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -28,8 +30,8 @@ func (s *ConversationService) LinkRunbooks(ctx context.Context, scope Scope, con
 		return nil, err
 	}
 	for _, id := range activationIDs {
-		if !validOpaqueIdentifier(id, 128) || strings.TrimSpace(id) != id {
-			return nil, fmt.Errorf("%w: routine id %q must be a portable identifier", ErrInvalidConversation, id)
+		if !models.IsValidOpaqueIdentifier(id, 128) || strings.TrimSpace(id) != id {
+			return nil, fmt.Errorf("%w: routine id %q must be a portable identifier", models.ErrInvalidConversation, id)
 		}
 	}
 	for attempt := 0; ; attempt++ {
@@ -41,12 +43,12 @@ func (s *ConversationService) LinkRunbooks(ctx context.Context, scope Scope, con
 		if linked == nil {
 			return conversation, nil
 		}
-		updated := cloneConversation(conversation)
+		updated := models.CloneConversation(conversation)
 		updated.RunbookActivationIDs = linked
 		updated.Revision++
 		updated.UpdatedAt = s.now().UTC()
 		result, err := s.store.UpdateConversation(ctx, updated, conversation.Revision)
-		if errors.Is(err, ErrRevisionConflict) && attempt+1 < maximumConversationRunbookLinkAttempts {
+		if errors.Is(err, models.ErrRevisionConflict) && attempt+1 < maximumConversationRunbookLinkAttempts {
 			continue
 		}
 		return result, err
@@ -72,7 +74,7 @@ func linkRunbookIDs(existing, ids []string) []string {
 	if !changed {
 		return nil
 	}
-	if extra := len(linked) - MaximumConversationRunbooks; extra > 0 {
+	if extra := len(linked) - models.MaximumConversationRunbooks; extra > 0 {
 		linked = linked[extra:]
 	}
 	return linked

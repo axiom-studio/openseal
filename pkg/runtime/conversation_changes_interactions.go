@@ -6,6 +6,8 @@ import (
 	"errors"
 	"sort"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // conversationInteractionHistoryLimit bounds the decided approvals and the
@@ -14,14 +16,14 @@ import (
 const conversationInteractionHistoryLimit = 50
 
 type conversationApprovalStore interface {
-	ListApprovals(context.Context, ApprovalFilter) ([]*ApprovalCheckpoint, error)
+	ListApprovals(context.Context, models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error)
 }
 
 // SkillSetupRequestReader lists one agent conversation's Skill setup
 // requests saved to deploymentID, or to any deployment when it is empty.
 // Hosts may supply a reader that first reconciles pending requests against
 // saved bindings, so the projection never shows completed setup.
-type SkillSetupRequestReader func(ctx context.Context, scope Scope, deploymentID, conversationID string) ([]*SkillSetupRequest, error)
+type SkillSetupRequestReader func(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.SkillSetupRequest, error)
 
 // SetSkillSetupRequestReader replaces the store read used for the
 // conversation's Skill setup request projection.
@@ -34,18 +36,18 @@ func (s *ConversationChangeService) SetSkillSetupRequestReader(reader SkillSetup
 // ConversationSkillSetupRequest is a setup request as placed in one
 // conversation view. ThreadRootMessageID is a projection, never authority.
 type ConversationSkillSetupRequest struct {
-	SkillSetupRequest
+	models.SkillSetupRequest
 	ThreadRootMessageID string `json:"threadRootMessageId,omitempty"`
 }
 
 // listConversationApprovals projects approvals for the conversation's own
 // Runs (including connector-thread, delegated and task Runs) with their
 // conversation placement resolved here, so clients never read Run lineage.
-func (s *ConversationChangeService) listConversationApprovals(ctx context.Context, conversation *Conversation, runs []*AgentRun) ([]*ApprovalCheckpoint, error) {
+func (s *ConversationChangeService) listConversationApprovals(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun) ([]*models.ApprovalCheckpoint, error) {
 	if s.approvals == nil || conversation == nil {
-		return []*ApprovalCheckpoint{}, nil
+		return []*models.ApprovalCheckpoint{}, nil
 	}
-	byRun := make(map[string]*AgentRun, len(runs))
+	byRun := make(map[string]*models.AgentRun, len(runs))
 	ids := make([]string, 0, len(runs))
 	for _, run := range runs {
 		if run != nil && byRun[run.ID] == nil {
@@ -53,9 +55,9 @@ func (s *ConversationChangeService) listConversationApprovals(ctx context.Contex
 			ids = append(ids, run.ID)
 		}
 	}
-	byID := make(map[string]*ApprovalCheckpoint)
+	byID := make(map[string]*models.ApprovalCheckpoint)
 	for start := 0; start < len(ids); start += conversationActivityRunBatchSize {
-		page, err := s.approvals.ListApprovals(ctx, ApprovalFilter{
+		page, err := s.approvals.ListApprovals(ctx, models.ApprovalFilter{
 			Scope: conversation.Scope, RunIDs: ids[start:min(start+conversationActivityRunBatchSize, len(ids))],
 		})
 		if err != nil {
@@ -66,9 +68,9 @@ func (s *ConversationChangeService) listConversationApprovals(ctx context.Contex
 				continue
 			}
 			run := byRun[approval.RunID]
-			approval.ConversationContext = &ApprovalConversationContext{
+			approval.ConversationContext = &models.ApprovalConversationContext{
 				ConversationID:      conversation.ID,
-				TriggerMessageID:    conversationRunLineageValue(run, byRun, conversationRunContextTriggerID),
+				TriggerMessageID:    conversationRunLineageValue(run, byRun, models.ConversationRunTriggerIDContextKey),
 				ThreadRootMessageID: conversationRunLineageValue(run, byRun, "threadRootMessageId"),
 			}
 			byID[approval.ID] = approval
@@ -76,10 +78,10 @@ func (s *ConversationChangeService) listConversationApprovals(ctx context.Contex
 	}
 	// The agent's own control conversation also shows work that started
 	// outside any conversation (for example a scheduled Run).
-	if conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceAgentControl {
+	if conversation.Origin != nil && conversation.Origin.Kind == models.ConversationReferenceAgentControl {
 		owner := conversation.Owner
-		for _, filter := range []ApprovalFilter{
-			{Status: []ApprovalStatus{ApprovalStatusPending}},
+		for _, filter := range []models.ApprovalFilter{
+			{Status: []models.ApprovalStatus{models.ApprovalStatusPending}},
 			{NewestFirst: true, Limit: conversationInteractionHistoryLimit},
 		} {
 			filter.Scope, filter.Owner, filter.ConversationID, filter.IncludeUnscoped = conversation.Scope, &owner, conversation.ID, true
@@ -92,17 +94,17 @@ func (s *ConversationChangeService) listConversationApprovals(ctx context.Contex
 					approval.ConversationContext == nil || approval.ConversationContext.ConversationID != "" {
 					continue
 				}
-				approval.ConversationContext = &ApprovalConversationContext{ConversationID: conversation.ID}
+				approval.ConversationContext = &models.ApprovalConversationContext{ConversationID: conversation.ID}
 				byID[approval.ID] = approval
 			}
 		}
 	}
-	all := make([]*ApprovalCheckpoint, 0, len(byID))
+	all := make([]*models.ApprovalCheckpoint, 0, len(byID))
 	for _, approval := range byID {
 		all = append(all, approval)
 	}
-	approvals := boundConversationInteractions(all, func(a *ApprovalCheckpoint) bool { return a.Status == ApprovalStatusPending },
-		func(a *ApprovalCheckpoint) (string, int64, int64) {
+	approvals := boundConversationInteractions(all, func(a *models.ApprovalCheckpoint) bool { return a.Status == models.ApprovalStatusPending },
+		func(a *models.ApprovalCheckpoint) (string, int64, int64) {
 			return a.ID, a.CreatedAt.UnixNano(), a.UpdatedAt.UnixNano()
 		})
 	// Place a card in its thread from the trigger message when the Run did
@@ -119,13 +121,13 @@ func (s *ConversationChangeService) listConversationApprovals(ctx context.Contex
 	}
 	for _, approval := range approvals {
 		if context := approval.ConversationContext; context.ThreadRootMessageID == "" {
-			context.ThreadRootMessageID = externalConversationThreadRoot(conversation, messages[context.TriggerMessageID])
+			context.ThreadRootMessageID = models.ExternalConversationThreadRoot(conversation, messages[context.TriggerMessageID])
 		}
 	}
 	return approvals, nil
 }
 
-func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx context.Context, conversation *Conversation, runs []*AgentRun, viewer *ConversationViewer) ([]*ConversationSkillSetupRequest, error) {
+func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun, viewer *models.ConversationViewer) ([]*ConversationSkillSetupRequest, error) {
 	if s.skillSetups == nil || conversation == nil {
 		return []*ConversationSkillSetupRequest{}, nil
 	}
@@ -135,14 +137,14 @@ func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx conte
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]*SkillSetupRequest, 0, len(stored))
+	candidates := make([]*models.SkillSetupRequest, 0, len(stored))
 	for _, request := range stored {
 		if request != nil && request.Scope == conversation.Scope && request.ChatOwner() == conversation.Owner && request.ConversationID == conversation.ID {
-			candidates = append(candidates, cloneSkillSetupRequest(request))
+			candidates = append(candidates, models.CloneSkillSetupRequest(request))
 		}
 	}
-	candidates = boundConversationInteractions(candidates, func(r *SkillSetupRequest) bool { return r.Status == "pending" },
-		func(r *SkillSetupRequest) (string, int64, int64) {
+	candidates = boundConversationInteractions(candidates, func(r *models.SkillSetupRequest) bool { return r.Status == "pending" },
+		func(r *models.SkillSetupRequest) (string, int64, int64) {
 			return r.ID, r.CreatedAt.UnixNano(), r.UpdatedAt.UnixNano()
 		})
 	triggers := make([]string, 0, len(candidates))
@@ -154,7 +156,7 @@ func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx conte
 		return nil, err
 	}
 	if viewer != nil {
-		selected := make([]*ChannelMessage, 0, len(messages))
+		selected := make([]*models.ChannelMessage, 0, len(messages))
 		for _, message := range messages {
 			selected = append(selected, message)
 		}
@@ -162,12 +164,12 @@ func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx conte
 		if err != nil {
 			return nil, err
 		}
-		messages = make(map[string]*ChannelMessage, len(visible))
+		messages = make(map[string]*models.ChannelMessage, len(visible))
 		for _, message := range visible {
 			messages[message.ID] = message
 		}
 	}
-	byRun := make(map[string]*AgentRun, len(runs))
+	byRun := make(map[string]*models.AgentRun, len(runs))
 	for _, run := range runs {
 		if run != nil {
 			byRun[run.ID] = run
@@ -181,7 +183,7 @@ func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx conte
 		}
 		thread := conversationRunLineageValue(byRun[request.RunID], byRun, "threadRootMessageId")
 		if thread == "" {
-			thread = externalConversationThreadRoot(conversation, trigger)
+			thread = models.ExternalConversationThreadRoot(conversation, trigger)
 		}
 		result = append(result, &ConversationSkillSetupRequest{SkillSetupRequest: *request, ThreadRootMessageID: thread})
 	}
@@ -225,7 +227,7 @@ func boundConversationInteractions[T any](items []T, pending func(T) bool, key f
 
 // conversationRunLineageValue reads a string context value from a Run, or
 // the nearest projected ancestor that recorded it.
-func conversationRunLineageValue(run *AgentRun, runs map[string]*AgentRun, key string) string {
+func conversationRunLineageValue(run *models.AgentRun, runs map[string]*models.AgentRun, key string) string {
 	for depth := 0; run != nil && depth < 16; depth++ {
 		if value, _ := run.Context[key].(string); strings.TrimSpace(value) != "" {
 			return value
@@ -242,7 +244,7 @@ func conversationRunLineageValue(run *AgentRun, runs map[string]*AgentRun, key s
 	return ""
 }
 
-func (s *ConversationChangeService) loadConversationMessages(ctx context.Context, conversation *Conversation, ids []string) (map[string]*ChannelMessage, error) {
+func (s *ConversationChangeService) loadConversationMessages(ctx context.Context, conversation *models.Conversation, ids []string) (map[string]*models.ChannelMessage, error) {
 	unique := make([]string, 0, len(ids))
 	seen := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -252,15 +254,15 @@ func (s *ConversationChangeService) loadConversationMessages(ctx context.Context
 		}
 	}
 	if len(unique) == 0 || s.conversations == nil {
-		return map[string]*ChannelMessage{}, nil
+		return map[string]*models.ChannelMessage{}, nil
 	}
-	if batch, ok := s.conversations.store.(ChannelMessageBatchStore); ok {
+	if batch, ok := s.conversations.store.(models.ChannelMessageBatchStore); ok {
 		return loadChannelMessageBatches(ctx, batch, conversation.Scope, conversation.ID, unique)
 	}
-	result := make(map[string]*ChannelMessage, len(unique))
+	result := make(map[string]*models.ChannelMessage, len(unique))
 	for _, id := range unique {
 		message, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, id)
-		if errors.Is(err, ErrChannelMessageNotFound) {
+		if errors.Is(err, models.ErrChannelMessageNotFound) {
 			continue
 		}
 		if err != nil {
@@ -273,12 +275,12 @@ func (s *ConversationChangeService) loadConversationMessages(ctx context.Context
 	return result, nil
 }
 
-func conversationApprovalProjectionDigest(approvals []*ApprovalCheckpoint) (string, error) {
+func conversationApprovalProjectionDigest(approvals []*models.ApprovalCheckpoint) (string, error) {
 	type entry struct {
-		ID       string                       `json:"id"`
-		Revision int64                        `json:"revision"`
-		Status   ApprovalStatus               `json:"status"`
-		Context  *ApprovalConversationContext `json:"context,omitempty"`
+		ID       string                              `json:"id"`
+		Revision int64                               `json:"revision"`
+		Status   models.ApprovalStatus               `json:"status"`
+		Context  *models.ApprovalConversationContext `json:"context,omitempty"`
 	}
 	values := make([]entry, 0, len(approvals))
 	for _, approval := range approvals {
@@ -288,7 +290,7 @@ func conversationApprovalProjectionDigest(approvals []*ApprovalCheckpoint) (stri
 	if err != nil {
 		return "", err
 	}
-	return hashBytes(encoded), nil
+	return models.SHA256Digest(encoded), nil
 }
 
 func conversationSkillSetupProjectionDigest(requests []*ConversationSkillSetupRequest) (string, error) {
@@ -306,5 +308,5 @@ func conversationSkillSetupProjectionDigest(requests []*ConversationSkillSetupRe
 	if err != nil {
 		return "", err
 	}
-	return hashBytes(encoded), nil
+	return models.SHA256Digest(encoded), nil
 }

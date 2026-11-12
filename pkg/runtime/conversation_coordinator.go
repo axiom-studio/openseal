@@ -10,6 +10,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -24,25 +25,25 @@ var (
 // credentials before returning a binding; observers are left out. OpenSeal
 // never transfers credentials between Agents.
 type ConversationParticipantBinding struct {
-	Participant   ConversationParticipant `json:"participant"`
-	SemanticRoles []string                `json:"semanticRoles,omitempty"`
+	Participant   models.ConversationParticipant `json:"participant"`
+	SemanticRoles []string                       `json:"semanticRoles,omitempty"`
 }
 
 func (b ConversationParticipantBinding) Validate() error {
 	if err := b.Participant.Validate(); err != nil {
 		return err
 	}
-	if b.Participant.Type != ConversationParticipantAgent {
-		return fmt.Errorf("%w: only Agent participants can be coordinated", ErrInvalidConversation)
+	if b.Participant.Type != models.ConversationParticipantAgent {
+		return fmt.Errorf("%w: only Agent participants can be coordinated", models.ErrInvalidConversation)
 	}
 	seen := make(map[string]struct{}, len(b.SemanticRoles))
 	for _, role := range b.SemanticRoles {
 		role = strings.TrimSpace(role)
 		if role == "" || len(role) > 80 {
-			return fmt.Errorf("%w: semantic roles must be 1-80 characters", ErrInvalidConversation)
+			return fmt.Errorf("%w: semantic roles must be 1-80 characters", models.ErrInvalidConversation)
 		}
 		if _, exists := seen[role]; exists {
-			return fmt.Errorf("%w: duplicate semantic role %q", ErrInvalidConversation, role)
+			return fmt.Errorf("%w: duplicate semantic role %q", models.ErrInvalidConversation, role)
 		}
 		seen[role] = struct{}{}
 	}
@@ -50,8 +51,8 @@ func (b ConversationParticipantBinding) Validate() error {
 }
 
 type ConversationParticipantQuery struct {
-	Conversation *Conversation
-	Trigger      *ChannelMessage
+	Conversation *models.Conversation
+	Trigger      *models.ChannelMessage
 }
 
 // ConversationParticipantSource is an embedding boundary. An enterprise host
@@ -69,7 +70,7 @@ func (f ConversationParticipantSourceFunc) ResolveConversationParticipants(ctx c
 
 // ConversationRoutingRequest asks who answers one Team channel message.
 type ConversationRoutingRequest struct {
-	Scope            Scope
+	Scope            models.Scope
 	ConversationID   string
 	TriggerMessageID string
 	IdempotencyKey   string
@@ -92,7 +93,7 @@ func (c ConversationCoordinatorConfig) normalize() (ConversationCoordinatorConfi
 	}
 	if c.MaximumParticipants < 1 || c.MaximumParticipants > 256 || c.RecentMessageLimit < 1 || c.RecentMessageLimit > 100 ||
 		c.RouteTimeout < time.Second || c.RouteTimeout > 5*time.Minute {
-		return ConversationCoordinatorConfig{}, fmt.Errorf("%w: invalid conversation coordinator configuration", ErrInvalidConversation)
+		return ConversationCoordinatorConfig{}, fmt.Errorf("%w: invalid conversation coordinator configuration", models.ErrInvalidConversation)
 	}
 	return c, nil
 }
@@ -125,21 +126,21 @@ func NewConversationCoordinator(
 
 // Coordinate commits the routing decision for a trigger once. A replay with the
 // same idempotency key returns the saved decision without calling the router.
-func (c *ConversationCoordinator) Coordinate(ctx context.Context, req ConversationRoutingRequest) (*ParticipationRoundResult, error) {
+func (c *ConversationCoordinator) Coordinate(ctx context.Context, req ConversationRoutingRequest) (*models.ParticipationRoundResult, error) {
 	return c.coordinateWithChildRuns(ctx, req, nil)
 }
 
 // coordinateWithChildRuns is Coordinate for a Team channel's routing Run.
 // childRunKey derives each responder's child Run idempotency key, so the
 // round records the Run id before the Run exists.
-func (c *ConversationCoordinator) coordinateWithChildRuns(ctx context.Context, req ConversationRoutingRequest, childRunKey func(ConversationParticipant) string) (*ParticipationRoundResult, error) {
+func (c *ConversationCoordinator) coordinateWithChildRuns(ctx context.Context, req ConversationRoutingRequest, childRunKey func(models.ConversationParticipant) string) (*models.ParticipationRoundResult, error) {
 	if c == nil || c.conversations == nil || c.participants == nil || c.router == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
 	key := strings.TrimSpace(req.IdempotencyKey)
 	triggerID := strings.TrimSpace(req.TriggerMessageID)
-	if key == "" || !validOpaqueIdentifier(strings.TrimSpace(req.ConversationID), 128) || !validOpaqueIdentifier(triggerID, 128) {
-		return nil, fmt.Errorf("%w: conversation, trigger, and idempotency key are required", ErrInvalidConversation)
+	if key == "" || !models.IsValidOpaqueIdentifier(strings.TrimSpace(req.ConversationID), 128) || !models.IsValidOpaqueIdentifier(triggerID, 128) {
+		return nil, fmt.Errorf("%w: conversation, trigger, and idempotency key are required", models.ErrInvalidConversation)
 	}
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
@@ -148,7 +149,7 @@ func (c *ConversationCoordinator) coordinateWithChildRuns(ctx context.Context, r
 		return nil, err
 	} else if existing != nil {
 		if existing.Round.TriggerMessageID != triggerID {
-			return nil, ErrMessageConflict
+			return nil, models.ErrMessageConflict
 		}
 		existing.Replayed = true
 		return existing, nil
@@ -157,15 +158,15 @@ func (c *ConversationCoordinator) coordinateWithChildRuns(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
-	if conversation.Status != ConversationStatusActive {
-		return nil, ErrInvalidConversation
+	if conversation.Status != models.ConversationStatusActive {
+		return nil, models.ErrInvalidConversation
 	}
 	trigger, err := c.conversations.GetChannelMessage(ctx, req.Scope, conversation.ID, triggerID)
 	if err != nil {
 		return nil, err
 	}
 	bindings, err := c.participants.ResolveConversationParticipants(ctx, ConversationParticipantQuery{
-		Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger),
+		Conversation: models.CloneConversation(conversation), Trigger: models.CloneChannelMessage(trigger),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve conversation participants: %w", err)
@@ -174,15 +175,15 @@ func (c *ConversationCoordinator) coordinateWithChildRuns(ctx context.Context, r
 		return nil, ErrNoConversationParticipants
 	}
 	if len(bindings) > c.config.MaximumParticipants {
-		return nil, fmt.Errorf("%w: participant count exceeds configured maximum", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: participant count exceeds configured maximum", models.ErrInvalidConversation)
 	}
-	seen := make(map[ConversationParticipant]bool, len(bindings))
+	seen := make(map[models.ConversationParticipant]bool, len(bindings))
 	for _, binding := range bindings {
 		if err := binding.Validate(); err != nil {
 			return nil, err
 		}
 		if seen[binding.Participant] {
-			return nil, fmt.Errorf("%w: duplicate conversation participant", ErrInvalidConversation)
+			return nil, fmt.Errorf("%w: duplicate conversation participant", models.ErrInvalidConversation)
 		}
 		seen[binding.Participant] = true
 	}
@@ -193,12 +194,12 @@ func (c *ConversationCoordinator) coordinateWithChildRuns(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
-	if len(responders) == 0 && trigger.Sender.Type != ConversationParticipantAgent {
+	if len(responders) == 0 && trigger.Sender.Type != models.ConversationParticipantAgent {
 		routed, err := c.route(ctx, conversation, trigger, bindings)
 		if err != nil {
 			return nil, err
 		}
-		responders = []ConversationResponder{routed}
+		responders = []models.ConversationResponder{routed}
 	}
 	if childRunKey != nil {
 		for index := range responders {
@@ -214,48 +215,48 @@ func (c *ConversationCoordinator) coordinateWithChildRuns(ctx context.Context, r
 			Scope: req.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 			TriggerMessageID: triggerID, Responders: responders, IdempotencyKey: key,
 		})
-		if !errors.Is(err, ErrRevisionConflict) {
+		if !errors.Is(err, models.ErrRevisionConflict) {
 			return result, err
 		}
 	}
-	return nil, ErrRevisionConflict
+	return nil, models.ErrRevisionConflict
 }
 
 // addressedResponders applies the addressing rules, which need no model call:
 // @mentioned Agents, then @everyone, then the author of a quoted or
 // replied-to Agent message. An Agent's own message (a handoff) is addressed
 // only through its @mentions and never fans out to everyone.
-func (c *ConversationCoordinator) addressedResponders(ctx context.Context, conversation *Conversation, trigger *ChannelMessage, bindings []ConversationParticipantBinding) ([]ConversationResponder, error) {
-	members := make(map[ConversationParticipant]ConversationParticipantBinding, len(bindings))
+func (c *ConversationCoordinator) addressedResponders(ctx context.Context, conversation *models.Conversation, trigger *models.ChannelMessage, bindings []ConversationParticipantBinding) ([]models.ConversationResponder, error) {
+	members := make(map[models.ConversationParticipant]ConversationParticipantBinding, len(bindings))
 	for _, binding := range bindings {
 		members[binding.Participant] = binding
 	}
-	responders := make([]ConversationResponder, 0)
-	added := make(map[ConversationParticipant]bool)
-	add := func(participant ConversationParticipant, addressed ConversationAddressing) {
+	responders := make([]models.ConversationResponder, 0)
+	added := make(map[models.ConversationParticipant]bool)
+	add := func(participant models.ConversationParticipant, addressed models.ConversationAddressing) {
 		if _, member := members[participant]; !member || added[participant] || participant == trigger.Sender {
 			return
 		}
 		added[participant] = true
-		responders = append(responders, ConversationResponder{Participant: participant, Addressed: addressed})
+		responders = append(responders, models.ConversationResponder{Participant: participant, Addressed: addressed})
 	}
 	for _, mention := range trigger.Mentions {
-		add(mention, ConversationAddressedMention)
+		add(mention, models.ConversationAddressedMention)
 	}
-	if trigger.Audience.Kind == ConversationAudienceParticipants {
+	if trigger.Audience.Kind == models.ConversationAudienceParticipants {
 		for _, participant := range trigger.Audience.Participants {
-			add(participant, ConversationAddressedMention)
+			add(participant, models.ConversationAddressedMention)
 		}
 	}
-	if trigger.Sender.Type == ConversationParticipantAgent {
+	if trigger.Sender.Type == models.ConversationParticipantAgent {
 		return responders, nil
 	}
 	if len(responders) > 0 {
 		return responders, nil
 	}
-	if trigger.Audience.Kind == ConversationAudienceEveryone {
+	if trigger.Audience.Kind == models.ConversationAudienceEveryone {
 		for _, binding := range bindings {
-			add(binding.Participant, ConversationAddressedEveryone)
+			add(binding.Participant, models.ConversationAddressedEveryone)
 		}
 		return responders, nil
 	}
@@ -264,25 +265,25 @@ func (c *ConversationCoordinator) addressedResponders(ctx context.Context, conve
 			continue
 		}
 		referenced, err := c.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, id)
-		if errors.Is(err, ErrChannelMessageNotFound) {
+		if errors.Is(err, models.ErrChannelMessageNotFound) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		if referenced.Sender.Type == ConversationParticipantAgent {
-			add(referenced.Sender, ConversationAddressedReply)
+		if referenced.Sender.Type == models.ConversationParticipantAgent {
+			add(referenced.Sender, models.ConversationAddressedReply)
 			if len(responders) > 0 {
 				return responders, nil
 			}
 		}
 	}
-	if trigger.Audience.Kind == ConversationAudienceRoles {
+	if trigger.Audience.Kind == models.ConversationAudienceRoles {
 		for _, binding := range bindings {
 			for _, role := range binding.SemanticRoles {
 				for _, addressed := range trigger.Audience.Roles {
 					if strings.EqualFold(strings.TrimSpace(role), strings.TrimSpace(addressed)) {
-						add(binding.Participant, ConversationAddressedRole)
+						add(binding.Participant, models.ConversationAddressedRole)
 					}
 				}
 			}
@@ -294,15 +295,15 @@ func (c *ConversationCoordinator) addressedResponders(ctx context.Context, conve
 // route makes the one routing call and applies the fixed fallback order when
 // it fails: the Agent last talking with this user, else the lead, else the
 // first member who is not busy.
-func (c *ConversationCoordinator) route(ctx context.Context, conversation *Conversation, trigger *ChannelMessage, bindings []ConversationParticipantBinding) (ConversationResponder, error) {
+func (c *ConversationCoordinator) route(ctx context.Context, conversation *models.Conversation, trigger *models.ChannelMessage, bindings []ConversationParticipantBinding) (models.ConversationResponder, error) {
 	roster := loadConversationTeamRoster(ctx, c.conversations.store, conversation)
 	request := ConversationRouteRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, TeamID: conversation.Owner.ID,
-		RoutingNotes: roster.notes, Trigger: *cloneChannelMessage(trigger),
+		RoutingNotes: roster.notes, Trigger: *models.CloneChannelMessage(trigger),
 	}
 	busy, err := teamBusyMembers(ctx, c.conversations.store, conversation)
 	if err != nil {
-		return ConversationResponder{}, err
+		return models.ConversationResponder{}, err
 	}
 	for _, binding := range bindings {
 		id := binding.Participant.ID
@@ -322,13 +323,13 @@ func (c *ConversationCoordinator) route(ctx context.Context, conversation *Conve
 		}
 		request.Members = append(request.Members, member)
 	}
-	viewer := ConversationViewer{Participant: trigger.Sender}
-	recent, err := c.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
+	viewer := models.ConversationViewer{Participant: trigger.Sender}
+	recent, err := c.conversations.ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: conversation.Scope, ConversationID: conversation.ID, BeforeSequence: trigger.Sequence,
 		Limit: 50, Descending: true, Viewer: &viewer,
 	})
 	if err != nil {
-		return ConversationResponder{}, err
+		return models.ConversationResponder{}, err
 	}
 	reverseChannelMessages(recent)
 	request.LastAgentWithUser = lastAgentWithUser(recent, trigger.Sender, request.Members)
@@ -336,7 +337,7 @@ func (c *ConversationCoordinator) route(ctx context.Context, conversation *Conve
 		recent = recent[len(recent)-c.config.RecentMessageLimit:]
 	}
 	for _, message := range recent {
-		request.Recent = append(request.Recent, *cloneChannelMessage(message))
+		request.Recent = append(request.Recent, *models.CloneChannelMessage(message))
 	}
 	routeCtx, cancel := context.WithTimeout(ctx, c.config.RouteTimeout)
 	decision, routeErr := c.router.Route(routeCtx, request)
@@ -344,22 +345,22 @@ func (c *ConversationCoordinator) route(ctx context.Context, conversation *Conve
 	if routeErr == nil {
 		for _, member := range request.Members {
 			if member.AgentID == strings.TrimSpace(decision.AgentID) {
-				return ConversationResponder{
-					Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: member.AgentID},
-					Addressed:   ConversationAddressedRouted, Reason: routingReason(decision.Reason, "best fit for this message"),
+				return models.ConversationResponder{
+					Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: member.AgentID},
+					Addressed:   models.ConversationAddressedRouted, Reason: routingReason(decision.Reason, "best fit for this message"),
 				}, nil
 			}
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return ConversationResponder{}, err
+		return models.ConversationResponder{}, err
 	}
 	return fallbackConversationResponder(request), nil
 }
 
-func fallbackConversationResponder(request ConversationRouteRequest) ConversationResponder {
-	pick := func(id, reason string) ConversationResponder {
-		return ConversationResponder{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: id}, Addressed: ConversationAddressedRouted, Reason: reason}
+func fallbackConversationResponder(request ConversationRouteRequest) models.ConversationResponder {
+	pick := func(id, reason string) models.ConversationResponder {
+		return models.ConversationResponder{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: id}, Addressed: models.ConversationAddressedRouted, Reason: reason}
 	}
 	if request.LastAgentWithUser != "" {
 		return pick(request.LastAgentWithUser, "was just talking with you")
@@ -381,26 +382,26 @@ func routingReason(reason, fallback string) string {
 	if reason == "" {
 		reason = fallback
 	}
-	for len(reason) > MaximumRoutingReasonBytes {
-		reason = truncateRunes(reason, len([]rune(reason))-1)
+	for len(reason) > models.MaximumRoutingReasonBytes {
+		reason = models.TruncateRunes(reason, len([]rune(reason))-1)
 	}
 	return reason
 }
 
 // lastAgentWithUser returns the newest member answer to one of user's
 // messages; members is the eligible roster.
-func lastAgentWithUser(messages []*ChannelMessage, user ConversationParticipant, members []RouteMember) string {
+func lastAgentWithUser(messages []*models.ChannelMessage, user models.ConversationParticipant, members []RouteMember) string {
 	eligible := make(map[string]bool, len(members))
 	for _, member := range members {
 		eligible[member.AgentID] = true
 	}
-	senders := make(map[string]ConversationParticipant, len(messages))
+	senders := make(map[string]models.ConversationParticipant, len(messages))
 	for _, message := range messages {
 		senders[message.ID] = message.Sender
 	}
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
-		if message.Sender.Type != ConversationParticipantAgent || !eligible[message.Sender.ID] {
+		if message.Sender.Type != models.ConversationParticipantAgent || !eligible[message.Sender.ID] {
 			continue
 		}
 		for _, id := range []string{message.ResolvesMessageID, message.ReplyToMessageID, quotedMessageID(message.Quote)} {
@@ -437,10 +438,10 @@ type conversationAgentCatalog interface {
 // names, purposes and owned topics from the kernel store. It is best effort: a
 // store without Team records yields an empty roster, never an error, because
 // membership itself comes from the host's participant source.
-func loadConversationTeamRoster(ctx context.Context, store ConversationStore, conversation *Conversation) conversationTeamRoster {
+func loadConversationTeamRoster(ctx context.Context, store models.ConversationStore, conversation *models.Conversation) conversationTeamRoster {
 	roster := conversationTeamRoster{members: map[string]conversationTeamMember{}}
 	teams, ok := store.(conversationTeamCatalog)
-	if !ok || conversation == nil || conversation.Owner.Type != OwnerTypeTeam {
+	if !ok || conversation == nil || conversation.Owner.Type != models.OwnerTypeTeam {
 		return roster
 	}
 	scope := capability.ScopeReference{Kind: conversation.Scope.Kind, ID: conversation.Scope.ID}
@@ -475,20 +476,20 @@ func loadConversationTeamRoster(ctx context.Context, store ConversationStore, co
 }
 
 // activeConversationRunStatuses are the non-terminal Run statuses.
-var activeConversationRunStatuses = []AgentRunStatus{AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning, AgentRunStatusPaused, AgentRunStatusSleeping,
-	AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent, AgentRunStatusWaitingForApproval, AgentRunStatusWaitingForEvent}
+var activeConversationRunStatuses = []models.AgentRunStatus{models.AgentRunStatusQueued, models.AgentRunStatusPlanning, models.AgentRunStatusRunning, models.AgentRunStatusPaused, models.AgentRunStatusSleeping,
+	models.AgentRunStatusWaitingForDependency, models.AgentRunStatusWaitingForAgent, models.AgentRunStatusWaitingForApproval, models.AgentRunStatusWaitingForEvent}
 
 // teamBusyMembers maps each member with an active Run of this Team (an answer
 // or a task) to a short label of that work.
-func teamBusyMembers(ctx context.Context, store ConversationStore, conversation *Conversation) (map[string]string, error) {
+func teamBusyMembers(ctx context.Context, store models.ConversationStore, conversation *models.Conversation) (map[string]string, error) {
 	busy := make(map[string]string)
-	runs, ok := store.(PortfolioStore)
+	runs, ok := store.(models.PortfolioStore)
 	if !ok {
 		return busy, nil
 	}
 	const pageSize = 200
 	for offset := 0; ; offset += pageSize {
-		page, err := runs.ListAgentRuns(ctx, AgentRunFilter{
+		page, err := runs.ListAgentRuns(ctx, models.AgentRunFilter{
 			Scope: conversation.Scope, Owner: &conversation.Owner,
 			Statuses: activeConversationRunStatuses,
 			Limit:    pageSize, Offset: offset,
@@ -497,15 +498,15 @@ func teamBusyMembers(ctx context.Context, store ConversationStore, conversation 
 			return nil, err
 		}
 		for _, run := range page {
-			if run == nil || run.AssignedAgentID == "" || isTerminalAgentRunStatus(run.Status) {
+			if run == nil || run.AssignedAgentID == "" || models.IsTerminalAgentRunStatus(run.Status) {
 				continue
 			}
 			if _, exists := busy[run.AssignedAgentID]; !exists {
 				label := run.Goal
-				if run.Kind == RunKindConversation {
+				if run.Kind == models.RunKindConversation {
 					label = "answering in the Team channel"
 				}
-				busy[run.AssignedAgentID] = truncateRunes(label, 80)
+				busy[run.AssignedAgentID] = models.TruncateRunes(label, 80)
 			}
 		}
 		if len(page) < pageSize {
@@ -514,7 +515,7 @@ func teamBusyMembers(ctx context.Context, store ConversationStore, conversation 
 	}
 }
 
-func (c *ConversationCoordinator) markObserved(ctx context.Context, conversation *Conversation, participant ConversationParticipant, sequence int64) error {
+func (c *ConversationCoordinator) markObserved(ctx context.Context, conversation *models.Conversation, participant models.ConversationParticipant, sequence int64) error {
 	if sequence <= 0 {
 		return nil
 	}
@@ -534,17 +535,17 @@ func (c *ConversationCoordinator) markObserved(ctx context.Context, conversation
 			Scope: conversation.Scope, ConversationID: conversation.ID, Participant: participant,
 			ExpectedRevision: expectedRevision, DeliveredSequence: sequence, ReadSequence: sequence,
 		})
-		if !errors.Is(err, ErrConversationCursorConflict) {
+		if !errors.Is(err, models.ErrConversationCursorConflict) {
 			return err
 		}
 	}
-	return ErrConversationCursorConflict
+	return models.ErrConversationCursorConflict
 }
 
-func mergeConversationReferences(left, right []ConversationReference) []ConversationReference {
-	merged := make([]ConversationReference, 0, len(left)+len(right))
-	seen := make(map[ConversationReference]struct{}, len(left)+len(right))
-	for _, references := range [][]ConversationReference{left, right} {
+func mergeConversationReferences(left, right []models.ConversationReference) []models.ConversationReference {
+	merged := make([]models.ConversationReference, 0, len(left)+len(right))
+	seen := make(map[models.ConversationReference]struct{}, len(left)+len(right))
+	for _, references := range [][]models.ConversationReference{left, right} {
 		for _, reference := range references {
 			if _, exists := seen[reference]; exists {
 				continue
@@ -556,7 +557,7 @@ func mergeConversationReferences(left, right []ConversationReference) []Conversa
 	return merged
 }
 
-func latestConversationSequence(messages []*ChannelMessage) int64 {
+func latestConversationSequence(messages []*models.ChannelMessage) int64 {
 	var latest int64
 	for _, message := range messages {
 		if message != nil && message.Sequence > latest {
@@ -566,7 +567,7 @@ func latestConversationSequence(messages []*ChannelMessage) int64 {
 	return latest
 }
 
-func reverseChannelMessages(messages []*ChannelMessage) {
+func reverseChannelMessages(messages []*models.ChannelMessage) {
 	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
 		messages[left], messages[right] = messages[right], messages[left]
 	}

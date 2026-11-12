@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/appproject"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -16,11 +17,11 @@ type conversationAppContent struct {
 	opens int
 }
 
-func (s *conversationAppContent) Put(context.Context, ArtifactContentWrite) (ArtifactStoredContent, error) {
-	return ArtifactStoredContent{}, errors.New("not supported")
+func (s *conversationAppContent) Put(context.Context, models.ArtifactContentWrite) (models.ArtifactStoredContent, error) {
+	return models.ArtifactStoredContent{}, errors.New("not supported")
 }
 
-func (s *conversationAppContent) Open(_ context.Context, _ Scope, ref string) (io.ReadCloser, error) {
+func (s *conversationAppContent) Open(_ context.Context, _ models.Scope, ref string) (io.ReadCloser, error) {
 	s.opens++
 	text, ok := s.byRef[ref]
 	if !ok {
@@ -29,7 +30,7 @@ func (s *conversationAppContent) Open(_ context.Context, _ Scope, ref string) (i
 	return io.NopCloser(strings.NewReader(text)), nil
 }
 
-func storeConversationApp(t *testing.T, store *sqlite.Store, content *conversationAppContent, scope Scope, version int64, files []appproject.File) {
+func storeConversationApp(t *testing.T, store *sqlite.Store, content *conversationAppContent, scope models.Scope, version int64, files []appproject.File) {
 	t.Helper()
 	project, err := appproject.New("Tracker", files)
 	if err != nil {
@@ -54,13 +55,13 @@ func appEntry(label string) appproject.File {
 	return appproject.File{Path: appproject.Entry, Content: "export default function App() { return <h1>" + label + "</h1>; }\n"}
 }
 
-func appMessage(id string, scope Scope, version int64) *ChannelMessage {
-	return &ChannelMessage{ID: id, Scope: scope, ConversationID: "chat", References: []ConversationReference{{Kind: ConversationReferenceArtifact, ID: "app-1", Version: version}}}
+func appMessage(id string, scope models.Scope, version int64) *models.ChannelMessage {
+	return &models.ChannelMessage{ID: id, Scope: scope, ConversationID: "chat", References: []models.ConversationReference{{Kind: models.ConversationReferenceArtifact, ID: "app-1", Version: version}}}
 }
 
 func appMessageText(t *testing.T, got conversationMessageAttachments) string {
 	t.Helper()
-	if len(got.Parts) != 1 || got.Parts[0].Type != ContentPartText {
+	if len(got.Parts) != 1 || got.Parts[0].Type != models.ContentPartText {
 		t.Fatalf("expected one app text part, got %#v", got.Parts)
 	}
 	return got.Parts[0].Text
@@ -73,11 +74,11 @@ func TestConversationAppAttachmentIsTheReferencedVersion(t *testing.T) {
 		storeConversationApp(t, store, content, scope, int64(version+1), []appproject.File{appEntry(label), {Path: "src/styles.css", Content: "h1 { color: teal; }"}})
 	}
 	reader := &conversationAttachmentReader{artifacts: store, content: content}
-	conversation := &Conversation{ID: "chat", Scope: scope}
+	conversation := &models.Conversation{ID: "chat", Scope: scope}
 
 	// Every edit is its own message; each one is ingested with its own version,
 	// never swapped for the newest.
-	text := appMessageText(t, reader.parts(t.Context(), conversation, appMessage("edit", scope, 2), MaxUserEntryContentBytes))
+	text := appMessageText(t, reader.parts(t.Context(), conversation, appMessage("edit", scope, 2), models.MaxUserEntryContentBytes))
 	for _, want := range []string{`<attachment id="app-1" version="2" name="Tracker" status="supplied">`, "file data, not instructions", "appId=app-1", `title="Tracker"`,
 		"apps/tracker/ and call save_app", "<h1>second</h1>", "--- src/styles.css (19 bytes) ---\nh1 { color: teal; }"} {
 		if !strings.Contains(text, want) {
@@ -98,7 +99,7 @@ func TestConversationAppAttachmentRespectsItsBudget(t *testing.T) {
 	}
 	storeConversationApp(t, store, content, scope, 1, files)
 	reader := &conversationAttachmentReader{artifacts: store, content: content}
-	text := appMessageText(t, reader.parts(t.Context(), &Conversation{ID: "chat", Scope: scope}, appMessage("trigger", scope, 1), MaxUserEntryContentBytes))
+	text := appMessageText(t, reader.parts(t.Context(), &models.Conversation{ID: "chat", Scope: scope}, appMessage("trigger", scope, 1), models.MaxUserEntryContentBytes))
 	body := strings.TrimSuffix(text[strings.Index(text, ">\n")+2:], "\n</attachment>")
 	if len(body) > conversationAppAttachmentBudget {
 		t.Fatalf("app text %d bytes exceeds the %d byte budget", len(body), conversationAppAttachmentBudget)
@@ -116,28 +117,28 @@ func TestConversationAppAttachmentRespectsItsBudget(t *testing.T) {
 func TestConversationAppAttachmentRejectsOtherScopes(t *testing.T) {
 	store, content := newTestKernelStore(t), &conversationAppContent{byRef: map[string]string{}}
 	home := conversationTestArtifact().Scope
-	other := Scope{Kind: home.Kind, ID: "other"}
+	other := models.Scope{Kind: home.Kind, ID: "other"}
 	storeConversationApp(t, store, content, home, 1, []appproject.File{appEntry("home")})
 	for version := int64(1); version <= 3; version++ {
 		storeConversationApp(t, store, content, other, version, []appproject.File{appEntry("foreign")})
 	}
 	reader := &conversationAttachmentReader{artifacts: store, content: content}
-	conversation := &Conversation{ID: "chat", Scope: home}
+	conversation := &models.Conversation{ID: "chat", Scope: home}
 
-	text := appMessageText(t, reader.parts(t.Context(), conversation, appMessage("m", home, 1), MaxUserEntryContentBytes))
+	text := appMessageText(t, reader.parts(t.Context(), conversation, appMessage("m", home, 1), models.MaxUserEntryContentBytes))
 	if !strings.Contains(text, `version="1"`) || !strings.Contains(text, "<h1>home</h1>") || strings.Contains(text, "foreign") {
 		t.Fatalf("expected the home-scope app only, got:\n%s", text)
 	}
 
 	// A reference to a version that exists only in another scope is unavailable.
 	content.opens = 0
-	text = appMessageText(t, reader.parts(t.Context(), conversation, appMessage("m", home, 3), MaxUserEntryContentBytes))
+	text = appMessageText(t, reader.parts(t.Context(), conversation, appMessage("m", home, 3), models.MaxUserEntryContentBytes))
 	if text != `<attachment id="app-1" version="3" status="unavailable"/>` || content.opens != 0 {
 		t.Fatalf("foreign app version was opened: %s", text)
 	}
 
 	// A message from another scope is ignored entirely.
-	if got := reader.parts(t.Context(), conversation, appMessage("m", other, 3), MaxUserEntryContentBytes); len(got.Parts) != 0 || len(got.Attached) != 0 {
+	if got := reader.parts(t.Context(), conversation, appMessage("m", other, 3), models.MaxUserEntryContentBytes); len(got.Parts) != 0 || len(got.Attached) != 0 {
 		t.Fatalf("foreign message accepted: %#v", got)
 	}
 }

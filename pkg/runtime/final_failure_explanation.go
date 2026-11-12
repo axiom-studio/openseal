@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -33,7 +34,7 @@ const maximumRunFailureCodeBytes = 64
 // Code is kept as the kernel classified it (run codes such as error_streak
 // stay distinct); host codes with a terminalFailureCode class are normalized
 // to it, so a gateway credit refusal becomes workspace_credits_exhausted.
-func beginRunFailureExplanation(run *AgentRun, kind, code, message, stepError, stepErrorCode string) *RunFailureExplanation {
+func beginRunFailureExplanation(run *models.AgentRun, kind, code, message, stepError, stepErrorCode string) *models.RunFailureExplanation {
 	if run != nil && run.FailureExplanation != nil {
 		existing := *run.FailureExplanation
 		return &existing
@@ -46,14 +47,14 @@ func beginRunFailureExplanation(run *AgentRun, kind, code, message, stepError, s
 	if message == "" {
 		message = "The requested work did not complete."
 	}
-	return &RunFailureExplanation{
+	return &models.RunFailureExplanation{
 		Kind: kind, Code: runFailureCode(code), Message: message,
 		StepError: boundedTurnFailureText(stepError), StepErrorCode: runFailureCodeOrEmpty(stepErrorCode),
 	}
 }
 
 // explainedRunFailure is the failure after its model explanation was posted.
-func explainedRunFailure(f *RunFailureExplanation) *RunFailureExplanation {
+func explainedRunFailure(f *models.RunFailureExplanation) *models.RunFailureExplanation {
 	if f == nil {
 		return nil
 	}
@@ -89,29 +90,29 @@ func runFailureCodeOrEmpty(code string) string {
 
 // runExplainingFailure reports whether the Run's next step is its one
 // tool-free failure explanation.
-func runExplainingFailure(run *AgentRun) bool {
-	return run != nil && run.FailureExplanation != nil && !run.FailureExplanation.Explained && !isTerminalAgentRunStatus(run.Status)
+func runExplainingFailure(run *models.AgentRun) bool {
+	return run != nil && run.FailureExplanation != nil && !run.FailureExplanation.Explained && !models.IsTerminalAgentRunStatus(run.Status)
 }
 
 // failureExplanationNoteText is the kernel instruction of the explanation
 // step. It is followed only by the model's tool-free reply.
-func failureExplanationNoteText(f *RunFailureExplanation) string {
+func failureExplanationNoteText(f *models.RunFailureExplanation) string {
 	return "This attempt has stopped: " + strings.TrimRight(f.Message, ". ") + ". Give one brief, useful final reply in your configured voice explaining what did not work and any next step the user actually needs. Ground it in this failure and the successful tool results above. Do not expose internal tool names, ids or governance details, and do not guess that the user's plan, account or permissions are wrong without evidence. Do not call tools, retry, repair, set anything up, schedule, wait, fork or delegate."
 }
 
 // failureExplanationNote is the note the loop appends at the start of the
 // explanation step (stepID). Its SourceKey is attempt-scoped, so a replayed
 // append of the same step is a no-op and a later attempt gets its own note.
-func failureExplanationNote(sessionID, runID, stepID string, f *RunFailureExplanation) *SessionEntry {
+func failureExplanationNote(sessionID, runID, stepID string, f *models.RunFailureExplanation) *models.SessionEntry {
 	if f == nil {
 		return nil
 	}
-	key := FailureNoteSourceKey(runID, stepID)
+	key := models.FailureNoteSourceKey(runID, stepID)
 	data, _ := json.Marshal(map[string]string{"code": f.Code})
-	return &SessionEntry{
-		ID: SessionEntryID(sessionID, key), SessionID: sessionID, RunID: runID, StepID: stepID,
-		Type: SessionEntryNote, SourceKey: key,
-		Note: &NoteEntry{Kind: NoteFailureExplanation, Text: failureExplanationNoteText(f), Data: data},
+	return &models.SessionEntry{
+		ID: models.SessionEntryID(sessionID, key), SessionID: sessionID, RunID: runID, StepID: stepID,
+		Type: models.SessionEntryNote, SourceKey: key,
+		Note: &models.NoteEntry{Kind: models.NoteFailureExplanation, Text: failureExplanationNoteText(f), Data: data},
 	}
 }
 
@@ -150,8 +151,8 @@ func boundedTurnFailureText(text string) string {
 // modelExplainsFailure reports whether a stopped attempt of this Run gets an
 // answer-only model turn to explain its failure before it ends. Hosted Agent
 // work and conversations do; other kinds end with the kernel's reply.
-func modelExplainsFailure(run *AgentRun) bool {
-	return run != nil && (run.Kind == RunKindAgentWork || run.Kind == RunKindConversation)
+func modelExplainsFailure(run *models.AgentRun) bool {
+	return run != nil && (run.Kind == models.RunKindAgentWork || run.Kind == models.RunKindConversation)
 }
 
 // turnFailureCanBeExplained reports whether a failed turn leaves a model able
@@ -159,8 +160,8 @@ func modelExplainsFailure(run *AgentRun) bool {
 // Workspace has no credits, the budget is spent, or the work was canceled.
 func turnFailureCanBeExplained(err error, code string) bool {
 	if err == nil || errors.Is(err, modelstep.ErrTurnHostUnavailable) || errors.Is(err, modelstep.ErrTurnHostConfiguration) ||
-		errors.Is(err, ErrBudgetExhausted) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, ErrLeaseLost) || errors.Is(err, ErrTurnLeaseHeld) {
+		errors.Is(err, models.ErrBudgetExhausted) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, models.ErrLeaseLost) || errors.Is(err, models.ErrTurnLeaseHeld) {
 		return false
 	}
 	switch terminalFailureCode(code) {

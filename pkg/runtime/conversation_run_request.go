@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -11,57 +13,57 @@ const (
 // conversationMessageInitiatingUser resolves only the canonical scoped human
 // identity. A host-owned voice-call start may name its authenticated initiator;
 // arbitrary service metadata and copied Run context never grant that authority.
-func conversationMessageInitiatingUser(conversation *Conversation, message *ChannelMessage) (ConversationParticipant, bool) {
+func conversationMessageInitiatingUser(conversation *models.Conversation, message *models.ChannelMessage) (models.ConversationParticipant, bool) {
 	if conversation == nil || message == nil || message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
-		return ConversationParticipant{}, false
+		return models.ConversationParticipant{}, false
 	}
 	actor := message.Sender
-	if voiceCallStartedMessage(message) && message.Initiator != nil {
+	if models.VoiceCallStartedMessage(message) && message.Initiator != nil {
 		actor = *message.Initiator
 	}
-	return actor, actor.Type == ConversationParticipantUser && actor.Validate() == nil
+	return actor, actor.Type == models.ConversationParticipantUser && actor.Validate() == nil
 }
 
-func conversationAgentRunRequest(conversation *Conversation, message *ChannelMessage) CreateAgentRunRequest {
+func conversationAgentRunRequest(conversation *models.Conversation, message *models.ChannelMessage) models.CreateAgentRunRequest {
 	goal := teamRoutingRunGoal
 	assignedAgentID := ""
-	visibility := ActivityVisibilityTeam
-	if conversation.Owner.Type == OwnerTypeAgent {
+	visibility := models.ActivityVisibilityTeam
+	if conversation.Owner.Type == models.OwnerTypeAgent {
 		goal = "Respond to an Agent channel message"
 		assignedAgentID = conversation.Owner.ID
-		visibility = ActivityVisibilityPrivate
+		visibility = models.ActivityVisibilityPrivate
 	}
-	request := CreateAgentRunRequest{
-		Scope: conversation.Scope, Kind: RunKindConversation, Owner: conversation.Owner,
-		AssignedAgentID: assignedAgentID, ActingUser: MessageActingUser(conversation, message),
-		ConcurrencyKey: ConversationRunLane(conversation.ID, "", assignedAgentID), Goal: goal, Source: RunSourceChat,
+	request := models.CreateAgentRunRequest{
+		Scope: conversation.Scope, Kind: models.RunKindConversation, Owner: conversation.Owner,
+		AssignedAgentID: assignedAgentID, ActingUser: models.MessageActingUser(conversation, message),
+		ConcurrencyKey: models.ConversationRunLane(conversation.ID, "", assignedAgentID), Goal: goal, Source: models.RunSourceChat,
 		Context: map[string]interface{}{
-			conversationRunContextConversationID: conversation.ID,
-			conversationRunContextTriggerID:      message.ID,
-			conversationRunContextTriggerSeq:     message.Sequence,
+			models.ConversationRunConversationIDContextKey: conversation.ID,
+			models.ConversationRunTriggerIDContextKey:      message.ID,
+			conversationRunContextTriggerSeq:               message.Sequence,
 		},
 		IdempotencyKey: conversationRunIdempotencyKey(conversation.Scope, conversation.ID, message.ID),
-		Actor:          ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
+		Actor:          models.ActivityActor{Type: "service", ID: models.ConversationRunSchedulerParticipant},
 		Visibility:     visibility,
 	}
-	if root := externalConversationThreadRoot(conversation, message); root != "" {
+	if root := models.ExternalConversationThreadRoot(conversation, message); root != "" {
 		request.Context["threadRootMessageId"] = root
-		request.ConcurrencyKey = ConversationRunLane(conversation.ID, root, assignedAgentID)
+		request.ConcurrencyKey = models.ConversationRunLane(conversation.ID, root, assignedAgentID)
 	}
 	if message.ResponseMode != "" {
 		request.Context["responseMode"] = message.ResponseMode
 	}
-	if voiceCallStartedMessage(message) {
+	if models.VoiceCallStartedMessage(message) {
 		request.Context["voiceCallStarted"] = true
 	}
 	if assignedAgentID != "" {
-		request.SessionID = conversationSessionID(conversation.Scope, request.ConcurrencyKey)
+		request.SessionID = models.ConversationSessionID(conversation.Scope, request.ConcurrencyKey)
 	}
 	return request
 }
 
-func conversationRunIdempotencyKey(scope Scope, conversationID, messageID string) string {
-	return "conversation-run:" + hashString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+messageID)
+func conversationRunIdempotencyKey(scope models.Scope, conversationID, messageID string) string {
+	return "conversation-run:" + models.SHA256DigestString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+messageID)
 }
 
 // ConversationPlace is a place find_place found in a chat, as the Agent
@@ -77,14 +79,14 @@ type ConversationPlace struct {
 const MaximumConversationPlaces = 20
 
 type agentConversationActiveRun struct {
-	ID                string         `json:"id"`
-	RootRunID         string         `json:"rootRunId"`
-	Entrypoint        string         `json:"entrypoint,omitempty"`
-	Status            AgentRunStatus `json:"status"`
-	Goal              string         `json:"goal"`
-	Source            RunSource      `json:"source"`
-	Revision          int64          `json:"revision"`
-	AvailableControls []string       `json:"availableControls,omitempty"`
+	ID                string                `json:"id"`
+	RootRunID         string                `json:"rootRunId"`
+	Entrypoint        string                `json:"entrypoint,omitempty"`
+	Status            models.AgentRunStatus `json:"status"`
+	Goal              string                `json:"goal"`
+	Source            models.RunSource      `json:"source"`
+	Revision          int64                 `json:"revision"`
+	AvailableControls []string              `json:"availableControls,omitempty"`
 }
 
 // agentConversationAssignment is the work a teammate handed over in the chat.
@@ -94,8 +96,8 @@ type agentConversationAssignment struct {
 	Work string `json:"work"`
 }
 
-func conversationRunAssignment(run *AgentRun) *agentConversationAssignment {
-	if run == nil || run.Source != RunSourceRequest && run.Source != RunSourceHandoff && run.Source != RunSourceEscalation || strings.TrimSpace(run.Goal) == "" {
+func conversationRunAssignment(run *models.AgentRun) *agentConversationAssignment {
+	if run == nil || run.Source != models.RunSourceRequest && run.Source != models.RunSourceHandoff && run.Source != models.RunSourceEscalation || strings.TrimSpace(run.Goal) == "" {
 		return nil
 	}
 	from, _ := run.Context[collaborationHandedOffByContextKey].(string)

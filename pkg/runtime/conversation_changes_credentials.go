@@ -3,16 +3,18 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ConversationCredentialRequest is a credential request as placed in one
 // conversation view. ThreadRootMessageID is a projection, never authority.
 type ConversationCredentialRequest struct {
-	CredentialRequest
+	models.CredentialRequest
 	ThreadRootMessageID string `json:"threadRootMessageId,omitempty"`
 }
 
-func (s *ConversationChangeService) listConversationCredentialRequests(ctx context.Context, conversation *Conversation, runs []*AgentRun, viewer *ConversationViewer) ([]*ConversationCredentialRequest, error) {
+func (s *ConversationChangeService) listConversationCredentialRequests(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun, viewer *models.ConversationViewer) ([]*ConversationCredentialRequest, error) {
 	if s.credentials == nil || conversation == nil {
 		return []*ConversationCredentialRequest{}, nil
 	}
@@ -20,14 +22,14 @@ func (s *ConversationChangeService) listConversationCredentialRequests(ctx conte
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]*CredentialRequest, 0, len(stored))
+	candidates := make([]*models.CredentialRequest, 0, len(stored))
 	for _, request := range stored {
 		if request != nil && request.Scope == conversation.Scope && request.Owner == conversation.Owner && request.ConversationID == conversation.ID {
-			candidates = append(candidates, cloneCredentialRequest(request))
+			candidates = append(candidates, models.CloneCredentialRequest(request))
 		}
 	}
-	candidates = boundConversationInteractions(candidates, func(r *CredentialRequest) bool { return r.Status == CredentialRequestStatusPending },
-		func(r *CredentialRequest) (string, int64, int64) {
+	candidates = boundConversationInteractions(candidates, func(r *models.CredentialRequest) bool { return r.Status == models.CredentialRequestStatusPending },
+		func(r *models.CredentialRequest) (string, int64, int64) {
 			return r.ID, r.CreatedAt.UnixNano(), r.UpdatedAt.UnixNano()
 		})
 	triggers := make([]string, 0, len(candidates))
@@ -39,7 +41,7 @@ func (s *ConversationChangeService) listConversationCredentialRequests(ctx conte
 		return nil, err
 	}
 	if viewer != nil {
-		selected := make([]*ChannelMessage, 0, len(messages))
+		selected := make([]*models.ChannelMessage, 0, len(messages))
 		for _, message := range messages {
 			selected = append(selected, message)
 		}
@@ -47,12 +49,12 @@ func (s *ConversationChangeService) listConversationCredentialRequests(ctx conte
 		if err != nil {
 			return nil, err
 		}
-		messages = make(map[string]*ChannelMessage, len(visible))
+		messages = make(map[string]*models.ChannelMessage, len(visible))
 		for _, message := range visible {
 			messages[message.ID] = message
 		}
 	}
-	byRun := make(map[string]*AgentRun, len(runs))
+	byRun := make(map[string]*models.AgentRun, len(runs))
 	for _, run := range runs {
 		if run != nil {
 			byRun[run.ID] = run
@@ -66,7 +68,7 @@ func (s *ConversationChangeService) listConversationCredentialRequests(ctx conte
 		}
 		thread := conversationRunLineageValue(byRun[request.RunID], byRun, "threadRootMessageId")
 		if thread == "" {
-			thread = externalConversationThreadRoot(conversation, trigger)
+			thread = models.ExternalConversationThreadRoot(conversation, trigger)
 		}
 		result = append(result, &ConversationCredentialRequest{CredentialRequest: *request, ThreadRootMessageID: thread})
 	}
@@ -88,5 +90,5 @@ func conversationCredentialRequestProjectionDigest(requests []*ConversationCrede
 	if err != nil {
 		return "", err
 	}
-	return hashBytes(encoded), nil
+	return models.SHA256Digest(encoded), nil
 }

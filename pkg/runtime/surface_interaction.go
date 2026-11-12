@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type RecordSurfaceInteractionRequest struct {
-	Scope             Scope
+	Scope             models.Scope
 	ConversationID    string
 	SurfaceArtifactID string
 	SurfaceID         string
@@ -20,7 +22,7 @@ type RecordSurfaceInteractionRequest struct {
 	ComponentID    string
 	ItemKey        string
 	ActionID       string
-	Actor          ConversationParticipant
+	Actor          models.ConversationParticipant
 	Repeatable     bool
 	Values         json.RawMessage
 	Outcome        json.RawMessage
@@ -32,14 +34,14 @@ type RecordSurfaceInteractionRequest struct {
 // earlier one with the same idempotency key. MessageID must name a message of
 // the conversation that references the surface artifact. Hosts validate the
 // surface, version, component and value shape before calling it.
-func (s *ConversationService) RecordSurfaceInteraction(ctx context.Context, req RecordSurfaceInteractionRequest) (*SurfaceInteraction, bool, error) {
+func (s *ConversationService) RecordSurfaceInteraction(ctx context.Context, req RecordSurfaceInteractionRequest) (*models.SurfaceInteraction, bool, error) {
 	if s == nil || s.store == nil {
 		return nil, false, errors.New("conversation store is not configured")
 	}
 	if _, err := s.GetConversation(ctx, req.Scope, req.ConversationID); err != nil {
 		return nil, false, err
 	}
-	interaction := &SurfaceInteraction{
+	interaction := &models.SurfaceInteraction{
 		ID: s.newID(), Scope: req.Scope, ConversationID: strings.TrimSpace(req.ConversationID),
 		SurfaceArtifactID: strings.TrimSpace(req.SurfaceArtifactID), SurfaceID: strings.TrimSpace(req.SurfaceID),
 		SurfaceVersion: req.SurfaceVersion, MessageID: strings.TrimSpace(req.MessageID), ComponentID: strings.TrimSpace(req.ComponentID),
@@ -55,14 +57,14 @@ func (s *ConversationService) RecordSurfaceInteraction(ctx context.Context, req 
 		return nil, false, err
 	}
 	if !channelMessageReferencesArtifact(message, interaction.SurfaceArtifactID) {
-		return nil, false, fmt.Errorf("%w: message %q does not reference surface artifact %q", ErrInvalidSurfaceInteraction, interaction.MessageID, interaction.SurfaceArtifactID)
+		return nil, false, fmt.Errorf("%w: message %q does not reference surface artifact %q", models.ErrInvalidSurfaceInteraction, interaction.MessageID, interaction.SurfaceArtifactID)
 	}
 	return s.store.CreateSurfaceInteraction(ctx, interaction)
 }
 
-func channelMessageReferencesArtifact(message *ChannelMessage, artifactID string) bool {
+func channelMessageReferencesArtifact(message *models.ChannelMessage, artifactID string) bool {
 	for _, reference := range message.References {
-		if reference.Kind == ConversationReferenceArtifact && reference.ID == artifactID {
+		if reference.Kind == models.ConversationReferenceArtifact && reference.ID == artifactID {
 			return true
 		}
 	}
@@ -71,11 +73,11 @@ func channelMessageReferencesArtifact(message *ChannelMessage, artifactID string
 
 // filterVisibleSurfaceInteractions keeps the interactions viewer may read:
 // those whose card message the viewer can see.
-func (s *ConversationService) filterVisibleSurfaceInteractions(ctx context.Context, scope Scope, conversationID string, interactions []*SurfaceInteraction, viewer ConversationViewer) ([]*SurfaceInteraction, error) {
+func (s *ConversationService) filterVisibleSurfaceInteractions(ctx context.Context, scope models.Scope, conversationID string, interactions []*models.SurfaceInteraction, viewer models.ConversationViewer) ([]*models.SurfaceInteraction, error) {
 	if err := viewer.Validate(); err != nil {
 		return nil, err
 	}
-	candidates := make([]*SurfaceInteraction, 0, len(interactions))
+	candidates := make([]*models.SurfaceInteraction, 0, len(interactions))
 	messageIDs := make([]string, 0)
 	requested := make(map[string]bool)
 	for _, interaction := range interactions {
@@ -88,8 +90,8 @@ func (s *ConversationService) filterVisibleSurfaceInteractions(ctx context.Conte
 	if len(candidates) == 0 {
 		return candidates, nil
 	}
-	messages := make([]*ChannelMessage, 0, len(messageIDs))
-	if batch, ok := s.store.(ChannelMessageBatchStore); ok {
+	messages := make([]*models.ChannelMessage, 0, len(messageIDs))
+	if batch, ok := s.store.(models.ChannelMessageBatchStore); ok {
 		loaded, err := loadChannelMessageBatches(ctx, batch, scope, conversationID, messageIDs)
 		if err != nil {
 			return nil, err
@@ -118,7 +120,7 @@ func (s *ConversationService) filterVisibleSurfaceInteractions(ctx context.Conte
 	for _, message := range visibleMessages {
 		visibleMessageIDs[message.ID] = true
 	}
-	visible := make([]*SurfaceInteraction, 0, len(candidates))
+	visible := make([]*models.SurfaceInteraction, 0, len(candidates))
 	for _, interaction := range candidates {
 		if visibleMessageIDs[interaction.MessageID] {
 			visible = append(visible, interaction)
@@ -129,7 +131,7 @@ func (s *ConversationService) filterVisibleSurfaceInteractions(ctx context.Conte
 
 // ListSurfaceInteractions pages interactions by Sequence. With a Viewer it
 // scans past hidden interactions so a page is not cut short by them.
-func (s *ConversationService) ListSurfaceInteractions(ctx context.Context, filter SurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
+func (s *ConversationService) ListSurfaceInteractions(ctx context.Context, filter models.SurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -140,7 +142,7 @@ func (s *ConversationService) ListSurfaceInteractions(ctx context.Context, filte
 	scan := filter
 	scan.Viewer = nil
 	desired := scan.EffectiveLimit()
-	result := make([]*SurfaceInteraction, 0)
+	result := make([]*models.SurfaceInteraction, 0)
 	for len(result) < desired {
 		raw, err := s.store.ListSurfaceInteractions(ctx, scan)
 		if err != nil {
@@ -167,7 +169,7 @@ func (s *ConversationService) ListSurfaceInteractions(ctx context.Context, filte
 
 // ListLatestSurfaceInteractions resolves last-write-wins state of a surface.
 // With a Viewer it reduces only the interactions that viewer may read.
-func (s *ConversationService) ListLatestSurfaceInteractions(ctx context.Context, filter LatestSurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
+func (s *ConversationService) ListLatestSurfaceInteractions(ctx context.Context, filter models.LatestSurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -180,8 +182,8 @@ func (s *ConversationService) ListLatestSurfaceInteractions(ctx context.Context,
 	if err := scan.Validate(); err != nil {
 		return nil, err
 	}
-	page := SurfaceInteractionFilter{Scope: filter.Scope, ConversationID: filter.ConversationID, SurfaceID: filter.SurfaceID, Limit: maximumSurfaceInteractionLimit}
-	visible := make([]*SurfaceInteraction, 0)
+	page := models.SurfaceInteractionFilter{Scope: filter.Scope, ConversationID: filter.ConversationID, SurfaceID: filter.SurfaceID, Limit: models.MaximumSurfaceInteractionLimit}
+	visible := make([]*models.SurfaceInteraction, 0)
 	for {
 		raw, err := s.store.ListSurfaceInteractions(ctx, page)
 		if err != nil {
@@ -200,5 +202,5 @@ func (s *ConversationService) ListLatestSurfaceInteractions(ctx context.Context,
 			break
 		}
 	}
-	return latestSurfaceInteractions(visible, filter.AcrossActors), nil
+	return models.LatestSurfaceInteractions(visible, filter.AcrossActors), nil
 }

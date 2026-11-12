@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
@@ -50,7 +51,7 @@ func handedOverFileIDs(ids []string) []string {
 // A file saved more than once goes out as its newest version only. A Run's
 // other files stay in the Library. unknown lists the entries that name no
 // saved file.
-func handedOverArtifacts(saved []savedArtifact, output map[string]interface{}) (out []ConversationReference, unknown []string) {
+func handedOverArtifacts(saved []models.SavedArtifact, output map[string]interface{}) (out []models.ConversationReference, unknown []string) {
 	var wanted []string
 	switch files := output[finalOutputFilesKey].(type) {
 	case []string:
@@ -105,7 +106,7 @@ func handedOverPath(name string) string {
 
 // unknownHandedOverFilesText sends a final whose files name no saved file
 // back to the model, which otherwise attaches nothing without a word.
-func unknownHandedOverFilesText(unknown []string, saved []savedArtifact) string {
+func unknownHandedOverFilesText(unknown []string, saved []models.SavedArtifact) string {
 	names := make([]string, 0, len(saved))
 	for _, file := range saved {
 		if file.Path != "" {

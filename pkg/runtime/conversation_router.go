@@ -1,6 +1,10 @@
 package runtime
 
-import "context"
+import (
+	"context"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+)
 
 // ConversationRouter picks the one Team member who answers a channel message
 // that addressed nobody (no @mention, no @everyone, no quoted or replied-to
@@ -26,7 +30,7 @@ func (f ConversationRouterFunc) Route(ctx context.Context, req ConversationRoute
 
 // ConversationRouteRequest is the lead's view of the Team for one message.
 type ConversationRouteRequest struct {
-	Scope          Scope
+	Scope          models.Scope
 	ConversationID string
 	TeamID         string
 	// Lead is the Agent id of the Team's lead role; may be "".
@@ -36,10 +40,10 @@ type ConversationRouteRequest struct {
 	Members      []RouteMember
 	// Recent is the last ~10 messages the sender can see, oldest first,
 	// ending before Trigger.
-	Recent []ChannelMessage
+	Recent []models.ChannelMessage
 	// LastAgentWithUser is the Agent that last answered this user; may be "".
 	LastAgentWithUser string
-	Trigger           ChannelMessage
+	Trigger           models.ChannelMessage
 }
 
 // RouteMember is one Team member the router may pick.

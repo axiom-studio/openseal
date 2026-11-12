@@ -11,17 +11,19 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-type recordingReactionProjector struct{ events []*ConversationReactionEvent }
+type recordingReactionProjector struct {
+	events []*models.ConversationReactionEvent
+}
 
-func (p *recordingReactionProjector) ProjectMessageReaction(_ context.Context, event *ConversationReactionEvent) error {
+func (p *recordingReactionProjector) ProjectMessageReaction(_ context.Context, event *models.ConversationReactionEvent) error {
 	p.events = append(p.events, event)
 	return nil
 }
 
 func TestConversationReactionsAcrossStores(t *testing.T) {
 	t.Parallel()
-	stores := map[string]func(t *testing.T) ConversationStore{
-		"sqlite": func(t *testing.T) ConversationStore {
+	stores := map[string]func(t *testing.T) models.ConversationStore{
+		"sqlite": func(t *testing.T) models.ConversationStore {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "reactions.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -37,26 +39,26 @@ func TestConversationReactionsAcrossStores(t *testing.T) {
 	}
 }
 
-func testConversationReactions(t *testing.T, store ConversationStore) {
+func testConversationReactions(t *testing.T, store models.ConversationStore) {
 	ctx := context.Background()
 	fixed := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	tick := 0
 	service := NewConversationService(store, models.WithClock(func() time.Time { tick++; return fixed.Add(time.Duration(tick) * time.Second) }))
 	projector := &recordingReactionProjector{}
 	service.SetReactionProjector(projector)
-	scope := Scope{Kind: "tenant", ID: "one"}
-	seedTestSpace(t, store.(SpaceStore), scope)
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}, Title: "Launch", IdempotencyKey: "launch",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "launch"}, Title: "Launch", IdempotencyKey: "launch",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	user := ConversationParticipant{Type: ConversationParticipantUser, ID: "maya"}
-	rio := ConversationParticipant{Type: ConversationParticipantAgent, ID: "rio"}
+	user := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "maya"}
+	rio := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "rio"}
 	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: user,
-		Intent: MessageIntentQuestion, Content: "Ship it?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Intent: models.MessageIntentQuestion, Content: "Ship it?", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		IdempotencyKey: "ship",
 	})
 	if err != nil {
@@ -64,15 +66,15 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 	}
 	private, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: posted.Conversation.Revision, Sender: user,
-		Intent: MessageIntentQuestion, Content: "Only for me",
-		Audience:       ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{user}},
+		Intent: models.MessageIntentQuestion, Content: "Only for me",
+		Audience:       models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{user}},
 		IdempotencyKey: "private",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	message := posted.Message
-	react := func(add bool, actor ConversationParticipant, messageID, emoji string) (*MessageReactionResult, error) {
+	react := func(add bool, actor models.ConversationParticipant, messageID, emoji string) (*MessageReactionResult, error) {
 		request := MessageReactionRequest{Scope: scope, ConversationID: conversation.ID, MessageID: messageID, Emoji: emoji, Actor: actor}
 		if add {
 			return service.AddMessageReaction(ctx, request)
@@ -81,7 +83,7 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 	}
 
 	first, err := react(true, rio, message.ID, "👍")
-	if err != nil || !first.Changed || first.Event == nil || first.Event.Type != ConversationReactionAdded || first.Event.Sequence != 1 {
+	if err != nil || !first.Changed || first.Event == nil || first.Event.Type != models.ConversationReactionAdded || first.Event.Sequence != 1 {
 		t.Fatalf("first add = %+v, %v", first, err)
 	}
 	again, err := react(true, rio, message.ID, "👍")
@@ -102,7 +104,7 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 		read.Reactions[0].Actors[0] != rio || read.Reactions[1].Emoji != "✅" {
 		t.Fatalf("reactions on read = %+v", read.Reactions)
 	}
-	listed, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Viewer: &ConversationViewer{Participant: user}})
+	listed, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Viewer: &models.ConversationViewer{Participant: user}})
 	if err != nil || len(listed) != 2 || len(listed[0].Reactions) != 2 || len(listed[1].Reactions) != 0 {
 		t.Fatalf("listed = %+v, %v", listed, err)
 	}
@@ -111,7 +113,7 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 	}
 
 	removed, err := react(false, user, message.ID, "✅")
-	if err != nil || !removed.Changed || removed.Event.Type != ConversationReactionRemoved || len(removed.Reactions) != 1 {
+	if err != nil || !removed.Changed || removed.Event.Type != models.ConversationReactionRemoved || len(removed.Reactions) != 1 {
 		t.Fatalf("remove = %+v, %v", removed, err)
 	}
 	absent, err := react(false, user, message.ID, "✅")
@@ -120,7 +122,7 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 	}
 
 	for _, emoji := range []string{"", "ok", "👍 ", "👍\n", "😀😀😀😀😀"} {
-		if _, err := react(true, user, message.ID, emoji); !errors.Is(err, ErrInvalidConversation) {
+		if _, err := react(true, user, message.ID, emoji); !errors.Is(err, models.ErrInvalidConversation) {
 			t.Fatalf("emoji %q: %v", emoji, err)
 		}
 	}
@@ -129,10 +131,10 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 			t.Fatalf("emoji %q: %v", emoji, err)
 		}
 	}
-	if _, err := react(true, rio, private.Message.ID, "👀"); !errors.Is(err, ErrChannelMessageNotFound) {
+	if _, err := react(true, rio, private.Message.ID, "👀"); !errors.Is(err, models.ErrChannelMessageNotFound) {
 		t.Fatalf("hidden message reaction: %v", err)
 	}
-	if _, err := react(true, rio, "missing", "👀"); !errors.Is(err, ErrChannelMessageNotFound) {
+	if _, err := react(true, rio, "missing", "👀"); !errors.Is(err, models.ErrChannelMessageNotFound) {
 		t.Fatalf("missing message reaction: %v", err)
 	}
 
@@ -153,7 +155,7 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Limit: 3, Viewer: &ConversationViewer{Participant: rio}})
+	page, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Limit: 3, Viewer: &models.ConversationViewer{Participant: rio}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,14 +163,14 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 		len(page.ReactionEvents[0].Reactions) != 5 || len(page.Messages) != 1 || len(page.Messages[0].Reactions) != 5 {
 		t.Fatalf("first change page = %d events, more %v, %+v", len(page.ReactionEvents), page.HasMore, page.Messages)
 	}
-	next, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: page.Cursor, Limit: 100, Viewer: &ConversationViewer{Participant: rio}})
+	next, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: page.Cursor, Limit: 100, Viewer: &models.ConversationViewer{Participant: rio}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(next.ReactionEvents) != 5 || next.ReactionEvents[0].Sequence != 4 || next.ReactionEvents[4].Emoji != "🎉" || !next.HasChanges {
 		t.Fatalf("next change page = %+v", next.ReactionEvents)
 	}
-	idle, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: next.Cursor, Viewer: &ConversationViewer{Participant: rio}})
+	idle, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: next.Cursor, Viewer: &models.ConversationViewer{Participant: rio}})
 	if err != nil || len(idle.ReactionEvents) != 0 {
 		t.Fatalf("idle page = %+v, %v", idle, err)
 	}

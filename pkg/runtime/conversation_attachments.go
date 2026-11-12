@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/appproject"
 	"github.com/axiom-studio/openseal/pkg/attachments"
 	"github.com/axiom-studio/openseal/pkg/chatpath"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -32,10 +33,10 @@ const (
 	conversationAppArtifactType = "app"
 	// conversationAttachmentsPerMessage caps the artifact references read from
 	// one message (and so the image parts of its entry).
-	conversationAttachmentsPerMessage = MaxSessionEntryImageParts
+	conversationAttachmentsPerMessage = models.MaxSessionEntryImageParts
 	// conversationImageMaxBytes bounds the verified image bytes of one message;
 	// each view image must stay within the 1 MiB host media limit.
-	conversationImageMaxBytes = maxModelStepMediaBytes
+	conversationImageMaxBytes = models.MaxModelStepMediaBytes
 )
 
 // conversationAttachmentReader reads the artifact attachments of one channel
@@ -44,11 +45,11 @@ const (
 // message (run-loop section 05 §4.6). Image bytes are never stored: an image
 // becomes a reference part that the step request builder resolves.
 type conversationAttachmentReader struct {
-	artifacts ArtifactStore
-	content   ArtifactContentStore
+	artifacts models.ArtifactStore
+	content   models.ArtifactContentStore
 }
 
-func newConversationAttachmentReader(artifacts ArtifactStore, content ArtifactContentStore) *conversationAttachmentReader {
+func newConversationAttachmentReader(artifacts models.ArtifactStore, content models.ArtifactContentStore) *conversationAttachmentReader {
 	return &conversationAttachmentReader{artifacts: artifacts, content: content}
 }
 
@@ -56,7 +57,7 @@ func newConversationAttachmentReader(artifacts ArtifactStore, content ArtifactCo
 // the parts that follow the message text and the artifacts the header's
 // "Attached:" line names.
 type conversationMessageAttachments struct {
-	Parts    []ContentPart
+	Parts    []models.ContentPart
 	Attached []conversationAttachedArtifact
 }
 
@@ -71,7 +72,7 @@ type conversationAttachedArtifact struct {
 // file text, 48 KiB of app source, and never more than textBudget bytes of
 // text overall (so the user entry stays under MaxUserEntryContentBytes). Only
 // a message of the conversation's own scope and id is read.
-func (r *conversationAttachmentReader) parts(ctx context.Context, conversation *Conversation, message *ChannelMessage, textBudget int) conversationMessageAttachments {
+func (r *conversationAttachmentReader) parts(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, textBudget int) conversationMessageAttachments {
 	var result conversationMessageAttachments
 	if conversation == nil || message == nil || conversation.Scope.Validate() != nil ||
 		message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
@@ -80,7 +81,7 @@ func (r *conversationAttachmentReader) parts(ctx context.Context, conversation *
 	fileRemaining, appRemaining, imageRemaining := conversationAttachmentBudget, conversationAppAttachmentBudget, conversationImageMaxBytes
 	seen := make(map[string]bool)
 	for _, ref := range message.References {
-		if ref.Kind != ConversationReferenceArtifact {
+		if ref.Kind != models.ConversationReferenceArtifact {
 			continue
 		}
 		key := fmt.Sprintf("%s:%d", ref.ID, ref.Version)
@@ -93,7 +94,7 @@ func (r *conversationAttachmentReader) parts(ctx context.Context, conversation *
 		}
 		attached := conversationAttachedArtifact{ID: ref.ID, Version: ref.Version}
 		status, text := "unavailable", ""
-		var image *ContentPart
+		var image *models.ContentPart
 		if artifact := r.artifact(ctx, conversation.Scope, ref); artifact != nil {
 			attached.Name = artifact.Name
 			wrapper := len(renderConversationAttachment(attached, "supplied", "x"))
@@ -108,8 +109,8 @@ func (r *conversationAttachmentReader) parts(ctx context.Context, conversation *
 				if content != nil {
 					imageRemaining -= len(content)
 					digest := sha256.Sum256(content)
-					image = &ContentPart{
-						Type: ContentPartImage, MediaType: mediaType, Detail: "auto", SHA256: hex.EncodeToString(digest[:]),
+					image = &models.ContentPart{
+						Type: models.ContentPartImage, MediaType: mediaType, Detail: "auto", SHA256: hex.EncodeToString(digest[:]),
 						ArtifactID: artifact.ID, ArtifactVersion: strconv.FormatInt(artifact.Version, 10),
 					}
 				}
@@ -128,14 +129,14 @@ func (r *conversationAttachmentReader) parts(ctx context.Context, conversation *
 			continue // the entry is full; the header still names the file
 		}
 		textBudget -= len(part)
-		result.Parts = append(result.Parts, ContentPart{Type: ContentPartText, Text: part})
+		result.Parts = append(result.Parts, models.ContentPart{Type: models.ContentPartText, Text: part})
 	}
 	return result
 }
 
 // artifact loads the exact referenced version from the conversation's scope,
 // or nil when it is missing, foreign or nothing can read its content.
-func (r *conversationAttachmentReader) artifact(ctx context.Context, scope Scope, ref ConversationReference) *Artifact {
+func (r *conversationAttachmentReader) artifact(ctx context.Context, scope models.Scope, ref models.ConversationReference) *models.Artifact {
 	if r == nil || r.artifacts == nil || r.content == nil || ref.Version <= 0 {
 		return nil
 	}
@@ -165,7 +166,7 @@ func renderConversationAttachment(attached conversationAttachedArtifact, status,
 // dimensions and returns its verified bytes with status image_context. The
 // bytes are only for the caller to digest or hand to a provider; they are
 // never stored in the session.
-func verifyConversationImage(ctx context.Context, store ArtifactContentStore, artifact *Artifact, remaining int) (string, []byte) {
+func verifyConversationImage(ctx context.Context, store models.ArtifactContentStore, artifact *models.Artifact, remaining int) (string, []byte) {
 	if remaining <= 0 || artifact.SizeBytes <= 0 || artifact.SizeBytes > int64(remaining) {
 		return "size_limit", nil
 	}
@@ -195,7 +196,7 @@ func verifyConversationImage(ctx context.Context, store ArtifactContentStore, ar
 	return "image_context", content
 }
 
-func readConversationAttachment(ctx context.Context, store ArtifactContentStore, artifact *Artifact, remaining int) (string, string) {
+func readConversationAttachment(ctx context.Context, store models.ArtifactContentStore, artifact *models.Artifact, remaining int) (string, string) {
 	mediaType, _, err := mime.ParseMediaType(artifact.MediaType)
 	if err != nil {
 		return "unsupported_format", ""
@@ -250,7 +251,7 @@ func readConversationAttachment(ctx context.Context, store ArtifactContentStore,
 	return "supplied", string(content)
 }
 
-func isConversationAppArtifact(artifact *Artifact) bool {
+func isConversationAppArtifact(artifact *models.Artifact) bool {
 	mediaType, _, _ := mime.ParseMediaType(artifact.MediaType)
 	return artifact.Type == conversationAppArtifactType || mediaType == appproject.MediaType
 }
@@ -259,7 +260,7 @@ func isConversationAppArtifact(artifact *Artifact) bool {
 // Agent needs to update it, then each file. When the source exceeds the
 // budget, every path is still listed with its size and the entry, widget and
 // smallest files are included until the budget is spent.
-func readConversationApp(ctx context.Context, store ArtifactContentStore, artifact *Artifact, remaining int) (string, string) {
+func readConversationApp(ctx context.Context, store models.ArtifactContentStore, artifact *models.Artifact, remaining int) (string, string) {
 	const byteLimit = 4 << 20
 	if artifact.SizeBytes < 0 || artifact.SizeBytes > byteLimit || remaining <= 0 {
 		return "size_limit", ""

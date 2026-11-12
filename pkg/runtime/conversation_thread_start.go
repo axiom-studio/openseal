@@ -1,15 +1,19 @@
 package runtime
 
-import "context"
+import (
+	"context"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+)
 
 // StartsThread ancestry is bounded separately from ordinary reply history.
 // Existing messages retain their direct-parent audience contract; a new root
 // additionally preserves the restrictions of every thread-start anchor it
 // follows. Long transcripts therefore never require walking every utterance.
 const maximumChannelThreadStartDepth = 16
-const maximumChannelThreadStartParentReads = MaximumChannelMessageBatchSize * maximumChannelThreadStartDepth
+const maximumChannelThreadStartParentReads = models.MaximumChannelMessageBatchSize * maximumChannelThreadStartDepth
 
-type channelMessageParentLoader func(context.Context, []string) (map[string]*ChannelMessage, error)
+type channelMessageParentLoader func(context.Context, []string) (map[string]*models.ChannelMessage, error)
 
 type channelThreadStartResult struct {
 	allowed  bool
@@ -18,16 +22,16 @@ type channelThreadStartResult struct {
 }
 
 type channelThreadStartProof struct {
-	scope          Scope
+	scope          models.Scope
 	conversationID string
-	parents        map[string]*ChannelMessage
+	parents        map[string]*models.ChannelMessage
 	load           channelMessageParentLoader
 	reads          int
 	results        map[string]channelThreadStartResult
 }
 
-func newChannelThreadStartProof(scope Scope, conversationID string, known map[string]*ChannelMessage, load channelMessageParentLoader) *channelThreadStartProof {
-	proof := &channelThreadStartProof{scope: scope, conversationID: conversationID, parents: make(map[string]*ChannelMessage), load: load}
+func newChannelThreadStartProof(scope models.Scope, conversationID string, known map[string]*models.ChannelMessage, load channelMessageParentLoader) *channelThreadStartProof {
+	proof := &channelThreadStartProof{scope: scope, conversationID: conversationID, parents: make(map[string]*models.ChannelMessage), load: load}
 	for id, message := range known {
 		if message != nil && message.ID == id && message.Scope == scope && message.ConversationID == conversationID {
 			proof.parents[id] = message
@@ -71,7 +75,7 @@ func (p *channelThreadStartProof) loadParents(ctx context.Context, ids []string)
 	return nil
 }
 
-func directChannelMessageParents(message *ChannelMessage) []string {
+func directChannelMessageParents(message *models.ChannelMessage) []string {
 	if message == nil {
 		return nil
 	}
@@ -87,7 +91,7 @@ func directChannelMessageParents(message *ChannelMessage) []string {
 // Parent reads are staged across the whole page, not issued once per reply.
 // Only a new StartsThread anchor expands ancestry; ordinary direct parents do
 // not recursively expand older conversation history.
-func (p *channelThreadStartProof) preload(ctx context.Context, anchors []string, viewer *ConversationViewer) error {
+func (p *channelThreadStartProof) preload(ctx context.Context, anchors []string, viewer *models.ConversationViewer) error {
 	visited := make(map[string]bool)
 	for depth := 0; depth < maximumChannelThreadStartDepth && len(anchors) > 0; depth++ {
 		current := make([]string, 0, len(anchors))
@@ -98,7 +102,7 @@ func (p *channelThreadStartProof) preload(ctx context.Context, anchors []string,
 			}
 			visited[id] = true
 			anchor := p.parents[id]
-			if anchor == nil || !anchor.StartsThread || viewer != nil && !CanViewChannelMessage(anchor, *viewer) {
+			if anchor == nil || !anchor.StartsThread || viewer != nil && !models.CanViewChannelMessage(anchor, *viewer) {
 				continue
 			}
 			current = append(current, id)
@@ -110,7 +114,7 @@ func (p *channelThreadStartProof) preload(ctx context.Context, anchors []string,
 		ordinaryIDs := make([]string, 0, len(current)*2)
 		for _, id := range current {
 			parent := p.parents[p.parents[id].ReplyToMessageID]
-			if parent != nil && !parent.StartsThread && (viewer == nil || CanViewChannelMessage(parent, *viewer)) {
+			if parent != nil && !parent.StartsThread && (viewer == nil || models.CanViewChannelMessage(parent, *viewer)) {
 				ordinaryIDs = append(ordinaryIDs, directChannelMessageParents(parent)...)
 			}
 		}
@@ -120,7 +124,7 @@ func (p *channelThreadStartProof) preload(ctx context.Context, anchors []string,
 		anchors = nil
 		for _, id := range current {
 			parent := p.parents[p.parents[id].ReplyToMessageID]
-			if parent == nil || viewer != nil && !CanViewChannelMessage(parent, *viewer) {
+			if parent == nil || viewer != nil && !models.CanViewChannelMessage(parent, *viewer) {
 				continue
 			}
 			if parent.StartsThread {
@@ -137,7 +141,7 @@ func (p *channelThreadStartProof) preload(ctx context.Context, anchors []string,
 	return nil
 }
 
-func (p *channelThreadStartProof) visit(id string, depth int, viewer *ConversationViewer, active map[string]bool) channelThreadStartResult {
+func (p *channelThreadStartProof) visit(id string, depth int, viewer *models.ConversationViewer, active map[string]bool) channelThreadStartResult {
 	if active[id] {
 		return channelThreadStartResult{complete: true}
 	}
@@ -152,7 +156,7 @@ func (p *channelThreadStartProof) visit(id string, depth int, viewer *Conversati
 	}
 	result := channelThreadStartResult{allowed: true, height: 1, complete: true}
 	anchor := p.parents[id]
-	if anchor == nil || !anchor.StartsThread || anchor.ThreadRootID != "" || viewer != nil && !CanViewChannelMessage(anchor, *viewer) {
+	if anchor == nil || !anchor.StartsThread || anchor.ThreadRootID != "" || viewer != nil && !models.CanViewChannelMessage(anchor, *viewer) {
 		result.allowed = false
 		return result
 	}
@@ -160,17 +164,17 @@ func (p *channelThreadStartProof) visit(id string, depth int, viewer *Conversati
 	defer delete(active, id)
 	if anchor.ReplyToMessageID != "" {
 		parent := p.parents[anchor.ReplyToMessageID]
-		if parent == nil || viewer != nil && !CanViewChannelMessage(parent, *viewer) {
+		if parent == nil || viewer != nil && !models.CanViewChannelMessage(parent, *viewer) {
 			result.allowed = false
 		} else {
-			ancestors := []*ChannelMessage{parent}
+			ancestors := []*models.ChannelMessage{parent}
 			if !parent.StartsThread {
 				for _, linked := range directChannelMessageParents(parent) {
 					ancestors = append(ancestors, p.parents[linked])
 				}
 			}
 			for _, ancestor := range ancestors {
-				if ancestor == nil || viewer != nil && !CanViewChannelMessage(ancestor, *viewer) {
+				if ancestor == nil || viewer != nil && !models.CanViewChannelMessage(ancestor, *viewer) {
 					result.allowed = false
 					continue
 				}
@@ -192,7 +196,7 @@ func (p *channelThreadStartProof) visit(id string, depth int, viewer *Conversati
 	return result
 }
 
-func threadStartAnchors(message *ChannelMessage, known map[string]*ChannelMessage) []string {
+func threadStartAnchors(message *models.ChannelMessage, known map[string]*models.ChannelMessage) []string {
 	anchors := make([]string, 0, 3)
 	if message == nil {
 		return anchors
@@ -208,7 +212,7 @@ func threadStartAnchors(message *ChannelMessage, known map[string]*ChannelMessag
 	return anchors
 }
 
-func filterChannelMessageThreadStarts(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, known map[string]*ChannelMessage, load channelMessageParentLoader, viewer ConversationViewer) ([]*ChannelMessage, error) {
+func filterChannelMessageThreadStarts(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, known map[string]*models.ChannelMessage, load channelMessageParentLoader, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	proof := newChannelThreadStartProof(scope, conversationID, known, load)
 	anchors := make([]string, 0)
 	for _, message := range messages {
@@ -222,7 +226,7 @@ func filterChannelMessageThreadStarts(ctx context.Context, scope Scope, conversa
 	if err := proof.preload(ctx, anchors, &viewer); err != nil {
 		return nil, err
 	}
-	visible := make([]*ChannelMessage, 0, len(messages))
+	visible := make([]*models.ChannelMessage, 0, len(messages))
 	for _, message := range messages {
 		allowed := message != nil && message.Scope == scope && message.ConversationID == conversationID
 		for _, id := range threadStartAnchors(message, proof.parents) {
@@ -238,14 +242,14 @@ func filterChannelMessageThreadStarts(ctx context.Context, scope Scope, conversa
 	return visible, nil
 }
 
-func (s *ConversationService) threadStartParentLoader(scope Scope, conversationID string) channelMessageParentLoader {
-	if batch, ok := s.store.(ChannelMessageBatchStore); ok {
-		return func(ctx context.Context, ids []string) (map[string]*ChannelMessage, error) {
+func (s *ConversationService) threadStartParentLoader(scope models.Scope, conversationID string) channelMessageParentLoader {
+	if batch, ok := s.store.(models.ChannelMessageBatchStore); ok {
+		return func(ctx context.Context, ids []string) (map[string]*models.ChannelMessage, error) {
 			return loadChannelMessageBatches(ctx, batch, scope, conversationID, ids)
 		}
 	}
-	return func(ctx context.Context, ids []string) (map[string]*ChannelMessage, error) {
-		parents := make(map[string]*ChannelMessage, len(ids))
+	return func(ctx context.Context, ids []string) (map[string]*models.ChannelMessage, error) {
+		parents := make(map[string]*models.ChannelMessage, len(ids))
 		for _, id := range ids {
 			message, err := s.store.GetChannelMessage(ctx, scope, conversationID, id)
 			if err != nil {
@@ -257,8 +261,8 @@ func (s *ConversationService) threadStartParentLoader(scope Scope, conversationI
 	}
 }
 
-func (s *ConversationService) validateThreadStartAncestry(ctx context.Context, message *ChannelMessage) (bool, error) {
-	proof := newChannelThreadStartProof(message.Scope, message.ConversationID, map[string]*ChannelMessage{message.ID: message}, s.threadStartParentLoader(message.Scope, message.ConversationID))
+func (s *ConversationService) validateThreadStartAncestry(ctx context.Context, message *models.ChannelMessage) (bool, error) {
+	proof := newChannelThreadStartProof(message.Scope, message.ConversationID, map[string]*models.ChannelMessage{message.ID: message}, s.threadStartParentLoader(message.Scope, message.ConversationID))
 	if err := proof.preload(ctx, []string{message.ID}, nil); err != nil {
 		return false, err
 	}

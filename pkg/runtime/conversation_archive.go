@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ConversationArchiveSource identifies the immutable source record set used
@@ -21,20 +23,20 @@ type ConversationArchiveSource struct {
 }
 
 func (s ConversationArchiveSource) Validate() error {
-	if !validOpaqueIdentifier(s.System, 80) || !validOpaqueIdentifier(s.ResourceType, 80) ||
-		!validOpaqueIdentifier(s.ResourceID, 128) {
-		return fmt.Errorf("%w: archive source system, resource type, and resource id are required", ErrInvalidConversation)
+	if !models.IsValidOpaqueIdentifier(s.System, 80) || !models.IsValidOpaqueIdentifier(s.ResourceType, 80) ||
+		!models.IsValidOpaqueIdentifier(s.ResourceID, 128) {
+		return fmt.Errorf("%w: archive source system, resource type, and resource id are required", models.ErrInvalidConversation)
 	}
 	return nil
 }
 
-func (s ConversationArchiveSource) reference(recordID string) ConversationReference {
+func (s ConversationArchiveSource) reference(recordID string) models.ConversationReference {
 	parts := []string{strings.TrimSpace(s.System), strings.TrimSpace(s.ResourceType), strings.TrimSpace(s.ResourceID)}
 	if strings.TrimSpace(recordID) != "" {
 		parts = append(parts, strings.TrimSpace(recordID))
 	}
-	return ConversationReference{
-		Kind: ConversationReferenceExternalSource,
+	return models.ConversationReference{
+		Kind: models.ConversationReferenceExternalSource,
 		ID:   strings.Join(parts, ":"),
 	}
 }
@@ -45,13 +47,13 @@ func (s ConversationArchiveSource) reference(recordID string) ConversationRefere
 // or activity records instead.
 type ConversationArchiveMessage struct {
 	RecordID           string
-	Sender             ConversationParticipant
+	Sender             models.ConversationParticipant
 	SenderDisplayName  string
-	Intent             ConversationMessageIntent
+	Intent             models.ConversationMessageIntent
 	Content            string
-	Audience           ConversationAudience
-	Mentions           []ConversationParticipant
-	References         []ConversationReference
+	Audience           models.ConversationAudience
+	Mentions           []models.ConversationParticipant
+	References         []models.ConversationReference
 	ReplyToRecordID    string
 	BroadcastToChannel bool
 	RequiresResponse   bool
@@ -59,8 +61,8 @@ type ConversationArchiveMessage struct {
 }
 
 type ImportConversationArchiveRequest struct {
-	Scope          Scope
-	Owner          ObjectiveOwner
+	Scope          models.Scope
+	Owner          models.ObjectiveOwner
 	Title          string
 	Source         ConversationArchiveSource
 	Messages       []ConversationArchiveMessage
@@ -68,11 +70,11 @@ type ImportConversationArchiveRequest struct {
 }
 
 type ConversationArchiveImportResult struct {
-	Conversation     *Conversation     `json:"conversation"`
-	Messages         []*ChannelMessage `json:"messages"`
-	ImportedMessages int               `json:"importedMessages"`
-	ReplayedMessages int               `json:"replayedMessages"`
-	Replayed         bool              `json:"replayed"`
+	Conversation     *models.Conversation     `json:"conversation"`
+	Messages         []*models.ChannelMessage `json:"messages"`
+	ImportedMessages int                      `json:"importedMessages"`
+	ReplayedMessages int                      `json:"replayedMessages"`
+	Replayed         bool                     `json:"replayed"`
 }
 
 // ImportArchive imports a historical channel without scheduling conversation
@@ -94,7 +96,7 @@ func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConve
 	key := strings.TrimSpace(req.IdempotencyKey)
 	title := strings.TrimSpace(req.Title)
 	if key == "" || len(key) > 256 || title == "" || len(title) > 240 || len(req.Messages) == 0 {
-		return nil, fmt.Errorf("%w: archive title, messages, and idempotency key are required", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: archive title, messages, and idempotency key are required", models.ErrInvalidConversation)
 	}
 
 	messages := append([]ConversationArchiveMessage(nil), req.Messages...)
@@ -108,13 +110,13 @@ func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConve
 	for index := range messages {
 		message := &messages[index]
 		message.RecordID = strings.TrimSpace(message.RecordID)
-		if !validOpaqueIdentifier(message.RecordID, 128) || message.CreatedAt.IsZero() {
-			return nil, fmt.Errorf("%w: every archive message requires a portable record id and timestamp", ErrInvalidConversation)
+		if !models.IsValidOpaqueIdentifier(message.RecordID, 128) || message.CreatedAt.IsZero() {
+			return nil, fmt.Errorf("%w: every archive message requires a portable record id and timestamp", models.ErrInvalidConversation)
 		}
 		if _, exists := records[message.RecordID]; exists {
-			return nil, fmt.Errorf("%w: duplicate archive message record id", ErrInvalidConversation)
+			return nil, fmt.Errorf("%w: duplicate archive message record id", models.ErrInvalidConversation)
 		}
-		records[message.RecordID] = stableConversationID(req.Scope, key+":"+message.RecordID, "archive-message")
+		records[message.RecordID] = models.StableConversationID(req.Scope, key+":"+message.RecordID, "archive-message")
 	}
 
 	conversation, replayed, err := s.importArchiveConversation(ctx, req, messages[0].CreatedAt.UTC(), key, title)
@@ -132,19 +134,19 @@ func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConve
 			var ok bool
 			replyToID, ok = records[strings.TrimSpace(archived.ReplyToRecordID)]
 			if !ok {
-				return nil, fmt.Errorf("%w: archive reply references an unknown source record", ErrMessageConflict)
+				return nil, fmt.Errorf("%w: archive reply references an unknown source record", models.ErrMessageConflict)
 			}
 		}
 		messageKey := key + ":message:" + archived.RecordID
-		references := cloneConversationReferences(archived.References)
+		references := models.CloneConversationReferences(archived.References)
 		references = append(references, req.Source.reference(archived.RecordID))
-		message := &ChannelMessage{
+		message := &models.ChannelMessage{
 			ID: records[archived.RecordID], Scope: req.Scope, ConversationID: conversation.ID,
 			Sequence: current.LastSequence + 1, Sender: archived.Sender, Intent: archived.Intent,
 			SenderDisplayName: strings.TrimSpace(archived.SenderDisplayName),
 			Content:           strings.TrimSpace(archived.Content), Audience: archived.Audience,
 			ReplyToMessageID: replyToID, BroadcastToChannel: archived.BroadcastToChannel,
-			Mentions: cloneParticipants(archived.Mentions), References: references,
+			Mentions: models.CloneConversationParticipants(archived.Mentions), References: references,
 			RequiresResponse: archived.RequiresResponse, IdempotencyKey: messageKey, Historical: true, CreatedAt: archived.CreatedAt.UTC(),
 		}
 		if replyToID != "" {
@@ -153,7 +155,7 @@ func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConve
 				return nil, getErr
 			}
 			if reply == nil {
-				return nil, fmt.Errorf("%w: archive reply source record has not been imported", ErrMessageConflict)
+				return nil, fmt.Errorf("%w: archive reply source record has not been imported", models.ErrMessageConflict)
 			}
 			message.ThreadRootID = reply.ThreadRootID
 			if message.ThreadRootID == "" {
@@ -169,19 +171,19 @@ func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConve
 		}
 		if existing != nil {
 			if !sameArchivedChannelMessage(existing, message) {
-				return nil, ErrMessageConflict
+				return nil, models.ErrMessageConflict
 			}
-			result.Messages = append(result.Messages, cloneChannelMessage(existing))
+			result.Messages = append(result.Messages, models.CloneChannelMessage(existing))
 			result.ReplayedMessages++
 			continue
 		}
-		updated := cloneConversation(current)
+		updated := models.CloneConversation(current)
 		updated.LastSequence = message.Sequence
 		updated.Revision++
 		if message.CreatedAt.After(updated.UpdatedAt) {
 			updated.UpdatedAt = message.CreatedAt
 		}
-		committed, commitErr := s.store.CommitChannelMessage(ctx, ChannelMessageCommitRecord{
+		committed, commitErr := s.store.CommitChannelMessage(ctx, models.ChannelMessageCommitRecord{
 			Conversation: updated, ExpectedRevision: current.Revision, Message: message,
 		})
 		if commitErr != nil {
@@ -201,20 +203,20 @@ func (s *ConversationService) importArchiveConversation(
 	createdAt time.Time,
 	key string,
 	title string,
-) (*Conversation, bool, error) {
+) (*models.Conversation, bool, error) {
 	if existing, err := s.store.FindConversationByIdempotencyKey(ctx, req.Scope, key); err != nil {
 		return nil, false, err
 	} else if existing != nil {
 		if existing.Owner != req.Owner || existing.Title != title || !existing.CreatedAt.Equal(createdAt) ||
 			!reflect.DeepEqual(existing.Origin, archiveConversationOrigin(req.Source)) {
-			return nil, false, ErrMessageConflict
+			return nil, false, models.ErrMessageConflict
 		}
 		return existing, true, nil
 	}
-	conversation := &Conversation{
-		ID: stableConversationID(req.Scope, key, "archive-conversation"), Scope: req.Scope, Owner: req.Owner,
-		Title: title, Origin: archiveConversationOrigin(req.Source), Status: ConversationStatusActive,
-		ApprovalMode: DefaultConversationApprovalMode, Revision: 1, CreatedAt: createdAt, UpdatedAt: createdAt,
+	conversation := &models.Conversation{
+		ID: models.StableConversationID(req.Scope, key, "archive-conversation"), Scope: req.Scope, Owner: req.Owner,
+		Title: title, Origin: archiveConversationOrigin(req.Source), Status: models.ConversationStatusActive,
+		ApprovalMode: models.DefaultConversationApprovalMode, Revision: 1, CreatedAt: createdAt, UpdatedAt: createdAt,
 	}
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
@@ -222,17 +224,17 @@ func (s *ConversationService) importArchiveConversation(
 	return s.store.CreateConversation(ctx, conversation, key)
 }
 
-func archiveConversationOrigin(source ConversationArchiveSource) *ConversationReference {
+func archiveConversationOrigin(source ConversationArchiveSource) *models.ConversationReference {
 	reference := source.reference("")
 	return &reference
 }
 
-func sameArchivedChannelMessage(existing, expected *ChannelMessage) bool {
+func sameArchivedChannelMessage(existing, expected *models.ChannelMessage) bool {
 	if existing == nil || expected == nil {
 		return false
 	}
-	left := cloneChannelMessage(existing)
-	right := cloneChannelMessage(expected)
+	left := models.CloneChannelMessage(existing)
+	right := models.CloneChannelMessage(expected)
 	right.Sequence = left.Sequence
 	return reflect.DeepEqual(left, right)
 }

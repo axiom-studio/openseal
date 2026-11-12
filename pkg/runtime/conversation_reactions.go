@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -17,17 +19,17 @@ const (
 // external conversation its message belongs to. Reactions mirrored in from an
 // external conversation are never projected back out.
 type MessageReactionProjector interface {
-	ProjectMessageReaction(ctx context.Context, event *ConversationReactionEvent) error
+	ProjectMessageReaction(ctx context.Context, event *models.ConversationReactionEvent) error
 }
 
 // MessageReactionRequest adds or removes one actor's emoji on a message the
 // actor can see.
 type MessageReactionRequest struct {
-	Scope          Scope
+	Scope          models.Scope
 	ConversationID string
 	MessageID      string
 	Emoji          string
-	Actor          ConversationParticipant
+	Actor          models.ConversationParticipant
 	// ActorRoles are the actor's audience roles, for message visibility.
 	ActorRoles []string
 	// FromExternal marks a reaction mirrored in from an external
@@ -38,18 +40,18 @@ type MessageReactionRequest struct {
 // MessageReactionResult reports whether the reaction changed and carries
 // the message as the actor sees it, with its current reactions.
 type MessageReactionResult struct {
-	Message   *ChannelMessage            `json:"message"`
-	Changed   bool                       `json:"changed"`
-	Event     *ConversationReactionEvent `json:"event,omitempty"`
-	Reactions []MessageReaction          `json:"reactions"`
+	Message   *models.ChannelMessage            `json:"message"`
+	Changed   bool                              `json:"changed"`
+	Event     *models.ConversationReactionEvent `json:"event,omitempty"`
+	Reactions []models.MessageReaction          `json:"reactions"`
 }
 
 // groupMessageReactions folds oldest-first records into per-message
 // reactions, each emoji in order of its first use.
-func groupMessageReactions(records []*MessageReactionRecord) map[string][]MessageReaction {
-	sorted := append([]*MessageReactionRecord(nil), records...)
+func groupMessageReactions(records []*models.MessageReactionRecord) map[string][]models.MessageReaction {
+	sorted := append([]*models.MessageReactionRecord(nil), records...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].CreatedAt.Before(sorted[j].CreatedAt) })
-	result := make(map[string][]MessageReaction)
+	result := make(map[string][]models.MessageReaction)
 	for _, record := range sorted {
 		if record == nil {
 			continue
@@ -63,7 +65,7 @@ func groupMessageReactions(records []*MessageReactionRecord) map[string][]Messag
 			}
 		}
 		if index < 0 {
-			reactions = append(reactions, MessageReaction{Emoji: record.Emoji})
+			reactions = append(reactions, models.MessageReaction{Emoji: record.Emoji})
 			index = len(reactions) - 1
 		}
 		reactions[index].Actors = append(reactions[index].Actors, record.Actor)
@@ -73,7 +75,7 @@ func groupMessageReactions(records []*MessageReactionRecord) map[string][]Messag
 }
 
 // loadMessageReactions reads the reactions of the given messages in batches.
-func loadMessageReactions(ctx context.Context, store ConversationStore, scope Scope, conversationID string, messageIDs []string) (map[string][]MessageReaction, error) {
+func loadMessageReactions(ctx context.Context, store models.ConversationStore, scope models.Scope, conversationID string, messageIDs []string) (map[string][]models.MessageReaction, error) {
 	unique := make([]string, 0, len(messageIDs))
 	seen := make(map[string]bool, len(messageIDs))
 	for _, id := range messageIDs {
@@ -82,7 +84,7 @@ func loadMessageReactions(ctx context.Context, store ConversationStore, scope Sc
 			unique = append(unique, id)
 		}
 	}
-	records := make([]*MessageReactionRecord, 0)
+	records := make([]*models.MessageReactionRecord, 0)
 	for start := 0; start < len(unique); start += maximumReactionMessageBatch {
 		end := min(start+maximumReactionMessageBatch, len(unique))
 		batch, err := store.ListMessageReactions(ctx, scope, conversationID, unique[start:end])
@@ -97,9 +99,9 @@ func loadMessageReactions(ctx context.Context, store ConversationStore, scope Sc
 // withMessageReactions returns the messages with their current reactions.
 // Messages are cloned before they are changed. Messages from several
 // conversations are read per conversation.
-func withMessageReactions(ctx context.Context, store ConversationStore, messages []*ChannelMessage) ([]*ChannelMessage, error) {
+func withMessageReactions(ctx context.Context, store models.ConversationStore, messages []*models.ChannelMessage) ([]*models.ChannelMessage, error) {
 	type conversationKey struct {
-		scope Scope
+		scope models.Scope
 		id    string
 	}
 	ids := make(map[conversationKey][]string)
@@ -117,7 +119,7 @@ func withMessageReactions(ctx context.Context, store ConversationStore, messages
 	if len(order) == 0 {
 		return messages, nil
 	}
-	reactions := make(map[conversationKey]map[string][]MessageReaction, len(order))
+	reactions := make(map[conversationKey]map[string][]models.MessageReaction, len(order))
 	for _, key := range order {
 		loaded, err := loadMessageReactions(ctx, store, key.scope, key.id, ids[key])
 		if err != nil {
@@ -125,7 +127,7 @@ func withMessageReactions(ctx context.Context, store ConversationStore, messages
 		}
 		reactions[key] = loaded
 	}
-	out := make([]*ChannelMessage, len(messages))
+	out := make([]*models.ChannelMessage, len(messages))
 	for index, message := range messages {
 		out[index] = message
 		if message == nil {
@@ -135,8 +137,8 @@ func withMessageReactions(ctx context.Context, store ConversationStore, messages
 		if len(current) == 0 && len(message.Reactions) == 0 {
 			continue
 		}
-		filled := cloneChannelMessage(message)
-		filled.Reactions = cloneMessageReactions(current)
+		filled := models.CloneChannelMessage(message)
+		filled.Reactions = models.CloneMessageReactions(current)
 		out[index] = filled
 	}
 	return out, nil
@@ -167,19 +169,19 @@ func (s *ConversationService) changeMessageReaction(ctx context.Context, req Mes
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
-	record := MessageReactionRecord{
+	record := models.MessageReactionRecord{
 		Scope: req.Scope, ConversationID: strings.TrimSpace(req.ConversationID), MessageID: strings.TrimSpace(req.MessageID),
 		Actor: req.Actor, Emoji: req.Emoji, CreatedAt: s.now().UTC(),
 	}
 	if err := record.Validate(); err != nil {
 		return nil, err
 	}
-	viewer := ConversationViewer{Participant: req.Actor, Roles: append([]string(nil), req.ActorRoles...)}
+	viewer := models.ConversationViewer{Participant: req.Actor, Roles: append([]string(nil), req.ActorRoles...)}
 	message, err := s.GetVisibleChannelMessage(ctx, record.Scope, record.ConversationID, record.MessageID, viewer)
 	if err != nil {
 		return nil, err
 	}
-	var event *ConversationReactionEvent
+	var event *models.ConversationReactionEvent
 	if add {
 		event, err = s.store.AddMessageReaction(ctx, record)
 	} else {
@@ -194,17 +196,17 @@ func (s *ConversationService) changeMessageReaction(ctx context.Context, req Mes
 	}
 	result := &MessageReactionResult{Changed: event != nil, Reactions: reactions[record.MessageID]}
 	if result.Reactions == nil {
-		result.Reactions = []MessageReaction{}
+		result.Reactions = []models.MessageReaction{}
 	}
-	result.Message = cloneChannelMessage(message)
-	result.Message.Reactions = cloneMessageReactions(reactions[record.MessageID])
+	result.Message = models.CloneChannelMessage(message)
+	result.Message.Reactions = models.CloneMessageReactions(reactions[record.MessageID])
 	if event != nil {
-		event.Reactions = cloneMessageReactions(result.Reactions)
+		event.Reactions = models.CloneMessageReactions(result.Reactions)
 		result.Event = event
 		// The reaction is durable; mirroring it is best effort through the
 		// durable delivery outbox and never undoes it.
 		if s.reactions != nil && !req.FromExternal {
-			_ = s.reactions.ProjectMessageReaction(ctx, cloneConversationReactionEvent(event))
+			_ = s.reactions.ProjectMessageReaction(ctx, models.CloneConversationReactionEvent(event))
 		}
 	}
 	return result, nil
@@ -212,9 +214,9 @@ func (s *ConversationService) changeMessageReaction(ctx context.Context, req Mes
 
 // visibleReactionEvents keeps the events on messages the viewer can see and
 // fills each with its message's current reactions.
-func (s *ConversationService) visibleReactionEvents(ctx context.Context, scope Scope, conversationID string, events []*ConversationReactionEvent, viewer *ConversationViewer) ([]*ConversationReactionEvent, error) {
+func (s *ConversationService) visibleReactionEvents(ctx context.Context, scope models.Scope, conversationID string, events []*models.ConversationReactionEvent, viewer *models.ConversationViewer) ([]*models.ConversationReactionEvent, error) {
 	if len(events) == 0 {
-		return []*ConversationReactionEvent{}, nil
+		return []*models.ConversationReactionEvent{}, nil
 	}
 	ids := make([]string, 0, len(events))
 	for _, event := range events {
@@ -226,8 +228,8 @@ func (s *ConversationService) visibleReactionEvents(ctx context.Context, scope S
 			visible[id] = true
 		}
 	} else {
-		var messages []*ChannelMessage
-		if batch, ok := s.store.(ChannelMessageBatchStore); ok {
+		var messages []*models.ChannelMessage
+		if batch, ok := s.store.(models.ChannelMessageBatchStore); ok {
 			loaded, err := loadChannelMessageBatches(ctx, batch, scope, conversationID, ids)
 			if err != nil {
 				return nil, err
@@ -267,15 +269,15 @@ func (s *ConversationService) visibleReactionEvents(ctx context.Context, scope S
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*ConversationReactionEvent, 0, len(events))
+	out := make([]*models.ConversationReactionEvent, 0, len(events))
 	for _, event := range events {
 		if !visible[event.MessageID] {
 			continue
 		}
-		filled := cloneConversationReactionEvent(event)
-		filled.Reactions = cloneMessageReactions(reactions[event.MessageID])
+		filled := models.CloneConversationReactionEvent(event)
+		filled.Reactions = models.CloneMessageReactions(reactions[event.MessageID])
 		if filled.Reactions == nil {
-			filled.Reactions = []MessageReaction{}
+			filled.Reactions = []models.MessageReaction{}
 		}
 		out = append(out, filled)
 	}
@@ -284,9 +286,9 @@ func (s *ConversationService) visibleReactionEvents(ctx context.Context, scope S
 
 // reactionPromptLines renders each message's reactions for an Agent's
 // conversation context, e.g. "👍 Rio, ✅ Maya".
-func reactionPromptLines(messages []*ChannelMessage, extra ...*ChannelMessage) map[string]string {
-	names := map[ConversationParticipant]string{}
-	all := append(append([]*ChannelMessage(nil), messages...), extra...)
+func reactionPromptLines(messages []*models.ChannelMessage, extra ...*models.ChannelMessage) map[string]string {
+	names := map[models.ConversationParticipant]string{}
+	all := append(append([]*models.ChannelMessage(nil), messages...), extra...)
 	for _, message := range all {
 		if message != nil && message.SenderDisplayName != "" {
 			if _, known := names[message.Sender]; !known {
@@ -305,7 +307,7 @@ func reactionPromptLines(messages []*ChannelMessage, extra ...*ChannelMessage) m
 				name := names[actor]
 				if name == "" {
 					name = actor.ID
-					if actor.Type == ConversationParticipantUser {
+					if actor.Type == models.ConversationParticipantUser {
 						name = "a user"
 					}
 				}
@@ -344,7 +346,7 @@ func admitTurnReactions(in []TurnReaction) []TurnReaction {
 	for _, reaction := range in {
 		reaction.MessageID = strings.TrimSpace(reaction.MessageID)
 		if len(out) == MaximumTurnReactions || seen[reaction] ||
-			!validOpaqueIdentifier(reaction.MessageID, 256) || ValidateReactionEmoji(reaction.Emoji) != nil {
+			!models.IsValidOpaqueIdentifier(reaction.MessageID, 256) || models.ValidateReactionEmoji(reaction.Emoji) != nil {
 			continue
 		}
 		seen[reaction] = true

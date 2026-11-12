@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -46,14 +48,14 @@ func normalizeExternalConversationContextErrorCode(code string) string {
 	}
 }
 
-func ExternalConversationContextAvailability(message *ChannelMessage, endpointID string) *ExternalConversationContextState {
+func ExternalConversationContextAvailability(message *models.ChannelMessage, endpointID string) *ExternalConversationContextState {
 	if message == nil || endpointID == "" {
 		return nil
 	}
 	prefix := externalConversationContextReferencePrefix(endpointID)
 	var state *ExternalConversationContextState
 	for _, reference := range message.References {
-		if reference.Kind != ConversationReferenceExternalSource || !strings.HasPrefix(reference.ID, prefix) {
+		if reference.Kind != models.ConversationReferenceExternalSource || !strings.HasPrefix(reference.ID, prefix) {
 			continue
 		}
 		status := strings.TrimPrefix(reference.ID, prefix)
@@ -66,8 +68,8 @@ func ExternalConversationContextAvailability(message *ChannelMessage, endpointID
 	if state == nil {
 		return nil
 	}
-	if source := message.ExternalSource; source != nil && validExternalConversationReference(source.ChannelID, 1024) &&
-		(source.ThreadID == "" || validExternalConversationReference(source.ThreadID, 1024)) {
+	if source := message.ExternalSource; source != nil && models.IsValidExternalConversationReference(source.ChannelID, 1024) &&
+		(source.ThreadID == "" || models.IsValidExternalConversationReference(source.ThreadID, 1024)) {
 		state.ExternalConversationID, state.ExternalThreadID = source.ChannelID, source.ThreadID
 	}
 	originPrefix := externalConversationContextOriginPrefix(endpointID)
@@ -77,7 +79,7 @@ func ExternalConversationContextAvailability(message *ChannelMessage, endpointID
 		if state.ExternalConversationID != "" {
 			break
 		}
-		if reference.Kind != ConversationReferenceExternalSource || !strings.HasPrefix(reference.ID, originPrefix) || len(reference.ID) > 256 {
+		if reference.Kind != models.ConversationReferenceExternalSource || !strings.HasPrefix(reference.ID, originPrefix) || len(reference.ID) > 256 {
 			continue
 		}
 		encoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(reference.ID, originPrefix))
@@ -85,7 +87,7 @@ func ExternalConversationContextAvailability(message *ChannelMessage, endpointID
 			continue
 		}
 		var ids []string
-		if json.Unmarshal(encoded, &ids) != nil || len(ids) != 2 || !validExternalConversationReference(ids[0], 1024) || (ids[1] != "" && !validExternalConversationReference(ids[1], 1024)) {
+		if json.Unmarshal(encoded, &ids) != nil || len(ids) != 2 || !models.IsValidExternalConversationReference(ids[0], 1024) || (ids[1] != "" && !models.IsValidExternalConversationReference(ids[1], 1024)) {
 			continue
 		}
 		state.ExternalConversationID, state.ExternalThreadID = ids[0], ids[1]
@@ -93,7 +95,7 @@ func ExternalConversationContextAvailability(message *ChannelMessage, endpointID
 	}
 	errorPrefix := externalConversationContextErrorPrefix(endpointID)
 	for _, reference := range message.References {
-		if reference.Kind == ConversationReferenceExternalSource && strings.HasPrefix(reference.ID, errorPrefix) {
+		if reference.Kind == models.ConversationReferenceExternalSource && strings.HasPrefix(reference.ID, errorPrefix) {
 			state.ErrorCode = normalizeExternalConversationContextErrorCode(strings.TrimPrefix(reference.ID, errorPrefix))
 			break
 		}

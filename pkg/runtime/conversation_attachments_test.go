@@ -15,6 +15,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func conversationTestPNG(t *testing.T) string {
@@ -36,11 +38,11 @@ func TestConversationImageBecomesReferencePart(t *testing.T) {
 	}
 	bytesStore := &conversationTestContent{text: content}
 	reader := &conversationAttachmentReader{artifacts: store, content: bytesStore}
-	conversation := &Conversation{ID: "chat", Scope: artifact.Scope}
-	message := &ChannelMessage{ID: "message", Scope: artifact.Scope, ConversationID: "chat", References: []ConversationReference{{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: 1}}}
-	got := reader.parts(t.Context(), conversation, message, MaxUserEntryContentBytes)
+	conversation := &models.Conversation{ID: "chat", Scope: artifact.Scope}
+	message := &models.ChannelMessage{ID: "message", Scope: artifact.Scope, ConversationID: "chat", References: []models.ConversationReference{{Kind: models.ConversationReferenceArtifact, ID: artifact.ID, Version: 1}}}
+	got := reader.parts(t.Context(), conversation, message, models.MaxUserEntryContentBytes)
 	digest := sha256.Sum256([]byte(content))
-	want := ContentPart{Type: ContentPartImage, MediaType: "image/png", Detail: "auto", SHA256: hex.EncodeToString(digest[:]), ArtifactID: artifact.ID, ArtifactVersion: "1"}
+	want := models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", Detail: "auto", SHA256: hex.EncodeToString(digest[:]), ArtifactID: artifact.ID, ArtifactVersion: "1"}
 	if len(got.Parts) != 1 || !reflect.DeepEqual(got.Parts[0], want) || bytesStore.opens != 1 {
 		t.Fatalf("image not projected once as a reference: %#v (opens %d)", got.Parts, bytesStore.opens)
 	}
@@ -71,8 +73,8 @@ func TestConversationImageBecomesReferencePart(t *testing.T) {
 	}
 	t.Run("failed image is a self-closed text part", func(t *testing.T) {
 		bytesStore.text = "bad"
-		got := reader.parts(t.Context(), conversation, message, MaxUserEntryContentBytes)
-		if len(got.Parts) != 1 || got.Parts[0].Type != ContentPartText ||
+		got := reader.parts(t.Context(), conversation, message, models.MaxUserEntryContentBytes)
+		if len(got.Parts) != 1 || got.Parts[0].Type != models.ContentPartText ||
 			got.Parts[0].Text != `<attachment id="file" version="1" name="chart.png" status="integrity_failed"/>` {
 			t.Fatalf("parts = %#v", got.Parts)
 		}
@@ -82,13 +84,13 @@ func TestConversationImageBecomesReferencePart(t *testing.T) {
 type conversationTestContent struct {
 	text  string
 	opens int
-	scope Scope
+	scope models.Scope
 }
 
-func (s *conversationTestContent) Put(context.Context, ArtifactContentWrite) (ArtifactStoredContent, error) {
-	return ArtifactStoredContent{}, errors.New("not supported")
+func (s *conversationTestContent) Put(context.Context, models.ArtifactContentWrite) (models.ArtifactStoredContent, error) {
+	return models.ArtifactStoredContent{}, errors.New("not supported")
 }
-func (s *conversationTestContent) Open(_ context.Context, scope Scope, _ string) (io.ReadCloser, error) {
+func (s *conversationTestContent) Open(_ context.Context, scope models.Scope, _ string) (io.ReadCloser, error) {
 	s.opens++
 	s.scope = scope
 	return io.NopCloser(strings.NewReader(s.text)), nil
@@ -140,31 +142,31 @@ func TestConversationAttachmentScopeAndProjection(t *testing.T) {
 	}
 	bytesStore := &conversationTestContent{text: content}
 	reader := &conversationAttachmentReader{artifacts: store, content: bytesStore}
-	conversation := &Conversation{ID: "chat", Scope: artifact.Scope}
-	message := &ChannelMessage{ID: "message", Scope: artifact.Scope, ConversationID: "chat", References: []ConversationReference{
-		{Kind: ConversationReferenceArtifact, ID: "file", Version: 1},
-		{Kind: ConversationReferenceArtifact, ID: "file", Version: 1},
-		{Kind: ConversationReferenceRun, ID: "run-1"},
+	conversation := &models.Conversation{ID: "chat", Scope: artifact.Scope}
+	message := &models.ChannelMessage{ID: "message", Scope: artifact.Scope, ConversationID: "chat", References: []models.ConversationReference{
+		{Kind: models.ConversationReferenceArtifact, ID: "file", Version: 1},
+		{Kind: models.ConversationReferenceArtifact, ID: "file", Version: 1},
+		{Kind: models.ConversationReferenceRun, ID: "run-1"},
 	}}
-	got := reader.parts(ctx, conversation, message, MaxUserEntryContentBytes)
+	got := reader.parts(ctx, conversation, message, models.MaxUserEntryContentBytes)
 	want := "<attachment id=\"file\" version=\"1\" name=\"file.csv\" status=\"supplied\">\ncompany,total\nAcme,42\n</attachment>"
-	if len(got.Parts) != 1 || !reflect.DeepEqual(got.Parts[0], ContentPart{Type: ContentPartText, Text: want}) || bytesStore.opens != 1 {
+	if len(got.Parts) != 1 || !reflect.DeepEqual(got.Parts[0], models.ContentPart{Type: models.ContentPartText, Text: want}) || bytesStore.opens != 1 {
 		t.Fatalf("scoped content not supplied exactly once: %#v (opens %d)", got.Parts, bytesStore.opens)
 	}
 
 	conversation.Scope.ID = "other"
 	message.Scope = conversation.Scope
-	got = reader.parts(ctx, conversation, message, MaxUserEntryContentBytes)
+	got = reader.parts(ctx, conversation, message, models.MaxUserEntryContentBytes)
 	if len(got.Parts) != 1 || got.Parts[0].Text != `<attachment id="file" version="1" status="unavailable"/>` || bytesStore.opens != 1 {
 		t.Fatalf("foreign tenant content was opened: %#v", got.Parts)
 	}
 	message.Scope = artifact.Scope
-	if got := reader.parts(ctx, conversation, message, MaxUserEntryContentBytes); len(got.Parts) != 0 || len(got.Attached) != 0 {
+	if got := reader.parts(ctx, conversation, message, models.MaxUserEntryContentBytes); len(got.Parts) != 0 || len(got.Attached) != 0 {
 		t.Fatal("foreign message accepted")
 	}
 	conversation.Scope = artifact.Scope
 	message.ConversationID = "another-chat"
-	if got := reader.parts(ctx, conversation, message, MaxUserEntryContentBytes); len(got.Parts) != 0 {
+	if got := reader.parts(ctx, conversation, message, models.MaxUserEntryContentBytes); len(got.Parts) != 0 {
 		t.Fatal("message of another conversation accepted")
 	}
 }
@@ -173,8 +175,8 @@ func conversationTestDigest(content string) string {
 	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(content)))
 }
 
-func conversationTestArtifact() *Artifact {
-	return &Artifact{ID: "file", Version: 1, Scope: Scope{Kind: "tenant", ID: "one"},
-		Name: "file.csv", ContentRef: "object-store:file", Classification: ArtifactClassificationInternal,
-		Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "user", ID: "owner"}}}
+func conversationTestArtifact() *models.Artifact {
+	return &models.Artifact{ID: "file", Version: 1, Scope: models.Scope{Kind: "tenant", ID: "one"},
+		Name: "file.csv", ContentRef: "object-store:file", Classification: models.ArtifactClassificationInternal,
+		Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "user", ID: "owner"}}}
 }

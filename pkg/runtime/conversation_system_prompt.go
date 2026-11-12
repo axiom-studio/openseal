@@ -1,5 +1,7 @@
 package runtime
 
+import "github.com/axiom-studio/openseal/pkg/models"
+
 // Static conversation sections of a loop model step's system prompt
 // (section 05 §6.2, SPEC §6). The binding appends them to
 // PromptContribution.Sections after the kernel sections. They depend only on
@@ -38,23 +40,23 @@ const ConversationExternalSourceRules = "Message headers name the external provi
 // conversationSpokenRules is the spoken_rules section (SPEC §6): the spoken
 // style, the silent final answer for ambient speech, and the authority caveat
 // that a spoken observation never counts as approval.
-const conversationSpokenRules = spokenResponseStyleInstruction +
+const conversationSpokenRules = models.SpokenResponseStyleInstruction +
 	" If ambient speech is not directed at you, call turn_final_answer with silent=true. " +
-	spokenResponseAuthorityInstruction
+	models.SpokenResponseAuthorityInstruction
 
 // conversationSystemSections returns the stable conversation sections of the
 // system prompt for run, in order: channel rules, attachment rules, external
 // source rules (external conversations), Team rules (Team-owned Runs) and
 // spoken rules (spoken replies, ConversationLoopAuthority.Spoken).
-func conversationSystemSections(conversation *Conversation, run *AgentRun, spoken bool) []ModelStepSystemSection {
-	sections := []ModelStepSystemSection{
+func conversationSystemSections(conversation *models.Conversation, run *models.AgentRun, spoken bool) []models.ModelStepSystemSection {
+	sections := []models.ModelStepSystemSection{
 		conversationSection(conversationSectionChannel, ConversationChannelRules),
 		conversationSection(conversationSectionAttachments, ConversationAttachmentRules),
 	}
-	if externalChannelContext(conversation) {
+	if models.IsExternalChannelConversation(conversation) {
 		sections = append(sections, conversationSection(conversationSectionExternalSource, ConversationExternalSourceRules))
 	}
-	if run != nil && run.Owner.Type == OwnerTypeTeam {
+	if run != nil && run.Owner.Type == models.OwnerTypeTeam {
 		sections = append(sections, conversationSection(conversationSectionTeam, teamChannelRules))
 	}
 	if spoken {
@@ -63,6 +65,6 @@ func conversationSystemSections(conversation *Conversation, run *AgentRun, spoke
 	return sections
 }
 
-func conversationSection(id, text string) ModelStepSystemSection {
-	return ModelStepSystemSection{ID: id, Title: conversationSectionTitles[id], Text: text}
+func conversationSection(id, text string) models.ModelStepSystemSection {
+	return models.ModelStepSystemSection{ID: id, Title: conversationSectionTitles[id], Text: text}
 }

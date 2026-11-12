@@ -1,11 +1,13 @@
 package runtime
 
+import "github.com/axiom-studio/openseal/pkg/models"
+
 // Use only after conversationWorkOrigin has verified the canonical origin.
-func conversationClarificationReferences(run *AgentRun) []ConversationReference {
-	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
-	if run.Kind == RunKindAgentWork && run.ParentRunID == "" {
-		if taskID, ok := run.Context[ConversationTaskContextKey].(string); ok && taskID != "" {
-			references = append(references, ConversationReference{Kind: ConversationReferenceTask, ID: taskID})
+func conversationClarificationReferences(run *models.AgentRun) []models.ConversationReference {
+	references := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}
+	if run.Kind == models.RunKindAgentWork && run.ParentRunID == "" {
+		if taskID, ok := run.Context[models.ConversationTaskContextKey].(string); ok && taskID != "" {
+			references = append(references, models.ConversationReference{Kind: models.ConversationReferenceTask, ID: taskID})
 		}
 	}
 	return references
@@ -22,11 +24,11 @@ func conversationClarificationKey(runID, entryID string) string {
 // conversationQuestionPostRequest is the one shape of a clarification question
 // message; the ask_user settle and the question reconciler post the same
 // request, so either replays the other.
-func conversationQuestionPostRequest(run *AgentRun, conversation *Conversation, trigger *ChannelMessage, args *askUserArgs, key string) PostChannelMessageRequest {
+func conversationQuestionPostRequest(run *models.AgentRun, conversation *models.Conversation, trigger *models.ChannelMessage, args *models.AskUserArgs, key string) PostChannelMessageRequest {
 	return PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: ConversationRunAgentID(conversation, run)},
-		Intent: MessageIntentQuestion, Content: args.Question, Question: args.ChannelQuestion(), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: ConversationRunAgentID(conversation, run)},
+		Intent: models.MessageIntentQuestion, Content: args.Question, Question: args.ChannelQuestion(), Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		ReplyToMessageID: trigger.ID, RequiresResponse: true, References: conversationClarificationReferences(run),
 		IdempotencyKey: key,
 	}

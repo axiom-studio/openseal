@@ -6,6 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -24,22 +25,22 @@ const teamChannelRules = "You are one member of this Team channel and answer und
 
 // isTeamRoutingRun reports whether run is a Team's routing Run: a
 // conversation Run with no assigned Agent, which starts member Runs.
-func isTeamRoutingRun(run *AgentRun) bool {
-	return run != nil && run.Kind == RunKindConversation && run.Owner.Type == OwnerTypeTeam &&
+func isTeamRoutingRun(run *models.AgentRun) bool {
+	return run != nil && run.Kind == models.RunKindConversation && run.Owner.Type == models.OwnerTypeTeam &&
 		strings.TrimSpace(run.AssignedAgentID) == ""
 }
 
-func conversationRoutingKey(scope Scope, conversationID, triggerID string) string {
-	return "participation-round:" + hashString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+triggerID)
+func conversationRoutingKey(scope models.Scope, conversationID, triggerID string) string {
+	return "participation-round:" + models.SHA256DigestString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+triggerID)
 }
 
 // teamMemberRunRequest is a member's answer Run: a root conversation Run in
 // the member's own lane, shaped like a 1:1 Agent chat's Run.
-func teamMemberRunRequest(routing *AgentRun, conversation *Conversation, trigger *ChannelMessage, responder ConversationResponder, key string) CreateAgentRunRequest {
+func teamMemberRunRequest(routing *models.AgentRun, conversation *models.Conversation, trigger *models.ChannelMessage, responder models.ConversationResponder, key string) models.CreateAgentRunRequest {
 	context := map[string]interface{}{
-		conversationRunContextConversationID: conversation.ID,
-		conversationRunContextTriggerID:      trigger.ID,
-		conversationRunContextTriggerSeq:     trigger.Sequence,
+		models.ConversationRunConversationIDContextKey: conversation.ID,
+		models.ConversationRunTriggerIDContextKey:      trigger.ID,
+		conversationRunContextTriggerSeq:               trigger.Sequence,
 		// The client's link from the routing Run to the answers it started.
 		teamRoutingRunContextKey: routing.ID,
 	}
@@ -49,18 +50,18 @@ func teamMemberRunRequest(routing *AgentRun, conversation *Conversation, trigger
 		}
 	}
 	if responder.Reason != "" {
-		context[routingReasonContextKey] = responder.Reason
+		context[models.RoutingReasonContextKey] = responder.Reason
 	}
 	root, _ := routing.Context["threadRootMessageId"].(string)
-	lane := ConversationRunLane(conversation.ID, root, responder.Participant.ID)
-	return CreateAgentRunRequest{
-		Scope: routing.Scope, Kind: RunKindConversation, Owner: routing.Owner,
+	lane := models.ConversationRunLane(conversation.ID, root, responder.Participant.ID)
+	return models.CreateAgentRunRequest{
+		Scope: routing.Scope, Kind: models.RunKindConversation, Owner: routing.Owner,
 		AssignedAgentID: responder.Participant.ID, ActingUser: routing.ActingUser,
-		ConcurrencyKey: lane, SessionID: conversationSessionID(routing.Scope, lane),
-		Goal: teamMemberRunGoal, Source: RunSourceChat, Priority: routing.Priority, Context: context,
-		Budget: cloneBudgetPolicy(routing.Budget), IdempotencyKey: key,
-		Actor:      ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
-		Visibility: ActivityVisibilityTeam,
+		ConcurrencyKey: lane, SessionID: models.ConversationSessionID(routing.Scope, lane),
+		Goal: teamMemberRunGoal, Source: models.RunSourceChat, Priority: routing.Priority, Context: context,
+		Budget: models.CloneBudgetPolicy(routing.Budget), IdempotencyKey: key,
+		Actor:      models.ActivityActor{Type: "service", ID: models.ConversationRunSchedulerParticipant},
+		Visibility: models.ActivityVisibilityTeam,
 	}
 }
 
@@ -103,11 +104,11 @@ func teamMemberName(info conversationTeamMember, binding ConversationParticipant
 	return binding.Participant.ID
 }
 
-func findHandoffMentions(content, sender string, roster conversationTeamRoster, bindings []ConversationParticipantBinding) []ConversationParticipant {
+func findHandoffMentions(content, sender string, roster conversationTeamRoster, bindings []ConversationParticipantBinding) []models.ConversationParticipant {
 	lower := strings.ToLower(content)
 	type found struct {
 		at          int
-		participant ConversationParticipant
+		participant models.ConversationParticipant
 	}
 	mentions := make([]found, 0)
 	for _, binding := range bindings {
@@ -122,7 +123,7 @@ func findHandoffMentions(content, sender string, roster conversationTeamRoster, 
 		}
 	}
 	sort.SliceStable(mentions, func(i, j int) bool { return mentions[i].at < mentions[j].at })
-	result := make([]ConversationParticipant, 0, len(mentions))
+	result := make([]models.ConversationParticipant, 0, len(mentions))
 	for _, mention := range mentions {
 		result = append(result, mention.participant)
 	}

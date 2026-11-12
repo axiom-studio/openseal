@@ -21,12 +21,12 @@ const (
 )
 
 type ConversationChangeRequest struct {
-	Scope          Scope
+	Scope          models.Scope
 	ConversationID string
 	Cursor         string
 	Limit          int
 	ActiveAt       time.Time
-	Viewer         *ConversationViewer
+	Viewer         *models.ConversationViewer
 }
 
 // ConversationChangeSet is a portable, transport-neutral projection for
@@ -38,15 +38,15 @@ type ConversationChangeRequest struct {
 // the reconnecting channel stream (except the {from, to} of an approval mode
 // change); detail remains available from the bounded canonical Activity feed.
 type ConversationChangeSet struct {
-	Conversation *Conversation               `json:"conversation"`
-	Messages     []*ChannelMessage           `json:"messages"`
-	Rounds       []*ParticipationRoundResult `json:"rounds"`
-	Runs         []*AgentRun                 `json:"runs"`
-	Activity     []ActivityProjection        `json:"activity"`
-	Presence     []*ConversationPresence     `json:"presence"`
+	Conversation *models.Conversation               `json:"conversation"`
+	Messages     []*models.ChannelMessage           `json:"messages"`
+	Rounds       []*models.ParticipationRoundResult `json:"rounds"`
+	Runs         []*models.AgentRun                 `json:"runs"`
+	Activity     []models.ActivityProjection        `json:"activity"`
+	Presence     []*models.ConversationPresence     `json:"presence"`
 	// Approvals are every pending approval for this conversation's Runs plus
 	// the most recently decided ones, each with a resolved ConversationContext.
-	Approvals []*ApprovalCheckpoint `json:"approvals"`
+	Approvals []*models.ApprovalCheckpoint `json:"approvals"`
 	// SkillSetupRequests are every pending setup request for this
 	// conversation plus the most recently resolved or dismissed ones.
 	SkillSetupRequests []*ConversationSkillSetupRequest `json:"skillSetupRequests"`
@@ -60,22 +60,22 @@ type ConversationChangeSet struct {
 	// added/removed events stored after the cursor, in Sequence order, on
 	// messages the viewer can see. Each carries its message's current
 	// reactions. Messages themselves carry reactions as of when they are read.
-	ReactionEvents []*ConversationReactionEvent `json:"reactionEvents"`
+	ReactionEvents []*models.ConversationReactionEvent `json:"reactionEvents"`
 	// SurfaceInteractions are durable deltas like Messages: interactions
 	// stored after the cursor, in Sequence order. SurfaceInteractionsChanged
 	// is set when the page carries any, and on the initial page.
-	SurfaceInteractions        []*SurfaceInteraction `json:"surfaceInteractions"`
-	RunsChanged                bool                  `json:"runsChanged"`
-	ActivityChanged            bool                  `json:"activityChanged"`
-	PresenceChanged            bool                  `json:"presenceChanged"`
-	ApprovalsChanged           bool                  `json:"approvalsChanged"`
-	SkillSetupRequestsChanged  bool                  `json:"skillSetupRequestsChanged"`
-	CredentialRequestsChanged  bool                  `json:"credentialRequestsChanged"`
-	RunbooksChanged            bool                  `json:"runbooksChanged"`
-	SurfaceInteractionsChanged bool                  `json:"surfaceInteractionsChanged"`
-	Cursor                     string                `json:"cursor"`
-	HasChanges                 bool                  `json:"hasChanges"`
-	HasMore                    bool                  `json:"hasMore"`
+	SurfaceInteractions        []*models.SurfaceInteraction `json:"surfaceInteractions"`
+	RunsChanged                bool                         `json:"runsChanged"`
+	ActivityChanged            bool                         `json:"activityChanged"`
+	PresenceChanged            bool                         `json:"presenceChanged"`
+	ApprovalsChanged           bool                         `json:"approvalsChanged"`
+	SkillSetupRequestsChanged  bool                         `json:"skillSetupRequestsChanged"`
+	CredentialRequestsChanged  bool                         `json:"credentialRequestsChanged"`
+	RunbooksChanged            bool                         `json:"runbooksChanged"`
+	SurfaceInteractionsChanged bool                         `json:"surfaceInteractionsChanged"`
+	Cursor                     string                       `json:"cursor"`
+	HasChanges                 bool                         `json:"hasChanges"`
+	HasMore                    bool                         `json:"hasMore"`
 }
 
 type conversationChangeCursor struct {
@@ -97,27 +97,27 @@ type conversationChangeCursor struct {
 
 type ConversationChangeService struct {
 	conversations *ConversationService
-	portfolio     PortfolioStore
-	activity      RunActivityStore
+	portfolio     models.PortfolioStore
+	activity      models.RunActivityStore
 	approvals     conversationApprovalStore
 	skillSetups   SkillSetupRequestReader
-	credentials   CredentialRequestStore
-	runbooks      RunbookActivationStore
+	credentials   models.CredentialRequestStore
+	runbooks      models.RunbookActivationStore
 	now           func() time.Time
 }
 
-func NewConversationChangeService(conversationStore ConversationStore, portfolio PortfolioStore, opts ...models.ServiceOption) (*ConversationChangeService, error) {
+func NewConversationChangeService(conversationStore models.ConversationStore, portfolio models.PortfolioStore, opts ...models.ServiceOption) (*ConversationChangeService, error) {
 	if conversationStore == nil || portfolio == nil {
 		return nil, errors.New("conversation and portfolio stores are required")
 	}
 	service := &ConversationChangeService{conversations: NewConversationService(conversationStore, opts...), portfolio: portfolio, now: models.ClockFrom(opts)}
-	service.activity, _ = portfolio.(RunActivityStore)
+	service.activity, _ = portfolio.(models.RunActivityStore)
 	service.approvals, _ = portfolio.(conversationApprovalStore)
-	if store, ok := portfolio.(SkillSetupRequestStore); ok {
+	if store, ok := portfolio.(models.SkillSetupRequestStore); ok {
 		service.skillSetups = store.ListSkillSetupRequests
 	}
-	service.credentials, _ = portfolio.(CredentialRequestStore)
-	service.runbooks, _ = portfolio.(RunbookActivationStore)
+	service.credentials, _ = portfolio.(models.CredentialRequestStore)
+	service.runbooks, _ = portfolio.(models.RunbookActivationStore)
 	return service, nil
 }
 
@@ -129,15 +129,15 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		return nil, err
 	}
 	conversationID := strings.TrimSpace(req.ConversationID)
-	if !validOpaqueIdentifier(conversationID, 128) {
-		return nil, fmt.Errorf("%w: conversation id is required", ErrInvalidConversation)
+	if !models.IsValidOpaqueIdentifier(conversationID, 128) {
+		return nil, fmt.Errorf("%w: conversation id is required", models.ErrInvalidConversation)
 	}
 	limit := req.Limit
 	if limit == 0 {
-		limit = defaultConversationChangeLimit
+		limit = models.DefaultConversationChangeLimit
 	}
-	if limit < 1 || limit > maximumConversationChangeLimit {
-		return nil, fmt.Errorf("%w: conversation change limit must be between 1 and %d", ErrInvalidConversation, maximumConversationChangeLimit)
+	if limit < 1 || limit > models.MaximumConversationChangeLimit {
+		return nil, fmt.Errorf("%w: conversation change limit must be between 1 and %d", models.ErrInvalidConversation, models.MaximumConversationChangeLimit)
 	}
 	cursor, initial, err := decodeConversationChangeCursor(req.Cursor, conversationID)
 	if err != nil {
@@ -148,7 +148,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		return nil, err
 	}
 
-	rawMessages, err := s.conversations.store.ListChannelMessages(ctx, ChannelMessageFilter{
+	rawMessages, err := s.conversations.store.ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: req.Scope, ConversationID: conversationID, AfterSequence: cursor.MessageSequence, Limit: limit,
 	})
 	if err != nil {
@@ -169,7 +169,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 
 	// Read one past the page to learn whether more interactions remain. Like
 	// messages, the cursor advances over hidden interactions too.
-	rawInteractions, err := s.conversations.store.ListSurfaceInteractions(ctx, SurfaceInteractionFilter{
+	rawInteractions, err := s.conversations.store.ListSurfaceInteractions(ctx, models.SurfaceInteractionFilter{
 		Scope: req.Scope, ConversationID: conversationID, AfterSequence: cursor.InteractionSequence, Limit: limit + 1,
 	})
 	if err != nil {
@@ -238,7 +238,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	runsChanged := initial || runDigest != cursor.RunDigest
 	projectedRuns := runs
 	if !runsChanged {
-		projectedRuns = []*AgentRun{}
+		projectedRuns = []*models.AgentRun{}
 	}
 	activity, err := s.listConversationActivity(ctx, conversation, runs)
 	if err != nil {
@@ -251,7 +251,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	activityChanged := initial || activityDigest != cursor.ActivityDigest
 	projectedActivity := activity
 	if !activityChanged {
-		projectedActivity = []ActivityProjection{}
+		projectedActivity = []models.ActivityProjection{}
 	}
 
 	approvals, err := s.listConversationApprovals(ctx, conversation, runs)
@@ -264,7 +264,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	}
 	approvalsChanged := initial || approvalDigest != cursor.ApprovalDigest
 	if !approvalsChanged {
-		approvals = []*ApprovalCheckpoint{}
+		approvals = []*models.ApprovalCheckpoint{}
 	}
 	skillSetups, err := s.listConversationSkillSetupRequests(ctx, conversation, runs, req.Viewer)
 	if err != nil {
@@ -319,7 +319,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	presenceChanged := initial || presenceDigest != cursor.PresenceDigest
 	projectedPresence := presence
 	if !presenceChanged {
-		projectedPresence = []*ConversationPresence{}
+		projectedPresence = []*models.ConversationPresence{}
 	}
 
 	next := conversationChangeCursor{
@@ -335,7 +335,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 || len(interactions) > 0 || len(reactionEvents) > 0 ||
 		runsChanged || activityChanged || presenceChanged || approvalsChanged || skillSetupsChanged || credentialsChanged || runbooksChanged
 	return &ConversationChangeSet{
-		Conversation: cloneConversation(conversation), Messages: cloneChannelMessages(messages), Rounds: cloneParticipationRoundResults(rounds),
+		Conversation: models.CloneConversation(conversation), Messages: models.CloneChannelMessages(messages), Rounds: cloneParticipationRoundResults(rounds),
 		Runs: cloneAgentRuns(projectedRuns), Activity: cloneConversationActivity(projectedActivity), Presence: cloneConversationPresences(projectedPresence),
 		Approvals: approvals, SkillSetupRequests: skillSetups, CredentialRequests: credentialRequests, Runbooks: runbooks,
 		SurfaceInteractions: interactions, SurfaceInteractionsChanged: interactionsChanged, ReactionEvents: reactionEvents,
@@ -349,8 +349,8 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 // correct options and explanation) from interactions another participant
 // made, so a viewer cannot learn a quiz's answer before answering it. The
 // viewer's own outcomes stay.
-func withoutOthersOutcomes(interactions []*SurfaceInteraction, viewer ConversationParticipant) []*SurfaceInteraction {
-	out := make([]*SurfaceInteraction, len(interactions))
+func withoutOthersOutcomes(interactions []*models.SurfaceInteraction, viewer models.ConversationParticipant) []*models.SurfaceInteraction {
+	out := make([]*models.SurfaceInteraction, len(interactions))
 	for index, interaction := range interactions {
 		out[index] = interaction
 		if interaction == nil || len(interaction.Outcome) == 0 || (interaction.ActorType == viewer.Type && interaction.ActorID == viewer.ID) {
@@ -366,14 +366,14 @@ func withoutOthersOutcomes(interactions []*SurfaceInteraction, viewer Conversati
 // A child inherits its originating message's visibility, not its assigned
 // agent's identity. Filter before computing digests or projecting activity so
 // hidden work cannot leak through either payloads or change notifications.
-func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope Scope, conversationID string, runs []*AgentRun, viewer ConversationViewer) ([]*AgentRun, error) {
+func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope models.Scope, conversationID string, runs []*models.AgentRun, viewer models.ConversationViewer) ([]*models.AgentRun, error) {
 	visibleRoots := make(map[string]bool)
 	var batchedMessages map[string]bool
-	if batch, ok := s.conversations.store.(ChannelMessageBatchStore); ok {
+	if batch, ok := s.conversations.store.(models.ChannelMessageBatchStore); ok {
 		ids := make([]string, 0, len(runs))
 		for _, run := range runs {
-			if run.Kind == RunKindConversation {
-				if triggerID, _ := run.Context[conversationRunContextTriggerID].(string); strings.TrimSpace(triggerID) != "" {
+			if run.Kind == models.RunKindConversation {
+				if triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string); strings.TrimSpace(triggerID) != "" {
 					ids = append(ids, triggerID)
 				}
 			}
@@ -386,7 +386,7 @@ func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope
 		// path's viewer validation only when a trigger message exists.
 		batchedMessages = make(map[string]bool, len(messages))
 		if len(messages) > 0 {
-			selected := make([]*ChannelMessage, 0, len(messages))
+			selected := make([]*models.ChannelMessage, 0, len(messages))
 			for _, id := range ids {
 				if message := messages[id]; message != nil {
 					selected = append(selected, message)
@@ -403,10 +403,10 @@ func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope
 		}
 	}
 	for _, run := range runs {
-		if run.Kind != RunKindConversation {
+		if run.Kind != models.RunKindConversation {
 			continue
 		}
-		triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+		triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 		if strings.TrimSpace(triggerID) == "" {
 			continue // Unknown provenance is not evidence of viewer access.
 		}
@@ -417,16 +417,16 @@ func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope
 			continue
 		}
 		if _, err := s.conversations.GetVisibleChannelMessage(ctx, scope, conversationID, triggerID, viewer); err != nil {
-			if errors.Is(err, ErrChannelMessageNotFound) {
+			if errors.Is(err, models.ErrChannelMessageNotFound) {
 				continue
 			}
 			return nil, err
 		}
 		visibleRoots[run.ID] = true
 	}
-	if tasks, ok := s.portfolio.(ConversationTaskStore); ok {
+	if tasks, ok := s.portfolio.(models.ConversationTaskStore); ok {
 		for _, run := range runs {
-			if run.Kind != RunKindAgentWork && run.Kind != RunKindConversation || run.ParentRunID != "" || run.RootRunID != run.ID {
+			if run.Kind != models.RunKindAgentWork && run.Kind != models.RunKindConversation || run.ParentRunID != "" || run.RootRunID != run.ID {
 				continue
 			}
 			task, err := tasks.FindConversationTaskByWorkRunID(ctx, scope, run.ID)
@@ -450,7 +450,7 @@ func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope
 			}
 		}
 	}
-	visible := make([]*AgentRun, 0, len(runs))
+	visible := make([]*models.AgentRun, 0, len(runs))
 	for _, run := range runs {
 		if visibleRoots[run.ID] || visibleRoots[run.RootRunID] {
 			visible = append(visible, run)
@@ -459,15 +459,15 @@ func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope
 	return visible, nil
 }
 
-func (s *ConversationChangeService) filterVisibleRounds(ctx context.Context, scope Scope, conversationID string, rounds []*ParticipationRoundResult, viewer ConversationViewer) ([]*ParticipationRoundResult, error) {
-	visible := make([]*ParticipationRoundResult, 0, len(rounds))
+func (s *ConversationChangeService) filterVisibleRounds(ctx context.Context, scope models.Scope, conversationID string, rounds []*models.ParticipationRoundResult, viewer models.ConversationViewer) ([]*models.ParticipationRoundResult, error) {
+	visible := make([]*models.ParticipationRoundResult, 0, len(rounds))
 	for _, result := range rounds {
 		if result == nil || result.Round == nil {
 			continue
 		}
 		if triggerID := strings.TrimSpace(result.Round.TriggerMessageID); triggerID != "" {
 			if _, err := s.conversations.GetVisibleChannelMessage(ctx, scope, conversationID, triggerID, viewer); err != nil {
-				if errors.Is(err, ErrChannelMessageNotFound) {
+				if errors.Is(err, models.ErrChannelMessageNotFound) {
 					continue
 				}
 				return nil, err
@@ -477,7 +477,7 @@ func (s *ConversationChangeService) filterVisibleRounds(ctx context.Context, sco
 		if err != nil {
 			return nil, err
 		}
-		projected := cloneParticipationRoundResult(result, result.Replayed)
+		projected := models.CloneParticipationRoundResult(result, result.Replayed)
 		projected.Messages = messages
 		visible = append(visible, projected)
 	}
@@ -486,15 +486,15 @@ func (s *ConversationChangeService) filterVisibleRounds(ctx context.Context, sco
 
 func (s *ConversationChangeService) listRoundsAfter(
 	ctx context.Context,
-	scope Scope,
+	scope models.Scope,
 	conversationID string,
 	afterRevision int64,
 	limit int,
-) ([]*ParticipationRoundResult, bool, int64, error) {
+) ([]*models.ParticipationRoundResult, bool, int64, error) {
 	const pageSize = 500
-	all := make([]*ParticipationRoundResult, 0)
+	all := make([]*models.ParticipationRoundResult, 0)
 	for offset := 0; ; offset += pageSize {
-		page, err := s.conversations.ListParticipationRounds(ctx, ParticipationRoundFilter{
+		page, err := s.conversations.ListParticipationRounds(ctx, models.ParticipationRoundFilter{
 			Scope: scope, ConversationID: conversationID, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
@@ -526,17 +526,17 @@ func (s *ConversationChangeService) listRoundsAfter(
 	return all, hasMore, nextRevision, nil
 }
 
-func (s *ConversationChangeService) listConversationRuns(ctx context.Context, conversation *Conversation, viewers ...*ConversationViewer) ([]*AgentRun, error) {
+func (s *ConversationChangeService) listConversationRuns(ctx context.Context, conversation *models.Conversation, viewers ...*models.ConversationViewer) ([]*models.AgentRun, error) {
 	const pageSize = 500
-	all := make([]*AgentRun, 0)
+	all := make([]*models.AgentRun, 0)
 	for offset := 0; ; offset += pageSize {
-		var page []*AgentRun
+		var page []*models.AgentRun
 		var err error
-		if indexed, ok := s.portfolio.(ConversationForegroundRunsReadStore); ok {
+		if indexed, ok := s.portfolio.(models.ConversationForegroundRunsReadStore); ok {
 			page, err = indexed.ListConversationForegroundRuns(ctx, conversation.Scope, conversation.Owner, conversation.ID, pageSize, offset)
 		} else {
-			page, err = s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-				Scope: conversation.Scope, Kind: RunKindConversation, Owner: &conversation.Owner, Limit: pageSize, Offset: offset,
+			page, err = s.portfolio.ListAgentRuns(ctx, models.AgentRunFilter{
+				Scope: conversation.Scope, Kind: models.RunKindConversation, Owner: &conversation.Owner, Limit: pageSize, Offset: offset,
 				ConversationID: conversation.ID,
 			})
 		}
@@ -551,28 +551,28 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 				all = append(all, run)
 				continue
 			}
-			if run.Scope != conversation.Scope || run.Owner != conversation.Owner || run.Kind != RunKindConversation ||
-				run.Context[conversationRunContextConversationID] != conversation.ID {
+			if run.Scope != conversation.Scope || run.Owner != conversation.Owner || run.Kind != models.RunKindConversation ||
+				run.Context[models.ConversationRunConversationIDContextKey] != conversation.ID {
 				continue
 			}
 			// An Agent's lane of this conversation, or of one of its threads.
 			thread, _ := run.Context["threadRootMessageId"].(string)
-			if run.ConcurrencyKey != ConversationRunLane(conversation.ID, thread, run.AssignedAgentID) {
+			if run.ConcurrencyKey != models.ConversationRunLane(conversation.ID, thread, run.AssignedAgentID) {
 				continue
 			}
 			if thread != "" {
 				if s.conversations == nil {
 					continue
 				}
-				triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+				triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 				trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
 				if err != nil {
-					if errors.Is(err, ErrChannelMessageNotFound) {
+					if errors.Is(err, models.ErrChannelMessageNotFound) {
 						continue
 					}
 					return nil, err
 				}
-				if externalConversationThreadRoot(conversation, trigger) != thread {
+				if models.ExternalConversationThreadRoot(conversation, trigger) != thread {
 					continue
 				}
 			}
@@ -585,8 +585,8 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	// Delegated work may outlive the reply that launched it. Batch exact
 	// durable root within this scope; do not infer membership from copied goals
 	// or require children to share the initiating agent's owner identity.
-	roots := append([]*AgentRun(nil), all...)
-	rootByID := make(map[string]*AgentRun, len(roots))
+	roots := append([]*models.AgentRun(nil), all...)
+	rootByID := make(map[string]*models.AgentRun, len(roots))
 	rootIDs := make([]string, 0, len(roots))
 	for _, root := range roots {
 		rootByID[root.ID] = root
@@ -595,8 +595,8 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	for start := 0; start < len(rootIDs); start += pageSize {
 		batch := rootIDs[start:min(start+pageSize, len(rootIDs))]
 		for offset := 0; ; offset += pageSize {
-			page, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-				Scope: conversation.Scope, Kind: RunKindAgentWork, RootRunIDs: batch, Limit: pageSize, Offset: offset,
+			page, err := s.portfolio.ListAgentRuns(ctx, models.AgentRunFilter{
+				Scope: conversation.Scope, Kind: models.RunKindAgentWork, RootRunIDs: batch, Limit: pageSize, Offset: offset,
 			})
 			if err != nil {
 				return nil, err
@@ -611,7 +611,7 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 			}
 		}
 	}
-	var viewer *ConversationViewer
+	var viewer *models.ConversationViewer
 	if len(viewers) > 0 {
 		viewer = viewers[0]
 	}
@@ -619,7 +619,7 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[string]*AgentRun, len(all)+len(taskRuns))
+	byID := make(map[string]*models.AgentRun, len(all)+len(taskRuns))
 	for _, run := range all {
 		byID[run.ID] = run
 	}
@@ -635,7 +635,7 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	for start := 0; start < len(taskRootIDs); start += pageSize {
 		batch := taskRootIDs[start:min(start+pageSize, len(taskRootIDs))]
 		for offset := 0; ; offset += pageSize {
-			page, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{Scope: conversation.Scope, Kind: RunKindAgentWork, RootRunIDs: batch, Limit: pageSize, Offset: offset})
+			page, err := s.portfolio.ListAgentRuns(ctx, models.AgentRunFilter{Scope: conversation.Scope, Kind: models.RunKindAgentWork, RootRunIDs: batch, Limit: pageSize, Offset: offset})
 			if err != nil {
 				return nil, err
 			}
@@ -666,10 +666,10 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 		}
 		return all[i].ID > all[j].ID
 	})
-	active := make([]*AgentRun, 0, len(all))
-	terminal := make([]*AgentRun, 0, min(len(all), conversationRunProjectionLimit))
+	active := make([]*models.AgentRun, 0, len(all))
+	terminal := make([]*models.AgentRun, 0, min(len(all), conversationRunProjectionLimit))
 	for _, run := range all {
-		if isTerminalAgentRunStatus(run.Status) {
+		if models.IsTerminalAgentRunStatus(run.Status) {
 			if len(terminal) < conversationRunProjectionLimit {
 				terminal = append(terminal, run)
 			}
@@ -684,7 +684,7 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	for _, run := range result {
 		included[run.ID] = true
 	}
-	for _, run := range append([]*AgentRun(nil), result...) {
+	for _, run := range append([]*models.AgentRun(nil), result...) {
 		root := rootByID[run.RootRunID]
 		if source := taskSources[run.ID]; source != nil {
 			root = source
@@ -698,14 +698,14 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	return result, nil
 }
 
-func (s *ConversationChangeService) listConversationTaskRuns(ctx context.Context, conversation *Conversation, viewer *ConversationViewer) ([]*AgentRun, map[string]*AgentRun, error) {
-	sources := make(map[string]*AgentRun)
-	tasks, ok := s.portfolio.(ConversationTaskStore)
+func (s *ConversationChangeService) listConversationTaskRuns(ctx context.Context, conversation *models.Conversation, viewer *models.ConversationViewer) ([]*models.AgentRun, map[string]*models.AgentRun, error) {
+	sources := make(map[string]*models.AgentRun)
+	tasks, ok := s.portfolio.(models.ConversationTaskStore)
 	if !ok || s.conversations == nil {
 		return nil, sources, nil
 	}
-	filter := ConversationTaskFilter{Scope: conversation.Scope, Owner: conversation.Owner, ConversationID: conversation.ID, Limit: conversationRunProjectionLimit}
-	if viewer != nil && viewer.Participant.Type == ConversationParticipantUser {
+	filter := models.ConversationTaskFilter{Scope: conversation.Scope, Owner: conversation.Owner, ConversationID: conversation.ID, Limit: conversationRunProjectionLimit}
+	if viewer != nil && viewer.Participant.Type == models.ConversationParticipantUser {
 		filter.AuthenticatedActor = viewer.Participant
 	}
 	// A recent terminal window must not displace older active work. Both reads
@@ -720,7 +720,7 @@ func (s *ConversationChangeService) listConversationTaskRuns(ctx context.Context
 	if err != nil {
 		return nil, nil, err
 	}
-	runs := make([]*AgentRun, 0, len(active)+len(recent))
+	runs := make([]*models.AgentRun, 0, len(active)+len(recent))
 	seen := make(map[string]bool, len(active)+len(recent))
 	for _, result := range append(active, recent...) {
 		if result == nil || result.Task == nil || result.WorkRun == nil || seen[result.WorkRun.ID] {
@@ -741,38 +741,38 @@ func (s *ConversationChangeService) listConversationTaskRuns(ctx context.Context
 }
 
 type conversationChangeTaskProofStore struct {
-	ConversationStore
-	ConversationTaskStore
-	PortfolioStore
+	models.ConversationStore
+	models.ConversationTaskStore
+	models.PortfolioStore
 }
 
 // A task is its own run root. Its source, actor, thread, and message visibility
 // must therefore be proven from persisted task identity rather than inferred
 // from a copied conversation/task context on arbitrary work.
-func (s *ConversationChangeService) proveConversationTaskRun(ctx context.Context, conversation *Conversation, task *ConversationTask, work *AgentRun, viewer *ConversationViewer) (*AgentRun, error) {
+func (s *ConversationChangeService) proveConversationTaskRun(ctx context.Context, conversation *models.Conversation, task *models.ConversationTask, work *models.AgentRun, viewer *models.ConversationViewer) (*models.AgentRun, error) {
 	if task == nil || work == nil || task.Validate() != nil || task.Scope != conversation.Scope || task.Owner != conversation.Owner ||
-		task.ConversationID != conversation.ID || !ConversationTaskMatchesWorkRun(task, work) ||
-		task.Mode != ConversationTaskModeContinuation && work.Context["threadRootMessageId"] != task.ThreadRootID ||
-		viewer != nil && viewer.Participant.Type == ConversationParticipantUser && viewer.Participant != task.AuthenticatedActor {
+		task.ConversationID != conversation.ID || !models.ConversationTaskMatchesWorkRun(task, work) ||
+		task.Mode != models.ConversationTaskModeContinuation && work.Context["threadRootMessageId"] != task.ThreadRootID ||
+		viewer != nil && viewer.Participant.Type == models.ConversationParticipantUser && viewer.Participant != task.AuthenticatedActor {
 		return nil, nil
 	}
-	tasks, ok := s.portfolio.(ConversationTaskStore)
+	tasks, ok := s.portfolio.(models.ConversationTaskStore)
 	if !ok {
 		return nil, nil
 	}
 	proofStore := conversationChangeTaskProofStore{ConversationStore: s.conversations.store, ConversationTaskStore: tasks, PortfolioStore: s.portfolio}
 	workTask, sourceReport, err := conversationTaskForReport(ctx, proofStore, work)
-	if errors.Is(err, ErrInvalidConversationTask) || errors.Is(err, agentrun.ErrConversationTaskNotFound) {
+	if errors.Is(err, models.ErrInvalidConversationTask) || errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if workTask == nil || sourceReport || !sameConversationTask(task, workTask) {
+	if workTask == nil || sourceReport || !models.SameConversationTask(task, workTask) {
 		return nil, nil
 	}
 	source, err := s.portfolio.GetAgentRun(ctx, task.Scope, task.SourceRunID)
-	if errors.Is(err, ErrRunNotFound) {
+	if errors.Is(err, models.ErrRunNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -781,32 +781,32 @@ func (s *ConversationChangeService) proveConversationTaskRun(ctx context.Context
 	if source == nil || source.ParentRunID != "" || source.RootRunID != source.ID {
 		return nil, nil
 	}
-	if task.Mode == ConversationTaskModeContinuation {
-		if !ConversationTaskMatchesWorkRun(task, source) {
+	if task.Mode == models.ConversationTaskModeContinuation {
+		if !models.ConversationTaskMatchesWorkRun(task, source) {
 			return nil, nil
 		}
 	} else {
-		if source.Status != AgentRunStatusCompleted || source.LastAppliedTurn != task.SourceTurnNumber || validateConversationRun(source) != nil {
+		if source.Status != models.AgentRunStatusCompleted || source.LastAppliedTurn != task.SourceTurnNumber || models.ValidateConversationRun(source) != nil {
 			return nil, nil
 		}
 		sourceTask, sourceReport, err := conversationTaskForReport(ctx, proofStore, source)
-		if errors.Is(err, ErrInvalidConversationTask) || errors.Is(err, agentrun.ErrConversationTaskNotFound) {
+		if errors.Is(err, models.ErrInvalidConversationTask) || errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		if sourceTask == nil || !sourceReport || !sameConversationTask(task, sourceTask) {
+		if sourceTask == nil || !sourceReport || !models.SameConversationTask(task, sourceTask) {
 			return nil, nil
 		}
 	}
-	var message *ChannelMessage
+	var message *models.ChannelMessage
 	if viewer != nil {
 		message, err = s.conversations.GetVisibleChannelMessage(ctx, task.Scope, task.ConversationID, task.SourceMessageID, *viewer)
 	} else {
 		message, err = s.conversations.GetChannelMessage(ctx, task.Scope, task.ConversationID, task.SourceMessageID)
 	}
-	if errors.Is(err, ErrChannelMessageNotFound) {
+	if errors.Is(err, models.ErrChannelMessageNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -816,11 +816,11 @@ func (s *ConversationChangeService) proveConversationTaskRun(ctx context.Context
 		return nil, nil
 	}
 	sourceThread, _ := source.Context["threadRootMessageId"].(string)
-	if sourceThread != externalConversationThreadRoot(conversation, message) {
+	if sourceThread != models.ExternalConversationThreadRoot(conversation, message) {
 		return nil, nil
 	}
 	actor := message.Sender
-	if actor.Type == ConversationParticipantService && message.Initiator != nil {
+	if actor.Type == models.ConversationParticipantService && message.Initiator != nil {
 		actor = *message.Initiator
 	}
 	thread := message.ThreadRootID
@@ -833,21 +833,21 @@ func (s *ConversationChangeService) proveConversationTaskRun(ctx context.Context
 	return source, nil
 }
 
-func (s *ConversationChangeService) listConversationActivity(ctx context.Context, conversation *Conversation, runs []*AgentRun) ([]ActivityProjection, error) {
+func (s *ConversationChangeService) listConversationActivity(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun) ([]models.ActivityProjection, error) {
 	if s.activity == nil || conversation == nil {
-		return []ActivityProjection{}, nil
+		return []models.ActivityProjection{}, nil
 	}
 	// The conversation's own activity stream (for example approval mode
 	// changes) is listed together with its Runs' activity.
 	runIDs := make([]string, 0, len(runs)+1)
-	runIDs = append(runIDs, activityStreamID(&ActivityEvent{ConversationRefs: []string{conversation.ID}}))
+	runIDs = append(runIDs, models.ActivityStreamID(&models.ActivityEvent{ConversationRefs: []string{conversation.ID}}))
 	for _, run := range runs {
 		runIDs = append(runIDs, run.ID)
 	}
-	byID := make(map[string]*ActivityEvent)
+	byID := make(map[string]*models.ActivityEvent)
 	for start := 0; start < len(runIDs); start += conversationActivityRunBatchSize {
 		end := min(start+conversationActivityRunBatchSize, len(runIDs))
-		events, err := s.activity.ListActivity(ctx, ActivityFilter{
+		events, err := s.activity.ListActivity(ctx, models.ActivityFilter{
 			Scope: conversation.Scope, RunIDs: runIDs[start:end], Descending: true, Limit: conversationRunProjectionLimit,
 		})
 		if err != nil {
@@ -857,7 +857,7 @@ func (s *ConversationChangeService) listConversationActivity(ctx context.Context
 			byID[event.ID] = event
 		}
 	}
-	result := make([]*ActivityEvent, 0, len(byID))
+	result := make([]*models.ActivityEvent, 0, len(byID))
 	for _, event := range byID {
 		result = append(result, event)
 	}
@@ -873,9 +873,9 @@ func (s *ConversationChangeService) listConversationActivity(ctx context.Context
 	if len(result) > conversationRunProjectionLimit {
 		result = result[:conversationRunProjectionLimit]
 	}
-	projected := make([]ActivityProjection, 0, len(result))
+	projected := make([]models.ActivityProjection, 0, len(result))
 	for _, event := range result {
-		projection := projectActivityEvent(event, false)
+		projection := models.ProjectActivityEvent(event, false)
 		// An approval mode change carries only the two mode names, which the
 		// conversation view renders; other payloads stay on the Activity feed.
 		if event.EventType == ConversationApprovalModeChangedEvent {
@@ -886,7 +886,7 @@ func (s *ConversationChangeService) listConversationActivity(ctx context.Context
 	return projected, nil
 }
 
-func conversationActivityProjectionDigest(events []ActivityProjection) (string, error) {
+func conversationActivityProjectionDigest(events []models.ActivityProjection) (string, error) {
 	values := make([]struct {
 		ID       string `json:"id"`
 		Sequence int64  `json:"sequence"`
@@ -901,36 +901,36 @@ func conversationActivityProjectionDigest(events []ActivityProjection) (string, 
 	if err != nil {
 		return "", err
 	}
-	return hashBytes(encoded), nil
+	return models.SHA256Digest(encoded), nil
 }
 
-func cloneConversationActivity(events []ActivityProjection) []ActivityProjection {
-	result := make([]ActivityProjection, len(events))
+func cloneConversationActivity(events []models.ActivityProjection) []models.ActivityProjection {
+	result := make([]models.ActivityProjection, len(events))
 	copy(result, events)
 	return result
 }
 
-func conversationRunProjectionDigest(runs []*AgentRun) (string, error) {
+func conversationRunProjectionDigest(runs []*models.AgentRun) (string, error) {
 	values := make([]struct {
-		ID       string         `json:"id"`
-		Revision int64          `json:"revision"`
-		Status   AgentRunStatus `json:"status"`
+		ID       string                `json:"id"`
+		Revision int64                 `json:"revision"`
+		Status   models.AgentRunStatus `json:"status"`
 	}, 0, len(runs))
 	for _, run := range runs {
 		values = append(values, struct {
-			ID       string         `json:"id"`
-			Revision int64          `json:"revision"`
-			Status   AgentRunStatus `json:"status"`
+			ID       string                `json:"id"`
+			Revision int64                 `json:"revision"`
+			Status   models.AgentRunStatus `json:"status"`
 		}{ID: run.ID, Revision: run.Revision, Status: run.Status})
 	}
 	encoded, err := json.Marshal(values)
 	if err != nil {
 		return "", err
 	}
-	return hashBytes(encoded), nil
+	return models.SHA256Digest(encoded), nil
 }
 
-func conversationPresenceProjectionDigest(presence []*ConversationPresence) (string, error) {
+func conversationPresenceProjectionDigest(presence []*models.ConversationPresence) (string, error) {
 	values := cloneConversationPresences(presence)
 	sort.Slice(values, func(i, j int) bool {
 		left := string(values[i].Participant.Type) + ":" + values[i].Participant.ID
@@ -941,7 +941,7 @@ func conversationPresenceProjectionDigest(presence []*ConversationPresence) (str
 	if err != nil {
 		return "", err
 	}
-	return hashBytes(encoded), nil
+	return models.SHA256Digest(encoded), nil
 }
 
 func encodeConversationChangeCursor(cursor conversationChangeCursor) (string, error) {
@@ -958,36 +958,36 @@ func decodeConversationChangeCursor(value, conversationID string) (conversationC
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(value))
 	if err != nil {
-		return conversationChangeCursor{}, false, fmt.Errorf("%w: invalid conversation change cursor", ErrInvalidConversation)
+		return conversationChangeCursor{}, false, fmt.Errorf("%w: invalid conversation change cursor", models.ErrInvalidConversation)
 	}
 	var cursor conversationChangeCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.Version != conversationChangeCursorVersion ||
 		cursor.ConversationID != conversationID || cursor.ConversationRevision < 0 || cursor.MessageSequence < 0 || cursor.RoundRevision < 0 || cursor.InteractionSequence < 0 {
-		return conversationChangeCursor{}, false, fmt.Errorf("%w: invalid conversation change cursor", ErrInvalidConversation)
+		return conversationChangeCursor{}, false, fmt.Errorf("%w: invalid conversation change cursor", models.ErrInvalidConversation)
 	}
 	return cursor, false, nil
 }
 
-func cloneParticipationRoundResults(in []*ParticipationRoundResult) []*ParticipationRoundResult {
-	out := make([]*ParticipationRoundResult, 0, len(in))
+func cloneParticipationRoundResults(in []*models.ParticipationRoundResult) []*models.ParticipationRoundResult {
+	out := make([]*models.ParticipationRoundResult, 0, len(in))
 	for _, result := range in {
-		out = append(out, cloneParticipationRoundResult(result, result != nil && result.Replayed))
+		out = append(out, models.CloneParticipationRoundResult(result, result != nil && result.Replayed))
 	}
 	return out
 }
 
-func cloneAgentRuns(in []*AgentRun) []*AgentRun {
-	out := make([]*AgentRun, 0, len(in))
+func cloneAgentRuns(in []*models.AgentRun) []*models.AgentRun {
+	out := make([]*models.AgentRun, 0, len(in))
 	for _, run := range in {
-		out = append(out, cloneAgentRun(run))
+		out = append(out, models.CloneAgentRun(run))
 	}
 	return out
 }
 
-func cloneConversationPresences(in []*ConversationPresence) []*ConversationPresence {
-	out := make([]*ConversationPresence, 0, len(in))
+func cloneConversationPresences(in []*models.ConversationPresence) []*models.ConversationPresence {
+	out := make([]*models.ConversationPresence, 0, len(in))
 	for _, presence := range in {
-		out = append(out, cloneConversationPresence(presence))
+		out = append(out, models.CloneConversationPresence(presence))
 	}
 	return out
 }

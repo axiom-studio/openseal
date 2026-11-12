@@ -15,10 +15,10 @@ import (
 
 type CreateConversationRequest struct {
 	ID     string
-	Scope  Scope
-	Owner  ObjectiveOwner
+	Scope  models.Scope
+	Owner  models.ObjectiveOwner
 	Title  string
-	Origin *ConversationReference
+	Origin *models.ConversationReference
 	// SpaceID places the conversation in a space. When empty the store uses
 	// the owner's first space, else the default space of CreatedBy, else it
 	// returns ErrNoDefaultSpace.
@@ -30,27 +30,27 @@ type CreateConversationRequest struct {
 }
 
 type UpdateConversationRequest struct {
-	Scope                Scope
+	Scope                models.Scope
 	ConversationID       string
 	ExpectedRevision     int64
 	Title                *string
-	Status               *ConversationStatus
+	Status               *models.ConversationStatus
 	ParticipationEnabled *bool
 }
 
 type PostChannelMessageRequest struct {
 	ID                string
-	Scope             Scope
+	Scope             models.Scope
 	ConversationID    string
 	ExpectedRevision  int64
-	Sender            ConversationParticipant
+	Sender            models.ConversationParticipant
 	SenderDisplayName string
-	Initiator         *ConversationParticipant
-	ExternalSource    *ExternalMessageSource
-	Intent            ConversationMessageIntent
+	Initiator         *models.ConversationParticipant
+	ExternalSource    *models.ExternalMessageSource
+	Intent            models.ConversationMessageIntent
 	Content           string
 	ResponseMode      string
-	Audience          ConversationAudience
+	Audience          models.ConversationAudience
 	// StartThread is a host option. The canonical root remains in the channel
 	// timeline while its responses are routed to its own durable thread.
 	StartThread      bool `json:"-"`
@@ -58,51 +58,51 @@ type PostChannelMessageRequest struct {
 	// QuotedMessageID shows an earlier message of this conversation as a quote.
 	QuotedMessageID     string
 	BroadcastToChannel  bool
-	Mentions            []ConversationParticipant
-	References          []ConversationReference
+	Mentions            []models.ConversationParticipant
+	References          []models.ConversationReference
 	RequiresResponse    bool
 	ResolvesMessageID   string
 	SupersedesMessageID string
 	// Question lists the options of an Agent's question (ask_user).
-	Question *ChannelQuestion
+	Question *models.ChannelQuestion
 	// SelectedOptionIDs are the options a reply picked from the question it
 	// resolves (or replies to).
 	SelectedOptionIDs []string
 	// BuilderParameters are the form fields of a person's message in an agent
 	// builder conversation (D7). Content may then be empty.
-	BuilderParameters *AgentBuilderParameters
+	BuilderParameters *models.AgentBuilderParameters
 	// RoutingReason is set by a routed Team member's answer.
 	RoutingReason  string
 	IdempotencyKey string
 	// RunGuard fences a Run's final reply (ChannelMessageCommitRecord.RunGuard).
 	// A replay of an existing IdempotencyKey returns that message unguarded.
-	RunGuard *ReplyRunGuard
+	RunGuard *models.ReplyRunGuard
 }
 
 // CommitConversationRoutingRequest records who answers one channel message.
 type CommitConversationRoutingRequest struct {
-	Scope            Scope
+	Scope            models.Scope
 	ConversationID   string
 	ExpectedRevision int64
 	TriggerMessageID string
-	Responders       []ConversationResponder
+	Responders       []models.ConversationResponder
 	IdempotencyKey   string
 }
 
 type AdvanceConversationCursorRequest struct {
-	Scope             Scope
+	Scope             models.Scope
 	ConversationID    string
-	Participant       ConversationParticipant
+	Participant       models.ConversationParticipant
 	ExpectedRevision  int64
 	DeliveredSequence int64
 	ReadSequence      int64
 }
 
 type SetConversationPresenceRequest struct {
-	Scope            Scope
+	Scope            models.Scope
 	ConversationID   string
-	Participant      ConversationParticipant
-	State            ConversationPresenceState
+	Participant      models.ConversationParticipant
+	State            models.ConversationPresenceState
 	Summary          string
 	RunID            string
 	LeaseID          string
@@ -111,17 +111,17 @@ type SetConversationPresenceRequest struct {
 }
 
 type ConversationService struct {
-	store     ConversationStore
+	store     models.ConversationStore
 	now       func() time.Time
 	newID     func() string
 	reactions MessageReactionProjector
 }
 
-func NewConversationService(store ConversationStore, opts ...models.ServiceOption) *ConversationService {
+func NewConversationService(store models.ConversationStore, opts ...models.ServiceOption) *ConversationService {
 	return &ConversationService{store: store, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
-func (s *ConversationService) CreateConversation(ctx context.Context, req CreateConversationRequest) (*Conversation, bool, error) {
+func (s *ConversationService) CreateConversation(ctx context.Context, req CreateConversationRequest) (*models.Conversation, bool, error) {
 	if s == nil || s.store == nil {
 		return nil, false, errors.New("conversation store is not configured")
 	}
@@ -133,25 +133,25 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 	}
 	key := strings.TrimSpace(req.IdempotencyKey)
 	if key == "" {
-		return nil, false, fmt.Errorf("%w: idempotency key is required", ErrInvalidConversation)
+		return nil, false, fmt.Errorf("%w: idempotency key is required", models.ErrInvalidConversation)
 	}
 	if existing, err := s.store.FindConversationByIdempotencyKey(ctx, req.Scope, key); err != nil {
 		return nil, false, err
 	} else if existing != nil {
 		if existing.Owner != req.Owner || existing.Title != strings.TrimSpace(req.Title) ||
-			!reflect.DeepEqual(existing.Origin, req.Origin) || !sameRequestedSpace(existing, req.SpaceID) {
-			return nil, false, ErrMessageConflict
+			!reflect.DeepEqual(existing.Origin, req.Origin) || !models.SameRequestedSpace(existing, req.SpaceID) {
+			return nil, false, models.ErrMessageConflict
 		}
 		return existing, true, nil
 	}
 	id := strings.TrimSpace(req.ID)
 	if id == "" {
-		id = stableConversationID(req.Scope, key, "conversation")
+		id = models.StableConversationID(req.Scope, key, "conversation")
 	}
 	now := s.now().UTC()
-	conversation := &Conversation{
-		ID: id, Scope: req.Scope, Owner: req.Owner, SpaceID: strings.TrimSpace(req.SpaceID), Title: strings.TrimSpace(req.Title), Status: ConversationStatusActive,
-		Origin: cloneConversationReference(req.Origin), ApprovalMode: DefaultConversationApprovalMode, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	conversation := &models.Conversation{
+		ID: id, Scope: req.Scope, Owner: req.Owner, SpaceID: strings.TrimSpace(req.SpaceID), Title: strings.TrimSpace(req.Title), Status: models.ConversationStatusActive,
+		Origin: cloneConversationReference(req.Origin), ApprovalMode: models.DefaultConversationApprovalMode, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		CreatedBy: strings.TrimSpace(req.CreatedBy),
 	}
 	if err := conversation.Validate(); err != nil {
@@ -160,18 +160,18 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 	return s.store.CreateConversation(ctx, conversation, key)
 }
 
-func (s *ConversationService) GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error) {
+func (s *ConversationService) GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error) {
 	conversation, err := s.store.GetConversation(ctx, scope, strings.TrimSpace(conversationID))
 	if err != nil {
 		return nil, err
 	}
 	if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	return conversation, nil
 }
 
-func (s *ConversationService) UpdateConversation(ctx context.Context, req UpdateConversationRequest) (*Conversation, error) {
+func (s *ConversationService) UpdateConversation(ctx context.Context, req UpdateConversationRequest) (*models.Conversation, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -179,22 +179,22 @@ func (s *ConversationService) UpdateConversation(ctx context.Context, req Update
 		return nil, err
 	}
 	if req.ExpectedRevision <= 0 {
-		return nil, fmt.Errorf("%w: expected revision must be positive", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: expected revision must be positive", models.ErrInvalidConversation)
 	}
 	conversation, err := s.GetConversation(ctx, req.Scope, req.ConversationID)
 	if err != nil {
 		return nil, err
 	}
 	if conversation.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	updated := cloneConversation(conversation)
+	updated := models.CloneConversation(conversation)
 	if req.Title != nil {
 		updated.Title = strings.TrimSpace(*req.Title)
 	}
 	if req.Status != nil {
 		updated.Status = *req.Status
-		if updated.Status == ConversationStatusArchived {
+		if updated.Status == models.ConversationStatusArchived {
 			archivedAt := s.now().UTC()
 			updated.ArchivedAt = &archivedAt
 			if updated.Participation != nil {
@@ -205,11 +205,11 @@ func (s *ConversationService) UpdateConversation(ctx context.Context, req Update
 		}
 	}
 	if req.ParticipationEnabled != nil {
-		if *req.ParticipationEnabled && (updated.Status != ConversationStatusActive || (updated.Owner.Type != OwnerTypeTeam && updated.Owner.Type != OwnerTypeAgent)) {
-			return nil, fmt.Errorf("%w: participation requires an active Agent or Team channel", ErrInvalidConversation)
+		if *req.ParticipationEnabled && (updated.Status != models.ConversationStatusActive || (updated.Owner.Type != models.OwnerTypeTeam && updated.Owner.Type != models.OwnerTypeAgent)) {
+			return nil, fmt.Errorf("%w: participation requires an active Agent or Team channel", models.ErrInvalidConversation)
 		}
 		if updated.Participation == nil {
-			updated.Participation = &ConversationParticipation{}
+			updated.Participation = &models.ConversationParticipation{}
 		}
 		if *req.ParticipationEnabled && !updated.Participation.Enabled {
 			updated.Participation.AfterSequence = conversation.LastSequence
@@ -224,48 +224,48 @@ func (s *ConversationService) UpdateConversation(ctx context.Context, req Update
 	return s.store.UpdateConversation(ctx, updated, conversation.Revision)
 }
 
-func (s *ConversationService) ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error) {
+func (s *ConversationService) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
 	return s.store.ListConversations(ctx, filter)
 }
 
-func (s *ConversationService) LastConversationActivity(ctx context.Context, scope Scope, ownerType OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+func (s *ConversationService) LastConversationActivity(ctx context.Context, scope models.Scope, ownerType models.OwnerType, ownerIDs []string) (map[string]time.Time, error) {
 	return s.store.LastConversationActivity(ctx, scope, ownerType, ownerIDs)
 }
 
-func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostChannelMessageRequest) (*ChannelMessageCommitResult, error) {
+func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
 	key := strings.TrimSpace(req.IdempotencyKey)
 	if key == "" {
-		return nil, fmt.Errorf("%w: message idempotency key is required", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: message idempotency key is required", models.ErrInvalidConversation)
 	}
 	if existing, err := s.store.FindChannelMessageByIdempotencyKey(ctx, req.Scope, req.ConversationID, key); err != nil {
 		return nil, err
 	} else if existing != nil {
 		if !sameChannelMessageRequest(existing, req) {
-			return nil, ErrMessageConflict
+			return nil, models.ErrMessageConflict
 		}
 		conversation, err := s.GetConversation(ctx, req.Scope, req.ConversationID)
-		return &ChannelMessageCommitResult{Conversation: conversation, Message: existing, Replayed: true}, err
+		return &models.ChannelMessageCommitResult{Conversation: conversation, Message: existing, Replayed: true}, err
 	}
 	conversation, err := s.GetConversation(ctx, req.Scope, req.ConversationID)
 	if err != nil {
 		return nil, err
 	}
-	if conversation.Status != ConversationStatusActive || conversation.Revision != req.ExpectedRevision {
+	if conversation.Status != models.ConversationStatusActive || conversation.Revision != req.ExpectedRevision {
 		if conversation.Revision != req.ExpectedRevision {
 			if existing, findErr := s.store.FindChannelMessageByIdempotencyKey(ctx, req.Scope, req.ConversationID, key); findErr != nil {
 				return nil, findErr
 			} else if existing != nil {
 				if !sameChannelMessageRequest(existing, req) {
-					return nil, ErrMessageConflict
+					return nil, models.ErrMessageConflict
 				}
-				return &ChannelMessageCommitResult{Conversation: conversation, Message: existing, Replayed: true}, nil
+				return &models.ChannelMessageCommitResult{Conversation: conversation, Message: existing, Replayed: true}, nil
 			}
-			return nil, ErrRevisionConflict
+			return nil, models.ErrRevisionConflict
 		}
-		return nil, ErrInvalidConversation
+		return nil, models.ErrInvalidConversation
 	}
 	threadRootID, err := s.resolveThreadRoot(ctx, req.Scope, conversation.ID, req.ReplyToMessageID)
 	if err != nil {
@@ -288,32 +288,32 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 				if err != nil {
 					return nil, err
 				}
-				return nil, ErrMessageConflict
+				return nil, models.ErrMessageConflict
 			}
 		}
 	}
 	if err := s.validateSelectedOptions(ctx, req); err != nil {
 		return nil, err
 	}
-	if req.BuilderParameters != nil && (conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceAgentBuilder) {
-		return nil, fmt.Errorf("%w: builder parameters belong to an agent builder conversation", ErrInvalidConversation)
+	if req.BuilderParameters != nil && (conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceAgentBuilder) {
+		return nil, fmt.Errorf("%w: builder parameters belong to an agent builder conversation", models.ErrInvalidConversation)
 	}
 	now := s.now().UTC()
 	id := strings.TrimSpace(req.ID)
 	if id == "" {
-		id = stableConversationID(req.Scope, key, "message")
+		id = models.StableConversationID(req.Scope, key, "message")
 	}
-	message := &ChannelMessage{
+	message := &models.ChannelMessage{
 		ID: id, Scope: req.Scope, ConversationID: conversation.ID, Sequence: conversation.LastSequence + 1,
 		Sender: req.Sender, SenderDisplayName: strings.TrimSpace(req.SenderDisplayName),
-		Initiator:      cloneConversationParticipant(req.Initiator),
-		ExternalSource: cloneExternalMessageSource(req.ExternalSource),
+		Initiator:      models.CloneConversationParticipant(req.Initiator),
+		ExternalSource: models.CloneExternalMessageSource(req.ExternalSource),
 		Intent:         req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
 		StartsThread: req.StartThread, ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), Quote: quote, BroadcastToChannel: req.BroadcastToChannel,
-		Question: cloneChannelQuestion(req.Question), SelectedOptionIDs: selectedOptionIDs(req.SelectedOptionIDs),
-		BuilderParameters: normalizeAgentBuilderParameters(req.BuilderParameters),
-		Mentions:          cloneParticipants(req.Mentions),
-		References:        cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse, ResponseMode: req.ResponseMode,
+		Question: models.CloneChannelQuestion(req.Question), SelectedOptionIDs: selectedOptionIDs(req.SelectedOptionIDs),
+		BuilderParameters: models.NormalizeAgentBuilderParameters(req.BuilderParameters),
+		Mentions:          models.CloneConversationParticipants(req.Mentions),
+		References:        models.CloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse, ResponseMode: req.ResponseMode,
 		ResolvesMessageID: strings.TrimSpace(req.ResolvesMessageID), SupersedesMessageID: strings.TrimSpace(req.SupersedesMessageID),
 		RoutingReason: strings.TrimSpace(req.RoutingReason), IdempotencyKey: key, CreatedAt: now,
 	}
@@ -326,14 +326,14 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 			return nil, err
 		}
 		if !valid {
-			return nil, fmt.Errorf("%w: thread ancestry is missing, cyclic, or too deep", ErrInvalidConversation)
+			return nil, fmt.Errorf("%w: thread ancestry is missing, cyclic, or too deep", models.ErrInvalidConversation)
 		}
 	}
-	updated := cloneConversation(conversation)
+	updated := models.CloneConversation(conversation)
 	updated.LastSequence = message.Sequence
 	updated.Revision++
 	updated.UpdatedAt = now
-	return s.store.CommitChannelMessage(ctx, ChannelMessageCommitRecord{Conversation: updated, ExpectedRevision: conversation.Revision, Message: message, RunGuard: req.RunGuard})
+	return s.store.CommitChannelMessage(ctx, models.ChannelMessageCommitRecord{Conversation: updated, ExpectedRevision: conversation.Revision, Message: message, RunGuard: req.RunGuard})
 }
 
 func selectedOptionIDs(in []string) []string {
@@ -357,42 +357,42 @@ func (s *ConversationService) validateSelectedOptions(ctx context.Context, req P
 		target = strings.TrimSpace(req.ReplyToMessageID)
 	}
 	if target == "" {
-		return fmt.Errorf("%w: selected options must answer a question", ErrInvalidConversation)
+		return fmt.Errorf("%w: selected options must answer a question", models.ErrInvalidConversation)
 	}
 	question, err := s.store.GetChannelMessage(ctx, req.Scope, req.ConversationID, target)
 	if err != nil {
 		return err
 	}
 	if question == nil || question.Question == nil {
-		return fmt.Errorf("%w: selected options answer a message that offers none", ErrInvalidConversation)
+		return fmt.Errorf("%w: selected options answer a message that offers none", models.ErrInvalidConversation)
 	}
 	for _, id := range ids {
 		if !question.Question.HasOption(id) {
-			return fmt.Errorf("%w: %q is not an option of that question", ErrInvalidConversation, id)
+			return fmt.Errorf("%w: %q is not an option of that question", models.ErrInvalidConversation, id)
 		}
 	}
 	if len(ids) > 1 && !question.Question.AllowMultiple {
-		return fmt.Errorf("%w: that question takes one option", ErrInvalidConversation)
+		return fmt.Errorf("%w: that question takes one option", models.ErrInvalidConversation)
 	}
 	return nil
 }
 
 // CommitConversationRouting durably records a routing decision. It posts no
 // messages: every responder commits its own answer from its own Run.
-func (s *ConversationService) CommitConversationRouting(ctx context.Context, req CommitConversationRoutingRequest) (*ParticipationRoundResult, error) {
+func (s *ConversationService) CommitConversationRouting(ctx context.Context, req CommitConversationRoutingRequest) (*models.ParticipationRoundResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
 	key := strings.TrimSpace(req.IdempotencyKey)
 	if key == "" {
-		return nil, fmt.Errorf("%w: routing idempotency key is required", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: routing idempotency key is required", models.ErrInvalidConversation)
 	}
-	roundID := stableConversationID(req.Scope, key, "round")
+	roundID := models.StableConversationID(req.Scope, key, "round")
 	now := s.now().UTC()
-	round := &ParticipationRound{
+	round := &models.ParticipationRound{
 		ID: roundID, Scope: req.Scope, ConversationID: strings.TrimSpace(req.ConversationID),
-		TriggerMessageID: strings.TrimSpace(req.TriggerMessageID), Status: ParticipationRoundCommitted,
-		Responders: append([]ConversationResponder(nil), req.Responders...), IdempotencyKey: key, Revision: 1, CreatedAt: now, CommittedAt: now,
+		TriggerMessageID: strings.TrimSpace(req.TriggerMessageID), Status: models.ParticipationRoundCommitted,
+		Responders: append([]models.ConversationResponder(nil), req.Responders...), IdempotencyKey: key, Revision: 1, CreatedAt: now, CommittedAt: now,
 	}
 	if existing, err := s.replayConversationRouting(ctx, round); err != nil || existing != nil {
 		return existing, err
@@ -401,8 +401,8 @@ func (s *ConversationService) CommitConversationRouting(ctx context.Context, req
 	if err != nil {
 		return nil, err
 	}
-	if conversation.Status != ConversationStatusActive {
-		return nil, ErrInvalidConversation
+	if conversation.Status != models.ConversationStatusActive {
+		return nil, models.ErrInvalidConversation
 	}
 	if conversation.Revision != req.ExpectedRevision {
 		// A concurrent replica may have committed this same request between the
@@ -411,46 +411,46 @@ func (s *ConversationService) CommitConversationRouting(ctx context.Context, req
 		if existing, err := s.replayConversationRouting(ctx, round); err != nil || existing != nil {
 			return existing, err
 		}
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	if round.TriggerMessageID != "" {
 		if trigger, err := s.store.GetChannelMessage(ctx, req.Scope, conversation.ID, round.TriggerMessageID); err != nil {
 			return nil, err
 		} else if trigger == nil {
-			return nil, ErrMessageConflict
+			return nil, models.ErrMessageConflict
 		}
 	}
-	updated := cloneConversation(conversation)
+	updated := models.CloneConversation(conversation)
 	updated.Revision++
 	updated.UpdatedAt = now
 	round.ConversationRevision = updated.Revision
 	if err := round.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidConversation, err)
+		return nil, fmt.Errorf("%w: %w", models.ErrInvalidConversation, err)
 	}
-	return s.store.CommitParticipationRound(ctx, ParticipationRoundCommitRecord{
+	return s.store.CommitParticipationRound(ctx, models.ParticipationRoundCommitRecord{
 		Conversation: updated, ExpectedRevision: conversation.Revision, Round: round,
 	})
 }
 
 // replayConversationRouting returns the already committed round for the
 // request's idempotency key, or nil when none exists yet.
-func (s *ConversationService) replayConversationRouting(ctx context.Context, round *ParticipationRound) (*ParticipationRoundResult, error) {
+func (s *ConversationService) replayConversationRouting(ctx context.Context, round *models.ParticipationRound) (*models.ParticipationRoundResult, error) {
 	existing, err := s.store.FindParticipationRoundByIdempotencyKey(ctx, round.Scope, round.ConversationID, round.IdempotencyKey)
 	if err != nil || existing == nil {
 		return nil, err
 	}
-	if !sameParticipationRound(existing.Round, round) {
-		return nil, ErrMessageConflict
+	if !models.SameParticipationRound(existing.Round, round) {
+		return nil, models.ErrMessageConflict
 	}
 	return existing, nil
 }
 
-func (s *ConversationService) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
-	if err := validateChannelMessageViewFilter(filter); err != nil {
+func (s *ConversationService) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
+	if err := models.ValidateChannelMessageViewFilter(filter); err != nil {
 		return nil, err
 	}
 	if filter.BeforeSequence < 0 || filter.AfterSequence < 0 || (filter.BeforeSequence > 0 && filter.AfterSequence >= filter.BeforeSequence) {
-		return nil, fmt.Errorf("%w: message sequence bounds are invalid", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: message sequence bounds are invalid", models.ErrInvalidConversation)
 	}
 	if filter.Viewer == nil {
 		messages, err := s.store.ListChannelMessages(ctx, filter)
@@ -468,7 +468,7 @@ func (s *ConversationService) ListChannelMessages(ctx context.Context, filter Ch
 	scan := filter
 	scan.Limit = desired
 	scan.Viewer = nil
-	result := make([]*ChannelMessage, 0, desired)
+	result := make([]*models.ChannelMessage, 0, desired)
 	for len(result) < desired {
 		raw, err := s.store.ListChannelMessages(ctx, scan)
 		if err != nil {
@@ -497,7 +497,7 @@ func (s *ConversationService) ListChannelMessages(ctx context.Context, filter Ch
 	return withMessageReactions(ctx, s.store, result)
 }
 
-func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
+func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	visible, err := s.filterVisibleChannelMessageParents(ctx, scope, conversationID, messages, viewer)
 	if err != nil {
 		return nil, err
@@ -507,7 +507,7 @@ func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, 
 
 // redactUnviewableQuotes keeps a quote's sender and excerpt only for viewers
 // who can see the quoted message itself.
-func (s *ConversationService) redactUnviewableQuotes(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
+func (s *ConversationService) redactUnviewableQuotes(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	ids := make([]string, 0)
 	for _, message := range messages {
 		if message != nil && message.Quote != nil && !message.Quote.Unavailable {
@@ -517,8 +517,8 @@ func (s *ConversationService) redactUnviewableQuotes(ctx context.Context, scope 
 	if len(ids) == 0 {
 		return messages, nil
 	}
-	quoted := make(map[string]*ChannelMessage, len(ids))
-	if batch, ok := s.store.(ChannelMessageBatchStore); ok {
+	quoted := make(map[string]*models.ChannelMessage, len(ids))
+	if batch, ok := s.store.(models.ChannelMessageBatchStore); ok {
 		loaded, err := loadChannelMessageBatches(ctx, batch, scope, conversationID, ids)
 		if err != nil {
 			return nil, err
@@ -536,11 +536,11 @@ func (s *ConversationService) redactUnviewableQuotes(ctx context.Context, scope 
 			quoted[id] = message
 		}
 	}
-	out := make([]*ChannelMessage, len(messages))
+	out := make([]*models.ChannelMessage, len(messages))
 	for i, message := range messages {
 		out[i] = message
-		if message != nil && message.Quote != nil && !message.Quote.Unavailable && !CanViewChannelMessage(quoted[message.Quote.MessageID], viewer) {
-			redacted := cloneChannelMessage(message)
+		if message != nil && message.Quote != nil && !message.Quote.Unavailable && !models.CanViewChannelMessage(quoted[message.Quote.MessageID], viewer) {
+			redacted := models.CloneChannelMessage(message)
 			redacted.Quote = message.Quote.Redacted()
 			out[i] = redacted
 		}
@@ -548,21 +548,21 @@ func (s *ConversationService) redactUnviewableQuotes(ctx context.Context, scope 
 	return out, nil
 }
 
-func (s *ConversationService) filterVisibleChannelMessageParents(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
+func (s *ConversationService) filterVisibleChannelMessageParents(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	if err := viewer.Validate(); err != nil {
 		return nil, err
 	}
-	if batch, ok := s.store.(ChannelMessageBatchStore); ok {
+	if batch, ok := s.store.(models.ChannelMessageBatchStore); ok {
 		return filterChannelMessagesWithBatchParents(ctx, batch, scope, conversationID, messages, viewer)
 	}
-	visible := make([]*ChannelMessage, 0, len(messages))
-	var known map[string]*ChannelMessage
+	visible := make([]*models.ChannelMessage, 0, len(messages))
+	var known map[string]*models.ChannelMessage
 	for _, message := range messages {
-		if !CanViewChannelMessage(message, viewer) {
+		if !models.CanViewChannelMessage(message, viewer) {
 			continue
 		}
 		if message.StartsThread && known == nil {
-			known = make(map[string]*ChannelMessage)
+			known = make(map[string]*models.ChannelMessage)
 		}
 		if known != nil {
 			known[message.ID] = message
@@ -579,13 +579,13 @@ func (s *ConversationService) filterVisibleChannelMessageParents(ctx context.Con
 				return nil, err
 			}
 			if parent != nil && parent.StartsThread && known == nil {
-				known = make(map[string]*ChannelMessage)
+				known = make(map[string]*models.ChannelMessage)
 				known[message.ID] = message
 			}
 			if known != nil {
 				known[linked] = parent
 			}
-			if !CanViewChannelMessage(parent, viewer) {
+			if !models.CanViewChannelMessage(parent, viewer) {
 				allowed = false
 				break
 			}
@@ -600,79 +600,79 @@ func (s *ConversationService) filterVisibleChannelMessageParents(ctx context.Con
 	return filterChannelMessageThreadStarts(ctx, scope, conversationID, visible, known, s.threadStartParentLoader(scope, conversationID), viewer)
 }
 
-func (s *ConversationService) GetVisibleChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string, viewer ConversationViewer) (*ChannelMessage, error) {
+func (s *ConversationService) GetVisibleChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string, viewer models.ConversationViewer) (*models.ChannelMessage, error) {
 	message, err := s.GetChannelMessage(ctx, scope, conversationID, messageID)
 	if err != nil {
 		return nil, err
 	}
-	visible, err := s.filterVisibleChannelMessages(ctx, scope, conversationID, []*ChannelMessage{message}, viewer)
+	visible, err := s.filterVisibleChannelMessages(ctx, scope, conversationID, []*models.ChannelMessage{message}, viewer)
 	if err != nil {
 		return nil, err
 	}
 	if len(visible) == 0 {
-		return nil, ErrChannelMessageNotFound
+		return nil, models.ErrChannelMessageNotFound
 	}
 	return visible[0], nil
 }
 
-func (s *ConversationService) GetChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string) (*ChannelMessage, error) {
+func (s *ConversationService) GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error) {
 	message, err := s.store.GetChannelMessage(ctx, scope, conversationID, messageID)
 	if err != nil {
 		return nil, err
 	}
 	if message == nil {
-		return nil, ErrChannelMessageNotFound
+		return nil, models.ErrChannelMessageNotFound
 	}
-	filled, err := withMessageReactions(ctx, s.store, []*ChannelMessage{message})
+	filled, err := withMessageReactions(ctx, s.store, []*models.ChannelMessage{message})
 	if err != nil {
 		return nil, err
 	}
 	return filled[0], nil
 }
 
-func (s *ConversationService) GetParticipationRound(ctx context.Context, scope Scope, conversationID, roundID string) (*ParticipationRoundResult, error) {
+func (s *ConversationService) GetParticipationRound(ctx context.Context, scope models.Scope, conversationID, roundID string) (*models.ParticipationRoundResult, error) {
 	result, err := s.store.GetParticipationRound(ctx, scope, conversationID, roundID)
 	if err != nil {
 		return nil, err
 	}
 	if result == nil {
-		return nil, ErrParticipationRoundNotFound
+		return nil, models.ErrParticipationRoundNotFound
 	}
 	return result, nil
 }
 
-func (s *ConversationService) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRoundResult, error) {
+func (s *ConversationService) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ParticipationRoundResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	if !validOpaqueIdentifier(strings.TrimSpace(conversationID), 128) || strings.TrimSpace(key) == "" || len(key) > 256 {
-		return nil, fmt.Errorf("%w: conversation and idempotency key are required", ErrInvalidConversation)
+	if !models.IsValidOpaqueIdentifier(strings.TrimSpace(conversationID), 128) || strings.TrimSpace(key) == "" || len(key) > 256 {
+		return nil, fmt.Errorf("%w: conversation and idempotency key are required", models.ErrInvalidConversation)
 	}
 	return s.store.FindParticipationRoundByIdempotencyKey(ctx, scope, strings.TrimSpace(conversationID), strings.TrimSpace(key))
 }
 
-func (s *ConversationService) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
+func (s *ConversationService) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
 	return s.store.ListParticipationRounds(ctx, filter)
 }
 
-func (s *ConversationService) GetCursor(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error) {
+func (s *ConversationService) GetCursor(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	return s.store.GetConversationCursor(ctx, scope, conversationID, participant)
 }
 
 // ListCursors returns the durable delivery and read position for every
 // participant that has observed a conversation. The result is ordered by
 // participant identity so API projections remain deterministic across stores.
-func (s *ConversationService) ListCursors(ctx context.Context, scope Scope, conversationID string) ([]*ConversationCursor, error) {
+func (s *ConversationService) ListCursors(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationCursor, error) {
 	if _, err := s.GetConversation(ctx, scope, conversationID); err != nil {
 		return nil, err
 	}
 	return s.store.ListConversationCursors(ctx, scope, conversationID)
 }
 
-func (s *ConversationService) AdvanceCursor(ctx context.Context, req AdvanceConversationCursorRequest) (*ConversationCursor, bool, error) {
+func (s *ConversationService) AdvanceCursor(ctx context.Context, req AdvanceConversationCursorRequest) (*models.ConversationCursor, bool, error) {
 	conversation, err := s.GetConversation(ctx, req.Scope, req.ConversationID)
 	if err != nil {
 		return nil, false, err
@@ -681,7 +681,7 @@ func (s *ConversationService) AdvanceCursor(ctx context.Context, req AdvanceConv
 		return nil, false, err
 	}
 	if req.DeliveredSequence < 0 || req.ReadSequence < 0 || req.ReadSequence > req.DeliveredSequence || req.DeliveredSequence > conversation.LastSequence {
-		return nil, false, ErrConversationCursorConflict
+		return nil, false, models.ErrConversationCursorConflict
 	}
 	current, err := s.store.GetConversationCursor(ctx, req.Scope, conversation.ID, req.Participant)
 	if err != nil {
@@ -689,29 +689,29 @@ func (s *ConversationService) AdvanceCursor(ctx context.Context, req AdvanceConv
 	}
 	if current != nil {
 		if current.Revision != req.ExpectedRevision || req.DeliveredSequence < current.DeliveredSequence || req.ReadSequence < current.ReadSequence {
-			return nil, false, ErrConversationCursorConflict
+			return nil, false, models.ErrConversationCursorConflict
 		}
 		if req.DeliveredSequence == current.DeliveredSequence && req.ReadSequence == current.ReadSequence {
 			return current, true, nil
 		}
 	} else if req.ExpectedRevision != 0 {
-		return nil, false, ErrConversationCursorConflict
+		return nil, false, models.ErrConversationCursorConflict
 	}
 	revision := int64(1)
 	if current != nil {
 		revision = current.Revision + 1
 	}
-	cursor := &ConversationCursor{
+	cursor := &models.ConversationCursor{
 		Scope: req.Scope, ConversationID: conversation.ID, Participant: req.Participant,
 		DeliveredSequence: req.DeliveredSequence, ReadSequence: req.ReadSequence, Revision: revision, UpdatedAt: s.now().UTC(),
 	}
 	if err := cursor.Validate(); err != nil {
 		return nil, false, err
 	}
-	return s.store.PutConversationCursor(ctx, ConversationCursorRecord{Cursor: cursor, ExpectedRevision: req.ExpectedRevision})
+	return s.store.PutConversationCursor(ctx, models.ConversationCursorRecord{Cursor: cursor, ExpectedRevision: req.ExpectedRevision})
 }
 
-func (s *ConversationService) SetPresence(ctx context.Context, req SetConversationPresenceRequest) (*ConversationPresence, error) {
+func (s *ConversationService) SetPresence(ctx context.Context, req SetConversationPresenceRequest) (*models.ConversationPresence, error) {
 	if _, err := s.GetConversation(ctx, req.Scope, req.ConversationID); err != nil {
 		return nil, err
 	}
@@ -723,7 +723,7 @@ func (s *ConversationService) SetPresence(ctx context.Context, req SetConversati
 		ttl = 30 * time.Second
 	}
 	if ttl < time.Second || ttl > 2*time.Minute {
-		return nil, fmt.Errorf("%w: presence TTL must be between one second and two minutes", ErrInvalidConversation)
+		return nil, fmt.Errorf("%w: presence TTL must be between one second and two minutes", models.ErrInvalidConversation)
 	}
 	now := s.now().UTC()
 	current, err := s.store.GetConversationPresence(ctx, req.Scope, req.ConversationID, req.Participant)
@@ -733,10 +733,10 @@ func (s *ConversationService) SetPresence(ctx context.Context, req SetConversati
 	leaseID := strings.TrimSpace(req.LeaseID)
 	if current != nil && current.ExpiresAt.After(now) {
 		if leaseID == "" || leaseID != current.LeaseID || current.Revision != req.ExpectedRevision {
-			return nil, ErrConversationPresenceConflict
+			return nil, models.ErrConversationPresenceConflict
 		}
 	} else if req.ExpectedRevision != 0 {
-		return nil, ErrConversationPresenceConflict
+		return nil, models.ErrConversationPresenceConflict
 	}
 	if leaseID == "" {
 		leaseID = s.newID()
@@ -745,7 +745,7 @@ func (s *ConversationService) SetPresence(ctx context.Context, req SetConversati
 	if current != nil && current.ExpiresAt.After(now) {
 		revision = current.Revision + 1
 	}
-	presence := &ConversationPresence{
+	presence := &models.ConversationPresence{
 		Scope: req.Scope, ConversationID: req.ConversationID, Participant: req.Participant, State: req.State,
 		Summary: strings.TrimSpace(req.Summary), RunID: strings.TrimSpace(req.RunID), LeaseID: leaseID,
 		Revision: revision, UpdatedAt: now, ExpiresAt: now.Add(ttl),
@@ -753,21 +753,21 @@ func (s *ConversationService) SetPresence(ctx context.Context, req SetConversati
 	if err := presence.Validate(); err != nil {
 		return nil, err
 	}
-	return s.store.PutConversationPresence(ctx, ConversationPresenceRecord{Presence: presence, ExpectedRevision: req.ExpectedRevision})
+	return s.store.PutConversationPresence(ctx, models.ConversationPresenceRecord{Presence: presence, ExpectedRevision: req.ExpectedRevision})
 }
 
-func (s *ConversationService) ReleasePresence(ctx context.Context, req ReleaseConversationPresenceRequest) error {
+func (s *ConversationService) ReleasePresence(ctx context.Context, req models.ReleaseConversationPresenceRequest) error {
 	if s == nil || s.store == nil {
 		return errors.New("conversation store is not configured")
 	}
 	return s.store.ReleaseConversationPresence(ctx, req)
 }
 
-func (s *ConversationService) ListPresence(ctx context.Context, scope Scope, conversationID string) ([]*ConversationPresence, error) {
+func (s *ConversationService) ListPresence(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationPresence, error) {
 	return s.store.ListConversationPresence(ctx, scope, conversationID, s.now().UTC())
 }
 
-func (s *ConversationService) resolveThreadRoot(ctx context.Context, scope Scope, conversationID, replyTo string) (string, error) {
+func (s *ConversationService) resolveThreadRoot(ctx context.Context, scope models.Scope, conversationID, replyTo string) (string, error) {
 	replyTo = strings.TrimSpace(replyTo)
 	if replyTo == "" {
 		return "", nil
@@ -777,7 +777,7 @@ func (s *ConversationService) resolveThreadRoot(ctx context.Context, scope Scope
 		return "", err
 	}
 	if message == nil {
-		return "", ErrMessageConflict
+		return "", models.ErrMessageConflict
 	}
 	if message.ThreadRootID != "" {
 		return message.ThreadRootID, nil
@@ -785,7 +785,7 @@ func (s *ConversationService) resolveThreadRoot(ctx context.Context, scope Scope
 	return message.ID, nil
 }
 
-func (s *ConversationService) resolveQuote(ctx context.Context, scope Scope, conversationID, quotedID string) (*ChannelMessageQuote, error) {
+func (s *ConversationService) resolveQuote(ctx context.Context, scope models.Scope, conversationID, quotedID string) (*models.ChannelMessageQuote, error) {
 	quotedID = strings.TrimSpace(quotedID)
 	if quotedID == "" {
 		return nil, nil
@@ -795,9 +795,9 @@ func (s *ConversationService) resolveQuote(ctx context.Context, scope Scope, con
 		return nil, err
 	}
 	if message == nil {
-		return nil, ErrMessageConflict
+		return nil, models.ErrMessageConflict
 	}
-	return newChannelMessageQuote(message), nil
+	return models.NewChannelMessageQuote(message), nil
 }
 
 // answerQuoteID returns the explicit quote, or quotes the message an Agent or
@@ -807,11 +807,11 @@ func (s *ConversationService) answerQuoteID(ctx context.Context, req PostChannel
 		return quoted, nil
 	}
 	replyTo := strings.TrimSpace(req.ReplyToMessageID)
-	if replyTo == "" || req.Intent != MessageIntentAnswer ||
-		(req.Sender.Type != ConversationParticipantAgent && req.Sender.Type != ConversationParticipantTeam) {
+	if replyTo == "" || req.Intent != models.MessageIntentAnswer ||
+		(req.Sender.Type != models.ConversationParticipantAgent && req.Sender.Type != models.ConversationParticipantTeam) {
 		return "", nil
 	}
-	recent, err := s.store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: req.Scope, ConversationID: req.ConversationID, Limit: 50, Descending: true})
+	recent, err := s.store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: req.Scope, ConversationID: req.ConversationID, Limit: 50, Descending: true})
 	if err != nil {
 		return "", err
 	}
@@ -821,7 +821,7 @@ func (s *ConversationService) answerQuoteID(ctx context.Context, req PostChannel
 	return "", nil
 }
 
-func quotedMessageID(quote *ChannelMessageQuote) string {
+func quotedMessageID(quote *models.ChannelMessageQuote) string {
 	if quote == nil {
 		return ""
 	}
@@ -831,8 +831,8 @@ func quotedMessageID(quote *ChannelMessageQuote) string {
 // answerNeedsQuote reports whether an answer to triggerID would read out of
 // order: someone other than the answerer has already spoken after the trigger
 // in the same view (main chat or the same started thread). recent is newest first.
-func answerNeedsQuote(triggerID string, answerer ConversationParticipant, recent []*ChannelMessage) bool {
-	byID := make(map[string]*ChannelMessage, len(recent))
+func answerNeedsQuote(triggerID string, answerer models.ConversationParticipant, recent []*models.ChannelMessage) bool {
+	byID := make(map[string]*models.ChannelMessage, len(recent))
 	for _, message := range recent {
 		if message != nil {
 			byID[message.ID] = message
@@ -842,7 +842,7 @@ func answerNeedsQuote(triggerID string, answerer ConversationParticipant, recent
 	if trigger == nil {
 		return false
 	}
-	view := func(message *ChannelMessage) string {
+	view := func(message *models.ChannelMessage) string {
 		if message.StartsThread {
 			return ""
 		}
@@ -856,14 +856,14 @@ func answerNeedsQuote(triggerID string, answerer ConversationParticipant, recent
 		if message == nil || message.Sequence <= trigger.Sequence {
 			continue
 		}
-		if message.Sender != answerer && message.Intent != MessageIntentSystem && message.Sender.Type != ConversationParticipantService && view(message) == triggerView {
+		if message.Sender != answerer && message.Intent != models.MessageIntentSystem && message.Sender.Type != models.ConversationParticipantService && view(message) == triggerView {
 			return true
 		}
 	}
 	return false
 }
 
-func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageRequest) bool {
+func sameChannelMessageRequest(existing *models.ChannelMessage, req PostChannelMessageRequest) bool {
 	if existing == nil || existing.ResponseMode != req.ResponseMode {
 		return false
 	}
@@ -879,12 +879,12 @@ func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageR
 		reflect.DeepEqual(existing.Mentions, req.Mentions) && reflect.DeepEqual(existing.References, req.References) &&
 		existing.RoutingReason == strings.TrimSpace(req.RoutingReason) &&
 		reflect.DeepEqual(existing.Question, req.Question) && slices.Equal(existing.SelectedOptionIDs, selectedOptionIDs(req.SelectedOptionIDs)) &&
-		reflect.DeepEqual(existing.BuilderParameters, normalizeAgentBuilderParameters(req.BuilderParameters)) &&
+		reflect.DeepEqual(existing.BuilderParameters, models.NormalizeAgentBuilderParameters(req.BuilderParameters)) &&
 		existing.RequiresResponse == req.RequiresResponse && existing.ResolvesMessageID == strings.TrimSpace(req.ResolvesMessageID) &&
 		existing.SupersedesMessageID == strings.TrimSpace(req.SupersedesMessageID)
 }
 
-func cloneConversationReference(in *ConversationReference) *ConversationReference {
+func cloneConversationReference(in *models.ConversationReference) *models.ConversationReference {
 	if in == nil {
 		return nil
 	}

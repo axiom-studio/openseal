@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -22,7 +23,7 @@ func TestBeginRunFailureExplanationClassifiesAndBounds(t *testing.T) {
 		"agent_behavior_fixed":              "agent_behavior_fixed",
 		"workspace_turn_budget_exhausted":   "budget_exhausted",
 	} {
-		f := beginRunFailureExplanation(&AgentRun{}, "", code, "m", "", "")
+		f := beginRunFailureExplanation(&models.AgentRun{}, "", code, "m", "", "")
 		if f.Code != want || f.Kind != RunFailureKindExecution || f.Explained {
 			t.Fatalf("code %q = %+v, want %s", code, f, want)
 		}
@@ -34,8 +35,8 @@ func TestBeginRunFailureExplanationClassifiesAndBounds(t *testing.T) {
 	if empty := beginRunFailureExplanation(nil, "", "", "  ", "", ""); empty.Message == "" {
 		t.Fatal("a failure needs a message")
 	}
-	first := &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "execution_failed", Message: "first"}
-	if again := beginRunFailureExplanation(&AgentRun{FailureExplanation: first}, "", "provider_unavailable", "second", "", ""); again == first || *again != *first {
+	first := &models.RunFailureExplanation{Kind: RunFailureKindExecution, Code: "execution_failed", Message: "first"}
+	if again := beginRunFailureExplanation(&models.AgentRun{FailureExplanation: first}, "", "provider_unavailable", "second", "", ""); again == first || *again != *first {
 		t.Fatalf("a second failure replaced the first cause: %+v", again)
 	}
 }

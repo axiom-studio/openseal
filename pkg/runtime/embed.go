@@ -26,25 +26,25 @@ var (
 
 type CreateEmbedInstallationRequest struct {
 	ID             string
-	Scope          Scope
+	Scope          models.Scope
 	DeploymentID   string
 	Name           string
 	AllowedOrigins []string
-	Identity       EmbedIdentityPolicy
-	Permissions    EmbedPermissionPolicy
+	Identity       models.EmbedIdentityPolicy
+	Permissions    models.EmbedPermissionPolicy
 	// CreatedBy is the person creating the installation.
 	CreatedBy string
 }
 
 type UpdateEmbedInstallationRequest struct {
-	Scope            Scope
+	Scope            models.Scope
 	ID               string
 	ExpectedRevision int64
 	Name             string
-	Status           EmbedInstallationStatus
+	Status           models.EmbedInstallationStatus
 	AllowedOrigins   []string
-	Identity         EmbedIdentityPolicy
-	Permissions      EmbedPermissionPolicy
+	Identity         models.EmbedIdentityPolicy
+	Permissions      models.EmbedPermissionPolicy
 }
 
 type OpenEmbedSessionRequest struct {
@@ -54,35 +54,35 @@ type OpenEmbedSessionRequest struct {
 }
 
 type OpenEmbedSessionResult struct {
-	Installation *EmbedInstallation `json:"installation"`
-	Session      *EmbedSession      `json:"session"`
-	Capability   string             `json:"capability"`
+	Installation *models.EmbedInstallation `json:"installation"`
+	Session      *models.EmbedSession      `json:"session"`
+	Capability   string                    `json:"capability"`
 }
 
 type EmbedSessionService struct {
-	store         EmbedStore
+	store         models.EmbedStore
 	conversations *ConversationService
 	now           func() time.Time
 	newID         func() string
 	randomToken   func() (string, error)
 }
 
-func NewEmbedSessionService(store EmbedStore, conversations ConversationStore, opts ...models.ServiceOption) (*EmbedSessionService, error) {
+func NewEmbedSessionService(store models.EmbedStore, conversations models.ConversationStore, opts ...models.ServiceOption) (*EmbedSessionService, error) {
 	if store == nil || conversations == nil {
 		return nil, errors.New("embed and conversation stores are required")
 	}
 	return &EmbedSessionService{store: store, conversations: NewConversationService(conversations, opts...), now: models.ClockFrom(opts), newID: uuid.NewString, randomToken: randomEmbedToken}, nil
 }
 
-func (s *EmbedSessionService) CreateInstallation(ctx context.Context, req CreateEmbedInstallationRequest) (*EmbedInstallation, error) {
+func (s *EmbedSessionService) CreateInstallation(ctx context.Context, req CreateEmbedInstallationRequest) (*models.EmbedInstallation, error) {
 	now := s.now().UTC()
 	route, err := s.randomToken()
 	if err != nil {
 		return nil, err
 	}
-	installation := &EmbedInstallation{
+	installation := &models.EmbedInstallation{
 		ID: strings.TrimSpace(req.ID), Scope: req.Scope, DeploymentID: strings.TrimSpace(req.DeploymentID), Name: strings.TrimSpace(req.Name),
-		PublicRoute: route, Status: EmbedInstallationActive, AllowedOrigins: normalizeEmbedOrigins(req.AllowedOrigins),
+		PublicRoute: route, Status: models.EmbedInstallationActive, AllowedOrigins: normalizeEmbedOrigins(req.AllowedOrigins),
 		Identity: req.Identity, Permissions: req.Permissions, CreatedBy: strings.TrimSpace(req.CreatedBy), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if installation.ID == "" {
@@ -94,26 +94,26 @@ func (s *EmbedSessionService) CreateInstallation(ctx context.Context, req Create
 	if err := s.store.CreateEmbedInstallation(ctx, installation); err != nil {
 		return nil, err
 	}
-	return cloneEmbedInstallation(installation), nil
+	return models.CloneEmbedInstallation(installation), nil
 }
 
-func (s *EmbedSessionService) GetInstallation(ctx context.Context, scope Scope, id string) (*EmbedInstallation, error) {
+func (s *EmbedSessionService) GetInstallation(ctx context.Context, scope models.Scope, id string) (*models.EmbedInstallation, error) {
 	return s.store.GetEmbedInstallation(ctx, scope, strings.TrimSpace(id))
 }
 
-func (s *EmbedSessionService) ListInstallations(ctx context.Context, filter EmbedInstallationFilter) ([]*EmbedInstallation, error) {
+func (s *EmbedSessionService) ListInstallations(ctx context.Context, filter models.EmbedInstallationFilter) ([]*models.EmbedInstallation, error) {
 	return s.store.ListEmbedInstallations(ctx, filter)
 }
 
-func (s *EmbedSessionService) UpdateInstallation(ctx context.Context, req UpdateEmbedInstallationRequest) (*EmbedInstallation, error) {
+func (s *EmbedSessionService) UpdateInstallation(ctx context.Context, req UpdateEmbedInstallationRequest) (*models.EmbedInstallation, error) {
 	current, err := s.store.GetEmbedInstallation(ctx, req.Scope, strings.TrimSpace(req.ID))
 	if err != nil {
 		return nil, err
 	}
-	if current.Revision != req.ExpectedRevision || current.Status == EmbedInstallationRevoked && req.Status != EmbedInstallationRevoked {
-		return nil, ErrEmbedRevisionConflict
+	if current.Revision != req.ExpectedRevision || current.Status == models.EmbedInstallationRevoked && req.Status != models.EmbedInstallationRevoked {
+		return nil, models.ErrEmbedRevisionConflict
 	}
-	next := cloneEmbedInstallation(current)
+	next := models.CloneEmbedInstallation(current)
 	next.Name, next.Status = strings.TrimSpace(req.Name), req.Status
 	next.AllowedOrigins, next.Identity, next.Permissions = normalizeEmbedOrigins(req.AllowedOrigins), req.Identity, req.Permissions
 	next.Revision++
@@ -124,7 +124,7 @@ func (s *EmbedSessionService) UpdateInstallation(ctx context.Context, req Update
 	if err := s.store.UpdateEmbedInstallation(ctx, next, current.Revision); err != nil {
 		return nil, err
 	}
-	return cloneEmbedInstallation(next), nil
+	return models.CloneEmbedInstallation(next), nil
 }
 
 func (s *EmbedSessionService) OpenSession(ctx context.Context, req OpenEmbedSessionRequest) (*OpenEmbedSessionResult, error) {
@@ -136,11 +136,11 @@ func (s *EmbedSessionService) OpenSession(ctx context.Context, req OpenEmbedSess
 	if err != nil {
 		return nil, err
 	}
-	if installation.Status != EmbedInstallationActive {
-		return nil, ErrEmbedSessionUnauthorized
+	if installation.Status != models.EmbedInstallationActive {
+		return nil, models.ErrEmbedSessionUnauthorized
 	}
 	claims := maps.Clone(req.VerifiedClaims)
-	if installation.Identity.Mode == EmbedIdentitySigned {
+	if installation.Identity.Mode == models.EmbedIdentitySigned {
 		if len(claims) == 0 {
 			return nil, ErrEmbedAuthentication
 		}
@@ -152,7 +152,7 @@ func (s *EmbedSessionService) OpenSession(ctx context.Context, req OpenEmbedSess
 	} else if len(claims) != 0 {
 		return nil, errors.New("anonymous embed cannot accept verified claims")
 	}
-	if err := ValidateCredentialFreeContext(claims); err != nil {
+	if err := models.ValidateCredentialFreeContext(claims); err != nil {
 		return nil, err
 	}
 	token, err := s.randomToken()
@@ -161,9 +161,9 @@ func (s *EmbedSessionService) OpenSession(ctx context.Context, req OpenEmbedSess
 	}
 	now := s.now().UTC()
 	id := s.newID()
-	session := &EmbedSession{
+	session := &models.EmbedSession{
 		ID: id, Scope: installation.Scope, InstallationID: installation.ID, ConversationID: "embed-" + id,
-		Status: EmbedSessionActive, Origin: origin, ExpiresAt: now.Add(time.Duration(installation.Permissions.SessionTTLSeconds) * time.Second),
+		Status: models.EmbedSessionActive, Origin: origin, ExpiresAt: now.Add(time.Duration(installation.Permissions.SessionTTLSeconds) * time.Second),
 		CreatedAt: now, UpdatedAt: now, CapabilityHash: hashEmbedCapability(token), VerifiedClaims: claims,
 	}
 	if err := session.Validate(); err != nil {
@@ -173,23 +173,23 @@ func (s *EmbedSessionService) OpenSession(ctx context.Context, req OpenEmbedSess
 		return nil, err
 	}
 	if _, _, err := s.conversations.CreateConversation(ctx, CreateConversationRequest{
-		ID: session.ConversationID, Scope: session.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: installation.DeploymentID},
-		Title: "Embedded chat", Origin: &ConversationReference{Kind: ConversationReferenceEmbedSession, ID: session.ID},
+		ID: session.ConversationID, Scope: session.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: installation.DeploymentID},
+		Title: "Embedded chat", Origin: &models.ConversationReference{Kind: models.ConversationReferenceEmbedSession, ID: session.ID},
 		CreatedBy:      installation.CreatedBy,
 		IdempotencyKey: "embed-session:" + session.ID,
 	}); err != nil {
 		return nil, err
 	}
-	return &OpenEmbedSessionResult{Installation: cloneEmbedInstallation(installation), Session: cloneEmbedSession(session), Capability: token}, nil
+	return &OpenEmbedSessionResult{Installation: models.CloneEmbedInstallation(installation), Session: models.CloneEmbedSession(session), Capability: token}, nil
 }
 
-func (s *EmbedSessionService) Authenticate(ctx context.Context, route, sessionID, capabilityToken, origin string) (*EmbedInstallation, *EmbedSession, error) {
+func (s *EmbedSessionService) Authenticate(ctx context.Context, route, sessionID, capabilityToken, origin string) (*models.EmbedInstallation, *models.EmbedSession, error) {
 	installation, err := s.store.GetEmbedInstallationByRoute(ctx, strings.TrimSpace(route))
 	if err != nil {
 		return nil, nil, err
 	}
-	if installation.Status != EmbedInstallationActive {
-		return nil, nil, ErrEmbedSessionUnauthorized
+	if installation.Status != models.EmbedInstallationActive {
+		return nil, nil, models.ErrEmbedSessionUnauthorized
 	}
 	normalizedOrigin, err := authorizeEmbedOrigin(installation, origin)
 	if err != nil {
@@ -200,23 +200,23 @@ func (s *EmbedSessionService) Authenticate(ctx context.Context, route, sessionID
 		return nil, nil, err
 	}
 	now := s.now().UTC()
-	if session.InstallationID != installation.ID || session.Status != EmbedSessionActive || !session.ExpiresAt.After(now) || session.Origin != normalizedOrigin ||
+	if session.InstallationID != installation.ID || session.Status != models.EmbedSessionActive || !session.ExpiresAt.After(now) || session.Origin != normalizedOrigin ||
 		subtle.ConstantTimeCompare([]byte(session.CapabilityHash), []byte(hashEmbedCapability(capabilityToken))) != 1 {
-		return nil, nil, ErrEmbedSessionUnauthorized
+		return nil, nil, models.ErrEmbedSessionUnauthorized
 	}
 	return installation, session, nil
 }
 
-func (s *EmbedSessionService) ConsumeMessage(ctx context.Context, installation *EmbedInstallation, session *EmbedSession) (*EmbedSession, error) {
+func (s *EmbedSessionService) ConsumeMessage(ctx context.Context, installation *models.EmbedInstallation, session *models.EmbedSession) (*models.EmbedSession, error) {
 	if installation == nil || session == nil {
-		return nil, ErrEmbedSessionUnauthorized
+		return nil, models.ErrEmbedSessionUnauthorized
 	}
 	return s.store.ConsumeEmbedSessionMessage(ctx, session.Scope, session.ID, installation.Permissions.MaximumMessages, s.now().UTC())
 }
 
-func (s *EmbedSessionService) ResolveConversationSessionContext(ctx context.Context, scope Scope, conversationID string) (map[string]interface{}, error) {
+func (s *EmbedSessionService) ResolveConversationSessionContext(ctx context.Context, scope models.Scope, conversationID string) (map[string]interface{}, error) {
 	session, err := s.store.GetEmbedSessionByConversation(ctx, scope, strings.TrimSpace(conversationID))
-	if errors.Is(err, ErrEmbedSessionNotFound) {
+	if errors.Is(err, models.ErrEmbedSessionNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -240,7 +240,7 @@ func (s *EmbedSessionService) ResolveConversationSessionContext(ctx context.Cont
 func normalizeEmbedOrigins(values []string) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
-		normalized, err := normalizeEmbedOrigin(value)
+		normalized, err := models.NormalizeEmbedOrigin(value)
 		if err == nil {
 			result = append(result, normalized)
 		} else {
@@ -251,8 +251,8 @@ func normalizeEmbedOrigins(values []string) []string {
 	return result
 }
 
-func authorizeEmbedOrigin(installation *EmbedInstallation, origin string) (string, error) {
-	normalized, err := normalizeEmbedOrigin(origin)
+func authorizeEmbedOrigin(installation *models.EmbedInstallation, origin string) (string, error) {
+	normalized, err := models.NormalizeEmbedOrigin(origin)
 	if err != nil {
 		return "", ErrEmbedOriginDenied
 	}

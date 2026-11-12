@@ -5,14 +5,16 @@ import (
 	"errors"
 	"time"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ConversationHistoryReadStore must enforce Viewer on both reads. This is a
 // provider-neutral kernel contract; hosts derive scope/owner/viewer from a run.
 type ConversationHistoryReadStore interface {
-	GetConversation(context.Context, Scope, string) (*Conversation, error)
-	ListChannelMessages(context.Context, ChannelMessageFilter) ([]*ChannelMessage, error)
-	GetVisibleChannelMessage(context.Context, Scope, string, string, ConversationViewer) (*ChannelMessage, error)
+	GetConversation(context.Context, models.Scope, string) (*models.Conversation, error)
+	ListChannelMessages(context.Context, models.ChannelMessageFilter) ([]*models.ChannelMessage, error)
+	GetVisibleChannelMessage(context.Context, models.Scope, string, string, models.ConversationViewer) (*models.ChannelMessage, error)
 }
 
 type ConversationHistoryReadRequest struct {
@@ -24,17 +26,17 @@ type ConversationHistoryReadRequest struct {
 }
 
 type ConversationHistoryExcerpt struct {
-	CreatedAt        time.Time                 `json:"createdAt"`
-	Intent           ConversationMessageIntent `json:"intent"`
-	ReplyToMessageID string                    `json:"replyToMessageId,omitempty"`
-	Quote            *ChannelMessageQuote      `json:"quote,omitempty"`
-	ID               string                    `json:"id"`
-	Sequence         int64                     `json:"sequence"`
-	Sender           ConversationParticipant   `json:"sender"`
-	Content          string                    `json:"content"`
-	OffsetBytes      int                       `json:"offsetBytes"`
-	NextOffsetBytes  *int                      `json:"nextOffsetBytes,omitempty"`
-	References       []ConversationReference   `json:"references,omitempty"`
+	CreatedAt        time.Time                        `json:"createdAt"`
+	Intent           models.ConversationMessageIntent `json:"intent"`
+	ReplyToMessageID string                           `json:"replyToMessageId,omitempty"`
+	Quote            *models.ChannelMessageQuote      `json:"quote,omitempty"`
+	ID               string                           `json:"id"`
+	Sequence         int64                            `json:"sequence"`
+	Sender           models.ConversationParticipant   `json:"sender"`
+	Content          string                           `json:"content"`
+	OffsetBytes      int                              `json:"offsetBytes"`
+	NextOffsetBytes  *int                             `json:"nextOffsetBytes,omitempty"`
+	References       []models.ConversationReference   `json:"references,omitempty"`
 }
 
 type ConversationHistoryReadResult struct {
@@ -46,7 +48,7 @@ type ConversationHistoryReadResult struct {
 // ReadConversationHistory returns bounded excerpts of durable originals, not a
 // synthesized recollection. Paging offsets are UTF-8 byte boundaries. Hidden
 // messages and their identifiers are never included in cursors or results.
-func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadStore, scope Scope, owner ObjectiveOwner, conversationID string, viewer ConversationViewer, request ConversationHistoryReadRequest, trustedThreadRoot ...string) (*ConversationHistoryReadResult, error) {
+func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadStore, scope models.Scope, owner models.ObjectiveOwner, conversationID string, viewer models.ConversationViewer, request ConversationHistoryReadRequest, trustedThreadRoot ...string) (*ConversationHistoryReadResult, error) {
 	denied := errors.New("conversation history is unavailable to this run")
 	if store == nil || scope.Validate() != nil || owner.Validate() != nil || viewer.Validate() != nil || conversationID == "" {
 		return nil, denied
@@ -71,7 +73,7 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 		threadRoot = trustedThreadRoot[0]
 	}
 	if threadRoot != "" {
-		if !validOpaqueIdentifier(threadRoot, 128) {
+		if !models.IsValidOpaqueIdentifier(threadRoot, 128) {
 			return nil, denied
 		}
 		root, err := store.GetVisibleChannelMessage(ctx, scope, conversationID, threadRoot, viewer)
@@ -79,7 +81,7 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 			return nil, denied
 		}
 	}
-	var messages []*ChannelMessage
+	var messages []*models.ChannelMessage
 	limit := request.Limit
 	if limit == 0 {
 		limit = 5
@@ -89,9 +91,9 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 		if err != nil || message == nil || threadRoot != "" && message.ID != threadRoot && message.ThreadRootID != threadRoot {
 			return nil, denied
 		}
-		messages = []*ChannelMessage{message}
+		messages = []*models.ChannelMessage{message}
 	} else {
-		messages, err = store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversationID, ThreadRootID: threadRoot, Viewer: &viewer, BeforeSequence: request.BeforeSequence, AfterSequence: after, Descending: !forward, Limit: limit + 1})
+		messages, err = store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversationID, ThreadRootID: threadRoot, Viewer: &viewer, BeforeSequence: request.BeforeSequence, AfterSequence: after, Descending: !forward, Limit: limit + 1})
 		if err != nil {
 			return nil, denied
 		}
@@ -109,7 +111,7 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 		}
 	}
 	for _, message := range messages {
-		if message == nil || message.Scope != scope || message.ConversationID != conversationID || !CanViewChannelMessage(message, viewer) {
+		if message == nil || message.Scope != scope || message.ConversationID != conversationID || !models.CanViewChannelMessage(message, viewer) {
 			return nil, denied
 		}
 		start := request.OffsetBytes
@@ -120,7 +122,7 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 		for end < len(message.Content) && !utf8.RuneStart(message.Content[end]) {
 			end--
 		}
-		excerpt := ConversationHistoryExcerpt{CreatedAt: message.CreatedAt, Intent: message.Intent, ReplyToMessageID: message.ReplyToMessageID, Quote: cloneChannelMessageQuote(message.Quote), ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, Content: message.Content[start:end], OffsetBytes: start, References: append([]ConversationReference(nil), message.References...)}
+		excerpt := ConversationHistoryExcerpt{CreatedAt: message.CreatedAt, Intent: message.Intent, ReplyToMessageID: message.ReplyToMessageID, Quote: models.CloneChannelMessageQuote(message.Quote), ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, Content: message.Content[start:end], OffsetBytes: start, References: append([]models.ConversationReference(nil), message.References...)}
 		if end < len(message.Content) {
 			next := end
 			excerpt.NextOffsetBytes = &next

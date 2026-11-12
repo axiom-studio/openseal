@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestRunContextBoundedTo32KiB(t *testing.T) {
-	session := &AgentSession{ID: "session", Scope: Scope{Kind: "tenant", ID: "bound"}}
+	session := &models.AgentSession{ID: "session", Scope: models.Scope{Kind: "tenant", ID: "bound"}}
 	var active, objectives []string
 	for index := 0; index < 150; index++ {
 		active = append(active, fmt.Sprintf("- run run-%03d (running, chat) %q", index, strings.Repeat("a", 150)))
@@ -37,7 +39,7 @@ func TestRunContextBoundedTo32KiB(t *testing.T) {
 		t.Fatalf("objectives %d, active %d", got, strings.Count(text, "- run run-"))
 	}
 	// The digest is of the whole section, so an unchanged truncated section is not sent again.
-	again := conversationContextNote(session, "run-2", sections, latestContextDigests([]*SessionEntry{note}))
+	again := conversationContextNote(session, "run-2", sections, latestContextDigests([]*models.SessionEntry{note}))
 	if names := runContextSectionNames(t, again); len(names) != 1 || !names[contextSectionRespondTo] {
 		t.Fatalf("re-sent sections = %v", names)
 	}

@@ -8,17 +8,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type countedConversationPortfolio struct {
-	PortfolioStore
+	models.PortfolioStore
 	rootCalls, rootRows int
 }
 
-func (s *countedConversationPortfolio) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+func (s *countedConversationPortfolio) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	rows, err := s.PortfolioStore.ListAgentRuns(ctx, filter)
-	if filter.Kind == RunKindConversation {
+	if filter.Kind == models.RunKindConversation {
 		s.rootCalls++
 		s.rootRows += len(rows)
 	}
@@ -29,16 +30,16 @@ func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			store, db := newTestSQLiteStore(t)
-			scope := Scope{Kind: "tenant", ID: "one"}
-			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}
+			scope := models.Scope{Kind: "tenant", ID: "one"}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "writer"}
 			now := time.Now().UTC()
 			for i := 0; i < 503; i++ {
-				run := &AgentRun{ID: fmt.Sprintf("run-%d", i), Scope: scope, Kind: RunKindConversation, Owner: owner,
-					ConcurrencyKey: "unrelated", Goal: "Research", Source: RunSourceChat, Status: AgentRunStatusCompleted,
+				run := &models.AgentRun{ID: fmt.Sprintf("run-%d", i), Scope: scope, Kind: models.RunKindConversation, Owner: owner,
+					ConcurrencyKey: "unrelated", Goal: "Research", Source: models.RunSourceChat, Status: models.AgentRunStatusCompleted,
 					Revision: 1, CreatedAt: now, UpdatedAt: now, AvailableAt: now, QueueEnteredAt: now}
 				if i >= 500 {
 					run.ConcurrencyKey = "selected"
-					run.Context = map[string]interface{}{conversationRunContextConversationID: "selected"}
+					run.Context = map[string]interface{}{models.ConversationRunConversationIDContextKey: "selected"}
 				}
 				if i == 501 {
 					run.Scope.ID = "foreign"
@@ -52,7 +53,7 @@ func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 			}
 			counted := &countedConversationPortfolio{PortfolioStore: store}
 			service := &ConversationChangeService{portfolio: counted}
-			runs, err := service.listConversationRuns(t.Context(), &Conversation{ID: "selected", Scope: scope, Owner: owner})
+			runs, err := service.listConversationRuns(t.Context(), &models.Conversation{ID: "selected", Scope: scope, Owner: owner})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -75,7 +76,7 @@ func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 func TestConversationRunsIncludeTeamMemberLanes(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store KernelStore = newTestKernelStore(t)
+			var store models.KernelStore = newTestKernelStore(t)
 			if backend == "sqlite" {
 				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
 				if err != nil {
@@ -84,23 +85,23 @@ func TestConversationRunsIncludeTeamMemberLanes(t *testing.T) {
 				t.Cleanup(func() { _ = db.Close() })
 				store = db
 			}
-			scope := Scope{Kind: "tenant", ID: "one"}
-			owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}
+			scope := models.Scope{Kind: "tenant", ID: "one"}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "launch"}
 			now := time.Now().UTC()
-			for _, run := range []*AgentRun{
+			for _, run := range []*models.AgentRun{
 				{ID: "routing", ConcurrencyKey: "room"},
 				{ID: "member", ConcurrencyKey: "room:agent:rio", AssignedAgentID: "rio"},
 				{ID: "forged", ConcurrencyKey: "room:agent:otto", AssignedAgentID: "rio"},
 			} {
-				run.Scope, run.Kind, run.Owner, run.Goal, run.Source, run.Status = scope, RunKindConversation, owner, "Answer", RunSourceChat, AgentRunStatusRunning
-				run.Context = map[string]interface{}{conversationRunContextConversationID: "room", conversationRunContextTriggerID: "ask"}
+				run.Scope, run.Kind, run.Owner, run.Goal, run.Source, run.Status = scope, models.RunKindConversation, owner, "Answer", models.RunSourceChat, models.AgentRunStatusRunning
+				run.Context = map[string]interface{}{models.ConversationRunConversationIDContextKey: "room", models.ConversationRunTriggerIDContextKey: "ask"}
 				run.Revision, run.CreatedAt, run.UpdatedAt, run.AvailableAt, run.QueueEnteredAt = 1, now, now, now, now
 				if err := store.CreateAgentRun(t.Context(), run); err != nil {
 					t.Fatal(err)
 				}
 			}
 			service := &ConversationChangeService{portfolio: store}
-			runs, err := service.listConversationRuns(t.Context(), &Conversation{ID: "room", Scope: scope, Owner: owner})
+			runs, err := service.listConversationRuns(t.Context(), &models.Conversation{ID: "room", Scope: scope, Owner: owner})
 			if err != nil {
 				t.Fatal(err)
 			}

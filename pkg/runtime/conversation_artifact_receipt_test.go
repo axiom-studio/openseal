@@ -4,14 +4,16 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // runActionArtifactReferences reads the Run's tool entries from the session
 // log; this lister returns fixed entries.
-type fixedEntryLister []*SessionEntry
+type fixedEntryLister []*models.SessionEntry
 
-func (l fixedEntryLister) ListAgentSessionEntries(_ context.Context, filter SessionEntryFilter) ([]*SessionEntry, error) {
-	var out []*SessionEntry
+func (l fixedEntryLister) ListAgentSessionEntries(_ context.Context, filter models.SessionEntryFilter) ([]*models.SessionEntry, error) {
+	var out []*models.SessionEntry
 	for _, entry := range l {
 		if entry.RunID != filter.RunID {
 			continue
@@ -25,8 +27,8 @@ func (l fixedEntryLister) ListAgentSessionEntries(_ context.Context, filter Sess
 }
 
 func TestRunActionArtifactReferencesFromSucceededCalls(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "one"}
-	run := &AgentRun{ID: "run", Scope: scope}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	run := &models.AgentRun{ID: "run", Scope: scope}
 	refs := func(values ...interface{}) map[string]interface{} {
 		list := make([]interface{}, 0, len(values)/2)
 		for i := 0; i+1 < len(values); i += 2 {
@@ -34,25 +36,25 @@ func TestRunActionArtifactReferencesFromSucceededCalls(t *testing.T) {
 		}
 		return map[string]interface{}{"artifactRefs": list}
 	}
-	actions := &fakeActionCalls{calls: map[string]*ActionCall{
-		"a1": {ID: "a1", RunID: "run", Status: ActionCallStatusSucceeded, Output: refs("one", 1, "two", 3)},
-		"a2": {ID: "a2", RunID: "run", Status: ActionCallStatusSucceeded, Output: refs("one", 1, strings.Repeat("x", 257), 1, "zero", 0)},
-		"a3": {ID: "a3", RunID: "run", Status: ActionCallStatusFailed, Output: refs("failed", 1)},
+	actions := &fakeActionCalls{calls: map[string]*models.ActionCall{
+		"a1": {ID: "a1", RunID: "run", Status: models.ActionCallStatusSucceeded, Output: refs("one", 1, "two", 3)},
+		"a2": {ID: "a2", RunID: "run", Status: models.ActionCallStatusSucceeded, Output: refs("one", 1, strings.Repeat("x", 257), 1, "zero", 0)},
+		"a3": {ID: "a3", RunID: "run", Status: models.ActionCallStatusFailed, Output: refs("failed", 1)},
 	}}
 	entries := fixedEntryLister{
-		{ID: "e1", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "a1"},
-		{ID: "e2", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "a2"},
-		{ID: "e3", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "a3"},
-		{ID: "e4", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "missing"},
-		{ID: "e5", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted},
+		{ID: "e1", RunID: "run", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, ActionCallID: "a1"},
+		{ID: "e2", RunID: "run", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, ActionCallID: "a2"},
+		{ID: "e3", RunID: "run", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, ActionCallID: "a3"},
+		{ID: "e4", RunID: "run", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, ActionCallID: "missing"},
+		{ID: "e5", RunID: "run", Type: models.SessionEntryTool, State: models.ToolEntryCompleted},
 	}
 	got, err := runActionArtifactReferences(context.Background(), entries, actions, run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []ConversationReference{
-		{Kind: ConversationReferenceArtifact, ID: "one", Version: 1},
-		{Kind: ConversationReferenceArtifact, ID: "two", Version: 3},
+	want := []models.ConversationReference{
+		{Kind: models.ConversationReferenceArtifact, ID: "one", Version: 1},
+		{Kind: models.ConversationReferenceArtifact, ID: "two", Version: 3},
 	}
 	if len(got) != len(want) || got[0].Ref != want[0] || got[1].Ref != want[1] {
 		t.Fatalf("references = %#v", got)
@@ -63,11 +65,11 @@ func TestRunActionArtifactReferencesFromSucceededCalls(t *testing.T) {
 // by the path they were presented from; the Run's other files stay in the
 // Library.
 func TestHandedOverArtifactsKeepsOnlyTheAnswersFiles(t *testing.T) {
-	saved := []savedArtifact{
-		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "panel-1", Version: 1}, Path: "images/panel-1.png"},
-		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "panel-2", Version: 1}, Path: "images/panel-2.png"},
-		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "comic-pdf", Version: 2}, Path: "docs/comic.pdf"},
-		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "chart", Version: 1}},
+	saved := []models.SavedArtifact{
+		{Ref: models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: "panel-1", Version: 1}, Path: "images/panel-1.png"},
+		{Ref: models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: "panel-2", Version: 1}, Path: "images/panel-2.png"},
+		{Ref: models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: "comic-pdf", Version: 2}, Path: "docs/comic.pdf"},
+		{Ref: models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: "chart", Version: 1}},
 	}
 	for _, files := range [][]interface{}{{"comic-pdf"}, {"docs/comic.pdf"}, {"/docs/comic.pdf"}, {"./docs/comic.pdf", "comic-pdf"}} {
 		got, unknown := handedOverArtifacts(saved, map[string]interface{}{finalOutputFilesKey: files})
@@ -98,11 +100,11 @@ func TestHandedOverArtifactsKeepsOnlyTheAnswersFiles(t *testing.T) {
 // app three times and presented a page, listed nothing, and told the person
 // "the game is above" with nothing above.
 func TestShownAppsAndPresentedFilesGoOutWithoutBeingNamed(t *testing.T) {
-	saved := []savedArtifact{
-		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "app-1", Version: 1}, Shown: true},
-		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "panel", Version: 1}, Path: "images/panel.png"},
-		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "app-1", Version: 2}, Shown: true},
-		{Ref: ConversationReference{Kind: ConversationReferenceArtifact, ID: "page", Version: 3}, Path: "pages/game.html", Shown: true},
+	saved := []models.SavedArtifact{
+		{Ref: models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: "app-1", Version: 1}, Shown: true},
+		{Ref: models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: "panel", Version: 1}, Path: "images/panel.png"},
+		{Ref: models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: "app-1", Version: 2}, Shown: true},
+		{Ref: models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: "page", Version: 3}, Path: "pages/game.html", Shown: true},
 	}
 	got, unknown := handedOverArtifacts(saved, map[string]interface{}{})
 	if len(unknown) != 0 || len(got) != 2 || got[0].ID != "app-1" || got[0].Version != 2 || got[1].ID != "page" {
@@ -113,7 +115,7 @@ func TestShownAppsAndPresentedFilesGoOutWithoutBeingNamed(t *testing.T) {
 	if len(got) != 3 || got[0].ID != "panel" || got[1].ID != "app-1" || got[2].ID != "page" {
 		t.Fatalf("handed over = %+v; want the panel, the app and the page once each", got)
 	}
-	for call, want := range map[*ActionCall]bool{
+	for call, want := range map[*models.ActionCall]bool{
 		{SkillID: "openseal.builtin", Action: "save_app"}:       true,
 		{SkillID: "openseal.builtin", Action: "present"}:        true,
 		{SkillID: "openseal.computer", Action: "present"}:       true,

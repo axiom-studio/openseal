@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -31,13 +32,13 @@ const (
 	// the store caps at MaxSessionAppendEntries; the rest of the cap is kept
 	// for the other entries of that append (the history_omitted and
 	// run_context notes, steering, event-wait and setup notes).
-	maximumCatchUpMessages = MaxSessionAppendEntries - catchUpReservedAppendEntries
+	maximumCatchUpMessages = models.MaxSessionAppendEntries - catchUpReservedAppendEntries
 	// catchUpReservedAppendEntries is the part of the append cap left to the
 	// entries that share the append with the catch-up.
 	catchUpReservedAppendEntries = 16
 	// catchUpAppendBytes is the encoded-size budget of the catch-up entries,
 	// leaving room under MaxSessionAppendBytes for the rest of the append.
-	catchUpAppendBytes = MaxSessionAppendBytes - 2<<20
+	catchUpAppendBytes = models.MaxSessionAppendBytes - 2<<20
 )
 
 // catchUpHistoryOmittedText is the history_omitted note: earlier or dropped
@@ -48,22 +49,22 @@ const catchUpHistoryOmittedText = "Earlier messages of this chat are not shown h
 // watermark into user entries.
 type conversationCatchUp struct {
 	conversations *ConversationService
-	runs          PortfolioStore
+	runs          models.PortfolioStore
 	attachments   *conversationAttachmentReader // nil: message text only
 }
 
-func newConversationCatchUp(conversations *ConversationService, runs PortfolioStore, attachments *conversationAttachmentReader) *conversationCatchUp {
+func newConversationCatchUp(conversations *ConversationService, runs models.PortfolioStore, attachments *conversationAttachmentReader) *conversationCatchUp {
 	return &conversationCatchUp{conversations: conversations, runs: runs, attachments: attachments}
 }
 
 type catchUpRequest struct {
-	Run          *AgentRun
-	Session      *AgentSession
-	Conversation *Conversation
-	Viewer       ConversationViewer // {Participant: {Type: agent, ID: run.AssignedAgentID}}
+	Run          *models.AgentRun
+	Session      *models.AgentSession
+	Conversation *models.Conversation
+	Viewer       models.ConversationViewer // {Participant: {Type: agent, ID: run.AssignedAgentID}}
 	// Trigger is the message the Run answers. A thread session's backdrop is
 	// read from it at seed time.
-	Trigger *ChannelMessage
+	Trigger *models.ChannelMessage
 	Through int64 // inclusive upper bound (channel sequence)
 	Seed    bool  // the session was just created or has no entries (§4.5)
 	Step    int64 // the step the entries are appended in
@@ -74,17 +75,17 @@ type catchUpRequest struct {
 }
 
 type catchUpResult struct {
-	Entries     []*SessionEntry // user entries in sequence order; maybe empty
-	Watermark   int64           // new ChannelWatermark (= Through when Through > the old watermark)
-	Omitted     int             // messages dropped by the caps
-	SeedFrom    int64           // first sequence ingested on a seed, 0 otherwise
-	OlderExists bool            // seed: visible messages exist before SeedFrom
+	Entries     []*models.SessionEntry // user entries in sequence order; maybe empty
+	Watermark   int64                  // new ChannelWatermark (= Through when Through > the old watermark)
+	Omitted     int                    // messages dropped by the caps
+	SeedFrom    int64                  // first sequence ingested on a seed, 0 otherwise
+	OlderExists bool                   // seed: visible messages exist before SeedFrom
 	// HistoryOmitted is the history_omitted note, set when OlderExists or
 	// Omitted > 0. It goes before Entries.
-	HistoryOmitted *SessionEntry
+	HistoryOmitted *models.SessionEntry
 	// Backdrop is the thread backdrop of a thread session, read once, at seed
 	// time (the run_context note's thread_backdrop section).
-	Backdrop []*ChannelMessage
+	Backdrop []*models.ChannelMessage
 }
 
 // collect reads the messages in (session watermark, Through] that the viewer
@@ -94,10 +95,10 @@ func (c *conversationCatchUp) collect(ctx context.Context, req catchUpRequest) (
 		return nil, errors.New("conversation catch-up is not configured")
 	}
 	if req.Run == nil || req.Session == nil || req.Conversation == nil {
-		return nil, fmt.Errorf("%w: catch-up needs a run, a session and a conversation", ErrInvalidAgentRun)
+		return nil, fmt.Errorf("%w: catch-up needs a run, a session and a conversation", models.ErrInvalidAgentRun)
 	}
 	if req.Conversation.Scope != req.Session.Scope || req.Conversation.ID != req.Session.ConversationID {
-		return nil, fmt.Errorf("%w: session %s does not belong to conversation %s", ErrInvalidAgentRun, req.Session.ID, req.Conversation.ID)
+		return nil, fmt.Errorf("%w: session %s does not belong to conversation %s", models.ErrInvalidAgentRun, req.Session.ID, req.Conversation.ID)
 	}
 	from := req.Session.ChannelWatermark
 	result := &catchUpResult{Watermark: from}
@@ -138,9 +139,9 @@ func (c *conversationCatchUp) collect(ctx context.Context, req catchUpRequest) (
 
 // filter is the visible-message read of the session's lane: the thread of a
 // thread session, the whole channel (thread replies included) otherwise.
-func (c *conversationCatchUp) filter(req catchUpRequest, after int64) ChannelMessageFilter {
+func (c *conversationCatchUp) filter(req catchUpRequest, after int64) models.ChannelMessageFilter {
 	viewer := req.Viewer
-	return ChannelMessageFilter{
+	return models.ChannelMessageFilter{
 		Scope: req.Conversation.Scope, ConversationID: req.Conversation.ID, ThreadRootID: req.Session.ThreadRootID,
 		AfterSequence: after, BeforeSequence: req.Through + 1, Limit: catchUpPageSize, Viewer: &viewer,
 	}
@@ -168,12 +169,12 @@ func (c *conversationCatchUp) seedStart(ctx context.Context, req catchUpRequest,
 // read pages the visible messages after from, drops the session's own and
 // keeps the newest maximumCatchUpMessages. It returns them ascending and the
 // number dropped by the cap.
-func (c *conversationCatchUp) read(ctx context.Context, req catchUpRequest, from int64) ([]*ChannelMessage, int, error) {
+func (c *conversationCatchUp) read(ctx context.Context, req catchUpRequest, from int64) ([]*models.ChannelMessage, int, error) {
 	own := make(map[string]bool, len(req.InheritedRuns))
 	for id := range req.InheritedRuns {
 		own[id] = true
 	}
-	kept := make([]*ChannelMessage, 0, catchUpPageSize)
+	kept := make([]*models.ChannelMessage, 0, catchUpPageSize)
 	dropped := 0
 	for after := from; after < req.Through; {
 		page, err := c.conversations.ListChannelMessages(ctx, c.filter(req, after))
@@ -206,12 +207,12 @@ func (c *conversationCatchUp) read(ctx context.Context, req catchUpRequest, from
 // kernel failure reply. People's messages are never skipped; neither is a
 // message of a Run bound to another session (a task report from a child
 // session, another thread's answer). cache maps run ids to the verdict.
-func (c *conversationCatchUp) ownSessionMessage(ctx context.Context, session *AgentSession, message *ChannelMessage, cache map[string]bool) (bool, error) {
-	if message == nil || message.Sender.Type == ConversationParticipantUser {
+func (c *conversationCatchUp) ownSessionMessage(ctx context.Context, session *models.AgentSession, message *models.ChannelMessage, cache map[string]bool) (bool, error) {
+	if message == nil || message.Sender.Type == models.ConversationParticipantUser {
 		return false, nil
 	}
 	for _, ref := range message.References {
-		if ref.Kind != ConversationReferenceRun || ref.ID == "" {
+		if ref.Kind != models.ConversationReferenceRun || ref.ID == "" {
 			continue
 		}
 		own, seen := cache[ref.ID]
@@ -220,7 +221,7 @@ func (c *conversationCatchUp) ownSessionMessage(ctx context.Context, session *Ag
 			switch {
 			case err == nil:
 				own = run != nil && run.SessionID == session.ID
-			case errors.Is(err, ErrRunNotFound):
+			case errors.Is(err, models.ErrRunNotFound):
 				own = false
 			default:
 				return false, err
@@ -237,9 +238,9 @@ func (c *conversationCatchUp) ownSessionMessage(ctx context.Context, session *Ag
 // entries builds the user entries of messages, newest first within
 // catchUpAppendBytes, and returns them ascending with the number that did not
 // fit.
-func (c *conversationCatchUp) entries(ctx context.Context, req catchUpRequest, messages []*ChannelMessage) ([]*SessionEntry, int) {
-	teamOwned := req.Conversation.Owner.Type == OwnerTypeTeam
-	out := make([]*SessionEntry, len(messages))
+func (c *conversationCatchUp) entries(ctx context.Context, req catchUpRequest, messages []*models.ChannelMessage) ([]*models.SessionEntry, int) {
+	teamOwned := req.Conversation.Owner.Type == models.OwnerTypeTeam
+	out := make([]*models.SessionEntry, len(messages))
 	budget, first := catchUpAppendBytes, len(messages)
 	for i := len(messages) - 1; i >= 0; i-- {
 		entry := readConversationMessageEntry(ctx, c.attachments, req.Conversation, req.Session, req.Run.ID, messages[i], teamOwned)
@@ -249,7 +250,7 @@ func (c *conversationCatchUp) entries(ctx context.Context, req catchUpRequest, m
 		// partial replay (a conflict) before it checks the watermark, while a
 		// stored SourceKey only skips the duplicate and the CAS reports
 		// ErrChannelWatermarkMoved, which the loop retries.
-		entry.ID = SessionEntryID(req.Session.ID, catchUpEntryKey(req.Run.ID, messages[i].ID))
+		entry.ID = models.SessionEntryID(req.Session.ID, catchUpEntryKey(req.Run.ID, messages[i].ID))
 		entry.Step = req.Step
 		encoded, err := json.Marshal(entry)
 		if err != nil || len(encoded) > budget {
@@ -264,21 +265,21 @@ func (c *conversationCatchUp) entries(ctx context.Context, req catchUpRequest, m
 // catchUpEntryKey is the logical key of the user entry runID ingests for one
 // channel message.
 func catchUpEntryKey(runID, messageID string) string {
-	return "catch-up:" + runID + ":" + ChannelMessageSourceKey(messageID)
+	return "catch-up:" + runID + ":" + models.ChannelMessageSourceKey(messageID)
 }
 
 // catchUpHistoryOmittedNote tells the model that messages of this chat exist
 // that the session does not hold. Its key is the Run and the watermark it
 // moves to, so a re-collect after a watermark conflict builds the same entry.
-func catchUpHistoryOmittedNote(req catchUpRequest, result *catchUpResult) *SessionEntry {
+func catchUpHistoryOmittedNote(req catchUpRequest, result *catchUpResult) *models.SessionEntry {
 	key := "history-omitted:" + req.Run.ID + ":" + strconv.FormatInt(result.Watermark, 10)
 	data, _ := json.Marshal(map[string]interface{}{
 		"omitted": result.Omitted, "olderExists": result.OlderExists, "seedFrom": result.SeedFrom, "throughSequence": result.Watermark,
 	})
-	entry := &SessionEntry{
-		ID: SessionEntryID(req.Session.ID, key), Scope: req.Session.Scope, SessionID: req.Session.ID, RunID: req.Run.ID,
-		Step: req.Step, Type: SessionEntryNote, SourceKey: key,
-		Note: &NoteEntry{Kind: NoteHistoryOmitted, Text: catchUpHistoryOmittedText, Data: data},
+	entry := &models.SessionEntry{
+		ID: models.SessionEntryID(req.Session.ID, key), Scope: req.Session.Scope, SessionID: req.Session.ID, RunID: req.Run.ID,
+		Step: req.Step, Type: models.SessionEntryNote, SourceKey: key,
+		Note: &models.NoteEntry{Kind: models.NoteHistoryOmitted, Text: catchUpHistoryOmittedText, Data: data},
 	}
 	entry.Tokens = modelstep.EstimateEntryTokens(entry)
 	return entry
@@ -288,11 +289,11 @@ func catchUpHistoryOmittedNote(req catchUpRequest, result *catchUpResult) *Sessi
 // step's context append: the history_omitted note, then the message entries,
 // with the watermark CAS from session's watermark. It is nil when there is
 // nothing to write.
-func (r *catchUpResult) stepContextAppend(session *AgentSession) *agentrun.StepContextAppend {
+func (r *catchUpResult) stepContextAppend(session *models.AgentSession) *agentrun.StepContextAppend {
 	if r == nil || session == nil || (len(r.Entries) == 0 && r.HistoryOmitted == nil && r.Watermark <= session.ChannelWatermark) {
 		return nil
 	}
-	entries := make([]*SessionEntry, 0, len(r.Entries)+1)
+	entries := make([]*models.SessionEntry, 0, len(r.Entries)+1)
 	if r.HistoryOmitted != nil {
 		entries = append(entries, r.HistoryOmitted)
 	}

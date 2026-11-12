@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -27,7 +29,7 @@ func LoopGovernedToolNames(actions []capability.ModelAction) map[string]string {
 			continue
 		}
 		name := governedToolPrefix + strings.ReplaceAll(action.Name, ".", "_")
-		if !validModelStepToolName(name) || taken[name] {
+		if !models.ValidModelStepToolName(name) || taken[name] {
 			name = hashedGovernedToolName(action.Name)
 		}
 		names[action.Name] = name
@@ -77,7 +79,7 @@ func selectGovernedAction(binding *agentrun.TurnRunnerBinding, name string, dire
 	if action, ok := LoopGovernedAction(binding.ModelActions, name); ok {
 		name = action.Name
 	}
-	request := TurnAction{Capability: name}
+	request := activity.TurnAction{Capability: name}
 	if directive != nil {
 		request.BindingID, request.BindingRevision = directive.BindingID, directive.BindingRevision
 		request.ExpectedSkillVersion = directive.ExpectedSkillVersion

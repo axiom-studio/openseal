@@ -6,10 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
-func conversationSectionIDs(sections []ModelStepSystemSection) []string {
+func conversationSectionIDs(sections []models.ModelStepSystemSection) []string {
 	ids := make([]string, 0, len(sections))
 	for _, section := range sections {
 		ids = append(ids, section.ID)
@@ -18,9 +19,9 @@ func conversationSectionIDs(sections []ModelStepSystemSection) []string {
 }
 
 func TestConversationSystemSectionsStableAcrossRuns(t *testing.T) {
-	conversation := &Conversation{ID: "conversation-1", Title: "Launch"}
-	first := &AgentRun{ID: "run-1", Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}, Goal: "first", SessionID: "session-1"}
-	second := &AgentRun{ID: "run-2", Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}, Goal: "second message", SessionID: "session-1", Revision: 9}
+	conversation := &models.Conversation{ID: "conversation-1", Title: "Launch"}
+	first := &models.AgentRun{ID: "run-1", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, Goal: "first", SessionID: "session-1"}
+	second := &models.AgentRun{ID: "run-2", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, Goal: "second message", SessionID: "session-1", Revision: 9}
 	a, err := json.Marshal(conversationSystemSections(conversation, first, false))
 	if err != nil {
 		t.Fatal(err)
@@ -39,21 +40,21 @@ func TestConversationSystemSectionsStableAcrossRuns(t *testing.T) {
 }
 
 func TestExternalAndTeamSectionsIncludedByConversationKind(t *testing.T) {
-	external := &Conversation{ID: "conversation-1", Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "source-1"}}
-	teamRun := &AgentRun{ID: "run-1", Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-1"}, AssignedAgentID: "agent-1"}
-	agentRun := &AgentRun{ID: "run-2", Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}}
+	external := &models.Conversation{ID: "conversation-1", Origin: &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: "source-1"}}
+	teamRun := &models.AgentRun{ID: "run-1", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-1"}, AssignedAgentID: "agent-1"}
+	agentRun := &models.AgentRun{ID: "run-2", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}}
 	cases := []struct {
 		name         string
-		conversation *Conversation
-		run          *AgentRun
+		conversation *models.Conversation
+		run          *models.AgentRun
 		spoken       bool
 		want         string
 	}{
-		{"plain", &Conversation{ID: "c"}, agentRun, false, "conversation_channel,conversation_attachments"},
+		{"plain", &models.Conversation{ID: "c"}, agentRun, false, "conversation_channel,conversation_attachments"},
 		{"external", external, agentRun, false, "conversation_channel,conversation_attachments,conversation_external_source"},
-		{"team", &Conversation{ID: "c"}, teamRun, false, "conversation_channel,conversation_attachments,team_channel"},
+		{"team", &models.Conversation{ID: "c"}, teamRun, false, "conversation_channel,conversation_attachments,team_channel"},
 		{"external team spoken", external, teamRun, true, "conversation_channel,conversation_attachments,conversation_external_source,team_channel,spoken_rules"},
-		{"non-external origin", &Conversation{ID: "c", Origin: &ConversationReference{Kind: ConversationReferenceAgentControl, ID: "agent-1"}}, agentRun, false, "conversation_channel,conversation_attachments"},
+		{"non-external origin", &models.Conversation{ID: "c", Origin: &models.ConversationReference{Kind: models.ConversationReferenceAgentControl, ID: "agent-1"}}, agentRun, false, "conversation_channel,conversation_attachments"},
 	}
 	for _, tc := range cases {
 		sections := conversationSystemSections(tc.conversation, tc.run, tc.spoken)
@@ -73,8 +74,8 @@ func TestExternalAndTeamSectionsIncludedByConversationKind(t *testing.T) {
 }
 
 func TestSystemSectionsHaveNoFormWords(t *testing.T) {
-	external := &Conversation{ID: "c", Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "s"}}
-	teamRun := &AgentRun{ID: "run-1", Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-1"}}
+	external := &models.Conversation{ID: "c", Origin: &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: "s"}}
+	teamRun := &models.AgentRun{ID: "run-1", Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-1"}}
 	idPattern := regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
 	seen := map[string]bool{}
 	for _, section := range conversationSystemSections(external, teamRun, true) {
@@ -96,8 +97,8 @@ func TestSystemSectionsHaveNoFormWords(t *testing.T) {
 }
 
 func TestSpokenRulesSectionKeepsAuthorityCaveat(t *testing.T) {
-	var spoken *ModelStepSystemSection
-	sections := conversationSystemSections(&Conversation{ID: "c"}, &AgentRun{ID: "run-1"}, true)
+	var spoken *models.ModelStepSystemSection
+	sections := conversationSystemSections(&models.Conversation{ID: "c"}, &models.AgentRun{ID: "run-1"}, true)
 	for i := range sections {
 		if sections[i].ID == conversationSectionSpoken {
 			spoken = &sections[i]
@@ -106,10 +107,10 @@ func TestSpokenRulesSectionKeepsAuthorityCaveat(t *testing.T) {
 	if spoken == nil {
 		t.Fatalf("spoken_rules missing: %v", conversationSectionIDs(sections))
 	}
-	if !strings.HasPrefix(spoken.Text, spokenResponseStyleInstruction) {
+	if !strings.HasPrefix(spoken.Text, models.SpokenResponseStyleInstruction) {
 		t.Fatalf("spoken_rules does not start with the spoken style: %q", spoken.Text)
 	}
-	if !strings.HasSuffix(spoken.Text, spokenResponseAuthorityInstruction) {
+	if !strings.HasSuffix(spoken.Text, models.SpokenResponseAuthorityInstruction) {
 		t.Fatalf("spoken_rules lost the authority caveat: %q", spoken.Text)
 	}
 	if !strings.Contains(spoken.Text, "not authenticated approval") {
@@ -121,7 +122,7 @@ func TestSpokenRulesSectionKeepsAuthorityCaveat(t *testing.T) {
 	if strings.Contains(spoken.Text, "runOutput") {
 		t.Fatalf("spoken_rules kept the old form wording: %q", spoken.Text)
 	}
-	for _, section := range conversationSystemSections(&Conversation{ID: "c"}, &AgentRun{ID: "run-1"}, false) {
+	for _, section := range conversationSystemSections(&models.Conversation{ID: "c"}, &models.AgentRun{ID: "run-1"}, false) {
 		if section.ID == conversationSectionSpoken {
 			t.Fatal("spoken_rules included for a written reply")
 		}

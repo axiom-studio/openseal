@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
 
@@ -118,7 +119,7 @@ func terminalFailureCode(code string) string {
 
 // terminalFailureCodeOf is the public reply class of a recorded failure. A
 // failure without a code is classed by its SPEC §2.2 kind.
-func terminalFailureCodeOf(f *RunFailureExplanation) string {
+func terminalFailureCodeOf(f *models.RunFailureExplanation) string {
 	if f == nil {
 		return "execution_failed"
 	}
@@ -134,7 +135,7 @@ func terminalFailureCodeOf(f *RunFailureExplanation) string {
 // terminalFailureReplyOf is the kernel's reply for a recorded failure.
 // stoppingCall is the failed governed call that stopped the attempt, and
 // latestFailedCall the Run's newest failed governed call; either may be nil.
-func terminalFailureReplyOf(f *RunFailureExplanation, stoppingCall, latestFailedCall *ActionCall) string {
+func terminalFailureReplyOf(f *models.RunFailureExplanation, stoppingCall, latestFailedCall *models.ActionCall) string {
 	code := terminalFailureCodeOf(f)
 	reply := TerminalFailureReply(code)
 	switch code {
@@ -157,13 +158,13 @@ func terminalFailureReplyOf(f *RunFailureExplanation, stoppingCall, latestFailed
 // attempt, and gives the typed rate-limit, browser and file-size replies. A
 // failure the model already moved past (later steps ran tools) is not named.
 // A store that cannot be read only loses that detail, never the reply.
-func terminalRunFailureReply(ctx context.Context, sessions loopSessionEntryLister, actions ActionCallReader, run *AgentRun) string {
+func terminalRunFailureReply(ctx context.Context, sessions loopSessionEntryLister, actions models.ActionCallReader, run *models.AgentRun) string {
 	if run == nil {
 		return TerminalFailureReply("execution_failed")
 	}
 	code := terminalFailureCodeOf(run.FailureExplanation)
-	var stopping, latest *ActionCall
-	if run.Status == AgentRunStatusFailed && (code == "action_failed" || code == "execution_failed") {
+	var stopping, latest *models.ActionCall
+	if run.Status == models.AgentRunStatusFailed && (code == "action_failed" || code == "execution_failed") {
 		stopping = stoppingFailedRunActionCall(ctx, sessions, actions, run)
 		if failure := typedActionFailure(stopping); failure != nil {
 			if failure.HasRateLimitedSource() {
@@ -189,13 +190,13 @@ const latestFailedCallScanLimit = 50
 
 // latestFailedRunActionCall is the call of the Run's newest error tool entry
 // that carries an action call, when that call is this Run's and failed.
-func latestFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions ActionCallReader, run *AgentRun) *ActionCall {
+func latestFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions models.ActionCallReader, run *models.AgentRun) *models.ActionCall {
 	if sessions == nil || actions == nil || run.ID == "" {
 		return nil
 	}
-	entries, err := sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, Types: []SessionEntryType{SessionEntryTool},
-		States: []ToolEntryState{ToolEntryError}, Descending: true, Limit: latestFailedCallScanLimit,
+	entries, err := sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, Types: []models.SessionEntryType{models.SessionEntryTool},
+		States: []models.ToolEntryState{models.ToolEntryError}, Descending: true, Limit: latestFailedCallScanLimit,
 	})
 	if err != nil {
 		return nil
@@ -206,12 +207,12 @@ func latestFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLis
 // stoppingFailedRunActionCall is like latestFailedRunActionCall, but only
 // looks at the Run's last step with tool entries: a failure in an earlier
 // step was followed by more work, so it did not stop the attempt.
-func stoppingFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions ActionCallReader, run *AgentRun) *ActionCall {
+func stoppingFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions models.ActionCallReader, run *models.AgentRun) *models.ActionCall {
 	if sessions == nil || actions == nil || run.ID == "" {
 		return nil
 	}
-	entries, err := sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, Types: []SessionEntryType{SessionEntryTool},
+	entries, err := sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, Types: []models.SessionEntryType{models.SessionEntryTool},
 		Descending: true, Limit: latestFailedCallScanLimit,
 	})
 	if err != nil {
@@ -231,7 +232,7 @@ func stoppingFailedRunActionCall(ctx context.Context, sessions loopSessionEntryL
 // firstFailedRunActionCall walks entries newest first (stopping at the first
 // entry of another step when stepID is set) to the first error entry with an
 // action call, and returns that call if it is this Run's and failed.
-func firstFailedRunActionCall(ctx context.Context, actions ActionCallReader, run *AgentRun, entries []*SessionEntry, stepID string) *ActionCall {
+func firstFailedRunActionCall(ctx context.Context, actions models.ActionCallReader, run *models.AgentRun, entries []*models.SessionEntry, stepID string) *models.ActionCall {
 	for _, entry := range entries {
 		if entry == nil || entry.RunID != run.ID {
 			continue
@@ -239,14 +240,14 @@ func firstFailedRunActionCall(ctx context.Context, actions ActionCallReader, run
 		if stepID != "" && entry.StepID != stepID {
 			return nil
 		}
-		if entry.State != ToolEntryError || entry.ActionCallID == "" {
+		if entry.State != models.ToolEntryError || entry.ActionCallID == "" {
 			continue
 		}
 		call, err := actions.GetActionCall(ctx, run.Scope, entry.ActionCallID)
 		if err != nil || call == nil || call.Scope != run.Scope || call.RunID != run.ID {
 			return nil
 		}
-		if call.Status != ActionCallStatusFailed {
+		if call.Status != models.ActionCallStatusFailed {
 			return nil
 		}
 		return call
@@ -256,8 +257,8 @@ func firstFailedRunActionCall(ctx context.Context, actions ActionCallReader, run
 
 // typedActionFailure is the call's typed failure when its stored error is
 // exactly the sanitized text of that type; model or tool text never is.
-func typedActionFailure(call *ActionCall) *skillerror.ActionError {
-	if call == nil || call.Status != ActionCallStatusFailed || call.ErrorCode == "" {
+func typedActionFailure(call *models.ActionCall) *skillerror.ActionError {
+	if call == nil || call.Status != models.ActionCallStatusFailed || call.ErrorCode == "" {
 		return nil
 	}
 	failure := skillerror.NewActionError(call.ErrorCode, "", call.ErrorDetails)
@@ -283,8 +284,8 @@ const maximumFailedActionCauseBytes = 300
 // for the kernel's reply when no model explained the failure. Transport
 // wrappers around the answer are dropped; credentials were already removed at
 // the ActionWorker boundary.
-func failedActionCause(call *ActionCall) string {
-	if call == nil || call.Status != ActionCallStatusFailed || call.ErrorCode != "" {
+func failedActionCause(call *models.ActionCall) string {
+	if call == nil || call.Status != models.ActionCallStatusFailed || call.ErrorCode != "" {
 		// A typed failure has its own exact wording.
 		return ""
 	}
