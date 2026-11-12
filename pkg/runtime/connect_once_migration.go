@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -333,9 +334,9 @@ func (m connectOnceMigration) stampRoutineCreators(ctx context.Context) error {
 		unstamped = `json_type(payload, '$.task') = 'object' AND IFNULL(json_extract(payload, '$.task.createdBy'), '') = ''`
 	}
 	type row struct {
-		scope Scope
+		scope models.Scope
 		id    string
-		task  ScheduledAgentTask
+		task  models.ScheduledAgentTask
 	}
 	var routines []row
 	err := m.rows(ctx, `SELECT scope_kind, scope_id, id, `+m.payloadText("payload")+` FROM `+m.table("runbook_activations")+` WHERE `+unstamped, nil, func(rows *sql.Rows) error {
@@ -345,7 +346,7 @@ func (m connectOnceMigration) stampRoutineCreators(ctx context.Context) error {
 			return err
 		}
 		var activation struct {
-			Task *ScheduledAgentTask `json:"task"`
+			Task *models.ScheduledAgentTask `json:"task"`
 		}
 		if err := json.Unmarshal([]byte(payload), &activation); err != nil {
 			return fmt.Errorf("runbook activation %s: %w", item.id, err)
@@ -376,7 +377,7 @@ func (m connectOnceMigration) stampRoutineCreators(ctx context.Context) error {
 	return nil
 }
 
-func (m connectOnceMigration) routineCreator(ctx context.Context, scope Scope, task ScheduledAgentTask) (string, error) {
+func (m connectOnceMigration) routineCreator(ctx context.Context, scope models.Scope, task models.ScheduledAgentTask) (string, error) {
 	conversationID, messageID := task.ConversationID, task.SourceMessageID
 	message, err := m.channelMessage(ctx, scope, conversationID, messageID)
 	if err != nil {
@@ -392,7 +393,7 @@ func (m connectOnceMigration) routineCreator(ctx context.Context, scope Scope, t
 			}); err != nil || !found {
 			return "", err
 		}
-		var request AgentRequest
+		var request models.AgentRequest
 		if err := json.Unmarshal([]byte(requestPayload), &request); err != nil {
 			return "", fmt.Errorf("agent request %s: %w", messageID, err)
 		}
@@ -405,12 +406,12 @@ func (m connectOnceMigration) routineCreator(ctx context.Context, scope Scope, t
 			}); err != nil || !found {
 			return "", err
 		}
-		var source AgentRun
+		var source models.AgentRun
 		if err := json.Unmarshal([]byte(runPayload), &source); err != nil {
 			return "", fmt.Errorf("run %s: %w", request.SourceRunID, err)
 		}
-		conversationID, _ = source.Context[conversationRunContextConversationID].(string)
-		messageID, _ = source.Context[conversationRunContextTriggerID].(string)
+		conversationID, _ = source.Context[models.ConversationRunConversationIDContextKey].(string)
+		messageID, _ = source.Context[models.ConversationRunTriggerIDContextKey].(string)
 		if conversationID == "" || messageID == "" {
 			return "", nil
 		}
@@ -427,14 +428,14 @@ func (m connectOnceMigration) routineCreator(ctx context.Context, scope Scope, t
 		}); err != nil || !found {
 		return "", err
 	}
-	var conversation Conversation
+	var conversation models.Conversation
 	if err := json.Unmarshal([]byte(conversationPayload), &conversation); err != nil {
 		return "", fmt.Errorf("conversation %s: %w", conversationID, err)
 	}
-	return MessageActingUser(&conversation, message), nil
+	return models.MessageActingUser(&conversation, message), nil
 }
 
-func (m connectOnceMigration) channelMessage(ctx context.Context, scope Scope, conversationID, messageID string) (*ChannelMessage, error) {
+func (m connectOnceMigration) channelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error) {
 	var payload string
 	found := false
 	if err := m.rows(ctx, `SELECT `+m.payloadText("payload")+` FROM `+m.table("channel_messages")+` WHERE scope_kind = `+m.placeholder(1)+` AND scope_id = `+m.placeholder(2)+` AND conversation_id = `+m.placeholder(3)+` AND id = `+m.placeholder(4),

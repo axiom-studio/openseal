@@ -3,11 +3,13 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // workingArtifactIDs reads a scope's working files for the list paths that
 // filter in Go.
-func workingArtifactIDs(ctx context.Context, db *sql.DB, query string, scope Scope) (map[string]bool, error) {
+func workingArtifactIDs(ctx context.Context, db *sql.DB, query string, scope models.Scope) (map[string]bool, error) {
 	rows, err := db.QueryContext(ctx, query, scope.Kind, scope.ID)
 	if err != nil {
 		return nil, err

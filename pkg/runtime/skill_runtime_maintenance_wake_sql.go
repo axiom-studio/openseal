@@ -3,14 +3,16 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func listCompletedMaintenanceWaiters(ctx context.Context, q maintenanceSQLQuery, runs, gates string, scope Scope, limit int, postgres bool) ([]*AgentRun, error) {
+func listCompletedMaintenanceWaiters(ctx context.Context, q maintenanceSQLQuery, runs, gates string, scope models.Scope, limit int, postgres bool) ([]*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	if limit <= 0 || limit > 200 {
-		return nil, ErrSkillRuntimeMaintenanceConflict
+		return nil, models.ErrSkillRuntimeMaintenanceConflict
 	}
 	query := `SELECT r.payload FROM ` + runs + ` r JOIN ` + gates + ` m ON m.scope_kind=r.scope_kind AND m.scope_id=r.scope_id AND m.skill_id=json_extract(r.payload,'$.wakeCondition.reference')
 		WHERE r.scope_kind=? AND r.scope_id=? AND r.status='waiting_for_dependency' AND json_extract(r.payload,'$.wakeCondition.type')='skill_runtime_maintenance' AND m.active=0 ORDER BY r.id LIMIT ?`
@@ -23,18 +25,18 @@ func listCompletedMaintenanceWaiters(ctx context.Context, q maintenanceSQLQuery,
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*AgentRun, 0, limit)
+	result := make([]*models.AgentRun, 0, limit)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		var run AgentRun
+		var run models.AgentRun
 		if err := json.Unmarshal([]byte(payload), &run); err != nil {
 			return nil, err
 		}
-		if run.Scope != scope || run.Status != AgentRunStatusWaitingForDependency || run.WakeCondition == nil || run.WakeCondition.Type != skillRuntimeMaintenanceWakeType {
-			return nil, ErrSkillRuntimeMaintenanceConflict
+		if run.Scope != scope || run.Status != models.AgentRunStatusWaitingForDependency || run.WakeCondition == nil || run.WakeCondition.Type != models.SkillRuntimeMaintenanceWakeType {
+			return nil, models.ErrSkillRuntimeMaintenanceConflict
 		}
 		result = append(result, &run)
 	}

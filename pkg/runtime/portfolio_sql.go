@@ -3,18 +3,20 @@ package runtime
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func decodeObjective(payload string) (*Objective, error) {
-	var objective Objective
+func decodeObjective(payload string) (*models.Objective, error) {
+	var objective models.Objective
 	if err := json.Unmarshal([]byte(payload), &objective); err != nil {
 		return nil, fmt.Errorf("decode objective: %w", err)
 	}
 	return &objective, nil
 }
 
-func decodeAgentRun(payload string) (*AgentRun, error) {
-	var run AgentRun
+func decodeAgentRun(payload string) (*models.AgentRun, error) {
+	var run models.AgentRun
 	if err := json.Unmarshal([]byte(payload), &run); err != nil {
 		return nil, fmt.Errorf("decode agent run: %w", err)
 	}
@@ -27,6 +29,6 @@ func decodeAgentRun(payload string) (*AgentRun, error) {
 	if run.QueueEnteredAt.IsZero() {
 		run.QueueEnteredAt = run.CreatedAt
 	}
-	run.Kind = normalizeRunKind(run.Kind)
+	run.Kind = models.NormalizeRunKind(run.Kind)
 	return &run, nil
 }

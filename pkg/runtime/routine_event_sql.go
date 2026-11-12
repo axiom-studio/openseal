@@ -3,12 +3,14 @@ package runtime
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // nullableRoutineEventIndex turns the index columns into SQL values (NULL
 // when the activation is not an event Task).
-func nullableRoutineEventIndex(activation *RunbookActivation) (interface{}, interface{}) {
-	kind, sourceRef := routineEventIndexOf(activation)
+func nullableRoutineEventIndex(activation *models.RunbookActivation) (interface{}, interface{}) {
+	kind, sourceRef := models.RoutineEventIndexOf(activation)
 	if kind == "" {
 		return nil, nil
 	}
@@ -17,8 +19,8 @@ func nullableRoutineEventIndex(activation *RunbookActivation) (interface{}, inte
 
 // routineEventRecordPayload is the stored payload of a record: the full
 // event for a pending record, nothing for a dropped one.
-func routineEventRecordPayload(record *RoutineEventRecord) ([]byte, error) {
-	if record.State == RoutineEventDropped {
+func routineEventRecordPayload(record *models.RoutineEventRecord) ([]byte, error) {
+	if record.State == models.RoutineEventDropped {
 		return nil, nil
 	}
 	return json.Marshal(record.Event)
@@ -26,7 +28,7 @@ func routineEventRecordPayload(record *RoutineEventRecord) ([]byte, error) {
 
 // decodeRoutineEventRecordEvent rebuilds the event of a stored row. A row
 // without payload (dropped) keeps only its ID, test flag and time.
-func decodeRoutineEventRecordEvent(record *RoutineEventRecord, payload []byte, eventID string, test bool, occurredAt time.Time) error {
+func decodeRoutineEventRecordEvent(record *models.RoutineEventRecord, payload []byte, eventID string, test bool, occurredAt time.Time) error {
 	if len(payload) > 0 {
 		if err := json.Unmarshal(payload, &record.Event); err != nil {
 			return err

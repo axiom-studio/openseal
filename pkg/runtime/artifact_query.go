@@ -5,13 +5,15 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // artifactListQuery applies the common catalog filters and page boundaries in
 // SQL so a user-visible page does not load and sort every tenant artifact.
 // Evidence and retention queries keep the exact Go filter until those nested
 // fields have a portable indexed representation.
-func artifactListQuery(filter ArtifactFilter, table, workingTable string, postgres bool) (string, []any) {
+func artifactListQuery(filter models.ArtifactFilter, table, workingTable string, postgres bool) (string, []any) {
 	args := make([]any, 0, 12)
 	bind := func(value any) string {
 		args = append(args, value)
@@ -68,9 +70,9 @@ func artifactListQuery(filter ArtifactFilter, table, workingTable string, postgr
 	if filter.SpaceID != "" {
 		where = append(where, provenanceField("spaceId")+" = "+bind(filter.SpaceID))
 	}
-	if filter.Files == ArtifactFilesResults || filter.Files == ArtifactFilesWorking {
+	if filter.Files == models.ArtifactFilesResults || filter.Files == models.ArtifactFilesWorking {
 		marked := "EXISTS (SELECT 1 FROM " + workingTable + " w WHERE w.scope_kind = a.scope_kind AND w.scope_id = a.scope_id AND w.id = a.id)"
-		if filter.Files == ArtifactFilesResults {
+		if filter.Files == models.ArtifactFilesResults {
 			marked = "NOT " + marked
 		}
 		where = append(where, marked)
@@ -83,13 +85,13 @@ func artifactListQuery(filter ArtifactFilter, table, workingTable string, postgr
 	return query, args
 }
 
-func queryArtifactPage(ctx context.Context, db *sql.DB, query string, args []any) ([]*Artifact, error) {
+func queryArtifactPage(ctx context.Context, db *sql.DB, query string, args []any) ([]*models.Artifact, error) {
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*Artifact, 0)
+	result := make([]*models.Artifact, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {

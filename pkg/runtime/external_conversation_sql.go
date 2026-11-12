@@ -4,90 +4,92 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type sqliteExternalConversationScanner interface {
 	Scan(...interface{}) error
 }
 
-func scanSQLiteExternalConversationEndpoint(scanner sqliteExternalConversationScanner) (*ExternalConversationEndpoint, error) {
+func scanSQLiteExternalConversationEndpoint(scanner sqliteExternalConversationScanner) (*models.ExternalConversationEndpoint, error) {
 	var payload string
 	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value ExternalConversationEndpoint
+	var value models.ExternalConversationEndpoint
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}
 	return &value, value.Validate()
 }
 
-func scanSQLiteExternalConversationInbox(scanner sqliteExternalConversationScanner) (*ExternalConversationInboxItem, error) {
+func scanSQLiteExternalConversationInbox(scanner sqliteExternalConversationScanner) (*models.ExternalConversationInboxItem, error) {
 	var payload string
 	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value ExternalConversationInboxItem
+	var value models.ExternalConversationInboxItem
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}
 	return &value, value.Validate()
 }
 
-func scanSQLiteExternalConversationMapping(scanner sqliteExternalConversationScanner) (*ExternalConversationMapping, error) {
+func scanSQLiteExternalConversationMapping(scanner sqliteExternalConversationScanner) (*models.ExternalConversationMapping, error) {
 	var payload string
 	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value ExternalConversationMapping
+	var value models.ExternalConversationMapping
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}
 	return &value, value.Validate()
 }
 
-func scanSQLiteExternalParticipantMapping(scanner sqliteExternalConversationScanner) (*ExternalParticipantMapping, error) {
+func scanSQLiteExternalParticipantMapping(scanner sqliteExternalConversationScanner) (*models.ExternalParticipantMapping, error) {
 	var payload string
 	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value ExternalParticipantMapping
+	var value models.ExternalParticipantMapping
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}
 	return &value, value.Validate()
 }
 
-func scanSQLiteExternalMessageMapping(scanner sqliteExternalConversationScanner) (*ExternalMessageMapping, error) {
+func scanSQLiteExternalMessageMapping(scanner sqliteExternalConversationScanner) (*models.ExternalMessageMapping, error) {
 	var payload string
 	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value ExternalMessageMapping
+	var value models.ExternalMessageMapping
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}
 	return &value, value.Validate()
 }
 
-func scanSQLiteExternalConversationDelivery(scanner sqliteExternalConversationScanner) (*ExternalConversationDelivery, error) {
+func scanSQLiteExternalConversationDelivery(scanner sqliteExternalConversationScanner) (*models.ExternalConversationDelivery, error) {
 	var payload string
 	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value ExternalConversationDelivery
+	var value models.ExternalConversationDelivery
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}

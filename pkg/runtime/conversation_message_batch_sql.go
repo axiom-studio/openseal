@@ -5,18 +5,20 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type channelMessageBatchSQLReader interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 }
 
-func getChannelMessageBatchSQL(ctx context.Context, reader channelMessageBatchSQLReader, table string, scope Scope, conversationID string, ids []string, postgres bool) ([]*ChannelMessage, error) {
-	if err := validateChannelMessageBatch(scope, ids); err != nil {
+func getChannelMessageBatchSQL(ctx context.Context, reader channelMessageBatchSQLReader, table string, scope models.Scope, conversationID string, ids []string, postgres bool) ([]*models.ChannelMessage, error) {
+	if err := models.ValidateChannelMessageBatch(scope, ids); err != nil {
 		return nil, err
 	}
 	if len(ids) == 0 {
-		return []*ChannelMessage{}, nil
+		return []*models.ChannelMessage{}, nil
 	}
 	args := []interface{}{scope.Kind, scope.ID, conversationID}
 	placeholders := make([]string, len(ids))
@@ -36,7 +38,7 @@ func getChannelMessageBatchSQL(ctx context.Context, reader channelMessageBatchSQ
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*ChannelMessage, 0, len(ids))
+	result := make([]*models.ChannelMessage, 0, len(ids))
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -35,11 +36,11 @@ type agentBuilderCutoverPayload struct {
 			} `json:"agents"`
 		} `json:"candidate"`
 	} `json:"result"`
-	Placement AgentBuilderCutoverPlacement `json:"placement"`
+	Placement models.AgentBuilderCutoverPlacement `json:"placement"`
 }
 
-func decodeAgentBuilderCutoverDraft(scope Scope, id, idempotencyKey, payload string) (AgentBuilderCutoverDraft, error) {
-	draft := AgentBuilderCutoverDraft{Scope: scope, ID: id, IdempotencyKey: idempotencyKey}
+func decodeAgentBuilderCutoverDraft(scope models.Scope, id, idempotencyKey, payload string) (models.AgentBuilderCutoverDraft, error) {
+	draft := models.AgentBuilderCutoverDraft{Scope: scope, ID: id, IdempotencyKey: idempotencyKey}
 	var value agentBuilderCutoverPayload
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return draft, fmt.Errorf("decode agent builder cutover draft %s: %w", id, err)
@@ -163,11 +164,11 @@ func foldChangeSetDrafts(ctx context.Context, tx agentBuilderMigrationExecer, ta
 
 // scanAgentBuilderCutoverDrafts decodes (scope_kind, scope_id, id,
 // idempotency_key, payload) rows.
-func scanAgentBuilderCutoverDrafts(rows *sql.Rows) ([]AgentBuilderCutoverDraft, error) {
+func scanAgentBuilderCutoverDrafts(rows *sql.Rows) ([]models.AgentBuilderCutoverDraft, error) {
 	defer rows.Close()
-	var drafts []AgentBuilderCutoverDraft
+	var drafts []models.AgentBuilderCutoverDraft
 	for rows.Next() {
-		var scope Scope
+		var scope models.Scope
 		var id, key, payload string
 		if err := rows.Scan(&scope.Kind, &scope.ID, &id, &key, &payload); err != nil {
 			return nil, err

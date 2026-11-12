@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // interactionUmbrellaMigrationActor dismisses a pending request whose asking
@@ -94,8 +96,8 @@ func jsonNumber(value interface{}) float64 {
 
 // interactionConversationUmbrella returns the owner of row's conversation and
 // whether the member that asked is still on its roster.
-func interactionConversationUmbrella(ctx context.Context, db teamSkillGrantMigrationDB, table func(string) string, placeholder func(int) string, row interactionUmbrellaRow) (ObjectiveOwner, bool, error) {
-	var owner ObjectiveOwner
+func interactionConversationUmbrella(ctx context.Context, db teamSkillGrantMigrationDB, table func(string) string, placeholder func(int) string, row interactionUmbrellaRow) (models.ObjectiveOwner, bool, error) {
+	var owner models.ObjectiveOwner
 	rows, err := db.QueryContext(ctx, `SELECT owner_type, owner_id FROM `+table("conversations")+` WHERE scope_kind = `+placeholder(1)+` AND scope_id = `+placeholder(2)+` AND id = `+placeholder(3), row.scopeKind, row.scopeID, row.conversationID)
 	if err != nil {
 		return owner, false, err
@@ -110,11 +112,11 @@ func interactionConversationUmbrella(ctx context.Context, db teamSkillGrantMigra
 	if err := rows.Close(); err != nil {
 		return owner, false, err
 	}
-	owner.Type = OwnerType(ownerType)
+	owner.Type = models.OwnerType(ownerType)
 	switch owner.Type {
-	case OwnerTypeAgent:
+	case models.OwnerTypeAgent:
 		return owner, owner.ID == row.deploymentID, nil
-	case OwnerTypeTeam:
+	case models.OwnerTypeTeam:
 		payloadText := "payload::text"
 		if placeholder(1) == "?" {
 			payloadText = "payload"
@@ -146,5 +148,5 @@ func interactionConversationUmbrella(ctx context.Context, db teamSkillGrantMigra
 		}
 		return owner, false, nil
 	}
-	return ObjectiveOwner{}, false, nil
+	return models.ObjectiveOwner{}, false, nil
 }

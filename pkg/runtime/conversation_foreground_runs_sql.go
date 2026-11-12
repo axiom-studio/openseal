@@ -3,6 +3,8 @@ package runtime
 import (
 	"database/sql"
 	"math"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func conversationForegroundSQLPageSize(limit, offset int) int {
@@ -12,8 +14,8 @@ func conversationForegroundSQLPageSize(limit, offset int) int {
 	return offset + limit
 }
 
-func scanConversationForegroundRunsSQL(rows *sql.Rows) ([]*AgentRun, error) {
-	runs := make([]*AgentRun, 0)
+func scanConversationForegroundRunsSQL(rows *sql.Rows) ([]*models.AgentRun, error) {
+	runs := make([]*models.AgentRun, 0)
 	for rows.Next() {
 		var payload, id string
 		var createdAt interface{}

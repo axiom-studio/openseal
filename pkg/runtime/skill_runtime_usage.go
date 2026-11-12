@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type skillRuntimeUsageQuerier interface {
@@ -16,7 +18,7 @@ const unfinishedSkillRunSQL = "'queued','planning','running','paused','sleeping'
 // Indexed EXISTS probes inspect metadata only. The receipt probe begins
 // with active Runs, so completed receipt history does not become a growing
 // payload scan on every reconciliation pass.
-func skillRuntimeUsageQuery(filter SkillRuntimeUsageFilter, actions, runs string, postgres bool) (string, []interface{}) {
+func skillRuntimeUsageQuery(filter models.SkillRuntimeUsageFilter, actions, runs string, postgres bool) (string, []interface{}) {
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.SkillID, filter.SkillVersion}
 	parameter := func(n int) string {
 		if postgres {
@@ -57,7 +59,7 @@ func skillRuntimeUsageQuery(filter SkillRuntimeUsageFilter, actions, runs string
 	return "SELECT EXISTS (" + first + ") OR EXISTS (" + second + ") OR EXISTS (" + dependency + ")", args
 }
 
-func hasSkillRuntimeUsage(ctx context.Context, query skillRuntimeUsageQuerier, filter SkillRuntimeUsageFilter, actions, runs string, postgres bool) (bool, error) {
+func hasSkillRuntimeUsage(ctx context.Context, query skillRuntimeUsageQuerier, filter models.SkillRuntimeUsageFilter, actions, runs string, postgres bool) (bool, error) {
 	if err := filter.Validate(); err != nil {
 		return false, err
 	}
@@ -88,10 +90,10 @@ func listReferencedSkillRuntimeVersionsQuery(bindings, actions, runs string, pos
 		" UNION SELECT skill_id,skill_version,'' FROM " + skillRuntimeDependencyTable(runs) + " WHERE scope_kind=" + kind + " AND scope_id=" + id + " ORDER BY 1,2,3"
 }
 
-func scanReferencedSkillRuntimeVersions(rows *sql.Rows) ([]SkillRuntimeReference, error) {
-	result := make([]SkillRuntimeReference, 0)
+func scanReferencedSkillRuntimeVersions(rows *sql.Rows) ([]models.SkillRuntimeReference, error) {
+	result := make([]models.SkillRuntimeReference, 0)
 	for rows.Next() {
-		var reference SkillRuntimeReference
+		var reference models.SkillRuntimeReference
 		if err := rows.Scan(&reference.SkillID, &reference.SkillVersion, &reference.SourceIdentity); err != nil {
 			return nil, err
 		}

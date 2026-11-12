@@ -8,10 +8,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func logicalSkillRuntimeUsage(ctx context.Context, q skillRuntimeUsageQuerier, scope Scope, skillID, actions, runs string, postgres bool) (bool, error) {
+func logicalSkillRuntimeUsage(ctx context.Context, q skillRuntimeUsageQuerier, scope models.Scope, skillID, actions, runs string, postgres bool) (bool, error) {
 	parameter := func(n int) string {
 		if postgres {
 			return fmt.Sprintf("$%d", n)
@@ -33,7 +34,7 @@ func logicalSkillRuntimeUsage(ctx context.Context, q skillRuntimeUsageQuerier, s
 	return busy, err
 }
 
-func maintenanceBindingsMatch(ctx context.Context, q skillRuntimeUsageQuerier, g *SkillRuntimeMaintenance, version, bindings string, postgres bool) (bool, error) {
+func maintenanceBindingsMatch(ctx context.Context, q skillRuntimeUsageQuerier, g *models.SkillRuntimeMaintenance, version, bindings string, postgres bool) (bool, error) {
 	parameter := func(n int) string {
 		if postgres {
 			return fmt.Sprintf("$%d", n)
@@ -58,7 +59,7 @@ type maintenanceSQLQuery interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 }
 
-func readSkillRuntimeMaintenance(ctx context.Context, q skillRuntimeUsageQuerier, table string, scope Scope, skillID string, postgres, lock bool) (*SkillRuntimeMaintenance, error) {
+func readSkillRuntimeMaintenance(ctx context.Context, q skillRuntimeUsageQuerier, table string, scope models.Scope, skillID string, postgres, lock bool) (*models.SkillRuntimeMaintenance, error) {
 	query := "SELECT payload FROM " + table + " WHERE scope_kind=? AND scope_id=? AND skill_id=?"
 	if postgres {
 		query = "SELECT payload FROM " + table + " WHERE scope_kind=$1 AND scope_id=$2 AND skill_id=$3"
@@ -69,21 +70,21 @@ func readSkillRuntimeMaintenance(ctx context.Context, q skillRuntimeUsageQuerier
 	var payload string
 	if err := q.QueryRowContext(ctx, query, scope.Kind, scope.ID, skillID).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrSkillRuntimeMaintenanceNotFound
+			return nil, models.ErrSkillRuntimeMaintenanceNotFound
 		}
 		return nil, err
 	}
-	var g SkillRuntimeMaintenance
+	var g models.SkillRuntimeMaintenance
 	if err := json.Unmarshal([]byte(payload), &g); err != nil {
 		return nil, err
 	}
 	if g.Scope != scope || g.SkillID != skillID || g.Revision < 1 || g.OperationID == "" {
-		return nil, ErrSkillRuntimeMaintenanceConflict
+		return nil, models.ErrSkillRuntimeMaintenanceConflict
 	}
 	return &g, nil
 }
 
-func writeSkillRuntimeMaintenance(ctx context.Context, q maintenanceSQLQuery, table string, g *SkillRuntimeMaintenance, postgres bool) error {
+func writeSkillRuntimeMaintenance(ctx context.Context, q maintenanceSQLQuery, table string, g *models.SkillRuntimeMaintenance, postgres bool) error {
 	payload, err := json.Marshal(g)
 	if err != nil {
 		return err
@@ -96,7 +97,7 @@ func writeSkillRuntimeMaintenance(ctx context.Context, q maintenanceSQLQuery, ta
 	return err
 }
 
-func validateMaintenanceBindingSnapshot(ctx context.Context, q maintenanceSQLQuery, table string, r SkillRuntimeMaintenanceRequest, postgres bool) error {
+func validateMaintenanceBindingSnapshot(ctx context.Context, q maintenanceSQLQuery, table string, r models.SkillRuntimeMaintenanceRequest, postgres bool) error {
 	expected := make(map[string]int64, len(r.ExpectedBindings))
 	for _, b := range r.ExpectedBindings {
 		expected[b.DeploymentID+"\x00"+b.BindingID] = b.Revision
@@ -119,15 +120,15 @@ func validateMaintenanceBindingSnapshot(ctx context.Context, q maintenanceSQLQue
 		}
 		key := deployment + "\x00" + id
 		if source != r.SourceIdentity {
-			return ErrSkillRuntimeMaintenanceConflict
+			return models.ErrSkillRuntimeMaintenanceConflict
 		}
 		if r.ExpectedBindingDigest == "" {
 			if expected[key] != revision {
-				return ErrSkillRuntimeMaintenanceConflict
+				return models.ErrSkillRuntimeMaintenanceConflict
 			}
 			delete(expected, key)
 		} else {
-			if err := AddSkillRuntimeMaintenanceBindingDigest(h, SkillRuntimeMaintenanceBindingRevision{DeploymentID: deployment, BindingID: id, Revision: revision}); err != nil {
+			if err := models.AddSkillRuntimeMaintenanceBindingDigest(h, models.SkillRuntimeMaintenanceBindingRevision{DeploymentID: deployment, BindingID: id, Revision: revision}); err != nil {
 				return err
 			}
 		}
@@ -136,15 +137,15 @@ func validateMaintenanceBindingSnapshot(ctx context.Context, q maintenanceSQLQue
 		return err
 	}
 	if len(expected) != 0 {
-		return ErrSkillRuntimeMaintenanceConflict
+		return models.ErrSkillRuntimeMaintenanceConflict
 	}
 	if r.ExpectedBindingDigest != "" && fmt.Sprintf("sha256:%x", h.Sum(nil)) != r.ExpectedBindingDigest {
-		return ErrSkillRuntimeMaintenanceConflict
+		return models.ErrSkillRuntimeMaintenanceConflict
 	}
 	return nil
 }
 
-func listActiveSkillRuntimeMaintenances(ctx context.Context, q maintenanceSQLQuery, table string, scope Scope, postgres bool) ([]*SkillRuntimeMaintenance, error) {
+func listActiveSkillRuntimeMaintenances(ctx context.Context, q maintenanceSQLQuery, table string, scope models.Scope, postgres bool) ([]*models.SkillRuntimeMaintenance, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -157,26 +158,26 @@ func listActiveSkillRuntimeMaintenances(ctx context.Context, q maintenanceSQLQue
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*SkillRuntimeMaintenance, 0)
+	result := make([]*models.SkillRuntimeMaintenance, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		var g SkillRuntimeMaintenance
+		var g models.SkillRuntimeMaintenance
 		if err := json.Unmarshal([]byte(payload), &g); err != nil {
 			return nil, err
 		}
 		if g.Scope != scope || !g.Active || g.Revision < 1 {
-			return nil, ErrSkillRuntimeMaintenanceConflict
+			return nil, models.ErrSkillRuntimeMaintenanceConflict
 		}
 		result = append(result, &g)
 	}
 	return result, rows.Err()
 }
 
-func listMaintenanceBindings(ctx context.Context, q maintenanceSQLQuery, table string, scope Scope, skillID, afterDeploymentID, afterBindingID string, limit int, postgres bool) ([]*skill.Binding, error) {
-	if err := validateMaintenanceBindingPage(scope, skillID, afterDeploymentID, afterBindingID, limit); err != nil {
+func listMaintenanceBindings(ctx context.Context, q maintenanceSQLQuery, table string, scope models.Scope, skillID, afterDeploymentID, afterBindingID string, limit int, postgres bool) ([]*skill.Binding, error) {
+	if err := models.ValidateMaintenanceBindingPage(scope, skillID, afterDeploymentID, afterBindingID, limit); err != nil {
 		return nil, err
 	}
 	query := "SELECT payload FROM " + table + " WHERE scope_kind=? AND scope_id=? AND skill_id=? AND (deployment_id>? OR (deployment_id=? AND id>?)) AND COALESCE(json_extract(payload,'$.disabled'),0)=0 ORDER BY deployment_id,id LIMIT ?"
@@ -201,7 +202,7 @@ func listMaintenanceBindings(ctx context.Context, q maintenanceSQLQuery, table s
 			return nil, err
 		}
 		if b.Scope.Kind != scope.Kind || b.Scope.ID != scope.ID || b.SkillID != skillID || b.Disabled {
-			return nil, ErrSkillRuntimeMaintenanceConflict
+			return nil, models.ErrSkillRuntimeMaintenanceConflict
 		}
 		result = append(result, &b)
 	}

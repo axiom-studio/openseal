@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const legacyRunSkillDependencyBatch = 1000
@@ -35,7 +36,7 @@ func backfillLegacyRunSkillDependencies(ctx context.Context, tx *sql.Tx, runs, d
 			return err
 		}
 		type item struct {
-			scope                                     Scope
+			scope                                     models.Scope
 			id, assigned, run, deployment, definition string
 		}
 		page := make([]item, 0, legacyRunSkillDependencyBatch)
@@ -56,13 +57,13 @@ func backfillLegacyRunSkillDependencies(ctx context.Context, tx *sql.Tx, runs, d
 		}
 		for _, value := range page {
 			cursor = [3]string{value.scope.Kind, value.scope.ID, value.id}
-			var run AgentRun
+			var run models.AgentRun
 			var deployment kernelagent.AgentDeployment
 			var definition kernelagent.AgentDefinition
 			if json.Unmarshal([]byte(value.run), &run) != nil || json.Unmarshal([]byte(value.deployment), &deployment) != nil || json.Unmarshal([]byte(value.definition), &definition) != nil || run.Scope != value.scope || run.ID != value.id || run.AssignedAgentID != value.assigned {
 				continue
 			}
-			pin := legacyAcceptedRunExecution(&run, &deployment, &definition)
+			pin := models.LegacyAcceptedRunExecution(&run, &deployment, &definition)
 			if pin == nil {
 				continue
 			}
@@ -71,7 +72,7 @@ func backfillLegacyRunSkillDependencies(ctx context.Context, tx *sql.Tx, runs, d
 				insert = `INSERT INTO ` + dependencies + ` VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`
 			}
 			for _, ref := range pin.SkillDependencies {
-				if _, err := tx.ExecContext(ctx, insert, run.Scope.Kind, run.Scope.ID, run.ID, ref.SkillID, ref.SkillVersion, runSkillDependencyDeployment(&run)); err != nil {
+				if _, err := tx.ExecContext(ctx, insert, run.Scope.Kind, run.Scope.ID, run.ID, ref.SkillID, ref.SkillVersion, models.RunSkillDependencyDeployment(&run)); err != nil {
 					return err
 				}
 			}

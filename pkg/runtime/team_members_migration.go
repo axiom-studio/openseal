@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // teamRetiredLeadRoleID was the lead role of a Team that named none.
@@ -130,7 +132,7 @@ func stripTeamRoles(definition map[string]interface{}) bool {
 	if definition == nil {
 		return false
 	}
-	changed := renameAllowedAmendmentField(definition, "roles", TeamMemberAmendmentField)
+	changed := renameAllowedAmendmentField(definition, "roles", models.TeamMemberAmendmentField)
 	for _, location := range []struct {
 		object map[string]interface{}
 		key    string
@@ -226,7 +228,7 @@ func (m teamMembersMigration) up() error {
 		}
 		recipient := migrationObject(row.document["recipient"])
 		role := migrationString(row.document, "semanticRole")
-		if member := holders[strings.Join([]string{row.keys[0], row.keys[1], migrationString(recipient, "id"), role}, "\x00")]; migrationString(recipient, "type") == string(OwnerTypeTeam) && member != "" && member != role {
+		if member := holders[strings.Join([]string{row.keys[0], row.keys[1], migrationString(recipient, "id"), role}, "\x00")]; migrationString(recipient, "type") == string(models.OwnerTypeTeam) && member != "" && member != role {
 			row.document["semanticRole"], changed = member, true
 		}
 		if changed {
@@ -271,7 +273,7 @@ func (r *teamRetiredRoles) restore(definition map[string]interface{}) bool {
 	if definition == nil {
 		return false
 	}
-	changed := renameAllowedAmendmentField(definition, TeamMemberAmendmentField, "roles")
+	changed := renameAllowedAmendmentField(definition, models.TeamMemberAmendmentField, "roles")
 	if _, present := definition["roles"]; present || r == nil {
 		return changed
 	}

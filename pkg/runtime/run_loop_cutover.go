@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -406,11 +407,11 @@ func (s *PostgresStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]Run
 	return scanRunLoopCutoverRefs(rows)
 }
 
-func scanRunLoopCutoverRefs(rows *sql.Rows) ([]RunLoopCutoverRef, error) {
+func scanRunLoopCutoverRefs(rows *sql.Rows) ([]models.RunLoopCutoverRef, error) {
 	defer rows.Close()
-	refs := make([]RunLoopCutoverRef, 0)
+	refs := make([]models.RunLoopCutoverRef, 0)
 	for rows.Next() {
-		var ref RunLoopCutoverRef
+		var ref models.RunLoopCutoverRef
 		if err := rows.Scan(&ref.Scope.Kind, &ref.Scope.ID, &ref.ID); err != nil {
 			return nil, err
 		}

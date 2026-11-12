@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func scanConversationActiveRunsSQL(rows *sql.Rows) ([]*AgentRun, error) {
-	runs := make([]*AgentRun, 0)
+func scanConversationActiveRunsSQL(rows *sql.Rows) ([]*models.AgentRun, error) {
+	runs := make([]*models.AgentRun, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {

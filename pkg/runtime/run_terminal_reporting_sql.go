@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Match strings.TrimSpace at the SQL eligibility boundary. SQL TRIM's default
@@ -18,7 +20,7 @@ func runTerminalReportLeaseResult(result sql.Result, err error) error {
 		return err
 	}
 	if count != 1 {
-		return ErrLeaseLost
+		return models.ErrLeaseLost
 	}
 	return nil
 }

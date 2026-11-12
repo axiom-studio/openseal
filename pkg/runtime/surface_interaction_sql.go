@@ -4,10 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func decodeSurfaceInteraction(payload string) (*SurfaceInteraction, error) {
-	var value SurfaceInteraction
+func decodeSurfaceInteraction(payload string) (*models.SurfaceInteraction, error) {
+	var value models.SurfaceInteraction
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, fmt.Errorf("decode surface interaction: %w", err)
 	}
@@ -29,9 +31,9 @@ func latestSurfaceInteractionQuery(table string, acrossActors bool, placeholders
 	) latest WHERE position = 1 ORDER BY sequence ASC`
 }
 
-func scanSurfaceInteractions(rows *sql.Rows) ([]*SurfaceInteraction, error) {
+func scanSurfaceInteractions(rows *sql.Rows) ([]*models.SurfaceInteraction, error) {
 	defer rows.Close()
-	result := make([]*SurfaceInteraction, 0)
+	result := make([]*models.SurfaceInteraction, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
