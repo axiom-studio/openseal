@@ -2,7 +2,7 @@
 #
 # Put a Go toolchain on PATH and pin it to the version go.mod names.
 #
-# This lives in a script rather than inline in release.yml because both the
+# This script is shared by the release workflow's
 # binary job and the desktop job need it and the two inline copies had already
 # drifted: one carried an explanation of GOTOOLCHAIN, the other only the
 # assertion. A single copy cannot drift.
