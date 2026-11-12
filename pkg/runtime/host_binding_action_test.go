@@ -73,7 +73,7 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	allow := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only"}, nil
 	})
-	coordinator := NewActionCoordinator(store, store, durableCatalog{catalog}, allow)
+	coordinator := NewActionCoordinator(store, store, durableCatalog{catalog}, allow, nil)
 	propose := func(run *AgentRun, key string) (*ActionProposalResult, error) {
 		return coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 			Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", BindingID: "mcp:linear", BindingRevision: 1,
@@ -221,7 +221,7 @@ func TestRoutineGrantsCoverHostBindingTools(t *testing.T) {
 	if pin := activation.Task.Grants[0].ToolArguments; pin["hash"] != "linear-create_issue" {
 		t.Fatalf("pin = %#v", pin)
 	}
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy())
+	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
 	occurrence := f.routineOccurrence(t, activation, "host-occurrence")
 	allowed[occurrence.ID] = true
 	proposeCreateIssue := func(run *AgentRun, toolCallID string) (*ActionProposalResult, error) {

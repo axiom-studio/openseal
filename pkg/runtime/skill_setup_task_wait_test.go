@@ -165,7 +165,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(t.Context(), ProposeActionRequest{
+	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(t.Context(), ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: step.ID, WorkerID: "setup-worker", DeploymentID: run.AssignedAgentID,
 		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
 		Arguments: arguments,

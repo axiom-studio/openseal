@@ -120,7 +120,7 @@ func TestRoutineGrantCoversOnlyTheGrantedBindingTool(t *testing.T) {
 	f.withBindingTools(t)
 	activation, _ := f.createRoutine(t, map[string]interface{}{"action": "mcp.github.create_issue"})
 	f.reviewEverything(t, activation)
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy())
+	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
 
 	cases := []struct {
 		name, slug, action, tool string
@@ -169,7 +169,7 @@ func TestRoutineGrantPinsTheApprovedTool(t *testing.T) {
 	if pin := activation.Task.Grants[0].ToolArguments; !reflect.DeepEqual(pin, map[string]interface{}{"tool": "create_issue", "hash": "github-create_issue"}) {
 		t.Fatalf("stored pin = %#v", pin)
 	}
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy())
+	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
 	if result := f.proposeTool(t, coordinator, f.routineOccurrence(t, activation, "pinned"), "github", "call", "create_issue", "pinned"); result.Approval != nil {
 		t.Fatal("the approved tool asked")
 	}

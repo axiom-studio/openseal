@@ -421,7 +421,7 @@ func (f *loopFixture) coordinator() *ConversationCoordinator {
 func (f *loopFixture) build() {
 	f.t.Helper()
 	policy := ActionPolicyEvaluatorFunc(f.policy.evaluate)
-	f.actions = NewActionCoordinator(f.store, f.store, f.catalog, policy)
+	f.actions = NewActionCoordinator(f.store, f.store, f.catalog, policy, nil)
 	f.actions.now = f.clock.Now
 	f.approve = NewApprovalCoordinator(f.store, f.store, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }))
 	f.approve.now = f.clock.Now

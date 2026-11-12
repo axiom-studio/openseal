@@ -93,7 +93,7 @@ func skillUpgradeDrainFixture(t *testing.T, store KernelStore) (*skill.Catalog, 
 	}
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-	}))
+	}), nil)
 	proposal, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "chat-worker", DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "follow-up", SkillVersion: "1.0.0", Action: "read", Arguments: map[string]interface{}{}, Summary: "Read messages"}, "read"))
 	if err != nil {
 		t.Fatal(err)

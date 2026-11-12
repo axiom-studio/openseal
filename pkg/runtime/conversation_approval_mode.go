@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -52,12 +53,12 @@ type ConversationApprovalModeService struct {
 	newID         func() string
 }
 
-func NewConversationApprovalModeService(store ConversationApprovalModeKernelStore) *ConversationApprovalModeService {
+func NewConversationApprovalModeService(store ConversationApprovalModeKernelStore, opts ...models.ServiceOption) *ConversationApprovalModeService {
 	return &ConversationApprovalModeService{
 		conversations: store, modes: store, actions: store, runs: store,
 		// Approval modes never approve an agent-builder card (D11): those
 		// actions are Review always, and the coordinator refuses the approve.
-		approvals: NewApprovalCoordinator(store, store, nil), now: time.Now, newID: uuid.NewString,
+		approvals: NewApprovalCoordinator(store, store, nil, opts...), now: models.ClockFrom(opts), newID: uuid.NewString,
 	}
 }
 

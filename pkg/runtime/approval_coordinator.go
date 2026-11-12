@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -116,17 +117,8 @@ type ApprovalCoordinator struct {
 	newID     func() string
 }
 
-func NewApprovalCoordinator(portfolio PortfolioStore, actions ActionStore, authorizer ApprovalAuthorizer) *ApprovalCoordinator {
-	return newApprovalCoordinatorWithClock(portfolio, actions, authorizer, time.Now)
-}
-
-// newApprovalCoordinatorWithClock is NewApprovalCoordinator stamping times
-// with now (nil: time.Now).
-func newApprovalCoordinatorWithClock(portfolio PortfolioStore, actions ActionStore, authorizer ApprovalAuthorizer, now func() time.Time) *ApprovalCoordinator {
-	if now == nil {
-		now = time.Now
-	}
-	return &ApprovalCoordinator{portfolio: portfolio, actions: actions, authorize: authorizer, now: now, newID: uuid.NewString}
+func NewApprovalCoordinator(portfolio PortfolioStore, actions ActionStore, authorizer ApprovalAuthorizer, opts ...models.ServiceOption) *ApprovalCoordinator {
+	return &ApprovalCoordinator{portfolio: portfolio, actions: actions, authorize: authorizer, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
 type approvalResolutionKind int

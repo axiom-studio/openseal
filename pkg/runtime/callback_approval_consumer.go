@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ApprovalCallbackConsumer applies one verified approval decision to the
@@ -27,12 +28,9 @@ type ApprovalCallbackConsumer struct {
 func NewApprovalCallbackConsumer(store interface {
 	PortfolioStore
 	ActionStore
-}, transport ...*ExternalConversationTransportService) *ApprovalCallbackConsumer {
-	consumer := &ApprovalCallbackConsumer{store: store, now: time.Now}
+}, transport *ExternalConversationTransportService, opts ...models.ServiceOption) *ApprovalCallbackConsumer {
+	consumer := &ApprovalCallbackConsumer{store: store, transport: transport, now: models.ClockFrom(opts)}
 	consumer.notifications, _ = store.(ApprovalNotificationStore)
-	if len(transport) > 0 {
-		consumer.transport = transport[0]
-	}
 	return consumer
 }
 
@@ -82,7 +80,7 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	}
 	// EligibleApprovalAuthorizer is no AgentBuilderApprovalAuthorizer, so a
 	// callback can reject but never approve an agent-builder card (D11).
-	coordinator := newApprovalCoordinatorWithClock(c.store, c.store, EligibleApprovalAuthorizer{}, c.now)
+	coordinator := NewApprovalCoordinator(c.store, c.store, EligibleApprovalAuthorizer{}, models.WithClock(c.now))
 	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: event.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
 		DecisionID: event.ID, Decision: ApprovalDecision(decision),

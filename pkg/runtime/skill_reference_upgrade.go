@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -53,8 +54,8 @@ type SkillReferenceUpgradeService struct {
 	now     func() time.Time
 }
 
-func NewSkillReferenceUpgradeService(store SkillReferenceUpgradeStore, catalog *skill.Catalog) *SkillReferenceUpgradeService {
-	return &SkillReferenceUpgradeService{store: store, catalog: catalog, now: time.Now}
+func NewSkillReferenceUpgradeService(store SkillReferenceUpgradeStore, catalog *skill.Catalog, opts ...models.ServiceOption) *SkillReferenceUpgradeService {
+	return &SkillReferenceUpgradeService{store: store, catalog: catalog, now: models.ClockFrom(opts)}
 }
 
 func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillReferenceUpgradeRequest) (*SkillReferenceUpgradePlan, error) {

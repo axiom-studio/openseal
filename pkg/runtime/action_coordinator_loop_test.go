@@ -37,7 +37,7 @@ func newLoopProposeFixture(t *testing.T, store KernelStore, mutate func(*CreateA
 	f.coordinator = NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		f.evaluations++
 		return f.decision, nil
-	}), validators...)
+	}), validators)
 	f.coordinator.now = func() time.Time { return now.Add(time.Second) }
 	return f
 }
@@ -531,7 +531,7 @@ func TestLoopProposePersonCredentialApproverIsActingUser(t *testing.T) {
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
-	}))
+	}), nil)
 	coordinator.now = func() time.Time { return now }
 	proposal, err := coordinator.Propose(context.Background(), loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "release-agent",

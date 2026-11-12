@@ -133,7 +133,7 @@ func newNestedActionFixtureWith(t *testing.T, store KernelStore, definition *ski
 			EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	coordinator := NewActionCoordinator(store, store, catalog, policy)
+	coordinator := NewActionCoordinator(store, store, catalog, policy, nil)
 	coordinator.now = func() time.Time { return now.Add(time.Second) }
 	fixture := &nestedActionFixture{store: store, scope: scope, now: now, run: run, turn: turn, catalog: catalog, coordinator: coordinator, binding: binding}
 	fixture.closeTurn = coordinator.OpenNestedActionTurn(run, turn, binding)

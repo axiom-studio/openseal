@@ -285,7 +285,7 @@ func TestRoutineRunsPerformGrantedActionsWithoutAsking(t *testing.T) {
 	activation, _ := f.createRoutine(t, map[string]interface{}{"action": "mail.send", "label": "Email you the summary", "toOwnerOnly": true})
 	// Manual review in the chat does not stop what the brief approved.
 	f.reviewEverything(t, activation)
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy())
+	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
 	coordinator.SetRoutineOwnerAddresses(f.owners)
 
 	cases := []struct {
@@ -325,7 +325,7 @@ func TestRoutineGrantWithoutOwnerLimitAndRevoke(t *testing.T) {
 	f := routineGrantFixture(t)
 	activation, _ := f.createRoutine(t, map[string]interface{}{"action": "mail.note"})
 	f.reviewEverything(t, activation)
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy())
+	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
 	run := f.routineOccurrence(t, activation, "before-revoke")
 	if result := f.propose(t, coordinator, run, "note", "note-before", map[string]interface{}{}); result.Approval != nil {
 		t.Fatal("granted note asked")

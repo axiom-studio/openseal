@@ -285,7 +285,7 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 	loop := newLoopProposalFixture(t, f.store, root, "worker", time.Now().UTC())
 	coordinator := NewActionCoordinator(f.store, f.store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
-	}))
+	}), nil)
 	proposal, err := coordinator.Propose(t.Context(), loop.request(ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed report"}, Summary: "Send reviewed report",

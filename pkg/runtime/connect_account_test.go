@@ -72,7 +72,7 @@ func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catal
 			return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
 		})
 	}
-	coordinator := NewActionCoordinator(store, store, catalog, policy)
+	coordinator := NewActionCoordinator(store, store, catalog, policy, nil)
 	coordinator.now = func() time.Time { return now }
 	proposal, err := coordinator.Propose(context.Background(), ProposeActionRequest{
 		Scope: scope, RunID: run.ID, TurnID: stepID, WorkerID: "agent-worker", DeploymentID: "release-agent",

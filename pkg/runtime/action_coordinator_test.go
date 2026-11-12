@@ -38,7 +38,7 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 			ApprovalTimeout: ApprovalTimeoutApprove,
 		}, nil
 	})
-	coordinator := NewActionCoordinator(store, store, catalog, policy)
+	coordinator := NewActionCoordinator(store, store, catalog, policy, nil)
 	coordinator.now = func() time.Time { return now.Add(time.Second) }
 	ids := []string{"call", "approval", "event"}
 	coordinator.newID = func() string {
@@ -106,7 +106,7 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 	decision := ActionDispositionAllow
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: decision, Reason: "test"}, nil
-	}))
+	}), nil)
 	coordinator.now = func() time.Time { return now.Add(time.Second) }
 	coordinator.newID = func() string { return "id-" + string(decision) }
 	base := ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy"}
@@ -148,7 +148,7 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		policyEvaluations++
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-	}))
+	}), nil)
 	identity := &ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}
 
 	firstRun := claimedActionRun(t, store, scope, time.Now().UTC(), "worker-one")
@@ -184,7 +184,7 @@ func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 	run := claimedActionRun(t, store, scope, time.Now().UTC(), "worker")
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-	}))
+	}), nil)
 	base := loopProposeRequest(ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "browser-agent", SkillID: "browser", SkillVersion: "1.0.0", Arguments: map[string]interface{}{}}, "operation-policy")
 	var rejection *ActionProposalRejection
 	forbidden := base

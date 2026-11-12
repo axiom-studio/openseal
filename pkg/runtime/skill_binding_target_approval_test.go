@@ -47,7 +47,7 @@ func targetedSkillCoordinator(t *testing.T, policy ActionPolicyEvaluator) (*skil
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	return f, claimed, NewActionCoordinator(f.store, f.store, f.catalog, policy, f.validator)
+	return f, claimed, NewActionCoordinator(f.store, f.store, f.catalog, policy, []ActionProposalValidator{f.validator})
 }
 
 func targetedSkillRequest(f *skillTargetFixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) ProposeActionRequest {

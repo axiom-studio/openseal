@@ -101,7 +101,7 @@ func proposeInteractionCall(t *testing.T, ctx context.Context, store *sqlite.Sto
 	}
 	f := newLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
 	validator, _ := NewSkillBindingActionValidator(catalog, store)
-	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, f.request(ProposeActionRequest{
+	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(ctx, f.request(ProposeActionRequest{
 		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: action, Arguments: arguments, Summary: "Ask the user"}, "interaction"))
 	if err != nil || proposal.Approval != nil || proposal.Call.Status != ActionCallStatusReady {
 		t.Fatalf("proposal: %#v %v", proposal, err)
@@ -236,7 +236,7 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	f := newLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
 	run := f.run
 	validator, _ := NewSkillBindingActionValidator(catalog, store)
-	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, f.request(ProposeActionRequest{
+	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(ctx, f.request(ProposeActionRequest{
 		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestCredential,
 		Arguments: map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}, "request-credential"))
 	if err != nil {

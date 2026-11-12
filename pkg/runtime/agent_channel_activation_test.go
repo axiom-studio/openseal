@@ -101,7 +101,7 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 		t.Fatal(err)
 	}
 	return &channelActionFixture{store: store, db: db, agents: agents, endpoints: endpoints, resolver: resolver, catalog: catalog, scope: scope, endpoint: endpoint, run: run,
-		coordinator: NewActionCoordinator(store, store, catalog, policy, validator), dispatcher: dispatcher}
+		coordinator: NewActionCoordinator(store, store, catalog, policy, []ActionProposalValidator{validator}), dispatcher: dispatcher}
 }
 
 func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{}) (*ActionProposalResult, error) {

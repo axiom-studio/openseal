@@ -37,7 +37,7 @@ func newRepeatExecFixture(t *testing.T) *repeatExecFixture {
 	if f.run.SessionID == "" {
 		t.Fatal("the Run has no session")
 	}
-	coordinator := NewActionCoordinator(store, store, nil, nil)
+	coordinator := NewActionCoordinator(store, store, nil, nil, nil)
 	coordinator.now = func() time.Time { return f.now }
 	return &repeatExecFixture{loopStoreFixture: f, sessions: store, coordinator: coordinator}
 }

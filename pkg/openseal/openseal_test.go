@@ -448,7 +448,7 @@ func loopBindingConfig(engine *Engine, host StepHost) (LoopBindingConfig, error)
 	}
 	tools, err := runtime.NewStepToolDispatcher(runtime.StepToolDispatcherConfig{
 		Sessions: store, Turns: store, Actions: store,
-		Coordinator: runtime.NewActionCoordinator(store, store, nil, nil),
+		Coordinator: runtime.NewActionCoordinator(store, store, nil, nil, nil),
 		Governed:    engine.GovernedTools(), Control: control,
 	})
 	if err != nil {

@@ -23,7 +23,7 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		prior := f.propose(f.loopCall("prior"))
-		coordinator := NewActionCoordinator(store, store, nil, nil)
+		coordinator := NewActionCoordinator(store, store, nil, nil, nil)
 		coordinator.now = func() time.Time { return f.now }
 
 		result, err := coordinator.RecordRefusedLoopCall(f.ctx, refusedLoopCallRequest(f, prior, RefusedLoopCallRepeat))
@@ -67,7 +67,7 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 func TestNewRefusedLoopCallDuplicateSuppressedSummary(t *testing.T) {
 	f := newLoopStoreFixture(t, newTestKernelStore(t))
 	prior := f.propose(f.loopCall("prior"))
-	coordinator := NewActionCoordinator(f.store, f.store, nil, nil)
+	coordinator := NewActionCoordinator(f.store, f.store, nil, nil, nil)
 	_, event, err := coordinator.NewRefusedLoopCall(refusedLoopCallRequest(f, prior, RefusedLoopCallDuplicateSuppressed))
 	if err != nil || event.Summary != "Already done; not repeated" {
 		t.Fatalf("event = %#v, %v", event, err)
@@ -87,7 +87,7 @@ func TestNewRefusedLoopCallDuplicateSuppressedSummary(t *testing.T) {
 func TestRefusedLoopCallRequiresLiveLease(t *testing.T) {
 	f := newLoopStoreFixture(t, newTestKernelStore(t))
 	prior := f.propose(f.loopCall("prior"))
-	coordinator := NewActionCoordinator(f.store, f.store, nil, nil)
+	coordinator := NewActionCoordinator(f.store, f.store, nil, nil, nil)
 	req := refusedLoopCallRequest(f, prior, RefusedLoopCallRepeat)
 	req.Lease = &AgentRunLeaseGuard{WorkerID: "other-worker", Now: f.now}
 	if _, err := coordinator.RecordRefusedLoopCall(f.ctx, req); !errors.Is(err, ErrLeaseLost) {

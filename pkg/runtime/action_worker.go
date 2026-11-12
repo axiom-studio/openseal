@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/google/uuid"
@@ -129,12 +130,12 @@ type ActionWorker struct {
 	loopLease time.Duration
 }
 
-func NewActionWorker(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher) *ActionWorker {
-	return &ActionWorker{store: store, catalog: catalog, credentials: credentials, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString, teams: teamRosterReader(store)}
+func NewActionWorker(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher, opts ...models.ServiceOption) *ActionWorker {
+	return &ActionWorker{store: store, catalog: catalog, credentials: credentials, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString, teams: teamRosterReader(store)}
 }
 
-func NewActionWorkerWithCredentialLeaseIssuer(store KernelStore, catalog ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher) *ActionWorker {
-	return &ActionWorker{store: store, catalog: catalog, leaseIssuer: issuer, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString, teams: teamRosterReader(store)}
+func NewActionWorkerWithCredentialLeaseIssuer(store KernelStore, catalog ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, opts ...models.ServiceOption) *ActionWorker {
+	return &ActionWorker{store: store, catalog: catalog, leaseIssuer: issuer, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString, teams: teamRosterReader(store)}
 }
 
 // ErrLoopActionNotClaimable is returned by ExecuteOwnLoopCall when the call is

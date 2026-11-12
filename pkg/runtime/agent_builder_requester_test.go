@@ -35,7 +35,7 @@ func TestAgentBuilderCardIsDecidedByTheRequester(t *testing.T) {
 		}
 		policy := NewDefaultActionPolicy()
 		policy.Approvers = []ApprovalPrincipal{{Type: "user", ID: "operator"}}
-		coordinator := NewActionCoordinator(store, store, fixture.catalog, policy, fixture.validator)
+		coordinator := NewActionCoordinator(store, store, fixture.catalog, policy, []ActionProposalValidator{fixture.validator})
 		create := agentBuilderCreateArguments()
 		create["spaceId"] = fixture.salesID
 		result, err := coordinator.Propose(ctx, agentBuilderApprovalRequest(fixture, run, AgentActionCreateAgent, create, "requester-"+tc.actingUser))

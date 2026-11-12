@@ -215,7 +215,7 @@ func createActionPoolWork(t *testing.T, store KernelStore, catalog *skill.Catalo
 	}
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-	}))
+	}), nil)
 	coordinator.now = func() time.Time { return now.Add(time.Second) }
 	proposal, err := coordinator.Propose(t.Context(), ProposeActionRequest{
 		Scope: scope, RunID: claimed.ID, TurnID: step.ID, WorkerID: "agent-worker", DeploymentID: "release-agent", Origin: ActionOriginVM, OriginRef: "command-1",

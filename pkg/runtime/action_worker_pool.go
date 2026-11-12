@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"go.uber.org/zap"
 )
 
@@ -60,18 +61,18 @@ type ActionWorkerPool struct {
 	now       func() time.Time
 }
 
-func NewActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig) (*ActionWorkerPool, error) {
-	return newActionWorkerPool(store, catalog, credentials, nil, dispatcher, logger, config)
+func NewActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+	return newActionWorkerPool(store, catalog, credentials, nil, dispatcher, logger, config, opts...)
 }
 
-func NewActionCredentialLeaseWorkerPool(store KernelStore, catalog ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig) (*ActionWorkerPool, error) {
+func NewActionCredentialLeaseWorkerPool(store KernelStore, catalog ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
 	if issuer == nil {
 		return nil, errors.New("action credential lease issuer is required")
 	}
-	return newActionWorkerPool(store, catalog, nil, issuer, dispatcher, logger, config)
+	return newActionWorkerPool(store, catalog, nil, issuer, dispatcher, logger, config, opts...)
 }
 
-func newActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig) (*ActionWorkerPool, error) {
+func newActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
 	if store == nil || catalog == nil || dispatcher == nil {
 		return nil, errors.New("action store, catalog, and dispatcher are required")
 	}
@@ -81,11 +82,11 @@ func newActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, cred
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	worker := NewActionWorker(store, catalog, credentials, dispatcher)
+	worker := NewActionWorker(store, catalog, credentials, dispatcher, opts...)
 	if issuer != nil {
-		worker = NewActionWorkerWithCredentialLeaseIssuer(store, catalog, issuer, dispatcher)
+		worker = NewActionWorkerWithCredentialLeaseIssuer(store, catalog, issuer, dispatcher, opts...)
 	}
-	pool := &ActionWorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1), poll: newWorkerPollSignal(), now: time.Now}
+	pool := &ActionWorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1), poll: newWorkerPollSignal(), now: models.ClockFrom(opts)}
 	pool.deadlines, _ = store.(ActionDeadlineStore)
 	pool.activity.touch()
 	worker.onClaim = pool.requestClaim

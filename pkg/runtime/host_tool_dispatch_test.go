@@ -52,7 +52,7 @@ type hostToolDispatchFixture struct {
 }
 
 func newHostToolDispatchFixture(replies ...func(context.Context, HostToolRequest) (HostToolResult, error)) *hostToolDispatchFixture {
-	f := &hostToolDispatchFixture{host: &fakeHostToolHost{replies: replies}, actions: NewActionCoordinator(nil, nil, nil, nil)}
+	f := &hostToolDispatchFixture{host: &fakeHostToolHost{replies: replies}, actions: NewActionCoordinator(nil, nil, nil, nil, nil)}
 	f.dispatcher = NewHostToolDispatcher(f.host, f.actions, nil)
 	f.dispatcher.sleep = func(ctx context.Context, wait time.Duration) error {
 		f.slept = append(f.slept, wait)

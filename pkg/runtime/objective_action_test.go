@@ -55,7 +55,7 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 				t.Fatal(err)
 			}
 			f := newLoopProposalFixture(t, store, claimed, "conversation-worker", time.Now().UTC())
-			coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
+			coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
 			proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
 				DeploymentID: owner.ID,
 				SkillID:      ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionCreate,
@@ -117,7 +117,7 @@ func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeA
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	validator, _ := NewObjectiveActionValidator(store)
-	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
+	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
 	base := loopProposeRequest(ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionCreate, IdempotencyKey: "create"}, "create")
 	base.Arguments = map[string]interface{}{"title": "Campaign", "goal": "Launch campaign", "owner": map[string]interface{}{"type": "team", "id": "finance"}}
 	if _, err := coordinator.Propose(ctx, base); err == nil {
@@ -163,7 +163,7 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 	}
 	validator, _ := NewObjectiveActionValidator(store)
 	f := newLoopProposalFixture(t, store, claimed, "worker", time.Now().UTC())
-	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
+	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
 	proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionPause, Arguments: map[string]interface{}{"objectiveId": objective.ID}, IdempotencyKey: "pause-on-request", Summary: "Pause objective: Watch production"}, "pause-on-request"))
 	if err != nil {
 		t.Fatal(err)

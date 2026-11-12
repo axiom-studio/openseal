@@ -31,7 +31,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := NewActionCoordinator(store, store, catalog, policy, validator)
+	coordinator := NewActionCoordinator(store, store, catalog, policy, []ActionProposalValidator{validator})
 	f := newLoopProposalFixture(t, store, createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-upsert"), "worker-upsert", time.Now().UTC())
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	// A person connects the account; the model may only change the rest.
@@ -166,7 +166,7 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
+	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
 	f := newLoopProposalFixture(t, store, createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-discover"), "worker-discover", time.Now().UTC())
 	proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
 		DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionDiscoverBinding,

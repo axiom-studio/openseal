@@ -22,7 +22,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 	person := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
 	coordinator := NewActionCoordinator(f.store, f.store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
-	}))
+	}), nil)
 	waiting := func(agentID string, trigger *ChannelMessage) *ActionProposalResult {
 		created, err := f.scheduler.runs.CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: scope, Kind: RunKindConversation, Owner: team.Owner, AssignedAgentID: agentID,

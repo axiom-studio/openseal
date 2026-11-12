@@ -153,7 +153,7 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	validator, _ := NewSkillBindingActionValidator(catalog, store)
-	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
+	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
 	step, err := NewAgentTurnService(store, store).BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: run.ID, SessionID: run.SessionID, Producer: StepProducerModel, WorkerID: "worker", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatal(err)

@@ -178,7 +178,7 @@ func TestActionRuntimeMaintenanceCoordinatorRejectsBeforeCatalogAndPolicy(t *tes
 		coordinator := NewActionCoordinator(kernel, kernel, &actionLifecycleCountingCatalog{ActionExecutionCatalog: fixture.catalog, calls: &catalogCalls}, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 			policyCalls++
 			return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-		}))
+		}), nil)
 		coordinator.now = func() time.Time { return fixture.now.Add(time.Second) }
 		result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 			Scope: before.Scope, RunID: before.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,

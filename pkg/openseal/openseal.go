@@ -3179,7 +3179,7 @@ func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
 }
 
 func (e *Engine) rebuildGovernance() {
-	e.actions = runtime.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy, e.actionValidators...)
+	e.actions = runtime.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy, e.actionValidators)
 	e.actions.SetRoutineOwnerAddresses(e.routineOwnerAddresses)
 	e.approvals = runtime.NewApprovalCoordinator(e.store, e.store, e.approvalAuth)
 }

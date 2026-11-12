@@ -60,7 +60,7 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 			Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
-	}))
+	}), nil)
 	proposal, err := coordinator.Propose(ctx, loop.request(ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "child-action",
@@ -113,7 +113,7 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 			Disposition: ActionDispositionRequireApproval, Reason: "human review is required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
-	}))
+	}), nil)
 	coordinator.now = func() time.Time { return now }
 	proposal, err := coordinator.Propose(ctx, loop.request(ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0", Action: "reply",

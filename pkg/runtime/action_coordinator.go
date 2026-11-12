@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -139,11 +140,11 @@ type ActionCoordinator struct {
 	nestedMaxCalls, nestedMaxConcurrent int
 }
 
-func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators ...ActionProposalValidator) *ActionCoordinator {
+func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators []ActionProposalValidator, opts ...models.ServiceOption) *ActionCoordinator {
 	portable := []ActionProposalValidator{KernelResolvedActionArgumentResolver{}, BindingActionArgumentResolver{}, EmbedSessionActionAuthorityValidator{}, RequiredActionEvidenceValidator{}, ObservationRefActionProposalValidator{}}
 	portable = append(portable, validators...)
 	coordinator := &ActionCoordinator{
-		portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: time.Now, newID: uuid.NewString,
+		portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: models.ClockFrom(opts), newID: uuid.NewString,
 		nestedMaxCalls: MaxNestedActionCallsPerTurn, nestedMaxConcurrent: MaxConcurrentNestedActionCalls,
 	}
 	// Conversation approval modes are read from the same kernel store when it

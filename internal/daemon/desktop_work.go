@@ -121,7 +121,7 @@ func desktopLoopBindingConfig(engine DesktopKernel, content runtime.ArtifactCont
 		Sessions: store, Turns: store, Actions: store,
 		// Only the refused row of a repeat refusal goes through this
 		// coordinator; proposals go through the engine's.
-		Coordinator: runtime.NewActionCoordinator(store, store, nil, nil),
+		Coordinator: runtime.NewActionCoordinator(store, store, nil, nil, nil),
 		Governed:    engine.GovernedTools(), Control: control, Logger: logger,
 	})
 	if err != nil {

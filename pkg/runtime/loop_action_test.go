@@ -80,13 +80,13 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 			return decision, nil
 		}
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-	}), proposalValidatorFunc(func(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+	}), []ActionProposalValidator{proposalValidatorFunc(func(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
 		f.validations++
 		if f.validate != nil {
 			return nil, f.validate(input)
 		}
 		return nil, nil
-	}))
+	})})
 	coordinator.now = now
 	f.actions = coordinator
 	f.approvals = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})

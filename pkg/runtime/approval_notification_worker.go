@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type ApprovalNotificationWorker struct {
@@ -218,7 +219,7 @@ func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval
 func (w *ApprovalNotificationWorker) resolveTimeout(ctx context.Context, approval *ApprovalCheckpoint, now time.Time) error {
 	// The timeout rule never approves an agent-builder card (D11): the
 	// coordinator expires it whatever its TimeoutDecision says.
-	coordinator := newApprovalCoordinatorWithClock(w.store, w.store, EligibleApprovalAuthorizer{}, func() time.Time { return now })
+	coordinator := NewApprovalCoordinator(w.store, w.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now }))
 	resolved, err := coordinator.ResolveTimeout(ctx, approval.Scope, approval.ID, approval.Revision, approval.ID)
 	if err != nil {
 		return err

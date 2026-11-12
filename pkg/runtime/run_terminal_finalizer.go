@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -43,8 +44,8 @@ type ActionRunTerminalFinalizer struct {
 	newID      func() string
 }
 
-func NewActionRunTerminalFinalizer(store KernelStore, catalog ActionExecutionCatalog, dispatcher ActionDispatcher) *ActionRunTerminalFinalizer {
-	return &ActionRunTerminalFinalizer{store: store, catalog: catalog, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString}
+func NewActionRunTerminalFinalizer(store KernelStore, catalog ActionExecutionCatalog, dispatcher ActionDispatcher, opts ...models.ServiceOption) *ActionRunTerminalFinalizer {
+	return &ActionRunTerminalFinalizer{store: store, catalog: catalog, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
 func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *AgentRun) error {

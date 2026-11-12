@@ -30,7 +30,7 @@ func agentBuilderApprovalCoordinator(t *testing.T, policy ActionPolicyEvaluator,
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	coordinator := NewActionCoordinator(store, store, fixture.catalog, policy, fixture.validator)
+	coordinator := NewActionCoordinator(store, store, fixture.catalog, policy, []ActionProposalValidator{fixture.validator})
 	coordinator.now = func() time.Time { return now }
 	return fixture, store, claimed, coordinator
 }
@@ -171,7 +171,7 @@ func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
 	}
 
 	// A create_team card gets the same policy as an agent card.
-	coordinator := NewActionCoordinator(newTestKernelStore(t), newTestKernelStore(t), skill.NewCatalog(), NewDefaultActionPolicy())
+	coordinator := NewActionCoordinator(newTestKernelStore(t), newTestKernelStore(t), skill.NewCatalog(), NewDefaultActionPolicy(), nil)
 	coordinator.newID = func() string { return "approval-team" }
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	team := bound(TeamManagementSkillID, "create_team")

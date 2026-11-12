@@ -45,7 +45,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 			EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	coordinator := NewActionCoordinator(store, store, catalog, policy, validator)
+	coordinator := NewActionCoordinator(store, store, catalog, policy, []ActionProposalValidator{validator})
 	arguments := map[string]interface{}{
 		"memberId": "ux-reviewer", "expectedDeploymentRevision": 1, "channelParticipation": "active",
 	}

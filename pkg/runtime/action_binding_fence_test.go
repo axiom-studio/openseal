@@ -101,7 +101,7 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 				}
 				coordinator := NewActionCoordinator(fixture.store, intercepted, fixture.catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 					return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-				}))
+				}), nil)
 				coordinator.now = func() time.Time { return fixture.now.Add(time.Second) }
 				result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
@@ -228,7 +228,7 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 				defer proposals.Done()
 				coordinator := NewActionCoordinator(fixture.store, fixture.store, fixture.catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 					return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-				}))
+				}), nil)
 				coordinator.now = func() time.Time { return fixture.now.Add(time.Second) }
 				<-start
 				outcomes[index], failures[index] = coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
