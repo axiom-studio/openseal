@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
@@ -27,7 +28,7 @@ func TestAskUserAnswerResumesWithAnswerAndConsumesIntervention(t *testing.T) {
 			t.Fatalf("receipt not bound to the ask_user step: %#v", receipt)
 		}
 		result, claimed := call.resume(t)
-		if !result.Resolved || result.Result.Kind != ControlContinue || call.entry.State != ToolEntryCompleted {
+		if !result.Resolved || result.Result.Kind != control.ControlContinue || call.entry.State != ToolEntryCompleted {
 			t.Fatalf("resume = %#v", result)
 		}
 		value := askUserResultValue(t, call.entry)
@@ -44,7 +45,7 @@ func TestAskUserAnswerResumesWithAnswerAndConsumesIntervention(t *testing.T) {
 		again := newAskUserCall(t, store, claimed, "foreground-worker", askUserTestQuestion)
 		refused := again.settle(t)
 		value = askUserResultValue(t, refused.Entry)
-		if refused.Kind != ControlContinue || refused.Entry.State != ToolEntryError || value["error"] != "already_asked" ||
+		if refused.Kind != control.ControlContinue || refused.Entry.State != ToolEntryError || value["error"] != "already_asked" ||
 			!strings.Contains(value["message"].(string), "The pricing page.") {
 			t.Fatalf("repeat = %#v %#v", refused, value)
 		}

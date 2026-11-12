@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
@@ -54,7 +55,7 @@ func (p *runStartPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput
 	}
 	var notes []*SessionEntry
 	if p.actions != nil && newGovernedEvidence(in.Path, run.ID) {
-		views, err := LoadGovernedToolViews(ctx, p.actions, run.Scope, in.Path, run.ID)
+		views, err := control.LoadGovernedToolViews(ctx, p.actions, run.Scope, in.Path, run.ID)
 		if err != nil {
 			return nil, fmt.Errorf("run start: load governed history: %w", err)
 		}
@@ -141,16 +142,16 @@ func newGovernedEvidence(path *AgentSessionPath, runID string) bool {
 
 // rateLimitedSourceNote follows browserSourceRateLimited: the newest Lightpanda
 // call decides; a success clears, a typed source_* failure sets or clears.
-func rateLimitedSourceNote(run *AgentRun, sessionID string, step *AgentTurn, views []GovernedToolView) *SessionEntry {
+func rateLimitedSourceNote(run *AgentRun, sessionID string, step *AgentTurn, views []control.GovernedToolView) *SessionEntry {
 	for index := len(views) - 1; index >= 0; index-- {
 		view := views[index]
-		if view.SkillID != LightpandaBrowserSkillID {
+		if view.SkillID != control.LightpandaBrowserSkillID {
 			continue
 		}
 		if view.Status == string(ActionCallStatusSucceeded) {
 			return nil
 		}
-		limited, relevant := TypedSourceFailure(view)
+		limited, relevant := control.TypedSourceFailure(view)
 		if !relevant {
 			continue
 		}
@@ -158,7 +159,7 @@ func rateLimitedSourceNote(run *AgentRun, sessionID string, step *AgentTurn, vie
 			return nil
 		}
 		return runStartNote(run, sessionID, step, RateLimitedSourceKey(run.ID, view.ActionCallID), NoteRateLimitedSource,
-			LiveBrowserRateLimitedError, map[string]string{"actionCallId": view.ActionCallID, "code": LiveBrowserRateLimitedCode})
+			control.LiveBrowserRateLimitedError, map[string]string{"actionCallId": view.ActionCallID, "code": control.LiveBrowserRateLimitedCode})
 	}
 	return nil
 }
@@ -166,8 +167,8 @@ func rateLimitedSourceNote(run *AgentRun, sessionID string, step *AgentTurn, vie
 // runStartSetupPendingNote follows pendingSkillSetupID and builds the same
 // entry as pendingSkillSetupNote (id, source key, text, data), for foreground
 // Runs only.
-func runStartSetupPendingNote(run *AgentRun, sessionID string, step *AgentTurn, views []GovernedToolView) *SessionEntry {
-	if IsBackgroundTaskRun(run) {
+func runStartSetupPendingNote(run *AgentRun, sessionID string, step *AgentTurn, views []control.GovernedToolView) *SessionEntry {
+	if control.IsBackgroundTaskRun(run) {
 		return nil
 	}
 	for index := len(views) - 1; index >= 0; index-- {
@@ -176,12 +177,12 @@ func runStartSetupPendingNote(run *AgentRun, sessionID string, step *AgentTurn, 
 			view.Action != agentrun.SkillActionRequestSetup && view.Action != skillbinding.SkillActionListSetupRequests {
 			continue
 		}
-		id := PendingSetupRequestID(run, view, run.PendingInterventions)
+		id := control.PendingSetupRequestID(run, view, run.PendingInterventions)
 		if id == "" || view.ActionCallID == "" {
 			return nil
 		}
-		return runStartNote(run, sessionID, step, SkillSetupPendingSourceKey(run.ID, id), NoteSetupPending,
-			SkillSetupPendingNote, map[string]string{"requestId": id, "actionCallId": view.ActionCallID})
+		return runStartNote(run, sessionID, step, control.SkillSetupPendingSourceKey(run.ID, id), NoteSetupPending,
+			control.SkillSetupPendingNote, map[string]string{"requestId": id, "actionCallId": view.ActionCallID})
 	}
 	return nil
 }

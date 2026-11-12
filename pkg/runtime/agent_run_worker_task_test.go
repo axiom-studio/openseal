@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
@@ -71,7 +72,7 @@ func answerStep(text string) agentrun.StepOutput {
 func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTaskKernelStore, producer agentrun.StepProducer) TurnRunnerResolverFunc {
 	t.Helper()
 	activity := NewRunActivityService(store, store)
-	control := &ControlExecutor{
+	control := &runtimecontrol.ControlExecutor{
 		Portfolio: store, Sessions: store, Activity: activity, Conversations: conversation.NewConversationService(store),
 		Reporting: store, Tasks: conversationrun.NewConversationTaskService(tasks),
 	}
@@ -84,7 +85,7 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTas
 		if err != nil {
 			return nil, err
 		}
-		authority, err := ResolveControlAuthority(ctx, ControlAuthorityInput{
+		authority, err := runtimecontrol.ResolveControlAuthority(ctx, runtimecontrol.ControlAuthorityInput{
 			Run: run, DeploymentID: run.AssignedAgentID, ConversationTasks: store, Runs: store, Conversations: store,
 		})
 		if err != nil {

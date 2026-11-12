@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 )
 
 // Crash-resume scenarios of the run loop (D14, SPEC §3.7, section 02 §8).
@@ -156,7 +157,7 @@ func (x *resumeTools) run(ctx context.Context, in agentrun.StepToolsInput, entri
 		if entry == nil || entry.Tool == nil || !entry.State.Open() {
 			continue
 		}
-		if IsFinalTool(ControlToolName(entry.Tool.Name)) {
+		if control.IsFinalTool(ControlToolName(entry.Tool.Name)) {
 			if inline {
 				return agentrun.StepToolsOutcome{SettlePending: true}, nil
 			}
@@ -297,8 +298,8 @@ func newResumeHarness(t *testing.T, raw KernelStore, budget *BudgetPolicy, stepL
 	h.runID = run.ID
 	loop, err := NewRunLoop(h.store, nil, nil, RunLoopConfig{
 		StepLeaseDuration: stepLease, Now: h.clock.Now, PlanToolEntries: h.tools.plan,
-		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (ControlResult, error) {
-			return ControlResult{Kind: ControlFinal, Final: &agentrun.FinalAnswer{
+		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (control.ControlResult, error) {
+			return control.ControlResult{Kind: control.ControlFinal, Final: &agentrun.FinalAnswer{
 				StepID: cc.Step.ID, PlainText: true, Answer: text, Output: map[string]interface{}{"summary": text},
 			}}, nil
 		},

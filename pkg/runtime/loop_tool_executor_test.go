@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -27,8 +28,8 @@ type loopFakeControlHandler struct {
 	calls int
 }
 
-func (h *loopFakeControlHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
-	return ControlToolSpec{Description: "fake", InputSchema: map[string]interface{}{"type": "object"}}
+func (h *loopFakeControlHandler) Spec(agentrun.ControlAuthority) control.ControlToolSpec {
+	return control.ControlToolSpec{Description: "fake", InputSchema: map[string]interface{}{"type": "object"}}
 }
 
 func (h *loopFakeControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
@@ -37,24 +38,24 @@ func (h *loopFakeControlHandler) Decode(raw json.RawMessage) (interface{}, error
 	}](raw)
 }
 
-func (h *loopFakeControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (h *loopFakeControlHandler) Run(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResult, error) {
 	h.calls++
 	result := models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{"status": "done"})
-	meta, err := json.Marshal(&ControlEntryMeta{Kind: cc.ToolName(), ForkID: "fork-" + cc.Entry.ID})
+	meta, err := json.Marshal(&control.ControlEntryMeta{Kind: cc.ToolName(), ForkID: "fork-" + cc.Entry.ID})
 	if err != nil {
-		return ControlResult{}, err
+		return control.ControlResult{}, err
 	}
 	now := x.Now()
 	moved, err := x.Sessions.TransitionToolEntry(ctx, ToolEntryTransitionRequest{
 		Scope: cc.Run.Scope, EntryID: cc.Entry.ID, RunID: cc.Run.ID, Lease: cc.LeaseGuard(now),
 		From: cc.Entry.State, ExpectedRevision: cc.Entry.Revision, To: ToolEntryCompleted,
 		Result: result, Kernel: &ToolEntryKernelPatch{Control: meta}, Now: now,
-		Tokens: modelstep.EstimateEntryTokens(WithToolResult(cc.Entry, ToolEntryCompleted, result)),
+		Tokens: modelstep.EstimateEntryTokens(control.WithToolResult(cc.Entry, ToolEntryCompleted, result)),
 	})
 	if err != nil {
-		return ControlResult{}, err
+		return control.ControlResult{}, err
 	}
-	return ControlResult{Kind: ControlContinue, Entry: moved.Entry}, nil
+	return control.ControlResult{Kind: control.ControlContinue, Entry: moved.Entry}, nil
 }
 
 // toolExecFixture is a claimed Run with a run session in an in-memory store and
@@ -68,15 +69,15 @@ type toolExecFixture struct {
 	now      time.Time
 	run      *AgentRun
 	host     *scriptedHost
-	control  *ControlExecutor
+	control  *control.ControlExecutor
 	handlers map[ControlToolName]*loopFakeControlHandler
 	binding  *agentrun.TurnRunnerBinding
 }
 
 // fakeLoopControls fakes every control tool of the run loop, except the
 // tools in real, which keep the handler given there.
-func fakeLoopControls(real ...Tool) (Registry, map[ControlToolName]*loopFakeControlHandler) {
-	registry := NewRegistry(real...)
+func fakeLoopControls(real ...control.Tool) (control.Registry, map[ControlToolName]*loopFakeControlHandler) {
+	registry := control.NewRegistry(real...)
 	fakes := map[ControlToolName]*loopFakeControlHandler{}
 	for name := range loopControlRegistry() {
 		if _, ok := registry[name]; !ok {
@@ -88,7 +89,7 @@ func fakeLoopControls(real ...Tool) (Registry, map[ControlToolName]*loopFakeCont
 }
 
 // newToolExecFixture fakes the control tools, except the tools in real.
-func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real ...Tool) *toolExecFixture {
+func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real ...control.Tool) *toolExecFixture {
 	t.Helper()
 	ctx := context.Background()
 	store := newTestKernelStore(t)
@@ -115,7 +116,7 @@ func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real 
 	f.run = f.currentRun()
 	registry, handlers := fakeLoopControls(real...)
 	f.handlers = handlers
-	f.control = &ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }}
+	f.control = &control.ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }}
 	f.control.UseTools(registry)
 	dispatcher, err := NewStepToolDispatcher(StepToolDispatcherConfig{
 		Sessions: store, Turns: store, Actions: store, Control: f.control,
@@ -447,7 +448,7 @@ func TestPlanToolEntriesRefusesUnusableArguments(t *testing.T) {
 	call.ArgumentsError = "unexpected end of JSON input"
 	step := f.step("step-1", AgentTurnStatusRunning, call)
 	entry := step.entries[0]
-	if entry.State != ToolEntryError || entry.Tool.Result.Status != ToolResultRefused || resultValue(t, entry)["error"] != ArgumentsInvalidCode {
+	if entry.State != ToolEntryError || entry.Tool.Result.Status != ToolResultRefused || resultValue(t, entry)["error"] != control.ArgumentsInvalidCode {
 		t.Fatalf("entry = %s %#v", entry.State, entry.Tool.Result)
 	}
 	out, err := f.binding.Tools.ExecuteStepTools(f.ctx, f.input(step))
@@ -465,13 +466,13 @@ type committedForkHandler struct {
 	settles int
 }
 
-func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (h *committedForkHandler) Run(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResult, error) {
 	h.settles++
 	key := "fork-" + cc.Entry.ID
 	h.groups[key]++
-	meta, err := json.Marshal(&ControlEntryMeta{Kind: ControlToolFork, ForkID: key, GroupID: key})
+	meta, err := json.Marshal(&control.ControlEntryMeta{Kind: ControlToolFork, ForkID: key, GroupID: key})
 	if err != nil {
-		return ControlResult{}, err
+		return control.ControlResult{}, err
 	}
 	now := x.Now()
 	moved, err := x.Sessions.TransitionToolEntry(ctx, ToolEntryTransitionRequest{
@@ -480,10 +481,10 @@ func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc a
 		Wait: &ToolEntryWait{GroupID: key}, Kernel: &ToolEntryKernelPatch{Control: meta}, Now: now,
 	})
 	if err != nil {
-		return ControlResult{}, err
+		return control.ControlResult{}, err
 	}
 	entry := moved.Entry
-	return ControlResult{Kind: ControlParked, Entry: entry, Park: &agentrun.LoopPark{
+	return control.ControlResult{Kind: control.ControlParked, Entry: entry, Park: &agentrun.LoopPark{
 		Status: AgentRunStatusWaitingForDependency, Wake: &WakeCondition{Type: "run_dependencies", Reference: key},
 		Summary: "Waiting for the branches", Committed: true,
 	}}, nil
@@ -496,7 +497,7 @@ func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc a
 // CTL-6b).
 func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 	fork := &committedForkHandler{groups: map[string]int{}}
-	f := newToolExecFixture(t, agentrun.ControlAuthority{ForkAllowed: true}, NewTool(ControlToolFork, fork))
+	f := newToolExecFixture(t, agentrun.ControlAuthority{ForkAllowed: true}, control.NewTool(ControlToolFork, fork))
 	// Step 1 asked for a fork; the step finished and was applied, then the
 	// worker died before the settle phase created the group.
 	step := f.step("step-1", AgentTurnStatusCompleted, toolCall("call-fork", "control_fork", `{"goal":"split"}`))

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -156,17 +157,17 @@ func (t imageGenerationTarget) isImageGeneration() bool {
 // rejected, or nil. Rewording the prompt still selects the same provider, so
 // the rejection holds for the rest of the Run; a binding revision is a
 // configuration change and starts clean. Calls of every origin count.
-func priorImageProviderRejection(ctx context.Context, actions ActionCallLister, scope Scope, runID string, target imageGenerationTarget) (*ActionCall, error) {
+func priorImageProviderRejection(ctx context.Context, actions control.ActionCallLister, scope Scope, runID string, target imageGenerationTarget) (*ActionCall, error) {
 	if !target.isImageGeneration() {
 		return nil, nil
 	}
 	if actions == nil || runID == "" {
 		return nil, errors.New("image rejection guard needs an action store and Run")
 	}
-	for offset := 0; ; offset += ActionCallPageSize {
+	for offset := 0; ; offset += control.ActionCallPageSize {
 		page, err := actions.ListActionCalls(ctx, ActionFilter{
 			Scope: scope, RunID: runID, Status: []ActionCallStatus{ActionCallStatusFailed},
-			Limit: ActionCallPageSize, Offset: offset,
+			Limit: control.ActionCallPageSize, Offset: offset,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("load image rejections: %w", err)
@@ -179,7 +180,7 @@ func priorImageProviderRejection(ctx context.Context, actions ActionCallLister, 
 				return call, nil
 			}
 		}
-		if len(page) < ActionCallPageSize {
+		if len(page) < control.ActionCallPageSize {
 			return nil, nil
 		}
 	}

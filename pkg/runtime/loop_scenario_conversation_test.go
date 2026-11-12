@@ -23,6 +23,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -549,7 +550,7 @@ func convMemberAgentBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerB
 		f.t.Fatalf("open conversation session: %v", err)
 	}
 	session := opened.Session
-	control, err := ResolveControlAuthority(f.ctx, ControlAuthorityInput{
+	control, err := control.ResolveControlAuthority(f.ctx, control.ControlAuthorityInput{
 		Run: run, DeploymentID: run.AssignedAgentID, Runs: f.store, Conversations: f.chats, Catalog: convTeamCatalog{},
 	})
 	if err != nil {

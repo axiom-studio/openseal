@@ -28,6 +28,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -297,7 +298,7 @@ type loopFixture struct {
 	portfolio  *PortfolioService
 	scheduler  *conversationrun.ConversationRunScheduler
 	runner     *conversationrun.ConversationRunTurnRunner
-	control    *ControlExecutor
+	control    *control.ControlExecutor
 	dispatcher *StepToolDispatcher
 	offered    []capability.ModelAction
 	// chats is the raw store's conversation side. Conversation services
@@ -440,7 +441,7 @@ func (f *loopFixture) build() {
 		f.t.Fatal(err)
 	}
 	activity := NewRunActivityService(f.store, f.store, models.WithClock(f.clock.Now))
-	f.control = &ControlExecutor{
+	f.control = &control.ControlExecutor{
 		Portfolio: f.store, Sessions: f.store.(AgentSessionStore), Activity: activity,
 		Conversations: f.convs, Reporting: f.chats, Now: f.clock.Now,
 	}
@@ -698,11 +699,11 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*agentrun.
 		}
 		authority = workspace.ChatAuthority(workspaceID)
 	}
-	input := ControlAuthorityInput{Run: run, DeploymentID: run.AssignedAgentID, Runs: f.store, Conversations: f.chats}
+	input := control.ControlAuthorityInput{Run: run, DeploymentID: run.AssignedAgentID, Runs: f.store, Conversations: f.chats}
 	if len(f.config.team) > 0 {
 		input.Catalog = loopFixtureTeamCatalog{members: f.config.team}
 	}
-	control, err := ResolveControlAuthority(f.ctx, input)
+	control, err := control.ResolveControlAuthority(f.ctx, input)
 	if err != nil {
 		f.t.Fatalf("resolve control authority: %v", err)
 	}

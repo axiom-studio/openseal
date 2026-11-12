@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -18,7 +19,7 @@ func TestRunbookProducerReportsDelegatedAgentFailureReason(t *testing.T) {
 	producer := &RunbookStepProducer{definition: &runbook.Definition{}}
 	run := &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "1"}, Output: map[string]interface{}{}}
 	stepID := "perform-hourly"
-	requestID := collaboration.StableCollaborationID(run.Scope, DelegationIdempotencyKey(run.ID, stepID), "request")
+	requestID := collaboration.StableCollaborationID(run.Scope, runtimecontrol.DelegationIdempotencyKey(run.ID, stepID), "request")
 	run.Output["collaborationResults"] = map[string]interface{}{
 		requestID: map[string]interface{}{
 			"status": string(AgentRequestStatusFailed),
@@ -165,11 +166,11 @@ func TestRunbookValueRendersTypedTemplateSegments(t *testing.T) {
 
 func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	store := newTestKernelStore(t)
-	control := &ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration.NewCollaborationService(store)}
+	control := &runtimecontrol.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration.NewCollaborationService(store)}
 	producer := newTestRunbookProducer(t, concurrentRunbookDefinition(), "manual", store)
 	cc := agentrun.ControlContext{
 		Run:     &AgentRun{ID: "run", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "fork", "pendingFork": "fork", "pendingCall": "runbook.2.fork"}}},
-		Binding: &agentrun.TurnRunnerBinding{Producer: producer}, Origin: ControlOriginKernel,
+		Binding: &agentrun.TurnRunnerBinding{Producer: producer}, Origin: runtimecontrol.ControlOriginKernel,
 		Entry:     &SessionEntry{ToolCallID: "runbook.9.fork"},
 		Arguments: &runbookKernelArgs{Step: "fork", Visit: 9},
 	}
@@ -181,11 +182,11 @@ func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	if _, _, _, err := runbookKernelCall(cc, pending); err != nil {
 		t.Fatalf("planned call refused: %v", err)
 	}
-	cc.Origin = ControlOriginModel
+	cc.Origin = runtimecontrol.ControlOriginModel
 	if _, _, _, err := runbookKernelCall(cc, pending); err == nil {
 		t.Fatal("a model call reached the runbook engine")
 	}
-	cc.Origin, cc.Entry = ControlOriginKernel, nil
+	cc.Origin, cc.Entry = runtimecontrol.ControlOriginKernel, nil
 	if _, _, _, err := runbookKernelCall(cc, pending); err == nil {
 		t.Fatal("a kernel call without its tool entry settled")
 	}

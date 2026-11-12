@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -764,7 +765,7 @@ func (d *drive) recordDeterministicStep(ctx context.Context, st *stepState, out 
 // entries, or "".
 func finalToolEntryID(entries []*SessionEntry) string {
 	for _, entry := range entries {
-		if entry != nil && entry.Tool != nil && IsFinalTool(ControlToolName(entry.Tool.Name)) {
+		if entry != nil && entry.Tool != nil && control.IsFinalTool(ControlToolName(entry.Tool.Name)) {
 			return entry.ID
 		}
 	}
@@ -831,7 +832,7 @@ func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) 
 			Output: map[string]interface{}{"summary": text},
 		}, "")
 	}
-	cc := NewControlContext(d.toolsInput(st, nil), nil)
+	cc := control.NewControlContext(d.toolsInput(st, nil), nil)
 	result, err := d.l.config.PlainTextFinal(st.durCtx, cc, text)
 	if err != nil {
 		return d.stepError(ctx, st, err, StepFailureProducerFailed)
@@ -840,15 +841,15 @@ func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) 
 		d.run = cloneAgentRun(result.Run)
 	}
 	switch result.Kind {
-	case ControlFinal:
+	case control.ControlFinal:
 		return d.finishFinal(ctx, st, result.Final, "")
-	case ControlContinue:
+	case control.ControlContinue:
 		return d.continueAfter(ctx, st, stepFinalRejected)
-	case ControlFailed:
+	case control.ControlFailed:
 		return d.fail(ctx, st, *result.Failure, nil, "")
-	case ControlParked:
+	case control.ControlParked:
 		return d.park(ctx, st, *result.Park)
-	case ControlEnded:
+	case control.ControlEnded:
 		return d.endedByTool(ctx, st, result.Run)
 	}
 	return d.stepError(ctx, st, fmt.Errorf("plain-text final returned %q", result.Kind), StepFailureProducerFailed)

@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 )
 
 type RunbookExecutionAuditRun struct {
@@ -631,7 +632,7 @@ func attachRunbookChildren(result *RunbookExecutionAudit, children []*AgentRun, 
 		if stepID == "" {
 			continue
 		}
-		requestID := collaboration.StableCollaborationID(parent.Scope, DelegationIdempotencyKey(parent.ID, stepID), "request")
+		requestID := collaboration.StableCollaborationID(parent.Scope, control.DelegationIdempotencyKey(parent.ID, stepID), "request")
 		if request := requestByID[requestID]; request != nil && request.ChildRunID != "" {
 			stepByChild[request.ChildRunID] = stepID
 		}

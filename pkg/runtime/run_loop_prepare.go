@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -61,7 +62,7 @@ type catalogModelStepPreparerConfig struct {
 
 type catalogModelStepPreparer struct {
 	config   catalogModelStepPreparerConfig
-	controls Registry // loopControlRegistry; tests substitute their own
+	controls control.Registry // loopControlRegistry; tests substitute their own
 }
 
 var _ agentrun.ModelStepPreparer = (*catalogModelStepPreparer)(nil)
@@ -73,8 +74,8 @@ func newCatalogModelStepPreparer(config catalogModelStepPreparerConfig) *catalog
 
 // loopControlRegistry is every control tool a Run loop runs: the built-in
 // tools and the kernel-only runbook tools.
-func loopControlRegistry() Registry {
-	return NewRegistry(append(BuiltinTools(), runbookControlTools()...)...)
+func loopControlRegistry() control.Registry {
+	return control.NewRegistry(append(control.BuiltinTools(), runbookControlTools()...)...)
 }
 
 // ModelCredential is a copy of the model credential the prepared steps send
@@ -108,7 +109,7 @@ func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agen
 	}
 	binding := in.Binding
 	set := p.CapabilitySet(in)
-	tools := WithFinalOutputProperties(p.tools(binding, set), in.Run, binding.FinalOutput)
+	tools := control.WithFinalOutputProperties(p.tools(binding, set), in.Run, binding.FinalOutput)
 
 	req := ModelStepRequest{
 		APIVersion:        ModelStepAPIVersion,
@@ -325,7 +326,7 @@ func loopCapabilityToolName(actions []capability.ModelAction) func(id string) st
 
 // ControlToolSpecs lists the control tools offered under a in the stable
 // advertised order (SPEC §5.1).
-func ControlToolSpecs(a agentrun.ControlAuthority) []ControlToolSpec {
+func ControlToolSpecs(a agentrun.ControlAuthority) []control.ControlToolSpec {
 	return loopControlRegistry().Specs(a)
 }
 

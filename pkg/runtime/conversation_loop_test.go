@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -142,8 +143,8 @@ func newChatLoopFixture(t *testing.T, base conversationtest.ThreadStartStore, op
 		PlanToolEntries: func(*agentrun.TurnRunnerBinding, *AgentSession, *AgentTurn, *SessionEntry, []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 			return nil, fmt.Errorf("chat loop tests make no tool calls")
 		},
-		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (ControlResult, error) {
-			return ControlResult{Kind: ControlFinal, Final: &agentrun.FinalAnswer{
+		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (control.ControlResult, error) {
+			return control.ControlResult{Kind: control.ControlFinal, Final: &agentrun.FinalAnswer{
 				StepID: cc.Step.ID, PlainText: true, Answer: text, Output: map[string]interface{}{conversationrun.FinalOutputSummaryKey: text},
 			}}, nil
 		},

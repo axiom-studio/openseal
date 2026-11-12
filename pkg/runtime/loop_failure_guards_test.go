@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -243,7 +244,7 @@ func TestImageProviderRejectionRefusesFurtherGenerations(t *testing.T) {
 
 	// A rejection past the first page is still found.
 	many := &fakeActionCallLister{}
-	for i := 0; i < ActionCallPageSize; i++ {
+	for i := 0; i < control.ActionCallPageSize; i++ {
 		many.calls = append(many.calls, imageCall(fmt.Sprintf("ac_%d", i), "run-1", ActionCallStatusFailed, "provider_unavailable"))
 	}
 	many.calls = append(many.calls, rejected)

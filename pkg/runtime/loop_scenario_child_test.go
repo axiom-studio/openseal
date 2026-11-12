@@ -28,6 +28,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -314,7 +315,7 @@ func (c *childFixture) bindingFor(run *AgentRun) *agentrun.TurnRunnerBinding {
 		copied.Owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}
 		authorityRun = &copied
 	}
-	control, err := ResolveControlAuthority(c.ctx, ControlAuthorityInput{
+	control, err := control.ResolveControlAuthority(c.ctx, control.ControlAuthorityInput{
 		Run: authorityRun, DeploymentID: run.AssignedAgentID, Runs: c.store, Conversations: c.chats,
 	})
 	if err != nil {
@@ -394,7 +395,7 @@ func (c *childFixture) runbookBinding(run *AgentRun) *agentrun.TurnRunnerBinding
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	control, err := ResolveControlAuthority(c.ctx, ControlAuthorityInput{Run: run, DeploymentID: run.AssignedAgentID, Deterministic: true})
+	control, err := control.ResolveControlAuthority(c.ctx, control.ControlAuthorityInput{Run: run, DeploymentID: run.AssignedAgentID, Deterministic: true})
 	if err != nil {
 		c.t.Fatal(err)
 	}

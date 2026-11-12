@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
@@ -368,7 +369,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 	for _, skillPrompt := range prompts {
 		refs = append(refs, skillPrompt.Reference)
 	}
-	binding.Authority, err = ResolveControlAuthority(ctx, ControlAuthorityInput{
+	binding.Authority, err = control.ResolveControlAuthority(ctx, control.ControlAuthorityInput{
 		Run: r.run, DeploymentID: r.deployment.ID, Catalog: r.catalog, Scope: r.scope,
 		SkillPromptRefs: refs, Operations: binding.RunbookOperations,
 		ConversationTasks: r.config.ConversationTasks, Runs: r.config.Store, Conversations: r.config.Conversations,
@@ -428,7 +429,7 @@ func (r *loopBindingResolution) deterministic(ctx context.Context, binding *agen
 	if err != nil {
 		return nil, err
 	}
-	binding.Authority, err = ResolveControlAuthority(ctx, ControlAuthorityInput{Run: r.run, DeploymentID: r.deployment.ID, Deterministic: true})
+	binding.Authority, err = control.ResolveControlAuthority(ctx, control.ControlAuthorityInput{Run: r.run, DeploymentID: r.deployment.ID, Deterministic: true})
 	if err != nil {
 		return nil, err
 	}

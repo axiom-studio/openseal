@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -78,7 +79,7 @@ type StepToolEntryPlanner func(binding *agentrun.TurnRunnerBinding, session *Age
 // (CTL-14 ControlExecutor.PlainTextFinal): ControlFinal accepts it,
 // ControlContinue means a final_rejection note was appended, ControlFailed
 // fails the Run.
-type PlainTextFinalizer func(ctx context.Context, cc agentrun.ControlContext, text string) (ControlResult, error)
+type PlainTextFinalizer func(ctx context.Context, cc agentrun.ControlContext, text string) (control.ControlResult, error)
 
 type RunLoopConfig struct {
 	StepLeaseDuration time.Duration // default 30s (AgentRunWorkerConfig.TurnLeaseDuration)

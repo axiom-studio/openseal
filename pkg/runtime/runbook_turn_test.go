@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
@@ -282,7 +283,7 @@ func TestRunbookProducerFailsKernelCallThatEndedWithoutResult(t *testing.T) {
 	path.Entries = []*SessionEntry{{
 		ID: "tool:step-1:" + out.ToolCalls[0].ID, RunID: run.ID, StepID: "step-1", Type: SessionEntryTool, State: ToolEntryError,
 		ToolCallID: out.ToolCalls[0].ID,
-		Tool:       &ToolEntry{Name: string(ControlToolRunbookFork), Result: ErrorResult(ToolResultRefused, "fork_rejected", "budget exhausted", nil)},
+		Tool:       &ToolEntry{Name: string(ControlToolRunbookFork), Result: control.ErrorResult(ToolResultRefused, "fork_rejected", "budget exhausted", nil)},
 	}}
 	failed := produceRunbook(t, producer, runbookInput(run, 3, nil, path))
 	if failed.Failure == nil || !strings.Contains(failed.Failure.Message, "ended without a durable result") || !strings.Contains(failed.Failure.Message, "budget exhausted") {
@@ -325,7 +326,7 @@ func TestRunbookKernelToolsAreNeverOffered(t *testing.T) {
 		}
 	}
 	for _, name := range []ControlToolName{ControlToolRunbookFork, ControlToolRunbookDelegate} {
-		if phase, ok := ControlToolPhase(string(name)); !ok || phase != ControlPhaseSettle {
+		if phase, ok := control.ControlToolPhase(string(name)); !ok || phase != control.ControlPhaseSettle {
 			t.Fatalf("%s phase=%s ok=%t", name, phase, ok)
 		}
 	}
@@ -360,7 +361,7 @@ type runbookLoopFixture struct {
 	ctx      context.Context
 	store    *sqlite.Store
 	scope    Scope
-	control  *ControlExecutor
+	control  *control.ControlExecutor
 	tools    *StepToolDispatcher
 	loop     *RunLoop
 	producer *RunbookStepProducer
@@ -371,7 +372,7 @@ func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runboo
 	store := newTestKernelStore(t)
 	f := &runbookLoopFixture{t: t, ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "runbook-loop"}}
 	collaboration := collaboration.NewCollaborationService(store)
-	f.control = &ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration}
+	f.control = &control.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration}
 	tools, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: f.control})
 	if err != nil {
 		t.Fatal(err)
@@ -567,7 +568,7 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 	if err != nil || state.PendingDelegation != "delegate" || state.PendingCall == "" {
 		t.Fatalf("engine state was not applied before the delegation: %#v err=%v", state, err)
 	}
-	requestID := collaboration.StableCollaborationID(f.scope, DelegationIdempotencyKey(source.ID, "delegate"), "request")
+	requestID := collaboration.StableCollaborationID(f.scope, control.DelegationIdempotencyKey(source.ID, "delegate"), "request")
 	request, err := f.control.Collaboration.GetAgentRequest(f.ctx, f.scope, requestID)
 	if err != nil || request.Recipient.ID != "specialist" || request.Goal != "Analyze the release" ||
 		request.SharedContext["release"] != "2026.07" || request.BudgetAllocation == nil || request.BudgetAllocation.MaxTurns != 2 {

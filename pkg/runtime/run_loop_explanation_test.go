@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -75,8 +76,8 @@ func driveExplanation(t *testing.T, store KernelStore, result agentrun.FinalDeli
 		PlanToolEntries: func(*agentrun.TurnRunnerBinding, *AgentSession, *AgentTurn, *SessionEntry, []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 			return nil, nil
 		},
-		PlainTextFinal: func(context.Context, agentrun.ControlContext, string) (ControlResult, error) {
-			return ControlResult{}, nil
+		PlainTextFinal: func(context.Context, agentrun.ControlContext, string) (control.ControlResult, error) {
+			return control.ControlResult{}, nil
 		},
 	})
 	if err != nil {

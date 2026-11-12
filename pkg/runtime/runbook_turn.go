@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -632,7 +633,7 @@ func runbookToolResultText(result *modelstep.LoopToolResult) string {
 	if result == nil || len(result.Content) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(ResultText(&ToolResult{Content: result.Content}))
+	return strings.TrimSpace(control.ResultText(&ToolResult{Content: result.Content}))
 }
 
 // kernelCall is the step output of a fork or delegation node: one kernel
@@ -750,14 +751,14 @@ func mergeRunbookBranchValues(checkpoint map[string]interface{}, key string, bra
 // Run per branch, each seeded with the engine state at its branch entry and
 // the branch budget of the definition. The source keeps checkpoint while it
 // waits.
-func (p *RunbookStepProducer) forkSpec(checkpoint map[string]interface{}, state runbookExecutionState, runID string) (ForkSpec, error) {
+func (p *RunbookStepProducer) forkSpec(checkpoint map[string]interface{}, state runbookExecutionState, runID string) (control.ForkSpec, error) {
 	step := p.definition.Steps[state.Current]
 	if step.Fork == nil {
-		return ForkSpec{}, fmt.Errorf("runbook fork %q is missing its definition", state.Current)
+		return control.ForkSpec{}, fmt.Errorf("runbook fork %q is missing its definition", state.Current)
 	}
 	join, ok := p.definition.Steps[step.Fork.Join]
 	if !ok || join.Join == nil || join.Join.Fork != state.Current {
-		return ForkSpec{}, fmt.Errorf("runbook fork %q has no matching join", state.Current)
+		return control.ForkSpec{}, fmt.Errorf("runbook fork %q has no matching join", state.Current)
 	}
 	mode := FanInModeAll
 	failure := DependencyFailureFailFast
@@ -795,7 +796,7 @@ func (p *RunbookStepProducer) forkSpec(checkpoint map[string]interface{}, state 
 			Budget: runbookBudgetPolicy(step.Fork.BranchBudgets, name),
 		})
 	}
-	return ForkSpec{
+	return control.ForkSpec{
 		ForkID: state.Current, Policy: RunDependencyPolicy{Mode: mode, FailureMode: failure},
 		Branches: branches, SourceCheckpoint: source,
 	}, nil
@@ -803,36 +804,36 @@ func (p *RunbookStepProducer) forkSpec(checkpoint map[string]interface{}, state 
 
 // delegationSpec is the kernel DelegationSpec of the delegation node stepID,
 // resolved from checkpoint.
-func (p *RunbookStepProducer) delegationSpec(checkpoint map[string]interface{}, stepID string) (DelegationSpec, error) {
+func (p *RunbookStepProducer) delegationSpec(checkpoint map[string]interface{}, stepID string) (control.DelegationSpec, error) {
 	step := p.definition.Steps[stepID]
 	if step.Delegate == nil {
-		return DelegationSpec{}, fmt.Errorf("runbook delegation %q is missing its definition", stepID)
+		return control.DelegationSpec{}, fmt.Errorf("runbook delegation %q is missing its definition", stepID)
 	}
 	agentValue, err := resolveRunbookValue(checkpoint, step.Delegate.AgentID)
 	if err != nil {
-		return DelegationSpec{}, stepError(stepID, err)
+		return control.DelegationSpec{}, stepError(stepID, err)
 	}
 	agentID, ok := agentValue.(string)
 	if !ok || strings.TrimSpace(agentID) == "" {
-		return DelegationSpec{}, fmt.Errorf("runbook delegation %q Agent ID must resolve to a string", stepID)
+		return control.DelegationSpec{}, fmt.Errorf("runbook delegation %q Agent ID must resolve to a string", stepID)
 	}
 	goalValue, err := resolveRunbookValue(checkpoint, step.Delegate.Goal)
 	if err != nil {
-		return DelegationSpec{}, stepError(stepID, err)
+		return control.DelegationSpec{}, stepError(stepID, err)
 	}
 	goal, ok := goalValue.(string)
 	if !ok || strings.TrimSpace(goal) == "" {
-		return DelegationSpec{}, fmt.Errorf("runbook delegation %q goal must resolve to a string", stepID)
+		return control.DelegationSpec{}, fmt.Errorf("runbook delegation %q goal must resolve to a string", stepID)
 	}
 	delegatedContext := make(map[string]interface{}, len(step.Delegate.Context))
 	for key, value := range step.Delegate.Context {
 		resolved, resolveErr := resolveRunbookValue(checkpoint, value)
 		if resolveErr != nil {
-			return DelegationSpec{}, stepError(stepID, resolveErr)
+			return control.DelegationSpec{}, stepError(stepID, resolveErr)
 		}
 		delegatedContext[key] = resolved
 	}
-	return DelegationSpec{
+	return control.DelegationSpec{
 		StepID: stepID, AgentID: strings.TrimSpace(agentID), Goal: strings.TrimSpace(goal),
 		Context: delegatedContext, Mode: step.Delegate.Mode, Timeout: step.Delegate.Timeout,
 		Budget: runbookBudgetPolicyValue(step.Delegate.Budget),
@@ -862,7 +863,7 @@ func (p *RunbookStepProducer) consumeDelegationResult(checkpoint map[string]inte
 	var output map[string]interface{}
 	switch {
 	case status == "":
-		requestID := collaboration.StableCollaborationID(run.Scope, DelegationIdempotencyKey(run.ID, stepID), "request")
+		requestID := collaboration.StableCollaborationID(run.Scope, control.DelegationIdempotencyKey(run.ID, stepID), "request")
 		collaborationResults, _ := run.Output["collaborationResults"].(map[string]interface{})
 		result, _ := collaborationResults[requestID].(map[string]interface{})
 		if len(result) == 0 {
@@ -926,15 +927,15 @@ type runbookForkHandler struct{}
 type runbookDelegateHandler struct{}
 
 // runbookControlTools are the kernel-only control tools of runbook Runs.
-func runbookControlTools() []Tool {
-	return []Tool{
-		NewTool(ControlToolRunbookFork, runbookForkHandler{}),
-		NewTool(ControlToolRunbookDelegate, runbookDelegateHandler{}),
+func runbookControlTools() []control.Tool {
+	return []control.Tool{
+		control.NewTool(ControlToolRunbookFork, runbookForkHandler{}),
+		control.NewTool(ControlToolRunbookDelegate, runbookDelegateHandler{}),
 	}
 }
 
-func runbookKernelSpec(description string) ControlToolSpec {
-	return ControlToolSpec{
+func runbookKernelSpec(description string) control.ControlToolSpec {
+	return control.ControlToolSpec{
 		Description: description,
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"step", "visit"},
@@ -964,7 +965,7 @@ func decodeRunbookKernelArgs(raw json.RawMessage) (interface{}, error) {
 func runbookKernelCall(cc agentrun.ControlContext, pending func(runbookExecutionState) string) (*RunbookStepProducer, map[string]interface{}, runbookExecutionState, error) {
 	args := cc.Arguments.(*runbookKernelArgs)
 	var state runbookExecutionState
-	if cc.Origin != ControlOriginKernel {
+	if cc.Origin != control.ControlOriginKernel {
 		return nil, nil, state, errors.New("runbook kernel calls are made only by the runbook engine")
 	}
 	var producer *RunbookStepProducer
@@ -988,7 +989,7 @@ func runbookKernelCall(cc agentrun.ControlContext, pending func(runbookExecution
 	return producer, checkpoint, state, nil
 }
 
-func (runbookForkHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
+func (runbookForkHandler) Spec(agentrun.ControlAuthority) control.ControlToolSpec {
 	return runbookKernelSpec("Kernel only: start the concurrent branches of a runbook fork.")
 }
 
@@ -996,23 +997,23 @@ func (runbookForkHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return decodeRunbookKernelArgs(raw)
 }
 
-func (runbookForkHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (runbookForkHandler) Run(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResult, error) {
 	producer, checkpoint, state, err := runbookKernelCall(cc, func(s runbookExecutionState) string { return s.PendingFork })
 	if err != nil {
-		return x.RefuseIfEntry(ctx, cc, ErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
+		return x.RefuseIfEntry(ctx, cc, control.ErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
 	}
 	spec, err := producer.forkSpec(checkpoint, state, cc.Run.ID)
 	if err != nil {
-		return x.RefuseIfEntry(ctx, cc, ErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
+		return x.RefuseIfEntry(ctx, cc, control.ErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
 	}
 	return x.Fork(ctx, cc, spec)
 }
 
-func (runbookForkHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
+func (runbookForkHandler) Resume(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResume, error) {
 	return x.ResumeFork(ctx, cc)
 }
 
-func (runbookDelegateHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
+func (runbookDelegateHandler) Spec(agentrun.ControlAuthority) control.ControlToolSpec {
 	return runbookKernelSpec("Kernel only: hand a runbook delegation node to its Agent.")
 }
 
@@ -1020,19 +1021,19 @@ func (runbookDelegateHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return decodeRunbookKernelArgs(raw)
 }
 
-func (runbookDelegateHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (runbookDelegateHandler) Run(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResult, error) {
 	producer, checkpoint, state, err := runbookKernelCall(cc, func(s runbookExecutionState) string { return s.PendingDelegation })
 	if err != nil {
-		return x.RefuseIfEntry(ctx, cc, ErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
+		return x.RefuseIfEntry(ctx, cc, control.ErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
 	}
 	spec, err := producer.delegationSpec(checkpoint, state.Current)
 	if err != nil {
-		return x.RefuseIfEntry(ctx, cc, ErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
+		return x.RefuseIfEntry(ctx, cc, control.ErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
 	}
 	return x.Delegate(ctx, cc, spec)
 }
 
-func (runbookDelegateHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
+func (runbookDelegateHandler) Resume(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResume, error) {
 	return x.ResumeDelegation(ctx, cc)
 }
 

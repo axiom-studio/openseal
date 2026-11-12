@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
@@ -27,7 +28,7 @@ type askUserCall struct {
 	session *models.AgentSession
 	step    *models.AgentTurn
 	entry   *models.SessionEntry
-	exec    *ControlExecutor
+	exec    *control.ControlExecutor
 }
 
 func askUserSessions(t *testing.T, store askUserTestStore) models.AgentSessionStore {
@@ -96,7 +97,7 @@ func newAskUserCallWithArguments(t *testing.T, store askUserTestStore, claimed *
 		store: store, worker: worker, run: run, session: session,
 		step:  &models.AgentTurn{ID: stepID, RunID: run.ID, Sequence: sequence, Status: models.AgentTurnStatusCompleted},
 		entry: appended.Entries[1],
-		exec:  &ControlExecutor{Portfolio: store, Sessions: sessions, Conversations: conversation.NewConversationService(store)},
+		exec:  &control.ControlExecutor{Portfolio: store, Sessions: sessions, Conversations: conversation.NewConversationService(store)},
 	}
 }
 
@@ -130,13 +131,13 @@ func openAskUserSession(t *testing.T, sessions models.AgentSessionStore, run *mo
 }
 
 func (c *askUserCall) context() agentrun.ControlContext {
-	return NewControlContext(agentrun.StepToolsInput{
+	return control.NewControlContext(agentrun.StepToolsInput{
 		Run: c.run, Step: c.step, Session: c.session, WorkerID: c.worker,
 		Binding: &agentrun.TurnRunnerBinding{Authority: agentrun.ControlAuthority{CanAskUser: true}},
 	}, c.entry)
 }
 
-func (c *askUserCall) settle(t *testing.T) ControlResult {
+func (c *askUserCall) settle(t *testing.T) control.ControlResult {
 	t.Helper()
 	result, err := c.exec.Settle(t.Context(), c.context())
 	if err != nil {
@@ -170,14 +171,14 @@ func askUserParked(t *testing.T, store askUserTestStore, claimed *models.AgentRu
 	t.Helper()
 	call := newAskUserCall(t, store, claimed, worker, question)
 	result := call.settle(t)
-	if result.Kind != ControlParked || result.Park == nil {
+	if result.Kind != control.ControlParked || result.Park == nil {
 		t.Fatalf("ask_user did not park: %#v", result)
 	}
 	return call.park(t, result.Park), call
 }
 
 // resume claims the Run again and resumes the ask_user entry.
-func (c *askUserCall) resume(t *testing.T) (ControlResume, *models.AgentRun) {
+func (c *askUserCall) resume(t *testing.T) (control.ControlResume, *models.AgentRun) {
 	t.Helper()
 	claimed := claimAskUserRun(t, c.store, c.run, c.worker)
 	entry, err := askUserSessions(t, c.store).GetSessionEntry(t.Context(), claimed.Scope, c.entry.ID)

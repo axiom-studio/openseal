@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -183,7 +184,7 @@ func (r *stepToolRun) refuseUnsettled(ctx context.Context, settle *SessionEntry,
 	}
 	for i := range r.entries {
 		if r.entry(i).ID == settle.ID {
-			return r.refuse(ctx, i, ErrorResult(ToolResultRefused, loopToolNotRunCode,
+			return r.refuse(ctx, i, control.ErrorResult(ToolResultRefused, loopToolNotRunCode,
 				fmt.Sprintf("not run: the step that made this call was %s before it ran", status), nil), nil)
 		}
 	}
@@ -241,11 +242,11 @@ func (r *stepToolRun) settle(ctx context.Context) error {
 			return r.resumeControl(ctx, i)
 		}
 		if status := r.earlierBlockingStatus(i); status != "" {
-			return r.refuse(ctx, i, ErrorResult(ToolResultRefused, loopToolNotRunCode,
+			return r.refuse(ctx, i, control.ErrorResult(ToolResultRefused, loopToolNotRunCode,
 				fmt.Sprintf("not run: an earlier call in this step was %s", status), nil), nil)
 		}
 		if r.x.cfg.Control == nil {
-			return r.refuse(ctx, i, ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+			return r.refuse(ctx, i, control.ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
 				"This tool is not available in this conversation.", nil), nil)
 		}
 		result, err := r.x.cfg.Control.Settle(ctx, r.controlContext(i))

@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -410,15 +411,15 @@ func workerPlanToolEntries(store PortfolioStore) StepToolEntryPlanner {
 
 // workerPlainTextFinal is the pool's RunLoopConfig.PlainTextFinal: the
 // control executor of the binding's claim executor judges the text.
-func workerPlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (ControlResult, error) {
-	var control *ControlExecutor
+func workerPlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (runtimecontrol.ControlResult, error) {
+	var control *runtimecontrol.ControlExecutor
 	if cc.Binding != nil {
 		if tools, ok := cc.Binding.Tools.(*claimToolExecutor); ok {
 			control = tools.controlExecutor()
 		}
 	}
 	if control == nil {
-		return ControlResult{}, errors.New("plain-text final needs a binding whose tool executor has a control executor")
+		return runtimecontrol.ControlResult{}, errors.New("plain-text final needs a binding whose tool executor has a control executor")
 	}
 	return control.PlainTextFinal(ctx, cc, text)
 }
