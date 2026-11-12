@@ -10,9 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
-	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 )
 
 type acknowledgementRecoveryHost struct {
@@ -88,7 +86,7 @@ func (h *acknowledgementRecoveryHost) DeliverExternalConversation(
 
 func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
 	previousRevision := endpoint.Revision
 	endpoint.Address = "C-approvals"
 	endpoint.InstallationWide = true
@@ -139,7 +137,7 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 
 func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+	store, catalog, endpoint := externalconversationtest.EndpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
 	conversations := runtimeconversation.NewConversationService(store)
@@ -206,7 +204,7 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 	for _, provider := range []string{"slack", "webchat"} {
 		t.Run(provider, func(t *testing.T) {
 			ctx := context.Background()
-			store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, provider)
+			store, catalog, endpoint := externalconversationtest.EndpointFixture(t, ctx, provider)
 			conversations := runtimeconversation.NewConversationService(store)
 			conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 				Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "External support",
@@ -283,110 +281,4 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 			}
 		})
 	}
-}
-
-func externalConversationDeliveryFixture(
-	t *testing.T,
-	ctx context.Context,
-	provider string,
-) (*sqlite.Store, *skill.Catalog, *ExternalConversationEndpoint) {
-	return externalConversationDeliveryFixtureWithOperations(t, ctx, provider, []skill.ConversationDeliveryOperation{skill.ConversationDeliveryMessageSend})
-}
-
-func externalConversationDeliveryFixtureWithOperations(
-	t *testing.T,
-	ctx context.Context,
-	provider string,
-	operations []skill.ConversationDeliveryOperation,
-) (*sqlite.Store, *skill.Catalog, *ExternalConversationEndpoint) {
-	t.Helper()
-	store := newTestKernelStore(t)
-	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, provider, operations)
-	return store, catalog, endpoint
-}
-
-// externalConversationEndpointFixtureOn creates the fixture endpoint in any
-// endpoint store (SQLite or PostgreSQL).
-func externalConversationEndpointFixtureOn(
-	t *testing.T,
-	ctx context.Context,
-	store ExternalConversationEndpointStore,
-	provider string,
-	operations []skill.ConversationDeliveryOperation,
-) (*skill.Catalog, *ExternalConversationEndpoint) {
-	t.Helper()
-	return externalConversationEndpointFixtureOwnedBy(t, ctx, store, provider, operations, ObjectiveOwner{Type: OwnerTypeAgent, ID: provider + "-agent"})
-}
-
-// externalConversationEndpointFixtureOwnedBy creates the fixture endpoint for
-// an Agent or a Team owner.
-func externalConversationEndpointFixtureOwnedBy(
-	t *testing.T,
-	ctx context.Context,
-	store ExternalConversationEndpointStore,
-	provider string,
-	operations []skill.ConversationDeliveryOperation,
-	owner ObjectiveOwner,
-) (*skill.Catalog, *ExternalConversationEndpoint) {
-	t.Helper()
-	catalog := skill.NewCatalog()
-	definition := skillbindingtest.SlackConversationSkillDefinition()
-	definition.ID, definition.Name = provider, provider
-	adapter := definition.ConversationAdapters["conversations"]
-	adapter.Delivery.Operations = append([]skill.ConversationDeliveryOperation(nil), operations...)
-	adapter.Provider = provider
-	adapter.Name = provider + " conversations"
-	adapter.Transport.IngressEndpoint = provider + ".conversation.ingress"
-	adapter.Transport.DeliveryEndpoint = provider + ".conversation.deliver"
-	if provider == "webchat" {
-		adapter.Credentials = nil
-		adapter.Transport.DeliveryCredentials = nil
-	}
-	definition.ConversationAdapters["conversations"] = adapter
-	if err := catalog.Register(ctx, definition); err != nil {
-		t.Fatal(err)
-	}
-	scope := Scope{Kind: "tenant", ID: provider}
-	seedTestSpace(t, store.(SpaceStore), scope)
-	deploymentID := owner.ID
-	handler := ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: deploymentID}
-	if owner.Type == OwnerTypeTeam {
-		handler.Kind = ExternalConversationHandlerTeam
-	}
-	binding := &skill.Binding{
-		ID: provider, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID,
-		SkillID: definition.ID, SkillVersion: definition.Version,
-		EnabledConversationAdapters: []string{"conversations"}, MaximumRisk: skill.RiskLevelRead, Revision: 1,
-	}
-	if provider == "slack" {
-		binding.Credentials = map[string]skill.CredentialReference{
-			"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant/slack"},
-		}
-	}
-	if err := catalog.Bind(ctx, binding); err != nil {
-		t.Fatal(err)
-	}
-	endpoint, err := externalconversation.NewExternalConversationEndpointService(store, catalog).Create(
-		ctx,
-		externalconversation.CreateExternalConversationEndpointRequest{
-			ID: provider + "-endpoint", Scope: scope,
-			Owner: owner, DeploymentID: deploymentID,
-			Name: provider + " endpoint",
-			Adapter: ExternalConversationAdapterReference{
-				SkillID: definition.ID, SkillVersion: definition.Version,
-				BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
-			},
-			Mode: capability.ConversationEndpointChannel, Address: provider + "-address",
-			Handler: handler,
-			Policy: ExternalConversationPolicy{
-				MessageSelection: ExternalConversationSelectAllMessages,
-				ReplyMode:        ExternalConversationReplyThread, IgnoreBots: true,
-			},
-			Status: ExternalConversationEndpointActive,
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return catalog, endpoint
 }

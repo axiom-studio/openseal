@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -114,7 +115,7 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	catalog, endpoint := routineConnectionFixture(t, h, "slack", ExternalConversationSelectMentions)
 	activation := conversationRoutine(h, endpoint, RoutineEventSlackMessage, "channel")
 	gateways := externalconversation.NewExternalConversationGatewayService(h.store, nil)
-	registration := CreateActiveGateway(t, h.ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
+	registration := externalconversationtest.CreateActiveGateway(t, h.ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "acme-slack", Name: "Acme Slack", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "pinned tenant gateway",
 		Gateway: ExternalConversationIngressGateway{
 			Scope: endpoint.Scope, Owner: h.owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter,
@@ -123,7 +124,7 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	})
 	human := slackRoutineMessage("171.001", "U1", "Ana Ruiz", "The invoice\nis late", false)
 	bot := slackRoutineMessage("171.002", "B1", "Deploy bot", "Deployed", true)
-	host := &GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
+	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
 		StatusCode: http.StatusOK,
 		Events: []externalconversation.ExternalConversationGatewayEvent{
 			{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: human},
@@ -180,7 +181,7 @@ func TestSlackRoutineIgnoresDirectMessages(t *testing.T) {
 	activation := conversationRoutine(h, endpoint, RoutineEventSlackMessage, "channel")
 	direct := slackRoutineMessage("172.001", "U1", "Ana Ruiz", "private note", false)
 	direct.Direct = true
-	host := &IngressHostStub{Result: &externalconversation.ExternalConversationIngressHostResult{
+	host := &externalconversationtest.IngressHostStub{Result: &externalconversation.ExternalConversationIngressHostResult{
 		StatusCode: http.StatusOK, Events: []NormalizedExternalConversationEvent{direct},
 	}}
 	service := externalconversation.NewExternalConversationTransportService(h.store, catalog)
@@ -219,13 +220,13 @@ func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
 	}
 	// An unpinned gateway: authority comes from each mapped endpoint.
 	gateways := externalconversation.NewExternalConversationGatewayService(h.store, nil)
-	registration := CreateActiveGateway(t, h.ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
+	registration := externalconversationtest.CreateActiveGateway(t, h.ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "telegram-bot", Name: "Telegram bot", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "unpinned gateway",
 		Gateway: ExternalConversationIngressGateway{
 			Scope: endpoint.Scope, Owner: h.owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: "telegram",
 		},
 	})
-	host := &GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
+	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
 		StatusCode: http.StatusOK,
 		Events:     []externalconversation.ExternalConversationGatewayEvent{{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: message}},
 	}}

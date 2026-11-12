@@ -12,6 +12,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -27,16 +28,16 @@ func (h *quotedPhotoHost) ReadExternalConversationAttachment(_ context.Context, 
 }
 
 func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
-	store, catalog, endpoint := FileConversationFixture(t)
-	content := &FileContentStore{}
+	store, catalog, endpoint := externalconversationtest.FileConversationFixture(t)
+	content := &externalconversationtest.FileContentStore{}
 	photo := &quotedPhotoHost{}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	item := ReceiveContextEvent(t, store, endpoint, "photo-reply", "reply", "parent", now)
-	history := &RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []externalconversation.ExternalConversationContextMessage{{
+	item := externalconversationtest.ReceiveContextEvent(t, store, endpoint, "photo-reply", "reply", "parent", now)
+	history := &externalconversationtest.RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []externalconversation.ExternalConversationContextMessage{{
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: "parent", ExternalMessageID: "parent", ExternalParticipantID: "Kev", ParticipantDisplayName: "Kev", OccurredAt: now.Add(-time.Second),
 		Attachments: []models.ExternalConversationAttachment{{ID: "photo", Name: "photo.png", MediaType: "image/png", SizeBytes: 68}},
 	}}}}
-	worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{WorkerID: "photo-worker", ContextHost: history, ContextCatalog: ContextHistoryResolver{catalog}, AttachmentHost: photo, AttachmentContent: content})
+	worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{WorkerID: "photo-worker", ContextHost: history, ContextCatalog: externalconversationtest.ContextHistoryResolver{ExternalConversationAdapterResolver: catalog}, AttachmentHost: photo, AttachmentContent: content})
 	if err != nil {
 		t.Fatal(err)
 	}

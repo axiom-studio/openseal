@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -17,15 +18,15 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	sqlDB := openTestSQLiteDB(t, path)
 	t.Cleanup(func() { store.Close() })
 	now := runStoreContractEpoch
-	first, _, _ := TerminalReportingRun(t, store, Scope{Kind: "tenant", ID: "upgrade-pending"}, now)
-	first = CompleteTerminalReportingRun(t, store, first, now)
-	second, _, _ := TerminalReportingRun(t, store, Scope{Kind: "tenant", ID: "upgrade-delivered"}, now)
-	second = CompleteTerminalReportingRun(t, store, second, now)
+	first, _, _ := externalconversationtest.TerminalReportingRun(t, store, Scope{Kind: "tenant", ID: "upgrade-pending"}, now)
+	first = externalconversationtest.CompleteTerminalReportingRun(t, store, first, now)
+	second, _, _ := externalconversationtest.TerminalReportingRun(t, store, Scope{Kind: "tenant", ID: "upgrade-delivered"}, now)
+	second = externalconversationtest.CompleteTerminalReportingRun(t, store, second, now)
 	claims, err := store.ClaimRunTerminalReports(t.Context(), RunTerminalReportingClaim{Scope: &first.Scope, WorkerID: "v58-in-flight", Now: now, LeaseDuration: time.Minute, Limit: 1})
 	if err != nil || len(claims) != 1 {
 		t.Fatalf("legacy claim fixture: %#v %v", claims, err)
 	}
-	if count, err := TerminalReportingWorker(t, store, now).ProcessScope(t.Context(), second.Scope); err != nil || count != 1 {
+	if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessScope(t.Context(), second.Scope); err != nil || count != 1 {
 		t.Fatalf("legacy delivered fixture: %d %v", count, err)
 	}
 	// Exact old table shape, including its active lease and released snapshot.
@@ -56,10 +57,10 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	if err != nil || delivered.DeliveredAt == nil || delivered.Run != nil || delivered.TerminalRevision != 0 {
 		t.Fatalf("acknowledged historical receipt changed: %#v %v", delivered, err)
 	}
-	if count, err := TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 0 {
+	if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 0 {
 		t.Fatalf("upgrade stole a held lease: %d %v", count, err)
 	}
-	if count, err := TerminalReportingWorker(t, store, now.Add(2*time.Minute)).ProcessBatch(t.Context()); err != nil || count != 1 {
+	if count, err := externalconversationtest.TerminalReportingWorker(t, store, now.Add(2*time.Minute)).ProcessBatch(t.Context()); err != nil || count != 1 {
 		t.Fatalf("upgrade lost pending receipt: %d %v", count, err)
 	}
 	// Reopening an already-upgraded store must preserve the new primary key.
@@ -70,7 +71,7 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count, err := TerminalReportingWorker(t, store, now.Add(3*time.Minute)).ProcessBatch(t.Context()); err != nil || count != 0 {
+	if count, err := externalconversationtest.TerminalReportingWorker(t, store, now.Add(3*time.Minute)).ProcessBatch(t.Context()); err != nil || count != 0 {
 		t.Fatalf("repeat upgrade regenerated delivery: %d %v", count, err)
 	}
 }

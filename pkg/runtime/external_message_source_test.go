@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 )
 
 // A provider message whose thread history was unavailable keeps its source
@@ -16,14 +17,14 @@ import (
 // message header and the run_context note, under the external source rules.
 func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	item := ReceiveContextEvent(t, store, endpoint, "identity-message", "trigger", "thread", now)
-	host := &RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: conversation.ExternalConversationContextUnavailable, Source: &ExternalMessageSource{
+	item := externalconversationtest.ReceiveContextEvent(t, store, endpoint, "identity-message", "trigger", "thread", now)
+	host := &externalconversationtest.RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: conversation.ExternalConversationContextUnavailable, Source: &ExternalMessageSource{
 		ChannelID: item.Event.ExternalConversationID, ParticipantID: item.Event.ExternalParticipantID, ParticipantDisplayName: "Kev",
 		ChannelName: "engineering", ChannelType: "private_channel",
 	}}}
-	worker, _ := NewContextWorker(t, store, ContextHistoryResolver{catalog}, host, false, models.WithClock(func() time.Time { return now }))
+	worker, _ := externalconversationtest.NewContextWorker(t, store, externalconversationtest.ContextHistoryResolver{ExternalConversationAdapterResolver: catalog}, host, false, models.WithClock(func() time.Time { return now }))
 	applied, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil {
 		t.Fatal(err)

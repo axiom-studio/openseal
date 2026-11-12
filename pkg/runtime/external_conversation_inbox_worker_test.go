@@ -10,35 +10,12 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 )
-
-type crashAfterExternalConversationDispatch struct {
-	next       externalconversation.ExternalConversationDispatcher
-	crashOnce  bool
-	dispatches int
-	runID      string
-}
-
-func (d *crashAfterExternalConversationDispatch) DispatchExternalConversation(
-	ctx context.Context,
-	req externalconversation.ExternalConversationDispatchRequest,
-) (*externalconversation.ExternalConversationDispatchResult, error) {
-	d.dispatches++
-	result, err := d.next.DispatchExternalConversation(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	d.runID = result.RunID
-	if d.crashOnce {
-		d.crashOnce = false
-		return nil, errors.New("synthetic crash after durable Run dispatch")
-	}
-	return result, nil
-}
 
 func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *testing.T) {
 	ctx := context.Background()
-	store, _, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+	store, _, endpoint := externalconversationtest.EndpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -62,8 +39,8 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatcher := &crashAfterExternalConversationDispatch{
-		next: externalconversation.NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: true,
+	dispatcher := &externalconversationtest.CrashAfterDispatch{
+		Next: externalconversation.NewCanonicalExternalConversationDispatcher(scheduler), CrashOnce: true,
 	}
 	workerClock := time.Now
 	worker, err := externalconversation.NewExternalConversationInboxWorker(store, dispatcher, externalconversation.ExternalConversationInboxWorkerConfig{
@@ -89,7 +66,7 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 		t.Fatalf("messages after crash = %#v, %v", messages, err)
 	}
 	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: endpoint.Scope, Kind: RunKindConversation, Limit: 10})
-	if err != nil || len(runs) != 1 || runs[0].ID != dispatcher.runID {
+	if err != nil || len(runs) != 1 || runs[0].ID != dispatcher.RunID {
 		t.Fatalf("Runs after crash = %#v, %v", runs, err)
 	}
 
@@ -99,8 +76,8 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 		applied.ChannelMessageID != messages[0].ID || applied.RunID != runs[0].ID || applied.Attempt != 2 {
 		t.Fatalf("recovered application = %#v, %v", applied, err)
 	}
-	if dispatcher.dispatches != 2 {
-		t.Fatalf("dispatch attempts = %d", dispatcher.dispatches)
+	if dispatcher.Dispatches != 2 {
+		t.Fatalf("dispatch attempts = %d", dispatcher.Dispatches)
 	}
 	messages, _ = store.ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: endpoint.Scope, ConversationID: conversations[0].ID, Limit: 10,

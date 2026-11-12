@@ -25,6 +25,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -43,7 +44,7 @@ type externalLoopFixture struct {
 	ext      externalLoopStore
 	adapters *skill.Catalog
 	endpoint *ExternalConversationEndpoint
-	host     *StreamChatHost
+	host     *externalconversationtest.StreamChatHost
 	progress *externalconversation.RunProgressAcknowledgementWorker
 	replies  *externalconversation.ExternalConversationReplyWorker
 	delivery *externalconversation.ExternalConversationDeliveryWorker
@@ -67,12 +68,12 @@ func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, op
 	if !ok {
 		t.Fatalf("%T is not an external conversation store", store)
 	}
-	f := &externalLoopFixture{loopFixture: newLoopFixture(t, store, opts...), ext: ext, host: &StreamChatHost{Messages: map[string]string{}}}
+	f := &externalLoopFixture{loopFixture: newLoopFixture(t, store, opts...), ext: ext, host: &externalconversationtest.StreamChatHost{Messages: map[string]string{}}}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}
 	if len(f.config.team) > 0 {
 		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}
 	}
-	f.adapters, f.endpoint = externalConversationEndpointFixtureOwnedBy(t, f.ctx, ext, provider, operations, owner)
+	f.adapters, f.endpoint = externalconversationtest.EndpointFixtureOwnedBy(t, f.ctx, ext, provider, operations, owner)
 	// The endpoint fixture fixes the scope ({tenant, <provider>}); the
 	// fixture Skill is bound there too so governed calls resolve.
 	f.scope = f.endpoint.Scope

@@ -11,10 +11,11 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/google/uuid"
 )
 
-func assertTerminalConversationFailure(t *testing.T, store TerminalReportingStore, run *AgentRun, trigger *ChannelMessage, code string) *ChannelMessage {
+func assertTerminalConversationFailure(t *testing.T, store externalconversationtest.TerminalReportingStore, run *AgentRun, trigger *ChannelMessage, code string) *ChannelMessage {
 	t.Helper()
 	message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run))
 	if err != nil || message == nil || message.Content != runtimeconversation.TerminalFailureReply(code) || message.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}) || message.Intent != MessageIntentAnswer || message.ReplyToMessageID != trigger.ID || message.ResolvesMessageID != trigger.ID || message.ThreadRootID != trigger.ID || message.ResponseMode != trigger.ResponseMode {
@@ -32,7 +33,7 @@ func assertTerminalConversationFailure(t *testing.T, store TerminalReportingStor
 
 func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-		store := TerminalReportingStoreOf(t, fixture.store)
+		store := externalconversationtest.TerminalReportingStoreOf(t, fixture.store)
 		now := runStoreContractEpoch
 		run, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, true)
 		run = conversationruntest.FailTerminalConversation(t, store, run, now, "cap_lookup_not_available")
@@ -42,9 +43,9 @@ func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *te
 		}
 		if fixture.reopen != nil {
 			fixture.store = fixture.reopen()
-			store = TerminalReportingStoreOf(t, fixture.store)
+			store = externalconversationtest.TerminalReportingStoreOf(t, fixture.store)
 		}
-		if count, err := TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
+		if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 			t.Fatalf("crash recovery did not publish failure: %d %v", count, err)
 		}
 		message := assertTerminalConversationFailure(t, store, run, trigger, "cap_lookup_not_available")
@@ -64,7 +65,7 @@ func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *te
 				t.Fatalf("failure reply widened private ancestry for %s: %#v", viewer.id, messages)
 			}
 		}
-		if count, err := TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 0 {
+		if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 0 {
 			t.Fatalf("failure delivery duplicated after acknowledgment: %d %v", count, err)
 		}
 	})
@@ -72,7 +73,7 @@ func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *te
 
 func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-		store := TerminalReportingStoreOf(t, fixture.store)
+		store := externalconversationtest.TerminalReportingStoreOf(t, fixture.store)
 		now := runStoreContractEpoch
 		first, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
 		first = conversationruntest.FailTerminalConversation(t, store, first, now, "provider_rate_limited")
@@ -102,7 +103,7 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 		if err := store.CompleteRunTerminalReport(t.Context(), completion); err != nil {
 			t.Fatal(err)
 		}
-		if count, err := TerminalReportingWorker(t, store, now.Add(3*time.Second)).ProcessBatch(t.Context()); err != nil || count != 1 {
+		if count, err := externalconversationtest.TerminalReportingWorker(t, store, now.Add(3*time.Second)).ProcessBatch(t.Context()); err != nil || count != 1 {
 			t.Fatalf("new failure receipt was lost: %d %v", count, err)
 		}
 		message := assertTerminalConversationFailure(t, store, second, trigger, "tool_call_cardinality")
@@ -147,7 +148,7 @@ func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t
 
 func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-		store := TerminalReportingStoreOf(t, fixture.store)
+		store := externalconversationtest.TerminalReportingStoreOf(t, fixture.store)
 		for _, startsThread := range []bool{false, true} {
 			scope := Scope{Kind: "tenant", ID: "canonical-scheduled-failure-" + uuid.NewString()}
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
@@ -178,7 +179,7 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 			// explicit transition and worker clock across all store contracts.
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			failed := conversationruntest.FailTerminalConversation(t, store, scheduled.Run, now, "provider_invalid_response")
-			if count, err := TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
+			if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 				t.Fatalf("failure reporter disagreed with canonical scheduler (thread=%t): %d %v", startsThread, count, err)
 			}
 			assertTerminalConversationFailure(t, store, failed, posted.Message, "provider_invalid_response")
@@ -217,14 +218,14 @@ func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *
 
 func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-		store := TerminalReportingStoreOf(t, fixture.store)
+		store := externalconversationtest.TerminalReportingStoreOf(t, fixture.store)
 		now := runStoreContractEpoch
 		run, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
 		run = conversationruntest.FailTerminalConversation(t, store, run, now, "workspace_credits_exhausted")
 		if run.CreditError == nil || run.CreditError.Code != RunCreditErrorWorkspaceCreditsExhausted {
 			t.Fatalf("credit stop is not typed on the Run: %#v", run.CreditError)
 		}
-		if count, err := TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
+		if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 			t.Fatalf("credit stop report was not acknowledged: %d %v", count, err)
 		}
 		if message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run)); message != nil || !errors.Is(err, ErrChannelMessageNotFound) && err != nil {

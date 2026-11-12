@@ -1,6 +1,6 @@
-// The external conversation tests' own copies of runtime's endpoint, crash
-// dispatcher, SQLite file store and run store contract fixtures, which
-// runtime's tests keep using.
+// The in-package tests' own copies of externalconversationtest's endpoint
+// fixtures and crash dispatcher (that package imports this one), and of
+// runtime's SQLite file store and run store contract fixtures.
 
 package externalconversation
 

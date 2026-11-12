@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -104,7 +105,7 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 
 func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
 	service := externalconversation.NewExternalConversationGatewayService(store, catalog)
 	gateway := ExternalConversationIngressGateway{
 		Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
@@ -207,7 +208,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
 		t.Fatal(err)
 	}
-	gateway := CreateActiveGateway(t, ctx, externalconversation.NewExternalConversationGatewayService(store, catalog), externalconversation.CreateExternalConversationGatewayRequest{
+	gateway := externalconversationtest.CreateActiveGateway(t, ctx, externalconversation.NewExternalConversationGatewayService(store, catalog), externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "synthetic-gateway", Name: "Synthetic gateway",
 		Gateway: ExternalConversationIngressGateway{
 			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "synthetic-agent"}, DeploymentID: "synthetic-agent", Provider: "synthetic",
@@ -235,7 +236,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 	if err != nil || resolved == nil || resolved.Adapter.Features != nil || resolved.Adapter.Credentials != nil {
 		t.Fatalf("restarted adapter = %#v, %v", resolved, err)
 	}
-	host := &GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
+	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
 		StatusCode: http.StatusOK,
 		Events: []externalconversation.ExternalConversationGatewayEvent{{
 			InstallationID: "installation-1", ApplicationID: "application-1", Address: "channel-1",

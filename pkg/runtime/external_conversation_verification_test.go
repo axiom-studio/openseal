@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -51,7 +52,7 @@ func (h *gatewayVerificationHost) VerifyExternalConversationGateway(_ context.Co
 
 func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *skill.Catalog, *externalconversation.ExternalConversationTransportService, *ExternalConversationGatewayRegistration, *ExternalConversationEndpoint) {
 	t.Helper()
-	base, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
+	base, catalog, endpoint := externalconversationtest.EndpointFixture(t, t.Context(), "slack")
 	previousRevision := endpoint.Revision
 	endpoint.InstallationID, endpoint.ApplicationID, endpoint.Address = "T123", "A123", "C123"
 	endpoint.Revision++
@@ -122,7 +123,7 @@ func TestPausedGatewayVerificationRequiresOptInAndNeverAcceptsEvents(t *testing.
 	}
 	t.Run("legacy host never invoked", func(t *testing.T) {
 		_, _, service, registration, _ := newGatewayVerificationFixture(t)
-		host := &GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{StatusCode: http.StatusOK}}
+		host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{StatusCode: http.StatusOK}}
 		_, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), externalconversation.ExternalConversationPublicIngressRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`)}, host)
 		if !errors.Is(err, ErrExternalConversationConflict) || host.Request.Request != nil {
 			t.Fatalf("paused route invoked non-opt-in host: %#v, %v", host.Request, err)

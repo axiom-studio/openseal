@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -50,10 +51,10 @@ func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *externalc
 
 func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	host := &RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextUnavailable}}
+	store, catalog, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
+	host := &externalconversationtest.RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextUnavailable}}
 	worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{
-		WorkerID: "reply-alias-worker", ContextHost: host, ContextCatalog: ContextHistoryResolver{catalog},
+		WorkerID: "reply-alias-worker", ContextHost: host, ContextCatalog: externalconversationtest.ContextHistoryResolver{ExternalConversationAdapterResolver: catalog},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +123,7 @@ func TestExternalConversationReplyAliasesNeverReuseForeignParents(t *testing.T) 
 	for _, name := range []string{"another chat", "qualified ID collision", "another endpoint", "another scope", "unknown parent", "explicit topic"} {
 		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
-			store, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+			store, _, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
 			worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{WorkerID: "reply-alias-worker"})
 			if err != nil {
 				t.Fatal(err)

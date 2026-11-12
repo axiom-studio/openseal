@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
@@ -133,7 +134,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 	for _, code := range []string{"source_rate_limited", "source_reads_failed", "browser_proxy_authentication_failed", "browser_proxy_unavailable", "file_too_large", "stale rate limit", "recovered rate limit", "raw error"} {
 		t.Run(code, func(t *testing.T) {
 			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-				store := TerminalReportingStoreOf(t, fixture.store)
+				store := externalconversationtest.TerminalReportingStoreOf(t, fixture.store)
 				kernel := fixture.store.(sourceFailureStore)
 				sessions := AgentSessionStore(kernel)
 				now := runStoreContractEpoch
@@ -182,9 +183,9 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 				}
 				if fixture.reopen != nil {
 					fixture.store = fixture.reopen()
-					store = TerminalReportingStoreOf(t, fixture.store)
+					store = externalconversationtest.TerminalReportingStoreOf(t, fixture.store)
 				}
-				if count, err := TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
+				if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 					t.Fatalf("outbox: count=%d err=%v", count, err)
 				}
 				message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(failed))
@@ -217,7 +218,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 						t.Fatalf("stale or raw evidence attributed: %q", message.Content)
 					}
 				}
-				if count, err := TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 0 {
+				if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 0 {
 					t.Fatalf("duplicate failure: count=%d err=%v", count, err)
 				}
 			})

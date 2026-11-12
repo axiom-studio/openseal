@@ -10,6 +10,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
@@ -19,7 +20,7 @@ type taskFailureReportingStore interface {
 	KernelStore
 	AgentSessionStore
 	ConversationTaskKernelStore
-	TerminalReportingStore
+	externalconversationtest.TerminalReportingStore
 }
 
 func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore, threaded bool) (*ConversationTaskResult, *ChannelMessage) {
@@ -180,7 +181,7 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 					if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, work); err != nil {
 						t.Fatal(err)
 					}
-					worker := TerminalReportingWorker(t, store, time.Now().Add(time.Second))
+					worker := externalconversationtest.TerminalReportingWorker(t, store, time.Now().Add(time.Second))
 					if _, err := worker.ProcessBatch(t.Context()); err != nil {
 						t.Fatal(err)
 					}

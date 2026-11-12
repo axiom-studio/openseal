@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -16,7 +17,7 @@ import (
 func checkApplicationRouteMatching(t *testing.T, store ExternalConversationEndpointStore) {
 	t.Helper()
 	ctx := context.Background()
-	_, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	_, _, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
 	endpoint.InstallationID = "T123"
 	endpoint.Address = "C123"
 	endpoint.ApplicationID = ""
@@ -96,12 +97,12 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			store, db := newTestSQLiteStore(t)
-			catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
+			catalog, endpoint := externalconversationtest.EndpointFixtureOn(t, ctx, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
 			gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
 			endpoint.InstallationID = "T123"
 			endpoint.ApplicationID = ""
 			endpoint.Address = "C123"
-			host := &GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []externalconversation.ExternalConversationGatewayEvent{{
+			host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []externalconversation.ExternalConversationGatewayEvent{{
 				InstallationID: "T123", ApplicationID: "A123", Address: "C123",
 				Event: NormalizedExternalConversationEvent{ID: "event-1", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C123", ExternalMessageID: "171.003", ExternalParticipantID: "U123", Text: "hi", OrderingKey: "C123:171.003", OccurredAt: time.Now().UTC()},
 			}}}}
