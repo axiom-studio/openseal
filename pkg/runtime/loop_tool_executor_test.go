@@ -21,6 +21,42 @@ import (
 
 const toolExecWorker = "tool-exec-worker"
 
+// loopFakeControlHandler completes its control entry with a fixed result, as
+// a control tool does, and counts its calls.
+type loopFakeControlHandler struct {
+	calls int
+}
+
+func (h *loopFakeControlHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
+	return ControlToolSpec{Description: "fake", InputSchema: map[string]interface{}{"type": "object"}}
+}
+
+func (h *loopFakeControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
+	return models.DecodeControlInto[struct {
+		Goal string `json:"goal"`
+	}](raw)
+}
+
+func (h *loopFakeControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+	h.calls++
+	result := models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{"status": "done"})
+	meta, err := json.Marshal(&ControlEntryMeta{Kind: cc.ToolName(), ForkID: "fork-" + cc.Entry.ID})
+	if err != nil {
+		return ControlResult{}, err
+	}
+	now := x.Now()
+	moved, err := x.Sessions.TransitionToolEntry(ctx, ToolEntryTransitionRequest{
+		Scope: cc.Run.Scope, EntryID: cc.Entry.ID, RunID: cc.Run.ID, Lease: cc.LeaseGuard(now),
+		From: cc.Entry.State, ExpectedRevision: cc.Entry.Revision, To: ToolEntryCompleted,
+		Result: result, Kernel: &ToolEntryKernelPatch{Control: meta}, Now: now,
+		Tokens: modelstep.EstimateEntryTokens(WithToolResult(cc.Entry, ToolEntryCompleted, result)),
+	})
+	if err != nil {
+		return ControlResult{}, err
+	}
+	return ControlResult{Kind: ControlContinue, Entry: moved.Entry}, nil
+}
+
 // toolExecFixture is a claimed Run with a run session in an in-memory store and
 // a claim tool executor whose host tools go to host and whose control tools
 // go to fake handlers.
@@ -33,18 +69,18 @@ type toolExecFixture struct {
 	run      *AgentRun
 	host     *scriptedHost
 	control  *ControlExecutor
-	handlers map[ControlToolName]*fakeControlHandler
+	handlers map[ControlToolName]*loopFakeControlHandler
 	binding  *agentrun.TurnRunnerBinding
 }
 
 // fakeLoopControls fakes every control tool of the run loop, except the
 // tools in real, which keep the handler given there.
-func fakeLoopControls(real ...Tool) (Registry, map[ControlToolName]*fakeControlHandler) {
+func fakeLoopControls(real ...Tool) (Registry, map[ControlToolName]*loopFakeControlHandler) {
 	registry := NewRegistry(real...)
-	fakes := map[ControlToolName]*fakeControlHandler{}
+	fakes := map[ControlToolName]*loopFakeControlHandler{}
 	for name := range loopControlRegistry() {
 		if _, ok := registry[name]; !ok {
-			fakes[name] = &fakeControlHandler{}
+			fakes[name] = &loopFakeControlHandler{}
 			registry[name] = fakes[name]
 		}
 	}
@@ -424,7 +460,7 @@ func TestPlanToolEntriesRefusesUnusableArguments(t *testing.T) {
 // dependency group under the entry's stable key (once) and moves the entry to
 // awaiting_child, as the coordinator transaction does.
 type committedForkHandler struct {
-	fakeControlHandler
+	loopFakeControlHandler
 	groups  map[string]int
 	settles int
 }

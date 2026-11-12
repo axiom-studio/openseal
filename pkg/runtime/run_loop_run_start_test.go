@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
@@ -18,9 +19,59 @@ func (a *runStartActions) ListActionCalls(ctx context.Context, filter ActionFilt
 	return a.lister.ListActionCalls(ctx, filter)
 }
 
+// runStartHistory is a Run's governed loop calls and their tool entries on
+// the session path, as the run-start preparer reads them.
+type runStartHistory struct {
+	t     *testing.T
+	run   *AgentRun
+	path  *AgentSessionPath
+	calls map[string]*ActionCall
+	now   time.Time
+}
+
+func newRunStartHistory(t *testing.T) *runStartHistory {
+	t.Helper()
+	scope := Scope{Kind: "workspace", ID: "ws-guards"}
+	return &runStartHistory{
+		t:     t,
+		run:   &AgentRun{ID: "run-guards", Scope: scope, Kind: RunKindConversation, SessionID: "session-guards"},
+		path:  &AgentSessionPath{},
+		calls: map[string]*ActionCall{},
+		now:   time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC),
+	}
+}
+
+// add records a terminal loop call and its tool entry on the path.
+func (f *runStartHistory) add(id, skillID, action string, status ActionCallStatus, output map[string]interface{}, errorCode string, details map[string]string) *SessionEntry {
+	f.t.Helper()
+	f.now = f.now.Add(time.Second)
+	call := &ActionCall{
+		ID: id, Scope: f.run.Scope, RunID: f.run.ID, SkillID: skillID, Action: action, Status: status,
+		Origin: ActionOriginLoop, Output: output, ErrorCode: errorCode, ErrorDetails: details,
+		CreatedAt: f.now, UpdatedAt: f.now,
+	}
+	f.calls[id] = call
+	state := ToolEntryCompleted
+	if status != ActionCallStatusSucceeded {
+		state = ToolEntryError
+	}
+	entry := &SessionEntry{
+		ID: "entry-" + id, Scope: f.run.Scope, SessionID: f.run.SessionID, RunID: f.run.ID,
+		StepID: "step-" + id, Type: SessionEntryTool, State: state, ToolCallID: "tc-" + id, ActionCallID: id,
+		Tool: &ToolEntry{Name: skillID + "." + action},
+	}
+	f.path.Entries = append(f.path.Entries, entry)
+	return entry
+}
+
+func (f *runStartHistory) rateLimitedLightpanda(id string) {
+	f.add(id, LightpandaBrowserSkillID, "lightpanda-read", ActionCallStatusFailed, nil,
+		"source_rate_limited", map[string]string{"httpStatus": "429"})
+}
+
 func TestRunStartNoteIdempotent(t *testing.T) {
 	// Governed-history notes: rate-limited source and pending setup.
-	g := newGuardFixture(t)
+	g := newRunStartHistory(t)
 	g.rateLimitedLightpanda("read-429")
 	g.add("setup-1", SkillManagementSkillID, agentrun.SkillActionRequestSetup, ActionCallStatusSucceeded, map[string]interface{}{
 		"setupRequest": map[string]interface{}{"id": "form-1", "status": "pending", "runId": g.run.ID, "actionCallId": "setup-1"},
