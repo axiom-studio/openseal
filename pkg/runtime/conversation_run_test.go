@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -270,7 +271,7 @@ func conversationRunRoundKey(scope Scope, conversationID, triggerID string) stri
 // it to a chat Run: the model producer, the run-start preparer and the
 // control authority of the speaking Agent. It records the Runs it resolves.
 type chatRunResolver struct {
-	store    chatLoopStore
+	store    runlooptest.ChatStore
 	producer agentrun.StepProducer
 	actions  []capability.ModelAction
 	resolved []*AgentRun
@@ -287,24 +288,13 @@ func (r *chatRunResolver) ResolveTurnRunner(_ context.Context, run *AgentRun) (*
 	}, nil
 }
 
-func (f *chatLoopFixture) chatRunner(resolver runtimeconversation.TurnRunnerResolver, participation bool) *conversationrun.ConversationRunTurnRunner {
-	f.t.Helper()
-	runner, err := conversationrun.NewConversationRunTurnRunner(f.store, conversationRunTestCoordinator(f.t, f.service), conversationrun.ConversationRunTurnRunnerConfig{
-		AgentTurns: resolver, RequireParticipationOptIn: participation,
-	})
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	return runner
-}
-
 func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		resolver := &chatRunResolver{store: f.store, producer: &chatLoopProducer{answers: []string{"The release evidence is healthy."}}}
-		runner := f.chatRunner(resolver, false)
-		trigger := f.post("release", "user-1", "Summarize the release evidence.")
-		run := f.startRun(trigger)
-		binding, err := runner.ResolveTurnRunner(f.ctx, run)
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		resolver := &chatRunResolver{store: f.Store, producer: &runlooptest.ChatProducer{Answers: []string{"The release evidence is healthy."}}}
+		runner := f.ChatRunner(resolver, false)
+		trigger := f.Post("release", "user-1", "Summarize the release evidence.")
+		run := f.StartRun(trigger)
+		binding, err := runner.ResolveTurnRunner(f.Ctx, run)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -323,12 +313,12 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 		if len(binding.Preparers) != 2 || len(binding.Prompt.Sections) == 0 {
 			t.Fatalf("preparers = %d, prompt sections = %d", len(binding.Preparers), len(binding.Prompt.Sections))
 		}
-		exit := f.drive(run, binding)
+		exit := f.Drive(run, binding)
 		if exit.Reason != runloop.RunLoopExitFinal {
 			t.Fatalf("exit = %#v", exit)
 		}
-		done := f.run(run.ID)
-		messages := f.agentMessages()
+		done := f.Run(run.ID)
+		messages := f.AgentMessages()
 		if done.Status != AgentRunStatusCompleted || len(messages) != 1 {
 			t.Fatalf("run = %s %#v, agent messages = %#v", done.Status, done.Output, messages)
 		}
@@ -343,13 +333,13 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 		}
 		// The answer is the Agent's own assistant entry in its lane session; no
 		// goal text reached the model.
-		path := f.path(run.SessionID)
+		path := f.Path(run.SessionID)
 		assistant := 0
 		for _, entry := range path {
 			if entry.Type == SessionEntryAssistant && entry.RunID == run.ID {
 				assistant++
 			}
-			if entry.Type == SessionEntryUser && strings.Contains(chatLoopEntryText(entry), "currentMessage") {
+			if entry.Type == SessionEntryUser && strings.Contains(runlooptest.ChatEntryText(entry), "currentMessage") {
 				t.Fatalf("goal JSON in the session: %#v", entry)
 			}
 		}
@@ -360,23 +350,23 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 }
 
 func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{team: true}, func(t *testing.T, f *chatLoopFixture) {
-		trigger := f.post("route", "user-1", "Who can check the canary?")
-		commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
-		created, err := commands.CreateAgentRun(f.ctx, runtimeconversation.ConversationAgentRunRequest(f.conversation, trigger))
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{Team: true}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		trigger := f.Post("route", "user-1", "Who can check the canary?")
+		commands := agentrun.NewRunCommandService(f.Store, models.WithClock(func() time.Time { return f.Now }))
+		created, err := commands.CreateAgentRun(f.Ctx, runtimeconversation.ConversationAgentRunRequest(f.Conversation, trigger))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if created.Run.SessionID != "" || created.Run.AssignedAgentID != "" {
 			t.Fatalf("routing Run = %#v", created.Run)
 		}
-		claimed, err := f.store.ClaimNextAgentRun(f.ctx, AgentRunClaim{
-			Scope: f.conversation.Scope, WorkerID: chatLoopWorker, Now: f.now, LeaseDuration: time.Hour, AgingInterval: time.Minute,
+		claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, AgentRunClaim{
+			Scope: f.Conversation.Scope, WorkerID: runlooptest.ChatWorker, Now: f.Now, LeaseDuration: time.Hour, AgingInterval: time.Minute,
 		})
 		if err != nil || claimed == nil || claimed.ID != created.Run.ID {
 			t.Fatalf("claim = %#v, %v", claimed, err)
 		}
-		binding, err := f.runner.ResolveTurnRunner(f.ctx, claimed)
+		binding, err := f.Runner.ResolveTurnRunner(f.Ctx, claimed)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -384,33 +374,33 @@ func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 		if binding.DefinitionID != "openseal.conversation-router" || binding.Producer == nil || binding.Session != nil || binding.Final != nil || len(binding.Preparers) != 0 {
 			t.Fatalf("routing binding = %#v", binding)
 		}
-		if exit := f.drive(claimed, binding); exit.Reason != runloop.RunLoopExitFinal {
+		if exit := f.Drive(claimed, binding); exit.Reason != runloop.RunLoopExitFinal {
 			t.Fatalf("exit = %#v", exit)
 		}
-		done := f.run(claimed.ID)
+		done := f.Run(claimed.ID)
 		ids, _ := done.Output["responderRunIds"].([]interface{})
-		if done.Status != AgentRunStatusCompleted || len(ids) != 1 || done.Output["conversationId"] != f.conversation.ID ||
+		if done.Status != AgentRunStatusCompleted || len(ids) != 1 || done.Output["conversationId"] != f.Conversation.ID ||
 			done.Output["triggerMessageId"] != trigger.ID || done.Output["participationRoundId"] == "" || done.Output["replayed"] != false {
 			t.Fatalf("routing Run = %s %#v", done.Status, done.Output)
 		}
-		member := f.run(fmt.Sprint(ids[0]))
-		lane := ConversationRunLane(f.conversation.ID, "", "agent-1")
+		member := f.Run(fmt.Sprint(ids[0]))
+		lane := ConversationRunLane(f.Conversation.ID, "", "agent-1")
 		if member.Kind != RunKindConversation || member.AssignedAgentID != "agent-1" || member.ConcurrencyKey != lane ||
-			member.SessionID != conversationSessionID(f.conversation.Scope, lane) || member.Context[runtimeconversation.TeamRoutingRunContextKey] != claimed.ID {
+			member.SessionID != conversationSessionID(f.Conversation.Scope, lane) || member.Context[runtimeconversation.TeamRoutingRunContextKey] != claimed.ID {
 			t.Fatalf("member Run = %#v", member)
 		}
-		if len(f.agentMessages()) != 0 {
-			t.Fatalf("the routing Run posted: %#v", f.agentMessages())
+		if len(f.AgentMessages()) != 0 {
+			t.Fatalf("the routing Run posted: %#v", f.AgentMessages())
 		}
 	})
 }
 
 func TestConversationRunOutsideParticipationEndsWithoutAgentBinding(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{participation: true}, func(t *testing.T, f *chatLoopFixture) {
-		resolver := &chatRunResolver{store: f.store, producer: &chatLoopProducer{}}
-		runner := f.chatRunner(resolver, true)
-		run := f.startRun(f.post("quiet", "user-1", "Anyone there?"))
-		binding, err := runner.ResolveTurnRunner(f.ctx, run)
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{Participation: true}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		resolver := &chatRunResolver{store: f.Store, producer: &runlooptest.ChatProducer{}}
+		runner := f.ChatRunner(resolver, true)
+		run := f.StartRun(f.Post("quiet", "user-1", "Anyone there?"))
+		binding, err := runner.ResolveTurnRunner(f.Ctx, run)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -419,23 +409,23 @@ func TestConversationRunOutsideParticipationEndsWithoutAgentBinding(t *testing.T
 		if binding.Model != "participation-disabled" || binding.Producer == nil || len(resolver.resolved) != 0 || binding.Session != nil {
 			t.Fatalf("binding = %#v, resolved = %d", binding, len(resolver.resolved))
 		}
-		if exit := f.drive(run, binding); exit.Reason != runloop.RunLoopExitFinal {
+		if exit := f.Drive(run, binding); exit.Reason != runloop.RunLoopExitFinal {
 			t.Fatalf("exit = %#v", exit)
 		}
-		done := f.run(run.ID)
-		if done.Status != AgentRunStatusCompleted || done.Output["participationSkipped"] != true || len(f.agentMessages()) != 0 {
-			t.Fatalf("run = %s %#v, messages = %#v", done.Status, done.Output, f.agentMessages())
+		done := f.Run(run.ID)
+		if done.Status != AgentRunStatusCompleted || done.Output["participationSkipped"] != true || len(f.AgentMessages()) != 0 {
+			t.Fatalf("run = %s %#v, messages = %#v", done.Status, done.Output, f.AgentMessages())
 		}
 	})
 }
 
 func TestConversationRunPinnedRunbookKeepsAgentBindingWithoutChatSeams(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		resolver := &chatRunResolver{store: f.store, producer: &chatLoopProducer{}}
-		runner := f.chatRunner(resolver, false)
-		run := cloneAgentRun(f.startRun(f.post("pinned", "user-1", "Handle this through the runbook.")))
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		resolver := &chatRunResolver{store: f.Store, producer: &runlooptest.ChatProducer{}}
+		runner := f.ChatRunner(resolver, false)
+		run := cloneAgentRun(f.StartRun(f.Post("pinned", "user-1", "Handle this through the runbook.")))
 		run.Plan = map[string]interface{}{"runbook": map[string]interface{}{"id": "handler", "version": "1"}}
-		binding, err := runner.ResolveTurnRunner(f.ctx, run)
+		binding, err := runner.ResolveTurnRunner(f.Ctx, run)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -447,16 +437,16 @@ func TestConversationRunPinnedRunbookKeepsAgentBindingWithoutChatSeams(t *testin
 }
 
 func TestConversationRunRefusesAgentBindingWithoutProducer(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		runner := f.chatRunner(TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		runner := f.ChatRunner(TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			return &agentrun.TurnRunnerBinding{DeploymentID: "agent-1"}, nil
 		}), false)
-		run := f.startRun(f.post("broken", "user-1", "Hello"))
-		if _, err := runner.ResolveTurnRunner(f.ctx, run); !errors.Is(err, runtimeconversation.ErrConversationCoordinationUnavailable) {
+		run := f.StartRun(f.Post("broken", "user-1", "Hello"))
+		if _, err := runner.ResolveTurnRunner(f.Ctx, run); !errors.Is(err, runtimeconversation.ErrConversationCoordinationUnavailable) {
 			t.Fatalf("err = %v", err)
 		}
-		withoutResolver := f.chatRunner(nil, false)
-		if _, err := withoutResolver.ResolveTurnRunner(f.ctx, run); !errors.Is(err, runtimeconversation.ErrConversationCoordinationUnavailable) {
+		withoutResolver := f.ChatRunner(nil, false)
+		if _, err := withoutResolver.ResolveTurnRunner(f.Ctx, run); !errors.Is(err, runtimeconversation.ErrConversationCoordinationUnavailable) {
 			t.Fatalf("err without an Agent resolver = %v", err)
 		}
 	})

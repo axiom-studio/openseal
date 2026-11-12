@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 )
 
 // A provider message whose thread history was unavailable keeps its source
@@ -52,24 +53,24 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 	}
 
 	// The inbox scheduled the Run that answers the message; the loop runs it.
-	f := newChatLoopFixture(t, store, chatLoopOptions{})
-	if f.conversation, err = f.service.GetConversation(ctx, endpoint.Scope, applied.ConversationID); err != nil {
+	f := runlooptest.NewChatFixture(t, store, runlooptest.ChatOptions{})
+	if f.Conversation, err = f.Service.GetConversation(ctx, endpoint.Scope, applied.ConversationID); err != nil {
 		t.Fatal(err)
 	}
 	// The scheduler stamped the Run on the wall clock; the fixture clock is
 	// truncated to the millisecond, so step past the Run's AvailableAt.
-	f.now = f.now.Add(time.Second)
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: chatLoopWorker, Now: f.now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	f.Now = f.Now.Add(time.Second)
+	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: runlooptest.ChatWorker, Now: f.Now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || run == nil || run.Context[conversationRunContextTriggerID] != again[0].ID {
 		t.Fatalf("claim = %#v, %v", run, err)
 	}
-	producer := &chatLoopProducer{answers: []string{"I can pick up the first two."}}
+	producer := &runlooptest.ChatProducer{Answers: []string{"I can pick up the first two."}}
 	binding := bindChatAgent(f, run, producer, endpoint.Owner.ID)
-	if exit := f.drive(run, binding); exit.Run.Status != AgentRunStatusCompleted || len(producer.paths) != 1 {
-		t.Fatalf("exit %s, run %s, steps %d", exit.Reason, exit.Run.Status, len(producer.paths))
+	if exit := f.Drive(run, binding); exit.Run.Status != AgentRunStatusCompleted || len(producer.Paths) != 1 {
+		t.Fatalf("exit %s, run %s, steps %d", exit.Reason, exit.Run.Status, len(producer.Paths))
 	}
 	var trigger, runContext *SessionEntry
-	for _, entry := range producer.paths[0] {
+	for _, entry := range producer.Paths[0] {
 		switch {
 		case entry.User != nil && entry.User.MessageID == again[0].ID:
 			trigger = entry
@@ -78,15 +79,15 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 		}
 	}
 	if trigger == nil || runContext == nil {
-		t.Fatalf("step path = %v", chatLoopShape(producer.paths[0]))
+		t.Fatalf("step path = %v", runlooptest.ChatShape(producer.Paths[0]))
 	}
-	header, _, _ := strings.Cut(chatLoopEntryText(trigger), "\n")
+	header, _, _ := strings.Cut(runlooptest.ChatEntryText(trigger), "\n")
 	for _, want := range []string{"Kev", "via slack engineering current-user"} {
 		if !strings.Contains(header, want) {
 			t.Errorf("message header missing %q: %s", want, header)
 		}
 	}
-	note := chatLoopEntryText(runContext)
+	note := runlooptest.ChatEntryText(runContext)
 	for _, want := range []string{"slack channel engineering (private_channel)", "Provider thread history: unavailable"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("run_context missing %q: %s", want, note)

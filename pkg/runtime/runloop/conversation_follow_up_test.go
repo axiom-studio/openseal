@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -222,66 +223,6 @@ func TestExternalInboxFollowUpItemDefersToTriggerItem(t *testing.T) {
 // message-backed intervention (bumping the Run's revision), and the Run's
 // next step ingests it into its own session through catch-up.
 
-func (f *chatLoopFixture) scheduler() *conversationrun.ConversationRunScheduler {
-	f.t.Helper()
-	scheduler, err := conversationrun.NewConversationRunScheduler(f.store, f.store, conversationrun.ConversationRunSchedulerConfig{})
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	return scheduler
-}
-
-func (f *chatLoopFixture) schedule(message *models.ChannelMessage) *models.AgentRun {
-	f.t.Helper()
-	result, _, err := f.scheduler().ScheduleMessage(f.ctx, f.conversation.Scope, f.conversation.ID, message.ID)
-	if err != nil || result == nil || result.Run == nil {
-		f.t.Fatalf("schedule %s = %#v, %v", message.ID, result, err)
-	}
-	return result.Run
-}
-
-// startMember creates and claims agentID's member Run answering trigger in a
-// Team chat, as the routing Run would (teamMemberRunRequest).
-func (f *chatLoopFixture) startMember(trigger *models.ChannelMessage, agentID string) *models.AgentRun {
-	f.t.Helper()
-	request := conversation.ConversationAgentRunRequest(f.conversation, trigger)
-	request.AssignedAgentID = agentID
-	request.ConcurrencyKey = models.ConversationRunLane(f.conversation.ID, "", agentID)
-	request.SessionID = models.ConversationSessionID(f.conversation.Scope, request.ConcurrencyKey)
-	request.IdempotencyKey = "member-" + agentID + "-" + trigger.ID
-	commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
-	result, err := commands.CreateAgentRun(f.ctx, request)
-	if err != nil {
-		f.t.Fatalf("create member run: %v", err)
-	}
-	claimed, err := f.store.ClaimNextAgentRun(f.ctx, models.AgentRunClaim{
-		Scope: f.conversation.Scope, WorkerID: chatLoopWorker, Now: f.now, LeaseDuration: time.Hour, AgingInterval: time.Minute,
-	})
-	if err != nil || claimed == nil || claimed.ID != result.Run.ID {
-		f.t.Fatalf("claim = %#v, %v (want %s)", claimed, err, result.Run.ID)
-	}
-	return claimed
-}
-
-// bindMember is bind for agentID's member Run.
-func (f *chatLoopFixture) bindMember(run *models.AgentRun, agentID string, producer agentrun.StepProducer) *agentrun.TurnRunnerBinding {
-	f.t.Helper()
-	return f.bindAgent(run, agentID, producer)
-}
-
-func (f *chatLoopFixture) eventTypes(runID string) []string {
-	f.t.Helper()
-	events, err := f.store.ListActivity(f.ctx, models.ActivityFilter{Scope: f.conversation.Scope, RunID: runID, Limit: 500})
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	types := make([]string, 0, len(events))
-	for _, event := range events {
-		types = append(types, event.EventType)
-	}
-	return types
-}
-
 func countFollowUpEntries(entries []*models.SessionEntry, messageID string) int {
 	count := 0
 	for _, entry := range entries {
@@ -292,40 +233,40 @@ func countFollowUpEntries(entries []*models.SessionEntry, messageID string) int 
 	return count
 }
 
-func expectNoGuidanceChanged(t *testing.T, f *chatLoopFixture, runID string) {
+func expectNoGuidanceChanged(t *testing.T, f *runlooptest.ChatFixture, runID string) {
 	t.Helper()
-	for _, eventType := range f.eventTypes(runID) {
+	for _, eventType := range f.EventTypes(runID) {
 		if eventType == "turn.guidance_changed" {
-			t.Fatalf("run %s recorded turn.guidance_changed: %v", runID, f.eventTypes(runID))
+			t.Fatalf("run %s recorded turn.guidance_changed: %v", runID, f.EventTypes(runID))
 		}
 	}
 }
 
 func TestFollowUpsDeliveredByTheSchedulerAppendToTheSessionOnce(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		trigger := f.post("first", "user-1", "Find the cheapest USB-C hub")
-		run := f.startRun(trigger)
-		binding := f.bind(run, &chatLoopProducer{})
-		f.prepare(run, binding, 1)
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		trigger := f.Post("first", "user-1", "Find the cheapest USB-C hub")
+		run := f.StartRun(trigger)
+		binding := f.Bind(run, &runlooptest.ChatProducer{})
+		prepareChatStep(f, run, binding, 1)
 
-		second := f.post("second", "user-1", "It must have HDMI")
-		third := f.post("third", "user-1", "Use the card ending 1001")
+		second := f.Post("second", "user-1", "It must have HDMI")
+		third := f.Post("third", "user-1", "Use the card ending 1001")
 		for _, message := range []*models.ChannelMessage{second, third} {
-			before := f.run(run.ID).Revision
-			if delivered := f.schedule(message); delivered.ID != run.ID || delivered.Revision <= before {
+			before := f.Run(run.ID).Revision
+			if delivered := f.Schedule(message); delivered.ID != run.ID || delivered.Revision <= before {
 				t.Fatalf("follow-up %s: run %s revision %d (was %d)", message.ID, delivered.ID, delivered.Revision, before)
 			}
 		}
 		// A replayed delivery records nothing new.
-		if replayed := f.schedule(third); len(replayed.PendingInterventions) != 2 {
+		if replayed := f.Schedule(third); len(replayed.PendingInterventions) != 2 {
 			t.Fatalf("replay duplicated the follow-up: %#v", replayed.PendingInterventions)
 		}
 
-		f.prepare(run, binding, 2)
-		f.prepare(run, binding, 3)
-		chatLoopExpectShape(t, f.path(binding.Session.ID),
+		prepareChatStep(f, run, binding, 2)
+		prepareChatStep(f, run, binding, 3)
+		runlooptest.ExpectChatShape(t, f.Path(binding.Session.ID),
 			"user:"+trigger.ID, "note:run_context:"+run.ID, "user:"+second.ID, "user:"+third.ID)
-		if got := f.run(run.ID).ConsumedInterventions; got != 2 {
+		if got := f.Run(run.ID).ConsumedInterventions; got != 2 {
 			t.Fatalf("consumed interventions = %d, want 2", got)
 		}
 		expectNoGuidanceChanged(t, f, run.ID)
@@ -334,12 +275,12 @@ func TestFollowUpsDeliveredByTheSchedulerAppendToTheSessionOnce(t *testing.T) {
 
 // A message from another person is not a follow-up: it starts its own Run.
 func TestFollowUpFromAnotherPersonStartsItsOwnRun(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		trigger := f.post("first", "user-1", "Find the cheapest USB-C hub")
-		run := f.startRun(trigger)
-		other := f.post("other", "user-2", "What is on my calendar?")
-		started := f.schedule(other)
-		if started.ID == run.ID || started.Context[models.ConversationRunTriggerIDContextKey] != other.ID || len(f.run(run.ID).PendingInterventions) != 0 {
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		trigger := f.Post("first", "user-1", "Find the cheapest USB-C hub")
+		run := f.StartRun(trigger)
+		other := f.Post("other", "user-2", "What is on my calendar?")
+		started := f.Schedule(other)
+		if started.ID == run.ID || started.Context[models.ConversationRunTriggerIDContextKey] != other.ID || len(f.Run(run.ID).PendingInterventions) != 0 {
 			t.Fatalf("another person's message was absorbed: %#v", started)
 		}
 	})
@@ -348,7 +289,7 @@ func TestFollowUpFromAnotherPersonStartsItsOwnRun(t *testing.T) {
 // followUpDuringStepProducer delivers a follow-up while its first step runs,
 // then answers each step with the next scripted text.
 type followUpDuringStepProducer struct {
-	chatLoopProducer
+	runlooptest.ChatProducer
 	during func()
 }
 
@@ -358,33 +299,33 @@ func (p *followUpDuringStepProducer) Produce(ctx context.Context, in agentrun.St
 		p.during = nil
 		during()
 	}
-	return p.chatLoopProducer.Produce(ctx, in)
+	return p.ChatProducer.Produce(ctx, in)
 }
 
 // A message delivered while a step runs bumps the Run's revision, so the
 // answer drafted without it is not posted; the next step sees the follow-up
 // in the session and its answer is the one posted.
 func TestFollowUpDuringStepSupersedesItsAnswer(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		trigger := f.post("first", "user-1", "Find a USB-C hub")
-		run := f.startRun(trigger)
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		trigger := f.Post("first", "user-1", "Find a USB-C hub")
+		run := f.StartRun(trigger)
 		var second *models.ChannelMessage
 		producer := &followUpDuringStepProducer{
-			chatLoopProducer: chatLoopProducer{answers: []string{"Here is a hub without HDMI.", "Here is a hub with HDMI."}},
+			ChatProducer: runlooptest.ChatProducer{Answers: []string{"Here is a hub without HDMI.", "Here is a hub with HDMI."}},
 			during: func() {
-				second = f.post("second", "user-1", "Only ones with HDMI")
-				f.schedule(second)
+				second = f.Post("second", "user-1", "Only ones with HDMI")
+				f.Schedule(second)
 			},
 		}
-		binding := f.bind(run, producer)
-		exit := f.drive(run, binding)
-		if exit.Run.Status != models.AgentRunStatusCompleted || len(producer.paths) != 2 {
-			t.Fatalf("exit = %s %s after %d steps", exit.Reason, exit.Run.Status, len(producer.paths))
+		binding := f.Bind(run, producer)
+		exit := f.Drive(run, binding)
+		if exit.Run.Status != models.AgentRunStatusCompleted || len(producer.Paths) != 2 {
+			t.Fatalf("exit = %s %s after %d steps", exit.Reason, exit.Run.Status, len(producer.Paths))
 		}
-		if countFollowUpEntries(producer.paths[1], second.ID) != 1 || countFollowUpEntries(producer.paths[0], second.ID) != 0 {
+		if countFollowUpEntries(producer.Paths[1], second.ID) != 1 || countFollowUpEntries(producer.Paths[0], second.ID) != 0 {
 			t.Fatal("the second step did not render the follow-up exactly once")
 		}
-		messages := f.agentMessages()
+		messages := f.AgentMessages()
 		if len(messages) != 1 || messages[0].Content != "Here is a hub with HDMI." {
 			var contents []string
 			for _, message := range messages {
@@ -400,26 +341,26 @@ func TestFollowUpDuringStepSupersedesItsAnswer(t *testing.T) {
 // to every working member as a follow-up, and each member's next step appends
 // it to that member's own session.
 func TestTeamFollowUpAppendsToEveryMemberSession(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{team: true}, func(t *testing.T, f *chatLoopFixture) {
-		trigger := f.post("trigger", "user-1", "Plan the launch.")
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{Team: true}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		trigger := f.Post("trigger", "user-1", "Plan the launch.")
 		members := []string{"agent-1", "agent-2"}
 		runs := map[string]*models.AgentRun{}
 		bindings := map[string]*agentrun.TurnRunnerBinding{}
 		revisions := map[string]int64{}
 		for _, agentID := range members {
-			runs[agentID] = f.startMember(trigger, agentID)
-			bindings[agentID] = f.bindMember(runs[agentID], agentID, &chatLoopProducer{})
-			f.prepare(runs[agentID], bindings[agentID], 1)
-			revisions[agentID] = f.run(runs[agentID].ID).Revision
+			runs[agentID] = f.StartMember(trigger, agentID)
+			bindings[agentID] = f.BindMember(runs[agentID], agentID, &runlooptest.ChatProducer{})
+			prepareChatStep(f, runs[agentID], bindings[agentID], 1)
+			revisions[agentID] = f.Run(runs[agentID].ID).Revision
 		}
 		if bindings["agent-1"].Session.ID == bindings["agent-2"].Session.ID {
 			t.Fatal("two members share one session")
 		}
 
-		followUp := f.post("follow-up", "user-1", "Keep it under a week.")
-		f.schedule(followUp)
+		followUp := f.Post("follow-up", "user-1", "Keep it under a week.")
+		f.Schedule(followUp)
 		for _, agentID := range members {
-			current := f.run(runs[agentID].ID)
+			current := f.Run(runs[agentID].ID)
 			if !runHasFollowUp(current, followUp.ID) || current.Revision <= revisions[agentID] {
 				t.Fatalf("%s: follow-up not delivered (revision %d, was %d): %#v", agentID, current.Revision, revisions[agentID], current.PendingInterventions)
 			}
@@ -427,15 +368,15 @@ func TestTeamFollowUpAppendsToEveryMemberSession(t *testing.T) {
 
 		for _, agentID := range members {
 			run, binding := runs[agentID], bindings[agentID]
-			f.prepare(run, binding, 2)
-			f.prepare(run, binding, 3)
-			chatLoopExpectShape(t, f.path(binding.Session.ID), "user:"+trigger.ID, "note:run_context:"+run.ID, "user:"+followUp.ID)
-			if got := f.run(run.ID).ConsumedInterventions; got != 1 {
+			prepareChatStep(f, run, binding, 2)
+			prepareChatStep(f, run, binding, 3)
+			runlooptest.ExpectChatShape(t, f.Path(binding.Session.ID), "user:"+trigger.ID, "note:run_context:"+run.ID, "user:"+followUp.ID)
+			if got := f.Run(run.ID).ConsumedInterventions; got != 1 {
 				t.Fatalf("%s consumed %d interventions", agentID, got)
 			}
 			expectNoGuidanceChanged(t, f, run.ID)
 		}
-		if runs, err := f.store.ListAgentRuns(f.ctx, models.AgentRunFilter{Scope: f.conversation.Scope, Kind: models.RunKindConversation, Owner: &f.conversation.Owner}); err != nil || len(runs) != len(members) {
+		if runs, err := f.Store.ListAgentRuns(f.Ctx, models.AgentRunFilter{Scope: f.Conversation.Scope, Kind: models.RunKindConversation, Owner: &f.Conversation.Owner}); err != nil || len(runs) != len(members) {
 			t.Fatalf("the follow-up started new work: %d runs, %v", len(runs), err)
 		}
 	})

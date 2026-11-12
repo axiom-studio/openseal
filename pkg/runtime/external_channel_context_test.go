@@ -8,13 +8,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 )
 
 // bindChatAgent resolves the chat seams for a Run of agentID's own chat, as
 // chatLoopFixture.bind does for agent-1.
-func bindChatAgent(f *chatLoopFixture, run *AgentRun, producer agentrun.StepProducer, agentID string) *agentrun.TurnRunnerBinding {
-	f.t.Helper()
-	return f.bindAgent(run, agentID, producer)
+func bindChatAgent(f *runlooptest.ChatFixture, run *AgentRun, producer agentrun.StepProducer, agentID string) *agentrun.TurnRunnerBinding {
+	f.T.Helper()
+	return f.BindAgent(run, agentID, producer)
 }
 
 // chatStepText is everything one model step was given: the system sections
@@ -25,7 +26,7 @@ func chatStepText(binding *agentrun.TurnRunnerBinding, path []*SessionEntry) str
 		parts = append(parts, section.Text)
 	}
 	for _, entry := range path {
-		parts = append(parts, chatLoopEntryText(entry))
+		parts = append(parts, runlooptest.ChatEntryText(entry))
 		if entry.User != nil {
 			for _, part := range entry.User.Content[1:] {
 				parts = append(parts, part.Text)
@@ -39,10 +40,10 @@ func chatStepText(binding *agentrun.TurnRunnerBinding, path []*SessionEntry) str
 // Agent's DMs, objectives or runbooks. The Agent's own application chat in the
 // same tenant still sees its objectives and runbooks.
 func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		scope, owner := f.conversation.Scope, f.conversation.Owner
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		scope, owner := f.Conversation.Scope, f.Conversation.Owner
 		external := func(key, title string) *Conversation {
-			conversation, _, err := f.service.CreateConversation(f.ctx, conversation.CreateConversationRequest{
+			conversation, _, err := f.Service.CreateConversation(f.Ctx, conversation.CreateConversationRequest{
 				Scope: scope, Owner: owner, Title: title, IdempotencyKey: key,
 				Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "same-slack-app", Version: 1},
 			})
@@ -51,22 +52,22 @@ func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
 			}
 			return conversation
 		}
-		personal := f.conversation
-		f.conversation = external("private-dm", "Private DM")
-		f.post("private-message", "user-1", "PRIVATE_DM_SECRET")
+		personal := f.Conversation
+		f.Conversation = external("private-dm", "Private DM")
+		f.Post("private-message", "user-1", "PRIVATE_DM_SECRET")
 		public := external("public-channel", "Public channel")
-		portfolio, ok := f.store.(interface {
+		portfolio, ok := f.Store.(interface {
 			RunbookActivationStore
 			PortfolioStore
 		})
 		if !ok {
-			t.Fatalf("%T has no runbook activations", f.store)
+			t.Fatalf("%T has no runbook activations", f.Store)
 		}
-		objective, err := NewPortfolioService(portfolio).CreateObjective(f.ctx, CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "PRIVATE_OBJECTIVE", Goal: "PRIVATE_OBJECTIVE_SECRET", Status: ObjectiveStatusActive})
+		objective, err := NewPortfolioService(portfolio).CreateObjective(f.Ctx, CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "PRIVATE_OBJECTIVE", Goal: "PRIVATE_OBJECTIVE_SECRET", Status: ObjectiveStatusActive})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := routine.NewRunbookActivationService(portfolio).Create(f.ctx, routine.CreateRunbookActivationRequest{
+		if _, err := routine.NewRunbookActivationService(portfolio).Create(f.Ctx, routine.CreateRunbookActivationRequest{
 			Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, DefinitionID: "private-workflow", DefinitionVersion: "1",
 			TriggerID: "scheduled", Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "private-workflow", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}},
 			Status: RunbookActivationActive, IdempotencyKey: "private-workflow",
@@ -76,14 +77,14 @@ func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
 
 		ask := func(conversation *Conversation, key, question string) string {
 			t.Helper()
-			f.conversation = conversation
-			run := f.startRun(f.post(key, "user-1", question))
-			producer := &chatLoopProducer{answers: []string{"Answered."}}
+			f.Conversation = conversation
+			run := f.StartRun(f.Post(key, "user-1", question))
+			producer := &runlooptest.ChatProducer{Answers: []string{"Answered."}}
 			binding := bindChatAgent(f, run, producer, owner.ID)
-			if exit := f.drive(run, binding); exit.Run.Status != AgentRunStatusCompleted || len(producer.paths) != 1 {
-				t.Fatalf("%s: exit %s, run %s, steps %d", key, exit.Reason, exit.Run.Status, len(producer.paths))
+			if exit := f.Drive(run, binding); exit.Run.Status != AgentRunStatusCompleted || len(producer.Paths) != 1 {
+				t.Fatalf("%s: exit %s, run %s, steps %d", key, exit.Reason, exit.Run.Status, len(producer.Paths))
 			}
-			return chatStepText(binding, producer.paths[0])
+			return chatStepText(binding, producer.Paths[0])
 		}
 		channel := ask(public, "public-message", "PUBLIC_CHANNEL_QUESTION")
 		if !strings.Contains(channel, "PUBLIC_CHANNEL_QUESTION") || !strings.Contains(channel, conversation.ConversationExternalSourceRules) {

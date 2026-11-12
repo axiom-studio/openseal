@@ -33,6 +33,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -1082,7 +1083,7 @@ func TestLoopForegroundPromotionForksTheSession(t *testing.T) {
 					// moves the Run off the lane.
 					c.clock.Advance(ConversationTaskForegroundTimeout)
 					run := c.mustRun(slowRunID)
-					result, err := c.raw.(promotingChatLoopStore).PromoteConversationTask(ctx, ConversationTaskPromotionRequest{
+					result, err := c.raw.(runlooptest.PromotingChatStore).PromoteConversationTask(ctx, ConversationTaskPromotionRequest{
 						Scope: run.Scope, RunID: run.ID, Now: run.CreatedAt.Add(ConversationTaskForegroundTimeout),
 					})
 					if err != nil || result == nil {

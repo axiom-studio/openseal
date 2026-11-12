@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 )
 
 // A Team member's chat step gets the message's attachments exactly as a 1:1
@@ -24,18 +25,18 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 		if !ok {
 			t.Fatalf("%T stores no artifacts", base)
 		}
-		ask := func(team bool) (*SessionEntry, *SessionEntry, *agentrun.TurnRunnerBinding, *chatLoopFixture) {
+		ask := func(team bool) (*SessionEntry, *SessionEntry, *agentrun.TurnRunnerBinding, *runlooptest.ChatFixture) {
 			t.Helper()
-			f := newChatLoopFixture(t, base, chatLoopOptions{team: team})
+			f := runlooptest.NewChatFixture(t, base, runlooptest.ChatOptions{Team: team})
 			artifact := conversationtest.CSVArtifact()
-			artifact.Scope = f.conversation.Scope
+			artifact.Scope = f.Conversation.Scope
 			artifact.MediaType, artifact.SizeBytes, artifact.Digest = "text/csv", int64(len(content)), conversationtest.Digest(content)
-			if err := artifacts.CreateArtifactVersion(f.ctx, artifact, 0); err != nil {
+			if err := artifacts.CreateArtifactVersion(f.Ctx, artifact, 0); err != nil {
 				t.Fatal(err)
 			}
-			f.runner = f.newRunner(conversationrun.ConversationRunTurnRunnerConfig{AttachmentContent: &conversationtest.TextContent{Text: content}})
-			posted, err := f.service.PostChannelMessage(f.ctx, conversation.PostChannelMessageRequest{
-				Scope: f.conversation.Scope, ConversationID: f.conversation.ID, ExpectedRevision: f.conversation.Revision,
+			f.Runner = f.NewRunner(conversationrun.ConversationRunTurnRunnerConfig{AttachmentContent: &conversationtest.TextContent{Text: content}})
+			posted, err := f.Service.PostChannelMessage(f.Ctx, conversation.PostChannelMessageRequest{
+				Scope: f.Conversation.Scope, ConversationID: f.Conversation.ID, ExpectedRevision: f.Conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
 				Content: "What does the attached file total?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 				References:     []ConversationReference{{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: 1}},
@@ -44,15 +45,15 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.conversation = posted.Conversation
-			run := f.startRun(posted.Message)
-			producer := &chatLoopProducer{answers: []string{"Acme totals 42."}}
-			binding := f.bind(run, producer)
-			if exit := f.drive(run, binding); exit.Run.Status != AgentRunStatusCompleted || len(producer.paths) != 1 {
-				t.Fatalf("team=%v: exit %s, run %s, steps %d", team, exit.Reason, exit.Run.Status, len(producer.paths))
+			f.Conversation = posted.Conversation
+			run := f.StartRun(posted.Message)
+			producer := &runlooptest.ChatProducer{Answers: []string{"Acme totals 42."}}
+			binding := f.Bind(run, producer)
+			if exit := f.Drive(run, binding); exit.Run.Status != AgentRunStatusCompleted || len(producer.Paths) != 1 {
+				t.Fatalf("team=%v: exit %s, run %s, steps %d", team, exit.Reason, exit.Run.Status, len(producer.Paths))
 			}
 			var trigger, note *SessionEntry
-			for _, entry := range producer.paths[0] {
+			for _, entry := range producer.Paths[0] {
 				switch {
 				case entry.User != nil && entry.User.MessageID == posted.Message.ID:
 					trigger = entry
@@ -61,7 +62,7 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 				}
 			}
 			if trigger == nil || note == nil {
-				t.Fatalf("team=%v: step path = %v", team, chatLoopShape(producer.paths[0]))
+				t.Fatalf("team=%v: step path = %v", team, runlooptest.ChatShape(producer.Paths[0]))
 			}
 			return trigger, note, binding, f
 		}
@@ -76,15 +77,15 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 			t.Fatalf("Team member attachment parts = %#v, 1:1 = %#v", member.User.Content[1:], direct.User.Content[1:])
 		}
 		for name, entry := range map[string]*SessionEntry{"1:1": direct, "member": member} {
-			if !strings.HasSuffix(chatLoopEntryText(entry), "\nAttached: file.csv (artifact file v1)") {
-				t.Fatalf("%s trigger = %q", name, chatLoopEntryText(entry))
+			if !strings.HasSuffix(runlooptest.ChatEntryText(entry), "\nAttached: file.csv (artifact file v1)") {
+				t.Fatalf("%s trigger = %q", name, runlooptest.ChatEntryText(entry))
 			}
 		}
 		if strings.Contains(chatStepText(directBinding, []*SessionEntry{directNote}), teamMemberRules) ||
 			!strings.Contains(chatStepText(memberBinding, []*SessionEntry{memberNote}), teamMemberRules) {
 			t.Fatal("Team rules reached the 1:1 step or missed the member step")
 		}
-		answers := team.agentMessages()
+		answers := team.AgentMessages()
 		if len(answers) != 1 || answers[0].Sender != conversationtest.AgentParticipant("agent-1") || answers[0].Content != "Acme totals 42." {
 			t.Fatalf("member answer = %#v", answers)
 		}

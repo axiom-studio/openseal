@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -81,9 +82,9 @@ func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content models.Arti
 	if err != nil || run == nil || run.ID != created.Run.ID {
 		t.Fatalf("claim = %#v, %v", run, err)
 	}
-	agent := chatLoopAgentTurns{run.ID: {
+	agent := runlooptest.ChatAgentTurns{run.ID: {
 		DeploymentID: run.AssignedAgentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
-		ModelProvider: string(models.ModelStepProviderAnthropic), Model: "chat-model", Producer: &chatLoopProducer{},
+		ModelProvider: string(models.ModelStepProviderAnthropic), Model: "chat-model", Producer: &runlooptest.ChatProducer{},
 		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
 	}}
 	runner, err := conversationrun.NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, runtimeconversation.NewConversationService(store)), conversationrun.ConversationRunTurnRunnerConfig{
