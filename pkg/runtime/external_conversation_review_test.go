@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -23,12 +24,12 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 		t.Run(provider, func(t *testing.T) {
 			store, db := newTestSQLiteStore(t)
 			fixture := newRunProgressWorkerFixtureOn(t, store, provider, []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryMessageUpdate, capability.ConversationDeliveryTypingIndicator})
-			storetest.RewriteRowPayload(t, db, "agent_runs", fixture.run.Scope, fixture.run.ID, func(run *AgentRun) {
+			storetest.RewriteRowPayload(t, db, "agent_runs", fixture.run.Scope, fixture.run.ID, func(run *models.AgentRun) {
 				run.Context = map[string]interface{}{"conversationId": fixture.conversation.ID, "triggerMessageId": fixture.inbound.ID}
 			})
 			request := skillbindingtest.SkillSetupRequest()
 			request.Scope = fixture.run.Scope
-			request.Owner, request.DeploymentID, request.AgentID = ObjectiveOwner{Type: OwnerTypeAgent, ID: fixture.endpoint.DeploymentID}, fixture.endpoint.DeploymentID, fixture.endpoint.DeploymentID
+			request.Owner, request.DeploymentID, request.AgentID = models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: fixture.endpoint.DeploymentID}, fixture.endpoint.DeploymentID, fixture.endpoint.DeploymentID
 			request.ConversationID = fixture.conversation.ID
 			request.TriggerMessageID = fixture.inbound.ID
 			request.RunID = fixture.run.ID
@@ -36,14 +37,14 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 			if err := fixture.store.SaveSkillSetupRequest(t.Context(), request, 0); err != nil {
 				t.Fatal(err)
 			}
-			approval := &ApprovalCheckpoint{ID: "review-approval", Revision: 1, Scope: fixture.run.Scope, RunID: fixture.run.ID, Status: ApprovalStatusPending, Summary: "Review **this change**.", ExpiresAt: time.Now().Add(time.Hour)}
+			approval := &models.ApprovalCheckpoint{ID: "review-approval", Revision: 1, Scope: fixture.run.Scope, RunID: fixture.run.ID, Status: models.ApprovalStatusPending, Summary: "Review **this change**.", ExpiresAt: time.Now().Add(time.Hour)}
 			approval.ActionCallID = "review-call"
 			reviews := &reviewApprovalStore{Store: fixture.store, approval: approval,
-				call: &ActionCall{ID: approval.ActionCallID, Scope: approval.Scope, InvocationDigest: strings.Repeat("a", 64)}}
+				call: &models.ActionCall{ID: approval.ActionCallID, Scope: approval.Scope, InvocationDigest: strings.Repeat("a", 64)}}
 			worker, err := NewRunProgressAcknowledgementWorker(reviews, fixture.catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error) {
 				t.Fatal("review invoked a model")
 				return "", nil
-			}), RunProgressAcknowledgementWorkerConfig{ReviewURL: func(kind, id, deploymentID, conversationID string, owner ObjectiveOwner) (string, error) {
+			}), RunProgressAcknowledgementWorkerConfig{ReviewURL: func(kind, id, deploymentID, conversationID string, owner models.ObjectiveOwner) (string, error) {
 				if deploymentID != fixture.endpoint.DeploymentID || conversationID != fixture.conversation.ID || owner != fixture.run.Owner {
 					t.Fatal("foreign routing context")
 				}
@@ -57,7 +58,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			deliveries, err := fixture.store.ListExternalConversationDeliveries(t.Context(), ExternalConversationDeliveryFilter{Scope: fixture.run.Scope, CorrelationKind: "review_request", Limit: 100})
+			deliveries, err := fixture.store.ListExternalConversationDeliveries(t.Context(), models.ExternalConversationDeliveryFilter{Scope: fixture.run.Scope, CorrelationKind: "review_request", Limit: 100})
 			if err != nil || len(deliveries) != 2 {
 				t.Fatalf("duplicate/missing review links: %#v %v", deliveries, err)
 			}
@@ -78,7 +79,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 				}
 				presentation, _ := review["presentation"].(map[string]interface{})
 				message, err := fixture.store.GetChannelMessage(t.Context(), delivery.Scope, delivery.ConversationID, delivery.ChannelMessageID)
-				if err != nil || message.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: conversationrun.ChannelReviewParticipantID}) {
+				if err != nil || message.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantService, ID: conversationrun.ChannelReviewParticipantID}) {
 					t.Fatalf("review message = %#v %v", message, err)
 				}
 				if started, _, err := scheduler.ScheduleMessage(t.Context(), delivery.Scope, delivery.ConversationID, delivery.ChannelMessageID); err != nil || started != nil {
@@ -99,12 +100,12 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 			if err := fixture.store.SaveSkillSetupRequest(t.Context(), request, 1); err != nil {
 				t.Fatal(err)
 			}
-			approval.Status = ApprovalStatusApproved
+			approval.Status = models.ApprovalStatusApproved
 			approval.Revision++
 			if _, err := worker.ProcessCommentaryScope(t.Context(), fixture.run.Scope); err != nil {
 				t.Fatal(err)
 			}
-			updates, err := fixture.store.ListExternalConversationDeliveries(t.Context(), ExternalConversationDeliveryFilter{Scope: fixture.run.Scope, CorrelationKind: "review_request", CorrelationID: "approval:" + approval.ID, Limit: 100})
+			updates, err := fixture.store.ListExternalConversationDeliveries(t.Context(), models.ExternalConversationDeliveryFilter{Scope: fixture.run.Scope, CorrelationKind: "review_request", CorrelationID: "approval:" + approval.ID, Limit: 100})
 			if err != nil || len(updates) != 2 {
 				t.Fatalf("resolved card update missing: %v %v", updates, err)
 			}
@@ -135,8 +136,8 @@ func TestPendingSetupProjectionIsTenantScoped(t *testing.T) {
 	}
 	defer sqlite.Close()
 	type pendingStore interface {
-		SkillSetupRequestStore
-		ListPendingSkillSetupRequests(context.Context, Scope, int, int) ([]*SkillSetupRequest, error)
+		models.SkillSetupRequestStore
+		ListPendingSkillSetupRequests(context.Context, models.Scope, int, int) ([]*models.SkillSetupRequest, error)
 	}
 	for _, store := range []pendingStore{newTestKernelStore(t), sqlite} {
 		request := skillbindingtest.SkillSetupRequest()
@@ -147,7 +148,7 @@ func TestPendingSetupProjectionIsTenantScoped(t *testing.T) {
 		if err != nil || len(items) != 1 {
 			t.Fatalf("pending list %v %v", items, err)
 		}
-		items, err = store.ListPendingSkillSetupRequests(t.Context(), Scope{Kind: "tenant", ID: "other"}, 100, 0)
+		items, err = store.ListPendingSkillSetupRequests(t.Context(), models.Scope{Kind: "tenant", ID: "other"}, 100, 0)
 		if err != nil || len(items) != 0 {
 			t.Fatal("pending request leaked across tenant")
 		}
@@ -173,11 +174,11 @@ func TestOriginApprovalDestinationRequiresDurableImportedTrigger(t *testing.T) {
 	run.Context = map[string]interface{}{"conversationId": fixture.conversation.ID, "triggerMessageId": fixture.inbound.ID}
 	saveReviewTestRun(t, fixture.store, run)
 	service := NewExternalConversationTransportService(fixture.store, fixture.catalog)
-	approval := &ApprovalCheckpoint{Scope: fixture.run.Scope, RunID: fixture.run.ID}
+	approval := &models.ApprovalCheckpoint{Scope: fixture.run.Scope, RunID: fixture.run.ID}
 	if allowed, err := service.approvalOriginDestination(t.Context(), approval, fixture.endpoint); err != nil || !allowed {
 		t.Fatalf("origin rejected %v %v", allowed, err)
 	}
-	other := cloneExternalConversationEndpoint(fixture.endpoint)
+	other := models.CloneExternalConversationEndpoint(fixture.endpoint)
 	other.ID = "other-endpoint"
 	if allowed, err := service.approvalOriginDestination(t.Context(), approval, other); err != nil || allowed {
 		t.Fatalf("other endpoint allowed %v %v", allowed, err)
@@ -203,36 +204,36 @@ func TestOriginApprovalConversationMembersMayDecide(t *testing.T) {
 		leaseExpires := now.Add(time.Minute)
 		run.LeaseOwner, run.LeaseExpiresAt = "worker", &leaseExpires
 		saveReviewTestRun(t, fixture.store, run)
-		waiting := cloneAgentRun(run)
-		waiting.Status = AgentRunStatusWaitingForApproval
-		waiting.WakeCondition = &WakeCondition{Type: "approval", Reference: "approval"}
+		waiting := models.CloneAgentRun(run)
+		waiting.Status = models.AgentRunStatusWaitingForApproval
+		waiting.WakeCondition = &models.WakeCondition{Type: "approval", Reference: "approval"}
 		waiting.LeaseOwner = ""
 		waiting.LeaseExpiresAt = nil
 		waiting.Revision++
-		call := &ActionCall{ID: "call", Scope: run.Scope, RunID: run.ID, DeploymentID: fixture.endpoint.DeploymentID, SkillID: "browser", SkillVersion: "1", Action: "send", TurnID: "step-1", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"text": "reviewed"}, ApprovalID: "approval", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now}
-		call.InvocationDigest = ComputeActionInvocationDigest(call)
-		call.SemanticDigest = ComputeActionSemanticDigest(call)
-		approval := &ApprovalCheckpoint{ID: "approval", Scope: run.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Send reviewed text", EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now}
-		proposed := &ActivityEvent{ID: "approval-requested", Scope: run.Scope, RunID: run.ID, EventType: "action.approval_requested", Summary: approval.Summary,
-			Actor: ActivityActor{Type: "worker", ID: "worker"}, Visibility: ActivityVisibilityScope, CreatedAt: now}
-		if _, err := fixture.store.CreateActionProposal(t.Context(), ActionProposalRecord{Call: call, Approval: approval, Run: waiting, ExpectedRunRevision: run.Revision,
-			Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now}, Event: proposed}); err != nil {
+		call := &models.ActionCall{ID: "call", Scope: run.Scope, RunID: run.ID, DeploymentID: fixture.endpoint.DeploymentID, SkillID: "browser", SkillVersion: "1", Action: "send", TurnID: "step-1", Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Status: models.ActionCallStatusWaitingApproval, Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"text": "reviewed"}, ApprovalID: "approval", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now}
+		call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+		call.SemanticDigest = models.ComputeActionSemanticDigest(call)
+		approval := &models.ApprovalCheckpoint{ID: "approval", Scope: run.Scope, RunID: run.ID, ActionCallID: call.ID, Status: models.ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Send reviewed text", EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now}
+		proposed := &models.ActivityEvent{ID: "approval-requested", Scope: run.Scope, RunID: run.ID, EventType: "action.approval_requested", Summary: approval.Summary,
+			Actor: models.ActivityActor{Type: "worker", ID: "worker"}, Visibility: models.ActivityVisibilityScope, CreatedAt: now}
+		if _, err := fixture.store.CreateActionProposal(t.Context(), models.ActionProposalRecord{Call: call, Approval: approval, Run: waiting, ExpectedRunRevision: run.Revision,
+			Lease: &models.AgentRunLeaseGuard{WorkerID: "worker", Now: now}, Event: proposed}); err != nil {
 			t.Fatal(err)
 		}
-		event := NormalizedExternalConversationEvent{ID: "decision", Type: capability.ConversationEventApprovalDecided, ExternalConversationID: "C123", ExternalMessageID: "171.003", OrderingKey: "C123:171.003", OccurredAt: now, ExternalParticipantID: "UANY", Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID, "invocationDigest": call.InvocationDigest, "decision": decision, "principalType": "external_participant", "principalId": "UOTHER"}}
+		event := models.NormalizedExternalConversationEvent{ID: "decision", Type: capability.ConversationEventApprovalDecided, ExternalConversationID: "C123", ExternalMessageID: "171.003", OrderingKey: "C123:171.003", OccurredAt: now, ExternalParticipantID: "UANY", Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID, "invocationDigest": call.InvocationDigest, "decision": decision, "principalType": "external_participant", "principalId": "UOTHER"}}
 		service := NewExternalConversationTransportService(fixture.store, fixture.catalog)
 		if _, err := service.resolveExternalApprovalDecision(t.Context(), fixture.endpoint, event); err == nil {
 			t.Fatal("mismatched provider identity accepted")
 		}
 		event.Attributes["principalId"] = "UANY"
 		received, err := service.Receive(t.Context(), ReceiveExternalConversationEventRequest{Scope: fixture.endpoint.Scope, EndpointID: fixture.endpoint.ID, Event: event})
-		var result *ApprovalResolutionResult
+		var result *models.ApprovalResolutionResult
 		if received != nil {
 			result = received.Approval
 		}
-		expected := ApprovalStatusApproved
+		expected := models.ApprovalStatusApproved
 		if decision == "reject" {
-			expected = ApprovalStatusRejected
+			expected = models.ApprovalStatusRejected
 		}
 		if err != nil || result == nil || result.Approval.Status != expected || result.Approval.DecisionBy.ID != "UANY" {
 			t.Fatalf("member decision failed: %v %v", result, err)
@@ -250,46 +251,46 @@ func TestOriginApprovalConversationMembersMayDecide(t *testing.T) {
 // a leased Run.
 type reviewApprovalStore struct {
 	*sqlite.Store
-	approval *ApprovalCheckpoint
-	call     *ActionCall
+	approval *models.ApprovalCheckpoint
+	call     *models.ActionCall
 }
 
-func (s *reviewApprovalStore) ListApprovals(ctx context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error) {
+func (s *reviewApprovalStore) ListApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
 	approvals, err := s.Store.ListApprovals(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	if filter.Offset == 0 && filter.Scope == s.approval.Scope && slices.Contains(filter.Status, s.approval.Status) {
-		approvals = append(approvals, cloneApprovalCheckpoint(s.approval))
+		approvals = append(approvals, models.CloneApprovalCheckpoint(s.approval))
 	}
 	return approvals, nil
 }
 
-func (s *reviewApprovalStore) GetApproval(ctx context.Context, scope Scope, id string) (*ApprovalCheckpoint, error) {
+func (s *reviewApprovalStore) GetApproval(ctx context.Context, scope models.Scope, id string) (*models.ApprovalCheckpoint, error) {
 	if scope == s.approval.Scope && id == s.approval.ID {
-		return cloneApprovalCheckpoint(s.approval), nil
+		return models.CloneApprovalCheckpoint(s.approval), nil
 	}
 	return s.Store.GetApproval(ctx, scope, id)
 }
 
-func (s *reviewApprovalStore) GetActionCall(ctx context.Context, scope Scope, id string) (*ActionCall, error) {
+func (s *reviewApprovalStore) GetActionCall(ctx context.Context, scope models.Scope, id string) (*models.ActionCall, error) {
 	if scope == s.call.Scope && id == s.call.ID {
-		return cloneActionCall(s.call), nil
+		return models.CloneActionCall(s.call), nil
 	}
 	return s.Store.GetActionCall(ctx, scope, id)
 }
 
 // markReviewCardDelivered delivers the review card with correlation id, as
 // the delivery worker does once the provider accepts it.
-func markReviewCardDelivered(t *testing.T, store *sqlite.Store, scope Scope, correlationID, providerMessageID string) {
+func markReviewCardDelivered(t *testing.T, store *sqlite.Store, scope models.Scope, correlationID, providerMessageID string) {
 	t.Helper()
 	now := time.Now().UTC()
 	leased, err := store.ClaimExternalConversationDelivery(t.Context(), scope, "delivery-worker", now, time.Minute)
 	if err != nil || leased == nil || leased.Correlation == nil || leased.Correlation.ID != correlationID {
 		t.Fatalf("claim review card %s = %#v, %v", correlationID, leased, err)
 	}
-	delivered := cloneExternalConversationDelivery(leased)
-	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = ExternalConversationDeliveryDelivered, "", time.Time{}
+	delivered := models.CloneExternalConversationDelivery(leased)
+	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = models.ExternalConversationDeliveryDelivered, "", time.Time{}
 	delivered.ProviderMessageID, delivered.DeliveredAt, delivered.UpdatedAt = providerMessageID, now, now
 	delivered.Revision++
 	if err := store.SaveExternalConversationDelivery(t.Context(), delivered, leased.Revision, "delivery-worker"); err != nil {
@@ -298,13 +299,13 @@ func markReviewCardDelivered(t *testing.T, store *sqlite.Store, scope Scope, cor
 }
 
 // saveReviewTestRun saves run as the next revision of the stored Run.
-func saveReviewTestRun(t *testing.T, store *sqlite.Store, run *AgentRun) {
+func saveReviewTestRun(t *testing.T, store *sqlite.Store, run *models.AgentRun) {
 	t.Helper()
 	expected := run.Revision
 	run.Revision++
 	run.UpdatedAt = time.Now().UTC()
-	event := &ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: run.ID, EventType: "run.updated", Summary: "Update review test run",
-		Actor: ActivityActor{Type: "test", ID: "review"}, Visibility: ActivityVisibilityScope, CreatedAt: run.UpdatedAt}
+	event := &models.ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: run.ID, EventType: "run.updated", Summary: "Update review test run",
+		Actor: models.ActivityActor{Type: "test", ID: "review"}, Visibility: models.ActivityVisibilityScope, CreatedAt: run.UpdatedAt}
 	if _, err := store.UpdateAgentRunWithEvent(t.Context(), run, expected, event, nil); err != nil {
 		t.Fatal(err)
 	}

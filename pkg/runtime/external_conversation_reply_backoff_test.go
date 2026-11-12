@@ -9,20 +9,21 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func appliedReplyItem(endpoint *ExternalConversationEndpoint, id, endpointID, runID string, now time.Time) *ExternalConversationInboxItem {
-	return &ExternalConversationInboxItem{
+func appliedReplyItem(endpoint *models.ExternalConversationEndpoint, id, endpointID, runID string, now time.Time) *models.ExternalConversationInboxItem {
+	return &models.ExternalConversationInboxItem{
 		ID: id, Scope: endpoint.Scope, EndpointID: endpointID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: NormalizedExternalConversationEvent{
+		Event: models.NormalizedExternalConversationEvent{
 			ID: "ev-" + id, Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C1",
 			ExternalMessageID: "m-" + id, ExternalParticipantID: "U1", Text: "hi", OrderingKey: "C1:" + id, OccurredAt: now,
 		},
-		Status: ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
+		Status: models.ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
 		ConversationID: "conversation", ChannelMessageID: "message-" + id, RunID: runID,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, AppliedAt: now,
 	}
@@ -34,24 +35,24 @@ func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.
 		capability.ConversationDeliveryMessageSend,
 	})
 	runs := agentrun.NewRunCommandService(store)
-	activity := NewRunActivityService(store, store)
-	newRun := func(key string, finish bool) *AgentRun {
-		created, err := runs.CreateAgentRun(ctx, CreateAgentRunRequest{
-			Scope: endpoint.Scope, Kind: RunKindConversation, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
-			Goal: "Respond", Source: RunSourceEvent, IdempotencyKey: key, Actor: ActivityActor{Type: "service", ID: "test"},
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	newRun := func(key string, finish bool) *models.AgentRun {
+		created, err := runs.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			Scope: endpoint.Scope, Kind: models.RunKindConversation, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
+			Goal: "Respond", Source: models.RunSourceEvent, IdempotencyKey: key, Actor: models.ActivityActor{Type: "service", ID: "test"},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		run, _, err := activity.TransitionRun(ctx, endpoint.Scope, created.Run.ID, RunTransitionRequest{
-			ExpectedRevision: created.Run.Revision, Status: AgentRunStatusRunning, Summary: "Started", Actor: ActivityActor{Type: "worker", ID: "w"},
+		run, _, err := activity.TransitionRun(ctx, endpoint.Scope, created.Run.ID, runtimeactivity.RunTransitionRequest{
+			ExpectedRevision: created.Run.Revision, Status: models.AgentRunStatusRunning, Summary: "Started", Actor: models.ActivityActor{Type: "worker", ID: "w"},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if finish {
-			run, _, err = activity.TransitionRun(ctx, endpoint.Scope, run.ID, RunTransitionRequest{
-				ExpectedRevision: run.Revision, Status: AgentRunStatusCompleted, Summary: "Done", Actor: ActivityActor{Type: "worker", ID: "w"},
+			run, _, err = activity.TransitionRun(ctx, endpoint.Scope, run.ID, runtimeactivity.RunTransitionRequest{
+				ExpectedRevision: run.Revision, Status: models.AgentRunStatusCompleted, Summary: "Done", Actor: models.ActivityActor{Type: "worker", ID: "w"},
 				Output: map[string]interface{}{"reply": "ok"},
 			})
 			if err != nil {
@@ -65,7 +66,7 @@ func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.
 	// "pending" waits for a Run that is still running.
 	broken := appliedReplyItem(endpoint, "broken", endpoint.ID, newRun("broken-run", true).ID, now)
 	pending := appliedReplyItem(endpoint, "pending", endpoint.ID, newRun("pending-run", false).ID, now)
-	for _, item := range []*ExternalConversationInboxItem{broken, pending} {
+	for _, item := range []*models.ExternalConversationInboxItem{broken, pending} {
 		if _, _, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil {
 			t.Fatal(err)
 		}
@@ -75,7 +76,7 @@ func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	load := func(id string) *ExternalConversationInboxItem {
+	load := func(id string) *models.ExternalConversationInboxItem {
 		item, err := store.GetExternalConversationInboxItem(ctx, endpoint.Scope, id)
 		if err != nil || item == nil {
 			t.Fatal(err)
@@ -90,14 +91,14 @@ func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.
 			item := load("broken")
 			backedOff := item.ReplyState == "" && item.ReplyAvailableAt != nil &&
 				item.ReplyAvailableAt.Equal(clock.Add(externalConversationReplyRetryDelay(failures)))
-			terminal := item.ReplyState == ExternalConversationReplyFailed && item.ReplyAvailableAt == nil
+			terminal := item.ReplyState == models.ExternalConversationReplyFailed && item.ReplyAvailableAt == nil
 			if item.ReplyAttempts != failures || !backedOff && !terminal || item.ReplyError == "" {
 				t.Fatalf("failure %d recorded %+v", failures, item)
 			}
 		}
 		clock = clock.Add(time.Second)
 	}
-	if failures != externalConversationReplyMaximumAttempts || load("broken").ReplyState != ExternalConversationReplyFailed {
+	if failures != externalConversationReplyMaximumAttempts || load("broken").ReplyState != models.ExternalConversationReplyFailed {
 		t.Fatalf("expected %d backed-off failures then a terminal state, got %d and %q", externalConversationReplyMaximumAttempts, failures, load("broken").ReplyState)
 	}
 	// Backoff means far fewer projections than one per pass (hundreds of passes).
@@ -110,7 +111,7 @@ func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.
 	if item := load("pending"); item.ReplyState != "" || item.ReplyAttempts != 0 {
 		t.Fatalf("an item waiting for its Run must stay due without penalty: %+v", item)
 	}
-	if item := load("broken"); item.Status != ExternalConversationInboxApplied {
+	if item := load("broken"); item.Status != models.ExternalConversationInboxApplied {
 		t.Fatal("reply bookkeeping must not change the inbox status other readers rely on")
 	}
 }
@@ -126,7 +127,7 @@ func TestExternalConversationReplyProgressIsCompareAndSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored, _ := store.GetExternalConversationInboxItem(ctx, endpoint.Scope, "cas")
-	done := ExternalConversationReplyProgress{State: ExternalConversationReplyProjected, At: now}
+	done := models.ExternalConversationReplyProgress{State: models.ExternalConversationReplyProjected, At: now}
 	if err := store.SaveExternalConversationReplyProgress(ctx, endpoint.Scope, "cas", stored.Revision+1, done); err == nil {
 		t.Fatal("a stale revision must conflict")
 	}
@@ -136,14 +137,14 @@ func TestExternalConversationReplyProgressIsCompareAndSet(t *testing.T) {
 	if err := store.SaveExternalConversationReplyProgress(ctx, endpoint.Scope, "cas", stored.Revision+1, done); err == nil {
 		t.Fatal("a terminal reply state is final")
 	}
-	due, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
-		Scope: endpoint.Scope, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied}, ReplyDueAt: &now,
+	due, err := store.ListExternalConversationInbox(ctx, models.ExternalConversationInboxFilter{
+		Scope: endpoint.Scope, Statuses: []models.ExternalConversationInboxStatus{models.ExternalConversationInboxApplied}, ReplyDueAt: &now,
 	})
 	if err != nil || len(due) != 0 {
 		t.Fatalf("a projected item must leave the due list: %v %v", due, err)
 	}
-	all, _ := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
-		Scope: endpoint.Scope, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied},
+	all, _ := store.ListExternalConversationInbox(ctx, models.ExternalConversationInboxFilter{
+		Scope: endpoint.Scope, Statuses: []models.ExternalConversationInboxStatus{models.ExternalConversationInboxApplied},
 	})
 	if len(all) != 1 {
 		t.Fatal("other readers still see the applied item")
@@ -151,9 +152,9 @@ func TestExternalConversationReplyProgressIsCompareAndSet(t *testing.T) {
 }
 
 type replyProgressTestStore interface {
-	ExternalConversationEndpointStore
-	ExternalConversationStore
-	ExternalConversationReplyStateStore
+	models.ExternalConversationEndpointStore
+	models.ExternalConversationStore
+	models.ExternalConversationReplyStateStore
 }
 
 func TestExternalConversationReplyProgressDurableStores(t *testing.T) {
@@ -197,8 +198,8 @@ func TestExternalConversationReplyProgressDurableStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			load := func(id string) *ExternalConversationInboxItem {
-				items, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{Scope: endpoint.Scope, Limit: 100})
+			load := func(id string) *models.ExternalConversationInboxItem {
+				items, err := store.ListExternalConversationInbox(ctx, models.ExternalConversationInboxFilter{Scope: endpoint.Scope, Limit: 100})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -211,21 +212,21 @@ func TestExternalConversationReplyProgressDurableStores(t *testing.T) {
 				return nil
 			}
 			if err := store.SaveExternalConversationReplyProgress(ctx, endpoint.Scope, "done", load("done").Revision,
-				ExternalConversationReplyProgress{State: ExternalConversationReplyProjected, At: now}); err != nil {
+				models.ExternalConversationReplyProgress{State: models.ExternalConversationReplyProjected, At: now}); err != nil {
 				t.Fatal(err)
 			}
 			retryAt := now.Add(time.Minute)
 			if err := store.SaveExternalConversationReplyProgress(ctx, endpoint.Scope, "backoff", load("backoff").Revision,
-				ExternalConversationReplyProgress{Attempts: 1, AvailableAt: &retryAt, Error: "boom", At: now}); err != nil {
+				models.ExternalConversationReplyProgress{Attempts: 1, AvailableAt: &retryAt, Error: "boom", At: now}); err != nil {
 				t.Fatal(err)
 			}
 			if err := store.SaveExternalConversationReplyProgress(ctx, endpoint.Scope, "done", 1,
-				ExternalConversationReplyProgress{State: ExternalConversationReplyProjected, At: now}); err == nil {
+				models.ExternalConversationReplyProgress{State: models.ExternalConversationReplyProjected, At: now}); err == nil {
 				t.Fatal("stale revision must conflict")
 			}
 			due := func(at time.Time) []string {
-				items, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
-					Scope: endpoint.Scope, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied}, ReplyDueAt: &at, Limit: 100,
+				items, err := store.ListExternalConversationInbox(ctx, models.ExternalConversationInboxFilter{
+					Scope: endpoint.Scope, Statuses: []models.ExternalConversationInboxStatus{models.ExternalConversationInboxApplied}, ReplyDueAt: &at, Limit: 100,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -243,7 +244,7 @@ func TestExternalConversationReplyProgressDurableStores(t *testing.T) {
 			if got := due(now.Add(2 * time.Minute)); len(got) != 2 || got[0] != "backoff" || got[1] != "due" {
 				t.Fatalf("due after backoff = %v", got)
 			}
-			if item := load("backoff"); item.ReplyAttempts != 1 || item.ReplyError != "boom" || item.Status != ExternalConversationInboxApplied {
+			if item := load("backoff"); item.ReplyAttempts != 1 || item.ReplyError != "boom" || item.Status != models.ExternalConversationInboxApplied {
 				t.Fatalf("progress not persisted: %+v", item)
 			}
 		})

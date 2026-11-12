@@ -18,35 +18,35 @@ import (
 // match before the suspended Run can resume.
 type ApprovalCallbackConsumer struct {
 	store interface {
-		PortfolioStore
-		ActionStore
+		models.PortfolioStore
+		models.ActionStore
 	}
-	notifications ApprovalNotificationStore
+	notifications models.ApprovalNotificationStore
 	transport     *ExternalConversationTransportService
 	now           func() time.Time
 }
 
 func NewApprovalCallbackConsumer(store interface {
-	PortfolioStore
-	ActionStore
+	models.PortfolioStore
+	models.ActionStore
 }, transport *ExternalConversationTransportService, opts ...models.ServiceOption) *ApprovalCallbackConsumer {
 	consumer := &ApprovalCallbackConsumer{store: store, transport: transport, now: models.ClockFrom(opts)}
-	consumer.notifications, _ = store.(ApprovalNotificationStore)
+	consumer.notifications, _ = store.(models.ApprovalNotificationStore)
 	return consumer
 }
 
 func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	ctx context.Context,
-	registration *CallbackRegistration,
-	subscription CallbackSubscription,
-	event EventEnvelope,
+	registration *models.CallbackRegistration,
+	subscription models.CallbackSubscription,
+	event models.EventEnvelope,
 ) error {
 	if c == nil || c.store == nil {
 		return errors.New("approval callback consumer is not configured")
 	}
 	if registration == nil || event.Scope != registration.Scope || event.Type != capability.CallbackEventApprovalDecided ||
 		strings.TrimSpace(subscription.TargetID) == "" {
-		return fmt.Errorf("%w: approval callback routing is invalid", ErrInvalidCallbackRegistration)
+		return fmt.Errorf("%w: approval callback routing is invalid", models.ErrInvalidCallbackRegistration)
 	}
 	approvalID, _ := event.Attributes["approvalId"].(string)
 	actionCallID, _ := event.Attributes["actionCallId"].(string)
@@ -60,7 +60,7 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 		strings.TrimSpace(invocationDigest) == "" || revision < 1 || !ok ||
 		(decision != "approve" && decision != "reject" && decision != "request_changes") ||
 		strings.TrimSpace(principalType) == "" || strings.TrimSpace(principalID) == "" {
-		return fmt.Errorf("%w: approval decision attributes are invalid", ErrInvalidCallbackRegistration)
+		return fmt.Errorf("%w: approval decision attributes are invalid", models.ErrInvalidCallbackRegistration)
 	}
 	approval, err := c.store.GetApproval(ctx, event.Scope, approvalID)
 	if err != nil {
@@ -70,10 +70,10 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	if err != nil {
 		return err
 	}
-	replay := approval.Status != ApprovalStatusPending && approval.DecisionID == event.ID
+	replay := approval.Status != models.ApprovalStatusPending && approval.DecisionID == event.ID
 	if approval.ActionCallID != actionCallID || call.InvocationDigest != invocationDigest ||
 		(!replay && approval.Revision != revision) {
-		return fmt.Errorf("%w: approval decision does not match the reviewed action", ErrInvalidCallbackRegistration)
+		return fmt.Errorf("%w: approval decision does not match the reviewed action", models.ErrInvalidCallbackRegistration)
 	}
 	destinationID, err := c.resolveReviewedDestination(ctx, registration, subscription, event, approval)
 	if err != nil {
@@ -84,8 +84,8 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	coordinator := action.NewApprovalCoordinator(c.store, c.store, action.EligibleApprovalAuthorizer{}, models.WithClock(c.now))
 	resolution, err := coordinator.Resolve(ctx, action.ResolveApprovalRequest{
 		Scope: event.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
-		DecisionID: event.ID, Decision: ApprovalDecision(decision),
-		Principal: ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,
+		DecisionID: event.ID, Decision: models.ApprovalDecision(decision),
+		Principal: models.ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,
 		CorrelationID: event.Subject,
 	})
 	if err != nil {
@@ -100,7 +100,7 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	providerApproverID, _ := event.Attributes["providerUserId"].(string)
 	if err := enqueueApprovalCardUpdate(
 		ctx, c.notifications, c.transport, resolution.Approval, resolution.Call,
-		ApprovalDestination{EndpointID: destinationID}, providerApproverID,
+		models.ApprovalDestination{EndpointID: destinationID}, providerApproverID,
 	); err != nil {
 		return fmt.Errorf("enqueue approval card update: %w", err)
 	}
@@ -114,26 +114,26 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 // provider's exact message identifier is the durable correlation boundary.
 func (c *ApprovalCallbackConsumer) resolveReviewedDestination(
 	ctx context.Context,
-	registration *CallbackRegistration,
-	subscription CallbackSubscription,
-	event EventEnvelope,
-	approval *ApprovalCheckpoint,
+	registration *models.CallbackRegistration,
+	subscription models.CallbackSubscription,
+	event models.EventEnvelope,
+	approval *models.ApprovalCheckpoint,
 ) (string, error) {
 	if approvalHasDestination(approval, subscription.TargetID) {
 		return subscription.TargetID, nil
 	}
 	if c.notifications == nil {
-		return "", fmt.Errorf("%w: approval decision does not match a reviewed destination", ErrInvalidCallbackRegistration)
+		return "", fmt.Errorf("%w: approval decision does not match a reviewed destination", models.ErrInvalidCallbackRegistration)
 	}
 	providerMessageID, _ := event.Payload["messageId"].(string)
 	providerMessageID = strings.TrimSpace(providerMessageID)
 	if providerMessageID == "" {
-		return "", fmt.Errorf("%w: approval decision does not identify the reviewed card", ErrInvalidCallbackRegistration)
+		return "", fmt.Errorf("%w: approval decision does not identify the reviewed card", models.ErrInvalidCallbackRegistration)
 	}
-	deliveries, err := c.notifications.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+	deliveries, err := c.notifications.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{
 		Scope: approval.Scope, EndpointID: subscription.TargetID,
 		CorrelationKind: "approval", CorrelationID: approval.ID,
-		Statuses: []ExternalConversationDeliveryStatus{ExternalConversationDeliveryDelivered}, Limit: 100,
+		Statuses: []models.ExternalConversationDeliveryStatus{models.ExternalConversationDeliveryDelivered}, Limit: 100,
 	})
 	if err != nil {
 		return "", err
@@ -160,5 +160,5 @@ func (c *ApprovalCallbackConsumer) resolveReviewedDestination(
 			return destination.EndpointID, nil
 		}
 	}
-	return "", fmt.Errorf("%w: approval decision does not match the reviewed card", ErrInvalidCallbackRegistration)
+	return "", fmt.Errorf("%w: approval decision does not match the reviewed card", models.ErrInvalidCallbackRegistration)
 }

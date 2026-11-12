@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
@@ -28,8 +29,8 @@ const maxRoutineEventHeaderBytes = 200
 // routineReportHeader is the run's one-line event header, or "". The text
 // comes from outside (an email subject, a summary), so mention syntax is
 // neutralized before it reaches a chat, and a long header is cut to fit.
-func routineReportHeader(run *AgentRun) string {
-	header, _ := run.Context[RoutineEventHeaderContextKey].(string)
+func routineReportHeader(run *models.AgentRun) string {
+	header, _ := run.Context[models.RoutineEventHeaderContextKey].(string)
 	header = neutralizeChatMentions(strings.Join(strings.Fields(header), " "))
 	if len(header) <= maxRoutineEventHeaderBytes {
 		return header
@@ -54,7 +55,7 @@ func neutralizeChatMentions(text string) string {
 
 // withRoutineReportHeader returns message with the delivery's header line
 // before its content, or message unchanged when there is none.
-func withRoutineReportHeader(delivery *ExternalConversationDelivery, message *ChannelMessage) *ChannelMessage {
+func withRoutineReportHeader(delivery *models.ExternalConversationDelivery, message *models.ChannelMessage) *models.ChannelMessage {
 	if delivery.Operation != capability.ConversationDeliveryMessageSend {
 		return message
 	}
@@ -62,7 +63,7 @@ func withRoutineReportHeader(delivery *ExternalConversationDelivery, message *Ch
 	if header = strings.TrimSpace(header); header == "" {
 		return message
 	}
-	headed := cloneChannelMessage(message)
+	headed := models.CloneChannelMessage(message)
 	headed.Content = header + "\n" + message.Content
 	return headed
 }
@@ -78,19 +79,19 @@ func withRoutineReportHeader(delivery *ExternalConversationDelivery, message *Ch
 // endpoint origin, the creating message's provider mapping and the active
 // endpoint's owner and Agent. Anything else is a no-op, as for the reply
 // worker; only store failures are returned for the reporting worker to retry.
-func projectRoutineReportDelivery(ctx context.Context, store ExternalConversationStore, transport *ExternalConversationTransportService, run *AgentRun) (*ExternalConversationDelivery, error) {
-	if store == nil || transport == nil || run == nil || !isTerminalAgentRunStatus(run.Status) ||
-		run.Context[scheduledTaskContextKey] != true || run.Context[ConversationTaskContextKey] != nil || !runNeedsTerminalReporting(run) ||
+func projectRoutineReportDelivery(ctx context.Context, store models.ExternalConversationStore, transport *ExternalConversationTransportService, run *models.AgentRun) (*models.ExternalConversationDelivery, error) {
+	if store == nil || transport == nil || run == nil || !models.IsTerminalAgentRunStatus(run.Status) ||
+		run.Context[models.ScheduledTaskContextKey] != true || run.Context[models.ConversationTaskContextKey] != nil || !models.RunNeedsTerminalReporting(run) ||
 		conversationrun.SilentRoutineOccurrence(run) {
 		return nil, nil
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	sourceID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	sourceID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	conversation, err := store.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil || conversation == nil {
 		return nil, ignoreMissingConversation(err)
 	}
-	if conversation.Owner != run.Owner || conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceExternalSource {
+	if conversation.Owner != run.Owner || conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceExternalSource {
 		return nil, nil
 	}
 	report, err := store.FindChannelMessageByIdempotencyKey(ctx, run.Scope, conversation.ID, "run-reporting-terminal:"+run.ID+":"+string(run.Status))
@@ -104,8 +105,8 @@ func projectRoutineReportDelivery(ctx context.Context, store ExternalConversatio
 	if err != nil || endpoint == nil {
 		return nil, ignoreMissingConversation(err)
 	}
-	if endpoint.Status != ExternalConversationEndpointActive || endpoint.Owner != run.Owner ||
-		(endpoint.Handler.Kind == ExternalConversationHandlerAgent && endpoint.DeploymentID != run.AssignedAgentID) {
+	if endpoint.Status != models.ExternalConversationEndpointActive || endpoint.Owner != run.Owner ||
+		(endpoint.Handler.Kind == models.ExternalConversationHandlerAgent && endpoint.DeploymentID != run.AssignedAgentID) {
 		return nil, nil
 	}
 	key := routineReportDeliveryKey(report.ID)
@@ -145,14 +146,14 @@ func projectRoutineReportDelivery(ctx context.Context, store ExternalConversatio
 }
 
 // routineReportMessage is the Agent's top-level terminal report for this Run.
-func routineReportMessage(message *ChannelMessage, run *AgentRun) bool {
-	if message == nil || message.Historical || message.Sender.Type != ConversationParticipantAgent || message.Sender.ID != run.AssignedAgentID ||
+func routineReportMessage(message *models.ChannelMessage, run *models.AgentRun) bool {
+	if message == nil || message.Historical || message.Sender.Type != models.ConversationParticipantAgent || message.Sender.ID != run.AssignedAgentID ||
 		message.ReplyToMessageID != "" || message.ThreadRootID != "" ||
-		message.Audience.Kind != ConversationAudienceChannel || strings.TrimSpace(message.Content) == "" {
+		message.Audience.Kind != models.ConversationAudienceChannel || strings.TrimSpace(message.Content) == "" {
 		return false
 	}
 	for _, reference := range message.References {
-		if reference.Kind == ConversationReferenceRun && reference.ID == run.ID {
+		if reference.Kind == models.ConversationReferenceRun && reference.ID == run.ID {
 			return true
 		}
 	}
@@ -162,9 +163,9 @@ func routineReportMessage(message *ChannelMessage, run *AgentRun) bool {
 // routineReportDestination resolves the provider conversation of the
 // routine's creating message. The report goes there top level. The mappings
 // written when that message arrived must agree.
-func routineReportDestination(ctx context.Context, store ExternalConversationStore, endpoint *ExternalConversationEndpoint, conversation *Conversation, source *ChannelMessage) (string, error) {
+func routineReportDestination(ctx context.Context, store models.ExternalConversationStore, endpoint *models.ExternalConversationEndpoint, conversation *models.Conversation, source *models.ChannelMessage) (string, error) {
 	origin := source.ExternalSource
-	if source.Historical || source.Sender.Type != ConversationParticipantUser || origin == nil || !validExternalConversationReference(origin.ChannelID, 1024) {
+	if source.Historical || source.Sender.Type != models.ConversationParticipantUser || origin == nil || !models.IsValidExternalConversationReference(origin.ChannelID, 1024) {
 		return "", nil
 	}
 	base, err := store.GetExternalConversationMapping(ctx, endpoint.Scope, endpoint.ID, origin.ChannelID, "")
@@ -172,7 +173,7 @@ func routineReportDestination(ctx context.Context, store ExternalConversationSto
 		return "", err
 	}
 	// The creating message must have arrived through this endpoint.
-	mapping, err := store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, ExternalMessageInbound, origin.MessageID)
+	mapping, err := store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, models.ExternalMessageInbound, origin.MessageID)
 	if err != nil || mapping == nil || mapping.ConversationID != conversation.ID || mapping.ChannelMessageID != source.ID {
 		return "", err
 	}
@@ -180,7 +181,7 @@ func routineReportDestination(ctx context.Context, store ExternalConversationSto
 }
 
 func ignoreMissingConversation(err error) error {
-	if errors.Is(err, ErrConversationNotFound) || errors.Is(err, ErrChannelMessageNotFound) || errors.Is(err, ErrExternalConversationEndpointNotFound) {
+	if errors.Is(err, models.ErrConversationNotFound) || errors.Is(err, models.ErrChannelMessageNotFound) || errors.Is(err, models.ErrExternalConversationEndpointNotFound) {
 		return nil
 	}
 	return err
@@ -189,7 +190,7 @@ func ignoreMissingConversation(err error) error {
 // An endpoint whose adapter binding changed, or that can no longer take this
 // message, keeps the report in the Conversation; retrying cannot fix it.
 func ignoreUndeliverable(err error) error {
-	if errors.Is(err, ErrExternalConversationConflict) || errors.Is(err, ErrExternalConversationEndpointNotFound) || errors.Is(err, ErrInvalidExternalConversation) {
+	if errors.Is(err, models.ErrExternalConversationConflict) || errors.Is(err, models.ErrExternalConversationEndpointNotFound) || errors.Is(err, models.ErrInvalidExternalConversation) {
 		return nil
 	}
 	return err

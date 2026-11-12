@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
@@ -12,14 +13,14 @@ import (
 // id keys that answer's deliveries: the item ID for the item's own Run, the
 // item and member Run IDs for each Team member's answer.
 type externalItemReply struct {
-	run *AgentRun
+	run *models.AgentRun
 	id  string
 }
 
 type externalItemReplyStore interface {
-	GetConversation(context.Context, Scope, string) (*Conversation, error)
-	GetChannelMessage(context.Context, Scope, string, string) (*ChannelMessage, error)
-	GetAgentRun(context.Context, Scope, string) (*AgentRun, error)
+	GetConversation(context.Context, models.Scope, string) (*models.Conversation, error)
+	GetChannelMessage(context.Context, models.Scope, string, string) (*models.ChannelMessage, error)
+	GetAgentRun(context.Context, models.Scope, string) (*models.AgentRun, error)
 }
 
 // externalItemReplies returns the Runs answering an applied inbox item: the
@@ -28,7 +29,7 @@ type externalItemReplyStore interface {
 // Each member Run must verify against the routing lineage, or be an earlier
 // member Run that took the message as a follow-up; callers skip those like
 // any follow-up.
-func externalItemReplies(ctx context.Context, store externalItemReplyStore, item *ExternalConversationInboxItem) ([]externalItemReply, error) {
+func externalItemReplies(ctx context.Context, store externalItemReplyStore, item *models.ExternalConversationInboxItem) ([]externalItemReply, error) {
 	if item == nil || strings.TrimSpace(item.RunID) == "" {
 		return nil, nil
 	}
@@ -36,7 +37,7 @@ func externalItemReplies(ctx context.Context, store externalItemReplyStore, item
 	if err != nil || run == nil {
 		return nil, err
 	}
-	if !runtimeconversation.IsTeamRoutingRun(run) || run.Status != AgentRunStatusCompleted {
+	if !runtimeconversation.IsTeamRoutingRun(run) || run.Status != models.AgentRunStatusCompleted {
 		return []externalItemReply{{run: run, id: item.ID}}, nil
 	}
 	conversation, err := store.GetConversation(ctx, item.Scope, item.ConversationID)
@@ -61,11 +62,11 @@ func externalItemReplies(ctx context.Context, store externalItemReplyStore, item
 		if verified {
 			verified = member.Context[runtimeconversation.TeamRoutingRunContextKey] == run.ID
 		} else {
-			verified = isTeamMemberRun(member) && member.Owner == run.Owner && member.Scope == run.Scope &&
-				member.Context[conversationRunContextConversationID] == item.ConversationID && conversationrun.ExternalInboxItemIsFollowUp(item, member)
+			verified = models.IsTeamMemberRun(member) && member.Owner == run.Owner && member.Scope == run.Scope &&
+				member.Context[models.ConversationRunConversationIDContextKey] == item.ConversationID && conversationrun.ExternalInboxItemIsFollowUp(item, member)
 		}
 		if !verified {
-			return nil, ErrExternalConversationConflict
+			return nil, models.ErrExternalConversationConflict
 		}
 		replies = append(replies, externalItemReply{run: member, id: item.ID + ":" + member.ID})
 	}
@@ -73,7 +74,7 @@ func externalItemReplies(ctx context.Context, store externalItemReplyStore, item
 }
 
 // teamResponderRunIDs is the member Run IDs a completed routing Run started.
-func teamResponderRunIDs(routing *AgentRun) []string {
+func teamResponderRunIDs(routing *models.AgentRun) []string {
 	var ids []string
 	switch values := routing.Output["responderRunIds"].(type) {
 	case []string:

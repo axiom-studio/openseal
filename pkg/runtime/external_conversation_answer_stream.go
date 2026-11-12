@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
@@ -46,18 +47,18 @@ func externalConversationReplyKey(replyID string) string {
 
 // externalAnswerStream is the durable outbox view of one answer's stream.
 type externalAnswerStream struct {
-	opened   *ExternalConversationDelivery // preview-1, the message.send
-	latest   *ExternalConversationDelivery
+	opened   *models.ExternalConversationDelivery // preview-1, the message.send
+	latest   *models.ExternalConversationDelivery
 	sequence int
 }
 
-func loadExternalAnswerStream(ctx context.Context, store ExternalConversationStore, item *ExternalConversationInboxItem, replyID string) (*externalAnswerStream, error) {
+func loadExternalAnswerStream(ctx context.Context, store models.ExternalConversationStore, item *models.ExternalConversationInboxItem, replyID string) (*externalAnswerStream, error) {
 	opened, err := store.GetExternalConversationDelivery(ctx, item.Scope,
 		stableExternalConversationID(item.Scope, item.EndpointID, "delivery", externalAnswerStreamKey(replyID, externalAnswerStreamPreviewPrefix+"1")))
 	if err != nil || opened == nil {
 		return nil, err
 	}
-	latest, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+	latest, err := store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{
 		Scope: item.Scope, EndpointID: item.EndpointID, ConversationID: item.ConversationID,
 		CorrelationKind: externalAnswerStreamCorrelationKind, CorrelationID: replyID, Limit: 1,
 	})
@@ -82,18 +83,18 @@ func (s *externalAnswerStream) settled() bool {
 
 // live reports a delivered stream message that has not been deleted.
 func (s *externalAnswerStream) live() bool {
-	return s.opened.Status == ExternalConversationDeliveryDelivered && s.opened.ProviderMessageID != "" &&
+	return s.opened.Status == models.ExternalConversationDeliveryDelivered && s.opened.ProviderMessageID != "" &&
 		s.latest.Correlation.Phase != externalAnswerStreamDeletePhase
 }
 
-func externalConversationDeliveryTerminal(status ExternalConversationDeliveryStatus) bool {
-	return status == ExternalConversationDeliveryDelivered || status == ExternalConversationDeliveryFailed ||
-		status == ExternalConversationDeliveryCanceled
+func externalConversationDeliveryTerminal(status models.ExternalConversationDeliveryStatus) bool {
+	return status == models.ExternalConversationDeliveryDelivered || status == models.ExternalConversationDeliveryFailed ||
+		status == models.ExternalConversationDeliveryCanceled
 }
 
 // externalAnswerStreamPreview returns the provisional body of a stream
 // preview delivery. The canonical trigger message only anchors it.
-func externalAnswerStreamPreview(delivery *ExternalConversationDelivery) (string, bool) {
+func externalAnswerStreamPreview(delivery *models.ExternalConversationDelivery) (string, bool) {
 	if delivery == nil || delivery.Correlation == nil || delivery.Correlation.Kind != externalAnswerStreamCorrelationKind ||
 		!strings.HasPrefix(delivery.Correlation.Phase, externalAnswerStreamPreviewPrefix) {
 		return "", false
@@ -119,9 +120,9 @@ func externalAnswerStreamText(text string) string {
 	return text
 }
 
-func externalConversationReplyThread(item *ExternalConversationInboxItem, endpoint *ExternalConversationEndpoint) string {
+func externalConversationReplyThread(item *models.ExternalConversationInboxItem, endpoint *models.ExternalConversationEndpoint) string {
 	thread := strings.TrimSpace(item.Event.ExternalThreadID)
-	if thread == "" && endpoint.Policy.ReplyMode == ExternalConversationReplyThread {
+	if thread == "" && endpoint.Policy.ReplyMode == models.ExternalConversationReplyThread {
 		thread = strings.TrimSpace(item.Event.ExternalMessageID)
 	}
 	return thread
@@ -130,12 +131,12 @@ func externalConversationReplyThread(item *ExternalConversationInboxItem, endpoi
 // projectAnswerStream posts the first meaningful preview and then edits it as
 // the preview grows, at most once per interval and with one edit in flight.
 // Adapters that cannot edit messages keep the single committed reply.
-func (w *RunProgressAcknowledgementWorker) projectAnswerStream(ctx context.Context, item *ExternalConversationInboxItem, reply externalItemReply) (*ExternalConversationDelivery, error) {
-	if item == nil || item.Status != ExternalConversationInboxApplied || item.RunID == "" || item.ConversationID == "" || item.ChannelMessageID == "" {
+func (w *RunProgressAcknowledgementWorker) projectAnswerStream(ctx context.Context, item *models.ExternalConversationInboxItem, reply externalItemReply) (*models.ExternalConversationDelivery, error) {
+	if item == nil || item.Status != models.ExternalConversationInboxApplied || item.RunID == "" || item.ConversationID == "" || item.ChannelMessageID == "" {
 		return nil, nil
 	}
 	run := reply.run
-	if isTerminalAgentRunStatus(run.Status) || conversationrun.ExternalInboxItemIsFollowUp(item, run) {
+	if models.IsTerminalAgentRunStatus(run.Status) || conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 		return nil, nil
 	}
 	endpoint, adapter, err := w.resolveEndpoint(ctx, item)
@@ -147,13 +148,13 @@ func (w *RunProgressAcknowledgementWorker) projectAnswerStream(ctx context.Conte
 		!containsConversationDeliveryOperation(operations, capability.ConversationDeliveryMessageUpdate) {
 		return nil, nil
 	}
-	events, err := w.store.ListActivity(ctx, ActivityFilter{Scope: item.Scope, RunID: run.ID, EventTypes: []string{"turn.answer_preview"}, Descending: true, Limit: 1})
+	events, err := w.store.ListActivity(ctx, models.ActivityFilter{Scope: item.Scope, RunID: run.ID, EventTypes: []string{"turn.answer_preview"}, Descending: true, Limit: 1})
 	if err != nil || len(events) == 0 {
 		return nil, err
 	}
 	// A reset keeps the current message; the next attempt or the committed
 	// reply replaces its text.
-	preview := projectTurnAnswerPreview(events[0])
+	preview := models.ProjectTurnAnswerPreview(events[0])
 	if preview == nil || preview.Reset {
 		return nil, nil
 	}
@@ -168,7 +169,7 @@ func (w *RunProgressAcknowledgementWorker) projectAnswerStream(ctx context.Conte
 	operation := capability.ConversationDeliveryMessageSend
 	phase := externalAnswerStreamPreviewPrefix + "1"
 	parameters := map[string]interface{}{"preview": text}
-	if isTeamMemberRun(run) {
+	if models.IsTeamMemberRun(run) {
 		// The preview speaks as the member, not as the Team's endpoint.
 		parameters[externalAnswerStreamAgentParameter] = run.AssignedAgentID
 	}
@@ -193,7 +194,7 @@ func (w *RunProgressAcknowledgementWorker) projectAnswerStream(ctx context.Conte
 		ConversationID: item.ConversationID, ChannelMessageID: item.ChannelMessageID,
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: externalConversationReplyThread(item, endpoint),
 		Parameters:     parameters,
-		Correlation:    &ExternalConversationDeliveryCorrelation{Kind: externalAnswerStreamCorrelationKind, ID: reply.id, Phase: phase},
+		Correlation:    &models.ExternalConversationDeliveryCorrelation{Kind: externalAnswerStreamCorrelationKind, ID: reply.id, Phase: phase},
 		IdempotencyKey: externalAnswerStreamKey(reply.id, phase),
 	})
 	if err != nil {
@@ -207,9 +208,9 @@ func (w *RunProgressAcknowledgementWorker) projectAnswerStream(ctx context.Conte
 func deleteAnswerStream(
 	ctx context.Context,
 	transport *ExternalConversationTransportService,
-	item *ExternalConversationInboxItem,
+	item *models.ExternalConversationInboxItem,
 	replyID string,
-	endpoint *ExternalConversationEndpoint,
+	endpoint *models.ExternalConversationEndpoint,
 	operations []capability.ConversationDeliveryOperation,
 	stream *externalAnswerStream,
 ) (bool, error) {
@@ -221,7 +222,7 @@ func deleteAnswerStream(
 		ConversationID: item.ConversationID, ChannelMessageID: item.ChannelMessageID,
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: stream.opened.ExternalThreadID,
 		Parameters:     map[string]interface{}{"providerMessageId": stream.opened.ProviderMessageID},
-		Correlation:    &ExternalConversationDeliveryCorrelation{Kind: externalAnswerStreamCorrelationKind, ID: replyID, Phase: externalAnswerStreamDeletePhase},
+		Correlation:    &models.ExternalConversationDeliveryCorrelation{Kind: externalAnswerStreamCorrelationKind, ID: replyID, Phase: externalAnswerStreamDeletePhase},
 		IdempotencyKey: externalAnswerStreamKey(replyID, externalAnswerStreamDeletePhase),
 	})
 	return err == nil, err
@@ -229,7 +230,7 @@ func deleteAnswerStream(
 
 // retireAnswerStream deletes the stream of an answer that is not sent (a
 // canceled Run or a superseded failure).
-func (w *ExternalConversationReplyWorker) retireAnswerStream(ctx context.Context, item *ExternalConversationInboxItem, replyID string) error {
+func (w *ExternalConversationReplyWorker) retireAnswerStream(ctx context.Context, item *models.ExternalConversationInboxItem, replyID string) error {
 	stream, err := loadExternalAnswerStream(ctx, w.store, item, replyID)
 	if err != nil || stream == nil {
 		return err

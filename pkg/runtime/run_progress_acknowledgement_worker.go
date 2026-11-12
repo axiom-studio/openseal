@@ -34,7 +34,7 @@ type RunProgressAcknowledgement struct {
 }
 
 type RunProgressAcknowledgementWorkerConfig struct {
-	ReviewURL               func(kind, requestID, deploymentID, conversationID string, owner ObjectiveOwner) (string, error)
+	ReviewURL               func(kind, requestID, deploymentID, conversationID string, owner models.ObjectiveOwner) (string, error)
 	MinimumRunAge           time.Duration
 	MinimumInterval         time.Duration
 	PageSize                int
@@ -67,7 +67,7 @@ func (c RunProgressAcknowledgementWorkerConfig) normalize() (RunProgressAcknowle
 // RunProgressAcknowledgementWorker renders meaningful Run progress and lets
 // the bound conversation adapter choose its declared presentation capability.
 type RunProgressAcknowledgementWorker struct {
-	store         RunProgressAcknowledgementStore
+	store         models.RunProgressAcknowledgementStore
 	resolver      ExternalConversationAdapterResolver
 	renderer      agentrun.RunProgressAcknowledgementRenderer
 	conversations *runtimeconversation.ConversationService
@@ -77,7 +77,7 @@ type RunProgressAcknowledgementWorker struct {
 }
 
 func NewRunProgressAcknowledgementWorker(
-	store RunProgressAcknowledgementStore,
+	store models.RunProgressAcknowledgementStore,
 	resolver ExternalConversationAdapterResolver,
 	renderer agentrun.RunProgressAcknowledgementRenderer,
 	config RunProgressAcknowledgementWorkerConfig,
@@ -96,27 +96,27 @@ func NewRunProgressAcknowledgementWorker(
 	}, nil
 }
 
-func (w *RunProgressAcknowledgementWorker) ProcessScope(ctx context.Context, scope Scope) ([]*ExternalConversationDelivery, error) {
+func (w *RunProgressAcknowledgementWorker) ProcessScope(ctx context.Context, scope models.Scope) ([]*models.ExternalConversationDelivery, error) {
 	return w.processScope(ctx, scope, true)
 }
 
 // ProcessCommentaryScope delivers existing public Agent updates without a
 // second model call or synthesized lifecycle narration.
-func (w *RunProgressAcknowledgementWorker) ProcessCommentaryScope(ctx context.Context, scope Scope) ([]*ExternalConversationDelivery, error) {
+func (w *RunProgressAcknowledgementWorker) ProcessCommentaryScope(ctx context.Context, scope models.Scope) ([]*models.ExternalConversationDelivery, error) {
 	return w.processScope(ctx, scope, false)
 }
 
-func (w *RunProgressAcknowledgementWorker) processScope(ctx context.Context, scope Scope, renderStatus bool) ([]*ExternalConversationDelivery, error) {
+func (w *RunProgressAcknowledgementWorker) processScope(ctx context.Context, scope models.Scope, renderStatus bool) ([]*models.ExternalConversationDelivery, error) {
 	if w == nil || w.store == nil || w.resolver == nil || w.renderer == nil || w.conversations == nil || w.transport == nil {
 		return nil, errors.New("Run progress acknowledgement worker is not configured")
 	}
-	items, err := w.store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
-		Scope: scope, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied}, Limit: w.config.PageSize,
+	items, err := w.store.ListExternalConversationInbox(ctx, models.ExternalConversationInboxFilter{
+		Scope: scope, Statuses: []models.ExternalConversationInboxStatus{models.ExternalConversationInboxApplied}, Limit: w.config.PageSize,
 	})
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*ExternalConversationDelivery, 0)
+	result := make([]*models.ExternalConversationDelivery, 0)
 	var processErrors []error
 	if !renderStatus {
 		reviews, err := w.projectReviewRequests(ctx, scope)
@@ -126,7 +126,7 @@ func (w *RunProgressAcknowledgementWorker) processScope(ctx context.Context, sco
 		}
 	}
 	for _, item := range items {
-		if item == nil || item.Status != ExternalConversationInboxApplied {
+		if item == nil || item.Status != models.ExternalConversationInboxApplied {
 			continue
 		}
 		// A Team's item is answered by each member Run its routing started.
@@ -145,7 +145,7 @@ func (w *RunProgressAcknowledgementWorker) processScope(ctx context.Context, sco
 	return result, errors.Join(processErrors...)
 }
 
-func (w *RunProgressAcknowledgementWorker) processReply(ctx context.Context, item *ExternalConversationInboxItem, reply externalItemReply, agents []string, renderStatus bool) ([]*ExternalConversationDelivery, []error) {
+func (w *RunProgressAcknowledgementWorker) processReply(ctx context.Context, item *models.ExternalConversationInboxItem, reply externalItemReply, agents []string, renderStatus bool) ([]*models.ExternalConversationDelivery, []error) {
 	updates, hasCommentary, err := w.projectCommentary(ctx, item, reply)
 	if err != nil {
 		return nil, []error{fmt.Errorf("project channel commentary for inbox item %s: %w", item.ID, err)}
@@ -180,8 +180,8 @@ func (w *RunProgressAcknowledgementWorker) processReply(ctx context.Context, ite
 	return result, processErrors
 }
 
-func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *ExternalConversationInboxItem, reply externalItemReply) (*ExternalConversationDelivery, error) {
-	if item == nil || item.Status != ExternalConversationInboxApplied || item.RunID == "" || item.ConversationID == "" || item.ChannelMessageID == "" {
+func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *models.ExternalConversationInboxItem, reply externalItemReply) (*models.ExternalConversationDelivery, error) {
+	if item == nil || item.Status != models.ExternalConversationInboxApplied || item.RunID == "" || item.ConversationID == "" || item.ChannelMessageID == "" {
 		return nil, nil
 	}
 	endpoint, adapter, err := w.resolveEndpoint(ctx, item)
@@ -190,20 +190,20 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 	}
 	run := reply.run
 	now := w.now().UTC()
-	if strings.TrimSpace(run.AssignedAgentID) == "" || isTerminalAgentRunStatus(run.Status) || now.Sub(run.CreatedAt) < w.config.MinimumRunAge || conversationrun.ExternalInboxItemIsFollowUp(item, run) {
+	if strings.TrimSpace(run.AssignedAgentID) == "" || models.IsTerminalAgentRunStatus(run.Status) || now.Sub(run.CreatedAt) < w.config.MinimumRunAge || conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 		return nil, nil
 	}
-	events, err := w.store.ListActivity(ctx, ActivityFilter{Scope: item.Scope, RunID: run.ID, Descending: true, Limit: 1})
+	events, err := w.store.ListActivity(ctx, models.ActivityFilter{Scope: item.Scope, RunID: run.ID, Descending: true, Limit: 1})
 	if err != nil {
 		return nil, err
 	}
-	var latest *ActivityEvent
+	var latest *models.ActivityEvent
 	if len(events) > 0 {
 		latest = events[0]
 	}
 	snapshot := runProgressSnapshot(run, latest)
 	phase := runProgressPhase(snapshot)
-	prior, err := w.store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+	prior, err := w.store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{
 		Scope: item.Scope, EndpointID: endpoint.ID, ConversationID: item.ConversationID,
 		CorrelationKind: runProgressAcknowledgementCorrelationKind, CorrelationID: run.ID, Limit: 100,
 	})
@@ -231,7 +231,7 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 		acknowledgement.SourceEventID = latest.ID
 	}
 	threadID := strings.TrimSpace(item.Event.ExternalThreadID)
-	if threadID == "" && endpoint.Policy.ReplyMode == ExternalConversationReplyThread {
+	if threadID == "" && endpoint.Policy.ReplyMode == models.ExternalConversationReplyThread {
 		threadID = strings.TrimSpace(item.Event.ExternalMessageID)
 	}
 	operation := capability.ConversationDeliveryMessageSend
@@ -252,7 +252,7 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 		ConversationID: item.ConversationID, ChannelMessageID: messageID,
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: threadID,
 		Parameters:     parameters,
-		Correlation:    &ExternalConversationDeliveryCorrelation{Kind: runProgressAcknowledgementCorrelationKind, ID: run.ID, Phase: phase},
+		Correlation:    &models.ExternalConversationDeliveryCorrelation{Kind: runProgressAcknowledgementCorrelationKind, ID: run.ID, Phase: phase},
 		IdempotencyKey: "run-acknowledgement-delivery:" + reply.id + ":" + phase,
 	})
 	if err != nil {
@@ -261,13 +261,13 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 	return enqueued.Delivery, nil
 }
 
-func (w *RunProgressAcknowledgementWorker) resolveEndpoint(ctx context.Context, item *ExternalConversationInboxItem) (*ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {
+func (w *RunProgressAcknowledgementWorker) resolveEndpoint(ctx context.Context, item *models.ExternalConversationInboxItem) (*models.ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, item.Scope, item.EndpointID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != item.EndpointRevision ||
-		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
+	if endpoint == nil || endpoint.Status != models.ExternalConversationEndpointActive || endpoint.Revision != item.EndpointRevision ||
+		!models.ExternalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
 		return nil, nil, nil
 	}
 	adapter, err := w.resolver.ResolveConversationAdapterBinding(
@@ -275,41 +275,41 @@ func (w *RunProgressAcknowledgementWorker) resolveEndpoint(ctx context.Context, 
 		endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID,
 	)
 	if err != nil || adapter == nil || adapter.Binding == nil || adapter.Adapter.Provider != endpoint.Provider {
-		return nil, nil, fmt.Errorf("%w: current conversation adapter is unavailable", ErrExternalConversationConflict)
+		return nil, nil, fmt.Errorf("%w: current conversation adapter is unavailable", models.ErrExternalConversationConflict)
 	}
 	return endpoint, adapter, nil
 }
 
 // post sends the acknowledgement as the Run's acting Agent, which rendered it.
 // replyID keys it to that Agent's answer (externalItemReply).
-func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *ExternalConversationInboxItem, replyID string, acknowledgement RunProgressAcknowledgement, agentID string) (*ChannelMessage, error) {
+func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *models.ExternalConversationInboxItem, replyID string, acknowledgement RunProgressAcknowledgement, agentID string) (*models.ChannelMessage, error) {
 	for range 3 {
 		conversation, err := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
 		if err != nil {
 			return nil, err
 		}
-		references := []ConversationReference{{Kind: ConversationReferenceRun, ID: acknowledgement.RunID, Version: acknowledgement.SourceRevision}}
+		references := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: acknowledgement.RunID, Version: acknowledgement.SourceRevision}}
 		if acknowledgement.SourceEventID != "" {
-			references = append(references, ConversationReference{Kind: ConversationReferenceActivity, ID: acknowledgement.SourceEventID})
+			references = append(references, models.ConversationReference{Kind: models.ConversationReferenceActivity, ID: acknowledgement.SourceEventID})
 		}
 		posted, err := w.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: conversation.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID},
-			Intent: MessageIntentAcknowledgment, Content: acknowledgement.Text,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: item.ChannelMessageID,
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: agentID},
+			Intent: models.MessageIntentAcknowledgment, Content: acknowledgement.Text,
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: item.ChannelMessageID,
 			References: references, IdempotencyKey: "run-acknowledgement-message:" + replyID + ":" + acknowledgement.Phase,
 		})
 		if err == nil {
 			return posted.Message, nil
 		}
-		if !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrMessageConflict) {
+		if !errors.Is(err, models.ErrRevisionConflict) && !errors.Is(err, models.ErrMessageConflict) {
 			return nil, err
 		}
 	}
-	return nil, ErrRevisionConflict
+	return nil, models.ErrRevisionConflict
 }
 
-func runProgressSnapshot(run *AgentRun, event *ActivityEvent) agentrun.RunProgressSnapshot {
+func runProgressSnapshot(run *models.AgentRun, event *models.ActivityEvent) agentrun.RunProgressSnapshot {
 	result := agentrun.RunProgressSnapshot{
 		RunID: run.ID, Scope: run.Scope, AgentID: run.AssignedAgentID, Goal: run.Goal, Status: run.Status, Revision: run.Revision,
 	}
@@ -321,11 +321,11 @@ func runProgressSnapshot(run *AgentRun, event *ActivityEvent) agentrun.RunProgre
 
 func runProgressPhase(snapshot agentrun.RunProgressSnapshot) string {
 	source := string(snapshot.Status) + "\x00" + snapshot.ActivityID + "\x00" + snapshot.ActivityType
-	digest := hashString(source)
+	digest := models.SHA256DigestString(source)
 	return "progress-" + digest[:16]
 }
 
-func runProgressPhaseDelivered(deliveries []*ExternalConversationDelivery, phase string) bool {
+func runProgressPhaseDelivered(deliveries []*models.ExternalConversationDelivery, phase string) bool {
 	for _, delivery := range deliveries {
 		if delivery != nil && delivery.Correlation != nil && delivery.Correlation.Phase == phase {
 			return true
@@ -388,17 +388,17 @@ func (r *modelStepProgressAcknowledgementRenderer) RenderRunProgressAcknowledgem
 	if r.now != nil {
 		now = r.now
 	}
-	stepID := "progress-ack-" + hashString(snapshot.RunID + "\x00" + snapshot.ActivityID + "\x00" + string(snapshot.Status))[:16]
-	req := ModelStepRequest{
-		APIVersion: ModelStepAPIVersion, Purpose: ModelStepPurposeAcknowledgement,
+	stepID := "progress-ack-" + models.SHA256DigestString(snapshot.RunID + "\x00" + snapshot.ActivityID + "\x00" + string(snapshot.Status))[:16]
+	req := models.ModelStepRequest{
+		APIVersion: models.ModelStepAPIVersion, Purpose: models.ModelStepPurposeAcknowledgement,
 		Scope: snapshot.Scope, RunID: snapshot.RunID, StepID: stepID, SessionID: "",
 		AgentID: snapshot.AgentID, DefinitionID: r.definitionID, DefinitionVersion: r.definitionVersion,
 		ModelCredential: r.modelCredential,
-		System:          ModelStepSystem{AgentInstructions: append([]string(nil), r.system...)},
+		System:          models.ModelStepSystem{AgentInstructions: append([]string(nil), r.system...)},
 		Tools:           nil,
-		Entries: []SessionEntryView{{
-			ID: stepID + "-facts", Sequence: 1, Type: SessionEntryUser, CreatedAt: now().UTC(),
-			User: &UserEntryView{Content: []ContentPart{{Type: ContentPartText, Text: string(facts)}}},
+		Entries: []models.SessionEntryView{{
+			ID: stepID + "-facts", Sequence: 1, Type: models.SessionEntryUser, CreatedAt: now().UTC(),
+			User: &models.UserEntryView{Content: []models.ContentPart{{Type: models.ContentPartText, Text: string(facts)}}},
 		}},
 	}
 	if err := req.Validate(); err != nil {
@@ -456,12 +456,12 @@ func (r *TurnRunnerProgressAcknowledgementRenderer) RenderRunProgressAcknowledge
 	if r == nil || r.resolver == nil || request.Snapshot.RunID == "" || request.Snapshot.AgentID == "" || request.Snapshot.Scope.Validate() != nil {
 		return "", errors.New("Run progress acknowledgement rendering is unavailable")
 	}
-	run := &AgentRun{
-		ID: request.Snapshot.RunID, Kind: RunKindAgentWork,
+	run := &models.AgentRun{
+		ID: request.Snapshot.RunID, Kind: models.RunKindAgentWork,
 		Scope: request.Snapshot.Scope,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: request.Snapshot.AgentID}, AssignedAgentID: request.Snapshot.AgentID, ActingUser: "",
+		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: request.Snapshot.AgentID}, AssignedAgentID: request.Snapshot.AgentID, ActingUser: "",
 		Goal:   request.Snapshot.Goal,
-		Source: RunSourceChat, Status: AgentRunStatusRunning,
+		Source: models.RunSourceChat, Status: models.AgentRunStatusRunning,
 		Revision: request.Snapshot.Revision,
 	}
 	binding, err := r.resolver.ResolveTurnRunner(ctx, run)

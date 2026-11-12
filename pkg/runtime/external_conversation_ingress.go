@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -17,7 +18,7 @@ const MaximumExternalConversationIngressBytes = 1 << 20
 // the exact Skill-owned ingress entrypoint. The kernel never interprets
 // provider signatures or event payloads.
 type ExternalConversationIngressRequest struct {
-	Scope      Scope               `json:"scope"`
+	Scope      models.Scope        `json:"scope"`
 	EndpointID string              `json:"endpointId"`
 	Method     string              `json:"method"`
 	Headers    map[string][]string `json:"headers,omitempty"`
@@ -36,30 +37,30 @@ type ExternalConversationPublicIngressRequest struct {
 }
 
 func (r *ExternalConversationPublicIngressRequest) Validate() error {
-	if r == nil || !validOpaqueIdentifier(strings.TrimSpace(r.Route), 128) {
-		return ErrInvalidExternalConversation
+	if r == nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(r.Route), 128) {
+		return models.ErrInvalidExternalConversation
 	}
 	return (&ExternalConversationIngressRequest{
-		Scope:      Scope{Kind: "tenant", ID: "route-validation"},
+		Scope:      models.Scope{Kind: "tenant", ID: "route-validation"},
 		EndpointID: "route-validation", Method: r.Method, Headers: r.Headers, Body: r.Body,
 	}).Validate()
 }
 
 func (r *ExternalConversationIngressRequest) Validate() error {
-	if r == nil || r.Scope.Validate() != nil || !validOpaqueIdentifier(r.EndpointID, 256) ||
+	if r == nil || r.Scope.Validate() != nil || !models.IsValidOpaqueIdentifier(r.EndpointID, 256) ||
 		r.Method != http.MethodPost || len(r.Body) == 0 || len(r.Body) > MaximumExternalConversationIngressBytes ||
 		len(r.Headers) > 64 {
-		return ErrInvalidExternalConversation
+		return models.ErrInvalidExternalConversation
 	}
 	for name, values := range r.Headers {
 		name = http.CanonicalHeaderKey(strings.TrimSpace(name))
 		if name == "" || name == "Authorization" || name == "Cookie" || len(name) > 128 ||
 			len(values) == 0 || len(values) > 16 {
-			return ErrInvalidExternalConversation
+			return models.ErrInvalidExternalConversation
 		}
 		for _, value := range values {
 			if len(value) > 4096 || strings.ContainsAny(value, "\r\n") {
-				return ErrInvalidExternalConversation
+				return models.ErrInvalidExternalConversation
 			}
 		}
 	}
@@ -70,44 +71,44 @@ func (r *ExternalConversationIngressRequest) Validate() error {
 // plus the bounded response the provider expects (for example a Slack URL
 // verification challenge). Non-2xx results cannot carry accepted events.
 type ExternalConversationIngressHostResult struct {
-	StatusCode  int                                   `json:"statusCode"`
-	ContentType string                                `json:"contentType,omitempty"`
-	Body        []byte                                `json:"body,omitempty"`
-	Events      []NormalizedExternalConversationEvent `json:"events,omitempty"`
+	StatusCode  int                                          `json:"statusCode"`
+	ContentType string                                       `json:"contentType,omitempty"`
+	Body        []byte                                       `json:"body,omitempty"`
+	Events      []models.NormalizedExternalConversationEvent `json:"events,omitempty"`
 }
 
 func (r *ExternalConversationIngressHostResult) Validate() error {
 	if r == nil || r.StatusCode < 200 || r.StatusCode > 599 ||
 		len(r.ContentType) > 256 || strings.ContainsAny(r.ContentType, "\r\n") ||
 		len(r.Body) > MaximumExternalConversationIngressBytes || len(r.Events) > 100 {
-		return ErrInvalidExternalConversation
+		return models.ErrInvalidExternalConversation
 	}
 	if r.StatusCode >= 300 && len(r.Events) > 0 {
-		return ErrInvalidExternalConversation
+		return models.ErrInvalidExternalConversation
 	}
 	for index := range r.Events {
 		if err := r.Events[index].Validate(); err != nil {
-			return fmt.Errorf("%w: normalized ingress event %d: %v", ErrInvalidExternalConversation, index, err)
+			return fmt.Errorf("%w: normalized ingress event %d: %v", models.ErrInvalidExternalConversation, index, err)
 		}
 	}
 	return nil
 }
 
 type ExternalConversationIngressHostRequest struct {
-	Endpoint *ExternalConversationEndpoint       `json:"endpoint"`
-	Adapter  *skill.BoundConversationAdapter     `json:"adapter"`
-	Request  *ExternalConversationIngressRequest `json:"request"`
+	Endpoint *models.ExternalConversationEndpoint `json:"endpoint"`
+	Adapter  *skill.BoundConversationAdapter      `json:"adapter"`
+	Request  *ExternalConversationIngressRequest  `json:"request"`
 }
 
 type ExternalConversationGatewayEvent struct {
-	InstallationID string                              `json:"installationId"`
-	ApplicationID  string                              `json:"applicationId,omitempty"`
-	Address        string                              `json:"address"`
-	Event          NormalizedExternalConversationEvent `json:"event"`
+	InstallationID string                                     `json:"installationId"`
+	ApplicationID  string                                     `json:"applicationId,omitempty"`
+	Address        string                                     `json:"address"`
+	Event          models.NormalizedExternalConversationEvent `json:"event"`
 }
 
 type ExternalConversationGatewayHostRequest struct {
-	Gateway ExternalConversationIngressGateway        `json:"gateway"`
+	Gateway models.ExternalConversationIngressGateway `json:"gateway"`
 	Adapter *skill.BoundConversationAdapter           `json:"adapter"`
 	Request *ExternalConversationPublicIngressRequest `json:"request"`
 	// VerificationOnly is internal authority to answer a provider setup
@@ -126,20 +127,20 @@ func (r *ExternalConversationGatewayHostResult) Validate() error {
 	if r == nil || r.StatusCode < 200 || r.StatusCode > 599 ||
 		len(r.ContentType) > 256 || strings.ContainsAny(r.ContentType, "\r\n") ||
 		len(r.Body) > MaximumExternalConversationIngressBytes || len(r.Events) > 100 {
-		return ErrInvalidExternalConversation
+		return models.ErrInvalidExternalConversation
 	}
 	if r.StatusCode >= 300 && len(r.Events) > 0 {
-		return ErrInvalidExternalConversation
+		return models.ErrInvalidExternalConversation
 	}
 	for index := range r.Events {
 		item := r.Events[index]
-		if !validOpaqueIdentifier(strings.TrimSpace(item.InstallationID), 1024) ||
-			(item.ApplicationID != "" && !validOpaqueIdentifier(strings.TrimSpace(item.ApplicationID), 1024)) ||
-			!validOpaqueIdentifier(strings.TrimSpace(item.Address), 1024) {
-			return fmt.Errorf("%w: verified ingress route %d is invalid", ErrInvalidExternalConversation, index)
+		if !models.IsValidOpaqueIdentifier(strings.TrimSpace(item.InstallationID), 1024) ||
+			(item.ApplicationID != "" && !models.IsValidOpaqueIdentifier(strings.TrimSpace(item.ApplicationID), 1024)) ||
+			!models.IsValidOpaqueIdentifier(strings.TrimSpace(item.Address), 1024) {
+			return fmt.Errorf("%w: verified ingress route %d is invalid", models.ErrInvalidExternalConversation, index)
 		}
 		if err := item.Event.Validate(); err != nil {
-			return fmt.Errorf("%w: normalized gateway event %d: %v", ErrInvalidExternalConversation, index, err)
+			return fmt.Errorf("%w: normalized gateway event %d: %v", models.ErrInvalidExternalConversation, index, err)
 		}
 	}
 	return nil
@@ -202,7 +203,7 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationIngr
 	if err != nil {
 		return nil, err
 	}
-	effectiveEndpoint := cloneExternalConversationEndpoint(endpoint)
+	effectiveEndpoint := models.CloneExternalConversationEndpoint(endpoint)
 	effectiveEndpoint.Adapter = externalConversationResolvedAdapterReference(adapter)
 	result, err := host.NormalizeExternalConversation(ctx, ExternalConversationIngressHostRequest{
 		Endpoint: effectiveEndpoint, Adapter: adapter, Request: &request,
@@ -217,7 +218,7 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationIngr
 		if event.Type != capability.ConversationEventApprovalDecided {
 			if !containsConversationEventType(adapter.Adapter.InboundEventTypes, event.Type) ||
 				(endpoint.Mode == capability.ConversationEndpointDirect && !event.Direct) {
-				return nil, fmt.Errorf("%w: adapter emitted an event outside the endpoint contract", ErrInvalidExternalConversation)
+				return nil, fmt.Errorf("%w: adapter emitted an event outside the endpoint contract", models.ErrInvalidExternalConversation)
 			}
 		}
 	}
@@ -257,7 +258,7 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationPubl
 		return nil, err
 	}
 	if endpoint == nil {
-		return nil, ErrExternalConversationEndpointNotFound
+		return nil, models.ErrExternalConversationEndpointNotFound
 	}
 	return s.NormalizeExternalConversationIngress(ctx, ExternalConversationIngressRequest{
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: request.Method,
@@ -271,7 +272,7 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationPubl
 // claims are then fanned out through the ordinary per-endpoint durable inbox.
 func (s *ExternalConversationTransportService) NormalizeExternalConversationGatewayIngress(
 	ctx context.Context,
-	gateway ExternalConversationIngressGateway,
+	gateway models.ExternalConversationIngressGateway,
 	request ExternalConversationPublicIngressRequest,
 	host ExternalConversationGatewayAdapterHost,
 ) (*ExternalConversationGatewayIngressResult, error) {
@@ -280,7 +281,7 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 
 func (s *ExternalConversationTransportService) normalizeExternalConversationGatewayIngress(
 	ctx context.Context,
-	gateway ExternalConversationIngressGateway,
+	gateway models.ExternalConversationIngressGateway,
 	request ExternalConversationPublicIngressRequest,
 	host ExternalConversationGatewayAdapterHost,
 	verificationOnly bool,
@@ -292,7 +293,7 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 	if verificationOnly {
 		verifier, ok := host.(ExternalConversationGatewayVerificationAdapterHost)
 		if !ok {
-			return nil, fmt.Errorf("%w: gateway verification while paused is unavailable", ErrExternalConversationConflict)
+			return nil, fmt.Errorf("%w: gateway verification while paused is unavailable", models.ErrExternalConversationConflict)
 		}
 		normalize = verifier.VerifyExternalConversationGateway
 	}
@@ -313,7 +314,7 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 	if err != nil || adapter == nil || adapter.Binding == nil ||
 		adapter.Binding.SkillID != ref.SkillID || adapter.Binding.SourceIdentity != ref.SourceIdentity ||
 		adapter.Binding.Revision < ref.BindingRevision || adapter.Adapter.Provider != gateway.Provider {
-		return nil, fmt.Errorf("%w: exact gateway Skill adapter is unavailable or stale", ErrExternalConversationConflict)
+		return nil, fmt.Errorf("%w: exact gateway Skill adapter is unavailable or stale", models.ErrExternalConversationConflict)
 	}
 	effectiveGateway := gateway
 	effectiveGateway.Adapter = externalConversationResolvedAdapterReference(adapter)
@@ -328,13 +329,13 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 	}
 	if verificationOnly {
 		if len(result.Events) != 0 {
-			return nil, fmt.Errorf("%w: paused gateway verification cannot accept events", ErrExternalConversationConflict)
+			return nil, fmt.Errorf("%w: paused gateway verification cannot accept events", models.ErrExternalConversationConflict)
 		}
 		return &ExternalConversationGatewayIngressResult{Response: result}, nil
 	}
 	type verifiedEventRoute struct {
 		event     ExternalConversationGatewayEvent
-		endpoints []*ExternalConversationEndpoint
+		endpoints []*models.ExternalConversationEndpoint
 	}
 	routes := make([]verifiedEventRoute, 0, len(result.Events))
 	for index := range result.Events {
@@ -343,7 +344,7 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 			(gateway.ApplicationID != "" && gateway.ApplicationID != routed.ApplicationID) {
 			continue
 		}
-		route := ExternalConversationVerifiedRoute{
+		route := models.ExternalConversationVerifiedRoute{
 			Provider: gateway.Provider, SkillID: adapter.Binding.SkillID, SkillVersion: adapter.Binding.SkillVersion,
 			SourceIdentity: adapter.Binding.SourceIdentity, AdapterID: ref.AdapterID,
 			InstallationID: routed.InstallationID, ApplicationID: routed.ApplicationID, Address: routed.Address,
@@ -395,7 +396,7 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 			// Fan-out remains valid inside that tenant (for example several
 			// specialized Agents observing one channel); a duplicated installation
 			// mapping across tenants is configuration ambiguity and accepts nothing.
-			var routedScope *Scope
+			var routedScope *models.Scope
 			for _, endpoint := range endpoints {
 				if endpoint == nil {
 					continue
@@ -406,19 +407,19 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 					continue
 				}
 				if endpoint.Scope != *routedScope {
-					return nil, fmt.Errorf("%w: verified ingress route is ambiguous across ownership scopes", ErrExternalConversationConflict)
+					return nil, fmt.Errorf("%w: verified ingress route is ambiguous across ownership scopes", models.ErrExternalConversationConflict)
 				}
 			}
 		}
 		if len(endpoints) > 100 {
-			return nil, fmt.Errorf("%w: verified ingress route fanout exceeds limit", ErrInvalidExternalConversation)
+			return nil, fmt.Errorf("%w: verified ingress route fanout exceeds limit", models.ErrInvalidExternalConversation)
 		}
 		routes = append(routes, verifiedEventRoute{event: routed, endpoints: endpoints})
 	}
 	for _, route := range routes {
 		if route.event.Event.Type != capability.ConversationEventApprovalDecided {
 			if !containsConversationEventType(adapter.Adapter.InboundEventTypes, route.event.Event.Type) {
-				return nil, fmt.Errorf("%w: adapter emitted undeclared event type %q", ErrInvalidExternalConversation, route.event.Event.Type)
+				return nil, fmt.Errorf("%w: adapter emitted undeclared event type %q", models.ErrInvalidExternalConversation, route.event.Event.Type)
 			}
 		}
 	}
@@ -477,13 +478,13 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationRegi
 		return nil, err
 	}
 	if registration == nil {
-		return nil, ErrExternalConversationGatewayNotFound
+		return nil, models.ErrExternalConversationGatewayNotFound
 	}
 	if err := registration.Validate(); err != nil {
 		return nil, err
 	}
-	if registration.Status != ExternalConversationGatewayActive && registration.Status != ExternalConversationGatewayPaused {
-		return nil, fmt.Errorf("%w: gateway is not active", ErrExternalConversationConflict)
+	if registration.Status != models.ExternalConversationGatewayActive && registration.Status != models.ExternalConversationGatewayPaused {
+		return nil, fmt.Errorf("%w: gateway is not active", models.ErrExternalConversationConflict)
 	}
-	return s.normalizeExternalConversationGatewayIngress(ctx, registration.Gateway, request, host, registration.Status == ExternalConversationGatewayPaused)
+	return s.normalizeExternalConversationGatewayIngress(ctx, registration.Gateway, request, host, registration.Status == models.ExternalConversationGatewayPaused)
 }

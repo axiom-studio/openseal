@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
@@ -12,22 +13,22 @@ import (
 // Typing indicators remain advisory; they must not replace conversation text.
 // No provider identity, internal activity, or extra model invocation is needed.
 // Each Team member forwards its own updates under its own name.
-func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context, item *ExternalConversationInboxItem, reply externalItemReply) ([]*ExternalConversationDelivery, bool, error) {
-	if item == nil || item.Status != ExternalConversationInboxApplied || item.RunID == "" || item.ConversationID == "" || item.ChannelMessageID == "" {
+func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context, item *models.ExternalConversationInboxItem, reply externalItemReply) ([]*models.ExternalConversationDelivery, bool, error) {
+	if item == nil || item.Status != models.ExternalConversationInboxApplied || item.RunID == "" || item.ConversationID == "" || item.ChannelMessageID == "" {
 		return nil, false, nil
 	}
 	run := reply.run
-	var result []*ExternalConversationDelivery
+	var result []*models.ExternalConversationDelivery
 	seen := false
 	var after int64
 	for {
-		events, err := w.store.ListActivity(ctx, ActivityFilter{Scope: item.Scope, RunID: run.ID, EventTypes: []string{"turn.commentary"}, AfterSequence: after, Limit: w.config.PageSize})
+		events, err := w.store.ListActivity(ctx, models.ActivityFilter{Scope: item.Scope, RunID: run.ID, EventTypes: []string{"turn.commentary"}, AfterSequence: after, Limit: w.config.PageSize})
 		if err != nil {
 			return result, seen, err
 		}
 		for _, event := range events {
 			after = event.Sequence
-			if event.Scope != item.Scope || event.RunID != run.ID || event.EventType != "turn.commentary" || event.Visibility == ActivityVisibilityPrivate || strings.TrimSpace(event.Summary) == "" {
+			if event.Scope != item.Scope || event.RunID != run.ID || event.EventType != "turn.commentary" || event.Visibility == models.ActivityVisibilityPrivate || strings.TrimSpace(event.Summary) == "" {
 				continue
 			}
 			seen = true
@@ -39,7 +40,7 @@ func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context
 				return result, seen, nil
 			}
 			if run.Owner != endpoint.Owner {
-				return result, seen, ErrExternalConversationConflict
+				return result, seen, models.ErrExternalConversationConflict
 			}
 			if conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 				return nil, false, nil // The trigger's item already forwards this Run's updates.
@@ -53,14 +54,14 @@ func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context
 				return result, seen, err
 			}
 			thread := strings.TrimSpace(item.Event.ExternalThreadID)
-			if thread == "" && endpoint.Policy.ReplyMode == ExternalConversationReplyThread {
+			if thread == "" && endpoint.Policy.ReplyMode == models.ExternalConversationReplyThread {
 				thread = strings.TrimSpace(item.Event.ExternalMessageID)
 			}
 			delivery, err := w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 				Scope: item.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 				ConversationID: item.ConversationID, ChannelMessageID: message.ID,
 				ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: thread,
-				Correlation:    &ExternalConversationDeliveryCorrelation{Kind: "run_commentary", ID: run.ID, Phase: phase},
+				Correlation:    &models.ExternalConversationDeliveryCorrelation{Kind: "run_commentary", ID: run.ID, Phase: phase},
 				IdempotencyKey: "run-commentary-delivery:" + reply.id + ":" + event.ID,
 			})
 			if err != nil {

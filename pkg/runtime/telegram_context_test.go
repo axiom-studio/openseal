@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -33,18 +34,18 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 	item := receiveContextTestEvent(t, store, endpoint, "photo-reply", "reply", "parent", now)
 	history := &recordingContextHost{result: &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []ExternalConversationContextMessage{{
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: "parent", ExternalMessageID: "parent", ExternalParticipantID: "Kev", ParticipantDisplayName: "Kev", OccurredAt: now.Add(-time.Second),
-		Attachments: []ExternalConversationAttachment{{ID: "photo", Name: "photo.png", MediaType: "image/png", SizeBytes: 68}},
+		Attachments: []models.ExternalConversationAttachment{{ID: "photo", Name: "photo.png", MediaType: "image/png", SizeBytes: 68}},
 	}}}}
 	worker, err := NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, ExternalConversationInboxWorkerConfig{WorkerID: "photo-worker", ContextHost: history, ContextCatalog: contextHistoryResolver{catalog}, AttachmentHost: photo, AttachmentContent: content})
 	if err != nil {
 		t.Fatal(err)
 	}
 	applied, err := worker.ProcessOne(t.Context(), endpoint.Scope)
-	if err != nil || applied == nil || applied.Status != ExternalConversationInboxApplied {
+	if err != nil || applied == nil || applied.Status != models.ExternalConversationInboxApplied {
 		t.Fatalf("apply: %#v %v", applied, err)
 	}
 	conversation, _ := store.GetConversation(t.Context(), endpoint.Scope, applied.ConversationID)
-	messages, _ := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10})
+	messages, _ := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10})
 	if len(messages) != 2 || !messages[0].Historical || messages[1].ReplyToMessageID != messages[0].ID {
 		t.Fatalf("messages: %#v", messages)
 	}
@@ -52,9 +53,9 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 	// part the step renders: the first step of the reply's chat Run, through
 	// the conversation turn runner with the same attachment content.
 	entry := quotedPhotoStepEntry(t, store, content, conversation, messages[1], messages[0].ID)
-	var images []ContentPart
+	var images []models.ContentPart
 	for _, part := range entry.User.Content {
-		if part.Type == ContentPartImage {
+		if part.Type == models.ContentPartImage {
 			images = append(images, part)
 		}
 	}
@@ -68,20 +69,20 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 
 // quotedPhotoStepEntry is the user entry of messageID in the first step
 // context of the chat Run that answers trigger.
-func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactContentStore, conversation *Conversation, trigger *ChannelMessage, messageID string) *SessionEntry {
+func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content models.ArtifactContentStore, conversation *models.Conversation, trigger *models.ChannelMessage, messageID string) *models.SessionEntry {
 	t.Helper()
 	ctx := t.Context()
 	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, runtimeconversation.ConversationAgentRunRequest(conversation, trigger))
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: conversation.Scope, WorkerID: "photo-step", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	run, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: conversation.Scope, WorkerID: "photo-step", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || run == nil || run.ID != created.Run.ID {
 		t.Fatalf("claim = %#v, %v", run, err)
 	}
 	agent := chatLoopAgentTurns{run.ID: {
 		DeploymentID: run.AssignedAgentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
-		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model", Producer: &chatLoopProducer{},
+		ModelProvider: string(models.ModelStepProviderAnthropic), Model: "chat-model", Producer: &chatLoopProducer{},
 		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
 	}}
 	runner, err := conversationrun.NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, runtimeconversation.NewConversationService(store)), conversationrun.ConversationRunTurnRunnerConfig{
@@ -95,7 +96,7 @@ func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactCon
 		t.Fatal(err)
 	}
 	chat := binding.Preparers[len(binding.Preparers)-1]
-	part, err := chat.BeforeStep(ctx, agentrun.StepInput{Run: run, Session: binding.Session, Binding: binding, WorkerID: "photo-step", Step: &AgentTurn{ID: run.ID + "-step-1", Sequence: 1}}, agentrun.SteeringPlan{})
+	part, err := chat.BeforeStep(ctx, agentrun.StepInput{Run: run, Session: binding.Session, Binding: binding, WorkerID: "photo-step", Step: &models.AgentTurn{ID: run.ID + "-step-1", Sequence: 1}}, agentrun.SteeringPlan{})
 	if err != nil || part == nil {
 		t.Fatalf("first step context = %#v, %v", part, err)
 	}
@@ -110,8 +111,8 @@ func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactCon
 
 func TestQuotedPhotoContextRejectsInvalidOriginAndUnboundedFiles(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	event := NormalizedExternalConversationEvent{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:8", ReplyToExternalMessageID: "chat:7", OccurredAt: now}
-	parent := ExternalConversationContextMessage{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:7", ExternalParticipantID: "user", OccurredAt: now, Attachments: []ExternalConversationAttachment{{ID: "photo", Name: "photo.jpg", MediaType: "image/jpeg", SizeBytes: 20}}}
+	event := models.NormalizedExternalConversationEvent{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:8", ReplyToExternalMessageID: "chat:7", OccurredAt: now}
+	parent := ExternalConversationContextMessage{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:7", ExternalParticipantID: "user", OccurredAt: now, Attachments: []models.ExternalConversationAttachment{{ID: "photo", Name: "photo.jpg", MediaType: "image/jpeg", SizeBytes: 20}}}
 	result := &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []ExternalConversationContextMessage{parent}}
 	messages, _, ok := normalizeExternalConversationContext(result, event)
 	if !ok || len(messages) != 1 {
@@ -122,7 +123,7 @@ func TestQuotedPhotoContextRejectsInvalidOriginAndUnboundedFiles(t *testing.T) {
 		t.Fatal("cross-chat parent accepted")
 	}
 	result.Messages[0] = parent
-	result.Messages[0].Attachments = []ExternalConversationAttachment{{ID: "photo", Name: "bad\nname"}}
+	result.Messages[0].Attachments = []models.ExternalConversationAttachment{{ID: "photo", Name: "bad\nname"}}
 	if _, _, ok := normalizeExternalConversationContext(result, event); ok {
 		t.Fatal("invalid descriptor accepted")
 	}

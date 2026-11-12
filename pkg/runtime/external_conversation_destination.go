@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -33,7 +34,7 @@ type ExternalConversationDestinationPage struct {
 // adapter and carries only search/pagination input. Credential resolution and
 // action invocation remain host responsibilities.
 type ExternalConversationDestinationDiscoveryRequest struct {
-	Scope                 Scope                                `json:"scope"`
+	Scope                 models.Scope                         `json:"scope"`
 	DeploymentID          string                               `json:"deploymentId"`
 	ExecutionDeploymentID string                               `json:"executionDeploymentId"`
 	Adapter               *capability.BoundConversationAdapter `json:"-"`
@@ -44,13 +45,13 @@ type ExternalConversationDestinationDiscoveryRequest struct {
 }
 
 func (r *ExternalConversationDestinationDiscoveryRequest) Validate() error {
-	if r == nil || r.Scope.Validate() != nil || !validAgentReference(strings.TrimSpace(r.DeploymentID), 256) ||
-		!validAgentReference(strings.TrimSpace(r.ExecutionDeploymentID), 256) ||
+	if r == nil || r.Scope.Validate() != nil || !models.IsValidAgentReference(strings.TrimSpace(r.DeploymentID), 256) ||
+		!models.IsValidAgentReference(strings.TrimSpace(r.ExecutionDeploymentID), 256) ||
 		r.Adapter == nil || r.Adapter.Definition == nil || r.Adapter.Binding == nil ||
 		r.Adapter.Binding.Scope != capability.ScopeReference(r.Scope) || r.Adapter.Binding.DeploymentID != r.DeploymentID ||
 		len(r.Cursor) > 4096 || strings.ContainsAny(r.Cursor, "\r\n") || len(r.Query) > 256 || strings.ContainsAny(r.Query, "\r\n") ||
 		r.Limit < 0 || r.Limit > MaximumConversationDestinationLimit {
-		return ErrInvalidExternalConversation
+		return models.ErrInvalidExternalConversation
 	}
 	if _, _, err := conversationDestinationDiscovery(r.Adapter, r.Mode); err != nil {
 		return err
@@ -142,18 +143,18 @@ func ProjectConversationDestinationPage(discovery capability.ConversationDestina
 
 func conversationDestinationDiscovery(adapter *capability.BoundConversationAdapter, mode capability.ConversationEndpointMode) (capability.ConversationDestinationDiscovery, capability.Action, error) {
 	if adapter == nil || adapter.Definition == nil || adapter.Binding == nil {
-		return capability.ConversationDestinationDiscovery{}, capability.Action{}, ErrInvalidExternalConversation
+		return capability.ConversationDestinationDiscovery{}, capability.Action{}, models.ErrInvalidExternalConversation
 	}
 	for _, discovery := range adapter.Adapter.DestinationDiscovery {
 		if discovery.Mode == mode {
 			action, ok := adapter.Definition.Actions[discovery.Action]
 			if !ok {
-				return capability.ConversationDestinationDiscovery{}, capability.Action{}, ErrInvalidExternalConversation
+				return capability.ConversationDestinationDiscovery{}, capability.Action{}, models.ErrInvalidExternalConversation
 			}
 			return discovery, action, nil
 		}
 	}
-	return capability.ConversationDestinationDiscovery{}, capability.Action{}, ErrInvalidExternalConversation
+	return capability.ConversationDestinationDiscovery{}, capability.Action{}, models.ErrInvalidExternalConversation
 }
 
 func valueAtConversationPath(value map[string]interface{}, path string) (interface{}, bool) {

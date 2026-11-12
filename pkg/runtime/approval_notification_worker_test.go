@@ -14,29 +14,30 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/callback"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 type approvalNotificationConflictStore struct {
-	ApprovalNotificationStore
+	models.ApprovalNotificationStore
 	remaining atomic.Int32
 }
 
 type approvalNotificationDeliveryLookupStore struct {
-	ApprovalNotificationStore
+	models.ApprovalNotificationStore
 	deliveryScans atomic.Int64
 }
 
-func (s *approvalNotificationDeliveryLookupStore) ListExternalConversationDeliveries(ctx context.Context, filter ExternalConversationDeliveryFilter) ([]*ExternalConversationDelivery, error) {
+func (s *approvalNotificationDeliveryLookupStore) ListExternalConversationDeliveries(ctx context.Context, filter models.ExternalConversationDeliveryFilter) ([]*models.ExternalConversationDelivery, error) {
 	s.deliveryScans.Add(1)
 	return s.ApprovalNotificationStore.ListExternalConversationDeliveries(ctx, filter)
 }
 
-func (s *approvalNotificationConflictStore) CommitChannelMessage(ctx context.Context, record ChannelMessageCommitRecord) (*ChannelMessageCommitResult, error) {
+func (s *approvalNotificationConflictStore) CommitChannelMessage(ctx context.Context, record models.ChannelMessageCommitRecord) (*models.ChannelMessageCommitResult, error) {
 	if s.remaining.Add(-1) >= 0 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	return s.ApprovalNotificationStore.CommitChannelMessage(ctx, record)
 }
@@ -48,15 +49,15 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		skill.ConversationDeliveryMessageSend, skill.ConversationDeliveryMessageUpdate,
 	})
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
-		Goal: "post reviewed comment", Source: RunSourceObjective,
+		Goal: "post reviewed comment", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
@@ -66,56 +67,56 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	// approval belongs to its own succeeded call.
 	for index := range 11 {
 		suffix := string(rune('a' + index))
-		historyCall := &ActionCall{ID: "historical-call-" + suffix, Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-0", DeploymentID: endpoint.DeploymentID,
-			Origin: ActionOriginLoop, Execution: ActionExecutionLoop, SkillID: "browser", SkillVersion: "1.0.0", Action: "comment",
-			Status: ActionCallStatusSucceeded, ApprovalID: "historical-approval-" + suffix, MaxAttempts: 1, Revision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
+		historyCall := &models.ActionCall{ID: "historical-call-" + suffix, Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-0", DeploymentID: endpoint.DeploymentID,
+			Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, SkillID: "browser", SkillVersion: "1.0.0", Action: "comment",
+			Status: models.ActionCallStatusSucceeded, ApprovalID: "historical-approval-" + suffix, MaxAttempts: 1, Revision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
 		decided := now.Add(-time.Hour)
-		historical := &ApprovalCheckpoint{
+		historical := &models.ApprovalCheckpoint{
 			ID: "historical-approval-" + suffix, Scope: endpoint.Scope, RunID: claimed.ID,
-			ActionCallID: historyCall.ID, Status: ApprovalStatusApproved, Summary: "Historical comment",
-			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ExpiresAt: decided.Add(24 * time.Hour),
-			DecisionID: "historical-decision-" + suffix, DecisionBy: &ApprovalPrincipal{Type: "user", ID: "operator"}, DecidedAt: &decided, Revision: 1,
+			ActionCallID: historyCall.ID, Status: models.ApprovalStatusApproved, Summary: "Historical comment",
+			EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}}, ExpiresAt: decided.Add(24 * time.Hour),
+			DecisionID: "historical-decision-" + suffix, DecisionBy: &models.ApprovalPrincipal{Type: "user", ID: "operator"}, DecidedAt: &decided, Revision: 1,
 			CreatedAt: now.Add(-time.Hour).Add(time.Duration(index) * time.Second), UpdatedAt: now.Add(-time.Hour),
 		}
 		if index == 0 {
-			historical.Destinations = []ApprovalDestination{{EndpointID: endpoint.ID}}
+			historical.Destinations = []models.ApprovalDestination{{EndpointID: endpoint.ID}}
 		}
-		historyEvent := &ActivityEvent{ID: "historical-event-" + suffix, Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: ActivitySeverityInfo,
-			AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: historical.Summary,
-			Visibility: ActivityVisibilityScope, CreatedAt: now.Add(-time.Hour)}
-		if _, err := store.CreateActionProposal(ctx, ActionProposalRecord{Call: historyCall, Approval: historical, Event: historyEvent, Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
+		historyEvent := &models.ActivityEvent{ID: "historical-event-" + suffix, Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: models.ActivitySeverityInfo,
+			AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: models.ActivityActor{Type: "worker", ID: "worker"}, Summary: historical.Summary,
+			Visibility: models.ActivityVisibilityScope, CreatedAt: now.Add(-time.Hour)}
+		if _, err := store.CreateActionProposal(ctx, models.ActionProposalRecord{Call: historyCall, Approval: historical, Event: historyEvent, Lease: &models.AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	call := &ActionCall{
-		ID: "call-1", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: ActionCallStatusWaitingApproval,
+	call := &models.ActionCall{
+		ID: "call-1", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: models.ActionCallStatusWaitingApproval,
 		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"comment": "Useful context"},
 		ApprovalID: "approval-1", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	call.InvocationDigest = ComputeActionInvocationDigest(call)
-	call.SemanticDigest = ComputeActionSemanticDigest(call)
-	approval := &ApprovalCheckpoint{
-		ID: "approval-1", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	call.SemanticDigest = models.ComputeActionSemanticDigest(call)
+	approval := &models.ApprovalCheckpoint{
+		ID: "approval-1", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: models.ApprovalStatusPending,
 		Risk: skill.RiskLevelExternal, Summary: "Post reviewed comment", PolicyReason: "external write",
 		ProposedAction: map[string]interface{}{"comment": "Useful context", "reviewContext": map[string]interface{}{
 			"commentDraft": "The exact proposed public comment.",
 			"destination":  "https://forum.example/posts/42",
 			"postURL":      "https://forum.example/posts/42#comment-7",
-		}}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
-		Destinations: []ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(24 * time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		}}, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}},
+		Destinations: []models.ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(24 * time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	waiting := cloneAgentRun(claimed)
-	waiting.Status = AgentRunStatusWaitingForApproval
-	waiting.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
+	waiting := models.CloneAgentRun(claimed)
+	waiting.Status = models.AgentRunStatusWaitingForApproval
+	waiting.WakeCondition = &models.WakeCondition{Type: "approval", Reference: approval.ID}
 	waiting.LeaseOwner = ""
 	waiting.LeaseExpiresAt = nil
 	waiting.Revision++
 	waiting.UpdatedAt = now
-	event := &ActivityEvent{ID: "approval-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: ActivitySeverityInfo,
-		AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
-		Visibility: ActivityVisibilityScope, CreatedAt: now}
-	if _, err := store.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: waiting, Event: event, ExpectedRunRevision: claimed.Revision, Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
+	event := &models.ActivityEvent{ID: "approval-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: models.ActivitySeverityInfo,
+		AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: models.ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
+		Visibility: models.ActivityVisibilityScope, CreatedAt: now}
+	if _, err := store.CreateActionProposal(ctx, models.ActionProposalRecord{Call: call, Approval: approval, Run: waiting, Event: event, ExpectedRunRevision: claimed.Revision, Lease: &models.AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
 		t.Fatal(err)
 	}
 	transport := NewExternalConversationTransportService(store, catalog, models.WithClock(func() time.Time { return now }))
@@ -124,9 +125,9 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		!strings.Contains(err.Error(), "no active provider callback") {
 		t.Fatalf("missing approval callback = %d, %v", count, err)
 	}
-	otherEndpoint := cloneExternalConversationEndpoint(endpoint)
+	otherEndpoint := models.CloneExternalConversationEndpoint(endpoint)
 	otherEndpoint.ID = "other-approval-endpoint"
-	otherEndpoint.Owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent:other"}
+	otherEndpoint.Owner = models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent:other"}
 	otherEndpoint.DeploymentID = "agent:other"
 	registerApprovalNotificationCallback(t, ctx, store, catalog, otherEndpoint)
 	if count, err := workerWithoutCallback.ProcessScope(ctx, endpoint.Scope, 10); err == nil || count != 0 ||
@@ -136,8 +137,8 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
 	// Marketplace definitions may retain their portable manifest channel key
 	// after the reviewed callback has been placed onto a concrete endpoint.
-	storetest.RewriteRowPayload(t, db, "approval_checkpoints", endpoint.Scope, approval.ID, func(stored *ApprovalCheckpoint) {
-		stored.Destinations = []ApprovalDestination{{EndpointID: "coding-slack-channel"}}
+	storetest.RewriteRowPayload(t, db, "approval_checkpoints", endpoint.Scope, approval.ID, func(stored *models.ApprovalCheckpoint) {
+		stored.Destinations = []models.ApprovalDestination{{EndpointID: "coding-slack-channel"}}
 	})
 	lookupStore := &approvalNotificationDeliveryLookupStore{ApprovalNotificationStore: store}
 	worker := NewApprovalNotificationWorker(lookupStore, transport, catalog, models.WithClock(func() time.Time { return now }))
@@ -147,7 +148,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 1 {
 		t.Fatalf("replay notify = %d, %v", count, err)
 	}
-	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	deliveries, err := store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 1 {
 		t.Fatalf("deliveries = %#v, %v", deliveries, err)
 	}
@@ -170,31 +171,31 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if err != nil || original == nil {
 		t.Fatalf("claim notification = %#v, %v", original, err)
 	}
-	delivered := cloneExternalConversationDelivery(original)
-	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = ExternalConversationDeliveryDelivered, "", time.Time{}
+	delivered := models.CloneExternalConversationDelivery(original)
+	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = models.ExternalConversationDeliveryDelivered, "", time.Time{}
 	delivered.ProviderMessageID, delivered.DeliveredAt, delivered.UpdatedAt = "1720000000.123", now.Add(time.Second), now.Add(time.Second)
 	delivered.Revision++
 	if err = store.SaveExternalConversationDelivery(ctx, delivered, original.Revision, "delivery-worker"); err != nil {
 		t.Fatal(err)
 	}
 
-	decision := NormalizedExternalConversationEvent{
+	decision := models.NormalizedExternalConversationEvent{
 		ID: "slack:approval:T1:1720000000.1:U1", Type: capability.ConversationEventApprovalDecided,
 		ExternalConversationID: endpoint.Address, ExternalMessageID: "1720000000.0", ExternalParticipantID: "U1",
 		OrderingKey: endpoint.Address + ":1720000000.0", OccurredAt: now,
 		Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID,
 			"invocationDigest": call.InvocationDigest, "decision": "approve", "principalType": "role", "principalId": "operator", "providerUserId": "U1"},
 	}
-	registration := &CallbackRegistration{Scope: endpoint.Scope, Provider: endpoint.Provider}
+	registration := &models.CallbackRegistration{Scope: endpoint.Scope, Provider: endpoint.Provider}
 	// The immutable approval still contains the portable key. The exact card
 	// delivered through the reviewed callback placement authorizes the provider
 	// decision without rewriting historical approval state.
-	subscription := CallbackSubscription{TargetID: endpoint.ID}
-	callbackEvent := EventEnvelope{
+	subscription := models.CallbackSubscription{TargetID: endpoint.ID}
+	callbackEvent := models.EventEnvelope{
 		ID: decision.ID, Scope: endpoint.Scope, Type: capability.CallbackEventApprovalDecided,
 		Source: "slack", Subject: decision.ExternalMessageID, OccurredAt: now,
 		Attributes: maps.Clone(decision.Attributes), Payload: map[string]interface{}{"messageId": delivered.ProviderMessageID},
-		Actor: ActivityActor{Type: "callback", ID: "slack-approval"},
+		Actor: models.ActivityActor{Type: "callback", ID: "slack-approval"},
 	}
 	consumer := NewApprovalCallbackConsumer(store, transport, models.WithClock(func() time.Time { return now }))
 	tampered := callbackEvent
@@ -212,25 +213,25 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		t.Fatal("ineligible approval principal was accepted")
 	}
 	pending, err := store.GetApproval(ctx, endpoint.Scope, approval.ID)
-	if err != nil || pending.Status != ApprovalStatusPending {
+	if err != nil || pending.Status != models.ApprovalStatusPending {
 		t.Fatalf("approval after rejected decisions = %#v, %v", pending, err)
 	}
 	if err := consumer.ConsumeCallbackEvent(ctx, registration, subscription, callbackEvent); err != nil {
 		t.Fatal(err)
 	}
 	resolvedApproval, err := store.GetApproval(ctx, endpoint.Scope, approval.ID)
-	if err != nil || resolvedApproval.Status != ApprovalStatusApproved {
+	if err != nil || resolvedApproval.Status != models.ApprovalStatusApproved {
 		t.Fatalf("resolution = %#v, %v", resolvedApproval, err)
 	}
 	resolvedCall, err := store.GetActionCall(ctx, endpoint.Scope, call.ID)
-	if err != nil || resolvedCall.Status != ActionCallStatusReady {
+	if err != nil || resolvedCall.Status != models.ActionCallStatusReady {
 		t.Fatalf("resolved call = %#v, %v", resolvedCall, err)
 	}
-	deliveries, err = store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	deliveries, err = store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 2 {
 		t.Fatalf("decision deliveries = %#v, %v", deliveries, err)
 	}
-	var decisionDelivery *ExternalConversationDelivery
+	var decisionDelivery *models.ExternalConversationDelivery
 	for _, delivery := range deliveries {
 		if delivery.Operation == capability.ConversationDeliveryMessageUpdate {
 			decisionDelivery = delivery
@@ -245,18 +246,18 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	}
 	// Stored delivery parameters are JSON, so the card holds plain strings.
 	decisionCard, _ := decisionDelivery.Parameters["approval"].(map[string]interface{})
-	if decisionCard["status"] != string(ApprovalStatusApproved) || decisionCard["actionStatus"] != string(ActionCallStatusReady) || decisionCard["providerApproverId"] != "U1" {
+	if decisionCard["status"] != string(models.ApprovalStatusApproved) || decisionCard["actionStatus"] != string(models.ActionCallStatusReady) || decisionCard["providerApproverId"] != "U1" {
 		t.Fatalf("decision card = %#v in %#v", decisionCard, decisionDelivery)
 	}
 	if err := consumer.ConsumeCallbackEvent(ctx, registration, subscription, callbackEvent); err != nil {
 		t.Fatalf("replay = %v", err)
 	}
-	deliveries, err = store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	deliveries, err = store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 2 {
 		t.Fatalf("replay deliveries = %#v, %v", deliveries, err)
 	}
-	completedCall := cloneActionCall(resolvedCall)
-	completedCall.Status = ActionCallStatusSucceeded
+	completedCall := models.CloneActionCall(resolvedCall)
+	completedCall.Status = models.ActionCallStatusSucceeded
 	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +272,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if scans := lookupStore.deliveryScans.Load(); scans != 0 {
 		t.Fatalf("approval outcome scanned endpoint delivery history %d times", scans)
 	}
-	deliveries, err = store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	deliveries, err = store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 4 {
 		t.Fatalf("outcome deliveries = %#v, %v", deliveries, err)
 	}
@@ -282,7 +283,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		}
 		if delivery.Operation == capability.ConversationDeliveryMessageUpdate {
 			projected, _ := delivery.Parameters["approval"].(map[string]interface{})
-			if projected["actionStatus"] == string(ActionCallStatusSucceeded) {
+			if projected["actionStatus"] == string(models.ActionCallStatusSucceeded) {
 				outcomeCard = true
 			}
 		}
@@ -293,7 +294,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	// The delivery intent is the durable idempotency boundary. A later pass
 	// must not attempt to recreate a canonical message whose presentation has
 	// drifted after the delivery was already accepted.
-	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{
+	messages, err := store.ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: endpoint.Scope, ConversationID: deliveries[0].ConversationID, Limit: 100,
 	})
 	if err != nil {
@@ -317,44 +318,44 @@ func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T
 		skill.ConversationDeliveryMessageSend,
 	})
 	now := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
-		Goal: "review pull request", Source: RunSourceManual,
+		Goal: "review pull request", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	call := &ActionCall{
-		ID: "call-internal", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-		SkillID: "summarize", SkillVersion: "1.0.0", Action: "execute", Status: ActionCallStatusWaitingApproval,
+	call := &models.ActionCall{
+		ID: "call-internal", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+		SkillID: "summarize", SkillVersion: "1.0.0", Action: "execute", Status: models.ActionCallStatusWaitingApproval,
 		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"url": "https://example.com/pr/17"},
 		ApprovalID: "approval-internal", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	call.InvocationDigest = ComputeActionInvocationDigest(call)
-	call.SemanticDigest = ComputeActionSemanticDigest(call)
-	approval := &ApprovalCheckpoint{
-		ID: "approval-internal", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	call.SemanticDigest = models.ComputeActionSemanticDigest(call)
+	approval := &models.ApprovalCheckpoint{
+		ID: "approval-internal", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: models.ApprovalStatusPending,
 		Risk: skill.RiskLevelExternal, Summary: "Summarize PR 17", PolicyReason: "external action",
-		ProposedAction: map[string]interface{}{"url": "https://example.com/pr/17"}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
+		ProposedAction: map[string]interface{}{"url": "https://example.com/pr/17"}, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}},
 		ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	waiting := cloneAgentRun(claimed)
-	waiting.Status = AgentRunStatusWaitingForApproval
-	waiting.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
+	waiting := models.CloneAgentRun(claimed)
+	waiting.Status = models.AgentRunStatusWaitingForApproval
+	waiting.WakeCondition = &models.WakeCondition{Type: "approval", Reference: approval.ID}
 	waiting.LeaseOwner, waiting.LeaseExpiresAt = "", nil
 	waiting.Revision++
 	waiting.UpdatedAt = now
-	if _, err = store.CreateActionProposal(ctx, ActionProposalRecord{
+	if _, err = store.CreateActionProposal(ctx, models.ActionProposalRecord{
 		Call: call, Approval: approval, Run: waiting, ExpectedRunRevision: claimed.Revision,
-		Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now},
-		Event: &ActivityEvent{ID: "approval-internal-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: ActivitySeverityInfo,
-			AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
-			Visibility: ActivityVisibilityScope, CreatedAt: now},
+		Lease: &models.AgentRunLeaseGuard{WorkerID: "worker", Now: now},
+		Event: &models.ActivityEvent{ID: "approval-internal-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: models.ActivitySeverityInfo,
+			AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: models.ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
+			Visibility: models.ActivityVisibilityScope, CreatedAt: now},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -364,14 +365,14 @@ func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T
 	}
 	conversation, err := store.FindConversationByIdempotencyKey(ctx, endpoint.Scope, agentApprovalConversationKey(endpoint.Owner))
 	if err != nil || conversation == nil || conversation.Title != "Approvals" || conversation.Owner != endpoint.Owner ||
-		conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceAgentApprovals ||
-		conversation.Origin.ID != AgentApprovalsConversationReferenceID(endpoint.Owner) {
+		conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceAgentApprovals ||
+		conversation.Origin.ID != models.AgentApprovalsConversationReferenceID(endpoint.Owner) {
 		t.Fatalf("approval conversation = %#v, %v", conversation, err)
 	}
 	message, err := store.FindChannelMessageByIdempotencyKey(ctx, endpoint.Scope, conversation.ID, "approval-request:"+approval.ID)
-	if err != nil || message == nil || message.Intent != MessageIntentApprovalRequest || len(message.References) != 2 ||
-		message.References[0] != (ConversationReference{Kind: ConversationReferenceApproval, ID: approval.ID}) ||
-		message.References[1] != (ConversationReference{Kind: ConversationReferenceRun, ID: run.ID}) {
+	if err != nil || message == nil || message.Intent != models.MessageIntentApprovalRequest || len(message.References) != 2 ||
+		message.References[0] != (models.ConversationReference{Kind: models.ConversationReferenceApproval, ID: approval.ID}) ||
+		message.References[1] != (models.ConversationReference{Kind: models.ConversationReferenceRun, ID: run.ID}) {
 		t.Fatalf("approval message = %#v, %v", message, err)
 	}
 }
@@ -381,8 +382,8 @@ func registerApprovalNotificationCallback(
 	ctx context.Context,
 	store *sqlite.Store,
 	catalog *skill.Catalog,
-	endpoint *ExternalConversationEndpoint,
-) *CallbackRegistration {
+	endpoint *models.ExternalConversationEndpoint,
+) *models.CallbackRegistration {
 	t.Helper()
 	definition := &skill.Definition{
 		ID: endpoint.Provider + "-approval-callback", Version: "1.0.0", Name: endpoint.Provider + " approval callback",
@@ -418,22 +419,22 @@ func registerApprovalNotificationCallback(
 	created, err := registry.Create(ctx, callback.CreateCallbackRegistrationRequest{
 		ID: endpoint.ID + "-approval-callback", Scope: endpoint.Scope, Owner: endpoint.Owner,
 		DeploymentID: endpoint.DeploymentID, Name: endpoint.Name + " approval callback", Provider: endpoint.Provider,
-		Adapter: CallbackAdapterReference{
+		Adapter: models.CallbackAdapterReference{
 			SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID,
 			BindingRevision: binding.Revision, AdapterID: "interactions",
 		},
-		Subscriptions: []CallbackSubscription{{
+		Subscriptions: []models.CallbackSubscription{{
 			EventType: capability.CallbackEventApprovalDecided, Consumer: "approvals", TargetID: endpoint.ID,
 		}},
-		Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "enable interactive approval decisions",
+		Actor: models.ActivityActor{Type: "user", ID: "operator"}, Reason: "enable interactive approval decisions",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	active := CallbackRegistrationActive
+	active := models.CallbackRegistrationActive
 	updated, err := registry.Update(ctx, created.Scope, created.ID, callback.UpdateCallbackRegistrationRequest{
 		ExpectedRevision: created.Revision, Status: &active,
-		Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "activate interactive approval decisions",
+		Actor: models.ActivityActor{Type: "user", ID: "operator"}, Reason: "activate interactive approval decisions",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -445,43 +446,43 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 	ctx := t.Context()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
-		Goal: "post reviewed comment", Source: RunSourceObjective, Budget: &BudgetPolicy{MaxActions: 1},
+		Goal: "post reviewed comment", Source: models.RunSourceObjective, Budget: &models.BudgetPolicy{MaxActions: 1},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	call := &ActionCall{
-		ID: "call-conflict", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: ActionCallStatusWaitingApproval,
+	call := &models.ActionCall{
+		ID: "call-conflict", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: models.ActionCallStatusWaitingApproval,
 		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"comment": "Useful context"},
 		ApprovalID: "approval-conflict", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	call.InvocationDigest = ComputeActionInvocationDigest(call)
-	call.SemanticDigest = ComputeActionSemanticDigest(call)
-	approval := &ApprovalCheckpoint{
-		ID: "approval-conflict", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	call.SemanticDigest = models.ComputeActionSemanticDigest(call)
+	approval := &models.ApprovalCheckpoint{
+		ID: "approval-conflict", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: models.ApprovalStatusPending,
 		Risk: skill.RiskLevelExternal, Summary: "Post reviewed comment", PolicyReason: "external write",
-		ProposedAction: map[string]interface{}{"comment": "Useful context"}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
-		Destinations: []ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		ProposedAction: map[string]interface{}{"comment": "Useful context"}, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}},
+		Destinations: []models.ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	waiting := cloneAgentRun(claimed)
-	waiting.Status = AgentRunStatusWaitingForApproval
-	waiting.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
+	waiting := models.CloneAgentRun(claimed)
+	waiting.Status = models.AgentRunStatusWaitingForApproval
+	waiting.WakeCondition = &models.WakeCondition{Type: "approval", Reference: approval.ID}
 	waiting.LeaseOwner = ""
 	waiting.LeaseExpiresAt = nil
 	waiting.Revision++
 	waiting.UpdatedAt = now
-	event := &ActivityEvent{ID: "approval-conflict-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: ActivitySeverityInfo,
-		AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
-		Visibility: ActivityVisibilityScope, CreatedAt: now}
-	if _, err := store.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: waiting, Event: event, ExpectedRunRevision: claimed.Revision, Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
+	event := &models.ActivityEvent{ID: "approval-conflict-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: models.ActivitySeverityInfo,
+		AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: models.ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
+		Visibility: models.ActivityVisibilityScope, CreatedAt: now}
+	if _, err := store.CreateActionProposal(ctx, models.ActionProposalRecord{Call: call, Approval: approval, Run: waiting, Event: event, ExpectedRunRevision: claimed.Revision, Lease: &models.AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -506,7 +507,7 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 			t.Fatal(err)
 		}
 	}
-	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	deliveries, err := store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 1 {
 		t.Fatalf("deliveries = %#v, %v", deliveries, err)
 	}
@@ -522,7 +523,7 @@ func TestApprovalNotificationReusesConversationAfterEndpointRename(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	renamed := cloneExternalConversationEndpoint(endpoint)
+	renamed := models.CloneExternalConversationEndpoint(endpoint)
 	renamed.Name = "Approvals in the new channel"
 	renamed.Revision++
 	renamed.UpdatedAt = renamed.UpdatedAt.Add(time.Second)
@@ -545,44 +546,44 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 		skill.ConversationDeliveryMessageSend, skill.ConversationDeliveryMessageUpdate,
 	})
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
-		Goal: "post reviewed comment", Source: RunSourceObjective,
+		Goal: "post reviewed comment", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	call := &ActionCall{
-		ID: "call-expiry", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: ActionCallStatusWaitingApproval,
+	call := &models.ActionCall{
+		ID: "call-expiry", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: models.ActionCallStatusWaitingApproval,
 		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"comment": "Useful context"},
 		ApprovalID: "approval-expiry", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	call.InvocationDigest = ComputeActionInvocationDigest(call)
-	call.SemanticDigest = ComputeActionSemanticDigest(call)
-	approval := &ApprovalCheckpoint{
-		ID: "approval-expiry", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	call.SemanticDigest = models.ComputeActionSemanticDigest(call)
+	approval := &models.ApprovalCheckpoint{
+		ID: "approval-expiry", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: models.ApprovalStatusPending,
 		Risk: skill.RiskLevelExternal, Summary: "Post reviewed comment", PolicyReason: "external write",
-		ProposedAction: map[string]interface{}{"comment": "Useful context"}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
-		Destinations: []ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(15 * time.Minute), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		ProposedAction: map[string]interface{}{"comment": "Useful context"}, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}},
+		Destinations: []models.ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(15 * time.Minute), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	waiting := cloneAgentRun(claimed)
-	waiting.Status = AgentRunStatusWaitingForApproval
-	waiting.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
+	waiting := models.CloneAgentRun(claimed)
+	waiting.Status = models.AgentRunStatusWaitingForApproval
+	waiting.WakeCondition = &models.WakeCondition{Type: "approval", Reference: approval.ID}
 	waiting.LeaseOwner, waiting.LeaseExpiresAt = "", nil
 	waiting.Revision++
 	waiting.UpdatedAt = now
-	if _, err = store.CreateActionProposal(ctx, ActionProposalRecord{
+	if _, err = store.CreateActionProposal(ctx, models.ActionProposalRecord{
 		Call: call, Approval: approval, Run: waiting, ExpectedRunRevision: claimed.Revision,
-		Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now},
-		Event: &ActivityEvent{ID: "approval-expiry-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: ActivitySeverityInfo,
-			AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
-			Visibility: ActivityVisibilityScope, CreatedAt: now},
+		Lease: &models.AgentRunLeaseGuard{WorkerID: "worker", Now: now},
+		Event: &models.ActivityEvent{ID: "approval-expiry-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: models.ActivitySeverityInfo,
+			AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: models.ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
+			Visibility: models.ActivityVisibilityScope, CreatedAt: now},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -597,8 +598,8 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 	if err != nil || original == nil {
 		t.Fatalf("claim notification = %#v, %v", original, err)
 	}
-	delivered := cloneExternalConversationDelivery(original)
-	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = ExternalConversationDeliveryDelivered, "", time.Time{}
+	delivered := models.CloneExternalConversationDelivery(original)
+	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = models.ExternalConversationDeliveryDelivered, "", time.Time{}
 	delivered.ProviderMessageID, delivered.DeliveredAt, delivered.UpdatedAt = "1720000000.123", now.Add(time.Second), now.Add(time.Second)
 	delivered.Revision++
 	if err = store.SaveExternalConversationDelivery(ctx, delivered, original.Revision, "delivery-worker"); err != nil {
@@ -609,14 +610,14 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 		t.Fatalf("expiry pass = %d, %v", count, err)
 	}
 	expired, err := store.GetApproval(ctx, endpoint.Scope, approval.ID)
-	if err != nil || expired.Status != ApprovalStatusExpired {
+	if err != nil || expired.Status != models.ApprovalStatusExpired {
 		t.Fatalf("expired approval = %#v, %v", expired, err)
 	}
-	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	deliveries, err := store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 2 {
 		t.Fatalf("deliveries = %#v, %v", deliveries, err)
 	}
-	var update *ExternalConversationDelivery
+	var update *models.ExternalConversationDelivery
 	for _, delivery := range deliveries {
 		if delivery.Operation == capability.ConversationDeliveryMessageUpdate {
 			update = delivery
@@ -631,7 +632,7 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 	}
 	// Stored delivery parameters are JSON, so the card holds plain strings.
 	card, _ := update.Parameters["approval"].(map[string]interface{})
-	if card["status"] != string(ApprovalStatusExpired) {
+	if card["status"] != string(models.ApprovalStatusExpired) {
 		t.Fatalf("expiry card = %#v", card)
 	}
 }
@@ -663,10 +664,10 @@ func TestApprovalNotificationPayloadHasNoCheckpointProjection(t *testing.T) {
 }
 
 func TestTerminalApprovalActionStatusIncludesRefused(t *testing.T) {
-	for status, want := range map[ActionCallStatus]bool{
-		ActionCallStatusSucceeded: true, ActionCallStatusFailed: true, ActionCallStatusDenied: true, ActionCallStatusCanceled: true,
-		ActionCallStatusCompensated: true, ActionCallStatusRefused: true,
-		ActionCallStatusReady: false, ActionCallStatusRunning: false, ActionCallStatusWaitingApproval: false,
+	for status, want := range map[models.ActionCallStatus]bool{
+		models.ActionCallStatusSucceeded: true, models.ActionCallStatusFailed: true, models.ActionCallStatusDenied: true, models.ActionCallStatusCanceled: true,
+		models.ActionCallStatusCompensated: true, models.ActionCallStatusRefused: true,
+		models.ActionCallStatusReady: false, models.ActionCallStatusRunning: false, models.ActionCallStatusWaitingApproval: false,
 	} {
 		if got := modelstep.IsTerminalApprovalActionStatus(status); got != want {
 			t.Fatalf("terminalApprovalActionStatus(%s) = %v, want %v", status, got, want)

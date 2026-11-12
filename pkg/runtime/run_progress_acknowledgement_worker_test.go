@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -18,10 +19,10 @@ import (
 type runProgressWorkerFixture struct {
 	store        *sqlite.Store
 	catalog      *skill.Catalog
-	endpoint     *ExternalConversationEndpoint
-	conversation *Conversation
-	inbound      *ChannelMessage
-	run          *AgentRun
+	endpoint     *models.ExternalConversationEndpoint
+	conversation *models.Conversation
+	inbound      *models.ChannelMessage
+	run          *models.AgentRun
 	now          time.Time
 }
 
@@ -39,7 +40,7 @@ func newRunProgressWorkerFixtureOn(t *testing.T, store *sqlite.Store, provider s
 	conversations := runtimeconversation.NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Support thread",
-		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
+		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "progress-conversation",
 	})
 	if err != nil {
@@ -47,39 +48,39 @@ func newRunProgressWorkerFixtureOn(t *testing.T, store *sqlite.Store, provider s
 	}
 	inbound, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "speaker"},
-		Intent: MessageIntentQuestion, Content: "Can you check this?",
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "speaker"},
+		Intent: models.MessageIntentQuestion, Content: "Can you check this?",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, RequiresResponse: true,
 		IdempotencyKey: "progress-inbound",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runResult, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: endpoint.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
-		AssignedAgentID: endpoint.DeploymentID, Goal: "Check the deployment", Source: RunSourceChat,
-		IdempotencyKey: "progress-run", Actor: ActivityActor{Type: "service", ID: "channel"},
+	runResult, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: endpoint.Scope, Kind: models.RunKindConversation, Owner: endpoint.Owner,
+		AssignedAgentID: endpoint.DeploymentID, Goal: "Check the deployment", Source: models.RunSourceChat,
+		IdempotencyKey: "progress-run", Actor: models.ActivityActor{Type: "service", ID: "channel"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, _, err := NewRunActivityService(store, store).TransitionRun(ctx, endpoint.Scope, runResult.Run.ID, RunTransitionRequest{
-		ExpectedRevision: runResult.Run.Revision, Status: AgentRunStatusRunning,
-		Summary: "Inspecting the current deployment", EventType: "run.observed", Actor: ActivityActor{Type: "worker", ID: "test"},
+	running, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, endpoint.Scope, runResult.Run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: runResult.Run.Revision, Status: models.AgentRunStatusRunning,
+		Summary: "Inspecting the current deployment", EventType: "run.observed", Actor: models.ActivityActor{Type: "worker", ID: "test"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	item := &ExternalConversationInboxItem{
+	item := &models.ExternalConversationInboxItem{
 		ID: "progress-inbox", Scope: endpoint.Scope, EndpointID: endpoint.ID,
 		EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: NormalizedExternalConversationEvent{
+		Event: models.NormalizedExternalConversationEvent{
 			ID: "progress-event", Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "conversation", ExternalThreadID: "thread", ExternalMessageID: "message",
 			ExternalParticipantID: "speaker", Text: "Can you check this?", OrderingKey: "conversation:message", OccurredAt: now,
 		},
-		Status: ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
+		Status: models.ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
 		ConversationID: conversation.ID, ChannelMessageID: inbound.Message.ID, RunID: running.ID,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, AppliedAt: now,
 	}
@@ -114,7 +115,7 @@ func TestRunProgressAcknowledgementWorkerUsesNativeProgressCapability(t *testing
 		rendered.MaxSentences != 2 || rendered.MaxCharacters != 100 {
 		t.Fatalf("renderer request = %#v", rendered)
 	}
-	messages, _ := fixture.store.ListChannelMessages(context.Background(), ChannelMessageFilter{
+	messages, _ := fixture.store.ListChannelMessages(context.Background(), models.ChannelMessageFilter{
 		Scope: fixture.endpoint.Scope, ConversationID: fixture.conversation.ID, Limit: 10,
 	})
 	if len(messages) != 1 {
@@ -141,10 +142,10 @@ func TestRunProgressAcknowledgementWorkerFallsBackToText(t *testing.T) {
 	if err != nil || len(deliveries) != 1 || deliveries[0].Operation != capability.ConversationDeliveryMessageSend {
 		t.Fatalf("text fallback delivery = %#v, %v", deliveries, err)
 	}
-	messages, _ := fixture.store.ListChannelMessages(context.Background(), ChannelMessageFilter{
+	messages, _ := fixture.store.ListChannelMessages(context.Background(), models.ChannelMessageFilter{
 		Scope: fixture.endpoint.Scope, ConversationID: fixture.conversation.ID, Limit: 10,
 	})
-	if len(messages) != 2 || messages[1].Intent != MessageIntentAcknowledgment || messages[1].Content != "I am checking now." {
+	if len(messages) != 2 || messages[1].Intent != models.MessageIntentAcknowledgment || messages[1].Content != "I am checking now." {
 		t.Fatalf("text fallback messages = %#v", messages)
 	}
 }
@@ -168,39 +169,39 @@ func TestRenderedRunProgressAcknowledgementIsBounded(t *testing.T) {
 }
 
 type progressAckStepHost struct {
-	requests []ModelStepRequest
-	reply    func(ModelStepRequest) ModelStepResult
+	requests []models.ModelStepRequest
+	reply    func(models.ModelStepRequest) models.ModelStepResult
 }
 
-func (h *progressAckStepHost) ExecuteModelStep(_ context.Context, req ModelStepRequest) (ModelStepResult, error) {
+func (h *progressAckStepHost) ExecuteModelStep(_ context.Context, req models.ModelStepRequest) (models.ModelStepResult, error) {
 	h.requests = append(h.requests, req)
 	return h.reply(req), nil
 }
 
-func (h *progressAckStepHost) ExecuteHostTool(context.Context, HostToolRequest) (HostToolResult, error) {
-	return HostToolResult{}, ErrHostToolUnsupported
+func (h *progressAckStepHost) ExecuteHostTool(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
+	return models.HostToolResult{}, models.ErrHostToolUnsupported
 }
 
-func progressAckResult(req ModelStepRequest, text string, calls ...ModelToolCall) ModelStepResult {
-	stop := ModelStopEnd
+func progressAckResult(req models.ModelStepRequest, text string, calls ...models.ModelToolCall) models.ModelStepResult {
+	stop := models.ModelStopEnd
 	if len(calls) > 0 {
-		stop = ModelStopToolCalls
+		stop = models.ModelStopToolCalls
 	}
-	return ModelStepResult{
-		APIVersion: ModelStepAPIVersion, StepID: req.StepID,
-		Assistant: AssistantEntry{
-			Provider: ModelStepProviderAnthropic, Model: "test-model", SystemDigest: "sys", ToolsDigest: "tools",
+	return models.ModelStepResult{
+		APIVersion: models.ModelStepAPIVersion, StepID: req.StepID,
+		Assistant: models.AssistantEntry{
+			Provider: models.ModelStepProviderAnthropic, Model: "test-model", SystemDigest: "sys", ToolsDigest: "tools",
 			Text: text, ToolCalls: calls, StopReason: stop,
 		},
-		Model: ModelStepModelInfo{Provider: ModelStepProviderAnthropic, Model: "test-model"},
+		Model: models.ModelStepModelInfo{Provider: models.ModelStepProviderAnthropic, Model: "test-model"},
 	}
 }
 
 func progressAckRequest() agentrun.RunProgressAcknowledgementRequest {
 	return agentrun.RunProgressAcknowledgementRequest{
 		Snapshot: agentrun.RunProgressSnapshot{
-			RunID: "run-1", Scope: Scope{Kind: "workspace", ID: "workspace-1"}, AgentID: "agent-1",
-			Goal: "Check the deployment", Status: AgentRunStatusRunning,
+			RunID: "run-1", Scope: models.Scope{Kind: "workspace", ID: "workspace-1"}, AgentID: "agent-1",
+			Goal: "Check the deployment", Status: models.AgentRunStatusRunning,
 			ActivityID: "event-1", ActivityType: "run.observed", ActivitySummary: "Inspecting the current deployment",
 		},
 		MaxSentences: 2, MaxCharacters: 100,
@@ -208,7 +209,7 @@ func progressAckRequest() agentrun.RunProgressAcknowledgementRequest {
 }
 
 func TestProgressAckIsSessionlessToolFreeModelStep(t *testing.T) {
-	host := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult {
+	host := &progressAckStepHost{reply: func(req models.ModelStepRequest) models.ModelStepResult {
 		return progressAckResult(req, "  Looking at the deployment now.  ")
 	}}
 	renderer := &modelStepProgressAcknowledgementRenderer{
@@ -226,10 +227,10 @@ func TestProgressAckIsSessionlessToolFreeModelStep(t *testing.T) {
 		t.Fatalf("requests = %d", len(host.requests))
 	}
 	req := host.requests[0]
-	if req.SessionID != "" || req.Tools != nil || req.Purpose != ModelStepPurposeAcknowledgement {
+	if req.SessionID != "" || req.Tools != nil || req.Purpose != models.ModelStepPurposeAcknowledgement {
 		t.Fatalf("request is not a sessionless tool-free acknowledgement: session=%q tools=%v purpose=%q", req.SessionID, req.Tools, req.Purpose)
 	}
-	if req.Stream != (ModelStepStream{}) {
+	if req.Stream != (models.ModelStepStream{}) {
 		t.Fatalf("acknowledgement must not stream: %+v", req.Stream)
 	}
 	if err := req.Validate(); err != nil {
@@ -238,14 +239,14 @@ func TestProgressAckIsSessionlessToolFreeModelStep(t *testing.T) {
 	if req.RunID != "run-1" || req.AgentID != "agent-1" || req.DefinitionID != "def" || req.DefinitionVersion != "1" {
 		t.Fatalf("identity = %+v", req)
 	}
-	wantStep := "progress-ack-" + hashString("run-1\x00event-1\x00" + string(AgentRunStatusRunning))[:16]
+	wantStep := "progress-ack-" + models.SHA256DigestString("run-1\x00event-1\x00" + string(models.AgentRunStatusRunning))[:16]
 	if req.StepID != wantStep {
 		t.Fatalf("step id = %q, want %q", req.StepID, wantStep)
 	}
 	if got := req.System.AgentInstructions; len(got) != 2 || got[1] != runProgressAcknowledgementSystemInstruction {
 		t.Fatalf("system = %v", got)
 	}
-	if len(req.Entries) != 1 || req.Entries[0].Type != SessionEntryUser {
+	if len(req.Entries) != 1 || req.Entries[0].Type != models.SessionEntryUser {
 		t.Fatalf("entries = %+v", req.Entries)
 	}
 	var facts map[string]interface{}
@@ -259,17 +260,17 @@ func TestProgressAckIsSessionlessToolFreeModelStep(t *testing.T) {
 }
 
 func TestProgressAckRejectsToolCallsAndOverlongText(t *testing.T) {
-	for name, reply := range map[string]func(ModelStepRequest) ModelStepResult{
-		"tool call": func(req ModelStepRequest) ModelStepResult {
-			return progressAckResult(req, "On it.", ModelToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{}`)})
+	for name, reply := range map[string]func(models.ModelStepRequest) models.ModelStepResult{
+		"tool call": func(req models.ModelStepRequest) models.ModelStepResult {
+			return progressAckResult(req, "On it.", models.ModelToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{}`)})
 		},
-		"overlong": func(req ModelStepRequest) ModelStepResult {
+		"overlong": func(req models.ModelStepRequest) models.ModelStepResult {
 			return progressAckResult(req, strings.Repeat("a", 101))
 		},
-		"too many sentences": func(req ModelStepRequest) ModelStepResult {
+		"too many sentences": func(req models.ModelStepRequest) models.ModelStepResult {
 			return progressAckResult(req, "One. Two. Three.")
 		},
-		"empty": func(req ModelStepRequest) ModelStepResult {
+		"empty": func(req models.ModelStepRequest) models.ModelStepResult {
 			return progressAckResult(req, "  ")
 		},
 	} {
@@ -286,7 +287,7 @@ func TestProgressAckRejectsToolCallsAndOverlongText(t *testing.T) {
 	}
 	other := progressAckRequest()
 	other.Snapshot.AgentID = "agent-2"
-	host := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult { return progressAckResult(req, "Fine.") }}
+	host := &progressAckStepHost{reply: func(req models.ModelStepRequest) models.ModelStepResult { return progressAckResult(req, "Fine.") }}
 	if _, err := (&modelStepProgressAcknowledgementRenderer{host: host, agentID: "agent-1"}).RenderRunProgressAcknowledgement(context.Background(), other); err == nil || len(host.requests) != 0 {
 		t.Fatalf("rendered for another Agent: err=%v requests=%d", err, len(host.requests))
 	}

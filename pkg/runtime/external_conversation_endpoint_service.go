@@ -18,35 +18,35 @@ import (
 
 type CreateExternalConversationEndpointRequest struct {
 	ID               string
-	Scope            Scope
-	Owner            ObjectiveOwner
+	Scope            models.Scope
+	Owner            models.ObjectiveOwner
 	DeploymentID     string
 	Name             string
-	Adapter          ExternalConversationAdapterReference
+	Adapter          models.ExternalConversationAdapterReference
 	Mode             capability.ConversationEndpointMode
 	InstallationID   string
 	ApplicationID    string
 	Address          string
 	InstallationWide bool
-	Handler          ExternalConversationHandler
-	Policy           ExternalConversationPolicy
+	Handler          models.ExternalConversationHandler
+	Policy           models.ExternalConversationPolicy
 	Configuration    map[string]interface{}
-	Status           ExternalConversationEndpointStatus
+	Status           models.ExternalConversationEndpointStatus
 	// CreatedBy is the person creating the endpoint.
 	CreatedBy string
 }
 
 type UpdateExternalConversationEndpointRequest struct {
 	ExpectedRevision int64
-	Adapter          *ExternalConversationAdapterReference
+	Adapter          *models.ExternalConversationAdapterReference
 	Name             *string
 	Address          *string
 	InstallationWide *bool
-	Handler          *ExternalConversationHandler
-	Policy           *ExternalConversationPolicy
+	Handler          *models.ExternalConversationHandler
+	Policy           *models.ExternalConversationPolicy
 	Configuration    map[string]interface{}
 	ReplaceConfig    bool
-	Status           *ExternalConversationEndpointStatus
+	Status           *models.ExternalConversationEndpointStatus
 }
 
 type ExternalConversationAdapterResolver interface {
@@ -55,26 +55,26 @@ type ExternalConversationAdapterResolver interface {
 }
 
 type ExternalConversationEndpointService struct {
-	store    ExternalConversationEndpointStore
+	store    models.ExternalConversationEndpointStore
 	resolver ExternalConversationAdapterResolver
 	now      func() time.Time
 	newID    func() string
 }
 
-func NewExternalConversationEndpointService(store ExternalConversationEndpointStore, resolver ExternalConversationAdapterResolver, opts ...models.ServiceOption) *ExternalConversationEndpointService {
+func NewExternalConversationEndpointService(store models.ExternalConversationEndpointStore, resolver ExternalConversationAdapterResolver, opts ...models.ServiceOption) *ExternalConversationEndpointService {
 	return &ExternalConversationEndpointService{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
-func (s *ExternalConversationEndpointService) Create(ctx context.Context, req CreateExternalConversationEndpointRequest) (*ExternalConversationEndpoint, error) {
+func (s *ExternalConversationEndpointService) Create(ctx context.Context, req CreateExternalConversationEndpointRequest) (*models.ExternalConversationEndpoint, error) {
 	if s == nil || s.store == nil || s.resolver == nil {
 		return nil, errors.New("external conversation endpoint service is not configured")
 	}
 	status := req.Status
 	if status == "" {
-		status = ExternalConversationEndpointPaused
+		status = models.ExternalConversationEndpointPaused
 	}
 	now := s.now().UTC()
-	endpoint := &ExternalConversationEndpoint{
+	endpoint := &models.ExternalConversationEndpoint{
 		ID: strings.TrimSpace(req.ID), Scope: req.Scope, Owner: req.Owner, DeploymentID: strings.TrimSpace(req.DeploymentID),
 		Name: strings.TrimSpace(req.Name), Adapter: normalizeExternalConversationAdapterReference(req.Adapter),
 		Mode: req.Mode, InstallationID: strings.TrimSpace(req.InstallationID), ApplicationID: strings.TrimSpace(req.ApplicationID),
@@ -100,10 +100,10 @@ func (s *ExternalConversationEndpointService) Create(ctx context.Context, req Cr
 	if err := s.store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
 		return nil, err
 	}
-	return cloneExternalConversationEndpoint(endpoint), nil
+	return models.CloneExternalConversationEndpoint(endpoint), nil
 }
 
-func (s *ExternalConversationEndpointService) Get(ctx context.Context, scope Scope, id string) (*ExternalConversationEndpoint, error) {
+func (s *ExternalConversationEndpointService) Get(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationEndpoint, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("external conversation endpoint service is not configured")
 	}
@@ -112,26 +112,26 @@ func (s *ExternalConversationEndpointService) Get(ctx context.Context, scope Sco
 		return nil, err
 	}
 	if endpoint == nil {
-		return nil, ErrExternalConversationEndpointNotFound
+		return nil, models.ErrExternalConversationEndpointNotFound
 	}
 	return endpoint, nil
 }
 
-func (s *ExternalConversationEndpointService) List(ctx context.Context, filter ExternalConversationEndpointFilter) ([]*ExternalConversationEndpoint, error) {
+func (s *ExternalConversationEndpointService) List(ctx context.Context, filter models.ExternalConversationEndpointFilter) ([]*models.ExternalConversationEndpoint, error) {
 	if s == nil || s.store == nil || filter.Scope.Validate() != nil || filter.Offset < 0 {
-		return nil, ErrInvalidExternalConversation
+		return nil, models.ErrInvalidExternalConversation
 	}
 	if filter.Owner != nil && filter.Owner.Validate() != nil {
-		return nil, ErrInvalidExternalConversation
+		return nil, models.ErrInvalidExternalConversation
 	}
 	for _, status := range filter.Statuses {
 		if !validExternalConversationEndpointStatus(status) {
-			return nil, ErrInvalidExternalConversation
+			return nil, models.ErrInvalidExternalConversation
 		}
 	}
 	filter.Provider = strings.TrimSpace(filter.Provider)
-	if filter.Provider != "" && !validOpaqueIdentifier(filter.Provider, 128) {
-		return nil, ErrInvalidExternalConversation
+	if filter.Provider != "" && !models.IsValidOpaqueIdentifier(filter.Provider, 128) {
+		return nil, models.ErrInvalidExternalConversation
 	}
 	if filter.Limit <= 0 || filter.Limit > 500 {
 		filter.Limit = 50
@@ -139,7 +139,7 @@ func (s *ExternalConversationEndpointService) List(ctx context.Context, filter E
 	return s.store.ListExternalConversationEndpoints(ctx, filter)
 }
 
-func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope Scope, id string, req UpdateExternalConversationEndpointRequest) (*ExternalConversationEndpoint, error) {
+func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope models.Scope, id string, req UpdateExternalConversationEndpointRequest) (*models.ExternalConversationEndpoint, error) {
 	next, err := s.PrepareUpdate(ctx, scope, id, req)
 	if err != nil {
 		return nil, err
@@ -147,24 +147,24 @@ func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope 
 	if err := s.store.UpdateExternalConversationEndpoint(ctx, next, req.ExpectedRevision); err != nil {
 		return nil, err
 	}
-	return cloneExternalConversationEndpoint(next), nil
+	return models.CloneExternalConversationEndpoint(next), nil
 }
 
 // PrepareUpdate applies the same lifecycle, adapter and policy validation as
 // Update without persisting anything. Callers must still compare the reviewed
 // revision when committing the returned state.
-func (s *ExternalConversationEndpointService) PrepareUpdate(ctx context.Context, scope Scope, id string, req UpdateExternalConversationEndpointRequest) (*ExternalConversationEndpoint, error) {
+func (s *ExternalConversationEndpointService) PrepareUpdate(ctx context.Context, scope models.Scope, id string, req UpdateExternalConversationEndpointRequest) (*models.ExternalConversationEndpoint, error) {
 	if s == nil || s.store == nil || s.resolver == nil || req.ExpectedRevision < 1 {
-		return nil, ErrInvalidExternalConversation
+		return nil, models.ErrInvalidExternalConversation
 	}
 	current, err := s.Get(ctx, scope, id)
 	if err != nil {
 		return nil, err
 	}
 	if current.Revision != req.ExpectedRevision {
-		return nil, ErrExternalConversationConflict
+		return nil, models.ErrExternalConversationConflict
 	}
-	next := cloneExternalConversationEndpoint(current)
+	next := models.CloneExternalConversationEndpoint(current)
 	if req.Adapter != nil {
 		next.Adapter = normalizeExternalConversationAdapterReference(*req.Adapter)
 	}
@@ -187,13 +187,13 @@ func (s *ExternalConversationEndpointService) PrepareUpdate(ctx context.Context,
 		next.Configuration = maps.Clone(req.Configuration)
 	}
 	if req.Status != nil {
-		if current.Status == ExternalConversationEndpointRetired && *req.Status != ExternalConversationEndpointRetired {
-			return nil, fmt.Errorf("%w: retired endpoints cannot be reactivated; configure an active or paused endpoint", ErrInvalidExternalConversation)
+		if current.Status == models.ExternalConversationEndpointRetired && *req.Status != models.ExternalConversationEndpointRetired {
+			return nil, fmt.Errorf("%w: retired endpoints cannot be reactivated; configure an active or paused endpoint", models.ErrInvalidExternalConversation)
 		}
 		next.Status = *req.Status
 	}
 	now := s.now().UTC()
-	if next.Status == ExternalConversationEndpointRetired && current.Status != ExternalConversationEndpointRetired {
+	if next.Status == models.ExternalConversationEndpointRetired && current.Status != models.ExternalConversationEndpointRetired {
 		next.RetiredAt = &now
 	}
 	next.Revision++
@@ -214,37 +214,37 @@ func (s *ExternalConversationEndpointService) PrepareUpdate(ctx context.Context,
 	if err := next.Validate(); err != nil {
 		return nil, err
 	}
-	return cloneExternalConversationEndpoint(next), nil
+	return models.CloneExternalConversationEndpoint(next), nil
 }
 
 func externalConversationEndpointSafetyShutdown(
-	current, next *ExternalConversationEndpoint,
+	current, next *models.ExternalConversationEndpoint,
 	req UpdateExternalConversationEndpointRequest,
 ) bool {
 	if current == nil || next == nil || req.Status == nil ||
 		req.Adapter != nil || req.Name != nil || req.Address != nil || req.InstallationWide != nil || req.Handler != nil || req.Policy != nil || req.ReplaceConfig {
 		return false
 	}
-	return next.Status == ExternalConversationEndpointPaused || next.Status == ExternalConversationEndpointRetired
+	return next.Status == models.ExternalConversationEndpointPaused || next.Status == models.ExternalConversationEndpointRetired
 }
 
-func (s *ExternalConversationEndpointService) resolveAdapter(ctx context.Context, endpoint *ExternalConversationEndpoint) (*skill.BoundConversationAdapter, error) {
+func (s *ExternalConversationEndpointService) resolveAdapter(ctx context.Context, endpoint *models.ExternalConversationEndpoint) (*skill.BoundConversationAdapter, error) {
 	ref := endpoint.Adapter
 	resolved, err := s.resolver.ResolveConversationAdapterBinding(
 		ctx, skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID,
 		ref.BindingID, ref.AdapterID,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("%w: resolve exact Skill adapter: %v", ErrInvalidExternalConversation, err)
+		return nil, fmt.Errorf("%w: resolve exact Skill adapter: %v", models.ErrInvalidExternalConversation, err)
 	}
 	if (endpoint.Provider != "" && resolved.Adapter.Provider != endpoint.Provider) ||
 		!slices.Contains(resolved.Adapter.EndpointModes, endpoint.Mode) {
-		return nil, fmt.Errorf("%w: exact Skill adapter does not match endpoint", ErrInvalidExternalConversation)
+		return nil, fmt.Errorf("%w: exact Skill adapter does not match endpoint", models.ErrInvalidExternalConversation)
 	}
 	return resolved, nil
 }
 
-func normalizeExternalConversationAdapterReference(value ExternalConversationAdapterReference) ExternalConversationAdapterReference {
+func normalizeExternalConversationAdapterReference(value models.ExternalConversationAdapterReference) models.ExternalConversationAdapterReference {
 	value.SkillID = strings.TrimSpace(value.SkillID)
 	value.SkillVersion = strings.TrimSpace(value.SkillVersion)
 	value.SourceIdentity = strings.TrimSpace(value.SourceIdentity)
@@ -253,16 +253,16 @@ func normalizeExternalConversationAdapterReference(value ExternalConversationAda
 	return value
 }
 
-func normalizeExternalConversationHandler(value ExternalConversationHandler) ExternalConversationHandler {
+func normalizeExternalConversationHandler(value models.ExternalConversationHandler) models.ExternalConversationHandler {
 	value.ID = strings.TrimSpace(value.ID)
 	return value
 }
 
-func validExternalConversationEndpointStatus(value ExternalConversationEndpointStatus) bool {
-	return value == ExternalConversationEndpointActive || value == ExternalConversationEndpointPaused || value == ExternalConversationEndpointRetired
+func validExternalConversationEndpointStatus(value models.ExternalConversationEndpointStatus) bool {
+	return value == models.ExternalConversationEndpointActive || value == models.ExternalConversationEndpointPaused || value == models.ExternalConversationEndpointRetired
 }
 
-func cloneExternalConversationDeliveryCorrelation(value *ExternalConversationDeliveryCorrelation) *ExternalConversationDeliveryCorrelation {
+func cloneExternalConversationDeliveryCorrelation(value *models.ExternalConversationDeliveryCorrelation) *models.ExternalConversationDeliveryCorrelation {
 	if value == nil {
 		return nil
 	}
@@ -270,8 +270,8 @@ func cloneExternalConversationDeliveryCorrelation(value *ExternalConversationDel
 	return &copy
 }
 
-func sortedExternalConversationEndpointStatuses(values []ExternalConversationEndpointStatus) []ExternalConversationEndpointStatus {
-	result := append([]ExternalConversationEndpointStatus(nil), values...)
+func sortedExternalConversationEndpointStatuses(values []models.ExternalConversationEndpointStatus) []models.ExternalConversationEndpointStatus {
+	result := append([]models.ExternalConversationEndpointStatus(nil), values...)
 	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result
 }

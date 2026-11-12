@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -14,7 +15,7 @@ type countingFinalReplyStore struct {
 	pages int
 }
 
-func (s *countingFinalReplyStore) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
+func (s *countingFinalReplyStore) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
 	s.pages++
 	return s.Store.ListChannelMessages(ctx, filter)
 }
@@ -23,15 +24,15 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 	ctx := t.Context()
 	store := &countingFinalReplyStore{Store: newTestKernelStore(t)}
 	service := runtimeconversation.NewConversationService(store)
-	scope := Scope{Kind: "tenant", ID: "17"}
+	scope := models.Scope{Kind: "tenant", ID: "17"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "seal"}, Title: "Busy channel", IdempotencyKey: "busy-final-channel",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "seal"}, Title: "Busy channel", IdempotencyKey: "busy-final-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var trigger *ChannelMessage
+	var trigger *models.ChannelMessage
 	for i := 0; i < 151; i++ {
 		current, err := service.GetConversation(ctx, scope, conversation.ID)
 		if err != nil {
@@ -39,8 +40,8 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 		}
 		posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "participant"},
-			Intent: MessageIntentUpdate, Content: fmt.Sprintf("Message %d", i), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "participant"},
+			Intent: models.MessageIntentUpdate, Content: fmt.Sprintf("Message %d", i), Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			IdempotencyKey: fmt.Sprintf("busy-message-%d", i),
 		})
 		if err != nil {
@@ -51,18 +52,18 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 	current, _ := service.GetConversation(ctx, scope, conversation.ID)
 	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "seal"}, Intent: MessageIntentAnswer,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "seal"}, Intent: models.MessageIntentAnswer,
 		Content:  "The image request failed, so I stopped. Your original image is still available.",
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: trigger.ID,
-		References: []ConversationReference{{Kind: ConversationReferenceRun, ID: "failed-run"}}, IdempotencyKey: "busy-final-answer",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: trigger.ID,
+		References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: "failed-run"}}, IdempotencyKey: "busy-final-answer",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	worker := &ExternalConversationReplyWorker{store: store, conversations: service}
-	item := &ExternalConversationInboxItem{Scope: scope, ConversationID: conversation.ID, ChannelMessageID: trigger.ID}
-	run := &AgentRun{ID: "failed-run", Scope: scope, Status: AgentRunStatusFailed,
-		FailureExplanation: &RunFailureExplanation{Kind: "execution", Code: "execution_failed", Message: "Image generation failed", Explained: true},
+	item := &models.ExternalConversationInboxItem{Scope: scope, ConversationID: conversation.ID, ChannelMessageID: trigger.ID}
+	run := &models.AgentRun{ID: "failed-run", Scope: scope, Status: models.AgentRunStatusFailed,
+		FailureExplanation: &models.RunFailureExplanation{Kind: "execution", Code: "execution_failed", Message: "Image generation failed", Explained: true},
 		Output:             map[string]interface{}{"messageId": posted.Message.ID}}
 	// Posting the answer read the channel once; count only the lookup.
 	store.pages = 0
@@ -80,7 +81,7 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 	}
 	for _, mutation := range []string{"scope", "conversation", "trigger", "user", "historical", "run"} {
 		t.Run(mutation, func(t *testing.T) {
-			candidate := cloneChannelMessage(posted.Message)
+			candidate := models.CloneChannelMessage(posted.Message)
 			switch mutation {
 			case "scope":
 				candidate.Scope.ID = "18"
@@ -89,11 +90,11 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 			case "trigger":
 				candidate.ReplyToMessageID = "another-trigger"
 			case "user":
-				candidate.Sender.Type = ConversationParticipantUser
+				candidate.Sender.Type = models.ConversationParticipantUser
 			case "historical":
 				candidate.Historical = true
 			case "run":
-				candidate.References = []ConversationReference{{Kind: ConversationReferenceRun, ID: "other-run"}}
+				candidate.References = []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: "other-run"}}
 			}
 			if canonicalExternalRunReply(candidate, item, run) {
 				t.Fatal("unrelated or untrusted answer was accepted")
@@ -104,8 +105,8 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 
 func TestExternalReplyUsesExplainedSummary(t *testing.T) {
 	ctx := t.Context()
-	run := &AgentRun{Status: AgentRunStatusFailed,
-		FailureExplanation: &RunFailureExplanation{Kind: "execution", Code: "execution_failed", Message: "Image generation failed"},
+	run := &models.AgentRun{Status: models.AgentRunStatusFailed,
+		FailureExplanation: &models.RunFailureExplanation{Kind: "execution", Code: "execution_failed", Message: "Image generation failed"},
 		Output:             map[string]interface{}{"summary": "The image request failed, so I stopped."}}
 	if reply, ok := externalConversationRunReply(ctx, nil, nil, run); !ok || reply != runtimeconversation.TerminalFailureReply("execution_failed") {
 		t.Fatalf("unexplained failure reused model output: %q", reply)
@@ -122,7 +123,7 @@ func TestExternalReplyUsesExplainedSummary(t *testing.T) {
 	if reply, ok := externalConversationRunReply(ctx, nil, nil, run); !ok || reply == "model text" {
 		t.Fatal("unmarked failed attempt trusted model-authored output")
 	}
-	if _, ok := externalConversationRunReply(ctx, nil, nil, &AgentRun{Status: AgentRunStatusRunning}); ok {
+	if _, ok := externalConversationRunReply(ctx, nil, nil, &models.AgentRun{Status: models.AgentRunStatusRunning}); ok {
 		t.Fatal("a running Run has no reply")
 	}
 }

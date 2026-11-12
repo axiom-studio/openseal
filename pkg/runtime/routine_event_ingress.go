@@ -49,7 +49,7 @@ func routineConversationSourceRefOf(deploymentID, bindingID, adapterID, installa
 	if ok {
 		return ref
 	}
-	ref = RoutineConversationSourceRef(deploymentID, bindingID, adapterID, installationID)
+	ref = models.RoutineConversationSourceRef(deploymentID, bindingID, adapterID, installationID)
 	routineConversationSourceRefs.Lock()
 	if len(routineConversationSourceRefs.refs) >= routineConversationSourceCacheMax {
 		routineConversationSourceRefs.refs = make(map[routineConversationSourceKey]string, routineConversationSourceCacheMax)
@@ -61,12 +61,12 @@ func routineConversationSourceRefOf(deploymentID, bindingID, adapterID, installa
 
 // routineConversationKind maps a conversation provider to its event kind
 // without allocating.
-func routineConversationKind(provider string) (RoutineEventKind, bool) {
+func routineConversationKind(provider string) (models.RoutineEventKind, bool) {
 	switch {
 	case strings.EqualFold(provider, "slack"):
-		return RoutineEventSlackMessage, true
+		return models.RoutineEventSlackMessage, true
 	case strings.EqualFold(provider, "telegram"):
-		return RoutineEventTelegramMessage, true
+		return models.RoutineEventTelegramMessage, true
 	}
 	return "", false
 }
@@ -78,11 +78,11 @@ func routineConversationKind(provider string) (RoutineEventKind, bool) {
 func offerConversationRoutineEvent(
 	ctx context.Context,
 	offerer RoutineEventOfferer,
-	scope Scope,
+	scope models.Scope,
 	deploymentID string,
-	adapter ExternalConversationAdapterReference,
+	adapter models.ExternalConversationAdapterReference,
 	provider, installationID string,
-	event *NormalizedExternalConversationEvent,
+	event *models.NormalizedExternalConversationEvent,
 ) error {
 	if offerer == nil || event == nil || event.Type != capability.ConversationEventMessageReceived || event.Direct || installationID == "" {
 		return nil
@@ -124,10 +124,10 @@ type conversationRoutineAttachment struct {
 
 // conversationRoutineEvent maps a normalized conversation message to a
 // routine event (SPEC §3.2, §8.1).
-func conversationRoutineEvent(scope Scope, kind RoutineEventKind, sourceRef string, event *NormalizedExternalConversationEvent) *RoutineEvent {
+func conversationRoutineEvent(scope models.Scope, kind models.RoutineEventKind, sourceRef string, event *models.NormalizedExternalConversationEvent) *models.RoutineEvent {
 	senderName := routineEventFieldValue(event.ParticipantDisplayName)
 	username := ""
-	if kind == RoutineEventTelegramMessage {
+	if kind == models.RoutineEventTelegramMessage {
 		username = routineEventFieldValue(conversationAttributeString(event.Attributes, "participantUsername"))
 	}
 	if senderName == "" {
@@ -137,7 +137,7 @@ func conversationRoutineEvent(scope Scope, kind RoutineEventKind, sourceRef stri
 	text := strings.ToValidUTF8(event.Text, "")
 	fields := map[string][]string{
 		"sender": {sender},
-		"text":   {models.TruncateUTF8(text, RoutineEventTextFieldMaxBytes)},
+		"text":   {models.TruncateUTF8(text, models.RoutineEventTextFieldMaxBytes)},
 		"bot":    {strconv.FormatBool(event.ParticipantIsBot)},
 	}
 	if senderName != "" {
@@ -145,11 +145,11 @@ func conversationRoutineEvent(scope Scope, kind RoutineEventKind, sourceRef stri
 	}
 	conversation := routineEventFieldValue(event.ExternalConversationID)
 	switch kind {
-	case RoutineEventSlackMessage:
+	case models.RoutineEventSlackMessage:
 		fields["channel"] = []string{conversation}
 		thread := strings.TrimSpace(event.ExternalThreadID)
 		fields["inThread"] = []string{strconv.FormatBool(thread != "" && thread != strings.TrimSpace(event.ExternalMessageID))}
-	case RoutineEventTelegramMessage:
+	case models.RoutineEventTelegramMessage:
 		fields["chat"] = []string{conversation}
 		if title := routineEventFieldValue(conversationAttributeString(event.Attributes, "chatTitle")); title != "" {
 			fields["chatTitle"] = []string{title}
@@ -173,9 +173,9 @@ func conversationRoutineEvent(scope Scope, kind RoutineEventKind, sourceRef stri
 	if summary == "" && len(event.Attachments) > 0 {
 		summary = "sent an attachment"
 	}
-	return &RoutineEvent{
+	return &models.RoutineEvent{
 		Scope: scope, ID: routineEventIDOf(event.ID), Kind: kind, SourceRef: sourceRef, OccurredAt: event.OccurredAt.UTC(),
-		Subject: models.TruncateUTF8(conversation, RoutineEventSubjectMaxBytes),
+		Subject: models.TruncateUTF8(conversation, models.RoutineEventSubjectMaxBytes),
 		Summary: routineEventSummary(who + ": " + summary), Fields: fields, Payload: routineEventPayload(payload),
 	}
 }
@@ -200,15 +200,15 @@ var _ callback.CallbackEventConsumer = (*RoutineCallbackConsumer)(nil)
 // ConsumeCallbackEvent offers one GitHub event. Events of other providers
 // are not routine events and are skipped. An offer error fails the receipt,
 // so the callback worker retries it; dedupe absorbs the retry.
-func (c *RoutineCallbackConsumer) ConsumeCallbackEvent(ctx context.Context, registration *CallbackRegistration, _ CallbackSubscription, event EventEnvelope) error {
+func (c *RoutineCallbackConsumer) ConsumeCallbackEvent(ctx context.Context, registration *models.CallbackRegistration, _ models.CallbackSubscription, event models.EventEnvelope) error {
 	if c == nil || c.offerer == nil {
 		return errors.New("routine events are not available")
 	}
 	if registration == nil || !strings.EqualFold(registration.Provider, "github") {
 		return nil
 	}
-	sourceRef := RoutineCallbackSourceRef(registration.ID)
-	if !c.offerer.Listening(registration.Scope, RoutineEventGitHub, sourceRef) {
+	sourceRef := models.RoutineCallbackSourceRef(registration.ID)
+	if !c.offerer.Listening(registration.Scope, models.RoutineEventGitHub, sourceRef) {
 		return nil
 	}
 	if _, err := c.offerer.OfferRoutineEvent(ctx, gitHubRoutineEvent(registration.Scope, sourceRef, event)); err != nil {
@@ -219,7 +219,7 @@ func (c *RoutineCallbackConsumer) ConsumeCallbackEvent(ctx context.Context, regi
 
 // gitHubRoutineEvent maps a GitHub callback envelope to a routine event. The
 // payload shape is the GitHub skill's callback adapter output.
-func gitHubRoutineEvent(scope Scope, sourceRef string, event EventEnvelope) *RoutineEvent {
+func gitHubRoutineEvent(scope models.Scope, sourceRef string, event models.EventEnvelope) *models.RoutineEvent {
 	eventName := strings.TrimPrefix(strings.TrimSpace(event.Type), routineGitHubEventPrefix)
 	kind, _, _ := strings.Cut(eventName, ".")
 	payload := event.Payload
@@ -266,9 +266,9 @@ func gitHubRoutineEvent(scope Scope, sourceRef string, event EventEnvelope) *Rou
 	if len(payload) > 0 {
 		encoded = routineEventPayload(payload)
 	}
-	return &RoutineEvent{
-		Scope: scope, ID: routineEventIDOf(event.ID), Kind: RoutineEventGitHub, SourceRef: sourceRef, OccurredAt: event.OccurredAt.UTC(),
-		Subject: models.TruncateUTF8(strings.ToValidUTF8(event.Subject, ""), RoutineEventSubjectMaxBytes),
+	return &models.RoutineEvent{
+		Scope: scope, ID: routineEventIDOf(event.ID), Kind: models.RoutineEventGitHub, SourceRef: sourceRef, OccurredAt: event.OccurredAt.UTC(),
+		Subject: models.TruncateUTF8(strings.ToValidUTF8(event.Subject, ""), models.RoutineEventSubjectMaxBytes),
 		Summary: routineEventSummary(gitHubRoutineSummary(kind, action, repository, number, title, conclusion)),
 		Fields:  fields, Payload: encoded,
 	}
@@ -363,7 +363,7 @@ func routineCallbackLabelNames(value interface{}) []string {
 		if name = routineEventFieldValue(name); name != "" {
 			names = append(names, name)
 		}
-		if len(names) == RoutineEventMaxFieldValues {
+		if len(names) == models.RoutineEventMaxFieldValues {
 			break
 		}
 	}
@@ -373,7 +373,7 @@ func routineCallbackLabelNames(value interface{}) []string {
 // routineEventIDOf keeps a producer's event ID when it is a valid routine
 // event ID and otherwise uses a stable digest of it.
 func routineEventIDOf(id string) string {
-	if ValidRoutineEventID(id) {
+	if models.ValidRoutineEventID(id) {
 		return id
 	}
 	sum := sha256.Sum256([]byte(id))
@@ -383,7 +383,7 @@ func routineEventIDOf(id string) string {
 // routineEventFieldValue is a filterable value: valid UTF-8, trimmed, at most
 // the field value limit.
 func routineEventFieldValue(value string) string {
-	return models.TruncateUTF8(strings.TrimSpace(strings.ToValidUTF8(value, "")), RoutineEventFieldValueMaxBytes)
+	return models.TruncateUTF8(strings.TrimSpace(strings.ToValidUTF8(value, "")), models.RoutineEventFieldValueMaxBytes)
 }
 
 func routineEventOneLine(value string) string {
@@ -392,7 +392,7 @@ func routineEventOneLine(value string) string {
 
 // routineEventSummary is one line of at most 280 bytes.
 func routineEventSummary(value string) string {
-	value = models.TruncateUTF8(routineEventOneLine(value), RoutineEventSummaryMaxBytes)
+	value = models.TruncateUTF8(routineEventOneLine(value), models.RoutineEventSummaryMaxBytes)
 	if !utf8.ValidString(value) || strings.TrimSpace(value) == "" {
 		return "New event"
 	}
@@ -403,7 +403,7 @@ func routineEventSummary(value string) string {
 // fit the payload limit; the event's fields still carry its facts.
 func routineEventPayload(value interface{}) json.RawMessage {
 	data, err := json.Marshal(value)
-	if err != nil || len(data) > RoutineEventPayloadMaxBytes || len(data) == 0 || data[0] != '{' {
+	if err != nil || len(data) > models.RoutineEventPayloadMaxBytes || len(data) == 0 || data[0] != '{' {
 		return nil
 	}
 	return data
@@ -412,10 +412,10 @@ func routineEventPayload(value interface{}) json.RawMessage {
 // RoutineEventOfferer is the matcher as seen by actions and ingress.
 type RoutineEventOfferer interface {
 	// Listening is an index lookup only: no I/O and no allocation. Producers call it before they build an event.
-	Listening(scope Scope, kind RoutineEventKind, sourceRef string) bool
-	OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (RoutineEventOffer, error)
+	Listening(scope models.Scope, kind models.RoutineEventKind, sourceRef string) bool
+	OfferRoutineEvent(ctx context.Context, event *models.RoutineEvent) (RoutineEventOffer, error)
 	// OfferRoutineTestEvent returns the stored test event's ID.
-	OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error)
+	OfferRoutineTestEvent(ctx context.Context, scope models.Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error)
 }
 
 // RoutineEventOffer counts what one offer did.

@@ -3,6 +3,7 @@ package runtime
 import (
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -12,8 +13,8 @@ import (
 func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: "conversation-runbook-start"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}
+	scope := models.Scope{Kind: "tenant", ID: "conversation-runbook-start"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-42"}
 	service := conversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{
@@ -22,12 +23,12 @@ func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trigger := conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Run it now.", "run-now")
-	source := &AgentRun{
-		ID: "conversation-run", Kind: RunKindConversation, Scope: scope, Owner: owner, AssignedAgentID: owner.ID,
-		Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID},
+	trigger := conversationruntest.PostMessage(t, service, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Run it now.", "run-now")
+	source := &models.AgentRun{
+		ID: "conversation-run", Kind: models.RunKindConversation, Scope: scope, Owner: owner, AssignedAgentID: owner.ID,
+		Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID, models.ConversationRunTriggerIDContextKey: trigger.ID},
 	}
-	child := &AgentRun{ID: "operation-run", Kind: RunKindAgentWork, Scope: scope, Owner: owner, AssignedAgentID: owner.ID}
+	child := &models.AgentRun{ID: "operation-run", Kind: models.RunKindAgentWork, Scope: scope, Owner: owner, AssignedAgentID: owner.ID}
 	summary := "Run the on-demand engagement operation"
 	if err := conversationrun.ProjectConversationRunbookStart(ctx, store, source, summary, child); err != nil {
 		t.Fatal(err)
@@ -35,13 +36,13 @@ func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 	if err := conversationrun.ProjectConversationRunbookStart(ctx, store, source, summary, child); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	messages, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 2 || messages[1].Intent != MessageIntentUpdate || messages[1].ReplyToMessageID != trigger.ID ||
+	if len(messages) != 2 || messages[1].Intent != models.MessageIntentUpdate || messages[1].ReplyToMessageID != trigger.ID ||
 		messages[1].Content != "Started: Run the on-demand engagement operation" || len(messages[1].References) != 1 ||
-		messages[1].References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: child.ID}) {
+		messages[1].References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRun, ID: child.ID}) {
 		t.Fatalf("conversation Runbook start projection = %#v", messages)
 	}
 }
@@ -52,13 +53,13 @@ func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 func TestRoutineOccurrenceSilentPostsNothing(t *testing.T) {
 	f := newRoutineReportFixture(t, "", true)
 	run := f.occurrence("quiet-occurrence", true)
-	run.Context[RoutineEventBatchContextKey] = "batch-1"
-	run.Context[RoutineEventHeaderContextKey] = "New email from Ana Ruiz: Invoice #4411"
+	run.Context[models.RoutineEventBatchContextKey] = "batch-1"
+	run.Context[models.RoutineEventHeaderContextKey] = "New email from Ana Ruiz: Invoice #4411"
 	run.Output = map[string]interface{}{agentrun.FinalOutputSilentKey: true}
 	if err := f.worker.project(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := conversation.NewConversationService(f.store).ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: f.conversation.ID})
+	messages, err := conversation.NewConversationService(f.store).ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: run.Scope, ConversationID: f.conversation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +71,7 @@ func TestRoutineOccurrenceSilentPostsNothing(t *testing.T) {
 	}
 
 	failed := f.occurrence("failed-occurrence", true)
-	failed.Status = AgentRunStatusCanceled
+	failed.Status = models.AgentRunStatusCanceled
 	failed.Output = map[string]interface{}{agentrun.FinalOutputSilentKey: true}
 	if err := f.worker.project(t.Context(), failed); err != nil {
 		t.Fatal(err)

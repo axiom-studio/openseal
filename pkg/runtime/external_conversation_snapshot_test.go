@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -31,7 +33,7 @@ func (h *snapshotDeliveryHost) DeliverExternalConversation(_ context.Context, re
 	return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: messageID}, nil
 }
 
-func upgradeSnapshotEndpoint(t *testing.T, store ExternalConversationEndpointStore, catalog *skill.Catalog, endpoint *ExternalConversationEndpoint) *ExternalConversationEndpoint {
+func upgradeSnapshotEndpoint(t *testing.T, store models.ExternalConversationEndpointStore, catalog *skill.Catalog, endpoint *models.ExternalConversationEndpoint) *models.ExternalConversationEndpoint {
 	t.Helper()
 	ctx := t.Context()
 	adapter, err := catalog.ResolveConversationAdapterBinding(ctx, skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID)
@@ -49,7 +51,7 @@ func upgradeSnapshotEndpoint(t *testing.T, store ExternalConversationEndpointSto
 	if err := catalog.Bind(ctx, &binding); err != nil {
 		t.Fatal(err)
 	}
-	upgraded := cloneExternalConversationEndpoint(endpoint)
+	upgraded := models.CloneExternalConversationEndpoint(endpoint)
 	upgraded.Revision++
 	upgraded.UpdatedAt = upgraded.UpdatedAt.Add(time.Second)
 	upgraded.Adapter.SkillVersion = definition.Version
@@ -63,7 +65,7 @@ func upgradeSnapshotEndpoint(t *testing.T, store ExternalConversationEndpointSto
 	return upgraded
 }
 
-func postSnapshotCanonicalReply(t *testing.T, store ConversationStore, endpoint *ExternalConversationEndpoint, item *ExternalConversationInboxItem) {
+func postSnapshotCanonicalReply(t *testing.T, store models.ConversationStore, endpoint *models.ExternalConversationEndpoint, item *models.ExternalConversationInboxItem) {
 	t.Helper()
 	conversations := runtimeconversation.NewConversationService(store)
 	current, err := conversations.GetConversation(t.Context(), item.Scope, item.ConversationID)
@@ -72,10 +74,10 @@ func postSnapshotCanonicalReply(t *testing.T, store ConversationStore, endpoint 
 	}
 	_, err = conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
-		Intent: MessageIntentAnswer, Content: "Canonical answer", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.Owner.ID},
+		Intent: models.MessageIntentAnswer, Content: "Canonical answer", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		ReplyToMessageID: item.ChannelMessageID, ResolvesMessageID: item.ChannelMessageID,
-		References: []ConversationReference{{Kind: ConversationReferenceRun, ID: item.RunID}}, IdempotencyKey: "snapshot-canonical-reply",
+		References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: item.RunID}}, IdempotencyKey: "snapshot-canonical-reply",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +86,7 @@ func postSnapshotCanonicalReply(t *testing.T, store ConversationStore, endpoint 
 
 func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing.T) {
 	ctx := t.Context()
-	_, memoryCatalog, original, item := externalConversationFailureReplyFixture(t, "slack", AgentRunStatusCompleted)
+	_, memoryCatalog, original, item := externalConversationFailureReplyFixture(t, "slack", models.AgentRunStatusCompleted)
 	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "snapshot-upgrade.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +115,7 @@ func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing
 	conversations := runtimeconversation.NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		ID: item.ConversationID, Scope: item.Scope, Owner: endpoint.Owner, Title: "Saved provider thread",
-		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
+		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "sqlite-snapshot-conversation",
 	})
 	if err != nil {
@@ -121,31 +123,31 @@ func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing
 	}
 	_, err = conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		ID: item.ChannelMessageID, Scope: item.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"}, Intent: MessageIntentQuestion,
-		Content: item.Event.Text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "sender"}, Intent: models.MessageIntentQuestion,
+		Content: item.Event.Text, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, RequiresResponse: true,
 		IdempotencyKey: "sqlite-snapshot-trigger",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: item.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
-		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: RunSourceEvent,
-		IdempotencyKey: "sqlite-snapshot-run", Actor: ActivityActor{Type: "service", ID: "test"}, Visibility: ActivityVisibilityPrivate,
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: item.Scope, Kind: models.RunKindConversation, Owner: endpoint.Owner,
+		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: models.RunSourceEvent,
+		IdempotencyKey: "sqlite-snapshot-run", Actor: models.ActivityActor{Type: "service", ID: "test"}, Visibility: models.ActivityVisibilityPrivate,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	item.RunID = created.Run.ID
-	activity := NewRunActivityService(store, store)
-	running, _, err := activity.TransitionRun(ctx, item.Scope, created.Run.ID, RunTransitionRequest{
-		ExpectedRevision: created.Run.Revision, Status: AgentRunStatusRunning, Summary: "Started", Actor: ActivityActor{Type: "worker", ID: "test"},
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, item.Scope, created.Run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: created.Run.Revision, Status: models.AgentRunStatusRunning, Summary: "Started", Actor: models.ActivityActor{Type: "worker", ID: "test"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = activity.TransitionRun(ctx, item.Scope, running.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted, Summary: "Finished", Actor: ActivityActor{Type: "worker", ID: "test"},
+	_, _, err = activity.TransitionRun(ctx, item.Scope, running.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted, Summary: "Finished", Actor: models.ActivityActor{Type: "worker", ID: "test"},
 		Output: map[string]interface{}{"reply": "Canonical answer"},
 	})
 	if err != nil {
@@ -172,7 +174,7 @@ func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing
 		t.Fatalf("sqlite queued reply was stranded or redirected: %#v", host.requests)
 	}
 	durable, err := store.GetExternalConversationDelivery(ctx, item.Scope, saved.ID)
-	if err != nil || durable.Status != ExternalConversationDeliveryDelivered || durable.EndpointRevision != saved.EndpointRevision || durable.Adapter != saved.Adapter {
+	if err != nil || durable.Status != models.ExternalConversationDeliveryDelivered || durable.EndpointRevision != saved.EndpointRevision || durable.Adapter != saved.Adapter {
 		t.Fatalf("sqlite audit snapshot = %#v, %v", durable, err)
 	}
 	if _, err := projector.ProcessScope(ctx, item.Scope, 10); err != nil {
@@ -185,7 +187,7 @@ func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing
 
 func TestExternalConversationSnapshotProjectsUnsentReplyAfterSkillUpgrade(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", AgentRunStatusCompleted)
+	store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", models.AgentRunStatusCompleted)
 	postSnapshotCanonicalReply(t, store, endpoint, item)
 	upgraded := upgradeSnapshotEndpoint(t, store, catalog, endpoint)
 	worker, err := NewExternalConversationReplyWorker(store, catalog)
@@ -204,7 +206,7 @@ func TestExternalConversationSnapshotProjectsUnsentReplyAfterSkillUpgrade(t *tes
 	if _, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil {
 		t.Fatal(err)
 	}
-	all, _ := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, ConversationID: item.ConversationID, Limit: 10})
+	all, _ := store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{Scope: endpoint.Scope, ConversationID: item.ConversationID, Limit: 10})
 	if len(all) != 2 {
 		t.Fatalf("projection replay duplicated outbox effects: %d", len(all))
 	}
@@ -212,7 +214,7 @@ func TestExternalConversationSnapshotProjectsUnsentReplyAfterSkillUpgrade(t *tes
 
 func TestExternalConversationSnapshotQueuedOutboxUsesCurrentAuthorityAndOriginalOrigin(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", AgentRunStatusCompleted)
+	store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", models.AgentRunStatusCompleted)
 	postSnapshotCanonicalReply(t, store, endpoint, item)
 	projector, _ := NewExternalConversationReplyWorker(store, catalog)
 	projected, err := projector.ProcessScope(ctx, endpoint.Scope, 10)
@@ -246,7 +248,7 @@ func TestExternalConversationSnapshotQueuedOutboxUsesCurrentAuthorityAndOriginal
 		}
 	}
 	durable, err := store.GetExternalConversationDelivery(ctx, endpoint.Scope, original.ID)
-	if err != nil || durable.Status != ExternalConversationDeliveryDelivered || durable.Adapter != original.Adapter || durable.EndpointRevision != original.EndpointRevision {
+	if err != nil || durable.Status != models.ExternalConversationDeliveryDelivered || durable.Adapter != original.Adapter || durable.EndpointRevision != original.EndpointRevision {
 		t.Fatalf("audit snapshot mutated: %#v, %v", durable, err)
 	}
 	if _, err := projector.ProcessScope(ctx, endpoint.Scope, 10); err != nil {
@@ -262,10 +264,10 @@ func TestExternalConversationSnapshotRejectsRedirectAndNewAuthority(t *testing.T
 		for _, scenario := range []string{"address", "binding", "source", "skill", "provider", "future-endpoint", "future-binding", "deployment"} {
 			t.Run(scenario+map[bool]string{false: "-projection", true: "-outbox"}[queued], func(t *testing.T) {
 				ctx := t.Context()
-				store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", AgentRunStatusCompleted)
+				store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", models.AgentRunStatusCompleted)
 				postSnapshotCanonicalReply(t, store, endpoint, item)
 				projector, _ := NewExternalConversationReplyWorker(store, catalog)
-				var delivery *ExternalConversationDelivery
+				var delivery *models.ExternalConversationDelivery
 				if queued {
 					projected, err := projector.ProcessScope(ctx, endpoint.Scope, 10)
 					if err != nil {
@@ -274,7 +276,7 @@ func TestExternalConversationSnapshotRejectsRedirectAndNewAuthority(t *testing.T
 					delivery = projected[0]
 				}
 				upgraded := upgradeSnapshotEndpoint(t, store, catalog, endpoint)
-				changed := cloneExternalConversationEndpoint(upgraded)
+				changed := models.CloneExternalConversationEndpoint(upgraded)
 				switch scenario {
 				case "address":
 					changed.Address = "different-private-room"
@@ -313,11 +315,11 @@ func TestExternalConversationSnapshotRejectsRedirectAndNewAuthority(t *testing.T
 				}
 				if queued {
 					worker, _ := NewExternalConversationDeliveryWorker(store, catalog, &snapshotDeliveryHost{}, ExternalConversationDeliveryWorkerConfig{WorkerID: "negative-worker"})
-					if _, _, err := worker.resolve(ctx, delivery); !errors.Is(err, ErrExternalConversationConflict) {
+					if _, _, err := worker.resolve(ctx, delivery); !errors.Is(err, models.ErrExternalConversationConflict) {
 						t.Fatalf("changed authority accepted: %v", err)
 					}
 				} else {
-					if _, _, err := projector.project(ctx, item); !errors.Is(err, ErrExternalConversationConflict) {
+					if _, _, err := projector.project(ctx, item); !errors.Is(err, models.ErrExternalConversationConflict) {
 						t.Fatalf("changed authority accepted: %v", err)
 					}
 				}

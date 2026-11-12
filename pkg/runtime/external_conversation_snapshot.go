@@ -1,17 +1,18 @@
 package runtime
 
 import (
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // An immutable transport intent follows compatible revisions of its stable
 // connection. A changed connection, source, or destination is new authority.
-func externalConversationSnapshotMatchesEndpoint(endpoint *ExternalConversationEndpoint, scope Scope, endpointID string,
-	revision int64, captured ExternalConversationAdapterReference, origin string,
+func externalConversationSnapshotMatchesEndpoint(endpoint *models.ExternalConversationEndpoint, scope models.Scope, endpointID string,
+	revision int64, captured models.ExternalConversationAdapterReference, origin string,
 ) bool {
 	if endpoint == nil || endpoint.Scope != scope || endpoint.ID != endpointID ||
-		endpoint.Status != ExternalConversationEndpointActive || revision < 1 || endpoint.Revision < revision ||
-		captured.BindingRevision < 1 || !externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, captured) ||
+		endpoint.Status != models.ExternalConversationEndpointActive || revision < 1 || endpoint.Revision < revision ||
+		captured.BindingRevision < 1 || !models.ExternalConversationAdapterBelongsToEndpoint(endpoint.Adapter, captured) ||
 		endpoint.Adapter.SkillID != captured.SkillID || endpoint.Adapter.SourceIdentity != captured.SourceIdentity {
 		return false
 	}
@@ -20,7 +21,7 @@ func externalConversationSnapshotMatchesEndpoint(endpoint *ExternalConversationE
 	return endpoint.Revision == revision || endpoint.Address == "" || endpoint.Address == origin
 }
 
-func externalConversationSnapshotMatchesBinding(endpoint *ExternalConversationEndpoint, captured ExternalConversationAdapterReference,
+func externalConversationSnapshotMatchesBinding(endpoint *models.ExternalConversationEndpoint, captured models.ExternalConversationAdapterReference,
 	adapter *skill.BoundConversationAdapter,
 ) bool {
 	return adapter != nil && adapter.Binding != nil && adapter.Definition != nil &&

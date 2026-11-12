@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -16,9 +17,9 @@ import (
 
 type routineReportFixture struct {
 	store        *sqlite.Store
-	endpoint     *ExternalConversationEndpoint
-	conversation *Conversation
-	source       *ChannelMessage
+	endpoint     *models.ExternalConversationEndpoint
+	conversation *models.Conversation
+	source       *models.ChannelMessage
 	worker       *RunTerminalReportingWorker
 	catalog      *skill.Catalog
 }
@@ -35,7 +36,7 @@ func newRoutineReportFixture(t *testing.T, threadID string, mapSource bool) *rou
 	conversations := runtimeconversation.NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack DM",
-		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
+		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "routine-report-conversation",
 	})
 	if err != nil {
@@ -47,23 +48,23 @@ func newRoutineReportFixture(t *testing.T, threadID string, mapSource bool) *rou
 		threads = append(threads, threadID)
 	}
 	for _, thread := range threads {
-		if err := store.SaveExternalConversationMapping(ctx, &ExternalConversationMapping{Scope: endpoint.Scope, EndpointID: endpoint.ID,
+		if err := store.SaveExternalConversationMapping(ctx, &models.ExternalConversationMapping{Scope: endpoint.Scope, EndpointID: endpoint.ID,
 			ExternalConversationID: "D123", ExternalThreadID: thread, ConversationID: conversation.ID, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 	source, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender:         ConversationParticipant{Type: ConversationParticipantUser, ID: "U123"},
-		ExternalSource: &ExternalMessageSource{Provider: "slack", ChannelID: "D123", ChannelType: "im", ThreadID: threadID, MessageID: "171.001", ParticipantID: "U123"},
-		Intent:         MessageIntentQuestion, Content: "Send me a news digest every morning at 7.",
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "routine-report-source",
+		Sender:         models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "U123"},
+		ExternalSource: &models.ExternalMessageSource{Provider: "slack", ChannelID: "D123", ChannelType: "im", ThreadID: threadID, MessageID: "171.001", ParticipantID: "U123"},
+		Intent:         models.MessageIntentQuestion, Content: "Send me a news digest every morning at 7.",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "routine-report-source",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mapSource {
-		if err := store.SaveExternalMessageMapping(ctx, &ExternalMessageMapping{Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: ExternalMessageInbound,
+		if err := store.SaveExternalMessageMapping(ctx, &models.ExternalMessageMapping{Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: models.ExternalMessageInbound,
 			ExternalMessageID: "171.001", ConversationID: conversation.ID, ChannelMessageID: source.Message.ID, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -80,23 +81,23 @@ func newRoutineReportFixture(t *testing.T, threadID string, mapSource bool) *rou
 
 // occurrence is one finished routine occurrence Run reporting to the
 // fixture's Conversation, as prepareActivationReporting configures it.
-func (f *routineReportFixture) occurrence(id string, routine bool) *AgentRun {
+func (f *routineReportFixture) occurrence(id string, routine bool) *models.AgentRun {
 	values := map[string]interface{}{
-		conversationRunContextConversationID: f.conversation.ID, conversationRunContextTriggerID: f.source.ID, runReportingContextRootRunID: id,
-		runReportingContextMilestones: []interface{}{string(runbook.ReportingCompleted), string(runbook.ReportingFailed)},
+		models.ConversationRunConversationIDContextKey: f.conversation.ID, models.ConversationRunTriggerIDContextKey: f.source.ID, models.RunReportingRootRunIDContextKey: id,
+		models.RunReportingMilestonesContextKey: []interface{}{string(runbook.ReportingCompleted), string(runbook.ReportingFailed)},
 	}
 	if routine {
-		values[scheduledTaskContextKey] = true
+		values[models.ScheduledTaskContextKey] = true
 	}
 	now := time.Now().UTC()
-	return &AgentRun{ID: id, Kind: RunKindAgentWork, Scope: f.endpoint.Scope, RootRunID: id, Owner: f.endpoint.Owner, AssignedAgentID: f.endpoint.DeploymentID,
-		Goal: "Send the morning news digest", Source: RunSourceSchedule, Status: AgentRunStatusCompleted, Context: values,
+	return &models.AgentRun{ID: id, Kind: models.RunKindAgentWork, Scope: f.endpoint.Scope, RootRunID: id, Owner: f.endpoint.Owner, AssignedAgentID: f.endpoint.DeploymentID,
+		Goal: "Send the morning news digest", Source: models.RunSourceSchedule, Status: models.AgentRunStatusCompleted, Context: values,
 		Output: map[string]interface{}{"summary": "Today's digest: three stories."}, Revision: 3, CreatedAt: now, UpdatedAt: now, CompletedAt: &now}
 }
 
-func (f *routineReportFixture) deliveries(t *testing.T) []*ExternalConversationDelivery {
+func (f *routineReportFixture) deliveries(t *testing.T) []*models.ExternalConversationDelivery {
 	t.Helper()
-	deliveries, err := f.store.ListExternalConversationDeliveries(t.Context(), ExternalConversationDeliveryFilter{Scope: f.endpoint.Scope, EndpointID: f.endpoint.ID, Limit: 100})
+	deliveries, err := f.store.ListExternalConversationDeliveries(t.Context(), models.ExternalConversationDeliveryFilter{Scope: f.endpoint.Scope, EndpointID: f.endpoint.ID, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,8 +150,8 @@ func TestRoutineReportDeliveryRequiresARoutineAndAnActiveProvenEndpoint(t *testi
 	}{
 		{"not a routine", false, nil},
 		{"paused endpoint", true, func(t *testing.T, f *routineReportFixture) {
-			paused := cloneExternalConversationEndpoint(f.endpoint)
-			paused.Status, paused.Revision = ExternalConversationEndpointPaused, f.endpoint.Revision+1
+			paused := models.CloneExternalConversationEndpoint(f.endpoint)
+			paused.Status, paused.Revision = models.ExternalConversationEndpointPaused, f.endpoint.Revision+1
 			if err := f.store.UpdateExternalConversationEndpoint(t.Context(), paused, f.endpoint.Revision); err != nil {
 				t.Fatal(err)
 			}
@@ -196,8 +197,8 @@ func TestRoutineReportMirrorHeader(t *testing.T) {
 			f := newRoutineReportFixture(t, "", true)
 			run := f.occurrence("routine-occurrence", true)
 			if test.header != "" {
-				run.Context[RoutineEventBatchContextKey] = "batch-1"
-				run.Context[RoutineEventHeaderContextKey] = test.header
+				run.Context[models.RoutineEventBatchContextKey] = "batch-1"
+				run.Context[models.RoutineEventHeaderContextKey] = test.header
 			}
 			if err := f.worker.project(t.Context(), run); err != nil {
 				t.Fatal(err)
@@ -225,7 +226,7 @@ func TestRoutineReportMirrorHeader(t *testing.T) {
 // people in the mirrored chat.
 func TestRoutineReportHeaderFitsAndNeutralizesMentions(t *testing.T) {
 	header := func(text string) string {
-		return routineReportHeader(&AgentRun{Context: map[string]interface{}{RoutineEventHeaderContextKey: text}})
+		return routineReportHeader(&models.AgentRun{Context: map[string]interface{}{models.RoutineEventHeaderContextKey: text}})
 	}
 	if got := header("New email: <!channel> ping <@U123> and @here"); got != "New email: ‹!channel› ping ‹@\u200bU123› and @\u200bhere" {
 		t.Fatalf("header = %q", got)

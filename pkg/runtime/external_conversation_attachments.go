@@ -27,10 +27,10 @@ type ExternalConversationAttachmentContent struct {
 }
 
 type ExternalConversationAttachmentHostRequest struct {
-	Endpoint   *ExternalConversationEndpoint
+	Endpoint   *models.ExternalConversationEndpoint
 	Adapter    *skill.BoundConversationAdapter
-	Event      NormalizedExternalConversationEvent
-	Attachment ExternalConversationAttachment
+	Event      models.NormalizedExternalConversationEvent
+	Attachment models.ExternalConversationAttachment
 }
 
 type ExternalConversationAttachmentHost interface {
@@ -46,23 +46,23 @@ func containsConversationFeature(features []capability.ConversationAdapterFeatur
 	return false
 }
 
-func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context, endpoint *ExternalConversationEndpoint, conversation *Conversation, event NormalizedExternalConversationEvent) ([]ConversationReference, []string, error) {
+func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context, endpoint *models.ExternalConversationEndpoint, conversation *models.Conversation, event models.NormalizedExternalConversationEvent) ([]models.ConversationReference, []string, error) {
 	if len(event.Attachments) == 0 {
 		return nil, nil, nil
 	}
-	var refs []ConversationReference
+	var refs []models.ConversationReference
 	var notices []string
 	if w.config.AttachmentHost == nil || w.config.AttachmentContent == nil || w.config.ContextCatalog == nil {
 		return nil, []string{"files could not be downloaded"}, nil
 	}
 	adapter, err := w.config.ContextCatalog.ResolveConversationAdapterBinding(ctx, skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID)
 	if err != nil || !externalConversationSnapshotMatchesBinding(endpoint, endpoint.Adapter, adapter) {
-		return nil, nil, ErrExternalConversationConflict
+		return nil, nil, models.ErrExternalConversationConflict
 	}
 	if !containsConversationFeature(adapter.Adapter.Features, capability.ConversationFeatureAttachments) {
 		return nil, []string{"this connection does not support attachments"}, nil
 	}
-	store, ok := w.store.(ArtifactStore)
+	store, ok := w.store.(models.ArtifactStore)
 	if !ok {
 		return nil, nil, errors.New("artifact catalog is unavailable")
 	}
@@ -74,9 +74,9 @@ func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context,
 			return nil, nil, err
 		} else if existing != nil {
 			if existing.Scope != endpoint.Scope || existing.Provenance.Owner == nil || *existing.Provenance.Owner != conversation.Owner {
-				return nil, nil, ErrExternalConversationConflict
+				return nil, nil, models.ErrExternalConversationConflict
 			}
-			refs = append(refs, ConversationReference{Kind: ConversationReferenceArtifact, ID: id, Version: 1})
+			refs = append(refs, models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: id, Version: 1})
 			remaining -= int(existing.SizeBytes)
 			continue
 		}
@@ -112,28 +112,28 @@ func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context,
 		}
 		digest := fmt.Sprintf("sha256:%x", sha256.Sum256(content.Data))
 		owner := conversation.Owner
-		stored, err := w.config.AttachmentContent.Put(ctx, ArtifactContentWrite{Scope: endpoint.Scope, MediaType: mediaType, Reader: bytes.NewReader(content.Data), SizeBytes: int64(len(content.Data)), Digest: digest, Owner: &owner})
+		stored, err := w.config.AttachmentContent.Put(ctx, models.ArtifactContentWrite{Scope: endpoint.Scope, MediaType: mediaType, Reader: bytes.NewReader(content.Data), SizeBytes: int64(len(content.Data)), Digest: digest, Owner: &owner})
 		if err != nil {
 			return nil, nil, err
 		}
-		_, err = catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &Artifact{ID: id, Version: 1, Scope: endpoint.Scope, Name: file.Name, MediaType: mediaType, ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: ArtifactClassificationConfidential, CreatedAt: event.OccurredAt,
-			Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "service", ID: externalConversationActorID}, Owner: &owner, ConversationID: conversation.ID, SpaceID: conversation.SpaceID}, Metadata: map[string]interface{}{"provider": endpoint.Provider, "providerFileId": file.ID, "externalMessageId": event.ExternalMessageID}}})
+		_, err = catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{ID: id, Version: 1, Scope: endpoint.Scope, Name: file.Name, MediaType: mediaType, ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: models.ArtifactClassificationConfidential, CreatedAt: event.OccurredAt,
+			Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "service", ID: externalConversationActorID}, Owner: &owner, ConversationID: conversation.ID, SpaceID: conversation.SpaceID}, Metadata: map[string]interface{}{"provider": endpoint.Provider, "providerFileId": file.ID, "externalMessageId": event.ExternalMessageID}}})
 		if err != nil {
 			return nil, nil, err
 		}
-		refs = append(refs, ConversationReference{Kind: ConversationReferenceArtifact, ID: id, Version: 1})
+		refs = append(refs, models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: id, Version: 1})
 		remaining -= len(content.Data)
 	}
 	return refs, notices, nil
 }
 
-func externalDeliveryAttachments(ctx context.Context, store ExternalConversationStore, content ArtifactContentStore, scope Scope, message *ChannelMessage) ([]ExternalConversationAttachmentContent, error) {
+func externalDeliveryAttachments(ctx context.Context, store models.ExternalConversationStore, content models.ArtifactContentStore, scope models.Scope, message *models.ChannelMessage) ([]ExternalConversationAttachmentContent, error) {
 	var result []ExternalConversationAttachmentContent
 	seen := map[string]bool{}
-	catalog, ok := store.(ArtifactStore)
+	catalog, ok := store.(models.ArtifactStore)
 	remaining := MaximumExternalConversationAttachmentBytes
 	for _, ref := range message.References {
-		if ref.Kind != ConversationReferenceArtifact {
+		if ref.Kind != models.ConversationReferenceArtifact {
 			continue
 		}
 		key := fmt.Sprintf("%s:%d", ref.ID, ref.Version)

@@ -8,24 +8,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/google/uuid"
 )
 
 func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, store KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		ctx := t.Context()
 		run := claimedFailureRun(t, store, "explained")
 		cause := errors.New("the model returned malformed tool arguments")
 		if !conversation.ModelExplainsFailure(run) || !conversation.TurnFailureCanBeExplained(cause, "tool_arguments_invalid") {
 			t.Fatal("an ordinary step failure must be explainable")
 		}
-		activity := NewRunActivityService(store, store)
-		explaining, _, err := activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-			ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, LeaseOwner: run.LeaseOwner,
+		activity := runtimeactivity.NewRunActivityService(store, store)
+		explaining, _, err := activity.TransitionRun(ctx, run.Scope, run.ID, runtimeactivity.RunTransitionRequest{
+			ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning, LeaseOwner: run.LeaseOwner,
 			FailureExplanation: conversation.BeginRunFailureExplanation(run, conversation.RunFailureKindExecution, "tool_arguments_invalid", "The model supplied invalid arguments.", cause.Error(), "producer_failed"),
 			EventType:          "run.failure_recorded", Summary: "The attempt stopped; the model will explain it",
 		})
@@ -40,8 +43,8 @@ func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 			t.Fatal(err)
 		}
 		var data map[string]string
-		if note.Type != SessionEntryNote || note.Note.Kind != NoteFailureExplanation || note.SourceKey != FailureNoteSourceKey(explaining.ID, "step-2") ||
-			note.ID != SessionEntryID(explaining.SessionID, note.SourceKey) || json.Unmarshal(note.Note.Data, &data) != nil || data["code"] != "tool_arguments_invalid" {
+		if note.Type != models.SessionEntryNote || note.Note.Kind != models.NoteFailureExplanation || note.SourceKey != models.FailureNoteSourceKey(explaining.ID, "step-2") ||
+			note.ID != models.SessionEntryID(explaining.SessionID, note.SourceKey) || json.Unmarshal(note.Note.Data, &data) != nil || data["code"] != "tool_arguments_invalid" {
 			t.Fatalf("note = %+v", note)
 		}
 		for _, want := range []string{"This attempt has stopped: The model supplied invalid arguments. Give one brief", "Do not call tools"} {
@@ -54,8 +57,8 @@ func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 		}
 
 		// The tool-free step posted its reply.
-		failed, _, err := activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-			ExpectedRevision: explaining.Revision, Status: AgentRunStatusFailed, LeaseOwner: run.LeaseOwner,
+		failed, _, err := activity.TransitionRun(ctx, run.Scope, run.ID, runtimeactivity.RunTransitionRequest{
+			ExpectedRevision: explaining.Revision, Status: models.AgentRunStatusFailed, LeaseOwner: run.LeaseOwner,
 			Error: explaining.FailureExplanation.Message, FailureExplanation: conversation.ExplainedRunFailure(explaining.FailureExplanation),
 			Output:    map[string]interface{}{"summary": "I couldn't read that file, so I stopped.", "messageId": "m-1"},
 			EventType: "run.failed", Summary: "Run failed",
@@ -85,16 +88,16 @@ func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
 			t.Fatalf("%s must not get an explanation step", code)
 		}
 	}
-	for _, err := range []error{modelstep.ErrTurnHostUnavailable, ErrBudgetExhausted, context.Canceled, ErrLeaseLost} {
+	for _, err := range []error{modelstep.ErrTurnHostUnavailable, models.ErrBudgetExhausted, context.Canceled, models.ErrLeaseLost} {
 		if conversation.TurnFailureCanBeExplained(err, "execution_failed") {
 			t.Fatalf("%v must not get an explanation step", err)
 		}
 	}
-	actiontest.ForEachStore(t, func(t *testing.T, store KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		ctx := t.Context()
 		run := claimedFailureRun(t, store, "kernel-reply")
-		failed, _, err := NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-			ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: run.LeaseOwner, Error: "provider down",
+		failed, _, err := runtimeactivity.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, runtimeactivity.RunTransitionRequest{
+			ExpectedRevision: run.Revision, Status: models.AgentRunStatusFailed, LeaseOwner: run.LeaseOwner, Error: "provider down",
 			FailureExplanation: conversation.BeginRunFailureExplanation(run, conversation.RunFailureKindExecution, "provider_unavailable", "The model provider was unavailable.", "upstream 503 SECRET", "host_unavailable"),
 			Output:             map[string]interface{}{"summary": "stale model text"},
 			EventType:          "run.failed", Summary: "Run failed",
@@ -116,11 +119,11 @@ func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
 }
 
 func TestCreditErrorFromTypedFailure(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, store KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		ctx := t.Context()
 		run := claimedFailureRun(t, store, "credits")
-		failed, _, err := NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-			ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: run.LeaseOwner, Error: "no credits",
+		failed, _, err := runtimeactivity.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, runtimeactivity.RunTransitionRequest{
+			ExpectedRevision: run.Revision, Status: models.AgentRunStatusFailed, LeaseOwner: run.LeaseOwner, Error: "no credits",
 			FailureExplanation: conversation.BeginRunFailureExplanation(run, conversation.RunFailureKindCredits, "gateway_credits_exhausted", "This workspace has no model credits available.", "", ""),
 			EventType:          "run.failed", Summary: "Run failed",
 		})
@@ -131,29 +134,29 @@ func TestCreditErrorFromTypedFailure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if stored.CreditError == nil || stored.CreditError.Code != RunCreditErrorWorkspaceCreditsExhausted || failed.CreditError == nil {
+		if stored.CreditError == nil || stored.CreditError.Code != models.RunCreditErrorWorkspaceCreditsExhausted || failed.CreditError == nil {
 			t.Fatalf("typed credit stop lost its credit error: %+v %+v", stored.CreditError, stored.FailureExplanation)
 		}
-		if terminalCreditError(AgentRunStatusRunning, stored.FailureExplanation) != nil || terminalCreditError(AgentRunStatusFailed, nil) != nil ||
-			terminalCreditError(AgentRunStatusFailed, &RunFailureExplanation{Code: "provider_unavailable"}) != nil {
+		if models.TerminalCreditError(models.AgentRunStatusRunning, stored.FailureExplanation) != nil || models.TerminalCreditError(models.AgentRunStatusFailed, nil) != nil ||
+			models.TerminalCreditError(models.AgentRunStatusFailed, &models.RunFailureExplanation{Code: "provider_unavailable"}) != nil {
 			t.Fatal("credit error from an unrelated failure")
 		}
 	})
 }
 
 // claimedFailureRun is a leased Agent conversation Run in a fresh scope.
-func claimedFailureRun(t *testing.T, store KernelStore, name string) *AgentRun {
+func claimedFailureRun(t *testing.T, store models.KernelStore, name string) *models.AgentRun {
 	t.Helper()
 	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: name + "-" + uuid.NewString()[:8]}
-	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "Reply", Source: RunSourceChat, SessionID: "session-" + name,
+	scope := models.Scope{Kind: "tenant", ID: name + "-" + uuid.NewString()[:8]}
+	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "Reply", Source: models.RunSourceChat, SessionID: "session-" + name,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	run, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || run == nil || run.ID != created.ID {
 		t.Fatalf("claim = %+v %v", run, err)
 	}

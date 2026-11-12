@@ -20,21 +20,21 @@ import (
 )
 
 type ReceiveExternalConversationEventRequest struct {
-	Scope           Scope
+	Scope           models.Scope
 	EndpointID      string
-	Event           NormalizedExternalConversationEvent
+	Event           models.NormalizedExternalConversationEvent
 	MaximumAttempts int
 }
 
 type ReceiveExternalConversationEventResult struct {
-	Item     *ExternalConversationInboxItem `json:"item"`
-	Approval *ApprovalResolutionResult      `json:"approval,omitempty"`
-	Accepted bool                           `json:"accepted"`
-	Replayed bool                           `json:"replayed"`
+	Item     *models.ExternalConversationInboxItem `json:"item"`
+	Approval *models.ApprovalResolutionResult      `json:"approval,omitempty"`
+	Accepted bool                                  `json:"accepted"`
+	Replayed bool                                  `json:"replayed"`
 }
 
 type EnqueueExternalConversationDeliveryRequest struct {
-	Scope                  Scope
+	Scope                  models.Scope
 	EndpointID             string
 	Operation              capability.ConversationDeliveryOperation
 	ConversationID         string
@@ -42,24 +42,24 @@ type EnqueueExternalConversationDeliveryRequest struct {
 	ExternalConversationID string
 	ExternalThreadID       string
 	Parameters             map[string]interface{}
-	Correlation            *ExternalConversationDeliveryCorrelation
+	Correlation            *models.ExternalConversationDeliveryCorrelation
 	IdempotencyKey         string
 	MaximumAttempts        int
 }
 
 type EnqueueExternalConversationDeliveryResult struct {
-	Delivery *ExternalConversationDelivery `json:"delivery"`
-	Replayed bool                          `json:"replayed"`
+	Delivery *models.ExternalConversationDelivery `json:"delivery"`
+	Replayed bool                                 `json:"replayed"`
 }
 
 type ExternalConversationTransportService struct {
-	store    ExternalConversationStore
+	store    models.ExternalConversationStore
 	resolver ExternalConversationAdapterResolver
 	routines RoutineEventOfferer
 	now      func() time.Time
 }
 
-func NewExternalConversationTransportService(store ExternalConversationStore, resolver ExternalConversationAdapterResolver, opts ...models.ServiceOption) *ExternalConversationTransportService {
+func NewExternalConversationTransportService(store models.ExternalConversationStore, resolver ExternalConversationAdapterResolver, opts ...models.ServiceOption) *ExternalConversationTransportService {
 	return &ExternalConversationTransportService{store: store, resolver: resolver, now: models.ClockFrom(opts)}
 }
 
@@ -97,26 +97,26 @@ func (s *ExternalConversationTransportService) Receive(ctx context.Context, req 
 	// checked against the exact invocation and origin above, independently of
 	// the adapter's declared conversational inbound event types.
 	if !containsConversationEventType(resolved.Adapter.InboundEventTypes, req.Event.Type) {
-		return nil, fmt.Errorf("%w: adapter does not declare event type %q", ErrInvalidExternalConversation, req.Event.Type)
+		return nil, fmt.Errorf("%w: adapter does not declare event type %q", models.ErrInvalidExternalConversation, req.Event.Type)
 	}
 	if endpoint.Mode == capability.ConversationEndpointDirect && !req.Event.Direct {
-		return nil, fmt.Errorf("%w: direct endpoint received a non-direct event", ErrInvalidExternalConversation)
+		return nil, fmt.Errorf("%w: direct endpoint received a non-direct event", models.ErrInvalidExternalConversation)
 	}
 	maximumAttempts := req.MaximumAttempts
 	if maximumAttempts == 0 {
 		maximumAttempts = 8
 	}
-	if maximumAttempts < 1 || maximumAttempts > MaximumExternalConversationDeliveryAttempts {
-		return nil, ErrInvalidExternalConversation
+	if maximumAttempts < 1 || maximumAttempts > models.MaximumExternalConversationDeliveryAttempts {
+		return nil, models.ErrInvalidExternalConversation
 	}
 	now := s.now().UTC()
 	accepted, summary := externalConversationPolicyAccepts(endpoint.Policy, req.Event)
-	status := ExternalConversationInboxPending
+	status := models.ExternalConversationInboxPending
 	var appliedAt time.Time
 	if !accepted {
-		status, appliedAt = ExternalConversationInboxIgnored, now
+		status, appliedAt = models.ExternalConversationInboxIgnored, now
 	}
-	item := &ExternalConversationInboxItem{
+	item := &models.ExternalConversationInboxItem{
 		ID:    stableExternalConversationID(req.Scope, endpoint.ID, "inbox", req.Event.ID),
 		Scope: req.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision,
 		Adapter: externalConversationResolvedAdapterReference(resolved),
@@ -128,18 +128,18 @@ func (s *ExternalConversationTransportService) Receive(ctx context.Context, req 
 		return nil, err
 	}
 	return &ReceiveExternalConversationEventResult{
-		Item: stored, Accepted: stored.Status != ExternalConversationInboxIgnored, Replayed: replayed,
+		Item: stored, Accepted: stored.Status != models.ExternalConversationInboxIgnored, Replayed: replayed,
 	}, nil
 }
 
 func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 	ctx context.Context,
-	endpoint *ExternalConversationEndpoint,
-	event NormalizedExternalConversationEvent,
-) (*ApprovalResolutionResult, error) {
+	endpoint *models.ExternalConversationEndpoint,
+	event models.NormalizedExternalConversationEvent,
+) (*models.ApprovalResolutionResult, error) {
 	store, ok := s.store.(interface {
-		PortfolioStore
-		ActionStore
+		models.PortfolioStore
+		models.ActionStore
 	})
 	if !ok {
 		return nil, errors.New("external approval coordination is unavailable")
@@ -156,7 +156,7 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 		strings.TrimSpace(invocationDigest) == "" || revision < 1 || !ok ||
 		(decision != "approve" && decision != "reject" && decision != "request_changes") ||
 		strings.TrimSpace(principalType) == "" || strings.TrimSpace(principalID) == "" {
-		return nil, fmt.Errorf("%w: approval decision attributes are invalid", ErrInvalidExternalConversation)
+		return nil, fmt.Errorf("%w: approval decision attributes are invalid", models.ErrInvalidExternalConversation)
 	}
 	approval, err := store.GetApproval(ctx, endpoint.Scope, approvalID)
 	if err != nil {
@@ -166,7 +166,7 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 	if err != nil {
 		return nil, err
 	}
-	replay := approval.Status != ApprovalStatusPending && approval.DecisionID == event.ID
+	replay := approval.Status != models.ApprovalStatusPending && approval.DecisionID == event.ID
 	originReview := false
 	destination := approvalHasDestination(approval, endpoint.ID)
 	if !destination || principalType == "external_participant" {
@@ -178,17 +178,17 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 	}
 	if approval.ActionCallID != actionCallID || call.InvocationDigest != invocationDigest ||
 		(!replay && approval.Revision != revision) || !destination {
-		return nil, fmt.Errorf("%w: approval decision does not match the reviewed action", ErrInvalidExternalConversation)
+		return nil, fmt.Errorf("%w: approval decision does not match the reviewed action", models.ErrInvalidExternalConversation)
 	}
 	var authorizer action.ApprovalAuthorizer = action.EligibleApprovalAuthorizer{}
 	if originReview && principalType == "external_participant" {
 		if strings.TrimSpace(event.ExternalParticipantID) == "" || principalID != event.ExternalParticipantID {
-			return nil, fmt.Errorf("%w: approval participant does not match the source event", ErrInvalidExternalConversation)
+			return nil, fmt.Errorf("%w: approval participant does not match the source event", models.ErrInvalidExternalConversation)
 		}
 		// Source conversation members may decide without an app account mapping.
 		// The adapter authenticates the provider identity; the durable imported
 		// trigger above limits this authority to the originating conversation.
-		authorizer = action.ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil })
+		authorizer = action.ApprovalAuthorizerFunc(func(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error { return nil })
 	}
 	// Neither authorizer above is an AgentBuilderApprovalAuthorizer, so an
 	// external channel reply can reject but never approve an agent-builder
@@ -196,21 +196,21 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 	coordinator := action.NewApprovalCoordinator(store, store, authorizer, models.WithClock(s.now))
 	resolution, err := coordinator.Resolve(ctx, action.ResolveApprovalRequest{
 		Scope: endpoint.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
-		DecisionID: event.ID, Decision: ApprovalDecision(decision),
-		Principal: ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,
+		DecisionID: event.ID, Decision: models.ApprovalDecision(decision),
+		Principal: models.ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,
 		CorrelationID: event.ExternalMessageID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	notificationStore, ok := s.store.(ApprovalNotificationStore)
+	notificationStore, ok := s.store.(models.ApprovalNotificationStore)
 	if !ok {
 		return nil, errors.New("external approval notification coordination is unavailable")
 	}
 	providerApproverID, _ := event.Attributes["providerUserId"].(string)
 	if err := enqueueApprovalCardUpdate(
 		ctx, notificationStore, s, resolution.Approval, resolution.Call,
-		ApprovalDestination{EndpointID: endpoint.ID}, providerApproverID,
+		models.ApprovalDestination{EndpointID: endpoint.ID}, providerApproverID,
 	); err != nil {
 		return nil, fmt.Errorf("enqueue approval card update: %w", err)
 	}
@@ -255,7 +255,7 @@ func integerAttribute(value interface{}) (int64, bool) {
 	}
 }
 
-func approvalHasDestination(approval *ApprovalCheckpoint, endpointID string) bool {
+func approvalHasDestination(approval *models.ApprovalCheckpoint, endpointID string) bool {
 	for _, destination := range approval.Destinations {
 		if destination.EndpointID == endpointID {
 			return true
@@ -276,51 +276,51 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 		return nil, err
 	}
 	if !containsConversationDeliveryOperation(resolved.Adapter.Delivery.Operations, req.Operation) {
-		return nil, fmt.Errorf("%w: adapter does not declare delivery operation %q", ErrInvalidExternalConversation, req.Operation)
+		return nil, fmt.Errorf("%w: adapter does not declare delivery operation %q", models.ErrInvalidExternalConversation, req.Operation)
 	}
 	message, err := s.store.GetChannelMessage(ctx, req.Scope, strings.TrimSpace(req.ConversationID), strings.TrimSpace(req.ChannelMessageID))
 	if err != nil {
 		return nil, err
 	}
 	if message == nil || message.ConversationID != strings.TrimSpace(req.ConversationID) || message.Historical ||
-		message.Audience.Kind != ConversationAudienceChannel {
-		return nil, fmt.Errorf("%w: delivery requires a current channel-visible canonical message", ErrInvalidExternalConversation)
+		message.Audience.Kind != models.ConversationAudienceChannel {
+		return nil, fmt.Errorf("%w: delivery requires a current channel-visible canonical message", models.ErrInvalidExternalConversation)
 	}
 	if req.Operation != capability.ConversationDeliveryMessageSend && len(req.Parameters) == 0 {
-		return nil, fmt.Errorf("%w: non-send delivery requires operation parameters", ErrInvalidExternalConversation)
+		return nil, fmt.Errorf("%w: non-send delivery requires operation parameters", models.ErrInvalidExternalConversation)
 	}
-	if req.ExternalConversationID != "" && !validExternalConversationReference(strings.TrimSpace(req.ExternalConversationID), 1024) {
-		return nil, ErrInvalidExternalConversation
+	if req.ExternalConversationID != "" && !models.IsValidExternalConversationReference(strings.TrimSpace(req.ExternalConversationID), 1024) {
+		return nil, models.ErrInvalidExternalConversation
 	}
 	// A thread-oriented endpoint may still originate a new channel message (for
 	// example, an approval card). Only canonical replies require an existing
 	// provider thread mapping; the provider response to a root send establishes
 	// the mapping used by subsequent replies.
-	if endpoint.Policy.ReplyMode == ExternalConversationReplyThread && message.ThreadRootID != "" && strings.TrimSpace(req.ExternalThreadID) == "" {
-		return nil, fmt.Errorf("%w: thread reply requires an external thread mapping", ErrInvalidExternalConversation)
+	if endpoint.Policy.ReplyMode == models.ExternalConversationReplyThread && message.ThreadRootID != "" && strings.TrimSpace(req.ExternalThreadID) == "" {
+		return nil, fmt.Errorf("%w: thread reply requires an external thread mapping", models.ErrInvalidExternalConversation)
 	}
-	if err := validateExternalConversationConfiguration(req.Parameters); err != nil {
+	if err := models.ValidateExternalConversationConfiguration(req.Parameters); err != nil {
 		return nil, err
 	}
 	maximumAttempts := req.MaximumAttempts
 	if maximumAttempts == 0 {
 		maximumAttempts = 8
 	}
-	if maximumAttempts < 1 || maximumAttempts > MaximumExternalConversationDeliveryAttempts {
-		return nil, ErrInvalidExternalConversation
+	if maximumAttempts < 1 || maximumAttempts > models.MaximumExternalConversationDeliveryAttempts {
+		return nil, models.ErrInvalidExternalConversation
 	}
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
 	if idempotencyKey == "" {
 		idempotencyKey = "conversation-delivery:" + endpoint.ID + ":" + string(req.Operation) + ":" + message.ID
 	}
-	if !validOpaqueIdentifier(idempotencyKey, 512) {
-		return nil, ErrInvalidExternalConversation
+	if !models.IsValidOpaqueIdentifier(idempotencyKey, 512) {
+		return nil, models.ErrInvalidExternalConversation
 	}
 	now := s.now().UTC()
 	orderingKey := externalConversationDeliveryOrderingKey(
 		req.Scope, endpoint.ID, resolved.Adapter.Delivery.Ordering, message.ConversationID, req.ExternalThreadID,
 	)
-	delivery := &ExternalConversationDelivery{
+	delivery := &models.ExternalConversationDelivery{
 		ID:    stableExternalConversationID(req.Scope, endpoint.ID, "delivery", idempotencyKey),
 		Scope: req.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision,
 		Adapter:   externalConversationResolvedAdapterReference(resolved),
@@ -329,7 +329,7 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 		ExternalThreadID:       strings.TrimSpace(req.ExternalThreadID), OrderingKey: orderingKey,
 		Parameters: maps.Clone(req.Parameters), IdempotencyKey: idempotencyKey,
 		Correlation: cloneExternalConversationDeliveryCorrelation(req.Correlation),
-		Status:      ExternalConversationDeliveryPending, MaximumAttempts: maximumAttempts, AvailableAt: now,
+		Status:      models.ExternalConversationDeliveryPending, MaximumAttempts: maximumAttempts, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	stored, replayed, err := s.store.EnqueueExternalConversationDelivery(ctx, delivery)
@@ -340,7 +340,7 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 }
 
 func externalConversationDeliveryOrderingKey(
-	scope Scope,
+	scope models.Scope,
 	endpointID string,
 	ordering capability.ConversationDeliveryOrdering,
 	conversationID, externalThreadID string,
@@ -355,7 +355,7 @@ func externalConversationDeliveryOrderingKey(
 	return stableExternalConversationID(scope, endpointID, "delivery-order", key)
 }
 
-func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context.Context, scope Scope, endpointID string) (*ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {
+func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context.Context, scope models.Scope, endpointID string) (*models.ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -364,10 +364,10 @@ func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context
 		return nil, nil, err
 	}
 	if endpoint == nil {
-		return nil, nil, ErrExternalConversationEndpointNotFound
+		return nil, nil, models.ErrExternalConversationEndpointNotFound
 	}
-	if endpoint.Status != ExternalConversationEndpointActive {
-		return nil, nil, ErrExternalConversationConflict
+	if endpoint.Status != models.ExternalConversationEndpointActive {
+		return nil, nil, models.ErrExternalConversationConflict
 	}
 	ref := endpoint.Adapter
 	resolved, err := s.resolver.ResolveConversationAdapterBinding(
@@ -379,7 +379,7 @@ func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context
 		resolved.Binding.Revision < ref.BindingRevision ||
 		resolved.Adapter.Provider != endpoint.Provider ||
 		!slices.Contains(resolved.Adapter.EndpointModes, endpoint.Mode) {
-		return nil, nil, fmt.Errorf("%w: current Skill adapter binding is unavailable or incompatible", ErrExternalConversationConflict)
+		return nil, nil, fmt.Errorf("%w: current Skill adapter binding is unavailable or incompatible", models.ErrExternalConversationConflict)
 	}
 	return endpoint, resolved, nil
 }
@@ -388,11 +388,11 @@ func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context
 // item and delivery captures the exact resolved Skill identity and binding
 // revision used for that operation, so a compatible credential or policy
 // amendment does not strand the endpoint while historical work remains exact.
-func externalConversationResolvedAdapterReference(resolved *skill.BoundConversationAdapter) ExternalConversationAdapterReference {
+func externalConversationResolvedAdapterReference(resolved *skill.BoundConversationAdapter) models.ExternalConversationAdapterReference {
 	if resolved == nil || resolved.Definition == nil || resolved.Binding == nil {
-		return ExternalConversationAdapterReference{}
+		return models.ExternalConversationAdapterReference{}
 	}
-	return ExternalConversationAdapterReference{
+	return models.ExternalConversationAdapterReference{
 		SkillID: resolved.Definition.ID, SkillVersion: resolved.Definition.Version,
 		SourceIdentity: skill.DefinitionSourceIdentity(resolved.Definition),
 		BindingID:      resolved.Binding.ID, BindingRevision: resolved.Binding.Revision,
@@ -400,7 +400,7 @@ func externalConversationResolvedAdapterReference(resolved *skill.BoundConversat
 	}
 }
 
-func externalConversationPolicyAccepts(policy ExternalConversationPolicy, event NormalizedExternalConversationEvent) (bool, string) {
+func externalConversationPolicyAccepts(policy models.ExternalConversationPolicy, event models.NormalizedExternalConversationEvent) (bool, string) {
 	if event.Type == capability.ConversationEventReactionAdded || event.Type == capability.ConversationEventReactionRemoved {
 		// Reactions never address the endpoint, so message selection does
 		// not apply. Bot reactions include this endpoint's own mirrored
@@ -414,11 +414,11 @@ func externalConversationPolicyAccepts(policy ExternalConversationPolicy, event 
 		return false, "Ignored a provider bot message."
 	}
 	switch policy.MessageSelection {
-	case ExternalConversationSelectMentions:
+	case models.ExternalConversationSelectMentions:
 		if !event.MentionsEndpoint {
 			return false, "Ignored a message that did not mention this endpoint."
 		}
-	case ExternalConversationSelectDirectOrMention:
+	case models.ExternalConversationSelectDirectOrMention:
 		if !event.Direct && !event.MentionsEndpoint {
 			return false, "Ignored a message that was neither direct nor an endpoint mention."
 		}
@@ -444,18 +444,18 @@ func containsConversationDeliveryOperation(values []capability.ConversationDeliv
 	return false
 }
 
-func stableExternalConversationID(scope Scope, endpointID, kind, key string) string {
+func stableExternalConversationID(scope models.Scope, endpointID, kind, key string) string {
 	seed := strings.Join([]string{"openseal", "external-conversation", scope.Key(), endpointID, kind, key}, ":")
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(seed)).String()
 }
 
 // An originating chat is a review destination only when the durable provider
 // inbox proves which endpoint started this run.
-func (s *ExternalConversationTransportService) approvalOriginDestination(ctx context.Context, approval *ApprovalCheckpoint, endpoint *ExternalConversationEndpoint) (bool, error) {
+func (s *ExternalConversationTransportService) approvalOriginDestination(ctx context.Context, approval *models.ApprovalCheckpoint, endpoint *models.ExternalConversationEndpoint) (bool, error) {
 	store := s.store.(interface {
-		ExternalConversationStore
-		ActionStore
-		PortfolioStore
+		models.ExternalConversationStore
+		models.ActionStore
+		models.PortfolioStore
 	})
 	run, err := store.GetAgentRun(ctx, approval.Scope, approval.RunID)
 	if err != nil {
@@ -484,11 +484,11 @@ func (s *ExternalConversationTransportService) approvalOriginDestination(ctx con
 	if err != nil {
 		return false, err
 	}
-	if conversation == nil || conversation.Owner != endpoint.Owner || conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceExternalSource || conversation.Origin.ID != endpoint.ID {
+	if conversation == nil || conversation.Owner != endpoint.Owner || conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceExternalSource || conversation.Origin.ID != endpoint.ID {
 		return false, nil
 	}
 	for offset := 0; ; offset += 100 {
-		items, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{Scope: approval.Scope, EndpointID: endpoint.ID, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied}, Limit: 100, Offset: offset})
+		items, err := store.ListExternalConversationInbox(ctx, models.ExternalConversationInboxFilter{Scope: approval.Scope, EndpointID: endpoint.ID, Statuses: []models.ExternalConversationInboxStatus{models.ExternalConversationInboxApplied}, Limit: 100, Offset: offset})
 		if err != nil {
 			return false, err
 		}

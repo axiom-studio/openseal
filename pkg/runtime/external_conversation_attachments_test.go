@@ -18,18 +18,18 @@ import (
 
 type externalFileContentStore struct {
 	data  []byte
-	scope Scope
-	owner *ObjectiveOwner
+	scope models.Scope
+	owner *models.ObjectiveOwner
 	opens int
 }
 
-func (s *externalFileContentStore) Put(_ context.Context, req ArtifactContentWrite) (ArtifactStoredContent, error) {
+func (s *externalFileContentStore) Put(_ context.Context, req models.ArtifactContentWrite) (models.ArtifactStoredContent, error) {
 	s.data, _ = io.ReadAll(req.Reader)
 	s.scope = req.Scope
 	s.owner = req.Owner
-	return ArtifactStoredContent{ContentRef: "opaque-file", SizeBytes: int64(len(s.data)), Digest: conversationtest.Digest(string(s.data))}, nil
+	return models.ArtifactStoredContent{ContentRef: "opaque-file", SizeBytes: int64(len(s.data)), Digest: conversationtest.Digest(string(s.data))}, nil
 }
-func (s *externalFileContentStore) Open(_ context.Context, scope Scope, _ string) (io.ReadCloser, error) {
+func (s *externalFileContentStore) Open(_ context.Context, scope models.Scope, _ string) (io.ReadCloser, error) {
 	s.scope = scope
 	s.opens++
 	return io.NopCloser(bytes.NewReader(s.data)), nil
@@ -45,7 +45,7 @@ func (h *externalFileHost) ReadExternalConversationAttachment(_ context.Context,
 	h.origin = req.Endpoint.Address
 	return &ExternalConversationAttachmentContent{ID: req.Attachment.ID, Name: req.Attachment.Name, MediaType: "text/plain", Data: []byte("real contents"), Status: "supplied"}, nil
 }
-func fileConversationFixture(t *testing.T) (*sqlite.Store, *skill.Catalog, *ExternalConversationEndpoint) {
+func fileConversationFixture(t *testing.T) (*sqlite.Store, *skill.Catalog, *models.ExternalConversationEndpoint) {
 	t.Helper()
 	store, original, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
 	bound, err := original.ResolveConversationAdapterBinding(t.Context(), skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID)
@@ -78,7 +78,7 @@ func TestExternalConversationImportsFileOnceAndScopesArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	worker := &ExternalConversationInboxWorker{store: store, config: ExternalConversationInboxWorkerConfig{ContextCatalog: catalog, AttachmentHost: host, AttachmentContent: content}}
-	event := NormalizedExternalConversationEvent{ID: "event1", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C-origin", ExternalThreadID: "171.1", ExternalMessageID: "171.2", ExternalParticipantID: "U1", OccurredAt: time.Now().UTC(), OrderingKey: "171.2", Attachments: []ExternalConversationAttachment{{ID: "F1", Name: "note.txt", MediaType: "text/plain", SizeBytes: 13}}}
+	event := models.NormalizedExternalConversationEvent{ID: "event1", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C-origin", ExternalThreadID: "171.1", ExternalMessageID: "171.2", ExternalParticipantID: "U1", OccurredAt: time.Now().UTC(), OrderingKey: "171.2", Attachments: []models.ExternalConversationAttachment{{ID: "F1", Name: "note.txt", MediaType: "text/plain", SizeBytes: 13}}}
 	if err := event.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -94,13 +94,13 @@ func TestExternalConversationImportsFileOnceAndScopesArtifact(t *testing.T) {
 	if _, _, err := worker.importAttachments(t.Context(), endpoint, conversation, event); err != nil || host.calls != 1 {
 		t.Fatal("replay downloaded duplicate file")
 	}
-	reply := &ChannelMessage{References: refs}
+	reply := &models.ChannelMessage{References: refs}
 	files, err := externalDeliveryAttachments(t.Context(), store, content, endpoint.Scope, reply)
 	if err != nil || len(files) != 1 || string(files[0].Data) != "real contents" {
 		t.Fatalf("files=%#v %v", files, err)
 	}
 	before := content.opens
-	if _, err := externalDeliveryAttachments(t.Context(), store, content, Scope{Kind: "tenant", ID: "other"}, reply); err == nil || content.opens != before {
+	if _, err := externalDeliveryAttachments(t.Context(), store, content, models.Scope{Kind: "tenant", ID: "other"}, reply); err == nil || content.opens != before {
 		t.Fatal("cross tenant file was opened")
 	}
 	content.data = []byte("tampered")
@@ -120,7 +120,7 @@ func (h *checkpointConversationHost) DeliverExternalConversation(_ context.Conte
 		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeRetry, ErrorCode: "file_upload_ready", Progress: map[string]interface{}{"providerFileId": "F-uploaded"}}, nil
 	}
 	if req.Delivery.Progress["providerFileId"] != "F-uploaded" {
-		return nil, ErrExternalConversationConflict
+		return nil, models.ErrExternalConversationConflict
 	}
 	return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: "file:F-uploaded"}, nil
 }
@@ -131,7 +131,7 @@ func TestExternalConversationDeliveryPersistsCheckpointAcrossWorkerRestart(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID}, Intent: MessageIntentAnswer, Content: "Here is your file.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "reply"})
+	reply, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.Owner.ID}, Intent: models.MessageIntentAnswer, Content: "Here is your file.", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "reply"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestExternalConversationDeliveryPersistsCheckpointAcrossWorkerRestart(t *te
 		t.Fatal(err)
 	}
 	result, err := worker.ProcessOne(t.Context(), endpoint.Scope)
-	if err != nil || result == nil || result.Status != ExternalConversationDeliveryRetry || result.Progress["providerFileId"] != "F-uploaded" {
+	if err != nil || result == nil || result.Status != models.ExternalConversationDeliveryRetry || result.Progress["providerFileId"] != "F-uploaded" {
 		t.Fatalf("checkpoint=%#v %v", result, err)
 	}
 	config.WorkerID = "worker-restarted"
@@ -156,7 +156,7 @@ func TestExternalConversationDeliveryPersistsCheckpointAcrossWorkerRestart(t *te
 		t.Fatal(err)
 	}
 	result, err = worker.ProcessOne(t.Context(), endpoint.Scope)
-	if err != nil || result == nil || result.Status != ExternalConversationDeliveryDelivered || host.calls != 2 {
+	if err != nil || result == nil || result.Status != models.ExternalConversationDeliveryDelivered || host.calls != 2 {
 		t.Fatalf("restart=%#v %v", result, err)
 	}
 }

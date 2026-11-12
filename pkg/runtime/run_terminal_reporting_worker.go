@@ -18,7 +18,7 @@ type RunTerminalReportingWorkerOptions struct {
 	LeaseDuration time.Duration
 	BatchSize     int
 	Concurrency   int
-	ScopeAllowed  func(context.Context, Scope) (bool, error)
+	ScopeAllowed  func(context.Context, models.Scope) (bool, error)
 }
 
 type RunTerminalReportingWorkerStats struct {
@@ -31,8 +31,8 @@ type RunTerminalReportingWorkerStats struct {
 }
 
 type RunTerminalReportingWorker struct {
-	store     RunTerminalReportingStore
-	project   func(context.Context, *AgentRun) error
+	store     models.RunTerminalReportingStore
+	project   func(context.Context, *models.AgentRun) error
 	options   RunTerminalReportingWorkerOptions
 	limiter   *workqueue.WorkerLimiter
 	now       func() time.Time
@@ -44,15 +44,15 @@ type RunTerminalReportingWorker struct {
 }
 
 func NewRunTerminalReportingWorker(store interface {
-	RunTerminalReportingStore
-	ConversationStore
+	models.RunTerminalReportingStore
+	models.ConversationStore
 }, options RunTerminalReportingWorkerOptions, opts ...models.ServiceOption) (*RunTerminalReportingWorker, error) {
-	if store == nil || !validOpaqueIdentifier(options.WorkerID, 180) || options.LeaseDuration < 3*time.Second || options.LeaseDuration > 5*time.Minute || options.BatchSize < 1 || options.BatchSize > 100 || options.Concurrency < 1 || options.Concurrency > 32 || options.Concurrency > options.BatchSize {
-		return nil, ErrInvalidRunTerminalReport
+	if store == nil || !models.IsValidOpaqueIdentifier(options.WorkerID, 180) || options.LeaseDuration < 3*time.Second || options.LeaseDuration > 5*time.Minute || options.BatchSize < 1 || options.BatchSize > 100 || options.Concurrency < 1 || options.Concurrency > 32 || options.Concurrency > options.BatchSize {
+		return nil, models.ErrInvalidRunTerminalReport
 	}
 	return &RunTerminalReportingWorker{
 		store: store, options: options, now: models.ClockFrom(opts),
-		project: func(ctx context.Context, run *AgentRun) error {
+		project: func(ctx context.Context, run *models.AgentRun) error {
 			return conversationrun.ProjectTerminalRunReporting(ctx, store, run)
 		},
 	}, nil
@@ -70,13 +70,13 @@ func (w *RunTerminalReportingWorker) SetExternalConversationDelivery(resolver Ex
 	if w == nil || resolver == nil {
 		return errors.New("external conversation delivery requires an adapter resolver")
 	}
-	store, ok := w.store.(ExternalConversationStore)
+	store, ok := w.store.(models.ExternalConversationStore)
 	if !ok {
 		return errors.New("terminal reporting store has no external conversations")
 	}
 	transport := NewExternalConversationTransportService(store, resolver, models.WithClock(w.now))
-	conversations := w.store.(ConversationStore)
-	w.project = func(ctx context.Context, run *AgentRun) error {
+	conversations := w.store.(models.ConversationStore)
+	w.project = func(ctx context.Context, run *models.AgentRun) error {
 		if err := conversationrun.ProjectTerminalRunReporting(ctx, conversations, run); err != nil {
 			return err
 		}
@@ -90,16 +90,16 @@ func (w *RunTerminalReportingWorker) ProcessBatch(ctx context.Context) (int, err
 	return w.process(ctx, nil)
 }
 
-func (w *RunTerminalReportingWorker) ProcessScope(ctx context.Context, scope Scope) (int, error) {
+func (w *RunTerminalReportingWorker) ProcessScope(ctx context.Context, scope models.Scope) (int, error) {
 	if err := scope.Validate(); err != nil {
 		return 0, err
 	}
 	return w.process(ctx, &scope)
 }
 
-func (w *RunTerminalReportingWorker) process(ctx context.Context, scope *Scope) (int, error) {
+func (w *RunTerminalReportingWorker) process(ctx context.Context, scope *models.Scope) (int, error) {
 	if w == nil || w.store == nil || w.project == nil {
-		return 0, ErrInvalidRunTerminalReport
+		return 0, models.ErrInvalidRunTerminalReport
 	}
 	ctx, cancel := context.WithTimeout(ctx, w.options.LeaseDuration*2/3)
 	defer cancel()
@@ -108,7 +108,7 @@ func (w *RunTerminalReportingWorker) process(ctx context.Context, scope *Scope) 
 		return 0, err
 	}
 	workerID := w.options.WorkerID + ":" + uuid.NewString()
-	reports, err := w.store.ClaimRunTerminalReports(ctx, RunTerminalReportingClaim{
+	reports, err := w.store.ClaimRunTerminalReports(ctx, models.RunTerminalReportingClaim{
 		Scope: scope, WorkerID: workerID, Now: w.now().UTC(), LeaseDuration: w.options.LeaseDuration, Limit: w.options.BatchSize,
 	})
 	release()
@@ -120,7 +120,7 @@ func (w *RunTerminalReportingWorker) process(ctx context.Context, scope *Scope) 
 	if len(reports) == 0 {
 		return 0, nil
 	}
-	jobs := make(chan *RunTerminalReport)
+	jobs := make(chan *models.RunTerminalReport)
 	var group sync.WaitGroup
 	var completed atomic.Int64
 	var failureMu sync.Mutex
@@ -164,12 +164,12 @@ dispatch:
 	return int(completed.Load()), errors.Join(failures...)
 }
 
-func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *RunTerminalReport) error {
+func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *models.RunTerminalReport) error {
 	if report == nil || report.Run == nil || report.LeaseExpiresAt == nil || report.Run.Scope != report.Scope || report.Run.ID != report.RunID || report.Run.Status != report.Status || report.TerminalRevision != report.Run.Revision {
-		return ErrInvalidRunTerminalReport
+		return models.ErrInvalidRunTerminalReport
 	}
 	var err error
-	if !runNeedsTerminalReporting(report.Run) {
+	if !models.RunNeedsTerminalReporting(report.Run) {
 		// The outbox trigger enqueues broadly; a Run with nothing to report
 		// (a Team routing Run, for example) is acknowledged, not retried.
 		err = conversationrun.ErrRunTerminalReportUndeliverable
@@ -182,10 +182,10 @@ func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *
 		}
 	}
 	if err == nil {
-		err = w.project(ctx, cloneAgentRun(report.Run))
+		err = w.project(ctx, models.CloneAgentRun(report.Run))
 	}
 	now := w.now().UTC()
-	completion := RunTerminalReportingCompletion{
+	completion := models.RunTerminalReportingCompletion{
 		Scope: report.Scope, RunID: report.RunID, Status: report.Status, TerminalRevision: report.TerminalRevision, WorkerID: report.LeaseOwner,
 		LeaseExpiresAt: *report.LeaseExpiresAt, Now: now,
 	}
@@ -198,7 +198,7 @@ func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *
 	}
 	if err != nil {
 		delay := workqueue.WorkerPollDelay(time.Second, report.Attempts-1, "terminal-report:"+report.RunID)
-		if retryErr := w.store.RetryRunTerminalReport(ctx, RunTerminalReportingRetry{RunTerminalReportingCompletion: completion, AvailableAt: now.Add(delay)}); retryErr != nil {
+		if retryErr := w.store.RetryRunTerminalReport(ctx, models.RunTerminalReportingRetry{RunTerminalReportingCompletion: completion, AvailableAt: now.Add(delay)}); retryErr != nil {
 			return errors.Join(err, retryErr)
 		}
 		w.retried.Add(1)

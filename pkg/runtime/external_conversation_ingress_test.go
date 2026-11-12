@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -22,17 +23,17 @@ type externalConversationGatewayHostStub struct {
 	result  *ExternalConversationGatewayHostResult
 }
 
-func createActiveExternalConversationGateway(t *testing.T, ctx context.Context, service *ExternalConversationGatewayService, request CreateExternalConversationGatewayRequest) *ExternalConversationGatewayRegistration {
+func createActiveExternalConversationGateway(t *testing.T, ctx context.Context, service *ExternalConversationGatewayService, request CreateExternalConversationGatewayRequest) *models.ExternalConversationGatewayRegistration {
 	t.Helper()
-	request.Status = ExternalConversationGatewayPaused
+	request.Status = models.ExternalConversationGatewayPaused
 	created, err := service.Create(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	active := ExternalConversationGatewayActive
+	active := models.ExternalConversationGatewayActive
 	activated, err := service.Update(ctx, request.Gateway.Scope, created.ID, UpdateExternalConversationGatewayRequest{
 		ExpectedRevision: created.Revision, Status: &active,
-		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "activate reviewed provider route",
+		Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "activate reviewed provider route",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +63,7 @@ func TestExternalConversationIngressUsesExactSkillAdapterAndPersistsVerifiedEven
 	now := time.Now().UTC()
 	host := &externalConversationIngressHostStub{result: &ExternalConversationIngressHostResult{
 		StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(`{"ok":true}`),
-		Events: []NormalizedExternalConversationEvent{{
+		Events: []models.NormalizedExternalConversationEvent{{
 			ID: "Ev-ingress", Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "C123", ExternalMessageID: "171.001",
 			ExternalParticipantID: "U123", Text: "Hello", OrderingKey: "C123:171.001", OccurredAt: now,
@@ -91,7 +92,7 @@ func TestExternalConversationIngressUsesExactSkillAdapterAndPersistsVerifiedEven
 		replayed.Received[0].Item.ID != first.Received[0].Item.ID {
 		t.Fatalf("replayed ingress = %#v, %v", replayed, err)
 	}
-	items, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
+	items, err := store.ListExternalConversationInbox(ctx, models.ExternalConversationInboxFilter{
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10,
 	})
 	if err != nil || len(items) != 1 {
@@ -101,7 +102,7 @@ func TestExternalConversationIngressUsesExactSkillAdapterAndPersistsVerifiedEven
 
 func TestExternalConversationIngressRejectsSensitiveForwardedHeaders(t *testing.T) {
 	request := &ExternalConversationIngressRequest{
-		Scope: Scope{Kind: "tenant", ID: "one"}, EndpointID: "endpoint", Method: http.MethodPost,
+		Scope: models.Scope{Kind: "tenant", ID: "one"}, EndpointID: "endpoint", Method: http.MethodPost,
 		Headers: map[string][]string{"Authorization": {"Bearer secret"}}, Body: []byte(`{}`),
 	}
 	if err := request.Validate(); err == nil {
@@ -114,7 +115,7 @@ func TestExternalConversationPublicIngressResolvesAuthoritativeScopeFromOpaqueRo
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	host := &externalConversationIngressHostStub{result: &ExternalConversationIngressHostResult{
 		StatusCode: http.StatusOK,
-		Events: []NormalizedExternalConversationEvent{{
+		Events: []models.NormalizedExternalConversationEvent{{
 			ID: "Ev-public-route", Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "C123", ExternalMessageID: "171.002",
 			ExternalParticipantID: "U123", Text: "Hello from the public route",
@@ -135,7 +136,7 @@ func TestExternalConversationPublicIngressResolvesAuthoritativeScopeFromOpaqueRo
 	}
 	if _, err := service.NormalizeExternalConversationPublicIngress(ctx, ExternalConversationPublicIngressRequest{
 		Route: "unknown-route", Method: http.MethodPost, Body: []byte(`{}`),
-	}, host); !errors.Is(err, ErrExternalConversationEndpointNotFound) {
+	}, host); !errors.Is(err, models.ErrExternalConversationEndpointNotFound) {
 		t.Fatalf("unknown route error = %v", err)
 	}
 }
@@ -152,7 +153,7 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
 		t.Fatal(err)
 	}
-	event := NormalizedExternalConversationEvent{
+	event := models.NormalizedExternalConversationEvent{
 		ID: "Ev-shared", Type: capability.ConversationEventMessageReceived,
 		ExternalConversationID: "C123", ExternalMessageID: "171.003",
 		ExternalParticipantID: "U123", Text: "Hello shared app",
@@ -164,15 +165,15 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 			InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: event,
 		}},
 	}}
-	gateway := ExternalConversationIngressGateway{
-		Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
+	gateway := models.ExternalConversationIngressGateway{
+		Scope: endpoint.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
 		Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 	}
 	service := NewExternalConversationTransportService(store, catalog)
 	gateways := NewExternalConversationGatewayService(store, nil)
 	registration := createActiveExternalConversationGateway(t, ctx, gateways, CreateExternalConversationGatewayRequest{
 		ID: "shared-slack", Name: "Shared Slack events", Gateway: gateway,
-		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create verified route acceptance",
+		Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "create verified route acceptance",
 	})
 
 	first, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
@@ -221,7 +222,7 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 	}
 	host.result.Events[0].InstallationID, host.result.Events[0].Address = "T123", "C123"
 	previousRevision = endpoint.Revision
-	endpoint.Status, endpoint.Revision = ExternalConversationEndpointPaused, endpoint.Revision+1
+	endpoint.Status, endpoint.Revision = models.ExternalConversationEndpointPaused, endpoint.Revision+1
 	endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
 		t.Fatal(err)
@@ -233,17 +234,17 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 		t.Fatalf("paused endpoint shared ingress = %#v err=%v", unmatched, err)
 	}
 
-	paused := ExternalConversationGatewayPaused
+	paused := models.ExternalConversationGatewayPaused
 	registration, err = gateways.Update(ctx, registration.Gateway.Scope, registration.ID, UpdateExternalConversationGatewayRequest{
 		ExpectedRevision: registration.Revision, Status: &paused,
-		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "pause ingress acceptance route",
+		Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "pause ingress acceptance route",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`),
-	}, host); !errors.Is(err, ErrExternalConversationConflict) {
+	}, host); !errors.Is(err, models.ErrExternalConversationConflict) {
 		t.Fatalf("paused gateway error = %v", err)
 	}
 }
@@ -263,7 +264,7 @@ func TestExternalConversationGatewayRoutesInstallationWideEndpointFromAnyAddress
 	}
 
 	for _, address := range []string{"C-one", "C-two", "D-direct"} {
-		matches, err := store.ListExternalConversationEndpointsByVerifiedRoute(ctx, ExternalConversationVerifiedRoute{
+		matches, err := store.ListExternalConversationEndpointsByVerifiedRoute(ctx, models.ExternalConversationVerifiedRoute{
 			Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123", Address: address,
 			SkillID: endpoint.Adapter.SkillID, SkillVersion: endpoint.Adapter.SkillVersion,
 			SourceIdentity: endpoint.Adapter.SourceIdentity, AdapterID: endpoint.Adapter.AdapterID,
@@ -272,7 +273,7 @@ func TestExternalConversationGatewayRoutesInstallationWideEndpointFromAnyAddress
 			t.Fatalf("address %q matches = %#v, %v", address, matches, err)
 		}
 	}
-	matches, err := store.ListExternalConversationEndpointsByVerifiedRoute(ctx, ExternalConversationVerifiedRoute{
+	matches, err := store.ListExternalConversationEndpointsByVerifiedRoute(ctx, models.ExternalConversationVerifiedRoute{
 		Provider: endpoint.Provider, InstallationID: "another-workspace", ApplicationID: "A123", Address: "C-one",
 		SkillID: endpoint.Adapter.SkillID, SkillVersion: endpoint.Adapter.SkillVersion,
 		SourceIdentity: endpoint.Adapter.SourceIdentity, AdapterID: endpoint.Adapter.AdapterID,
@@ -294,17 +295,17 @@ func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
 		t.Fatal(err)
 	}
-	other := cloneExternalConversationEndpoint(endpoint)
+	other := models.CloneExternalConversationEndpoint(endpoint)
 	other.ID = "other-tenant-endpoint"
 	other.IngressRoute = "other-tenant-route"
-	other.Scope = Scope{Kind: "tenant", ID: "other"}
+	other.Scope = models.Scope{Kind: "tenant", ID: "other"}
 	other.CreatedAt = other.CreatedAt.Add(time.Second)
 	other.UpdatedAt = other.CreatedAt
 	other.Revision = 1
 	if err := store.CreateExternalConversationEndpoint(ctx, other); err != nil {
 		t.Fatal(err)
 	}
-	event := NormalizedExternalConversationEvent{
+	event := models.NormalizedExternalConversationEvent{
 		ID: "Ev-tenant-boundary", Type: capability.ConversationEventMessageReceived,
 		ExternalConversationID: "C-shared", ExternalMessageID: "171.004",
 		ExternalParticipantID: "U123", Text: "Tenant boundary",
@@ -319,11 +320,11 @@ func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, nil),
 		CreateExternalConversationGatewayRequest{
 			ID: "tenant-slack", Name: "Tenant Slack",
-			Gateway: ExternalConversationIngressGateway{
-				Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
+			Gateway: models.ExternalConversationIngressGateway{
+				Scope: endpoint.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
 				Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 			},
-			Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create tenant isolation route",
+			Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "create tenant isolation route",
 		},
 	)
 	result, err := NewExternalConversationTransportService(store, catalog).
@@ -333,7 +334,7 @@ func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 	if err != nil || len(result.Received) != 1 || result.Received[0].Item.Scope != endpoint.Scope {
 		t.Fatalf("tenant-bounded ingress = %#v, err = %v", result, err)
 	}
-	items, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
+	items, err := store.ListExternalConversationInbox(ctx, models.ExternalConversationInboxFilter{
 		Scope: other.Scope, EndpointID: other.ID, Limit: 10,
 	})
 	if err != nil || len(items) != 0 {
@@ -344,7 +345,7 @@ func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCrossTenantAmbiguity(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, first := externalConversationDeliveryFixture(t, ctx, "slack")
-	configureRoute := func(endpoint *ExternalConversationEndpoint, installation, application, address string) {
+	configureRoute := func(endpoint *models.ExternalConversationEndpoint, installation, application, address string) {
 		t.Helper()
 		previousRevision := endpoint.Revision
 		endpoint.InstallationID, endpoint.ApplicationID, endpoint.Address = installation, application, address
@@ -356,7 +357,7 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 	}
 	configureRoute(first, "T-one", "A-shared", "C-support")
 
-	secondScope := Scope{Kind: "tenant", ID: "second"}
+	secondScope := models.Scope{Kind: "tenant", ID: "second"}
 	secondBinding := &skill.Binding{
 		ID: "slack-second", Scope: skill.ScopeReference{Kind: secondScope.Kind, ID: secondScope.ID}, DeploymentID: "second-agent",
 		SkillID: "slack", SkillVersion: "1.0.0", EnabledConversationAdapters: []string{"conversations"},
@@ -370,23 +371,23 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 	}
 	second, err := NewExternalConversationEndpointService(store, catalog).Create(ctx, CreateExternalConversationEndpointRequest{
 		ID: "second-endpoint", Scope: secondScope,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "second-agent"}, DeploymentID: "second-agent",
+		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "second-agent"}, DeploymentID: "second-agent",
 		Name: "Second support channel",
-		Adapter: ExternalConversationAdapterReference{
+		Adapter: models.ExternalConversationAdapterReference{
 			SkillID: "slack", SkillVersion: "1.0.0", BindingID: secondBinding.ID,
 			BindingRevision: secondBinding.Revision, AdapterID: "conversations",
 		},
 		Mode: capability.ConversationEndpointChannel, Address: "C-support",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "second-agent"},
-		Policy:  ExternalConversationPolicy{MessageSelection: ExternalConversationSelectAllMessages, ReplyMode: ExternalConversationReplyThread, IgnoreBots: true},
-		Status:  ExternalConversationEndpointActive,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "second-agent"},
+		Policy:  models.ExternalConversationPolicy{MessageSelection: models.ExternalConversationSelectAllMessages, ReplyMode: models.ExternalConversationReplyThread, IgnoreBots: true},
+		Status:  models.ExternalConversationEndpointActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	configureRoute(second, "T-two", "A-shared", "C-support")
 
-	platformScope := Scope{Kind: "platform", ID: "default"}
+	platformScope := models.Scope{Kind: "platform", ID: "default"}
 	platformBinding := &skill.Binding{
 		ID: "slack-platform", Scope: skill.ScopeReference{Kind: platformScope.Kind, ID: platformScope.ID}, DeploymentID: "slack-platform-verifier",
 		SkillID: "slack", SkillVersion: "1.0.0", EnabledConversationAdapters: []string{"conversations"},
@@ -400,21 +401,21 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 	}
 	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "platform-slack", Name: "Platform Slack events",
-		Gateway: ExternalConversationIngressGateway{
-			Scope: platformScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: platformBinding.DeploymentID}, DeploymentID: platformBinding.DeploymentID, Provider: "slack",
-			Adapter: ExternalConversationAdapterReference{
+		Gateway: models.ExternalConversationIngressGateway{
+			Scope: platformScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: platformBinding.DeploymentID}, DeploymentID: platformBinding.DeploymentID, Provider: "slack",
+			Adapter: models.ExternalConversationAdapterReference{
 				SkillID: "slack", SkillVersion: "1.0.0", BindingID: platformBinding.ID,
 				BindingRevision: platformBinding.Revision, AdapterID: "conversations",
 			},
 		},
-		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create platform routing acceptance",
+		Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "create platform routing acceptance",
 	})
 	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK}}
 	service := NewExternalConversationTransportService(store, catalog)
 	invoke := func(eventID, installation string) (*ExternalConversationGatewayIngressResult, error) {
 		host.result.Events = []ExternalConversationGatewayEvent{{
 			InstallationID: installation, ApplicationID: "A-shared", Address: "C-support",
-			Event: NormalizedExternalConversationEvent{
+			Event: models.NormalizedExternalConversationEvent{
 				ID: eventID, Type: capability.ConversationEventMessageReceived,
 				ExternalConversationID: "C-support", ExternalMessageID: eventID,
 				ExternalParticipantID: "U-support", Text: "hello", OrderingKey: "C-support:" + eventID,
@@ -434,9 +435,9 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 		t.Fatalf("second tenant route = %#v, %v", secondResult, err)
 	}
 
-	ambiguous := cloneExternalConversationEndpoint(first)
+	ambiguous := models.CloneExternalConversationEndpoint(first)
 	ambiguous.ID, ambiguous.IngressRoute = "ambiguous-endpoint", "ambiguous-route"
-	ambiguous.Scope = Scope{Kind: "tenant", ID: "ambiguous"}
+	ambiguous.Scope = models.Scope{Kind: "tenant", ID: "ambiguous"}
 	ambiguous.Owner.ID, ambiguous.DeploymentID = "ambiguous-agent", "ambiguous-agent"
 	ambiguous.Handler.ID = "ambiguous-agent"
 	ambiguous.Revision = 1
@@ -444,10 +445,10 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 	if err := store.CreateExternalConversationEndpoint(ctx, ambiguous); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := invoke("event-ambiguous", "T-one"); !errors.Is(err, ErrExternalConversationConflict) {
+	if _, err := invoke("event-ambiguous", "T-one"); !errors.Is(err, models.ErrExternalConversationConflict) {
 		t.Fatalf("cross-tenant ambiguous route error = %v", err)
 	}
-	items, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
+	items, err := store.ListExternalConversationInbox(ctx, models.ExternalConversationInboxFilter{
 		Scope: first.Scope, EndpointID: first.ID, Limit: 10,
 	})
 	if err != nil || len(items) != 1 {
@@ -463,7 +464,7 @@ func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpoints
 	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{Kind: "platform", ID: "default"}
+	scope := models.Scope{Kind: "platform", ID: "default"}
 	binding := &skill.Binding{
 		ID: "verification-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 		DeploymentID: "verification-host", SkillID: definition.ID, SkillVersion: definition.Version,
@@ -477,14 +478,14 @@ func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpoints
 	}
 	gateway := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "verification-gateway", Name: "Verification gateway",
-		Gateway: ExternalConversationIngressGateway{
-			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: binding.DeploymentID}, DeploymentID: binding.DeploymentID, Provider: "slack",
-			Adapter: ExternalConversationAdapterReference{
+		Gateway: models.ExternalConversationIngressGateway{
+			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: binding.DeploymentID}, DeploymentID: binding.DeploymentID, Provider: "slack",
+			Adapter: models.ExternalConversationAdapterReference{
 				SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID,
 				BindingRevision: binding.Revision, AdapterID: "conversations",
 			},
 		},
-		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create provider verification route",
+		Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "create provider verification route",
 	})
 	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{
 		StatusCode: http.StatusOK, ContentType: "text/plain", Body: []byte("verify-me"),
@@ -506,14 +507,14 @@ func TestConversationGatewayUsesCurrentReviewedBindingAfterSetupSave(t *testing.
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, endpoint.Revision-1); err != nil {
 		t.Fatal(err)
 	}
-	gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
-	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{ID: "saved-setup", Name: "Saved setup", Gateway: gateway, Actor: ActivityActor{Type: "test", ID: "owner"}, Reason: "Reviewed inbox"})
+	gateway := models.ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
+	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{ID: "saved-setup", Name: "Saved setup", Gateway: gateway, Actor: models.ActivityActor{Type: "test", ID: "owner"}, Reason: "Reviewed inbox"})
 	bound, err := catalog.ResolveConversationAdapterBinding(ctx, skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	binding := bound.Binding
-	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []ExternalConversationGatewayEvent{{InstallationID: "T123", ApplicationID: "A123", Address: endpoint.Address, Event: NormalizedExternalConversationEvent{ID: "new-event", Type: capability.ConversationEventMessageReceived, ExternalConversationID: endpoint.Address, ExternalMessageID: "171.004", ExternalParticipantID: "U123", Text: "hello", OrderingKey: "channel:171.004", OccurredAt: time.Now().UTC()}}}}}
+	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []ExternalConversationGatewayEvent{{InstallationID: "T123", ApplicationID: "A123", Address: endpoint.Address, Event: models.NormalizedExternalConversationEvent{ID: "new-event", Type: capability.ConversationEventMessageReceived, ExternalConversationID: endpoint.Address, ExternalMessageID: "171.004", ExternalParticipantID: "U123", Text: "hello", OrderingKey: "channel:171.004", OccurredAt: time.Now().UTC()}}}}}
 	service := NewExternalConversationTransportService(store, catalog)
 	request := ExternalConversationPublicIngressRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`)}
 	for revision := int64(2); revision <= 4; revision++ {
@@ -531,7 +532,7 @@ func TestConversationGatewayUsesCurrentReviewedBindingAfterSetupSave(t *testing.
 		if _, err := service.NormalizeExternalConversationIngress(ctx, ExternalConversationIngressRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: http.MethodPost, Body: []byte(`{}`)}, directHost); err != nil || directHost.request.Endpoint.Adapter.BindingRevision != revision {
 			t.Fatalf("direct ingress snapshot drifted: %v", err)
 		}
-		pending := &ExternalConversationDelivery{Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter, Operation: capability.ConversationDeliveryMessageSend}
+		pending := &models.ExternalConversationDelivery{Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter, Operation: capability.ConversationDeliveryMessageSend}
 		worker := &ExternalConversationDeliveryWorker{store: store, resolver: catalog}
 		if _, resolved, err := worker.resolve(ctx, pending); err != nil || resolved.Binding.Revision != revision {
 			t.Fatalf("queued reply failed after setup save: %v", err)
@@ -552,7 +553,7 @@ func TestConversationGatewayUsesCurrentReviewedBindingAfterSetupSave(t *testing.
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, request, host); !errors.Is(err, ErrExternalConversationConflict) {
+	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, request, host); !errors.Is(err, models.ErrExternalConversationConflict) {
 		t.Fatalf("disabled binding accepted: %v", err)
 	}
 }

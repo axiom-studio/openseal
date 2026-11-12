@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -96,9 +97,9 @@ func (f *answerStreamFixture) clockOption() models.ServiceOption {
 func (f *answerStreamFixture) preview(text string, reset bool) {
 	f.t.Helper()
 	f.sequence++
-	_, err := NewRunActivityService(f.store, f.store).AppendActivity(f.t.Context(), &ActivityEvent{
+	_, err := activity.NewRunActivityService(f.store, f.store).AppendActivity(f.t.Context(), &models.ActivityEvent{
 		Scope: f.endpoint.Scope, RunID: f.run.ID, EventType: "turn.answer_preview", Summary: "Reply preview updated",
-		Actor: ActivityActor{Type: "worker", ID: "test"}, Visibility: ActivityVisibilityScope,
+		Actor: models.ActivityActor{Type: "worker", ID: "test"}, Visibility: models.ActivityVisibilityScope,
 		Payload: map[string]interface{}{"attemptId": "attempt", "sequence": f.sequence, "text": text, "reset": reset},
 	})
 	if err != nil {
@@ -106,7 +107,7 @@ func (f *answerStreamFixture) preview(text string, reset bool) {
 	}
 }
 
-func (f *answerStreamFixture) stream() []*ExternalConversationDelivery {
+func (f *answerStreamFixture) stream() []*models.ExternalConversationDelivery {
 	f.t.Helper()
 	deliveries, err := f.progress.ProcessCommentaryScope(f.t.Context(), f.endpoint.Scope)
 	if err != nil {
@@ -129,7 +130,7 @@ func (f *answerStreamFixture) deliverAll() {
 	f.t.Fatal("outbox did not drain")
 }
 
-func (f *answerStreamFixture) reply() []*ExternalConversationDelivery {
+func (f *answerStreamFixture) reply() []*models.ExternalConversationDelivery {
 	f.t.Helper()
 	deliveries, err := f.replies.ProcessScope(f.t.Context(), f.endpoint.Scope, 10)
 	if err != nil {
@@ -138,7 +139,7 @@ func (f *answerStreamFixture) reply() []*ExternalConversationDelivery {
 	return deliveries
 }
 
-func (f *answerStreamFixture) finish(status AgentRunStatus, answer string) {
+func (f *answerStreamFixture) finish(status models.AgentRunStatus, answer string) {
 	f.t.Helper()
 	ctx := f.t.Context()
 	if answer != "" {
@@ -146,16 +147,16 @@ func (f *answerStreamFixture) finish(status AgentRunStatus, answer string) {
 		current, _ := conversations.GetConversation(ctx, f.endpoint.Scope, f.conversation.ID)
 		if _, err := conversations.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 			Scope: f.endpoint.Scope, ConversationID: f.conversation.ID, ExpectedRevision: current.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: f.endpoint.DeploymentID},
-			Intent: MessageIntentAnswer, Content: answer, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-			ReplyToMessageID: f.inbound.ID, References: []ConversationReference{{Kind: ConversationReferenceRun, ID: f.run.ID}},
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: f.endpoint.DeploymentID},
+			Intent: models.MessageIntentAnswer, Content: answer, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
+			ReplyToMessageID: f.inbound.ID, References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: f.run.ID}},
 			IdempotencyKey: "streamed-answer",
 		}); err != nil {
 			f.t.Fatal(err)
 		}
 	}
-	if _, _, err := NewRunActivityService(f.store, f.store).TransitionRun(ctx, f.endpoint.Scope, f.run.ID, RunTransitionRequest{
-		ExpectedRevision: f.run.Revision, Status: status, Summary: "Finished", Actor: ActivityActor{Type: "worker", ID: "test"},
+	if _, _, err := activity.NewRunActivityService(f.store, f.store).TransitionRun(ctx, f.endpoint.Scope, f.run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: f.run.Revision, Status: status, Summary: "Finished", Actor: models.ActivityActor{Type: "worker", ID: "test"},
 	}); err != nil {
 		f.t.Fatal(err)
 	}
@@ -187,7 +188,7 @@ func TestExternalAnswerStreamEditsOneMessageAndFinishesIt(t *testing.T) {
 		t.Fatalf("an edit overtook the unsent message: %#v", deliveries)
 	}
 	f.deliverAll()
-	if f.host.messages["chat-1"] != streamedOpening || f.host.requests[0].Message.Intent != MessageIntentAnswer || len(f.host.requests[0].Message.References) != 0 {
+	if f.host.messages["chat-1"] != streamedOpening || f.host.requests[0].Message.Intent != models.MessageIntentAnswer || len(f.host.requests[0].Message.References) != 0 {
 		t.Fatalf("preview body = %#v", f.host.requests[0].Message)
 	}
 	// Edits are throttled per conversation.
@@ -200,7 +201,7 @@ func TestExternalAnswerStreamEditsOneMessageAndFinishesIt(t *testing.T) {
 	if len(edited) != 1 || edited[0].Operation != capability.ConversationDeliveryMessageUpdate || edited[0].Parameters["providerMessageId"] != "chat-1" {
 		t.Fatalf("stream did not edit its message: %#v", edited)
 	}
-	f.finish(AgentRunStatusCompleted, streamedOpening+" timed out after 30 seconds.")
+	f.finish(models.AgentRunStatusCompleted, streamedOpening+" timed out after 30 seconds.")
 	// The committed reply waits for the in-flight edit instead of racing it.
 	if deliveries := f.reply(); len(deliveries) != 0 {
 		t.Fatalf("reply overtook the stream: %#v", deliveries)
@@ -228,7 +229,7 @@ func TestExternalAnswerStreamEditsOneMessageAndFinishesIt(t *testing.T) {
 	if len(f.host.messages) != 1 || f.host.messages["chat-1"] != streamedOpening+" timed out after 30 seconds." {
 		t.Fatalf("chat = %#v", f.host.messages)
 	}
-	mapping, err := f.store.GetExternalMessageMapping(t.Context(), f.endpoint.Scope, f.endpoint.ID, ExternalMessageOutbound, "chat-1")
+	mapping, err := f.store.GetExternalMessageMapping(t.Context(), f.endpoint.Scope, f.endpoint.ID, models.ExternalMessageOutbound, "chat-1")
 	if err != nil || mapping == nil || mapping.ChannelMessageID != final.ChannelMessageID {
 		t.Fatalf("streamed message maps to %#v, %v", mapping, err)
 	}
@@ -255,7 +256,7 @@ func TestExternalAnswerStreamSupersedesLateEdit(t *testing.T) {
 	}
 	f.deliverAll()
 	stored, _ := f.store.GetExternalConversationDelivery(t.Context(), f.endpoint.Scope, late[0].ID)
-	if stored.Status != ExternalConversationDeliveryFailed || stored.ErrorCode != "answer_superseded" {
+	if stored.Status != models.ExternalConversationDeliveryFailed || stored.ErrorCode != "answer_superseded" {
 		t.Fatalf("late edit = %#v", stored)
 	}
 }
@@ -267,7 +268,7 @@ func TestExternalAnswerStreamFailedTurn(t *testing.T) {
 		f.stream()
 		f.deliverAll()
 		f.preview("", true)
-		f.finish(AgentRunStatusFailed, "")
+		f.finish(models.AgentRunStatusFailed, "")
 		f.reply()
 		f.deliverAll()
 		if got := f.operations(); len(got) != 3 || got[1] != capability.ConversationDeliveryMessageDelete || got[2] != capability.ConversationDeliveryMessageSend {
@@ -283,7 +284,7 @@ func TestExternalAnswerStreamFailedTurn(t *testing.T) {
 		f.stream()
 		f.deliverAll()
 		f.preview("", true)
-		f.finish(AgentRunStatusFailed, "")
+		f.finish(models.AgentRunStatusFailed, "")
 		f.reply()
 		f.deliverAll()
 		if got := f.operations(); len(got) != 2 || got[1] != capability.ConversationDeliveryMessageUpdate {
@@ -300,7 +301,7 @@ func TestExternalAnswerStreamPostsReplyWhenEditFails(t *testing.T) {
 	f.preview(streamedOpening, false)
 	f.stream()
 	f.deliverAll()
-	f.finish(AgentRunStatusCompleted, streamedOpening+" timed out.")
+	f.finish(models.AgentRunStatusCompleted, streamedOpening+" timed out.")
 	// The chat message was deleted, so the edit cannot finish it.
 	f.host.rejectAll = capability.ConversationDeliveryMessageUpdate
 	f.reply()
@@ -321,7 +322,7 @@ func TestExternalAnswerStreamNeedsMessageUpdate(t *testing.T) {
 	if deliveries := f.stream(); len(deliveries) != 0 {
 		t.Fatalf("an adapter without message.update streamed: %#v", deliveries)
 	}
-	f.finish(AgentRunStatusCompleted, streamedOpening+" timed out.")
+	f.finish(models.AgentRunStatusCompleted, streamedOpening+" timed out.")
 	if deliveries := f.reply(); len(deliveries) != 1 || deliveries[0].Operation != capability.ConversationDeliveryMessageSend {
 		t.Fatalf("reply = %#v", deliveries)
 	}

@@ -44,17 +44,17 @@ func (h *recordingContextHost) ReadExternalConversationContext(_ context.Context
 	return h.result, h.err
 }
 
-func receiveContextTestEvent(t *testing.T, store *sqlite.Store, endpoint *ExternalConversationEndpoint, id, messageID, threadID string, now time.Time) *ExternalConversationInboxItem {
+func receiveContextTestEvent(t *testing.T, store *sqlite.Store, endpoint *models.ExternalConversationEndpoint, id, messageID, threadID string, now time.Time) *models.ExternalConversationInboxItem {
 	t.Helper()
-	item := &ExternalConversationInboxItem{
+	item := &models.ExternalConversationInboxItem{
 		ID: id, Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: NormalizedExternalConversationEvent{
+		Event: models.NormalizedExternalConversationEvent{
 			ID: id, Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "workspace/channel", ExternalThreadID: threadID, ExternalMessageID: messageID,
 			ExternalParticipantID: "current-user", ParticipantDisplayName: "Kev", Text: "Which ones can you pick up?",
 			MentionsEndpoint: true, OrderingKey: "workspace/channel:" + threadID, OccurredAt: now,
 		},
-		Status: ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now,
+		Status: models.ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, _, err := store.ReceiveExternalConversationEvent(t.Context(), item); err != nil {
@@ -63,7 +63,7 @@ func receiveContextTestEvent(t *testing.T, store *sqlite.Store, endpoint *Extern
 	return item
 }
 
-func contextTestHistory(event NormalizedExternalConversationEvent) *ExternalConversationContextResult {
+func contextTestHistory(event models.NormalizedExternalConversationEvent) *ExternalConversationContextResult {
 	return &ExternalConversationContextResult{Status: conversation.ExternalConversationContextComplete, Messages: []ExternalConversationContextMessage{
 		{ExternalConversationID: event.ExternalConversationID, ExternalThreadID: event.ExternalThreadID,
 			ExternalMessageID: "earlier-reply", ExternalParticipantID: "human-two", ParticipantDisplayName: "Piyush",
@@ -119,16 +119,16 @@ func TestExternalConversationContextImportsParentAndRepliesBeforeFirstMention(t 
 	}
 	workerClock = func() time.Time { return now.Add(time.Second) }
 	applied, err := worker.ProcessOne(ctx, endpoint.Scope)
-	if err != nil || applied.Status != ExternalConversationInboxApplied || applied.RunID == "" {
+	if err != nil || applied.Status != models.ExternalConversationInboxApplied || applied.RunID == "" {
 		t.Fatalf("application = %#v, %v", applied, err)
 	}
-	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
+	messages, err := store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
 	if err != nil || len(messages) != 3 {
 		t.Fatalf("history = %#v, %v", messages, err)
 	}
 	parent, reply, trigger := messages[0], messages[1], messages[2]
 	if parent.Content != host.result.Messages[1].Text || !parent.Historical || parent.RequiresResponse || parent.ThreadRootID != "" ||
-		parent.Sender.Type != ConversationParticipantUser || parent.SenderDisplayName != "Mahendra" ||
+		parent.Sender.Type != models.ConversationParticipantUser || parent.SenderDisplayName != "Mahendra" ||
 		!reply.Historical || reply.ThreadRootID != parent.ID || reply.ReplyToMessageID != parent.ID ||
 		trigger.Historical || !trigger.RequiresResponse || trigger.ThreadRootID != parent.ID || trigger.ReplyToMessageID != parent.ID {
 		t.Fatalf("parent/reply/trigger boundaries = %#v / %#v / %#v", parent, reply, trigger)
@@ -137,7 +137,7 @@ func TestExternalConversationContextImportsParentAndRepliesBeforeFirstMention(t 
 	if state == nil || state.Status != conversation.ExternalConversationContextComplete || state.ImportedMessages != 2 || state.ExternalConversationID != item.Event.ExternalConversationID || state.ExternalThreadID != item.Event.ExternalThreadID {
 		t.Fatalf("availability = %#v", state)
 	}
-	runs, _ := store.ListAgentRuns(ctx, AgentRunFilter{Scope: endpoint.Scope, Kind: RunKindConversation, Limit: 20})
+	runs, _ := store.ListAgentRuns(ctx, models.AgentRunFilter{Scope: endpoint.Scope, Kind: models.RunKindConversation, Limit: 20})
 	if len(runs) != 1 || len(host.requests) != 1 || dispatcher.dispatches != 2 {
 		t.Fatalf("recovery duplicated context or work: runs=%d reads=%d dispatches=%d", len(runs), len(host.requests), dispatcher.dispatches)
 	}
@@ -162,7 +162,7 @@ func TestExternalConversationContextRefreshesMissingRepliesAndKeepsThreadsSepara
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstMessages, _ := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
+	firstMessages, _ := store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
 	firstRoot := firstMessages[0].ID
 	second := receiveContextTestEvent(t, store, endpoint, "first-thread-next-mention", "mention-two", "parent-one", now.Add(time.Minute))
 	host.result = contextTestHistory(first.Event)
@@ -174,7 +174,7 @@ func TestExternalConversationContextRefreshesMissingRepliesAndKeepsThreadsSepara
 	if _, err := worker.ProcessOne(ctx, endpoint.Scope); err != nil {
 		t.Fatal(err)
 	}
-	secondMessages, _ := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, ThreadRootID: firstRoot, Limit: 20})
+	secondMessages, _ := store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, ThreadRootID: firstRoot, Limit: 20})
 	if len(secondMessages) != 5 || !secondMessages[3].Historical || secondMessages[3].Content != "I can supply photos." {
 		t.Fatalf("missed context refresh = %#v", secondMessages)
 	}
@@ -190,7 +190,7 @@ func TestExternalConversationContextRefreshesMissingRepliesAndKeepsThreadsSepara
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherMessages, _ := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: otherApplied.ConversationID, ThreadRootID: otherTrigger.ThreadRootID, Limit: 20})
+	otherMessages, _ := store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: otherApplied.ConversationID, ThreadRootID: otherTrigger.ThreadRootID, Limit: 20})
 	if applied.ConversationID != otherApplied.ConversationID || otherTrigger.ThreadRootID == firstRoot || len(otherMessages) != 3 {
 		t.Fatalf("threads were not isolated within their channel: %#v", otherMessages)
 	}
@@ -228,7 +228,7 @@ func TestExternalConversationContextReadFailureDoesNotHideTrigger(t *testing.T) 
 	if err != nil || applied.RunID == "" {
 		t.Fatalf("trigger did not proceed: %#v, %v", applied, err)
 	}
-	messages, _ := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 10})
+	messages, _ := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 10})
 	if len(messages) != 1 {
 		t.Fatalf("unexpected history count: %d", len(messages))
 	}
@@ -286,7 +286,7 @@ func TestExternalConversationContextBindingChangeDuringReadDoesNotImportStaleDat
 	if err != nil || applied.RunID == "" {
 		t.Fatalf("trigger = %#v, %v", applied, err)
 	}
-	messages, _ := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
+	messages, _ := store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
 	if len(messages) != 1 {
 		t.Fatalf("stale binding context was imported: %d messages", len(messages))
 	}
@@ -298,8 +298,8 @@ func TestExternalConversationContextBindingChangeDuringReadDoesNotImportStaleDat
 
 func TestExternalConversationContextAvailabilityKeepsLongCanonicalOrigin(t *testing.T) {
 	state := &conversation.ExternalConversationContextState{Status: conversation.ExternalConversationContextComplete, ImportedMessages: 1}
-	message := &ChannelMessage{ExternalSource: &ExternalMessageSource{ChannelID: strings.Repeat("c", 1024), ThreadID: strings.Repeat("t", 1024)},
-		References: []ConversationReference{externalConversationContextReference("endpoint", state)}}
+	message := &models.ChannelMessage{ExternalSource: &models.ExternalMessageSource{ChannelID: strings.Repeat("c", 1024), ThreadID: strings.Repeat("t", 1024)},
+		References: []models.ConversationReference{externalConversationContextReference("endpoint", state)}}
 	actual := conversation.ExternalConversationContextAvailability(message, "endpoint")
 	if actual == nil || actual.ExternalConversationID != message.ExternalSource.ChannelID || actual.ExternalThreadID != message.ExternalSource.ThreadID {
 		t.Fatalf("long origin was truncated: %#v", actual)
@@ -309,8 +309,8 @@ func TestExternalConversationContextAvailabilityKeepsLongCanonicalOrigin(t *test
 func TestExternalConversationContextAvailabilityPrefersCanonicalSource(t *testing.T) {
 	state := &conversation.ExternalConversationContextState{Status: conversation.ExternalConversationContextComplete,
 		ExternalConversationID: "old-channel", ExternalThreadID: "old-thread"}
-	message := &ChannelMessage{ExternalSource: &ExternalMessageSource{ChannelID: "actual-channel", ThreadID: "actual-thread"},
-		References: []ConversationReference{externalConversationContextReference("endpoint", state), *externalConversationContextOriginReference("endpoint", state)}}
+	message := &models.ChannelMessage{ExternalSource: &models.ExternalMessageSource{ChannelID: "actual-channel", ThreadID: "actual-thread"},
+		References: []models.ConversationReference{externalConversationContextReference("endpoint", state), *externalConversationContextOriginReference("endpoint", state)}}
 	actual := conversation.ExternalConversationContextAvailability(message, "endpoint")
 	if actual == nil || actual.ExternalConversationID != "actual-channel" || actual.ExternalThreadID != "actual-thread" {
 		t.Fatalf("marker overrode canonical provenance: %#v", actual)
@@ -350,7 +350,7 @@ func TestExternalConversationContextRejectsCrossDestinationAndOversizedResults(t
 			if err != nil || applied.RunID == "" {
 				t.Fatalf("unsafe history blocked trigger: %#v, %v", applied, err)
 			}
-			messages, _ := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
+			messages, _ := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
 			if len(messages) != 1 {
 				t.Fatalf("unsafe context was partially imported: %d messages", len(messages))
 			}
@@ -363,7 +363,7 @@ func TestExternalConversationContextRejectsCrossDestinationAndOversizedResults(t
 }
 
 func TestExternalConversationContextFiltersFutureAndDeduplicatesHistory(t *testing.T) {
-	event := NormalizedExternalConversationEvent{ExternalConversationID: "channel", ExternalThreadID: "parent", ExternalMessageID: "trigger", OccurredAt: time.Now().UTC()}
+	event := models.NormalizedExternalConversationEvent{ExternalConversationID: "channel", ExternalThreadID: "parent", ExternalMessageID: "trigger", OccurredAt: time.Now().UTC()}
 	result := contextTestHistory(event)
 	result.Messages = append(result.Messages, result.Messages[0])
 	future := result.Messages[0]

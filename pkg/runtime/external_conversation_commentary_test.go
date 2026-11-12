@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -22,13 +24,13 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 			if updates, err := worker.ProcessCommentaryScope(t.Context(), fixture.endpoint.Scope); err != nil || len(updates) != 1 || updates[0].Operation != capability.ConversationDeliveryTypingIndicator {
 				t.Fatalf("initial working state missing: %#v %v", updates, err)
 			}
-			activity := NewRunActivityService(fixture.store, fixture.store)
+			activity := runtimeactivity.NewRunActivityService(fixture.store, fixture.store)
 			for i, eventType := range []string{"turn.commentary", "turn.progress", "turn.commentary", "turn.commentary"} {
-				visibility := ActivityVisibilityScope
+				visibility := models.ActivityVisibilityScope
 				if i == 2 {
-					visibility = ActivityVisibilityPrivate
+					visibility = models.ActivityVisibilityPrivate
 				}
-				_, err := activity.AppendActivity(t.Context(), &ActivityEvent{Scope: fixture.endpoint.Scope, RunID: fixture.run.ID, EventType: eventType, Summary: []string{"I’m checking the pull request.", "internal tool loaded", "PRIVATE_SECRET", "Found the issue—fixing it now."}[i], Actor: ActivityActor{Type: "worker", ID: "test"}, Visibility: visibility})
+				_, err := activity.AppendActivity(t.Context(), &models.ActivityEvent{Scope: fixture.endpoint.Scope, RunID: fixture.run.ID, EventType: eventType, Summary: []string{"I’m checking the pull request.", "internal tool loaded", "PRIVATE_SECRET", "Found the issue—fixing it now."}[i], Actor: models.ActivityActor{Type: "worker", ID: "test"}, Visibility: visibility})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -37,7 +39,7 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 				t.Fatalf("updates withheld until completion: %#v %v", updates, err)
 			}
 			// Even a quick completed run must keep its public updates before the answer.
-			if _, _, err := activity.TransitionRun(t.Context(), fixture.endpoint.Scope, fixture.run.ID, RunTransitionRequest{ExpectedRevision: fixture.run.Revision, Status: AgentRunStatusCompleted, Summary: "Done", EventType: "run.completed", Actor: ActivityActor{Type: "worker", ID: "test"}}); err != nil {
+			if _, _, err := activity.TransitionRun(t.Context(), fixture.endpoint.Scope, fixture.run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: fixture.run.Revision, Status: models.AgentRunStatusCompleted, Summary: "Done", EventType: "run.completed", Actor: models.ActivityActor{Type: "worker", ID: "test"}}); err != nil {
 				t.Fatal(err)
 			}
 			for range 2 {
@@ -51,11 +53,11 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 					}
 				}
 			}
-			outbox, err := fixture.store.ListExternalConversationDeliveries(t.Context(), ExternalConversationDeliveryFilter{Scope: fixture.endpoint.Scope, EndpointID: fixture.endpoint.ID, Limit: 100})
+			outbox, err := fixture.store.ListExternalConversationDeliveries(t.Context(), models.ExternalConversationDeliveryFilter{Scope: fixture.endpoint.Scope, EndpointID: fixture.endpoint.ID, Limit: 100})
 			if err != nil || len(outbox) != 4 {
 				t.Fatalf("reconciliation duplicated updates: %#v %v", outbox, err)
 			}
-			messages, err := fixture.store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: fixture.endpoint.Scope, ConversationID: fixture.conversation.ID, Limit: 100})
+			messages, err := fixture.store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: fixture.endpoint.Scope, ConversationID: fixture.conversation.ID, Limit: 100})
 			if err != nil || len(messages) != 3 || messages[1].Content != "I’m checking the pull request." || messages[2].Content != "Found the issue—fixing it now." {
 				t.Fatalf("public wording/order changed or private activity leaked: %#v %v", messages, err)
 			}
@@ -65,9 +67,9 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 
 func TestExternalThreadStatusKeepsQueuedFollowupWorking(t *testing.T) {
 	fixture := newRunProgressWorkerFixture(t, "webchat", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator})
-	_, err := agentrun.NewRunCommandService(fixture.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: fixture.run.Scope, Kind: RunKindConversation, Owner: fixture.run.Owner, AssignedAgentID: fixture.run.AssignedAgentID,
-		Goal: "Continue in the same thread", Source: RunSourceChat, ConcurrencyKey: "thread-a", IdempotencyKey: "thread-followup", Actor: ActivityActor{Type: "service", ID: "channel"},
+	_, err := agentrun.NewRunCommandService(fixture.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: fixture.run.Scope, Kind: models.RunKindConversation, Owner: fixture.run.Owner, AssignedAgentID: fixture.run.AssignedAgentID,
+		Goal: "Continue in the same thread", Source: models.RunSourceChat, ConcurrencyKey: "thread-a", IdempotencyKey: "thread-followup", Actor: models.ActivityActor{Type: "service", ID: "channel"},
 	})
 	if err != nil {
 		t.Fatal(err)

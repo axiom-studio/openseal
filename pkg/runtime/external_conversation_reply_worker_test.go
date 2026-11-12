@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -18,7 +20,7 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	conversations := runtimeconversation.NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack thread",
-		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
+		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "reply-worker-conversation",
 	})
 	if err != nil {
@@ -26,34 +28,34 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	}
 	inbound, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "U123"},
-		Intent: MessageIntentQuestion, Content: "Can you help?",
-		Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "U123"},
+		Intent: models.MessageIntentQuestion, Content: "Can you help?",
+		Audience:         models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		RequiresResponse: true, IdempotencyKey: "reply-worker-inbound",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runResult, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: endpoint.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
-		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: RunSourceEvent,
+	runResult, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: endpoint.Scope, Kind: models.RunKindConversation, Owner: endpoint.Owner,
+		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: models.RunSourceEvent,
 		IdempotencyKey: "reply-worker-run",
-		Actor:          ActivityActor{Type: "service", ID: "external-conversation"}, Visibility: ActivityVisibilityPrivate,
+		Actor:          models.ActivityActor{Type: "service", ID: "external-conversation"}, Visibility: models.ActivityVisibilityPrivate,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
-	running, _, err := activity.TransitionRun(ctx, endpoint.Scope, runResult.Run.ID, RunTransitionRequest{
-		ExpectedRevision: runResult.Run.Revision, Status: AgentRunStatusRunning,
-		Summary: "Started", Actor: ActivityActor{Type: "worker", ID: "test"},
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, endpoint.Scope, runResult.Run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: runResult.Run.Revision, Status: models.AgentRunStatusRunning,
+		Summary: "Started", Actor: models.ActivityActor{Type: "worker", ID: "test"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, _, err := activity.TransitionRun(ctx, endpoint.Scope, running.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted,
-		Summary: "Completed", Actor: ActivityActor{Type: "worker", ID: "test"},
+	completed, _, err := activity.TransitionRun(ctx, endpoint.Scope, running.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted,
+		Summary: "Completed", Actor: models.ActivityActor{Type: "worker", ID: "test"},
 		Output: map[string]interface{}{"reply": "Yes — I can help with that."},
 	})
 	if err != nil {
@@ -62,25 +64,25 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	current, _ := conversations.GetConversation(ctx, endpoint.Scope, conversation.ID)
 	_, err = conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID},
-		Intent: MessageIntentAcknowledgment, Content: "Working on it",
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: inbound.Message.ID,
-		References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: completed.ID}},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.DeploymentID},
+		Intent: models.MessageIntentAcknowledgment, Content: "Working on it",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: inbound.Message.ID,
+		References:     []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: completed.ID}},
 		IdempotencyKey: "reply-worker-progress-ack",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	item := &ExternalConversationInboxItem{
+	item := &models.ExternalConversationInboxItem{
 		ID: "reply-worker-inbox", Scope: endpoint.Scope, EndpointID: endpoint.ID,
 		EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: NormalizedExternalConversationEvent{
+		Event: models.NormalizedExternalConversationEvent{
 			ID: "Ev-reply", Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "C123", ExternalMessageID: "171.001",
 			ExternalParticipantID: "U123", Text: "Can you help?", OrderingKey: "C123:171.001", OccurredAt: now,
 		},
-		Status: ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
+		Status: models.ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
 		ConversationID: conversation.ID, ChannelMessageID: inbound.Message.ID, RunID: completed.ID,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, AppliedAt: now,
 	}
@@ -92,7 +94,7 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 		t.Fatal(err)
 	}
 	first, err := worker.ProcessScope(ctx, endpoint.Scope, 10)
-	if err != nil || len(first) != 1 || first[0].Status != ExternalConversationDeliveryPending ||
+	if err != nil || len(first) != 1 || first[0].Status != models.ExternalConversationDeliveryPending ||
 		first[0].ExternalThreadID != item.Event.ExternalMessageID {
 		t.Fatalf("first projection = %#v, %v", first, err)
 	}
@@ -103,20 +105,20 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	if replayed := reprojectAppliedExternalInbox(t, worker, store, endpoint.Scope); len(replayed) != 1 || replayed[0].ID != first[0].ID {
 		t.Fatalf("replayed projection = %#v", replayed)
 	}
-	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{
+	messages, err := store.ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10,
 	})
 	if err != nil || len(messages) != 3 || messages[1].Content != "Working on it" ||
 		messages[2].Content != "Yes — I can help with that." || messages[2].ReplyToMessageID != inbound.Message.ID {
 		t.Fatalf("canonical messages = %#v, %v", messages, err)
 	}
-	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+	deliveries, err := store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10,
 	})
 	if err != nil || len(deliveries) != 2 {
 		t.Fatalf("durable deliveries = %#v, %v", deliveries, err)
 	}
-	operations := map[capability.ConversationDeliveryOperation]*ExternalConversationDelivery{}
+	operations := map[capability.ConversationDeliveryOperation]*models.ExternalConversationDelivery{}
 	for _, delivery := range deliveries {
 		operations[delivery.Operation] = delivery
 	}
@@ -125,8 +127,8 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 		operations[capability.ConversationDeliveryTypingIndicator].Parameters["status"] != "" {
 		t.Fatalf("durable delivery operations = %#v", operations)
 	}
-	retired := cloneExternalConversationEndpoint(endpoint)
-	retired.Status = ExternalConversationEndpointRetired
+	retired := models.CloneExternalConversationEndpoint(endpoint)
+	retired.Status = models.ExternalConversationEndpointRetired
 	retired.Revision++
 	retired.UpdatedAt = now.Add(time.Second)
 	retired.RetiredAt = &retired.UpdatedAt
@@ -152,19 +154,19 @@ func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *test
 	}
 	inbound, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "visitor"},
-		Intent: MessageIntentQuestion, Content: "Hello",
-		Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "visitor"},
+		Intent: models.MessageIntentQuestion, Content: "Hello",
+		Audience:         models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		RequiresResponse: true, IdempotencyKey: "direct-inbound",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runResult, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: endpoint.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
-		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: RunSourceEvent,
+	runResult, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: endpoint.Scope, Kind: models.RunKindConversation, Owner: endpoint.Owner,
+		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: models.RunSourceEvent,
 		IdempotencyKey: "direct-reply-run",
-		Actor:          ActivityActor{Type: "service", ID: "external-conversation"}, Visibility: ActivityVisibilityPrivate,
+		Actor:          models.ActivityActor{Type: "service", ID: "external-conversation"}, Visibility: models.ActivityVisibilityPrivate,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -172,38 +174,38 @@ func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *test
 	current, _ := conversations.GetConversation(ctx, endpoint.Scope, conversation.ID)
 	reply, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID},
-		Intent: MessageIntentAnswer, Content: "Hello there",
-		Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.DeploymentID},
+		Intent: models.MessageIntentAnswer, Content: "Hello there",
+		Audience:         models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		ReplyToMessageID: inbound.Message.ID,
-		References:       []ConversationReference{{Kind: ConversationReferenceRun, ID: runResult.Run.ID}},
+		References:       []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: runResult.Run.ID}},
 		IdempotencyKey:   "direct-handler-response",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
-	running, _, _ := activity.TransitionRun(ctx, endpoint.Scope, runResult.Run.ID, RunTransitionRequest{
-		ExpectedRevision: runResult.Run.Revision, Status: AgentRunStatusRunning,
-		Summary: "Started", Actor: ActivityActor{Type: "worker", ID: "test"},
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	running, _, _ := activity.TransitionRun(ctx, endpoint.Scope, runResult.Run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: runResult.Run.Revision, Status: models.AgentRunStatusRunning,
+		Summary: "Started", Actor: models.ActivityActor{Type: "worker", ID: "test"},
 	})
-	completed, _, err := activity.TransitionRun(ctx, endpoint.Scope, running.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted,
-		Summary: "Completed", Actor: ActivityActor{Type: "worker", ID: "test"},
+	completed, _, err := activity.TransitionRun(ctx, endpoint.Scope, running.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted,
+		Summary: "Completed", Actor: models.ActivityActor{Type: "worker", ID: "test"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	item := &ExternalConversationInboxItem{
+	item := &models.ExternalConversationInboxItem{
 		ID: "direct-reply-inbox", Scope: endpoint.Scope, EndpointID: endpoint.ID,
 		EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: NormalizedExternalConversationEvent{
+		Event: models.NormalizedExternalConversationEvent{
 			ID: "web-event", Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "room", ExternalMessageID: "message-one",
 			ExternalParticipantID: "visitor", Text: "Hello", OrderingKey: "room:message-one", OccurredAt: now,
 		},
-		Status: ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
+		Status: models.ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
 		ConversationID: conversation.ID, ChannelMessageID: inbound.Message.ID, RunID: completed.ID,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, AppliedAt: now,
 	}
@@ -215,7 +217,7 @@ func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *test
 	if err != nil || len(deliveries) != 1 || deliveries[0].ChannelMessageID != reply.Message.ID {
 		t.Fatalf("direct delivery = %#v, %v", deliveries, err)
 	}
-	messages, _ := store.ListChannelMessages(ctx, ChannelMessageFilter{
+	messages, _ := store.ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10,
 	})
 	if len(messages) != 2 {
@@ -226,15 +228,15 @@ func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *test
 // reprojectAppliedExternalInbox projects every applied item directly,
 // bypassing the worker's terminal reply state, to prove projection itself
 // stays idempotent.
-func reprojectAppliedExternalInbox(t *testing.T, worker *ExternalConversationReplyWorker, store ExternalConversationStore, scope Scope) []*ExternalConversationDelivery {
+func reprojectAppliedExternalInbox(t *testing.T, worker *ExternalConversationReplyWorker, store models.ExternalConversationStore, scope models.Scope) []*models.ExternalConversationDelivery {
 	t.Helper()
-	items, err := store.ListExternalConversationInbox(t.Context(), ExternalConversationInboxFilter{
-		Scope: scope, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied}, Limit: 100,
+	items, err := store.ListExternalConversationInbox(t.Context(), models.ExternalConversationInboxFilter{
+		Scope: scope, Statuses: []models.ExternalConversationInboxStatus{models.ExternalConversationInboxApplied}, Limit: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var deliveries []*ExternalConversationDelivery
+	var deliveries []*models.ExternalConversationDelivery
 	for _, item := range items {
 		projected, _, err := worker.project(t.Context(), item)
 		if err != nil {

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -30,36 +32,36 @@ type ExternalConversationContextHost interface {
 }
 
 type ExternalConversationContextHostRequest struct {
-	Endpoint *ExternalConversationEndpoint       `json:"endpoint"`
-	Adapter  *skill.BoundConversationAdapter     `json:"adapter"`
-	Event    NormalizedExternalConversationEvent `json:"event"`
+	Endpoint *models.ExternalConversationEndpoint       `json:"endpoint"`
+	Adapter  *skill.BoundConversationAdapter            `json:"adapter"`
+	Event    models.NormalizedExternalConversationEvent `json:"event"`
 }
 
 type ExternalConversationContextMessage struct {
-	Source                 *ExternalMessageSource           `json:"source,omitempty"`
-	ExternalConversationID string                           `json:"externalConversationId"`
-	ExternalThreadID       string                           `json:"externalThreadId,omitempty"`
-	ExternalMessageID      string                           `json:"externalMessageId"`
-	ExternalParticipantID  string                           `json:"externalParticipantId"`
-	ParticipantDisplayName string                           `json:"participantDisplayName,omitempty"`
-	Text                   string                           `json:"text"`
-	Attachments            []ExternalConversationAttachment `json:"attachments,omitempty"`
-	OccurredAt             time.Time                        `json:"occurredAt"`
+	Source                 *models.ExternalMessageSource           `json:"source,omitempty"`
+	ExternalConversationID string                                  `json:"externalConversationId"`
+	ExternalThreadID       string                                  `json:"externalThreadId,omitempty"`
+	ExternalMessageID      string                                  `json:"externalMessageId"`
+	ExternalParticipantID  string                                  `json:"externalParticipantId"`
+	ParticipantDisplayName string                                  `json:"participantDisplayName,omitempty"`
+	Text                   string                                  `json:"text"`
+	Attachments            []models.ExternalConversationAttachment `json:"attachments,omitempty"`
+	OccurredAt             time.Time                               `json:"occurredAt"`
 }
 
 type ExternalConversationContextResult struct {
-	Source    *ExternalMessageSource               `json:"source,omitempty"`
+	Source    *models.ExternalMessageSource        `json:"source,omitempty"`
 	Status    string                               `json:"status"`
 	ErrorCode string                               `json:"errorCode,omitempty"`
 	Messages  []ExternalConversationContextMessage `json:"messages,omitempty"`
 }
 
-func externalConversationContextReference(endpointID string, state *runtimeconversation.ExternalConversationContextState) ConversationReference {
-	return ConversationReference{Kind: ConversationReferenceExternalSource,
+func externalConversationContextReference(endpointID string, state *runtimeconversation.ExternalConversationContextState) models.ConversationReference {
+	return models.ConversationReference{Kind: models.ConversationReferenceExternalSource,
 		ID: runtimeconversation.ExternalConversationContextReferencePrefix(endpointID) + state.Status, Version: int64(state.ImportedMessages) + 1}
 }
 
-func externalConversationContextOriginReference(endpointID string, state *runtimeconversation.ExternalConversationContextState) *ConversationReference {
+func externalConversationContextOriginReference(endpointID string, state *runtimeconversation.ExternalConversationContextState) *models.ConversationReference {
 	if state.ExternalConversationID == "" {
 		return nil
 	}
@@ -68,12 +70,12 @@ func externalConversationContextOriginReference(endpointID string, state *runtim
 	if len(id) > 256 {
 		return nil
 	}
-	return &ConversationReference{Kind: ConversationReferenceExternalSource, ID: id}
+	return &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: id}
 }
 
-func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, endpoint *ExternalConversationEndpoint,
-	conversation *Conversation, mapping *ExternalConversationMapping, item *ExternalConversationInboxItem,
-) (*ExternalConversationMapping, *runtimeconversation.ExternalConversationContextState, error) {
+func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, endpoint *models.ExternalConversationEndpoint,
+	conversation *models.Conversation, mapping *models.ExternalConversationMapping, item *models.ExternalConversationInboxItem,
+) (*models.ExternalConversationMapping, *runtimeconversation.ExternalConversationContextState, error) {
 	if w.config.ContextHost == nil || w.config.ContextCatalog == nil {
 		return mapping, nil, nil
 	}
@@ -89,7 +91,7 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 	if err != nil {
 		return mapping, state, nil
 	}
-	if !hasConversationFeature(adapter.Adapter.Features, capability.ConversationFeatureContextHistory) {
+	if !models.HasConversationFeature(adapter.Adapter.Features, capability.ConversationFeatureContextHistory) {
 		return mapping, nil, nil
 	}
 	// Automatic hydration never broadens an unthreaded mention into the entire
@@ -97,7 +99,7 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 	if item.Event.ExternalThreadID == "" {
 		return mapping, state, nil
 	}
-	effective := cloneExternalConversationEndpoint(endpoint)
+	effective := models.CloneExternalConversationEndpoint(endpoint)
 	effective.Address = item.Event.ExternalConversationID
 	effective.Adapter = externalConversationResolvedAdapterReference(adapter)
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -117,16 +119,16 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 	if getErr != nil {
 		return mapping, nil, getErr
 	}
-	if current == nil || current.Status != ExternalConversationEndpointActive || current.Revision != endpoint.Revision {
-		return mapping, nil, ErrExternalConversationConflict
+	if current == nil || current.Status != models.ExternalConversationEndpointActive || current.Revision != endpoint.Revision {
+		return mapping, nil, models.ErrExternalConversationConflict
 	}
 	fresh, resolveErr := w.resolveContextAdapter(ctx, current, item.Adapter)
 	if resolveErr != nil || fresh.Binding.Revision != adapter.Binding.Revision {
 		return mapping, state, nil
 	}
 	if source := result.Source; source != nil && source.ChannelID == item.Event.ExternalConversationID && source.ParticipantID == item.Event.ExternalParticipantID {
-		item.Event.Source = cloneExternalMessageSource(source)
-		if name := sourceLabel(source.ParticipantDisplayName, 160); name != "" {
+		item.Event.Source = models.CloneExternalMessageSource(source)
+		if name := models.ExternalSourceLabel(source.ParticipantDisplayName, 160); name != "" {
 			item.Event.ParticipantDisplayName = name
 		}
 	}
@@ -158,8 +160,8 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 	return mapping, state, nil
 }
 
-func (w *ExternalConversationInboxWorker) resolveContextAdapter(ctx context.Context, endpoint *ExternalConversationEndpoint,
-	ref ExternalConversationAdapterReference,
+func (w *ExternalConversationInboxWorker) resolveContextAdapter(ctx context.Context, endpoint *models.ExternalConversationEndpoint,
+	ref models.ExternalConversationAdapterReference,
 ) (*skill.BoundConversationAdapter, error) {
 	adapter, err := w.config.ContextCatalog.ResolveConversationAdapterBinding(ctx,
 		skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, ref.BindingID, ref.AdapterID)
@@ -168,12 +170,12 @@ func (w *ExternalConversationInboxWorker) resolveContextAdapter(ctx context.Cont
 		adapter.Binding.DeploymentID != endpoint.DeploymentID || adapter.Binding.ID != ref.BindingID ||
 		adapter.Binding.Revision < ref.BindingRevision || adapter.Binding.SkillID != ref.SkillID ||
 		adapter.Definition.ID != ref.SkillID || adapter.AdapterID != ref.AdapterID || adapter.Adapter.Provider != endpoint.Provider {
-		return nil, ErrExternalConversationConflict
+		return nil, models.ErrExternalConversationConflict
 	}
 	return adapter, nil
 }
 
-func normalizeExternalConversationContext(result *ExternalConversationContextResult, event NormalizedExternalConversationEvent) ([]ExternalConversationContextMessage, string, bool) {
+func normalizeExternalConversationContext(result *ExternalConversationContextResult, event models.NormalizedExternalConversationEvent) ([]ExternalConversationContextMessage, string, bool) {
 	if !runtimeconversation.ValidExternalConversationContextStatus(result.Status) || len(result.Messages) > runtimeconversation.MaximumExternalConversationContextMessages {
 		return nil, "", false
 	}
@@ -184,10 +186,10 @@ func normalizeExternalConversationContext(result *ExternalConversationContextRes
 	for _, message := range result.Messages {
 		if message.ExternalConversationID != event.ExternalConversationID ||
 			(message.ExternalThreadID != event.ExternalThreadID && !(message.ExternalThreadID == "" && message.ExternalMessageID == event.ExternalThreadID)) ||
-			!validExternalConversationReference(message.ExternalMessageID, 1024) ||
-			!validExternalConversationReference(message.ExternalParticipantID, 1024) ||
+			!models.IsValidExternalConversationReference(message.ExternalMessageID, 1024) ||
+			!models.IsValidExternalConversationReference(message.ExternalParticipantID, 1024) ||
 			message.OccurredAt.IsZero() || len(message.ParticipantDisplayName) > 160 || strings.ContainsAny(message.ParticipantDisplayName, "\r\n") ||
-			(strings.TrimSpace(message.Text) == "" && len(message.Attachments) == 0) || len(message.Text) > 64*1024 || validateExternalAttachments(message.Attachments) != nil {
+			(strings.TrimSpace(message.Text) == "" && len(message.Attachments) == 0) || len(message.Text) > 64*1024 || models.ValidateExternalAttachments(message.Attachments) != nil {
 			return nil, "", false
 		}
 		if message.ExternalMessageID == event.ExternalMessageID {
@@ -234,10 +236,10 @@ func normalizeExternalConversationContext(result *ExternalConversationContextRes
 	return messages, status, true
 }
 
-func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Context, endpoint *ExternalConversationEndpoint,
-	conversation *Conversation, thread *ExternalConversationMapping, historical ExternalConversationContextMessage,
-) (*ChannelMessage, error) {
-	for _, direction := range []ExternalMessageDirection{ExternalMessageInbound, ExternalMessageOutbound} {
+func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Context, endpoint *models.ExternalConversationEndpoint,
+	conversation *models.Conversation, thread *models.ExternalConversationMapping, historical ExternalConversationContextMessage,
+) (*models.ChannelMessage, error) {
+	for _, direction := range []models.ExternalMessageDirection{models.ExternalMessageInbound, models.ExternalMessageOutbound} {
 		mapping, err := w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, direction, historical.ExternalMessageID)
 		if err != nil {
 			return nil, err
@@ -257,7 +259,7 @@ func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Conte
 		}
 	}
 	// Quoted files belong to the historical message, not the user's new reply.
-	attachmentRefs, notices, err := w.importAttachments(ctx, endpoint, conversation, NormalizedExternalConversationEvent{
+	attachmentRefs, notices, err := w.importAttachments(ctx, endpoint, conversation, models.NormalizedExternalConversationEvent{
 		ID:   stableExternalConversationID(endpoint.Scope, endpoint.ID, "context-attachment", historical.ExternalMessageID),
 		Type: capability.ConversationEventMessageReceived, OrderingKey: historical.ExternalMessageID, Text: historical.Text,
 		ExternalConversationID: historical.ExternalConversationID, ExternalThreadID: historical.ExternalThreadID,
@@ -287,7 +289,7 @@ func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Conte
 			}
 			return existing, nil
 		}
-		participant, err := w.ensureParticipant(ctx, endpoint, NormalizedExternalConversationEvent{
+		participant, err := w.ensureParticipant(ctx, endpoint, models.NormalizedExternalConversationEvent{
 			ExternalParticipantID: historical.ExternalParticipantID, ParticipantDisplayName: historical.ParticipantDisplayName,
 		})
 		if err != nil {
@@ -297,16 +299,16 @@ func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Conte
 		if err != nil {
 			return nil, err
 		}
-		if current.Status != ConversationStatusActive {
-			return nil, ErrInvalidConversation
+		if current.Status != models.ConversationStatusActive {
+			return nil, models.ErrInvalidConversation
 		}
-		message := &ChannelMessage{
-			ID: stableConversationID(endpoint.Scope, key, "message"), Scope: endpoint.Scope, ConversationID: conversation.ID,
+		message := &models.ChannelMessage{
+			ID: models.StableConversationID(endpoint.Scope, key, "message"), Scope: endpoint.Scope, ConversationID: conversation.ID,
 			Sequence: current.LastSequence + 1, Sender: participant.Participant, SenderDisplayName: participant.DisplayName,
-			ExternalSource: externalMessageSource(endpoint, NormalizedExternalConversationEvent{ExternalConversationID: historical.ExternalConversationID, ExternalThreadID: historical.ExternalThreadID, ExternalMessageID: historical.ExternalMessageID, ExternalParticipantID: historical.ExternalParticipantID, ParticipantDisplayName: historical.ParticipantDisplayName, OccurredAt: historical.OccurredAt, Source: historical.Source}),
-			Intent:         MessageIntentUpdate, Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			ExternalSource: activity.NewExternalMessageSource(endpoint, models.NormalizedExternalConversationEvent{ExternalConversationID: historical.ExternalConversationID, ExternalThreadID: historical.ExternalThreadID, ExternalMessageID: historical.ExternalMessageID, ExternalParticipantID: historical.ExternalParticipantID, ParticipantDisplayName: historical.ParticipantDisplayName, OccurredAt: historical.OccurredAt, Source: historical.Source}),
+			Intent:         models.MessageIntentUpdate, Content: text, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			Historical: true, IdempotencyKey: key, CreatedAt: historical.OccurredAt.UTC(),
-			References: append([]ConversationReference{{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}}, attachmentRefs...),
+			References: append([]models.ConversationReference{{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}}, attachmentRefs...),
 		}
 		if thread.ExternalThreadID != "" && thread.ThreadRootMessageID != "" {
 			message.ThreadRootID, message.ReplyToMessageID = thread.ThreadRootMessageID, thread.ThreadRootMessageID
@@ -314,12 +316,12 @@ func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Conte
 		if err := message.Validate(); err != nil {
 			return nil, err
 		}
-		next := cloneConversation(current)
+		next := models.CloneConversation(current)
 		next.LastSequence, next.Revision, next.UpdatedAt = message.Sequence, current.Revision+1, w.now().UTC()
-		result, err := w.store.CommitChannelMessage(ctx, ChannelMessageCommitRecord{
+		result, err := w.store.CommitChannelMessage(ctx, models.ChannelMessageCommitRecord{
 			Conversation: next, ExpectedRevision: current.Revision, Message: message,
 		})
-		if errors.Is(err, ErrRevisionConflict) {
+		if errors.Is(err, models.ErrRevisionConflict) {
 			continue
 		}
 		if err != nil {
@@ -330,10 +332,10 @@ func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Conte
 		}
 		return result.Message, nil
 	}
-	return nil, ErrRevisionConflict
+	return nil, models.ErrRevisionConflict
 }
 
-func externalConversationContextMessageFitsThread(message *ChannelMessage, thread *ExternalConversationMapping) bool {
+func externalConversationContextMessageFitsThread(message *models.ChannelMessage, thread *models.ExternalConversationMapping) bool {
 	if message == nil || thread == nil {
 		return false
 	}

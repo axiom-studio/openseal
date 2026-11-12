@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -29,11 +30,11 @@ func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			changed := cloneAgentRun(current)
+			changed := models.CloneAgentRun(current)
 			changed.Revision++
 			changed.UpdatedAt = now.Add(time.Duration(changed.Revision) * time.Second)
 			changed.Plan = map[string]interface{}{"metadata": "updated"}
-			if _, err := store.UpdateAgentRunWithEvent(t.Context(), changed, current.Revision, &ActivityEvent{ID: uuid.NewString(), Scope: changed.Scope, RunID: changed.ID, EventType: "run.metadata_updated", Summary: "Updated metadata", Severity: ActivitySeverityInfo, Visibility: ActivityVisibilityPrivate, CreatedAt: changed.UpdatedAt}, nil); err != nil {
+			if _, err := store.UpdateAgentRunWithEvent(t.Context(), changed, current.Revision, &models.ActivityEvent{ID: uuid.NewString(), Scope: changed.Scope, RunID: changed.ID, EventType: "run.metadata_updated", Summary: "Updated metadata", Severity: models.ActivitySeverityInfo, Visibility: models.ActivityVisibilityPrivate, CreatedAt: changed.UpdatedAt}, nil); err != nil {
 				t.Fatal(err)
 			}
 			captured, err := externalConversationFailureReportRun(t.Context(), store, changed)
@@ -43,7 +44,7 @@ func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testi
 			if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, captured); err != nil {
 				t.Fatal(err)
 			}
-			messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: first.Scope, ConversationID: trigger.ConversationID, Limit: 20})
+			messages, err := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: first.Scope, ConversationID: trigger.ConversationID, Limit: 20})
 			if err != nil || len(messages) != 2 {
 				t.Fatalf("metadata update duplicated the failure reply: %#v %v", messages, err)
 			}
@@ -65,33 +66,33 @@ func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *test
 	}
 	normal, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}, Intent: MessageIntentAnswer,
-		Content: "The saved normal answer", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: trigger.ID,
-		References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}, IdempotencyKey: conversationTaskFinalResponseKey(run),
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID}, Intent: models.MessageIntentAnswer,
+		Content: "The saved normal answer", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: trigger.ID,
+		References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}, IdempotencyKey: models.ConversationTaskFinalResponseKey(run),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	worker := &ExternalConversationReplyWorker{store: store}
-	message, err := worker.findCanonicalReply(t.Context(), &ExternalConversationInboxItem{Scope: run.Scope, ConversationID: conversation.ID, ChannelMessageID: trigger.ID}, run)
+	message, err := worker.findCanonicalReply(t.Context(), &models.ExternalConversationInboxItem{Scope: run.Scope, ConversationID: conversation.ID, ChannelMessageID: trigger.ID}, run)
 	if err != nil || message == nil || message.ID != normal.Message.ID {
 		t.Fatalf("history scan selected an older failed attempt instead of the exact normal answer: %#v %v", message, err)
 	}
 }
 
-type externalFailureReceiptFixture struct{ report *RunTerminalReport }
+type externalFailureReceiptFixture struct{ report *models.RunTerminalReport }
 
-func (f externalFailureReceiptFixture) GetRunTerminalReport(context.Context, Scope, string, AgentRunStatus) (*RunTerminalReport, error) {
+func (f externalFailureReceiptFixture) GetRunTerminalReport(context.Context, models.Scope, string, models.AgentRunStatus) (*models.RunTerminalReport, error) {
 	return f.report, nil
 }
 
 func TestExternalTerminalFailureRejectsReceiptIdentityDrift(t *testing.T) {
-	run := &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "tenant"}, Kind: RunKindConversation, Source: RunSourceChat, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}, AssignedAgentID: "finn", Status: AgentRunStatusFailed, Revision: 4,
-		Context: map[string]interface{}{conversationRunContextConversationID: "conversation", conversationRunContextTriggerID: "trigger", "threadRootMessageId": "trigger"}}
+	run := &models.AgentRun{ID: "run", Scope: models.Scope{Kind: "tenant", ID: "tenant"}, Kind: models.RunKindConversation, Source: models.RunSourceChat, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}, AssignedAgentID: "finn", Status: models.AgentRunStatusFailed, Revision: 4,
+		Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: "conversation", models.ConversationRunTriggerIDContextKey: "trigger", "threadRootMessageId": "trigger"}}
 	for _, field := range []string{"scope", "revision", "agent", "source", "trigger", "malformed_thread"} {
 		t.Run(field, func(t *testing.T) {
-			snapshot := cloneAgentRun(run)
-			report := &RunTerminalReport{Scope: run.Scope, RunID: run.ID, Status: run.Status, TerminalRevision: run.Revision, Run: snapshot}
+			snapshot := models.CloneAgentRun(run)
+			report := &models.RunTerminalReport{Scope: run.Scope, RunID: run.ID, Status: run.Status, TerminalRevision: run.Revision, Run: snapshot}
 			switch field {
 			case "scope":
 				report.Scope.ID = "other"
@@ -100,13 +101,13 @@ func TestExternalTerminalFailureRejectsReceiptIdentityDrift(t *testing.T) {
 			case "agent":
 				snapshot.AssignedAgentID = "other"
 			case "source":
-				snapshot.Source = RunSourceEvent
+				snapshot.Source = models.RunSourceEvent
 			case "trigger":
-				snapshot.Context[conversationRunContextTriggerID] = "other"
+				snapshot.Context[models.ConversationRunTriggerIDContextKey] = "other"
 			case "malformed_thread":
 				snapshot.Context["threadRootMessageId"] = map[string]interface{}{"invalid": true}
 			}
-			if _, err := externalConversationFailureReportRun(t.Context(), externalFailureReceiptFixture{report: report}, run); !errors.Is(err, ErrInvalidRunTerminalReport) {
+			if _, err := externalConversationFailureReportRun(t.Context(), externalFailureReceiptFixture{report: report}, run); !errors.Is(err, models.ErrInvalidRunTerminalReport) {
 				t.Fatalf("drifted terminal authority was accepted: %v", err)
 			}
 		})
@@ -116,20 +117,20 @@ func TestExternalTerminalFailureRejectsReceiptIdentityDrift(t *testing.T) {
 func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *testing.T) {
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
 	service := runtimeconversation.NewConversationService(store)
-	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Original inbox", Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}, IdempotencyKey: uuid.NewString()})
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Original inbox", Origin: &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}, IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	post := func(conversation *Conversation) *ChannelMessage {
+	post := func(conversation *models.Conversation) *models.ChannelMessage {
 		t.Helper()
-		message, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion, Content: "Check this request", RequiresResponse: true, StartThread: true, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: uuid.NewString()})
+		message, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "kev"}, Intent: models.MessageIntentQuestion, Content: "Check this request", RequiresResponse: true, StartThread: true, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: uuid.NewString()})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return message.Message
 	}
 	trigger := post(conversation)
-	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID, Kind: RunKindConversation, Source: RunSourceEvent, Goal: "Respond", Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID, "threadRootMessageId": trigger.ID}, IdempotencyKey: uuid.NewString()})
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID, Kind: models.RunKindConversation, Source: models.RunSourceEvent, Goal: "Respond", Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID, models.ConversationRunTriggerIDContextKey: trigger.ID, "threadRootMessageId": trigger.ID}, IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,29 +144,29 @@ func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *
 		t.Fatal(err)
 	}
 	foreignTrigger := post(foreign)
-	changed := cloneAgentRun(run)
-	changed.Context[conversationRunContextConversationID] = foreign.ID
-	changed.Context[conversationRunContextTriggerID] = foreignTrigger.ID
+	changed := models.CloneAgentRun(run)
+	changed.Context[models.ConversationRunConversationIDContextKey] = foreign.ID
+	changed.Context[models.ConversationRunTriggerIDContextKey] = foreignTrigger.ID
 	changed.Context["threadRootMessageId"] = foreignTrigger.ID
 	changed.Revision++
 	changed.UpdatedAt = now.Add(time.Second)
-	if _, err := store.UpdateAgentRunWithEvent(t.Context(), changed, run.Revision, &ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: run.ID, EventType: "run.metadata_updated", Summary: "Changed metadata", CreatedAt: changed.UpdatedAt}, nil); err != nil {
+	if _, err := store.UpdateAgentRunWithEvent(t.Context(), changed, run.Revision, &models.ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: run.ID, EventType: "run.metadata_updated", Summary: "Changed metadata", CreatedAt: changed.UpdatedAt}, nil); err != nil {
 		t.Fatal(err)
 	}
 	worker, err := NewExternalConversationReplyWorker(store, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := &ExternalConversationInboxItem{ID: "original-inbox", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter, Status: ExternalConversationInboxApplied, ConversationID: conversation.ID, ChannelMessageID: trigger.ID, RunID: run.ID,
-		Event: NormalizedExternalConversationEvent{ID: "original-event", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C123", ExternalMessageID: "171.001", ExternalParticipantID: "kev", Text: "Check this request", OrderingKey: "C123:171.001", OccurredAt: now}}
-	if _, _, err := worker.project(t.Context(), item); !errors.Is(err, ErrExternalConversationConflict) {
+	item := &models.ExternalConversationInboxItem{ID: "original-inbox", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter, Status: models.ExternalConversationInboxApplied, ConversationID: conversation.ID, ChannelMessageID: trigger.ID, RunID: run.ID,
+		Event: models.NormalizedExternalConversationEvent{ID: "original-event", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C123", ExternalMessageID: "171.001", ExternalParticipantID: "kev", Text: "Check this request", OrderingKey: "C123:171.001", OccurredAt: now}}
+	if _, _, err := worker.project(t.Context(), item); !errors.Is(err, models.ErrExternalConversationConflict) {
 		t.Fatalf("mutable metadata redirected an acknowledged inbox reply: %v", err)
 	}
-	messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: foreign.ID, Limit: 10})
+	messages, err := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: foreign.ID, Limit: 10})
 	if err != nil || len(messages) != 1 || messages[0].ID != foreignTrigger.ID {
 		t.Fatalf("failure projection wrote in the foreign conversation: %#v %v", messages, err)
 	}
-	deliveries, err := store.ListExternalConversationDeliveries(t.Context(), ExternalConversationDeliveryFilter{Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10})
+	deliveries, err := store.ListExternalConversationDeliveries(t.Context(), models.ExternalConversationDeliveryFilter{Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10})
 	if err != nil || len(deliveries) != 0 {
 		t.Fatalf("rejected foreign origin still enqueued external delivery: %#v %v", deliveries, err)
 	}

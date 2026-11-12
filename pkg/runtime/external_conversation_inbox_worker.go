@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
@@ -20,10 +21,10 @@ const externalConversationActorID = "openseal.external-conversation"
 // must use IdempotencyKey when creating work so a crash after dispatch but
 // before inbox completion cannot create a second Run.
 type ExternalConversationDispatchRequest struct {
-	Endpoint       *ExternalConversationEndpoint `json:"endpoint"`
-	Conversation   *Conversation                 `json:"conversation"`
-	Message        *ChannelMessage               `json:"message"`
-	IdempotencyKey string                        `json:"idempotencyKey"`
+	Endpoint       *models.ExternalConversationEndpoint `json:"endpoint"`
+	Conversation   *models.Conversation                 `json:"conversation"`
+	Message        *models.ChannelMessage               `json:"message"`
+	IdempotencyKey string                               `json:"idempotencyKey"`
 }
 
 type ExternalConversationDispatchResult struct {
@@ -49,10 +50,10 @@ func (d *CanonicalExternalConversationDispatcher) DispatchExternalConversation(
 	req ExternalConversationDispatchRequest,
 ) (*ExternalConversationDispatchResult, error) {
 	if req.Endpoint == nil || req.Conversation == nil || req.Message == nil || strings.TrimSpace(req.IdempotencyKey) == "" {
-		return nil, fmt.Errorf("%w: complete dispatch context is required", ErrInvalidExternalConversation)
+		return nil, fmt.Errorf("%w: complete dispatch context is required", models.ErrInvalidExternalConversation)
 	}
 	switch req.Endpoint.Handler.Kind {
-	case ExternalConversationHandlerAgent, ExternalConversationHandlerTeam:
+	case models.ExternalConversationHandlerAgent, models.ExternalConversationHandlerTeam:
 		if d == nil || d.scheduler == nil {
 			return nil, errors.New("conversation run scheduler is not configured")
 		}
@@ -65,13 +66,13 @@ func (d *CanonicalExternalConversationDispatcher) DispatchExternalConversation(
 		}
 		return &ExternalConversationDispatchResult{RunID: result.Run.ID}, nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported handler kind", ErrInvalidExternalConversation)
+		return nil, fmt.Errorf("%w: unsupported handler kind", models.ErrInvalidExternalConversation)
 	}
 }
 
 type ExternalConversationInboxWorkerConfig struct {
 	AttachmentHost    ExternalConversationAttachmentHost
-	AttachmentContent ArtifactContentStore
+	AttachmentContent models.ArtifactContentStore
 	WorkerID          string
 	LeaseDuration     time.Duration
 	BaseRetry         time.Duration
@@ -82,8 +83,8 @@ type ExternalConversationInboxWorkerConfig struct {
 
 func (c ExternalConversationInboxWorkerConfig) normalize() (ExternalConversationInboxWorkerConfig, error) {
 	c.WorkerID = strings.TrimSpace(c.WorkerID)
-	if !validOpaqueIdentifier(c.WorkerID, 256) {
-		return ExternalConversationInboxWorkerConfig{}, fmt.Errorf("%w: worker id is invalid", ErrInvalidExternalConversation)
+	if !models.IsValidOpaqueIdentifier(c.WorkerID, 256) {
+		return ExternalConversationInboxWorkerConfig{}, fmt.Errorf("%w: worker id is invalid", models.ErrInvalidExternalConversation)
 	}
 	if c.LeaseDuration == 0 {
 		c.LeaseDuration = time.Minute
@@ -95,7 +96,7 @@ func (c ExternalConversationInboxWorkerConfig) normalize() (ExternalConversation
 		c.MaximumRetry = 5 * time.Minute
 	}
 	if c.LeaseDuration <= 0 || c.BaseRetry <= 0 || c.MaximumRetry < c.BaseRetry {
-		return ExternalConversationInboxWorkerConfig{}, fmt.Errorf("%w: worker durations are invalid", ErrInvalidExternalConversation)
+		return ExternalConversationInboxWorkerConfig{}, fmt.Errorf("%w: worker durations are invalid", models.ErrInvalidExternalConversation)
 	}
 	return c, nil
 }
@@ -105,7 +106,7 @@ func (c ExternalConversationInboxWorkerConfig) normalize() (ExternalConversation
 // Run. Every intermediate identity is deterministic and durably mapped, so a
 // worker may restart after any write without duplicating the visible message.
 type ExternalConversationInboxWorker struct {
-	store         ExternalConversationStore
+	store         models.ExternalConversationStore
 	conversations *runtimeconversation.ConversationService
 	dispatcher    ExternalConversationDispatcher
 	config        ExternalConversationInboxWorkerConfig
@@ -113,7 +114,7 @@ type ExternalConversationInboxWorker struct {
 }
 
 func NewExternalConversationInboxWorker(
-	store ExternalConversationStore,
+	store models.ExternalConversationStore,
 	dispatcher ExternalConversationDispatcher,
 	config ExternalConversationInboxWorkerConfig,
 	opts ...models.ServiceOption,
@@ -132,7 +133,7 @@ func NewExternalConversationInboxWorker(
 
 // ProcessOne leases and applies at most one due inbox item in a scope. A nil
 // result means no work was due.
-func (w *ExternalConversationInboxWorker) ProcessOne(ctx context.Context, scope Scope) (*ExternalConversationInboxItem, error) {
+func (w *ExternalConversationInboxWorker) ProcessOne(ctx context.Context, scope models.Scope) (*models.ExternalConversationInboxItem, error) {
 	if w == nil || w.store == nil || w.conversations == nil || w.dispatcher == nil {
 		return nil, errors.New("external conversation inbox worker is not configured")
 	}
@@ -150,24 +151,24 @@ func (w *ExternalConversationInboxWorker) ProcessOne(ctx context.Context, scope 
 	return item, nil
 }
 
-func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *ExternalConversationInboxItem) error {
-	if item.Status != ExternalConversationInboxLeased || item.LeaseOwner != w.config.WorkerID {
-		return ErrExternalConversationLeaseLost
+func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *models.ExternalConversationInboxItem) error {
+	if item.Status != models.ExternalConversationInboxLeased || item.LeaseOwner != w.config.WorkerID {
+		return models.ErrExternalConversationLeaseLost
 	}
 	if item.Event.Type == capability.ConversationEventReactionAdded || item.Event.Type == capability.ConversationEventReactionRemoved {
 		return w.applyReaction(ctx, item)
 	}
 	if item.Event.Type != capability.ConversationEventMessageReceived {
-		return fmt.Errorf("%w: event type %q is not yet a canonical message", ErrInvalidExternalConversation, item.Event.Type)
+		return fmt.Errorf("%w: event type %q is not yet a canonical message", models.ErrInvalidExternalConversation, item.Event.Type)
 	}
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, item.Scope, item.EndpointID)
 	if err != nil {
 		return err
 	}
-	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
+	if endpoint == nil || endpoint.Status != models.ExternalConversationEndpointActive ||
 		endpoint.Revision != item.EndpointRevision ||
-		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
-		return ErrExternalConversationConflict
+		!models.ExternalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
+		return models.ErrExternalConversationConflict
 	}
 
 	conversation, mapping, err := w.ensureConversation(ctx, endpoint, item.Event)
@@ -210,7 +211,7 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *Exter
 	if err != nil {
 		return err
 	}
-	if dispatch == nil || !validOpaqueIdentifier(dispatch.RunID, 256) {
+	if dispatch == nil || !models.IsValidOpaqueIdentifier(dispatch.RunID, 256) {
 		return errors.New("external conversation dispatcher did not return a canonical Run")
 	}
 	return w.complete(ctx, item, conversation.ID, message.ID, dispatch.RunID)
@@ -218,16 +219,16 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *Exter
 
 func (w *ExternalConversationInboxWorker) ensureConversation(
 	ctx context.Context,
-	endpoint *ExternalConversationEndpoint,
-	event NormalizedExternalConversationEvent,
-) (*Conversation, *ExternalConversationMapping, error) {
+	endpoint *models.ExternalConversationEndpoint,
+	event models.NormalizedExternalConversationEvent,
+) (*models.Conversation, *models.ExternalConversationMapping, error) {
 	base, err := w.store.GetExternalConversationMapping(ctx, endpoint.Scope, endpoint.ID, event.ExternalConversationID, "")
 	if err != nil {
 		return nil, nil, err
 	}
 	if base == nil {
 		key := stableExternalConversationID(endpoint.Scope, endpoint.ID, "conversation", event.ExternalConversationID)
-		origin := &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}
+		origin := &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}
 		conversation, _, createErr := w.conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 			Scope: endpoint.Scope, Owner: endpoint.Owner, Title: endpoint.Name, Origin: origin, CreatedBy: endpoint.CreatedBy, IdempotencyKey: key,
 		})
@@ -235,17 +236,17 @@ func (w *ExternalConversationInboxWorker) ensureConversation(
 			return nil, nil, createErr
 		}
 		now := w.now().UTC()
-		candidate := &ExternalConversationMapping{
+		candidate := &models.ExternalConversationMapping{
 			Scope: endpoint.Scope, EndpointID: endpoint.ID, ExternalConversationID: event.ExternalConversationID,
 			ConversationID: conversation.ID, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
 		if saveErr := w.store.SaveExternalConversationMapping(ctx, candidate, 0); saveErr != nil {
-			if !errors.Is(saveErr, ErrExternalConversationConflict) {
+			if !errors.Is(saveErr, models.ErrExternalConversationConflict) {
 				return nil, nil, saveErr
 			}
 			candidate, saveErr = w.store.GetExternalConversationMapping(ctx, endpoint.Scope, endpoint.ID, event.ExternalConversationID, "")
 			if saveErr != nil || candidate == nil || candidate.ConversationID != conversation.ID {
-				return nil, nil, ErrExternalConversationConflict
+				return nil, nil, models.ErrExternalConversationConflict
 			}
 		}
 		base = candidate
@@ -255,8 +256,8 @@ func (w *ExternalConversationInboxWorker) ensureConversation(
 		return nil, nil, err
 	}
 	if conversation.Owner != endpoint.Owner || conversation.Origin == nil ||
-		conversation.Origin.Kind != ConversationReferenceExternalSource || conversation.Origin.ID != endpoint.ID {
-		return nil, nil, ErrExternalConversationConflict
+		conversation.Origin.Kind != models.ConversationReferenceExternalSource || conversation.Origin.ID != endpoint.ID {
+		return nil, nil, models.ErrExternalConversationConflict
 	}
 	if event.ExternalThreadID == "" {
 		return conversation, base, nil
@@ -273,27 +274,27 @@ func (w *ExternalConversationInboxWorker) ensureConversation(
 			return nil, nil, err
 		}
 		now := w.now().UTC()
-		candidate := &ExternalConversationMapping{
+		candidate := &models.ExternalConversationMapping{
 			Scope: endpoint.Scope, EndpointID: endpoint.ID, ExternalConversationID: event.ExternalConversationID,
 			ExternalThreadID: event.ExternalThreadID, ConversationID: conversation.ID,
 			ThreadRootMessageID: rootID,
 			Revision:            1, CreatedAt: now, UpdatedAt: now,
 		}
 		if saveErr := w.store.SaveExternalConversationMapping(ctx, candidate, 0); saveErr != nil {
-			if !errors.Is(saveErr, ErrExternalConversationConflict) {
+			if !errors.Is(saveErr, models.ErrExternalConversationConflict) {
 				return nil, nil, saveErr
 			}
 			candidate, saveErr = w.store.GetExternalConversationMapping(
 				ctx, endpoint.Scope, endpoint.ID, event.ExternalConversationID, event.ExternalThreadID,
 			)
 			if saveErr != nil || candidate == nil || candidate.ConversationID != conversation.ID {
-				return nil, nil, ErrExternalConversationConflict
+				return nil, nil, models.ErrExternalConversationConflict
 			}
 		}
 		thread = candidate
 	}
 	if thread.ConversationID != conversation.ID {
-		return nil, nil, ErrExternalConversationConflict
+		return nil, nil, models.ErrExternalConversationConflict
 	}
 	return conversation, thread, nil
 }
@@ -303,14 +304,14 @@ func (w *ExternalConversationInboxWorker) ensureConversation(
 // endpoint's message mapping, and never import a parent from another chat.
 func (w *ExternalConversationInboxWorker) existingReplyThreadRoot(
 	ctx context.Context,
-	endpoint *ExternalConversationEndpoint,
-	conversation *Conversation,
+	endpoint *models.ExternalConversationEndpoint,
+	conversation *models.Conversation,
 	externalParentID string,
 ) (string, error) {
 	if externalParentID == "" {
 		return "", nil
 	}
-	for _, direction := range []ExternalMessageDirection{ExternalMessageInbound, ExternalMessageOutbound} {
+	for _, direction := range []models.ExternalMessageDirection{models.ExternalMessageInbound, models.ExternalMessageOutbound} {
 		mapping, err := w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, direction, externalParentID)
 		if err != nil {
 			return "", err
@@ -344,42 +345,42 @@ func (w *ExternalConversationInboxWorker) existingReplyThreadRoot(
 
 func (w *ExternalConversationInboxWorker) ensureParticipant(
 	ctx context.Context,
-	endpoint *ExternalConversationEndpoint,
-	event NormalizedExternalConversationEvent,
-) (*ExternalParticipantMapping, error) {
+	endpoint *models.ExternalConversationEndpoint,
+	event models.NormalizedExternalConversationEvent,
+) (*models.ExternalParticipantMapping, error) {
 	current, err := w.store.GetExternalParticipantMapping(ctx, endpoint.Scope, endpoint.ID, event.ExternalParticipantID)
 	if err != nil {
 		return nil, err
 	}
 	if current == nil {
 		now := w.now().UTC()
-		candidate := &ExternalParticipantMapping{
+		candidate := &models.ExternalParticipantMapping{
 			Scope: endpoint.Scope, EndpointID: endpoint.ID, ExternalParticipantID: event.ExternalParticipantID,
-			Participant: ConversationParticipant{
-				Type: ConversationParticipantUser,
+			Participant: models.ConversationParticipant{
+				Type: models.ConversationParticipantUser,
 				ID:   stableExternalConversationID(endpoint.Scope, endpoint.ID, "participant", event.ExternalParticipantID),
 			},
 			DisplayName: strings.TrimSpace(event.ParticipantDisplayName),
 			Revision:    1, CreatedAt: now, UpdatedAt: now,
 		}
 		if saveErr := w.store.SaveExternalParticipantMapping(ctx, candidate, 0); saveErr != nil {
-			if !errors.Is(saveErr, ErrExternalConversationConflict) {
+			if !errors.Is(saveErr, models.ErrExternalConversationConflict) {
 				return nil, saveErr
 			}
 			candidate, saveErr = w.store.GetExternalParticipantMapping(ctx, endpoint.Scope, endpoint.ID, event.ExternalParticipantID)
 			if saveErr != nil || candidate == nil {
-				return nil, ErrExternalConversationConflict
+				return nil, models.ErrExternalConversationConflict
 			}
 		}
 		return candidate, nil
 	}
 	if name := strings.TrimSpace(event.ParticipantDisplayName); name != "" && current.DisplayName != name {
-		next := cloneExternalParticipantMapping(current)
+		next := models.CloneExternalParticipantMapping(current)
 		next.DisplayName = strings.TrimSpace(event.ParticipantDisplayName)
 		next.Revision++
 		next.UpdatedAt = w.now().UTC()
 		if err := w.store.SaveExternalParticipantMapping(ctx, next, current.Revision); err != nil {
-			if !errors.Is(err, ErrExternalConversationConflict) {
+			if !errors.Is(err, models.ErrExternalConversationConflict) {
 				return nil, err
 			}
 			return w.store.GetExternalParticipantMapping(ctx, endpoint.Scope, endpoint.ID, event.ExternalParticipantID)
@@ -391,20 +392,20 @@ func (w *ExternalConversationInboxWorker) ensureParticipant(
 
 func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 	ctx context.Context,
-	endpoint *ExternalConversationEndpoint,
-	conversation *Conversation,
-	thread *ExternalConversationMapping,
-	participant *ExternalParticipantMapping,
-	event NormalizedExternalConversationEvent,
+	endpoint *models.ExternalConversationEndpoint,
+	conversation *models.Conversation,
+	thread *models.ExternalConversationMapping,
+	participant *models.ExternalParticipantMapping,
+	event models.NormalizedExternalConversationEvent,
 	contextState *runtimeconversation.ExternalConversationContextState,
-) (*ChannelMessage, error) {
+) (*models.ChannelMessage, error) {
 	if existing, err := w.store.GetExternalMessageMapping(
-		ctx, endpoint.Scope, endpoint.ID, ExternalMessageInbound, event.ExternalMessageID,
+		ctx, endpoint.Scope, endpoint.ID, models.ExternalMessageInbound, event.ExternalMessageID,
 	); err != nil {
 		return nil, err
 	} else if existing != nil {
 		if existing.ConversationID != conversation.ID {
-			return nil, ErrExternalConversationConflict
+			return nil, models.ErrExternalConversationConflict
 		}
 		return w.conversations.GetChannelMessage(ctx, endpoint.Scope, conversation.ID, existing.ChannelMessageID)
 	}
@@ -416,14 +417,14 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 	} else if existing != nil {
 		return existing, nil
 	}
-	references := []ConversationReference{{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}}
+	references := []models.ConversationReference{{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}}
 	if contextState != nil {
 		references = append(references, externalConversationContextReference(endpoint.ID, contextState))
 		if origin := externalConversationContextOriginReference(endpoint.ID, contextState); origin != nil {
 			references = append(references, *origin)
 		}
 		if code := runtimeconversation.NormalizeExternalConversationContextErrorCode(contextState.ErrorCode); code != "" {
-			references = append(references, ConversationReference{Kind: ConversationReferenceExternalSource,
+			references = append(references, models.ConversationReference{Kind: models.ConversationReferenceExternalSource,
 				ID: runtimeconversation.ExternalConversationContextErrorPrefix(endpoint.ID) + code})
 		}
 	}
@@ -449,7 +450,7 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 			replyTo = thread.ThreadRootMessageID
 		}
 		if event.ReplyToExternalMessageID != "" {
-			for _, direction := range []ExternalMessageDirection{ExternalMessageInbound, ExternalMessageOutbound} {
+			for _, direction := range []models.ExternalMessageDirection{models.ExternalMessageInbound, models.ExternalMessageOutbound} {
 				parent, err := w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, direction, event.ReplyToExternalMessageID)
 				if err != nil {
 					return nil, err
@@ -468,17 +469,17 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 				}
 			}
 		}
-		source := externalMessageSource(endpoint, event)
-		source.ParticipantDisplayName = sourceLabel(participant.DisplayName, 160)
+		source := activity.NewExternalMessageSource(endpoint, event)
+		source.ParticipantDisplayName = models.ExternalSourceLabel(participant.DisplayName, 160)
 		result, postErr := w.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 			Sender: participant.Participant, SenderDisplayName: participant.DisplayName,
 			ExternalSource: source,
-			Intent:         MessageIntentQuestion, Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Intent:         models.MessageIntentQuestion, Content: text, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			ReplyToMessageID: replyTo, References: references,
 			RequiresResponse: true, IdempotencyKey: key,
 		})
-		if errors.Is(postErr, ErrRevisionConflict) {
+		if errors.Is(postErr, models.ErrRevisionConflict) {
 			continue
 		}
 		if postErr != nil {
@@ -486,38 +487,38 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 		}
 		return result.Message, nil
 	}
-	return nil, ErrRevisionConflict
+	return nil, models.ErrRevisionConflict
 }
 
 func (w *ExternalConversationInboxWorker) ensureInboundMessageMapping(
 	ctx context.Context,
-	endpoint *ExternalConversationEndpoint,
+	endpoint *models.ExternalConversationEndpoint,
 	externalMessageID string,
-	message *ChannelMessage,
+	message *models.ChannelMessage,
 ) error {
-	current, err := w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, ExternalMessageInbound, externalMessageID)
+	current, err := w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, models.ExternalMessageInbound, externalMessageID)
 	if err != nil {
 		return err
 	}
 	if current != nil {
 		if current.ConversationID != message.ConversationID || current.ChannelMessageID != message.ID {
-			return ErrExternalConversationConflict
+			return models.ErrExternalConversationConflict
 		}
 		return nil
 	}
 	now := w.now().UTC()
-	candidate := &ExternalMessageMapping{
-		Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: ExternalMessageInbound,
+	candidate := &models.ExternalMessageMapping{
+		Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: models.ExternalMessageInbound,
 		ExternalMessageID: externalMessageID, ConversationID: message.ConversationID, ChannelMessageID: message.ID,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := w.store.SaveExternalMessageMapping(ctx, candidate, 0); err != nil {
-		if !errors.Is(err, ErrExternalConversationConflict) {
+		if !errors.Is(err, models.ErrExternalConversationConflict) {
 			return err
 		}
-		current, err = w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, ExternalMessageInbound, externalMessageID)
+		current, err = w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, models.ExternalMessageInbound, externalMessageID)
 		if err != nil || current == nil || current.ConversationID != message.ConversationID || current.ChannelMessageID != message.ID {
-			return ErrExternalConversationConflict
+			return models.ErrExternalConversationConflict
 		}
 	}
 	return nil
@@ -525,22 +526,22 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessageMapping(
 
 func (w *ExternalConversationInboxWorker) ensureThreadRoot(
 	ctx context.Context,
-	current *ExternalConversationMapping,
+	current *models.ExternalConversationMapping,
 	messageID string,
-) (*ExternalConversationMapping, error) {
-	next := cloneExternalConversationMapping(current)
+) (*models.ExternalConversationMapping, error) {
+	next := models.CloneExternalConversationMapping(current)
 	next.ThreadRootMessageID = messageID
 	next.Revision++
 	next.UpdatedAt = w.now().UTC()
 	if err := w.store.SaveExternalConversationMapping(ctx, next, current.Revision); err != nil {
-		if !errors.Is(err, ErrExternalConversationConflict) {
+		if !errors.Is(err, models.ErrExternalConversationConflict) {
 			return nil, err
 		}
 		stored, getErr := w.store.GetExternalConversationMapping(
 			ctx, current.Scope, current.EndpointID, current.ExternalConversationID, current.ExternalThreadID,
 		)
 		if getErr != nil || stored == nil || stored.ThreadRootMessageID != messageID {
-			return nil, ErrExternalConversationConflict
+			return nil, models.ErrExternalConversationConflict
 		}
 		return stored, nil
 	}
@@ -549,12 +550,12 @@ func (w *ExternalConversationInboxWorker) ensureThreadRoot(
 
 func (w *ExternalConversationInboxWorker) complete(
 	ctx context.Context,
-	item *ExternalConversationInboxItem,
+	item *models.ExternalConversationInboxItem,
 	conversationID, messageID, runID string,
 ) error {
 	now := w.now().UTC()
-	next := cloneExternalConversationInboxItem(item)
-	next.Status = ExternalConversationInboxApplied
+	next := models.CloneExternalConversationInboxItem(item)
+	next.Status = models.ExternalConversationInboxApplied
 	next.ConversationID, next.ChannelMessageID, next.RunID = conversationID, messageID, runID
 	next.LeaseOwner, next.LeaseExpiresAt = "", time.Time{}
 	next.ErrorCode, next.Summary = "", ""
@@ -572,20 +573,20 @@ func (w *ExternalConversationInboxWorker) complete(
 
 func (w *ExternalConversationInboxWorker) recordFailure(
 	ctx context.Context,
-	item *ExternalConversationInboxItem,
+	item *models.ExternalConversationInboxItem,
 	processingErr error,
 ) error {
 	now := w.now().UTC()
-	next := cloneExternalConversationInboxItem(item)
+	next := models.CloneExternalConversationInboxItem(item)
 	next.LeaseOwner, next.LeaseExpiresAt = "", time.Time{}
 	next.ErrorCode = externalConversationErrorCode(processingErr)
 	next.Summary = "The normalized conversation event could not be applied."
 	next.UpdatedAt = now
 	next.Revision++
 	if next.Attempt >= next.MaximumAttempts {
-		next.Status = ExternalConversationInboxDeadLetter
+		next.Status = models.ExternalConversationInboxDeadLetter
 	} else {
-		next.Status = ExternalConversationInboxRetry
+		next.Status = models.ExternalConversationInboxRetry
 		next.AvailableAt = now.Add(exponentialExternalConversationRetry(w.config.BaseRetry, w.config.MaximumRetry, next.Attempt))
 	}
 	if err := next.Validate(); err != nil {
@@ -614,11 +615,11 @@ func exponentialExternalConversationRetry(base, maximum time.Duration, attempt i
 
 func externalConversationErrorCode(err error) string {
 	switch {
-	case errors.Is(err, ErrExternalConversationConflict):
+	case errors.Is(err, models.ErrExternalConversationConflict):
 		return "endpoint_or_mapping_conflict"
-	case errors.Is(err, ErrRevisionConflict):
+	case errors.Is(err, models.ErrRevisionConflict):
 		return "conversation_revision_conflict"
-	case errors.Is(err, ErrInvalidExternalConversation):
+	case errors.Is(err, models.ErrInvalidExternalConversation):
 		return "invalid_normalized_event"
 	default:
 		return "handler_dispatch_failed"

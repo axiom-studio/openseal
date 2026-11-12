@@ -18,7 +18,7 @@ import (
 // the reply; event Runbooks expose the reply as their typed "reply" output.
 // Both paths converge on the same idempotent Conversation message and outbox.
 type ExternalConversationReplyWorker struct {
-	store         ExternalConversationReplyStore
+	store         models.ExternalConversationReplyStore
 	conversations *conversation.ConversationService
 	transport     *ExternalConversationTransportService
 	now           func() time.Time
@@ -41,7 +41,7 @@ func externalConversationReplyRetryDelay(attempt int) time.Duration {
 }
 
 func NewExternalConversationReplyWorker(
-	store ExternalConversationReplyStore,
+	store models.ExternalConversationReplyStore,
 	resolver ExternalConversationAdapterResolver,
 	opts ...models.ServiceOption,
 ) (*ExternalConversationReplyWorker, error) {
@@ -62,19 +62,19 @@ func NewExternalConversationReplyWorker(
 // item on every pass; other stores keep the original revisit behaviour.
 func (w *ExternalConversationReplyWorker) ProcessScope(
 	ctx context.Context,
-	scope Scope,
+	scope models.Scope,
 	limit int,
-) ([]*ExternalConversationDelivery, error) {
+) ([]*models.ExternalConversationDelivery, error) {
 	if w == nil || w.store == nil || w.conversations == nil || w.transport == nil {
 		return nil, errors.New("external conversation reply worker is not configured")
 	}
 	if limit <= 0 {
 		limit = 100
 	}
-	progress, tracked := w.store.(ExternalConversationReplyStateStore)
+	progress, tracked := w.store.(models.ExternalConversationReplyStateStore)
 	now := w.now().UTC()
-	filter := ExternalConversationInboxFilter{
-		Scope: scope, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied}, Limit: limit,
+	filter := models.ExternalConversationInboxFilter{
+		Scope: scope, Statuses: []models.ExternalConversationInboxStatus{models.ExternalConversationInboxApplied}, Limit: limit,
 	}
 	if tracked {
 		filter.ReplyDueAt = &now
@@ -83,7 +83,7 @@ func (w *ExternalConversationReplyWorker) ProcessScope(
 	if err != nil {
 		return nil, err
 	}
-	deliveries := make([]*ExternalConversationDelivery, 0, len(items))
+	deliveries := make([]*models.ExternalConversationDelivery, 0, len(items))
 	var projectErrors []error
 	for _, item := range items {
 		projected, resolved, projectErr := w.project(ctx, item)
@@ -97,19 +97,19 @@ func (w *ExternalConversationReplyWorker) ProcessScope(
 		deliveries = append(deliveries, projected...)
 		if tracked && resolved {
 			// A lost race only means another worker recorded it first.
-			_ = progress.SaveExternalConversationReplyProgress(ctx, item.Scope, item.ID, item.Revision, ExternalConversationReplyProgress{
-				State: ExternalConversationReplyProjected, Attempts: item.ReplyAttempts, At: now,
+			_ = progress.SaveExternalConversationReplyProgress(ctx, item.Scope, item.ID, item.Revision, models.ExternalConversationReplyProgress{
+				State: models.ExternalConversationReplyProjected, Attempts: item.ReplyAttempts, At: now,
 			})
 		}
 	}
 	return deliveries, errors.Join(projectErrors...)
 }
 
-func (w *ExternalConversationReplyWorker) recordFailure(ctx context.Context, progress ExternalConversationReplyStateStore, item *ExternalConversationInboxItem, now time.Time, cause error) {
+func (w *ExternalConversationReplyWorker) recordFailure(ctx context.Context, progress models.ExternalConversationReplyStateStore, item *models.ExternalConversationInboxItem, now time.Time, cause error) {
 	attempts := item.ReplyAttempts + 1
-	next := ExternalConversationReplyProgress{Attempts: attempts, Error: cause.Error(), At: now}
+	next := models.ExternalConversationReplyProgress{Attempts: attempts, Error: cause.Error(), At: now}
 	if attempts >= externalConversationReplyMaximumAttempts {
-		next.State = ExternalConversationReplyFailed
+		next.State = models.ExternalConversationReplyFailed
 	} else {
 		retryAt := now.Add(externalConversationReplyRetryDelay(attempts))
 		next.AvailableAt = &retryAt
@@ -122,8 +122,8 @@ func (w *ExternalConversationReplyWorker) recordFailure(ctx context.Context, pro
 // due (no Run, a canceled Run, a paused endpoint, a superseded failure).
 func (w *ExternalConversationReplyWorker) project(
 	ctx context.Context,
-	item *ExternalConversationInboxItem,
-) ([]*ExternalConversationDelivery, bool, error) {
+	item *models.ExternalConversationInboxItem,
+) ([]*models.ExternalConversationDelivery, bool, error) {
 	deliveries, err := w.projectItem(ctx, item)
 	if errors.Is(err, errExternalReplyPending) {
 		return deliveries, false, nil
@@ -138,12 +138,12 @@ var errExternalReplyPending = errors.New("external conversation reply pending")
 // one per member for a Team's. Each member answer has its own keys.
 func (w *ExternalConversationReplyWorker) projectItem(
 	ctx context.Context,
-	item *ExternalConversationInboxItem,
-) ([]*ExternalConversationDelivery, error) {
+	item *models.ExternalConversationInboxItem,
+) ([]*models.ExternalConversationDelivery, error) {
 	if item == nil {
 		return nil, nil
 	}
-	if item.Status != ExternalConversationInboxApplied ||
+	if item.Status != models.ExternalConversationInboxApplied ||
 		strings.TrimSpace(item.RunID) == "" || strings.TrimSpace(item.ConversationID) == "" ||
 		strings.TrimSpace(item.ChannelMessageID) == "" {
 		return nil, nil
@@ -153,7 +153,7 @@ func (w *ExternalConversationReplyWorker) projectItem(
 		return nil, err
 	}
 	agents := externalItemReplyAgents(replies)
-	var deliveries []*ExternalConversationDelivery
+	var deliveries []*models.ExternalConversationDelivery
 	var failures []error
 	pending := false
 	for _, reply := range replies {
@@ -178,18 +178,18 @@ func (w *ExternalConversationReplyWorker) projectItem(
 
 func (w *ExternalConversationReplyWorker) projectReply(
 	ctx context.Context,
-	item *ExternalConversationInboxItem,
+	item *models.ExternalConversationInboxItem,
 	reply externalItemReply,
 	agents []string,
-) (*ExternalConversationDelivery, error) {
+) (*models.ExternalConversationDelivery, error) {
 	run := reply.run
-	if run.Status == AgentRunStatusCanceled {
+	if run.Status == models.AgentRunStatusCanceled {
 		return nil, w.retireAnswerStream(ctx, item, reply.id)
 	}
 	if conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 		return nil, nil // The Run's own trigger item delivers its single reply.
 	}
-	if run.Status != AgentRunStatusCompleted && run.Status != AgentRunStatusFailed {
+	if run.Status != models.AgentRunStatusCompleted && run.Status != models.AgentRunStatusFailed {
 		return nil, errExternalReplyPending
 	}
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, item.Scope, item.EndpointID)
@@ -200,11 +200,11 @@ func (w *ExternalConversationReplyWorker) projectReply(
 	// has not yet crossed the external delivery boundary. Applied inbox items
 	// remain immutable audit records and are revisited by this projector, so an
 	// inactive endpoint is a successful no-op rather than a permanent warning.
-	if endpoint != nil && endpoint.Status != ExternalConversationEndpointActive {
+	if endpoint != nil && endpoint.Status != models.ExternalConversationEndpointActive {
 		return nil, nil
 	}
 	if !externalConversationSnapshotMatchesEndpoint(endpoint, item.Scope, item.EndpointID, item.EndpointRevision, item.Adapter, item.Event.ExternalConversationID) {
-		return nil, ErrExternalConversationConflict
+		return nil, models.ErrExternalConversationConflict
 	}
 	// Projection is already durable. Do not reinterpret an old item against a
 	// newer Skill version or enqueue another status clear while new work runs.
@@ -218,7 +218,7 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		// A reply that finishes a streamed message stays pending until the edit
 		// settles. If the edit failed (the chat message was deleted, say), the
 		// reply is posted as a new message instead.
-		if existing.Status == ExternalConversationDeliveryDelivered {
+		if existing.Status == models.ExternalConversationDeliveryDelivered {
 			return existing, nil
 		}
 		if !externalConversationDeliveryTerminal(existing.Status) {
@@ -237,8 +237,8 @@ func (w *ExternalConversationReplyWorker) projectReply(
 			(item.Event.ExternalThreadID != "" && existing.ExternalThreadID != item.Event.ExternalThreadID) ||
 			existing.EndpointRevision < item.EndpointRevision || existing.Adapter.BindingRevision < item.Adapter.BindingRevision ||
 			existing.Adapter.SkillID != item.Adapter.SkillID || existing.Adapter.SourceIdentity != item.Adapter.SourceIdentity ||
-			!externalConversationAdapterBelongsToEndpoint(existing.Adapter, item.Adapter) {
-			return nil, ErrExternalConversationConflict
+			!models.ExternalConversationAdapterBelongsToEndpoint(existing.Adapter, item.Adapter) {
+			return nil, models.ErrExternalConversationConflict
 		}
 		return existing, nil
 	}
@@ -247,26 +247,26 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		return nil, err
 	}
 	if !externalConversationSnapshotMatchesBinding(endpoint, item.Adapter, adapter) || endpoint.Owner != run.Owner ||
-		(endpoint.Handler.Kind == ExternalConversationHandlerAgent && endpoint.DeploymentID != run.AssignedAgentID) {
-		return nil, ErrExternalConversationConflict
+		(endpoint.Handler.Kind == models.ExternalConversationHandlerAgent && endpoint.DeploymentID != run.AssignedAgentID) {
+		return nil, models.ErrExternalConversationConflict
 	}
-	if failedConversationReportCandidate(run) {
+	if models.FailedConversationReportCandidate(run) {
 		// Metadata-only updates are not new attempts. Resolve the captured
 		// terminal identity instead of minting a reply for a mutable revision.
 		if reports, ok := w.store.(interface {
-			GetRunTerminalReport(context.Context, Scope, string, AgentRunStatus) (*RunTerminalReport, error)
+			GetRunTerminalReport(context.Context, models.Scope, string, models.AgentRunStatus) (*models.RunTerminalReport, error)
 		}); ok {
 			run, err = externalConversationFailureReportRun(ctx, reports, run)
 			if err != nil {
 				return nil, err
 			}
 		}
-		conversationID, conversationOK := run.Context[conversationRunContextConversationID].(string)
-		triggerID, triggerOK := run.Context[conversationRunContextTriggerID].(string)
+		conversationID, conversationOK := run.Context[models.ConversationRunConversationIDContextKey].(string)
+		triggerID, triggerOK := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 		if !conversationOK || !triggerOK || conversationID != item.ConversationID || triggerID != item.ChannelMessageID {
 			// An acknowledged report releases its snapshot. Its immutable
 			// inbox source still fences projection from mutable Run context.
-			return nil, ErrExternalConversationConflict
+			return nil, models.ErrExternalConversationConflict
 		}
 		// Both workers publish through the same revision-specific failure key.
 		// The provider outbox then delivers that saved Agent answer once.
@@ -279,9 +279,9 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		return nil, err
 	}
 	if message == nil {
-		if run.Status == AgentRunStatusFailed {
+		if run.Status == models.AgentRunStatusFailed {
 			member := ""
-			if isTeamMemberRun(run) {
+			if models.IsTeamMemberRun(run) {
 				member = run.AssignedAgentID
 			}
 			superseded, checkErr := w.failureSuperseded(ctx, item, endpoint, member)
@@ -294,15 +294,15 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		}
 		content, ok := externalConversationRunReply(ctx, w.store, w.store, run)
 		if !ok {
-			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", ErrInvalidExternalConversation)
+			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", models.ErrInvalidExternalConversation)
 		}
 		saved, refErr := conversation.RunActionArtifactReferences(ctx, w.store, w.store, run)
 		if refErr != nil {
 			return nil, refErr
 		}
 		artifacts, _ := conversation.HandedOverArtifacts(saved, run.Output)
-		if catalog, ok := any(w.store).(ArtifactStore); ok {
-			_ = markRunFiles(ctx, catalog, run.Scope, saved, artifacts)
+		if catalog, ok := any(w.store).(models.ArtifactStore); ok {
+			_ = models.MarkRunFiles(ctx, catalog, run.Scope, saved, artifacts)
 		}
 		current, getErr := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
 		if getErr != nil {
@@ -314,11 +314,11 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		}
 		posted, postErr := w.conversations.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 			Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: current.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: senderID},
-			Intent: MessageIntentAnswer, Content: content,
-			Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: senderID},
+			Intent: models.MessageIntentAnswer, Content: content,
+			Audience:         models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			ReplyToMessageID: item.ChannelMessageID, ResolvesMessageID: item.ChannelMessageID,
-			References:     append([]ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}, artifacts...),
+			References:     append([]models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}, artifacts...),
 			IdempotencyKey: "external-conversation-reply:" + reply.id,
 		})
 		if postErr != nil {
@@ -371,12 +371,12 @@ func (w *ExternalConversationReplyWorker) projectReply(
 // is then posted as usual.
 func (w *ExternalConversationReplyWorker) finishAnswerStream(
 	ctx context.Context,
-	item *ExternalConversationInboxItem,
+	item *models.ExternalConversationInboxItem,
 	replyID string,
-	endpoint *ExternalConversationEndpoint,
+	endpoint *models.ExternalConversationEndpoint,
 	adapter capability.ConversationAdapter,
-	run *AgentRun,
-	message *ChannelMessage,
+	run *models.AgentRun,
+	message *models.ChannelMessage,
 	request *EnqueueExternalConversationDeliveryRequest,
 ) error {
 	stream, err := loadExternalAnswerStream(ctx, w.store, item, replyID)
@@ -392,10 +392,10 @@ func (w *ExternalConversationReplyWorker) finishAnswerStream(
 	files := false
 	if containsConversationFeature(adapter.Features, capability.ConversationFeatureAttachments) {
 		for _, reference := range message.References {
-			files = files || reference.Kind == ConversationReferenceArtifact
+			files = files || reference.Kind == models.ConversationReferenceArtifact
 		}
 	}
-	if run.Status == AgentRunStatusFailed || files {
+	if run.Status == models.AgentRunStatusFailed || files {
 		deleted, err := deleteAnswerStream(ctx, w.transport, item, replyID, endpoint, adapter.Delivery.Operations, stream)
 		if err != nil || deleted || files {
 			return err
@@ -409,36 +409,36 @@ func (w *ExternalConversationReplyWorker) finishAnswerStream(
 
 func (w *ExternalConversationReplyWorker) findCanonicalReply(
 	ctx context.Context,
-	item *ExternalConversationInboxItem,
-	run *AgentRun,
-) (*ChannelMessage, error) {
+	item *models.ExternalConversationInboxItem,
+	run *models.AgentRun,
+) (*models.ChannelMessage, error) {
 	// The canonical projector also prefers a committed normal answer. In
 	// particular, an older failed manual attempt must not win a history scan.
-	message, err := w.store.FindChannelMessageByIdempotencyKey(ctx, item.Scope, item.ConversationID, conversationTaskFinalResponseKey(run))
-	if err != nil && !errors.Is(err, ErrChannelMessageNotFound) {
+	message, err := w.store.FindChannelMessageByIdempotencyKey(ctx, item.Scope, item.ConversationID, models.ConversationTaskFinalResponseKey(run))
+	if err != nil && !errors.Is(err, models.ErrChannelMessageNotFound) {
 		return nil, err
 	}
 	if message != nil {
 		if !canonicalExternalRunReply(message, item, run) {
-			return nil, ErrExternalConversationConflict
+			return nil, models.ErrExternalConversationConflict
 		}
 		return message, nil
 	}
-	if run.Status == AgentRunStatusFailed {
+	if run.Status == models.AgentRunStatusFailed {
 		message, err := w.store.FindChannelMessageByIdempotencyKey(ctx, item.Scope, item.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run))
-		if err != nil && !errors.Is(err, ErrChannelMessageNotFound) {
+		if err != nil && !errors.Is(err, models.ErrChannelMessageNotFound) {
 			return nil, err
 		}
 		if message != nil {
 			if !canonicalExternalRunReply(message, item, run) {
-				return nil, ErrExternalConversationConflict
+				return nil, models.ErrExternalConversationConflict
 			}
 			return message, nil
 		}
 	}
 	if messageID, _ := run.Output["messageId"].(string); strings.TrimSpace(messageID) != "" {
 		message, err := w.store.GetChannelMessage(ctx, item.Scope, item.ConversationID, messageID)
-		if err != nil && !errors.Is(err, ErrChannelMessageNotFound) {
+		if err != nil && !errors.Is(err, models.ErrChannelMessageNotFound) {
 			return nil, err
 		}
 		if message != nil && message.ID == messageID && canonicalExternalRunReply(message, item, run) {
@@ -447,7 +447,7 @@ func (w *ExternalConversationReplyWorker) findCanonicalReply(
 	}
 	// Older outputs may not carry messageId. Stores cap page sizes, so scan
 	// actual pages rather than assuming one large limit includes the answer.
-	filter := ChannelMessageFilter{Scope: item.Scope, ConversationID: item.ConversationID, Limit: 100}
+	filter := models.ChannelMessageFilter{Scope: item.Scope, ConversationID: item.ConversationID, Limit: 100}
 	for {
 		messages, err := w.store.ListChannelMessages(ctx, filter)
 		if err != nil {
@@ -463,7 +463,7 @@ func (w *ExternalConversationReplyWorker) findCanonicalReply(
 		}
 		last := messages[len(messages)-1]
 		if last == nil || last.Sequence <= filter.AfterSequence {
-			return nil, ErrExternalConversationConflict
+			return nil, models.ErrExternalConversationConflict
 		}
 		filter.AfterSequence = last.Sequence
 	}
@@ -472,10 +472,10 @@ func (w *ExternalConversationReplyWorker) findCanonicalReply(
 // Only the external mutable-Run read needs normalization. A reporting worker
 // must project its exact claimed snapshot even when a newer attempt exists.
 func externalConversationFailureReportRun(ctx context.Context, reports interface {
-	GetRunTerminalReport(context.Context, Scope, string, AgentRunStatus) (*RunTerminalReport, error)
-}, run *AgentRun) (*AgentRun, error) {
+	GetRunTerminalReport(context.Context, models.Scope, string, models.AgentRunStatus) (*models.RunTerminalReport, error)
+}, run *models.AgentRun) (*models.AgentRun, error) {
 	report, err := reports.GetRunTerminalReport(ctx, run.Scope, run.ID, run.Status)
-	if errors.Is(err, ErrRunTerminalReportNotFound) {
+	if errors.Is(err, models.ErrRunTerminalReportNotFound) {
 		// Historical pre-59 failures may have no reporting intent.
 		return run, nil
 	}
@@ -483,7 +483,7 @@ func externalConversationFailureReportRun(ctx context.Context, reports interface
 		return nil, err
 	}
 	if report == nil || report.Scope != run.Scope || report.RunID != run.ID || report.Status != run.Status || report.TerminalRevision < 0 || report.TerminalRevision > run.Revision {
-		return nil, ErrInvalidRunTerminalReport
+		return nil, models.ErrInvalidRunTerminalReport
 	}
 	if report.TerminalRevision == 0 && report.DeliveredAt != nil && report.Run == nil {
 		// Acknowledged schema58 rows released their snapshots before the
@@ -493,48 +493,48 @@ func externalConversationFailureReportRun(ctx context.Context, reports interface
 	if report.Run != nil {
 		snapshot := report.Run
 		if snapshot.Scope != run.Scope || snapshot.ID != run.ID || snapshot.Status != run.Status || snapshot.Revision != report.TerminalRevision || snapshot.Owner != run.Owner || snapshot.AssignedAgentID != run.AssignedAgentID || snapshot.Kind != run.Kind || snapshot.ParentRunID != run.ParentRunID || snapshot.Source != run.Source {
-			return nil, ErrInvalidRunTerminalReport
+			return nil, models.ErrInvalidRunTerminalReport
 		}
-		for _, key := range []string{conversationRunContextConversationID, conversationRunContextTriggerID, "threadRootMessageId"} {
+		for _, key := range []string{models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey, "threadRootMessageId"} {
 			left, leftString := snapshot.Context[key].(string)
 			right, rightString := run.Context[key].(string)
 			if key == "threadRootMessageId" && snapshot.Context[key] == nil && run.Context[key] == nil {
 				continue
 			}
 			if !leftString || !rightString || left != right {
-				return nil, ErrInvalidRunTerminalReport
+				return nil, models.ErrInvalidRunTerminalReport
 			}
 		}
-		return cloneAgentRun(snapshot), nil
+		return models.CloneAgentRun(snapshot), nil
 	}
 	if report.DeliveredAt == nil {
-		return nil, ErrInvalidRunTerminalReport
+		return nil, models.ErrInvalidRunTerminalReport
 	}
 	// Acknowledgment releases only the duplicated snapshot, never its key.
-	result := cloneAgentRun(run)
+	result := models.CloneAgentRun(run)
 	result.Revision = report.TerminalRevision
 	return result, nil
 }
 
-func canonicalExternalRunReply(message *ChannelMessage, item *ExternalConversationInboxItem, run *AgentRun) bool {
+func canonicalExternalRunReply(message *models.ChannelMessage, item *models.ExternalConversationInboxItem, run *models.AgentRun) bool {
 	if message == nil || message.Scope != item.Scope || message.ConversationID != item.ConversationID ||
-		message.ReplyToMessageID != item.ChannelMessageID || message.Intent != MessageIntentAnswer ||
-		message.Sender.Type == ConversationParticipantUser || message.Historical || strings.TrimSpace(message.Content) == "" {
+		message.ReplyToMessageID != item.ChannelMessageID || message.Intent != models.MessageIntentAnswer ||
+		message.Sender.Type == models.ConversationParticipantUser || message.Historical || strings.TrimSpace(message.Content) == "" {
 		return false
 	}
 	for _, reference := range message.References {
-		if reference.Kind == ConversationReferenceRun && reference.ID == run.ID {
+		if reference.Kind == models.ConversationReferenceRun && reference.ID == run.ID {
 			return true
 		}
 	}
 	return false
 }
 
-func externalConversationRunReply(ctx context.Context, sessions conversation.LoopSessionEntryLister, actions ActionCallReader, run *AgentRun) (string, bool) {
+func externalConversationRunReply(ctx context.Context, sessions conversation.LoopSessionEntryLister, actions models.ActionCallReader, run *models.AgentRun) (string, bool) {
 	if run == nil {
 		return "", false
 	}
-	if run.Status == AgentRunStatusFailed {
+	if run.Status == models.AgentRunStatusFailed {
 		// Only a posted model explanation is the failed attempt's reply.
 		if f := run.FailureExplanation; f != nil && f.Explained {
 			if summary := strings.TrimSpace(conversationrun.ConversationResultString(run.Output, "summary")); summary != "" && len(summary) <= 65536 {
@@ -546,7 +546,7 @@ func externalConversationRunReply(ctx context.Context, sessions conversation.Loo
 		// those actions had external effects.
 		return conversation.TerminalRunFailureReply(ctx, sessions, actions, run), true
 	}
-	if run.Status != AgentRunStatusCompleted {
+	if run.Status != models.AgentRunStatusCompleted {
 		return "", false
 	}
 	reply, ok := run.Output["reply"].(string)
@@ -561,8 +561,8 @@ func externalConversationRunReply(ctx context.Context, sessions conversation.Loo
 // supersedes its failure; a teammate's answer does not.
 func (w *ExternalConversationReplyWorker) failureSuperseded(
 	ctx context.Context,
-	item *ExternalConversationInboxItem,
-	endpoint *ExternalConversationEndpoint,
+	item *models.ExternalConversationInboxItem,
+	endpoint *models.ExternalConversationEndpoint,
 	member string,
 ) (bool, error) {
 	// Older workers acknowledged failed runs only by clearing thread status.
@@ -585,10 +585,10 @@ func (w *ExternalConversationReplyWorker) failureSuperseded(
 		return false, err
 	}
 	threadRoot := trigger.ThreadRootID
-	if threadRoot == "" && (item.Event.ExternalThreadID != "" || endpoint.Policy.ReplyMode == ExternalConversationReplyThread) {
+	if threadRoot == "" && (item.Event.ExternalThreadID != "" || endpoint.Policy.ReplyMode == models.ExternalConversationReplyThread) {
 		threadRoot = trigger.ID
 	}
-	filter := ChannelMessageFilter{
+	filter := models.ChannelMessageFilter{
 		Scope: item.Scope, ConversationID: item.ConversationID,
 		ThreadRootID: threadRoot, AfterSequence: trigger.Sequence, Limit: 500,
 	}
@@ -602,8 +602,8 @@ func (w *ExternalConversationReplyWorker) failureSuperseded(
 				(threadRoot == "" && message.ThreadRootID != "" && message.ThreadRootID != trigger.ID) {
 				continue
 			}
-			if message.Sender.Type == ConversationParticipantUser ||
-				(message.Intent == MessageIntentAnswer && (member == "" || message.Sender.ID == member)) {
+			if message.Sender.Type == models.ConversationParticipantUser ||
+				(message.Intent == models.MessageIntentAnswer && (member == "" || message.Sender.ID == member)) {
 				return true, nil
 			}
 		}

@@ -15,10 +15,10 @@ import (
 
 type ExternalConversationDeliveryHostRequest struct {
 	Attachments []ExternalConversationAttachmentContent `json:"attachments,omitempty"`
-	Endpoint    *ExternalConversationEndpoint           `json:"endpoint"`
+	Endpoint    *models.ExternalConversationEndpoint    `json:"endpoint"`
 	Adapter     *skill.BoundConversationAdapter         `json:"adapter"`
-	Delivery    *ExternalConversationDelivery           `json:"delivery"`
-	Message     *ChannelMessage                         `json:"message"`
+	Delivery    *models.ExternalConversationDelivery    `json:"delivery"`
+	Message     *models.ChannelMessage                  `json:"message"`
 }
 
 type ExternalConversationAcknowledgementStatus string
@@ -36,19 +36,19 @@ type ExternalConversationDeliveryAcknowledgement struct {
 
 func (a *ExternalConversationDeliveryAcknowledgement) Validate() error {
 	if a == nil {
-		return fmt.Errorf("%w: acknowledgement is required", ErrInvalidExternalConversation)
+		return fmt.Errorf("%w: acknowledgement is required", models.ErrInvalidExternalConversation)
 	}
 	switch a.Status {
 	case ExternalConversationAcknowledgementFound:
-		if !validExternalConversationReference(a.ProviderMessageID, 1024) {
-			return fmt.Errorf("%w: found acknowledgement requires a provider message id", ErrInvalidExternalConversation)
+		if !models.IsValidExternalConversationReference(a.ProviderMessageID, 1024) {
+			return fmt.Errorf("%w: found acknowledgement requires a provider message id", models.ErrInvalidExternalConversation)
 		}
 	case ExternalConversationAcknowledgementNotFound, ExternalConversationAcknowledgementUnknown:
 		if a.ProviderMessageID != "" {
-			return fmt.Errorf("%w: unresolved acknowledgement cannot include a provider message id", ErrInvalidExternalConversation)
+			return fmt.Errorf("%w: unresolved acknowledgement cannot include a provider message id", models.ErrInvalidExternalConversation)
 		}
 	default:
-		return fmt.Errorf("%w: acknowledgement status is invalid", ErrInvalidExternalConversation)
+		return fmt.Errorf("%w: acknowledgement status is invalid", models.ErrInvalidExternalConversation)
 	}
 	return nil
 }
@@ -73,26 +73,26 @@ type ExternalConversationDeliveryHostResult struct {
 func (r *ExternalConversationDeliveryHostResult) Validate() error {
 	if r == nil || r.RetryAfter < 0 || len(r.ErrorCode) > 128 || len(r.Summary) > 1024 ||
 		strings.ContainsAny(r.ErrorCode, "\r\n") || strings.ContainsAny(r.Summary, "\r\n") {
-		return fmt.Errorf("%w: invalid delivery host result", ErrInvalidExternalConversation)
+		return fmt.Errorf("%w: invalid delivery host result", models.ErrInvalidExternalConversation)
 	}
-	if err := validateExternalConversationConfiguration(r.Progress); err != nil {
+	if err := models.ValidateExternalConversationConfiguration(r.Progress); err != nil {
 		return err
 	}
 	switch r.Outcome {
 	case ExternalConversationDeliveryOutcomeDelivered:
-		if !validExternalConversationReference(r.ProviderMessageID, 1024) || r.ErrorCode != "" || r.RetryAfter != 0 {
-			return fmt.Errorf("%w: delivered result is incomplete", ErrInvalidExternalConversation)
+		if !models.IsValidExternalConversationReference(r.ProviderMessageID, 1024) || r.ErrorCode != "" || r.RetryAfter != 0 {
+			return fmt.Errorf("%w: delivered result is incomplete", models.ErrInvalidExternalConversation)
 		}
 	case ExternalConversationDeliveryOutcomeRetry:
 		if r.ProviderMessageID != "" || r.ErrorCode == "" {
-			return fmt.Errorf("%w: retry result requires a safe error code", ErrInvalidExternalConversation)
+			return fmt.Errorf("%w: retry result requires a safe error code", models.ErrInvalidExternalConversation)
 		}
 	case ExternalConversationDeliveryOutcomeFailed:
 		if r.ProviderMessageID != "" || r.ErrorCode == "" || r.RetryAfter != 0 {
-			return fmt.Errorf("%w: failed result requires a safe error code", ErrInvalidExternalConversation)
+			return fmt.Errorf("%w: failed result requires a safe error code", models.ErrInvalidExternalConversation)
 		}
 	default:
-		return fmt.Errorf("%w: invalid delivery outcome", ErrInvalidExternalConversation)
+		return fmt.Errorf("%w: invalid delivery outcome", models.ErrInvalidExternalConversation)
 	}
 	return nil
 }
@@ -113,7 +113,7 @@ type ExternalConversationAdapterHost interface {
 }
 
 type ExternalConversationDeliveryWorkerConfig struct {
-	AttachmentContent ArtifactContentStore
+	AttachmentContent models.ArtifactContentStore
 	WorkerID          string
 	LeaseDuration     time.Duration
 	BaseRetry         time.Duration
@@ -122,8 +122,8 @@ type ExternalConversationDeliveryWorkerConfig struct {
 
 func (c ExternalConversationDeliveryWorkerConfig) normalize() (ExternalConversationDeliveryWorkerConfig, error) {
 	c.WorkerID = strings.TrimSpace(c.WorkerID)
-	if !validOpaqueIdentifier(c.WorkerID, 256) {
-		return ExternalConversationDeliveryWorkerConfig{}, fmt.Errorf("%w: worker id is invalid", ErrInvalidExternalConversation)
+	if !models.IsValidOpaqueIdentifier(c.WorkerID, 256) {
+		return ExternalConversationDeliveryWorkerConfig{}, fmt.Errorf("%w: worker id is invalid", models.ErrInvalidExternalConversation)
 	}
 	if c.LeaseDuration == 0 {
 		c.LeaseDuration = time.Minute
@@ -135,13 +135,13 @@ func (c ExternalConversationDeliveryWorkerConfig) normalize() (ExternalConversat
 		c.MaximumRetry = 5 * time.Minute
 	}
 	if c.LeaseDuration <= 0 || c.BaseRetry <= 0 || c.MaximumRetry < c.BaseRetry {
-		return ExternalConversationDeliveryWorkerConfig{}, fmt.Errorf("%w: worker durations are invalid", ErrInvalidExternalConversation)
+		return ExternalConversationDeliveryWorkerConfig{}, fmt.Errorf("%w: worker durations are invalid", models.ErrInvalidExternalConversation)
 	}
 	return c, nil
 }
 
 type ExternalConversationDeliveryWorker struct {
-	store    ExternalConversationStore
+	store    models.ExternalConversationStore
 	resolver ExternalConversationAdapterResolver
 	host     ExternalConversationAdapterHost
 	config   ExternalConversationDeliveryWorkerConfig
@@ -149,7 +149,7 @@ type ExternalConversationDeliveryWorker struct {
 }
 
 func NewExternalConversationDeliveryWorker(
-	store ExternalConversationStore,
+	store models.ExternalConversationStore,
 	resolver ExternalConversationAdapterResolver,
 	host ExternalConversationAdapterHost,
 	config ExternalConversationDeliveryWorkerConfig,
@@ -167,7 +167,7 @@ func NewExternalConversationDeliveryWorker(
 	}, nil
 }
 
-func (w *ExternalConversationDeliveryWorker) ProcessOne(ctx context.Context, scope Scope) (*ExternalConversationDelivery, error) {
+func (w *ExternalConversationDeliveryWorker) ProcessOne(ctx context.Context, scope models.Scope) (*models.ExternalConversationDelivery, error) {
 	if w == nil || w.store == nil || w.resolver == nil || w.host == nil {
 		return nil, errors.New("external conversation delivery worker is not configured")
 	}
@@ -185,9 +185,9 @@ func (w *ExternalConversationDeliveryWorker) ProcessOne(ctx context.Context, sco
 	return delivery, nil
 }
 
-func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delivery *ExternalConversationDelivery) error {
-	if delivery.Status != ExternalConversationDeliveryLeased || delivery.LeaseOwner != w.config.WorkerID {
-		return ErrExternalConversationLeaseLost
+func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalConversationDelivery) error {
+	if delivery.Status != models.ExternalConversationDeliveryLeased || delivery.LeaseOwner != w.config.WorkerID {
+		return models.ErrExternalConversationLeaseLost
 	}
 	endpoint, adapter, err := w.resolve(ctx, delivery)
 	if err != nil {
@@ -197,8 +197,8 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 	if err != nil {
 		return err
 	}
-	if message == nil || message.Historical || message.Audience.Kind != ConversationAudienceChannel {
-		return fmt.Errorf("%w: canonical delivery message is unavailable", ErrInvalidExternalConversation)
+	if message == nil || message.Historical || message.Audience.Kind != models.ConversationAudienceChannel {
+		return fmt.Errorf("%w: canonical delivery message is unavailable", models.ErrInvalidExternalConversation)
 	}
 	if preview, ok := externalAnswerStreamPreview(delivery); ok {
 		// Once the committed reply is queued it owns the streamed message, so a
@@ -218,21 +218,21 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 		if agent, _ := delivery.Parameters[externalAnswerStreamAgentParameter].(string); agent != "" {
 			sender = agent
 		}
-		message = &ChannelMessage{
+		message = &models.ChannelMessage{
 			ID: message.ID, Scope: message.Scope, ConversationID: message.ConversationID, Sequence: message.Sequence,
-			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: sender},
-			Intent: MessageIntentAnswer, Content: preview, Audience: message.Audience,
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: sender},
+			Intent: models.MessageIntentAnswer, Content: preview, Audience: message.Audience,
 			ThreadRootID: message.ThreadRootID, ReplyToMessageID: message.ID, CreatedAt: message.CreatedAt,
 		}
 	}
 	message = withRoutineReportHeader(delivery, message)
-	deliveryEndpoint := cloneExternalConversationEndpoint(endpoint)
+	deliveryEndpoint := models.CloneExternalConversationEndpoint(endpoint)
 	if origin := strings.TrimSpace(delivery.ExternalConversationID); origin != "" {
 		deliveryEndpoint.Address = origin
 	} else if strings.TrimSpace(deliveryEndpoint.Address) == "" {
-		return fmt.Errorf("%w: installation-wide endpoint delivery requires the originating conversation", ErrInvalidExternalConversation)
+		return fmt.Errorf("%w: installation-wide endpoint delivery requires the originating conversation", models.ErrInvalidExternalConversation)
 	}
-	effectiveDelivery := cloneExternalConversationDelivery(delivery)
+	effectiveDelivery := models.CloneExternalConversationDelivery(delivery)
 	// Keep the durable intent and receipt intact; execution uses the currently
 	// reviewed connection, including when setup changed while this was queued.
 	effectiveDelivery.Adapter = externalConversationResolvedAdapterReference(adapter)
@@ -280,27 +280,27 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 		return w.markDelivered(ctx, delivery, result.ProviderMessageID)
 	case ExternalConversationDeliveryOutcomeRetry:
 		if result.RetryAfter > 0 && !adapter.Adapter.Delivery.SupportsRetryAfter {
-			return fmt.Errorf("%w: adapter returned undeclared retry-after", ErrInvalidExternalConversation)
+			return fmt.Errorf("%w: adapter returned undeclared retry-after", models.ErrInvalidExternalConversation)
 		}
 		return w.recordFailure(ctx, delivery, errors.New("adapter requested retry"), result.ErrorCode, result.Summary, result.RetryAfter)
 	case ExternalConversationDeliveryOutcomeFailed:
 		return w.markFailed(ctx, delivery, result.ErrorCode, result.Summary)
 	default:
-		return ErrInvalidExternalConversation
+		return models.ErrInvalidExternalConversation
 	}
 }
 
 func (w *ExternalConversationDeliveryWorker) resolve(
 	ctx context.Context,
-	delivery *ExternalConversationDelivery,
-) (*ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {
+	delivery *models.ExternalConversationDelivery,
+) (*models.ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, delivery.Scope, delivery.EndpointID)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !externalConversationSnapshotMatchesEndpoint(endpoint, delivery.Scope, delivery.EndpointID, delivery.EndpointRevision,
 		delivery.Adapter, delivery.ExternalConversationID) {
-		return nil, nil, ErrExternalConversationConflict
+		return nil, nil, models.ErrExternalConversationConflict
 	}
 	ref := delivery.Adapter
 	adapter, err := w.resolver.ResolveConversationAdapterBinding(
@@ -308,17 +308,17 @@ func (w *ExternalConversationDeliveryWorker) resolve(
 		ref.BindingID, ref.AdapterID,
 	)
 	if err != nil || !externalConversationSnapshotMatchesBinding(endpoint, ref, adapter) {
-		return nil, nil, ErrExternalConversationConflict
+		return nil, nil, models.ErrExternalConversationConflict
 	}
 	if !containsConversationDeliveryOperation(adapter.Adapter.Delivery.Operations, delivery.Operation) {
-		return nil, nil, fmt.Errorf("%w: delivery operation is no longer available", ErrExternalConversationConflict)
+		return nil, nil, fmt.Errorf("%w: delivery operation is no longer available", models.ErrExternalConversationConflict)
 	}
 	return endpoint, adapter, nil
 }
 
 func (w *ExternalConversationDeliveryWorker) markDelivered(
 	ctx context.Context,
-	delivery *ExternalConversationDelivery,
+	delivery *models.ExternalConversationDelivery,
 	providerMessageID string,
 ) error {
 	now := w.now().UTC()
@@ -331,26 +331,26 @@ func (w *ExternalConversationDeliveryWorker) markDelivered(
 	// A reaction belongs to an already mapped message and maps nothing new.
 	reaction := delivery.Operation == capability.ConversationDeliveryReactionAdd || delivery.Operation == capability.ConversationDeliveryReactionRemove
 	if delivery.Operation != capability.ConversationDeliveryTypingIndicator && delivery.Operation != capability.ConversationDeliveryMessageDelete && !preview && !reaction {
-		mapping := &ExternalMessageMapping{
-			Scope: delivery.Scope, EndpointID: delivery.EndpointID, Direction: ExternalMessageOutbound,
+		mapping := &models.ExternalMessageMapping{
+			Scope: delivery.Scope, EndpointID: delivery.EndpointID, Direction: models.ExternalMessageOutbound,
 			ExternalMessageID: providerMessageID, ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,
 			Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
 		if err := w.store.SaveExternalMessageMapping(ctx, mapping, 0); err != nil {
-			if !errors.Is(err, ErrExternalConversationConflict) {
+			if !errors.Is(err, models.ErrExternalConversationConflict) {
 				return err
 			}
 			current, getErr := w.store.GetExternalMessageMapping(
-				ctx, delivery.Scope, delivery.EndpointID, ExternalMessageOutbound, providerMessageID,
+				ctx, delivery.Scope, delivery.EndpointID, models.ExternalMessageOutbound, providerMessageID,
 			)
 			if getErr != nil || current == nil || current.ConversationID != delivery.ConversationID ||
 				current.ChannelMessageID != delivery.ChannelMessageID {
-				return ErrExternalConversationConflict
+				return models.ErrExternalConversationConflict
 			}
 		}
 	}
-	next := cloneExternalConversationDelivery(delivery)
-	next.Status = ExternalConversationDeliveryDelivered
+	next := models.CloneExternalConversationDelivery(delivery)
+	next.Status = models.ExternalConversationDeliveryDelivered
 	next.ProviderMessageID = providerMessageID
 	next.LeaseOwner, next.LeaseExpiresAt = "", time.Time{}
 	next.ErrorCode, next.Summary = "", ""
@@ -368,12 +368,12 @@ func (w *ExternalConversationDeliveryWorker) markDelivered(
 
 func (w *ExternalConversationDeliveryWorker) markFailed(
 	ctx context.Context,
-	delivery *ExternalConversationDelivery,
+	delivery *models.ExternalConversationDelivery,
 	code, summary string,
 ) error {
 	now := w.now().UTC()
-	next := cloneExternalConversationDelivery(delivery)
-	next.Status = ExternalConversationDeliveryFailed
+	next := models.CloneExternalConversationDelivery(delivery)
+	next.Status = models.ExternalConversationDeliveryFailed
 	next.LeaseOwner, next.LeaseExpiresAt = "", time.Time{}
 	next.ErrorCode, next.Summary = code, summary
 	next.UpdatedAt = now
@@ -390,13 +390,13 @@ func (w *ExternalConversationDeliveryWorker) markFailed(
 
 func (w *ExternalConversationDeliveryWorker) recordFailure(
 	ctx context.Context,
-	delivery *ExternalConversationDelivery,
+	delivery *models.ExternalConversationDelivery,
 	processingErr error,
 	code, summary string,
 	retryAfter time.Duration,
 ) error {
 	now := w.now().UTC()
-	next := cloneExternalConversationDelivery(delivery)
+	next := models.CloneExternalConversationDelivery(delivery)
 	next.LeaseOwner, next.LeaseExpiresAt = "", time.Time{}
 	if code == "" {
 		code = externalConversationDeliveryErrorCode(processingErr)
@@ -408,9 +408,9 @@ func (w *ExternalConversationDeliveryWorker) recordFailure(
 	next.UpdatedAt = now
 	next.Revision++
 	if next.Attempt >= next.MaximumAttempts {
-		next.Status = ExternalConversationDeliveryFailed
+		next.Status = models.ExternalConversationDeliveryFailed
 	} else {
-		next.Status = ExternalConversationDeliveryRetry
+		next.Status = models.ExternalConversationDeliveryRetry
 		delay := exponentialExternalConversationRetry(w.config.BaseRetry, w.config.MaximumRetry, next.Attempt)
 		if retryAfter > 0 {
 			if retryAfter > w.config.MaximumRetry {
@@ -432,9 +432,9 @@ func (w *ExternalConversationDeliveryWorker) recordFailure(
 
 func externalConversationDeliveryErrorCode(err error) string {
 	switch {
-	case errors.Is(err, ErrExternalConversationConflict):
+	case errors.Is(err, models.ErrExternalConversationConflict):
 		return "endpoint_or_adapter_conflict"
-	case errors.Is(err, ErrInvalidExternalConversation):
+	case errors.Is(err, models.ErrInvalidExternalConversation):
 		return "invalid_delivery"
 	default:
 		return "adapter_delivery_unconfirmed"

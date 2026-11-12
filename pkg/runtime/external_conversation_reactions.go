@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
@@ -19,19 +20,19 @@ const externalReactionDeliveryScanPages = 10
 // marked external so it is never delivered back out. A reaction on a message
 // OpenSeal does not know, or cannot show to that participant, is applied as a
 // no-op. Reactions never start a Run.
-func (w *ExternalConversationInboxWorker) applyReaction(ctx context.Context, item *ExternalConversationInboxItem) error {
+func (w *ExternalConversationInboxWorker) applyReaction(ctx context.Context, item *models.ExternalConversationInboxItem) error {
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, item.Scope, item.EndpointID)
 	if err != nil {
 		return err
 	}
-	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
+	if endpoint == nil || endpoint.Status != models.ExternalConversationEndpointActive ||
 		endpoint.Revision != item.EndpointRevision ||
-		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
-		return ErrExternalConversationConflict
+		!models.ExternalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
+		return models.ErrExternalConversationConflict
 	}
 	event := item.Event
-	var mapping *ExternalMessageMapping
-	for _, direction := range []ExternalMessageDirection{ExternalMessageInbound, ExternalMessageOutbound} {
+	var mapping *models.ExternalMessageMapping
+	for _, direction := range []models.ExternalMessageDirection{models.ExternalMessageInbound, models.ExternalMessageOutbound} {
 		candidate, err := w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, direction, event.ExternalMessageID)
 		if err != nil {
 			return err
@@ -57,7 +58,7 @@ func (w *ExternalConversationInboxWorker) applyReaction(ctx context.Context, ite
 	} else {
 		_, err = w.conversations.RemoveMessageReaction(ctx, request)
 	}
-	if errors.Is(err, ErrChannelMessageNotFound) {
+	if errors.Is(err, models.ErrChannelMessageNotFound) {
 		return w.complete(ctx, item, mapping.ConversationID, "", "")
 	}
 	if err != nil {
@@ -79,16 +80,16 @@ type externalReactionTarget struct {
 // reaction made in OpenSeal on a message that came from, or was delivered
 // to, an external conversation whose adapter declares reactions. The
 // delivery parameters carry the emoji and the provider message id.
-func (s *ExternalConversationTransportService) ProjectMessageReaction(ctx context.Context, event *ConversationReactionEvent) error {
+func (s *ExternalConversationTransportService) ProjectMessageReaction(ctx context.Context, event *models.ConversationReactionEvent) error {
 	if s == nil || s.store == nil || s.resolver == nil || event == nil {
 		return nil
 	}
 	operation := capability.ConversationDeliveryReactionAdd
-	if event.Type == ConversationReactionRemoved {
+	if event.Type == models.ConversationReactionRemoved {
 		operation = capability.ConversationDeliveryReactionRemove
 	}
 	message, err := s.store.GetChannelMessage(ctx, event.Scope, event.ConversationID, event.MessageID)
-	if err != nil || message == nil || message.Historical || message.Audience.Kind != ConversationAudienceChannel {
+	if err != nil || message == nil || message.Historical || message.Audience.Kind != models.ConversationAudienceChannel {
 		return err
 	}
 	target, err := s.externalReactionTarget(ctx, message)
@@ -118,10 +119,10 @@ func (s *ExternalConversationTransportService) ProjectMessageReaction(ctx contex
 
 // externalReactionTarget finds the external conversation of an imported
 // message from its source, and of an OpenSeal answer from its delivered send.
-func (s *ExternalConversationTransportService) externalReactionTarget(ctx context.Context, message *ChannelMessage) (*externalReactionTarget, error) {
+func (s *ExternalConversationTransportService) externalReactionTarget(ctx context.Context, message *models.ChannelMessage) (*externalReactionTarget, error) {
 	if source := message.ExternalSource; source != nil {
 		for _, reference := range message.References {
-			if reference.Kind != ConversationReferenceExternalSource {
+			if reference.Kind != models.ConversationReferenceExternalSource {
 				continue
 			}
 			endpoint, err := s.store.GetExternalConversationEndpoint(ctx, message.Scope, reference.ID)
@@ -139,9 +140,9 @@ func (s *ExternalConversationTransportService) externalReactionTarget(ctx contex
 		return nil, nil
 	}
 	for page := 0; page < externalReactionDeliveryScanPages; page++ {
-		deliveries, err := s.store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+		deliveries, err := s.store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{
 			Scope: message.Scope, ConversationID: message.ConversationID,
-			Statuses: []ExternalConversationDeliveryStatus{ExternalConversationDeliveryDelivered},
+			Statuses: []models.ExternalConversationDeliveryStatus{models.ExternalConversationDeliveryDelivered},
 			Limit:    100, Offset: page * 100,
 		})
 		if err != nil {

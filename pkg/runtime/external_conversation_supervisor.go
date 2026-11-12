@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 
@@ -51,7 +52,7 @@ type ExternalConversationSupervisor struct {
 	wake             chan struct{}
 	signals          atomic.Pointer[workqueue.WorkSignalStatus]
 	queue            *workqueue.ScopeWakeQueue
-	deadlines        ExternalConversationDeadlineStore
+	deadlines        models.ExternalConversationDeadlineStore
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 	startOnce        sync.Once
@@ -92,7 +93,7 @@ func NewExternalConversationSupervisor(
 		inbox: inbox, replies: replies, delivery: delivery, approvals: approvals, scopes: scopes,
 		config: config, logger: logger, wake: make(chan struct{}, 1), queue: workqueue.NewScopeWakeQueue(),
 	}
-	supervisor.deadlines, _ = inbox.store.(ExternalConversationDeadlineStore)
+	supervisor.deadlines, _ = inbox.store.(models.ExternalConversationDeadlineStore)
 	return supervisor, nil
 }
 
@@ -123,7 +124,7 @@ func (s *ExternalConversationSupervisor) Wake() {
 }
 
 // WakeScope reconciles one scope promptly instead of every listed scope.
-func (s *ExternalConversationSupervisor) WakeScope(scope Scope) {
+func (s *ExternalConversationSupervisor) WakeScope(scope models.Scope) {
 	s.queue.WakeScope(scope)
 }
 
@@ -143,7 +144,7 @@ func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 	return s.reconcileScopes(ctx, workqueue.NormalizeScopes(scopes))
 }
 
-func (s *ExternalConversationSupervisor) reconcileScopes(ctx context.Context, scopes []Scope) error {
+func (s *ExternalConversationSupervisor) reconcileScopes(ctx context.Context, scopes []models.Scope) error {
 	var reconcileErrors []error
 	for _, scope := range scopes {
 		if err := s.reconcileScope(ctx, scope); err != nil {
@@ -153,7 +154,7 @@ func (s *ExternalConversationSupervisor) reconcileScopes(ctx context.Context, sc
 	return errors.Join(reconcileErrors...)
 }
 
-func (s *ExternalConversationSupervisor) reconcileScope(ctx context.Context, scope Scope) error {
+func (s *ExternalConversationSupervisor) reconcileScope(ctx context.Context, scope models.Scope) error {
 	var reconcileErrors []error
 	if s.callbacks != nil {
 		for range s.config.BatchSize {
@@ -206,14 +207,14 @@ func (s *ExternalConversationSupervisor) reconcileScope(ctx context.Context, sco
 
 // scheduleScope schedules a queue-driven scope's next pass: its earliest
 // durable deadline, or a backed-off retry after a failed pass.
-func (s *ExternalConversationSupervisor) scheduleScope(ctx context.Context, signals *workqueue.WorkSignalStatus, scope Scope, failed error) {
+func (s *ExternalConversationSupervisor) scheduleScope(ctx context.Context, signals *workqueue.WorkSignalStatus, scope models.Scope, failed error) {
 	now := time.Now().UTC()
 	next, err := s.deadlines.NextExternalConversationDeadline(ctx, scope, now)
 	if err != nil && ctx.Err() == nil {
 		s.logger.Warnw("external conversation deadline lookup failed", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
 	}
 	retry := s.queue.Outcome(scope, errors.Join(failed, err), s.config.Interval, now)
-	signals.Schedule(WorkFamilyExternalDue, scope, workqueue.EarliestDeadline(next, retry))
+	signals.Schedule(models.WorkFamilyExternalDue, scope, workqueue.EarliestDeadline(next, retry))
 }
 
 func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
@@ -249,7 +250,7 @@ func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
 		now := time.Now()
 		scopes, deferred := s.queue.Take(now, spacing)
 		for scope, at := range deferred {
-			signals.Schedule(WorkFamilyExternalDue, scope, &at)
+			signals.Schedule(models.WorkFamilyExternalDue, scope, &at)
 		}
 		if full {
 			listed, err := known.List(ctx)
@@ -267,7 +268,7 @@ func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
 				s.logger.Warnw("failed to check external conversation scopes", "error", err)
 				if queueDriven {
 					for _, scope := range scopes {
-						signals.ScheduleIn(WorkFamilyExternalDue, scope, 10*s.config.Interval)
+						signals.ScheduleIn(models.WorkFamilyExternalDue, scope, 10*s.config.Interval)
 					}
 				}
 			}

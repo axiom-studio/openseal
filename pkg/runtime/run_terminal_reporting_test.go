@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -17,9 +18,9 @@ import (
 )
 
 type terminalReportingContractStore interface {
-	RunCommandStore
-	RunTerminalReportingStore
-	ConversationStore
+	models.RunCommandStore
+	models.RunTerminalReportingStore
+	models.ConversationStore
 }
 
 func terminalReportingContractFixture(t *testing.T, fixture runStoreContractFixture) terminalReportingContractStore {
@@ -31,30 +32,30 @@ func terminalReportingContractFixture(t *testing.T, fixture runStoreContractFixt
 	return store
 }
 
-func terminalReportingContractRun(t *testing.T, store terminalReportingContractStore, scope Scope, at time.Time) (*AgentRun, *Conversation, *ChannelMessage) {
+func terminalReportingContractRun(t *testing.T, store terminalReportingContractStore, scope models.Scope, at time.Time) (*models.AgentRun, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "report-agent"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "report-agent"}
 	conversations := runtimeconversation.NewConversationService(store)
-	seedTestSpace(t, store.(SpaceStore), scope)
+	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Original request", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	trigger, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requesting-user"}, Intent: MessageIntentQuestion,
-		Content: "Send me the result here when the work finishes", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: uuid.NewString(),
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requesting-user"}, Intent: models.MessageIntentQuestion,
+		Content: "Send me the result here when the work finishes", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	key := uuid.NewString()
 	commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
-	created, err := commands.CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Report the completed background work", Source: RunSourceSchedule, IdempotencyKey: key,
+	created, err := commands.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Report the completed background work", Source: models.RunSourceSchedule, IdempotencyKey: key,
 		Context: map[string]interface{}{
-			conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.Message.ID,
-			runReportingContextRootRunID: agentrun.RunIDForIdempotencyKey(scope, key), runReportingContextMilestones: []string{"completed", "failed"}, scheduledTaskContextKey: true,
+			models.ConversationRunConversationIDContextKey: conversation.ID, models.ConversationRunTriggerIDContextKey: trigger.Message.ID,
+			models.RunReportingRootRunIDContextKey: agentrun.RunIDForIdempotencyKey(scope, key), models.RunReportingMilestonesContextKey: []string{"completed", "failed"}, models.ScheduledTaskContextKey: true,
 		},
 	})
 	if err != nil {
@@ -63,15 +64,15 @@ func terminalReportingContractRun(t *testing.T, store terminalReportingContractS
 	return created.Run, trigger.Conversation, trigger.Message
 }
 
-func terminalReportingContractComplete(t *testing.T, store terminalReportingContractStore, run *AgentRun, at time.Time) *AgentRun {
+func terminalReportingContractComplete(t *testing.T, store terminalReportingContractStore, run *models.AgentRun, at time.Time) *models.AgentRun {
 	t.Helper()
-	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return at }))
-	running, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning})
+	activity := runtimeactivity.NewRunActivityService(store, store, models.WithClock(func() time.Time { return at }))
+	running, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "The requested result is ready"},
+	terminal, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "The requested result is ready"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -95,13 +96,13 @@ func terminalReportingContractWorkerWithClock(t *testing.T, store terminalReport
 	return worker
 }
 
-func terminalReportingContractAssertMessage(t *testing.T, store ConversationStore, run *AgentRun, conversation *Conversation, trigger *ChannelMessage) {
+func terminalReportingContractAssertMessage(t *testing.T, store models.ConversationStore, run *models.AgentRun, conversation *models.Conversation, trigger *models.ChannelMessage) {
 	t.Helper()
-	messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: conversation.ID, Limit: 100})
+	messages, err := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: run.Scope, ConversationID: conversation.ID, Limit: 100})
 	if err != nil || len(messages) != 2 {
 		t.Fatalf("terminal result lost or duplicated: messages=%#v error=%v", messages, err)
 	}
-	var report *ChannelMessage
+	var report *models.ChannelMessage
 	for _, message := range messages {
 		if message.ID != trigger.ID {
 			report = message
@@ -116,7 +117,7 @@ func TestTerminalRunReportingContractCommitCrashRestartRecovery(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-restart"}, now)
+		run, conversation, trigger := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-restart"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		intent, err := store.GetRunTerminalReport(t.Context(), run.Scope, run.ID, run.Status)
 		if err != nil || intent.Run == nil || intent.Run.Revision != run.Revision || intent.DeliveredAt != nil {
@@ -149,9 +150,9 @@ func TestTerminalRunReportingContractCrashAfterPostBeforeAck(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-ack-crash"}, now)
+		run, conversation, trigger := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-ack-crash"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
-		claims, err := store.ClaimRunTerminalReports(t.Context(), RunTerminalReportingClaim{WorkerID: "dead-worker", Now: now, LeaseDuration: time.Minute, Limit: 1})
+		claims, err := store.ClaimRunTerminalReports(t.Context(), models.RunTerminalReportingClaim{WorkerID: "dead-worker", Now: now, LeaseDuration: time.Minute, Limit: 1})
 		if err != nil || len(claims) != 1 {
 			t.Fatalf("claim: %#v, %v", claims, err)
 		}
@@ -163,9 +164,9 @@ func TestTerminalRunReportingContractCrashAfterPostBeforeAck(t *testing.T) {
 			store = terminalReportingContractFixture(t, fixture)
 		}
 		now = now.Add(2 * time.Minute)
-		if err := store.CompleteRunTerminalReport(t.Context(), RunTerminalReportingCompletion{
+		if err := store.CompleteRunTerminalReport(t.Context(), models.RunTerminalReportingCompletion{
 			Scope: run.Scope, RunID: run.ID, Status: run.Status, TerminalRevision: claims[0].TerminalRevision, WorkerID: claims[0].LeaseOwner, LeaseExpiresAt: *claims[0].LeaseExpiresAt, Now: now,
-		}); !errors.Is(err, ErrLeaseLost) {
+		}); !errors.Is(err, models.ErrLeaseLost) {
 			t.Fatalf("expired delivery attempt was not fenced: %v", err)
 		}
 		if delivered, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || delivered != 1 {
@@ -185,12 +186,12 @@ type terminalReportingConflictStore struct {
 	remaining int
 }
 
-func (s *terminalReportingConflictStore) CommitChannelMessage(ctx context.Context, record ChannelMessageCommitRecord) (*ChannelMessageCommitResult, error) {
+func (s *terminalReportingConflictStore) CommitChannelMessage(ctx context.Context, record models.ChannelMessageCommitRecord) (*models.ChannelMessageCommitResult, error) {
 	s.mu.Lock()
 	if s.remaining > 0 {
 		s.remaining--
 		s.mu.Unlock()
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	s.mu.Unlock()
 	return s.terminalReportingContractStore.CommitChannelMessage(ctx, record)
@@ -200,11 +201,11 @@ func TestTerminalRunReportingContractConflictBackoffAndActiveScopeGate(t *testin
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-retry"}, now)
+		run, conversation, trigger := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-retry"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		conflicted := &terminalReportingConflictStore{terminalReportingContractStore: store, remaining: 2}
 		worker := terminalReportingContractWorkerWithClock(t, conflicted, func() time.Time { return now })
-		if delivered, err := worker.ProcessBatch(t.Context()); !errors.Is(err, ErrRevisionConflict) || delivered != 0 {
+		if delivered, err := worker.ProcessBatch(t.Context()); !errors.Is(err, models.ErrRevisionConflict) || delivered != 0 {
 			t.Fatalf("exhausted revision retry should retain work: delivered=%d error=%v", delivered, err)
 		}
 		intent, err := store.GetRunTerminalReport(t.Context(), run.Scope, run.ID, run.Status)
@@ -215,7 +216,7 @@ func TestTerminalRunReportingContractConflictBackoffAndActiveScopeGate(t *testin
 			t.Fatalf("backoff was ignored: delivered=%d error=%v", delivered, err)
 		}
 		now = intent.AvailableAt
-		worker.options.ScopeAllowed = func(_ context.Context, scope Scope) (bool, error) {
+		worker.options.ScopeAllowed = func(_ context.Context, scope models.Scope) (bool, error) {
 			if scope != run.Scope {
 				t.Errorf("tenant gate checked wrong scope: %#v", scope)
 			}
@@ -229,7 +230,7 @@ func TestTerminalRunReportingContractConflictBackoffAndActiveScopeGate(t *testin
 			t.Fatal("inactive tenant's pending report was discarded")
 		}
 		now = intent.AvailableAt
-		worker.options.ScopeAllowed = func(context.Context, Scope) (bool, error) { return true, nil }
+		worker.options.ScopeAllowed = func(context.Context, models.Scope) (bool, error) { return true, nil }
 		if delivered, err := worker.ProcessBatch(t.Context()); err != nil || delivered != 1 {
 			t.Fatalf("active tenant did not recover its report: delivered=%d error=%v", delivered, err)
 		}
@@ -241,7 +242,7 @@ func TestTerminalRunReportingContractConcurrentFastpathAndDurableRetry(t *testin
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-concurrent"}, now)
+		run, conversation, trigger := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-concurrent"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		var group sync.WaitGroup
 		failures := make(chan error, 6)
@@ -263,7 +264,7 @@ func TestTerminalRunReportingContractConcurrentFastpathAndDurableRetry(t *testin
 		for err := range failures {
 			// A concurrent revision race can be retried by the durable worker;
 			// immutable-content/idempotency conflicts must never be accepted.
-			if !errors.Is(err, ErrRevisionConflict) {
+			if !errors.Is(err, models.ErrRevisionConflict) {
 				t.Fatal(err)
 			}
 		}
@@ -287,37 +288,41 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 		store := terminalReportingContractFixture(t, fixture)
 		cases := []struct {
 			name       string
-			status     AgentRunStatus
+			status     models.AgentRunStatus
 			milestones interface{}
 			at         time.Time
-			mutate     func(*AgentRun)
+			mutate     func(*models.AgentRun)
 			want       bool
 		}{
-			{name: "completed", status: AgentRunStatusCompleted, milestones: []string{"completed"}, want: true},
-			{name: "failed", status: AgentRunStatusFailed, milestones: []string{"failed"}, want: true},
-			{name: "canceled", status: AgentRunStatusCanceled, milestones: []string{"failed"}, want: true},
-			{name: "completion-disabled", status: AgentRunStatusCompleted, milestones: []string{"failed"}},
-			{name: "failure-disabled", status: AgentRunStatusFailed, milestones: []string{"completed"}},
-			{name: "root-missing", status: AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *AgentRun) { delete(r.Context, runReportingContextRootRunID) }},
-			{name: "child", status: AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *AgentRun) { r.Context[runReportingContextRootRunID] = "different-root" }},
-			{name: "destination-missing", status: AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *AgentRun) { r.Context[conversationRunContextConversationID] = "" }},
-			{name: "trigger-missing", status: AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *AgentRun) { r.Context[conversationRunContextTriggerID] = "" }},
-			{name: "milestones-malformed", status: AgentRunStatusCompleted, milestones: "completed"},
-			{name: "milestones-empty", status: AgentRunStatusCompleted},
-			{name: "trimmed-root", status: AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, mutate: func(r *AgentRun) { r.Context[runReportingContextRootRunID] = "\t\u2000" + r.ID + "\u3000\n" }},
-			{name: "unicode-blank-destination", status: AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *AgentRun) { r.Context[conversationRunContextConversationID] = "\t\u2000\u3000\n" }},
-			{name: "fraction-at-second-boundary", status: AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreContractEpoch.Add(999999 * time.Microsecond)},
-			{name: "fraction-with-offset", status: AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreContractEpoch.Add(999999 * time.Microsecond).In(time.FixedZone("IST", 19800))},
+			{name: "completed", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, want: true},
+			{name: "failed", status: models.AgentRunStatusFailed, milestones: []string{"failed"}, want: true},
+			{name: "canceled", status: models.AgentRunStatusCanceled, milestones: []string{"failed"}, want: true},
+			{name: "completion-disabled", status: models.AgentRunStatusCompleted, milestones: []string{"failed"}},
+			{name: "failure-disabled", status: models.AgentRunStatusFailed, milestones: []string{"completed"}},
+			{name: "root-missing", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *models.AgentRun) { delete(r.Context, models.RunReportingRootRunIDContextKey) }},
+			{name: "child", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *models.AgentRun) { r.Context[models.RunReportingRootRunIDContextKey] = "different-root" }},
+			{name: "destination-missing", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *models.AgentRun) { r.Context[models.ConversationRunConversationIDContextKey] = "" }},
+			{name: "trigger-missing", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *models.AgentRun) { r.Context[models.ConversationRunTriggerIDContextKey] = "" }},
+			{name: "milestones-malformed", status: models.AgentRunStatusCompleted, milestones: "completed"},
+			{name: "milestones-empty", status: models.AgentRunStatusCompleted},
+			{name: "trimmed-root", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, mutate: func(r *models.AgentRun) {
+				r.Context[models.RunReportingRootRunIDContextKey] = "\t\u2000" + r.ID + "\u3000\n"
+			}},
+			{name: "unicode-blank-destination", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *models.AgentRun) {
+				r.Context[models.ConversationRunConversationIDContextKey] = "\t\u2000\u3000\n"
+			}},
+			{name: "fraction-at-second-boundary", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreContractEpoch.Add(999999 * time.Microsecond)},
+			{name: "fraction-with-offset", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreContractEpoch.Add(999999 * time.Microsecond).In(time.FixedZone("IST", 19800))},
 		}
 		for _, test := range cases {
 			t.Run(test.name, func(t *testing.T) {
 				id := uuid.NewString()
-				run := &AgentRun{
-					ID: id, RootRunID: id, Scope: Scope{Kind: "tenant", ID: "report-eligibility"}, Kind: RunKindAgentWork,
-					Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "report-agent"}, AssignedAgentID: "report-agent",
-					Goal: "Report completed work", Source: RunSourceSchedule, Status: test.status, Revision: 1,
+				run := &models.AgentRun{
+					ID: id, RootRunID: id, Scope: models.Scope{Kind: "tenant", ID: "report-eligibility"}, Kind: models.RunKindAgentWork,
+					Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "report-agent"}, AssignedAgentID: "report-agent",
+					Goal: "Report completed work", Source: models.RunSourceSchedule, Status: test.status, Revision: 1,
 					CreatedAt: runStoreContractEpoch, UpdatedAt: runStoreContractEpoch,
-					Context: map[string]interface{}{runReportingContextRootRunID: id, conversationRunContextConversationID: "original-chat", conversationRunContextTriggerID: "original-message", runReportingContextMilestones: test.milestones},
+					Context: map[string]interface{}{models.RunReportingRootRunIDContextKey: id, models.ConversationRunConversationIDContextKey: "original-chat", models.ConversationRunTriggerIDContextKey: "original-message", models.RunReportingMilestonesContextKey: test.milestones},
 				}
 				if test.mutate != nil {
 					test.mutate(run)
@@ -325,7 +330,7 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 				if !test.at.IsZero() {
 					run.CreatedAt, run.UpdatedAt = test.at, test.at
 				}
-				_, err := store.CreateAgentRunWithEvent(t.Context(), run, &ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: id, EventType: "run.completed", Summary: "Imported durable completion", CreatedAt: runStoreContractEpoch})
+				_, err := store.CreateAgentRunWithEvent(t.Context(), run, &models.ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: id, EventType: "run.completed", Summary: "Imported durable completion", CreatedAt: runStoreContractEpoch})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -334,7 +339,7 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 					if err != nil || intent == nil || intent.Run == nil || intent.Status != run.Status || !intent.AvailableAt.Equal(run.UpdatedAt) {
 						t.Fatalf("terminal creation lost its report: %#v, %v", intent, err)
 					}
-				} else if !errors.Is(err, ErrRunTerminalReportNotFound) {
+				} else if !errors.Is(err, models.ErrRunTerminalReportNotFound) {
 					t.Fatalf("ineligible completion enqueued a report: %#v, %v", intent, err)
 				}
 			})
@@ -346,37 +351,37 @@ func TestTerminalRunReportingContractImmutableSnapshotScopedClaimsAndFencing(t *
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		first, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-first"}, now)
-		second, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-second"}, now)
+		first, _, _ := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-first"}, now)
+		second, _, _ := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-second"}, now)
 		first = terminalReportingContractComplete(t, store, first, now)
 		second = terminalReportingContractComplete(t, store, second, now)
-		changed := cloneAgentRun(first)
+		changed := models.CloneAgentRun(first)
 		changed.Revision++
 		changed.UpdatedAt = now.Add(time.Second)
 		changed.Output["summary"] = "A different later canonical payload"
-		_, err := store.UpdateAgentRunWithEvent(t.Context(), changed, first.Revision, &ActivityEvent{ID: uuid.NewString(), Scope: first.Scope, RunID: first.ID, EventType: "run.updated", Summary: "Update canonical terminal metadata", CreatedAt: changed.UpdatedAt}, nil)
+		_, err := store.UpdateAgentRunWithEvent(t.Context(), changed, first.Revision, &models.ActivityEvent{ID: uuid.NewString(), Scope: first.Scope, RunID: first.ID, EventType: "run.updated", Summary: "Update canonical terminal metadata", CreatedAt: changed.UpdatedAt}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		claims, err := store.ClaimRunTerminalReports(t.Context(), RunTerminalReportingClaim{Scope: &first.Scope, WorkerID: "same-worker", Now: now, LeaseDuration: time.Minute, Limit: 1})
+		claims, err := store.ClaimRunTerminalReports(t.Context(), models.RunTerminalReportingClaim{Scope: &first.Scope, WorkerID: "same-worker", Now: now, LeaseDuration: time.Minute, Limit: 1})
 		if err != nil || len(claims) != 1 || claims[0].RunID != first.ID || claims[0].Run.Output["summary"] != "The requested result is ready" {
 			t.Fatalf("scope isolation or immutable report snapshot was lost: %#v, %v", claims, err)
 		}
-		completion := RunTerminalReportingCompletion{Scope: first.Scope, RunID: first.ID, Status: first.Status, TerminalRevision: claims[0].TerminalRevision, WorkerID: "wrong-worker", LeaseExpiresAt: *claims[0].LeaseExpiresAt, Now: now}
-		if err := store.CompleteRunTerminalReport(t.Context(), completion); !errors.Is(err, ErrLeaseLost) {
+		completion := models.RunTerminalReportingCompletion{Scope: first.Scope, RunID: first.ID, Status: first.Status, TerminalRevision: claims[0].TerminalRevision, WorkerID: "wrong-worker", LeaseExpiresAt: *claims[0].LeaseExpiresAt, Now: now}
+		if err := store.CompleteRunTerminalReport(t.Context(), completion); !errors.Is(err, models.ErrLeaseLost) {
 			t.Fatalf("foreign worker acknowledged report: %v", err)
 		}
 		completion.WorkerID = claims[0].LeaseOwner
 		completion.LeaseExpiresAt = completion.LeaseExpiresAt.Add(time.Nanosecond)
-		if err := store.CompleteRunTerminalReport(t.Context(), completion); !errors.Is(err, ErrLeaseLost) {
+		if err := store.CompleteRunTerminalReport(t.Context(), completion); !errors.Is(err, models.ErrLeaseLost) {
 			t.Fatalf("altered lease token acknowledged report: %v", err)
 		}
-		if err := store.RetryRunTerminalReport(t.Context(), RunTerminalReportingRetry{RunTerminalReportingCompletion: completion, AvailableAt: now.Add(time.Second)}); !errors.Is(err, ErrLeaseLost) {
+		if err := store.RetryRunTerminalReport(t.Context(), models.RunTerminalReportingRetry{RunTerminalReportingCompletion: completion, AvailableAt: now.Add(time.Second)}); !errors.Is(err, models.ErrLeaseLost) {
 			t.Fatalf("altered lease token rescheduled report: %v", err)
 		}
 		completion.LeaseExpiresAt = *claims[0].LeaseExpiresAt
 		completion.Scope = second.Scope
-		if err := store.CompleteRunTerminalReport(t.Context(), completion); !errors.Is(err, ErrLeaseLost) {
+		if err := store.CompleteRunTerminalReport(t.Context(), completion); !errors.Is(err, models.ErrLeaseLost) {
 			t.Fatalf("foreign scope acknowledged report: %v", err)
 		}
 		completion.Scope = first.Scope
@@ -384,11 +389,11 @@ func TestTerminalRunReportingContractImmutableSnapshotScopedClaimsAndFencing(t *
 			t.Fatal(err)
 		}
 		changed.Revision++
-		_, err = store.UpdateAgentRunWithEvent(t.Context(), changed, changed.Revision-1, &ActivityEvent{ID: uuid.NewString(), Scope: changed.Scope, RunID: changed.ID, EventType: "run.updated", Summary: "Update already reported terminal metadata", CreatedAt: changed.UpdatedAt}, nil)
+		_, err = store.UpdateAgentRunWithEvent(t.Context(), changed, changed.Revision-1, &models.ActivityEvent{ID: uuid.NewString(), Scope: changed.Scope, RunID: changed.ID, EventType: "run.updated", Summary: "Update already reported terminal metadata", CreatedAt: changed.UpdatedAt}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		claims, err = store.ClaimRunTerminalReports(t.Context(), RunTerminalReportingClaim{WorkerID: "global-worker", Now: now.Add(time.Second), LeaseDuration: time.Minute, Limit: 1})
+		claims, err = store.ClaimRunTerminalReports(t.Context(), models.RunTerminalReportingClaim{WorkerID: "global-worker", Now: now.Add(time.Second), LeaseDuration: time.Minute, Limit: 1})
 		if err != nil || len(claims) != 1 || claims[0].RunID != second.ID || claims[0].Scope != second.Scope {
 			t.Fatalf("acknowledged identity requeued or global claim missed the other scope: %#v, %v", claims, err)
 		}
@@ -399,9 +404,9 @@ func TestTerminalRunReportingContractFailedTerminalCommitRollsBackIntent(t *test
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		run, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-atomic-failure"}, now)
-		activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
-		running, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning})
+		run, _, _ := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-atomic-failure"}, now)
+		activity := runtimeactivity.NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
+		running, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -424,15 +429,15 @@ func TestTerminalRunReportingContractFailedTerminalCommitRollsBackIntent(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, err = activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted})
+		_, _, err = activity.TransitionRun(t.Context(), run.Scope, run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted})
 		if err == nil {
 			t.Fatal("injected terminal commit failure was accepted")
 		}
 		canonical, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
-		if err != nil || canonical.Status != AgentRunStatusRunning {
+		if err != nil || canonical.Status != models.AgentRunStatusRunning {
 			t.Fatalf("failed terminal transaction changed the Run: %#v, %v", canonical, err)
 		}
-		if intent, err := store.GetRunTerminalReport(t.Context(), run.Scope, run.ID, AgentRunStatusCompleted); !errors.Is(err, ErrRunTerminalReportNotFound) {
+		if intent, err := store.GetRunTerminalReport(t.Context(), run.Scope, run.ID, models.AgentRunStatusCompleted); !errors.Is(err, models.ErrRunTerminalReportNotFound) {
 			t.Fatalf("failed terminal transaction left a delivery intent: %#v, %v", intent, err)
 		}
 	})
