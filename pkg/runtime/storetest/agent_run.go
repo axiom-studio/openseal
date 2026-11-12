@@ -18,6 +18,6 @@ func QueuedAgentRun(scope models.Scope, agentID, goal string, now time.Time) *mo
 		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: agentID}, AssignedAgentID: agentID,
 		Goal: goal, Source: models.RunSourceObjective, Status: models.AgentRunStatusQueued,
 		AvailableAt: now, QueueEnteredAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
-		Engine: "loop", // runtime.RunEngineLoop: a Run the run loop drives
+		Engine: models.RunEngineLoop,
 	}
 }
