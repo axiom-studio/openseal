@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -48,7 +49,7 @@ func newAgentSessionPostgresStores(t *testing.T, n int) []*PostgresStore {
 func TestPostgresAgentSessionStore(t *testing.T) {
 	runAgentSessionStoreConformance(t, func(t *testing.T) (agentSessionConformanceStore, createRunSessionInOwnTx) {
 		store := newAgentSessionPostgresStores(t, 1)[0]
-		return store, func(ctx context.Context, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
+		return store, func(ctx context.Context, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
 			return createPostgresRunSessionInOwnTx(ctx, store, req)
 		}
 	})
@@ -56,7 +57,7 @@ func TestPostgresAgentSessionStore(t *testing.T) {
 
 // createPostgresRunSessionInOwnTx runs the store's in-transaction
 // createRunAgentSessionTx helper in a transaction of its own.
-func createPostgresRunSessionInOwnTx(ctx context.Context, s *PostgresStore, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
+func createPostgresRunSessionInOwnTx(ctx context.Context, s *PostgresStore, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -77,8 +78,8 @@ func createPostgresRunSessionInOwnTx(ctx context.Context, s *PostgresStore, req 
 type sessionReplicaFixture struct {
 	*sessionConformance
 	replicas []*PostgresStore
-	leased   *AgentRun
-	lane     *AgentSession
+	leased   *models.AgentRun
+	lane     *models.AgentSession
 }
 
 func newSessionReplicaFixture(t *testing.T) *sessionReplicaFixture {
@@ -88,7 +89,7 @@ func newSessionReplicaFixture(t *testing.T) *sessionReplicaFixture {
 		t:     t,
 		ctx:   context.Background(),
 		store: replicas[0],
-		scope: Scope{Kind: "tenant", ID: "session-" + uuid.NewString()[:8]},
+		scope: models.Scope{Kind: "tenant", ID: "session-" + uuid.NewString()[:8]},
 		now:   time.Now().UTC().Truncate(time.Millisecond),
 	}
 	run, session := f.conversationRun("agent-a")
@@ -101,11 +102,11 @@ func newSessionReplicaFixture(t *testing.T) *sessionReplicaFixture {
 func TestPostgresAgentSessionStaleReplicaAppendRefused(t *testing.T) {
 	f := newSessionReplicaFixture(t)
 	stale, fresh := f.replicas[0], f.replicas[1]
-	f.mustAppend(f.lane.ID, f.leased.ID, testAssistantEntry("a1", "s1", "c1"), testToolEntry("e1", "s1", "c1", ToolEntryPending))
+	f.mustAppend(f.lane.ID, f.leased.ID, testAssistantEntry("a1", "s1", "c1"), testToolEntry("e1", "s1", "c1", models.ToolEntryPending))
 
 	// The stale worker's lease runs out; the other replica reclaims the Run.
 	later := f.now.Add(2 * time.Hour)
-	claimed, err := fresh.ClaimNextAgentRun(f.ctx, AgentRunClaim{
+	claimed, err := fresh.ClaimNextAgentRun(f.ctx, models.AgentRunClaim{
 		Scope: f.scope, WorkerID: "fresh-worker", Now: later, LeaseDuration: time.Hour, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != f.leased.ID || claimed.LeaseOwner != "fresh-worker" {
@@ -113,35 +114,35 @@ func TestPostgresAgentSessionStaleReplicaAppendRefused(t *testing.T) {
 	}
 
 	// The stale worker still believes its lease is live (its clock says f.now).
-	staleLease := &AgentRunLeaseGuard{WorkerID: conformanceWorker, Now: f.now}
-	_, err = stale.AppendAgentSessionEntries(f.ctx, AppendAgentSessionEntriesRequest{
+	staleLease := &models.AgentRunLeaseGuard{WorkerID: conformanceWorker, Now: f.now}
+	_, err = stale.AppendAgentSessionEntries(f.ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: f.scope, SessionID: f.lane.ID, RunID: f.leased.ID, Lease: staleLease,
-		Entries: []*SessionEntry{testUserEntry("u-stale", "late")}, Events: []*ActivityEvent{f.event(f.leased.ID, "stale")}, Now: f.now,
+		Entries: []*models.SessionEntry{testUserEntry("u-stale", "late")}, Events: []*models.ActivityEvent{f.event(f.leased.ID, "stale")}, Now: f.now,
 	})
-	expectErr(t, "stale append", err, ErrLeaseLost)
+	expectErr(t, "stale append", err, models.ErrLeaseLost)
 	f.assertNoEntry("u-stale")
-	_, err = stale.TransitionToolEntry(f.ctx, ToolEntryTransitionRequest{
-		Scope: f.scope, EntryID: "e1", RunID: f.leased.ID, Lease: *staleLease, From: ToolEntryPending, To: ToolEntryRunning, Now: f.now,
+	_, err = stale.TransitionToolEntry(f.ctx, models.ToolEntryTransitionRequest{
+		Scope: f.scope, EntryID: "e1", RunID: f.leased.ID, Lease: *staleLease, From: models.ToolEntryPending, To: models.ToolEntryRunning, Now: f.now,
 	})
-	expectErr(t, "stale transition", err, ErrLeaseLost)
-	if got := f.entry("e1"); got.State != ToolEntryPending || got.Revision != 1 {
+	expectErr(t, "stale transition", err, models.ErrLeaseLost)
+	if got := f.entry("e1"); got.State != models.ToolEntryPending || got.Revision != 1 {
 		t.Fatalf("stale transition wrote %s rev %d", got.State, got.Revision)
 	}
 	if got := f.session(f.lane.ID); got.NextSequence != 3 {
 		t.Fatalf("stale append moved NextSequence to %d", got.NextSequence)
 	}
 
-	freshLease := &AgentRunLeaseGuard{WorkerID: "fresh-worker", Now: later}
-	result, err := fresh.AppendAgentSessionEntries(f.ctx, AppendAgentSessionEntriesRequest{
+	freshLease := &models.AgentRunLeaseGuard{WorkerID: "fresh-worker", Now: later}
+	result, err := fresh.AppendAgentSessionEntries(f.ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: f.scope, SessionID: f.lane.ID, RunID: f.leased.ID, Lease: freshLease,
-		Entries: []*SessionEntry{testUserEntry("u-fresh", "now")}, Now: later,
+		Entries: []*models.SessionEntry{testUserEntry("u-fresh", "now")}, Now: later,
 	})
 	if err != nil || idsOf(result.Entries) != "u-fresh" || result.Entries[0].Sequence != 3 {
 		t.Fatalf("fresh append = %+v, %v", result, err)
 	}
-	if _, err := fresh.TransitionToolEntry(f.ctx, ToolEntryTransitionRequest{
-		Scope: f.scope, EntryID: "e1", RunID: f.leased.ID, Lease: *freshLease, From: ToolEntryPending, To: ToolEntryInterrupted,
-		Result: conformanceResult(ToolEntryInterrupted), Now: later,
+	if _, err := fresh.TransitionToolEntry(f.ctx, models.ToolEntryTransitionRequest{
+		Scope: f.scope, EntryID: "e1", RunID: f.leased.ID, Lease: *freshLease, From: models.ToolEntryPending, To: models.ToolEntryInterrupted,
+		Result: conformanceResult(models.ToolEntryInterrupted), Now: later,
 	}); err != nil {
 		t.Fatalf("fresh transition: %v", err)
 	}
@@ -163,10 +164,10 @@ func TestPostgresAgentSessionAppendRacesLeaseTakeover(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			_, appendErrs[i] = stale.AppendAgentSessionEntries(f.ctx, AppendAgentSessionEntriesRequest{
+			_, appendErrs[i] = stale.AppendAgentSessionEntries(f.ctx, models.AppendAgentSessionEntriesRequest{
 				Scope: f.scope, SessionID: f.lane.ID, RunID: f.leased.ID,
-				Lease:   &AgentRunLeaseGuard{WorkerID: conformanceWorker, Now: f.now},
-				Entries: []*SessionEntry{testUserEntry(fmt.Sprintf("u%d", i), "racing")}, Now: f.now,
+				Lease:   &models.AgentRunLeaseGuard{WorkerID: conformanceWorker, Now: f.now},
+				Entries: []*models.SessionEntry{testUserEntry(fmt.Sprintf("u%d", i), "racing")}, Now: f.now,
 			})
 		}(i)
 	}
@@ -182,14 +183,14 @@ func TestPostgresAgentSessionAppendRacesLeaseTakeover(t *testing.T) {
 			takeoverErr = err
 			return
 		}
-		next := cloneAgentRun(current)
+		next := models.CloneAgentRun(current)
 		expires := later.Add(time.Hour)
 		next.LeaseOwner, next.LeaseExpiresAt = "fresh-worker", &expires
 		next.Revision = current.Revision + 1
 		next.UpdatedAt = later
-		_, takeoverErr = fresh.UpdateAgentRunWithEvent(f.ctx, next, current.Revision, &ActivityEvent{
-			ID: uuid.NewString(), Scope: f.scope, EventType: "run.status_changed", Severity: ActivitySeverityInfo, AgentID: current.AssignedAgentID,
-			RunID: current.ID, Actor: ActivityActor{Type: "worker", ID: "fresh-worker"}, Summary: "Run reclaimed", Visibility: ActivityVisibilityScope, CreatedAt: later,
+		_, takeoverErr = fresh.UpdateAgentRunWithEvent(f.ctx, next, current.Revision, &models.ActivityEvent{
+			ID: uuid.NewString(), Scope: f.scope, EventType: "run.status_changed", Severity: models.ActivitySeverityInfo, AgentID: current.AssignedAgentID,
+			RunID: current.ID, Actor: models.ActivityActor{Type: "worker", ID: "fresh-worker"}, Summary: "Run reclaimed", Visibility: models.ActivityVisibilityScope, CreatedAt: later,
 		}, nil)
 	}()
 	close(start)
@@ -202,13 +203,13 @@ func TestPostgresAgentSessionAppendRacesLeaseTakeover(t *testing.T) {
 		switch {
 		case err == nil:
 			committed++
-		case errors.Is(err, ErrLeaseLost):
+		case errors.Is(err, models.ErrLeaseLost):
 			f.assertNoEntry(fmt.Sprintf("u%d", i))
 		default:
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
-	entries, err := f.store.ListAgentSessionEntries(f.ctx, SessionEntryFilter{Scope: f.scope, SessionID: f.lane.ID})
+	entries, err := f.store.ListAgentSessionEntries(f.ctx, models.SessionEntryFilter{Scope: f.scope, SessionID: f.lane.ID})
 	if err != nil || len(entries) != committed {
 		t.Fatalf("entries = %d, %v; %d appends committed", len(entries), err, committed)
 	}
@@ -218,12 +219,12 @@ func TestPostgresAgentSessionAppendRacesLeaseTakeover(t *testing.T) {
 		}
 	}
 	// After the takeover nothing from the stale worker gets in.
-	_, err = stale.AppendAgentSessionEntries(f.ctx, AppendAgentSessionEntriesRequest{
+	_, err = stale.AppendAgentSessionEntries(f.ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: f.scope, SessionID: f.lane.ID, RunID: f.leased.ID,
-		Lease:   &AgentRunLeaseGuard{WorkerID: conformanceWorker, Now: f.now},
-		Entries: []*SessionEntry{testUserEntry("u-after", "late")}, Now: f.now,
+		Lease:   &models.AgentRunLeaseGuard{WorkerID: conformanceWorker, Now: f.now},
+		Entries: []*models.SessionEntry{testUserEntry("u-after", "late")}, Now: f.now,
 	})
-	expectErr(t, "append after takeover", err, ErrLeaseLost)
+	expectErr(t, "append after takeover", err, models.ErrLeaseLost)
 }
 
 // Sixteen tool entries of one batch settle concurrently from two replicas,
@@ -236,9 +237,9 @@ func TestPostgresAgentSessionSixteenConcurrentTransitionsAcrossReplicas(t *testi
 	for i := range callIDs {
 		callIDs[i] = fmt.Sprintf("c%02d", i)
 	}
-	batch := []*SessionEntry{testAssistantEntry("a1", "s1", callIDs...)}
+	batch := []*models.SessionEntry{testAssistantEntry("a1", "s1", callIDs...)}
 	for i, callID := range callIDs {
-		batch = append(batch, testToolEntry(fmt.Sprintf("e%02d", i), "s1", callID, ToolEntryPending))
+		batch = append(batch, testToolEntry(fmt.Sprintf("e%02d", i), "s1", callID, models.ToolEntryPending))
 	}
 	f.mustAppend(f.lane.ID, f.leased.ID, batch...)
 
@@ -251,15 +252,15 @@ func TestPostgresAgentSessionSixteenConcurrentTransitionsAcrossReplicas(t *testi
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			req := f.transitionReq(fmt.Sprintf("e%02d", i), f.leased.ID, ToolEntryPending, ToolEntryCompleted)
+			req := f.transitionReq(fmt.Sprintf("e%02d", i), f.leased.ID, models.ToolEntryPending, models.ToolEntryCompleted)
 			req.ExpectedRevision = 1
-			req.Events = []*ActivityEvent{f.event(f.leased.ID, fmt.Sprintf("Finished e%02d", i))}
+			req.Events = []*models.ActivityEvent{f.event(f.leased.ID, fmt.Sprintf("Finished e%02d", i))}
 			_, distinct[i] = f.replicas[i%2].TransitionToolEntry(f.ctx, req)
 		}(i)
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			req := f.transitionReq("e00", f.leased.ID, ToolEntryPending, ToolEntryRunning)
+			req := f.transitionReq("e00", f.leased.ID, models.ToolEntryPending, models.ToolEntryRunning)
 			_, contested[i] = f.replicas[(i+1)%2].TransitionToolEntry(f.ctx, req)
 		}(i)
 	}
@@ -271,14 +272,14 @@ func TestPostgresAgentSessionSixteenConcurrentTransitionsAcrossReplicas(t *testi
 	winners := 0
 	if distinct[0] == nil {
 		winners++
-	} else if !errors.Is(distinct[0], ErrToolEntryStateConflict) {
+	} else if !errors.Is(distinct[0], models.ErrToolEntryStateConflict) {
 		t.Fatalf("e00 completion: %v", distinct[0])
 	}
 	for i, err := range contested {
 		switch {
 		case err == nil:
 			winners++
-		case errors.Is(err, ErrToolEntryStateConflict):
+		case errors.Is(err, models.ErrToolEntryStateConflict):
 		default:
 			t.Fatalf("contested %d: %v", i, err)
 		}
@@ -290,7 +291,7 @@ func TestPostgresAgentSessionSixteenConcurrentTransitionsAcrossReplicas(t *testi
 		if distinct[i] != nil {
 			t.Fatalf("transition e%02d: %v", i, distinct[i])
 		}
-		if got := f.entry(fmt.Sprintf("e%02d", i)); got.State != ToolEntryCompleted || got.Revision != 2 {
+		if got := f.entry(fmt.Sprintf("e%02d", i)); got.State != models.ToolEntryCompleted || got.Revision != 2 {
 			t.Fatalf("e%02d = %s rev %d", i, got.State, got.Revision)
 		}
 	}
@@ -309,7 +310,7 @@ func TestPostgresAgentSessionSixteenConcurrentTransitionsAcrossReplicas(t *testi
 
 func assertDenseActivitySequences(t *testing.T, f *sessionReplicaFixture) {
 	t.Helper()
-	events, err := f.store.ListActivity(f.ctx, ActivityFilter{Scope: f.scope, RunID: f.leased.ID, Limit: 500})
+	events, err := f.store.ListActivity(f.ctx, models.ActivityFilter{Scope: f.scope, RunID: f.leased.ID, Limit: 500})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,13 +345,13 @@ func TestPostgresAgentSessionTxHelpersRollBackWithCaller(t *testing.T) {
 	}
 
 	withRolledBackTx(func(tx *sql.Tx) error {
-		_, err := store.createRunAgentSessionTx(f.ctx, tx, CreateRunAgentSessionTxRequest{
+		_, err := store.createRunAgentSessionTx(f.ctx, tx, models.CreateRunAgentSessionTxRequest{
 			Scope: f.scope, OwnerRunID: child.ID, AgentID: "agent-a", ParentSessionID: f.lane.ID,
-			InitialEntries: []*SessionEntry{goalEntry("g1", child.ID)}, Now: f.now,
+			InitialEntries: []*models.SessionEntry{goalEntry("g1", child.ID)}, Now: f.now,
 		})
 		return err
 	})
-	if _, err := store.GetAgentSession(f.ctx, f.scope, RunAgentSessionID(f.scope, child.ID)); !errors.Is(err, ErrAgentSessionNotFound) {
+	if _, err := store.GetAgentSession(f.ctx, f.scope, models.RunAgentSessionID(f.scope, child.ID)); !errors.Is(err, models.ErrAgentSessionNotFound) {
 		t.Fatalf("rolled-back create left a session: %v", err)
 	}
 	f.assertNoEntry("g1")
@@ -362,7 +363,7 @@ func TestPostgresAgentSessionTxHelpersRollBackWithCaller(t *testing.T) {
 		if _, err := store.lockPostgresSessionRunTx(f.ctx, tx, f.scope, f.leased.ID, nil); err != nil {
 			return err
 		}
-		_, err := store.appendAgentSessionEntriesTx(f.ctx, tx, f.appendReq(f.lane.ID, f.leased.ID, testAssistantEntry("a1", "s1", "c1"), testToolEntry("e1", "s1", "c1", ToolEntryPending)))
+		_, err := store.appendAgentSessionEntriesTx(f.ctx, tx, f.appendReq(f.lane.ID, f.leased.ID, testAssistantEntry("a1", "s1", "c1"), testToolEntry("e1", "s1", "c1", models.ToolEntryPending)))
 		return err
 	})
 	f.assertNoEntry("a1")
@@ -370,15 +371,15 @@ func TestPostgresAgentSessionTxHelpersRollBackWithCaller(t *testing.T) {
 		t.Fatalf("rolled-back append moved NextSequence to %d", got.NextSequence)
 	}
 
-	f.mustAppend(f.lane.ID, f.leased.ID, testAssistantEntry("a1", "s1", "c1"), testToolEntry("e1", "s1", "c1", ToolEntryPending))
+	f.mustAppend(f.lane.ID, f.leased.ID, testAssistantEntry("a1", "s1", "c1"), testToolEntry("e1", "s1", "c1", models.ToolEntryPending))
 	withRolledBackTx(func(tx *sql.Tx) error {
 		if _, err := store.lockPostgresSessionRunTx(f.ctx, tx, f.scope, f.leased.ID, nil); err != nil {
 			return err
 		}
-		_, err := store.transitionToolEntryTx(f.ctx, tx, f.transitionReq("e1", f.leased.ID, ToolEntryPending, ToolEntryRunning))
+		_, err := store.transitionToolEntryTx(f.ctx, tx, f.transitionReq("e1", f.leased.ID, models.ToolEntryPending, models.ToolEntryRunning))
 		return err
 	})
-	if got := f.entry("e1"); got.State != ToolEntryPending || got.Revision != 1 {
+	if got := f.entry("e1"); got.State != models.ToolEntryPending || got.Revision != 1 {
 		t.Fatalf("rolled-back transition wrote %s rev %d", got.State, got.Revision)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -31,13 +32,13 @@ func BenchmarkConversationTaskContinuationDuePostgres(b *testing.B) {
 			}
 			_ = store.Close()
 		})
-		return store, func(b *testing.B, filter ConversationTaskDueFilter) {
+		return store, func(b *testing.B, filter models.ConversationTaskDueFilter) {
 			explainPostgresConversationTaskDue(b, store, filter)
 		}
 	})
 }
 
-func explainPostgresConversationTaskDue(b *testing.B, store *PostgresStore, filter ConversationTaskDueFilter) {
+func explainPostgresConversationTaskDue(b *testing.B, store *PostgresStore, filter models.ConversationTaskDueFilter) {
 	b.Helper()
 	ctx := context.Background()
 	if _, err := store.db.ExecContext(ctx, "ANALYZE "+store.table("agent_runs")); err != nil {

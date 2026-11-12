@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -34,9 +35,9 @@ func openPostgresRoutineEventStore(t *testing.T) *PostgresStore {
 }
 
 func TestPostgresRoutineEventStore(t *testing.T) {
-	runRoutineEventStoreContract(t, func(t *testing.T) (KernelStore, routineEventPayloadProbe) {
+	runRoutineEventStoreContract(t, func(t *testing.T) (models.KernelStore, routineEventPayloadProbe) {
 		store := openPostgresRoutineEventStore(t)
-		return store, func(t *testing.T, scope Scope, activationID, eventID string) bool {
+		return store, func(t *testing.T, scope models.Scope, activationID, eventID string) bool {
 			var hasPayload bool
 			if err := store.db.QueryRow(`SELECT payload IS NOT NULL FROM `+store.table("routine_events")+`
 				WHERE scope_kind = $1 AND scope_id = $2 AND activation_id = $3 AND event_id = $4`,
@@ -50,7 +51,7 @@ func TestPostgresRoutineEventStore(t *testing.T) {
 	t.Run("concurrent claims yield one open batch", func(t *testing.T) {
 		store := openPostgresRoutineEventStore(t)
 		ctx := t.Context()
-		scope := Scope{Kind: "tenant", ID: "claims"}
+		scope := models.Scope{Kind: "tenant", ID: "claims"}
 		now := time.Now().UTC().Truncate(time.Microsecond)
 		activation := routineEventTestActivation(scope, "racing", now)
 		if err := store.CreateRunbookActivation(ctx, activation); err != nil {
@@ -58,13 +59,13 @@ func TestPostgresRoutineEventStore(t *testing.T) {
 		}
 		for i := 0; i < 20; i++ {
 			event := routineTestEvent(scope, activation, uuid.NewString(), now.Add(time.Duration(i)*time.Millisecond))
-			if _, err := store.InsertRoutineEvent(ctx, &RoutineEventRecord{Scope: scope, ActivationID: activation.ID, Event: event,
-				State: RoutineEventPending, ReceivedAt: event.OccurredAt}); err != nil {
+			if _, err := store.InsertRoutineEvent(ctx, &models.RoutineEventRecord{Scope: scope, ActivationID: activation.ID, Event: event,
+				State: models.RoutineEventPending, ReceivedAt: event.OccurredAt}); err != nil {
 				t.Fatal(err)
 			}
 		}
 		const claimers = 8
-		batches := make([]*RoutineEventBatch, claimers)
+		batches := make([]*models.RoutineEventBatch, claimers)
 		errs := make([]error, claimers)
 		var wait sync.WaitGroup
 		start := make(chan struct{})
@@ -189,7 +190,7 @@ func TestPostgresMigration80RoutineEvents(t *testing.T) {
 	}
 	assertRoutineEventTables(t, ctx, store, false)
 	// An event Task written by a release that did not fill the columns.
-	scope := Scope{Kind: "tenant", ID: "migrated"}
+	scope := models.Scope{Kind: "tenant", ID: "migrated"}
 	activation := routineEventTestActivation(scope, "written-at-79", time.Now().UTC())
 	if err := store.CreateRunbookActivation(ctx, activation); err != nil {
 		t.Fatal(err)
@@ -207,7 +208,7 @@ func TestPostgresMigration80RoutineEvents(t *testing.T) {
 	assertRoutineEventTables(t, ctx, reopened, true)
 	assertSchemaCurrent(t, ctx, reopened)
 	keys, err := reopened.ListRoutineEventSourceKeysInScope(ctx, scope)
-	if err != nil || len(keys) != 1 || keys[0].Kind != RoutineEventWebhook || keys[0].SourceRef != activation.Task.Event.SourceRef {
+	if err != nil || len(keys) != 1 || keys[0].Kind != models.RoutineEventWebhook || keys[0].SourceRef != activation.Task.Event.SourceRef {
 		t.Fatalf("keys after migrating = %#v, %v", keys, err)
 	}
 	var indexes int

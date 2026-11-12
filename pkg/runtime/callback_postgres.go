@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const callbackRegistryMigrationVersion int64 = 39
@@ -42,7 +45,7 @@ func (s *PostgresStore) migrateCallbackRegistry(ctx context.Context, tx *sql.Tx)
 	return err
 }
 
-func (s *PostgresStore) CreateCallbackRegistration(ctx context.Context, value *CallbackRegistration) error {
+func (s *PostgresStore) CreateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -55,12 +58,12 @@ func (s *PostgresStore) CreateCallbackRegistration(ctx context.Context, value *C
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`, value.Scope.Kind, value.Scope.ID, value.ID,
 		value.IngressRoute, value.Provider, value.Status, value.Revision, value.UpdatedAt, string(payload))
 	if postgresUniqueViolation(err) {
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	return err
 }
 
-func (s *PostgresStore) GetCallbackRegistration(ctx context.Context, scope Scope, id string) (*CallbackRegistration, error) {
+func (s *PostgresStore) GetCallbackRegistration(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -68,15 +71,15 @@ func (s *PostgresStore) GetCallbackRegistration(ctx context.Context, scope Scope
 		WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *PostgresStore) GetCallbackRegistrationByIngressRoute(ctx context.Context, route string) (*CallbackRegistration, error) {
-	if !validOpaqueIdentifier(strings.TrimSpace(route), 128) {
-		return nil, ErrInvalidCallbackRegistration
+func (s *PostgresStore) GetCallbackRegistrationByIngressRoute(ctx context.Context, route string) (*models.CallbackRegistration, error) {
+	if !models.IsValidOpaqueIdentifier(strings.TrimSpace(route), 128) {
+		return nil, models.ErrInvalidCallbackRegistration
 	}
 	return scanPostgresCallbackRegistration(s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("callback_registrations")+`
 		WHERE ingress_route=$1`, strings.TrimSpace(route)))
 }
 
-func (s *PostgresStore) ListCallbackRegistrations(ctx context.Context, filter CallbackRegistrationFilter) ([]*CallbackRegistration, error) {
+func (s *PostgresStore) ListCallbackRegistrations(ctx context.Context, filter models.CallbackRegistrationFilter) ([]*models.CallbackRegistration, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -99,14 +102,14 @@ func (s *PostgresStore) ListCallbackRegistrations(ctx context.Context, filter Ca
 	}
 	query, args, placeholder = appendPostgresActivityStrings(query, args, placeholder, "status", statuses)
 	query += fmt.Sprintf(` ORDER BY updated_at DESC,id ASC LIMIT $%d OFFSET $%d`, placeholder, placeholder+1)
-	limit, offset := normalizeExternalConversationPage(filter.Limit, filter.Offset)
+	limit, offset := models.NormalizeExternalConversationPage(filter.Limit, filter.Offset)
 	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*CallbackRegistration, 0)
+	result := make([]*models.CallbackRegistration, 0)
 	for rows.Next() {
 		value, scanErr := scanPostgresCallbackRegistration(rows)
 		if scanErr != nil {
@@ -125,7 +128,7 @@ func (s *PostgresStore) migrateWorkflowSourceCallbackLookup(ctx context.Context,
 	return err
 }
 
-func (s *PostgresStore) UpdateCallbackRegistration(ctx context.Context, value *CallbackRegistration, expectedRevision int64) error {
+func (s *PostgresStore) UpdateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -138,7 +141,7 @@ func (s *PostgresStore) UpdateCallbackRegistration(ctx context.Context, value *C
 		WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`, value.IngressRoute, value.Provider,
 		value.Status, value.Revision, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision)
 	if postgresUniqueViolation(err) {
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	if err != nil {
 		return err
@@ -153,14 +156,14 @@ func (s *PostgresStore) UpdateCallbackRegistration(ctx context.Context, value *C
 			return getErr
 		}
 		if current == nil {
-			return ErrCallbackRegistrationNotFound
+			return models.ErrCallbackRegistrationNotFound
 		}
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	return nil
 }
 
-func (s *PostgresStore) ReceiveCallbackEvent(ctx context.Context, value *CallbackEventReceipt) (*CallbackEventReceipt, bool, error) {
+func (s *PostgresStore) ReceiveCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt) (*models.CallbackEventReceipt, bool, error) {
 	if err := value.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -181,7 +184,7 @@ func (s *PostgresStore) ReceiveCallbackEvent(ctx context.Context, value *Callbac
 		return nil, false, err
 	}
 	if rows == 1 {
-		return cloneCallbackEventReceipt(value), false, nil
+		return models.CloneCallbackEventReceipt(value), false, nil
 	}
 	current, err := scanPostgresCallbackEvent(s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("callback_events")+`
 		WHERE scope_kind=$1 AND scope_id=$2 AND registration_id=$3 AND event_source=$4 AND event_id=$5`,
@@ -189,7 +192,7 @@ func (s *PostgresStore) ReceiveCallbackEvent(ctx context.Context, value *Callbac
 	return current, true, err
 }
 
-func (s *PostgresStore) UpdateCallbackEvent(ctx context.Context, value *CallbackEventReceipt, expectedRevision int64) error {
+func (s *PostgresStore) UpdateCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -210,14 +213,14 @@ func (s *PostgresStore) UpdateCallbackEvent(ctx context.Context, value *Callback
 		return err
 	}
 	if rows != 1 {
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	return nil
 }
 
-func (s *PostgresStore) ClaimCallbackEvent(ctx context.Context, scope Scope, worker string, now time.Time, leaseDuration time.Duration) (*CallbackEventReceipt, error) {
-	if scope.Validate() != nil || !validOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
-		return nil, ErrInvalidCallbackRegistration
+func (s *PostgresStore) ClaimCallbackEvent(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.CallbackEventReceipt, error) {
+	if scope.Validate() != nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
+		return nil, models.ErrInvalidCallbackRegistration
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -228,11 +231,11 @@ func (s *PostgresStore) ClaimCallbackEvent(ctx context.Context, scope Scope, wor
 		WHERE scope_kind=$1 AND scope_id=$2 AND available_at<=$3
 		  AND (status=$4 OR (status=$5 AND lease_expires_at<=$3))
 		ORDER BY available_at ASC,updated_at ASC,id ASC FOR UPDATE SKIP LOCKED LIMIT 1`,
-		scope.Kind, scope.ID, now, CallbackEventPending, CallbackEventLeased))
+		scope.Kind, scope.ID, now, models.CallbackEventPending, models.CallbackEventLeased))
 	if err != nil || receipt == nil {
 		return nil, err
 	}
-	receipt.Status, receipt.LeaseOwner = CallbackEventLeased, strings.TrimSpace(worker)
+	receipt.Status, receipt.LeaseOwner = models.CallbackEventLeased, strings.TrimSpace(worker)
 	receipt.LeaseExpiresAt = now.Add(leaseDuration).UTC()
 	receipt.Attempts++
 	receipt.Revision++
@@ -250,7 +253,7 @@ func (s *PostgresStore) ClaimCallbackEvent(ctx context.Context, scope Scope, wor
 		return nil, err
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return nil, ErrCallbackRegistrationConflict
+		return nil, models.ErrCallbackRegistrationConflict
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -258,7 +261,7 @@ func (s *PostgresStore) ClaimCallbackEvent(ctx context.Context, scope Scope, wor
 	return receipt, nil
 }
 
-func (s *PostgresStore) SaveClaimedCallbackEvent(ctx context.Context, receipt *CallbackEventReceipt, expectedRevision int64, leaseOwner string) error {
+func (s *PostgresStore) SaveClaimedCallbackEvent(ctx context.Context, receipt *models.CallbackEventReceipt, expectedRevision int64, leaseOwner string) error {
 	if err := receipt.Validate(); err != nil {
 		return err
 	}
@@ -271,41 +274,41 @@ func (s *PostgresStore) SaveClaimedCallbackEvent(ctx context.Context, receipt *C
 		WHERE scope_kind=$9 AND scope_id=$10 AND id=$11 AND revision=$12 AND status=$13 AND lease_owner=$14`,
 		receipt.Status, receipt.AvailableAt, receipt.LeaseOwner, nullablePostgresTime(receipt.LeaseExpiresAt), receipt.Attempts,
 		receipt.Revision, receipt.UpdatedAt, string(payload), receipt.Scope.Kind, receipt.Scope.ID, receipt.ID,
-		expectedRevision, CallbackEventLeased, strings.TrimSpace(leaseOwner))
+		expectedRevision, models.CallbackEventLeased, strings.TrimSpace(leaseOwner))
 	if err != nil {
 		return err
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	return nil
 }
 
-func scanPostgresCallbackRegistration(scanner sqliteExternalConversationScanner) (*CallbackRegistration, error) {
+func scanPostgresCallbackRegistration(scanner sqlstore.RowScanner) (*models.CallbackRegistration, error) {
 	var payload []byte
 	if err := scanner.Scan(&payload); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value CallbackRegistration
+	var value models.CallbackRegistration
 	if err := json.Unmarshal(payload, &value); err != nil {
 		return nil, err
 	}
 	return &value, value.Validate()
 }
 
-func scanPostgresCallbackEvent(scanner sqliteExternalConversationScanner) (*CallbackEventReceipt, error) {
+func scanPostgresCallbackEvent(scanner sqlstore.RowScanner) (*models.CallbackEventReceipt, error) {
 	var payload []byte
 	if err := scanner.Scan(&payload); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value CallbackEventReceipt
+	var value models.CallbackEventReceipt
 	if err := json.Unmarshal(payload, &value); err != nil {
 		return nil, err
 	}
-	normalizeStoredCallbackReceipt(&value)
+	models.NormalizeStoredCallbackReceipt(&value)
 	return &value, value.Validate()
 }

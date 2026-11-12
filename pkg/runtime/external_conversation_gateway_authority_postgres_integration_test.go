@@ -5,6 +5,8 @@ package runtime
 import (
 	"context"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testing.T) {
@@ -20,8 +22,8 @@ func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testin
 	memory, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	legacy := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(memory), CreateExternalConversationGatewayRequest{
 		ID: "legacy-gateway", Name: "Legacy provider gateway",
-		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
-		Actor:   ActivityActor{Type: "test", ID: "operator"}, Reason: "Exercise upgrade from reviewed legacy routing",
+		Gateway: models.ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
+		Actor:   models.ActivityActor{Type: "test", ID: "operator"}, Reason: "Exercise upgrade from reviewed legacy routing",
 	})
 	endpoint.InstallationID, endpoint.ApplicationID = "owned-installation", "owned-application"
 	if err := store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
@@ -30,20 +32,20 @@ func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testin
 	if err := store.CreateExternalConversationGateway(ctx, legacy); err != nil {
 		t.Fatal(err)
 	}
-	foreign := cloneExternalConversationEndpoint(endpoint)
+	foreign := models.CloneExternalConversationEndpoint(endpoint)
 	foreign.ID, foreign.IngressRoute, foreign.Scope.ID = "foreign-endpoint", "foreign-route", "foreign-tenant"
 	foreign.InstallationID = "foreign-installation"
 	if err := store.CreateExternalConversationEndpoint(ctx, foreign); err != nil {
 		t.Fatal(err)
 	}
-	ambiguousGateway := cloneExternalConversationGateway(legacy)
+	ambiguousGateway := models.CloneExternalConversationGateway(legacy)
 	ambiguousGateway.ID, ambiguousGateway.IngressRoute = "ambiguous-gateway", "ambiguous-gateway-route"
 	ambiguousGateway.Gateway.DeploymentID, ambiguousGateway.Gateway.Owner.ID = "ambiguous-agent", "ambiguous-agent"
 	if err := store.CreateExternalConversationGateway(ctx, ambiguousGateway); err != nil {
 		t.Fatal(err)
 	}
 	for _, identity := range []struct{ id, installation string }{{"first", "installation-a"}, {"second", "installation-b"}} {
-		candidate := cloneExternalConversationEndpoint(endpoint)
+		candidate := models.CloneExternalConversationEndpoint(endpoint)
 		candidate.ID, candidate.IngressRoute = "ambiguous-"+identity.id, "ambiguous-route-"+identity.id
 		candidate.DeploymentID, candidate.Owner.ID, candidate.Handler.ID = "ambiguous-agent", "ambiguous-agent", "ambiguous-agent"
 		candidate.InstallationID = identity.installation
@@ -80,7 +82,7 @@ func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testin
 			t.Fatalf("ambiguous installation gained authority: %#v, %v", ambiguous, err)
 		}
 	}
-	items, err := replica.ListExternalConversationGateways(context.Background(), ExternalConversationGatewayFilter{
+	items, err := replica.ListExternalConversationGateways(context.Background(), models.ExternalConversationGatewayFilter{
 		Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Limit: 10,
 	})
 	if err != nil || len(items) != 1 || items[0].ID != legacy.ID {

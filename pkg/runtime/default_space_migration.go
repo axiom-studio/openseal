@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // defaultSpaceMigrationVersion renames each scope's Personal space to its
@@ -29,7 +31,7 @@ func (s *PostgresStore) migrateDefaultSpace(ctx context.Context, tx *sql.Tx) err
 			`ALTER INDEX IF EXISTS `+s.table("spaces_personal_idx")+` RENAME TO spaces_default_idx`,
 		)
 	}
-	statements = append(statements, defaultSpaceRewrites(s.table("spaces"), s.table("space_members"), s.table("conversations"), s.table("artifacts"), true)...)
+	statements = append(statements, sqlstore.DefaultSpaceRewrites(s.table("spaces"), s.table("space_members"), s.table("conversations"), s.table("artifacts"), true)...)
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return err

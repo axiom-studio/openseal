@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/lib/pq"
 )
 
@@ -57,7 +59,7 @@ func (s *PostgresStore) pruneRoutineEventsQuery() string {
 		WHERE state IN ('started','dropped') AND received_at < $1 ORDER BY received_at LIMIT $2)`
 }
 
-func (s *PostgresStore) ListRoutineEventActivations(ctx context.Context, scope Scope, kind RoutineEventKind, sourceRef string) ([]*RunbookActivation, error) {
+func (s *PostgresStore) ListRoutineEventActivations(ctx context.Context, scope models.Scope, kind models.RoutineEventKind, sourceRef string) ([]*models.RunbookActivation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -66,13 +68,13 @@ func (s *PostgresStore) ListRoutineEventActivations(ctx context.Context, scope S
 		return nil, err
 	}
 	defer rows.Close()
-	values := make([]*RunbookActivation, 0)
+	values := make([]*models.RunbookActivation, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		activation, err := decodeRunbookActivation(payload)
+		activation, err := sqlstore.DecodeRunbookActivation(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -81,16 +83,16 @@ func (s *PostgresStore) ListRoutineEventActivations(ctx context.Context, scope S
 	return values, rows.Err()
 }
 
-func (s *PostgresStore) ListRoutineEventSubscriptions(ctx context.Context, kinds []RoutineEventKind, after string, limit int) ([]RoutineEventSubscription, string, error) {
-	kindValues, err := routineEventKindStrings(kinds)
+func (s *PostgresStore) ListRoutineEventSubscriptions(ctx context.Context, kinds []models.RoutineEventKind, after string, limit int) ([]models.RoutineEventSubscription, string, error) {
+	kindValues, err := models.RoutineEventKindStrings(kinds)
 	if err != nil {
 		return nil, "", err
 	}
-	afterKind, afterScope, afterID, err := decodeRoutineEventSubscriptionCursor(after)
+	afterKind, afterScope, afterID, err := models.DecodeRoutineEventSubscriptionCursor(after)
 	if err != nil {
 		return nil, "", err
 	}
-	limit = normalizeRoutineEventLimit(limit, routineEventSubscriptionPageLimit)
+	limit = models.NormalizeRoutineEventLimit(limit, models.RoutineEventSubscriptionPageLimit)
 	query := `SELECT payload::text FROM ` + s.table("runbook_activations") + `
 		WHERE status = 'active' AND event_kind IS NOT NULL AND (cardinality($1::text[]) = 0 OR event_kind = ANY($1::text[]))
 			AND ($2 = '' OR (scope_kind, scope_id, id) > ($3, $4, $5))
@@ -100,17 +102,17 @@ func (s *PostgresStore) ListRoutineEventSubscriptions(ctx context.Context, kinds
 		return nil, "", err
 	}
 	defer rows.Close()
-	values := make([]RoutineEventSubscription, 0)
+	values := make([]models.RoutineEventSubscription, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, "", err
 		}
-		activation, err := decodeRunbookActivation(payload)
+		activation, err := sqlstore.DecodeRunbookActivation(payload)
 		if err != nil {
 			return nil, "", err
 		}
-		if subscription, ok := routineEventSubscriptionOf(activation); ok {
+		if subscription, ok := models.RoutineEventSubscriptionOf(activation); ok {
 			values = append(values, subscription)
 		}
 	}
@@ -119,12 +121,12 @@ func (s *PostgresStore) ListRoutineEventSubscriptions(ctx context.Context, kinds
 	}
 	next := ""
 	if len(values) == limit {
-		next = encodeRoutineEventSubscriptionCursor(values[len(values)-1])
+		next = models.EncodeRoutineEventSubscriptionCursor(values[len(values)-1])
 	}
 	return values, next, nil
 }
 
-func (s *PostgresStore) ListRoutineEventSourceKeysInScope(ctx context.Context, scope Scope) ([]RoutineEventSourceKey, error) {
+func (s *PostgresStore) ListRoutineEventSourceKeysInScope(ctx context.Context, scope models.Scope) ([]models.RoutineEventSourceKey, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -133,9 +135,9 @@ func (s *PostgresStore) ListRoutineEventSourceKeysInScope(ctx context.Context, s
 		return nil, err
 	}
 	defer rows.Close()
-	keys := make([]RoutineEventSourceKey, 0)
+	keys := make([]models.RoutineEventSourceKey, 0)
 	for rows.Next() {
-		key := RoutineEventSourceKey{Scope: scope}
+		key := models.RoutineEventSourceKey{Scope: scope}
 		if err := rows.Scan(&key.Kind, &key.SourceRef); err != nil {
 			return nil, err
 		}
@@ -144,20 +146,20 @@ func (s *PostgresStore) ListRoutineEventSourceKeysInScope(ctx context.Context, s
 	return keys, rows.Err()
 }
 
-func (s *PostgresStore) CountActiveRoutineEventRuns(ctx context.Context, scope Scope) (int, error) {
+func (s *PostgresStore) CountActiveRoutineEventRuns(ctx context.Context, scope models.Scope) (int, error) {
 	if err := scope.Validate(); err != nil {
 		return 0, err
 	}
 	var count int
-	err := s.db.QueryRowContext(ctx, s.activeRoutineEventRunsQuery(), scope.Kind, scope.ID, time.Now().Add(-RoutineEventActiveRunWindow).UTC()).Scan(&count)
+	err := s.db.QueryRowContext(ctx, s.activeRoutineEventRunsQuery(), scope.Kind, scope.ID, time.Now().Add(-models.RoutineEventActiveRunWindow).UTC()).Scan(&count)
 	return count, err
 }
 
-func (s *PostgresStore) InsertRoutineEvent(ctx context.Context, record *RoutineEventRecord) (bool, error) {
-	if err := prepareRoutineEventRecord(record); err != nil {
+func (s *PostgresStore) InsertRoutineEvent(ctx context.Context, record *models.RoutineEventRecord) (bool, error) {
+	if err := models.PrepareRoutineEventRecord(record); err != nil {
 		return false, err
 	}
-	payload, err := routineEventRecordPayload(record)
+	payload, err := sqlstore.RoutineEventRecordPayload(record)
 	if err != nil {
 		return false, err
 	}
@@ -181,8 +183,8 @@ func (s *PostgresStore) InsertRoutineEvent(ctx context.Context, record *RoutineE
 	return inserted == 1, err
 }
 
-func (s *PostgresStore) CountPendingRoutineEvents(ctx context.Context, scope Scope, activationID string) (int, error) {
-	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
+func (s *PostgresStore) CountPendingRoutineEvents(ctx context.Context, scope models.Scope, activationID string) (int, error) {
+	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return 0, err
 	}
 	var count int
@@ -190,7 +192,7 @@ func (s *PostgresStore) CountPendingRoutineEvents(ctx context.Context, scope Sco
 	return count, err
 }
 
-func (s *PostgresStore) CountPendingRoutineEventsInScope(ctx context.Context, scope Scope) (int, error) {
+func (s *PostgresStore) CountPendingRoutineEventsInScope(ctx context.Context, scope models.Scope) (int, error) {
 	if err := scope.Validate(); err != nil {
 		return 0, err
 	}
@@ -199,15 +201,15 @@ func (s *PostgresStore) CountPendingRoutineEventsInScope(ctx context.Context, sc
 	return count, err
 }
 
-func (s *PostgresStore) ListRoutineEventWorkScopes(ctx context.Context) ([]Scope, error) {
+func (s *PostgresStore) ListRoutineEventWorkScopes(ctx context.Context) ([]models.Scope, error) {
 	rows, err := s.db.QueryContext(ctx, s.routineEventWorkScopesQuery())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	scopes := make([]Scope, 0)
+	scopes := make([]models.Scope, 0)
 	for rows.Next() {
-		var scope Scope
+		var scope models.Scope
 		if err := rows.Scan(&scope.Kind, &scope.ID); err != nil {
 			return nil, err
 		}
@@ -216,11 +218,11 @@ func (s *PostgresStore) ListRoutineEventWorkScopes(ctx context.Context) ([]Scope
 	return scopes, rows.Err()
 }
 
-func (s *PostgresStore) ListRoutineEventWork(ctx context.Context, scope Scope, after string, limit int) ([]string, error) {
+func (s *PostgresStore) ListRoutineEventWork(ctx context.Context, scope models.Scope, after string, limit int) ([]string, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, s.routineEventWorkQuery(), scope.Kind, scope.ID, after, normalizeRoutineEventLimit(limit, routineEventSubscriptionPageLimit))
+	rows, err := s.db.QueryContext(ctx, s.routineEventWorkQuery(), scope.Kind, scope.ID, after, models.NormalizeRoutineEventLimit(limit, models.RoutineEventSubscriptionPageLimit))
 	if err != nil {
 		return nil, err
 	}
@@ -243,8 +245,8 @@ type postgresRoutineQuerier interface {
 
 const postgresRoutineBatchColumns = `scope_kind, scope_id, id, activation_id, event_ids::text, dropped, test, COALESCE(run_id, ''), created_at, started_at`
 
-func scanPostgresRoutineEventBatch(row interface{ Scan(...interface{}) error }) (*RoutineEventBatch, error) {
-	var batch RoutineEventBatch
+func scanPostgresRoutineEventBatch(row interface{ Scan(...interface{}) error }) (*models.RoutineEventBatch, error) {
+	var batch models.RoutineEventBatch
 	var eventIDs string
 	var startedAt sql.NullTime
 	if err := row.Scan(&batch.Scope.Kind, &batch.Scope.ID, &batch.ID, &batch.ActivationID, &eventIDs, &batch.Dropped, &batch.Test, &batch.RunID, &batch.CreatedAt, &startedAt); err != nil {
@@ -261,7 +263,7 @@ func scanPostgresRoutineEventBatch(row interface{ Scan(...interface{}) error }) 
 	return &batch, nil
 }
 
-func (s *PostgresStore) openRoutineEventBatch(ctx context.Context, query postgresRoutineQuerier, scope Scope, activationID string) (*RoutineEventBatch, error) {
+func (s *PostgresStore) openRoutineEventBatch(ctx context.Context, query postgresRoutineQuerier, scope models.Scope, activationID string) (*models.RoutineEventBatch, error) {
 	batch, err := scanPostgresRoutineEventBatch(query.QueryRowContext(ctx, `SELECT `+postgresRoutineBatchColumns+` FROM `+s.table("routine_event_batches")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND activation_id = $3 AND started_at IS NULL`, scope.Kind, scope.ID, activationID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -272,17 +274,17 @@ func (s *PostgresStore) openRoutineEventBatch(ctx context.Context, query postgre
 
 // lockRoutineActivationEvents serializes claims and drops of one
 // activation's events across processes for the rest of the transaction.
-func (s *PostgresStore) lockRoutineActivationEvents(ctx context.Context, tx *sql.Tx, scope Scope, activationID string) error {
+func (s *PostgresStore) lockRoutineActivationEvents(ctx context.Context, tx *sql.Tx, scope models.Scope, activationID string) error {
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`,
 		"openseal:routine-events:"+s.schema+"|"+scope.Kind+"|"+scope.ID+"|"+activationID)
 	return err
 }
 
-func (s *PostgresStore) ClaimRoutineEventBatch(ctx context.Context, scope Scope, activationID string, maxEvents int, now time.Time) (*RoutineEventBatch, error) {
-	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
+func (s *PostgresStore) ClaimRoutineEventBatch(ctx context.Context, scope models.Scope, activationID string, maxEvents int, now time.Time) (*models.RoutineEventBatch, error) {
+	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return nil, err
 	}
-	maxEvents = normalizeRoutineEventBatchSize(maxEvents)
+	maxEvents = models.NormalizeRoutineEventBatchSize(maxEvents)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -327,7 +329,7 @@ func (s *PostgresStore) ClaimRoutineEventBatch(ctx context.Context, scope Scope,
 	if len(ids) == 0 {
 		return nil, tx.Commit()
 	}
-	batch := &RoutineEventBatch{Scope: scope, ID: newRoutineEventBatchID(), ActivationID: activationID, EventIDs: ids, Test: test, CreatedAt: now.UTC()}
+	batch := &models.RoutineEventBatch{Scope: scope, ID: models.NewRoutineEventBatchID(), ActivationID: activationID, EventIDs: ids, Test: test, CreatedAt: now.UTC()}
 	if !test {
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+s.table("routine_events")+`
 			WHERE scope_kind = $1 AND scope_id = $2 AND activation_id = $3 AND state = 'dropped' AND dropped_reason = 'overflow' AND NOT test
@@ -354,8 +356,8 @@ func (s *PostgresStore) ClaimRoutineEventBatch(ctx context.Context, scope Scope,
 	return batch, tx.Commit()
 }
 
-func (s *PostgresStore) MarkRoutineEventBatchStarted(ctx context.Context, scope Scope, batchID, runID string, now time.Time) error {
-	if err := validateRoutineEventScopeActivation(scope, batchID); err != nil {
+func (s *PostgresStore) MarkRoutineEventBatchStarted(ctx context.Context, scope models.Scope, batchID, runID string, now time.Time) error {
+	if err := models.ValidateRoutineEventScopeActivation(scope, batchID); err != nil {
 		return err
 	}
 	if runID == "" {
@@ -369,7 +371,7 @@ func (s *PostgresStore) MarkRoutineEventBatchStarted(ctx context.Context, scope 
 	batch, err := scanPostgresRoutineEventBatch(tx.QueryRowContext(ctx, `SELECT `+postgresRoutineBatchColumns+` FROM `+s.table("routine_event_batches")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, scope.Kind, scope.ID, batchID))
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrRoutineEventBatchNotFound
+		return models.ErrRoutineEventBatchNotFound
 	}
 	if err != nil {
 		return err
@@ -378,7 +380,7 @@ func (s *PostgresStore) MarkRoutineEventBatchStarted(ctx context.Context, scope 
 		if batch.RunID == runID {
 			return nil
 		}
-		return ErrRoutineEventBatchStarted
+		return models.ErrRoutineEventBatchStarted
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("routine_event_batches")+` SET run_id = $4, started_at = $5
 		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, batchID, runID, now.UTC()); err != nil {
@@ -392,8 +394,8 @@ func (s *PostgresStore) MarkRoutineEventBatchStarted(ctx context.Context, scope 
 	return tx.Commit()
 }
 
-func (s *PostgresStore) GetRoutineEventBatch(ctx context.Context, scope Scope, batchID string) (*RoutineEventBatch, []*RoutineEventRecord, error) {
-	if err := validateRoutineEventScopeActivation(scope, batchID); err != nil {
+func (s *PostgresStore) GetRoutineEventBatch(ctx context.Context, scope models.Scope, batchID string) (*models.RoutineEventBatch, []*models.RoutineEventRecord, error) {
+	if err := models.ValidateRoutineEventScopeActivation(scope, batchID); err != nil {
 		return nil, nil, err
 	}
 	batch, err := scanPostgresRoutineEventBatch(s.db.QueryRowContext(ctx, `SELECT `+postgresRoutineBatchColumns+` FROM `+s.table("routine_event_batches")+`
@@ -411,9 +413,9 @@ func (s *PostgresStore) GetRoutineEventBatch(ctx context.Context, scope Scope, b
 		return nil, nil, err
 	}
 	defer rows.Close()
-	byID := make(map[string]*RoutineEventRecord, len(batch.EventIDs))
+	byID := make(map[string]*models.RoutineEventRecord, len(batch.EventIDs))
 	for rows.Next() {
-		record := &RoutineEventRecord{Scope: scope, ActivationID: batch.ActivationID}
+		record := &models.RoutineEventRecord{Scope: scope, ActivationID: batch.ActivationID}
 		var eventID string
 		var test bool
 		var occurredAt time.Time
@@ -422,7 +424,7 @@ func (s *PostgresStore) GetRoutineEventBatch(ctx context.Context, scope Scope, b
 			return nil, nil, err
 		}
 		record.ReceivedAt = record.ReceivedAt.UTC()
-		if err := decodeRoutineEventRecordEvent(record, []byte(payload.String), eventID, test, occurredAt); err != nil {
+		if err := sqlstore.DecodeRoutineEventRecordEvent(record, []byte(payload.String), eventID, test, occurredAt); err != nil {
 			return nil, nil, err
 		}
 		byID[eventID] = record
@@ -430,7 +432,7 @@ func (s *PostgresStore) GetRoutineEventBatch(ctx context.Context, scope Scope, b
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
-	records := make([]*RoutineEventRecord, 0, len(batch.EventIDs))
+	records := make([]*models.RoutineEventRecord, 0, len(batch.EventIDs))
 	for _, id := range batch.EventIDs {
 		if record := byID[id]; record != nil {
 			records = append(records, record)
@@ -439,15 +441,15 @@ func (s *PostgresStore) GetRoutineEventBatch(ctx context.Context, scope Scope, b
 	return batch, records, nil
 }
 
-func (s *PostgresStore) GetOpenRoutineEventBatch(ctx context.Context, scope Scope, activationID string) (*RoutineEventBatch, error) {
-	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
+func (s *PostgresStore) GetOpenRoutineEventBatch(ctx context.Context, scope models.Scope, activationID string) (*models.RoutineEventBatch, error) {
+	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return nil, err
 	}
 	return s.openRoutineEventBatch(ctx, s.db, scope, activationID)
 }
 
-func (s *PostgresStore) CountRoutineEventBatchesSince(ctx context.Context, scope Scope, activationID string, since time.Time, test bool) (int, *time.Time, error) {
-	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
+func (s *PostgresStore) CountRoutineEventBatchesSince(ctx context.Context, scope models.Scope, activationID string, since time.Time, test bool) (int, *time.Time, error) {
+	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return 0, nil, err
 	}
 	var count int
@@ -464,8 +466,8 @@ func (s *PostgresStore) CountRoutineEventBatchesSince(ctx context.Context, scope
 	return count, &value, nil
 }
 
-func (s *PostgresStore) CountRoutineTestEventsSince(ctx context.Context, scope Scope, activationID string, since time.Time) (int, error) {
-	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
+func (s *PostgresStore) CountRoutineTestEventsSince(ctx context.Context, scope models.Scope, activationID string, since time.Time) (int, error) {
+	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return 0, err
 	}
 	var count int
@@ -475,11 +477,11 @@ func (s *PostgresStore) CountRoutineTestEventsSince(ctx context.Context, scope S
 	return count, err
 }
 
-func (s *PostgresStore) DropRoutineEvents(ctx context.Context, scope Scope, activationID string, reason string) (int, error) {
-	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
+func (s *PostgresStore) DropRoutineEvents(ctx context.Context, scope models.Scope, activationID string, reason string) (int, error) {
+	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return 0, err
 	}
-	if !validRoutineEventDropReason(reason) {
+	if !models.IsValidRoutineEventDropReason(reason) {
 		return 0, fmt.Errorf("routine event dropped reason %q is invalid", reason)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -508,17 +510,17 @@ func (s *PostgresStore) DropRoutineEvents(ctx context.Context, scope Scope, acti
 	return int(dropped), tx.Commit()
 }
 
-func (s *PostgresStore) RoutineEventActivity(ctx context.Context, scope Scope, activationIDs []string, now time.Time) (map[string]RoutineEventActivity, error) {
+func (s *PostgresStore) RoutineEventActivity(ctx context.Context, scope models.Scope, activationIDs []string, now time.Time) (map[string]models.RoutineEventActivity, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	ids := uniqueRoutineActivationIDs(activationIDs)
-	result := make(map[string]RoutineEventActivity, len(ids))
+	ids := models.UniqueRoutineActivationIDs(activationIDs)
+	result := make(map[string]models.RoutineEventActivity, len(ids))
 	if len(ids) == 0 {
 		return result, nil
 	}
 	for _, id := range ids {
-		result[id] = RoutineEventActivity{ActivationID: id}
+		result[id] = models.RoutineEventActivity{ActivationID: id}
 	}
 	dayAgo, hourAgo := now.Add(-24*time.Hour).UTC(), now.Add(-time.Hour).UTC()
 	oldestInHour := make(map[string]*time.Time)
@@ -589,14 +591,14 @@ func (s *PostgresStore) RoutineEventActivity(ctx context.Context, scope Scope, a
 			return nil, err
 		}
 		activity := result[id]
-		finishRoutineEventActivity(&activity, maxPerHour, oldestInHour[id])
+		models.FinishRoutineEventActivity(&activity, maxPerHour, oldestInHour[id])
 		result[id] = activity
 	}
 	return result, rows.Err()
 }
 
 func (s *PostgresStore) PruneRoutineEvents(ctx context.Context, before time.Time, limit int) (int, error) {
-	limit = normalizeRoutineEventLimit(limit, 10_000)
+	limit = models.NormalizeRoutineEventLimit(limit, 10_000)
 	result, err := s.db.ExecContext(ctx, s.pruneRoutineEventsQuery(), before.UTC(), limit)
 	if err != nil {
 		return 0, err
@@ -622,8 +624,8 @@ func (s *PostgresStore) PruneRoutineEvents(ctx context.Context, before time.Time
 
 const postgresHookColumns = `id, scope_kind, scope_id, activation_id, revision, path_token_enabled, created_at, rotated_at`
 
-func scanPostgresHook(row interface{ Scan(...interface{}) error }) (*Hook, error) {
-	var hook Hook
+func scanPostgresHook(row interface{ Scan(...interface{}) error }) (*models.Hook, error) {
+	var hook models.Hook
 	if err := row.Scan(&hook.ID, &hook.Scope.Kind, &hook.Scope.ID, &hook.ActivationID, &hook.Revision, &hook.PathTokenEnabled, &hook.CreatedAt, &hook.RotatedAt); err != nil {
 		return nil, err
 	}
@@ -631,8 +633,8 @@ func scanPostgresHook(row interface{ Scan(...interface{}) error }) (*Hook, error
 	return &hook, nil
 }
 
-func (s *PostgresStore) CreateHook(ctx context.Context, hook *Hook) (*Hook, error) {
-	value, err := prepareHook(hook)
+func (s *PostgresStore) CreateHook(ctx context.Context, hook *models.Hook) (*models.Hook, error) {
+	value, err := models.PrepareHook(hook)
 	if err != nil {
 		return nil, err
 	}
@@ -645,13 +647,13 @@ func (s *PostgresStore) CreateHook(ctx context.Context, hook *Hook) (*Hook, erro
 	if err != nil {
 		return nil, err
 	}
-	if stored == nil || !sameHookOwner(stored, value) {
-		return nil, ErrHookConflict
+	if stored == nil || !models.SameHookOwner(stored, value) {
+		return nil, models.ErrHookConflict
 	}
 	return stored, nil
 }
 
-func (s *PostgresStore) GetHook(ctx context.Context, hookID string) (*Hook, error) {
+func (s *PostgresStore) GetHook(ctx context.Context, hookID string) (*models.Hook, error) {
 	hook, err := scanPostgresHook(s.db.QueryRowContext(ctx, `SELECT `+postgresHookColumns+` FROM `+s.table("hooks")+` WHERE id = $1`, hookID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -659,7 +661,7 @@ func (s *PostgresStore) GetHook(ctx context.Context, hookID string) (*Hook, erro
 	return hook, err
 }
 
-func (s *PostgresStore) UpdateHook(ctx context.Context, scope Scope, hookID string, expectedRevision int64, rotate bool, pathTokenEnabled *bool, now time.Time) (*Hook, error) {
+func (s *PostgresStore) UpdateHook(ctx context.Context, scope models.Scope, hookID string, expectedRevision int64, rotate bool, pathTokenEnabled *bool, now time.Time) (*models.Hook, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -679,9 +681,9 @@ func (s *PostgresStore) UpdateHook(ctx context.Context, scope Scope, hookID stri
 			return nil, getErr
 		}
 		if existing == nil || existing.Scope != scope {
-			return nil, ErrHookNotFound
+			return nil, models.ErrHookNotFound
 		}
-		return nil, ErrHookRevision
+		return nil, models.ErrHookRevision
 	}
 	return hook, err
 }
@@ -699,4 +701,4 @@ func (s *PostgresStore) PruneHooks(ctx context.Context, createdBefore time.Time)
 	return int(removed), err
 }
 
-var _ RoutineEventStore = (*PostgresStore)(nil)
+var _ models.RoutineEventStore = (*PostgresStore)(nil)

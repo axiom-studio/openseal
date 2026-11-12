@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ RunTerminalReportingStore = (*PostgresStore)(nil)
+var _ models.RunTerminalReportingStore = (*PostgresStore)(nil)
 
 func (s *PostgresStore) migrateRunTerminalReporting(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `
@@ -33,11 +36,11 @@ func (s *PostgresStore) migrateRunTerminalReporting(ctx context.Context, tx *sql
 		BEGIN
 			IF NEW.status IN ('completed','failed','canceled')
 			AND jsonb_typeof(NEW.payload #> '{context,reportingRootRunId}')='string'
-			AND btrim(NEW.payload #>> '{context,reportingRootRunId}','`+runTerminalReportingWhitespace+`')=NEW.id
+			AND btrim(NEW.payload #>> '{context,reportingRootRunId}','`+sqlstore.RunTerminalReportingWhitespace+`')=NEW.id
 			AND jsonb_typeof(NEW.payload #> '{context,conversationId}')='string'
-			AND btrim(NEW.payload #>> '{context,conversationId}','`+runTerminalReportingWhitespace+`')<>''
+			AND btrim(NEW.payload #>> '{context,conversationId}','`+sqlstore.RunTerminalReportingWhitespace+`')<>''
 			AND jsonb_typeof(NEW.payload #> '{context,triggerMessageId}')='string'
-			AND btrim(NEW.payload #>> '{context,triggerMessageId}','`+runTerminalReportingWhitespace+`')<>''
+			AND btrim(NEW.payload #>> '{context,triggerMessageId}','`+sqlstore.RunTerminalReportingWhitespace+`')<>''
 			AND (NEW.payload #> '{context,reportingMilestones}') @>
 				(CASE WHEN NEW.status='completed' THEN '["completed"]'::jsonb ELSE '["failed"]'::jsonb END)
 			THEN
@@ -57,13 +60,13 @@ func (s *PostgresStore) migrateRunTerminalReporting(ctx context.Context, tx *sql
 	return err
 }
 
-func (s *PostgresStore) ClaimRunTerminalReports(ctx context.Context, request RunTerminalReportingClaim) ([]*RunTerminalReport, error) {
+func (s *PostgresStore) ClaimRunTerminalReports(ctx context.Context, request models.RunTerminalReportingClaim) ([]*models.RunTerminalReport, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
 	expires := request.Now.Add(request.LeaseDuration).UTC().Truncate(time.Microsecond)
 	if !expires.After(request.Now) {
-		return nil, ErrInvalidRunTerminalReport
+		return nil, models.ErrInvalidRunTerminalReport
 	}
 	args := []interface{}{request.Now.UTC().Truncate(time.Microsecond), request.Limit, request.WorkerID, expires}
 	filter := ""
@@ -91,7 +94,7 @@ func (s *PostgresStore) ClaimRunTerminalReports(ctx context.Context, request Run
 	if err != nil {
 		return nil, err
 	}
-	reports := make([]*RunTerminalReport, 0, request.Limit)
+	reports := make([]*models.RunTerminalReport, 0, request.Limit)
 	for rows.Next() {
 		report, scanErr := scanPostgresRunTerminalReport(rows)
 		if scanErr != nil {
@@ -113,12 +116,12 @@ func (s *PostgresStore) ClaimRunTerminalReports(ctx context.Context, request Run
 	return reports, nil
 }
 
-func (s *PostgresStore) CompleteRunTerminalReport(ctx context.Context, request RunTerminalReportingCompletion) error {
+func (s *PostgresStore) CompleteRunTerminalReport(ctx context.Context, request models.RunTerminalReportingCompletion) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
 	if !request.LeaseExpiresAt.Equal(request.LeaseExpiresAt.Truncate(time.Microsecond)) {
-		return ErrLeaseLost
+		return models.ErrLeaseLost
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("run_terminal_reports")+`
 		SET queue_state='delivered',delivered_at=$1,lease_owner='',lease_expires_at=NULL,payload=NULL
@@ -126,18 +129,18 @@ func (s *PostgresStore) CompleteRunTerminalReport(ctx context.Context, request R
 		AND lease_owner=$6 AND lease_expires_at=$7 AND lease_expires_at>$1 AND terminal_revision=$8`,
 		request.Now.UTC().Truncate(time.Microsecond), request.Scope.Kind, request.Scope.ID, request.RunID, request.Status,
 		request.WorkerID, request.LeaseExpiresAt.UTC(), request.TerminalRevision)
-	return runTerminalReportLeaseResult(result, err)
+	return sqlstore.RunTerminalReportLeaseResult(result, err)
 }
 
-func (s *PostgresStore) RetryRunTerminalReport(ctx context.Context, request RunTerminalReportingRetry) error {
+func (s *PostgresStore) RetryRunTerminalReport(ctx context.Context, request models.RunTerminalReportingRetry) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
 	if !request.LeaseExpiresAt.Equal(request.LeaseExpiresAt.Truncate(time.Microsecond)) {
-		return ErrLeaseLost
+		return models.ErrLeaseLost
 	}
 	if !request.AvailableAt.Truncate(time.Microsecond).After(request.Now) {
-		return ErrInvalidRunTerminalReport
+		return models.ErrInvalidRunTerminalReport
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("run_terminal_reports")+`
 		SET available_at=$1,lease_owner='',lease_expires_at=NULL
@@ -145,27 +148,27 @@ func (s *PostgresStore) RetryRunTerminalReport(ctx context.Context, request RunT
 		AND lease_owner=$6 AND lease_expires_at=$7 AND lease_expires_at>$8 AND terminal_revision=$9`,
 		request.AvailableAt.UTC().Truncate(time.Microsecond), request.Scope.Kind, request.Scope.ID, request.RunID, request.Status,
 		request.WorkerID, request.LeaseExpiresAt.UTC(), request.Now.UTC().Truncate(time.Microsecond), request.TerminalRevision)
-	return runTerminalReportLeaseResult(result, err)
+	return sqlstore.RunTerminalReportLeaseResult(result, err)
 }
 
-func (s *PostgresStore) GetRunTerminalReport(ctx context.Context, scope Scope, runID string, status AgentRunStatus) (*RunTerminalReport, error) {
+func (s *PostgresStore) GetRunTerminalReport(ctx context.Context, scope models.Scope, runID string, status models.AgentRunStatus) (*models.RunTerminalReport, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	if !validOpaqueIdentifier(runID, 128) || !isTerminalAgentRunStatus(status) {
-		return nil, ErrInvalidRunTerminalReport
+	if !models.IsValidOpaqueIdentifier(runID, 128) || !models.IsTerminalAgentRunStatus(status) {
+		return nil, models.ErrInvalidRunTerminalReport
 	}
 	report, err := scanPostgresRunTerminalReport(s.db.QueryRowContext(ctx, `SELECT scope_kind,scope_id,run_id,terminal_status,terminal_revision,
 		payload,available_at,attempts,lease_owner,lease_expires_at,delivered_at FROM `+s.table("run_terminal_reports")+`
 		WHERE scope_kind=$1 AND scope_id=$2 AND run_id=$3 AND terminal_status=$4 ORDER BY terminal_revision DESC LIMIT 1`, scope.Kind, scope.ID, runID, status))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrRunTerminalReportNotFound
+		return nil, models.ErrRunTerminalReportNotFound
 	}
 	return report, err
 }
 
-func scanPostgresRunTerminalReport(scanner interface{ Scan(...interface{}) error }) (*RunTerminalReport, error) {
-	var report RunTerminalReport
+func scanPostgresRunTerminalReport(scanner interface{ Scan(...interface{}) error }) (*models.RunTerminalReport, error) {
+	var report models.RunTerminalReport
 	var payload sql.NullString
 	var expires, delivered sql.NullTime
 	if err := scanner.Scan(&report.Scope.Kind, &report.Scope.ID, &report.RunID, &report.Status, &report.TerminalRevision,
@@ -182,7 +185,7 @@ func scanPostgresRunTerminalReport(scanner interface{ Scan(...interface{}) error
 		report.DeliveredAt = &at
 	}
 	if payload.Valid {
-		report.Run = &AgentRun{}
+		report.Run = &models.AgentRun{}
 		decoder := json.NewDecoder(strings.NewReader(payload.String))
 		decoder.UseNumber()
 		if err := decoder.Decode(report.Run); err != nil {

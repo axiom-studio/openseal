@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const externalConversationGatewayMigrationVersion int64 = 28
@@ -31,7 +34,7 @@ func (s *PostgresStore) migrateExternalConversationGateways(ctx context.Context,
 
 func (s *PostgresStore) CreateExternalConversationGateway(
 	ctx context.Context,
-	value *ExternalConversationGatewayRegistration,
+	value *models.ExternalConversationGatewayRegistration,
 ) error {
 	if err := value.Validate(); err != nil {
 		return err
@@ -46,16 +49,16 @@ func (s *PostgresStore) CreateExternalConversationGateway(
 		value.Gateway.Scope.Kind, value.Gateway.Scope.ID, value.ID, value.IngressRoute,
 		value.Gateway.Provider, value.Status, value.Revision, value.UpdatedAt, string(payload))
 	if postgresUniqueViolation(err) {
-		return ErrExternalConversationConflict
+		return models.ErrExternalConversationConflict
 	}
 	return err
 }
 
 func (s *PostgresStore) GetExternalConversationGateway(
 	ctx context.Context,
-	scope Scope,
+	scope models.Scope,
 	id string,
-) (*ExternalConversationGatewayRegistration, error) {
+) (*models.ExternalConversationGatewayRegistration, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -68,9 +71,9 @@ func (s *PostgresStore) GetExternalConversationGateway(
 func (s *PostgresStore) GetExternalConversationGatewayByIngressRoute(
 	ctx context.Context,
 	route string,
-) (*ExternalConversationGatewayRegistration, error) {
-	if !validOpaqueIdentifier(strings.TrimSpace(route), 128) {
-		return nil, ErrInvalidExternalConversation
+) (*models.ExternalConversationGatewayRegistration, error) {
+	if !models.IsValidOpaqueIdentifier(strings.TrimSpace(route), 128) {
+		return nil, models.ErrInvalidExternalConversation
 	}
 	return scanPostgresExternalConversationGateway(s.db.QueryRowContext(ctx,
 		`SELECT payload FROM `+s.table("external_conversation_gateways")+` WHERE ingress_route=$1`,
@@ -79,8 +82,8 @@ func (s *PostgresStore) GetExternalConversationGatewayByIngressRoute(
 
 func (s *PostgresStore) ListExternalConversationGateways(
 	ctx context.Context,
-	filter ExternalConversationGatewayFilter,
-) ([]*ExternalConversationGatewayRegistration, error) {
+	filter models.ExternalConversationGatewayFilter,
+) ([]*models.ExternalConversationGatewayRegistration, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -108,14 +111,14 @@ func (s *PostgresStore) ListExternalConversationGateways(
 	}
 	query, args, placeholder = appendPostgresActivityStrings(query, args, placeholder, "status", statuses)
 	query += fmt.Sprintf(` ORDER BY updated_at DESC,id ASC LIMIT $%d OFFSET $%d`, placeholder, placeholder+1)
-	limit, offset := normalizeExternalConversationPage(filter.Limit, filter.Offset)
+	limit, offset := models.NormalizeExternalConversationPage(filter.Limit, filter.Offset)
 	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*ExternalConversationGatewayRegistration, 0)
+	result := make([]*models.ExternalConversationGatewayRegistration, 0)
 	for rows.Next() {
 		value, scanErr := scanPostgresExternalConversationGateway(rows)
 		if scanErr != nil {
@@ -128,7 +131,7 @@ func (s *PostgresStore) ListExternalConversationGateways(
 
 func (s *PostgresStore) UpdateExternalConversationGateway(
 	ctx context.Context,
-	value *ExternalConversationGatewayRegistration,
+	value *models.ExternalConversationGatewayRegistration,
 	expectedRevision int64,
 ) error {
 	if err := value.Validate(); err != nil {
@@ -144,7 +147,7 @@ func (s *PostgresStore) UpdateExternalConversationGateway(
 		value.IngressRoute, value.Gateway.Provider, value.Status, value.Revision, value.UpdatedAt, string(payload),
 		value.Gateway.Scope.Kind, value.Gateway.Scope.ID, value.ID, expectedRevision)
 	if postgresUniqueViolation(err) {
-		return ErrExternalConversationConflict
+		return models.ErrExternalConversationConflict
 	}
 	if err != nil {
 		return err
@@ -159,23 +162,23 @@ func (s *PostgresStore) UpdateExternalConversationGateway(
 			return getErr
 		}
 		if current == nil {
-			return ErrExternalConversationGatewayNotFound
+			return models.ErrExternalConversationGatewayNotFound
 		}
-		return ErrExternalConversationConflict
+		return models.ErrExternalConversationConflict
 	}
 	return nil
 }
 
 func scanPostgresExternalConversationGateway(
-	scanner sqliteExternalConversationScanner,
-) (*ExternalConversationGatewayRegistration, error) {
+	scanner sqlstore.RowScanner,
+) (*models.ExternalConversationGatewayRegistration, error) {
 	var payload []byte
 	if err := scanner.Scan(&payload); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value ExternalConversationGatewayRegistration
+	var value models.ExternalConversationGatewayRegistration
 	if err := json.Unmarshal(payload, &value); err != nil {
 		return nil, err
 	}

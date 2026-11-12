@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const surfaceInteractionMigrationVersion int64 = 65
@@ -39,7 +42,7 @@ func (s *PostgresStore) migrateSurfaceInteractions(ctx context.Context, tx *sql.
 	return err
 }
 
-func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interaction *SurfaceInteraction) (*SurfaceInteraction, bool, error) {
+func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interaction *models.SurfaceInteraction) (*models.SurfaceInteraction, bool, error) {
 	if err := interaction.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -59,7 +62,7 @@ func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interactio
 		return nil, false, err
 	}
 	if conversation == nil {
-		return nil, false, ErrConversationNotFound
+		return nil, false, models.ErrConversationNotFound
 	}
 	scope := []interface{}{interaction.Scope.Kind, interaction.Scope.ID, interaction.ConversationID}
 	existing, err := s.getPostgresSurfaceInteraction(ctx, tx, `idempotency_key = $4`, append(scope, interaction.IdempotencyKey)...)
@@ -67,8 +70,8 @@ func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interactio
 		return nil, false, err
 	}
 	if existing != nil {
-		if !sameSurfaceInteractionTarget(existing, interaction) {
-			return nil, false, &SurfaceInteractionConflictError{Existing: existing}
+		if !models.SameSurfaceInteractionTarget(existing, interaction) {
+			return nil, false, &models.SurfaceInteractionConflictError{Existing: existing}
 		}
 		return existing, true, tx.Commit()
 	}
@@ -79,11 +82,11 @@ func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interactio
 			return nil, false, err
 		}
 		if existing != nil {
-			return nil, false, &SurfaceInteractionConflictError{Existing: existing}
+			return nil, false, &models.SurfaceInteractionConflictError{Existing: existing}
 		}
 	}
 	table := s.table("surface_interactions")
-	created := cloneSurfaceInteraction(interaction)
+	created := models.CloneSurfaceInteraction(interaction)
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM `+table+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND conversation_id = $3`, scope...).Scan(&created.Sequence); err != nil {
 		return nil, false, err
@@ -99,24 +102,24 @@ func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interactio
 		created.ID, created.Sequence, created.SurfaceArtifactID, created.SurfaceID, created.SurfaceVersion, created.MessageID, created.ComponentID,
 		created.ItemKey, created.ActorType, created.ActorID, created.Repeatable, created.IdempotencyKey, created.CreatedAt, string(payload)); err != nil {
 		if postgresUniqueViolation(err) {
-			return nil, false, ErrSurfaceInteractionConflict
+			return nil, false, models.ErrSurfaceInteractionConflict
 		}
 		return nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, false, err
 	}
-	return cloneSurfaceInteraction(created), false, nil
+	return models.CloneSurfaceInteraction(created), false, nil
 }
 
-func (s *PostgresStore) ListSurfaceInteractions(ctx context.Context, filter SurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
+func (s *PostgresStore) ListSurfaceInteractions(ctx context.Context, filter models.SurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
 	if conversation, err := s.getPostgresConversation(ctx, s.db, filter.Scope, filter.ConversationID, false); err != nil {
 		return nil, err
 	} else if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	query := `SELECT payload FROM ` + s.table("surface_interactions") + ` WHERE scope_kind = $1 AND scope_id = $2 AND conversation_id = $3 AND sequence > $4`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, filter.AfterSequence}
@@ -129,29 +132,29 @@ func (s *PostgresStore) ListSurfaceInteractions(ctx context.Context, filter Surf
 	if err != nil {
 		return nil, err
 	}
-	return scanSurfaceInteractions(rows)
+	return sqlstore.ScanSurfaceInteractions(rows)
 }
 
-func (s *PostgresStore) ListLatestSurfaceInteractions(ctx context.Context, filter LatestSurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
+func (s *PostgresStore) ListLatestSurfaceInteractions(ctx context.Context, filter models.LatestSurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
 	if conversation, err := s.getPostgresConversation(ctx, s.db, filter.Scope, filter.ConversationID, false); err != nil {
 		return nil, err
 	} else if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
-	rows, err := s.db.QueryContext(ctx, latestSurfaceInteractionQuery(s.table("surface_interactions"), filter.AcrossActors, [4]string{"$1", "$2", "$3", "$4"}),
+	rows, err := s.db.QueryContext(ctx, sqlstore.LatestSurfaceInteractionQuery(s.table("surface_interactions"), filter.AcrossActors, [4]string{"$1", "$2", "$3", "$4"}),
 		filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, filter.SurfaceID)
 	if err != nil {
 		return nil, err
 	}
-	return scanSurfaceInteractions(rows)
+	return sqlstore.ScanSurfaceInteractions(rows)
 }
 
 // getPostgresSurfaceInteraction reads one interaction of a conversation; where
 // filters after the leading $1..$3 scope and conversation parameters.
-func (s *PostgresStore) getPostgresSurfaceInteraction(ctx context.Context, queryer postgresConversationQueryer, where string, args ...interface{}) (*SurfaceInteraction, error) {
+func (s *PostgresStore) getPostgresSurfaceInteraction(ctx context.Context, queryer postgresConversationQueryer, where string, args ...interface{}) (*models.SurfaceInteraction, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM `+s.table("surface_interactions")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND conversation_id = $3 AND `+where+` ORDER BY sequence LIMIT 1`, args...).Scan(&payload)
@@ -161,5 +164,5 @@ func (s *PostgresStore) getPostgresSurfaceInteraction(ctx context.Context, query
 	if err != nil {
 		return nil, err
 	}
-	return decodeSurfaceInteraction(payload)
+	return sqlstore.DecodeSurfaceInteraction(payload)
 }

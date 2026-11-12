@@ -10,6 +10,8 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -220,7 +222,7 @@ func (s *PostgresStore) ListDefinitionVersions(ctx context.Context, id string) (
 }
 
 func (s *PostgresStore) CreateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, activation kernelagent.DefinitionActivation) error {
-	deploymentPayload, activationPayload, err := registryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -281,7 +283,7 @@ func (s *PostgresStore) ListDeployments(ctx context.Context, scope capability.Sc
 }
 
 func (s *PostgresStore) UpdateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, activation kernelagent.DefinitionActivation) error {
-	deploymentPayload, activationPayload, err := registryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -435,7 +437,7 @@ func (s *PostgresStore) activateAmendment(ctx context.Context, amendment *kernel
 	if err != nil {
 		return err
 	}
-	deploymentPayload, activationPayload, err := registryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -494,14 +496,14 @@ func (s *PostgresStore) synchronizeAgentRunbookActivations(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	var current []*RunbookActivation
+	var current []*models.RunbookActivation
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			rows.Close()
 			return err
 		}
-		var activation RunbookActivation
+		var activation models.RunbookActivation
 		if err := json.Unmarshal([]byte(payload), &activation); err != nil {
 			rows.Close()
 			return err
@@ -511,7 +513,7 @@ func (s *PostgresStore) synchronizeAgentRunbookActivations(ctx context.Context, 
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	next, err := reconcileAgentRunbookActivations(current, definition, deployment, deployment.UpdatedAt)
+	next, err := models.ReconcileAgentRunbookActivations(current, definition, deployment, deployment.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -528,7 +530,7 @@ func (s *PostgresStore) synchronizeAgentRunbookActivations(ctx context.Context, 
 			if err != nil {
 				return err
 			}
-			return ErrRunbookActivationRevision
+			return models.ErrRunbookActivationRevision
 		}
 	}
 	return nil
@@ -608,7 +610,7 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 		return err
 	}
 	defer tx.Rollback()
-	maintenanceScope := Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
+	maintenanceScope := models.Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
 	var previousSkillID string
 	lookupErr := tx.QueryRowContext(ctx, `SELECT skill_id FROM `+s.table("skill_bindings")+` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID).Scan(&previousSkillID)
 	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
@@ -629,7 +631,7 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 			return err
 		}
 		if g != nil {
-			return &SkillRuntimeMaintenanceError{Maintenance: *g}
+			return &models.SkillRuntimeMaintenanceError{Maintenance: *g}
 		}
 	}
 	if !exists {
@@ -736,14 +738,14 @@ func (s *PostgresStore) DeleteSkillBinding(ctx context.Context, scope skill.Scop
 	if revision != expectedRevision {
 		return skill.ErrBindingRevisionConflict
 	}
-	maintenanceScope := Scope{Kind: scope.Kind, ID: scope.ID}
+	maintenanceScope := models.Scope{Kind: scope.Kind, ID: scope.ID}
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, skillRuntimeMaintenanceLockKey(maintenanceScope, skillID)); err != nil {
 		return err
 	}
 	if g, err := s.postgresSkillRuntimeMaintenanceActiveTx(ctx, tx, maintenanceScope, skillID); err != nil {
 		return err
 	} else if g != nil {
-		return &SkillRuntimeMaintenanceError{Maintenance: *g}
+		return &models.SkillRuntimeMaintenanceError{Maintenance: *g}
 	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM `+s.table("skill_bindings")+` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 AND revision=$5`,
 		scope.Kind, scope.ID, deploymentID, bindingID, expectedRevision)

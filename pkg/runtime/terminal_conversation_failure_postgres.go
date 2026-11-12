@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const terminalConversationFailureMigrationVersion int64 = 59
@@ -39,13 +41,13 @@ func (s *PostgresStore) migrateTerminalConversationFailures(ctx context.Context,
 			IF (TG_OP='INSERT' OR OLD.status IS DISTINCT FROM NEW.status)
 			AND NEW.status IN ('completed','failed','canceled')
 			AND jsonb_typeof(NEW.payload #> '{context,conversationId}')='string'
-			AND btrim(NEW.payload #>> '{context,conversationId}','`+runTerminalReportingWhitespace+`')<>''
+			AND btrim(NEW.payload #>> '{context,conversationId}','`+sqlstore.RunTerminalReportingWhitespace+`')<>''
 			AND jsonb_typeof(NEW.payload #> '{context,triggerMessageId}')='string'
-			AND btrim(NEW.payload #>> '{context,triggerMessageId}','`+runTerminalReportingWhitespace+`')<>''
+			AND btrim(NEW.payload #>> '{context,triggerMessageId}','`+sqlstore.RunTerminalReportingWhitespace+`')<>''
 			AND (
 				(NEW.status='failed' AND NEW.payload->>'kind'='conversation' AND COALESCE(NEW.payload->>'parentRunId','')='')
 				OR (jsonb_typeof(NEW.payload #> '{context,reportingRootRunId}')='string'
-					AND btrim(NEW.payload #>> '{context,reportingRootRunId}','`+runTerminalReportingWhitespace+`')=NEW.id
+					AND btrim(NEW.payload #>> '{context,reportingRootRunId}','`+sqlstore.RunTerminalReportingWhitespace+`')=NEW.id
 					AND (NEW.payload #> '{context,reportingMilestones}') @>
 					(CASE WHEN NEW.status='completed' THEN '["completed"]'::jsonb ELSE '["failed"]'::jsonb END))
 			) THEN
@@ -74,7 +76,7 @@ func (s *PostgresStore) rollbackTerminalConversationFailures(ctx context.Context
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM `+s.table("run_terminal_reports")+`
 		WHERE queue_state='pending' AND NOT COALESCE(
 			jsonb_typeof(payload #> '{context,reportingRootRunId}')='string'
-			AND btrim(payload #>> '{context,reportingRootRunId}','`+runTerminalReportingWhitespace+`')=run_id
+			AND btrim(payload #>> '{context,reportingRootRunId}','`+sqlstore.RunTerminalReportingWhitespace+`')=run_id
 			AND (payload #> '{context,reportingMilestones}') @>
 			(CASE WHEN terminal_status='completed' THEN '["completed"]'::jsonb ELSE '["failed"]'::jsonb END),FALSE))`).Scan(&unsupportedPending); err != nil {
 		return err

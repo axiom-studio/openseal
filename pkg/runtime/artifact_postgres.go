@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func (s *PostgresStore) migrateArtifacts(ctx context.Context, tx *sql.Tx) error {
@@ -46,7 +49,7 @@ func (s *PostgresStore) migrateArtifacts(ctx context.Context, tx *sql.Tx) error 
 	return err
 }
 
-func (s *PostgresStore) CreateArtifactVersion(ctx context.Context, artifact *Artifact, expectedLatestVersion int64) error {
+func (s *PostgresStore) CreateArtifactVersion(ctx context.Context, artifact *models.Artifact, expectedLatestVersion int64) error {
 	if err := artifact.Validate(); err != nil {
 		return err
 	}
@@ -59,7 +62,7 @@ func (s *PostgresStore) CreateArtifactVersion(ctx context.Context, artifact *Art
 		return err
 	}
 	defer tx.Rollback()
-	lockKey := hashString(artifactStorageKey(artifact.Scope, artifact.ID))
+	lockKey := models.SHA256DigestString(artifactStorageKey(artifact.Scope, artifact.ID))
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey); err != nil {
 		return err
 	}
@@ -69,7 +72,7 @@ func (s *PostgresStore) CreateArtifactVersion(ctx context.Context, artifact *Art
 		return err
 	}
 	if latest != expectedLatestVersion {
-		return ErrArtifactVersionConflict
+		return models.ErrArtifactVersionConflict
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("artifacts")+`
 		(scope_kind, scope_id, id, version, type, media_type, classification, digest, content_ref,
@@ -83,7 +86,7 @@ func (s *PostgresStore) CreateArtifactVersion(ctx context.Context, artifact *Art
 	return tx.Commit()
 }
 
-func (s *PostgresStore) GetArtifact(ctx context.Context, scope Scope, id string, version int64) (*Artifact, error) {
+func (s *PostgresStore) GetArtifact(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -101,21 +104,21 @@ func (s *PostgresStore) GetArtifact(ctx context.Context, scope Scope, id string,
 	} else if err != nil {
 		return nil, err
 	}
-	return decodeArtifact(payload)
+	return sqlstore.DecodeArtifact(payload)
 }
 
-func (s *PostgresStore) ListArtifacts(ctx context.Context, filter ArtifactFilter) ([]*Artifact, error) {
+func (s *PostgresStore) ListArtifacts(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
 	if filter.EvidenceTarget == "" && filter.RetentionDueBefore == nil {
-		query, args := artifactListQuery(filter, s.table("artifacts"), s.table("artifact_working_files"), true)
-		return queryArtifactPage(ctx, s.db, query, args)
+		query, args := sqlstore.ArtifactListQuery(filter, s.table("artifacts"), s.table("artifact_working_files"), true)
+		return sqlstore.QueryArtifactPage(ctx, s.db, query, args)
 	}
 	var working map[string]bool
-	if filter.Files != ArtifactFilesAll {
+	if filter.Files != models.ArtifactFilesAll {
 		var err error
-		if working, err = workingArtifactIDs(ctx, s.db, `SELECT id FROM `+s.table("artifact_working_files")+` WHERE scope_kind = $1 AND scope_id = $2`, filter.Scope); err != nil {
+		if working, err = sqlstore.WorkingArtifactIDs(ctx, s.db, `SELECT id FROM `+s.table("artifact_working_files")+` WHERE scope_kind = $1 AND scope_id = $2`, filter.Scope); err != nil {
 			return nil, err
 		}
 	}
@@ -124,14 +127,14 @@ func (s *PostgresStore) ListArtifacts(ctx context.Context, filter ArtifactFilter
 		return nil, err
 	}
 	defer rows.Close()
-	all := make([]*Artifact, 0)
+	all := make([]*models.Artifact, 0)
 	latest := make(map[string]int64)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		artifact, err := decodeArtifact(payload)
+		artifact, err := sqlstore.DecodeArtifact(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -143,12 +146,12 @@ func (s *PostgresStore) ListArtifacts(ctx context.Context, filter ArtifactFilter
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	result := make([]*Artifact, 0, len(all))
+	result := make([]*models.Artifact, 0, len(all))
 	for _, artifact := range all {
 		if filter.LatestOnly && artifact.Version != latest[artifact.ID] {
 			continue
 		}
-		if matchesArtifactFilter(artifact, filter) && filter.Files.Keeps(working[artifact.ID]) {
+		if models.MatchesArtifactFilter(artifact, filter) && filter.Files.Keeps(working[artifact.ID]) {
 			result = append(result, artifact)
 		}
 	}
@@ -166,8 +169,8 @@ func (s *PostgresStore) ListArtifacts(ctx context.Context, filter ArtifactFilter
 	return result[start:end], nil
 }
 
-var _ ArtifactStore = (*PostgresStore)(nil)
+var _ models.ArtifactStore = (*PostgresStore)(nil)
 
-func artifactStorageKey(scope Scope, id string) string {
+func artifactStorageKey(scope models.Scope, id string) string {
 	return scope.Kind + "\x00" + scope.ID + "\x00" + id
 }

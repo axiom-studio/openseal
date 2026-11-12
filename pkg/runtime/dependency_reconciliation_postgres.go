@@ -3,12 +3,15 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ RunDependencyReconciliationStore = (*PostgresStore)(nil)
+var _ models.RunDependencyReconciliationStore = (*PostgresStore)(nil)
 
-func (s *PostgresStore) ListWaitingRunDependencyGroups(ctx context.Context, scope Scope, afterID string, limit int) ([]RunDependencyGroupWork, error) {
-	if err := validateWaitingDependencyGroupPage(scope, afterID, limit); err != nil {
+func (s *PostgresStore) ListWaitingRunDependencyGroups(ctx context.Context, scope models.Scope, afterID string, limit int) ([]models.RunDependencyGroupWork, error) {
+	if err := models.ValidateWaitingDependencyGroupPage(scope, afterID, limit); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT g.id, g.revision, g.source_run_id, r.revision,
@@ -24,9 +27,9 @@ func (s *PostgresStore) ListWaitingRunDependencyGroups(ctx context.Context, scop
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]RunDependencyGroupWork, 0, limit)
+	result := make([]models.RunDependencyGroupWork, 0, limit)
 	for rows.Next() {
-		work := RunDependencyGroupWork{Scope: scope}
+		work := models.RunDependencyGroupWork{Scope: scope}
 		if err := rows.Scan(&work.GroupID, &work.GroupRevision, &work.SourceRunID, &work.SourceRevision, &work.Ready); err != nil {
 			return nil, err
 		}
@@ -35,8 +38,8 @@ func (s *PostgresStore) ListWaitingRunDependencyGroups(ctx context.Context, scop
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) ReconcileRunDependencyGroup(ctx context.Context, record RunDependencyGroupReconciliationRecord) (*RunDependencyResult, error) {
-	if err := validateDependencyGroupReconciliationRecord(record); err != nil {
+func (s *PostgresStore) ReconcileRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupReconciliationRecord) (*models.RunDependencyResult, error) {
+	if err := models.ValidateDependencyGroupReconciliationRecord(record); err != nil {
 		return nil, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -49,7 +52,7 @@ func (s *PostgresStore) ReconcileRunDependencyGroup(ctx context.Context, record 
 		return nil, err
 	}
 	if group == nil {
-		return nil, ErrDependencyGroupNotFound
+		return nil, models.ErrDependencyGroupNotFound
 	}
 	edges, err := s.listPostgresDependencies(ctx, tx, record.Scope, group.ID, true)
 	if err != nil {
@@ -59,8 +62,8 @@ func (s *PostgresStore) ReconcileRunDependencyGroup(ctx context.Context, record 
 	if err != nil {
 		return nil, err
 	}
-	targets := make(map[string]*AgentRun)
-	if !isTerminalAgentRunStatus(source.Status) && !isTerminalDependencyGroup(group) {
+	targets := make(map[string]*models.AgentRun)
+	if !models.IsTerminalAgentRunStatus(source.Status) && !models.IsTerminalDependencyGroup(group) {
 		rows, err := tx.QueryContext(ctx, `SELECT r.payload FROM `+s.table("run_dependencies")+` d JOIN `+s.table("agent_runs")+` r
 			ON r.scope_kind=d.scope_kind AND r.scope_id=d.scope_id AND r.id=d.target_run_id
 			WHERE d.scope_kind=$1 AND d.scope_id=$2 AND d.group_id=$3 AND d.kind='run' AND d.state IN ('pending','running')
@@ -74,7 +77,7 @@ func (s *PostgresStore) ReconcileRunDependencyGroup(ctx context.Context, record 
 				rows.Close()
 				return nil, err
 			}
-			target, err := decodeAgentRun(payload)
+			target, err := sqlstore.DecodeAgentRun(payload)
 			if err != nil {
 				rows.Close()
 				return nil, err
@@ -87,7 +90,7 @@ func (s *PostgresStore) ReconcileRunDependencyGroup(ctx context.Context, record 
 			return nil, rowErr
 		}
 	}
-	result, err := applyDependencyGroupReconciliation(group, edges, source, targets, record)
+	result, err := models.ApplyDependencyGroupReconciliation(group, edges, source, targets, record)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +105,7 @@ func (s *PostgresStore) ReconcileRunDependencyGroup(ctx context.Context, record 
 	return result, nil
 }
 
-func (s *PostgresStore) persistPostgresDependencyResult(ctx context.Context, tx *sql.Tx, group *RunDependencyGroup, edges []*RunDependency, source *AgentRun, result *RunDependencyResult) error {
+func (s *PostgresStore) persistPostgresDependencyResult(ctx context.Context, tx *sql.Tx, group *models.RunDependencyGroup, edges []*models.RunDependency, source *models.AgentRun, result *models.RunDependencyResult) error {
 	previous := make(map[string]int64, len(edges))
 	for _, edge := range edges {
 		previous[edge.ID] = edge.Revision

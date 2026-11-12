@@ -6,24 +6,26 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // WorkspaceSearchHit is a tenant-scoped candidate. Hosts must apply their
 // resource authorization policy before returning it to a caller.
 type WorkspaceSearchHit struct {
-	Kind         string          `json:"kind"`
-	Conversation *Conversation   `json:"conversation,omitempty"`
-	Message      *ChannelMessage `json:"message,omitempty"`
-	Artifact     *Artifact       `json:"artifact,omitempty"`
-	Run          *AgentRun       `json:"run,omitempty"`
-	Score        float64         `json:"score"`
-	UpdatedAt    time.Time       `json:"updatedAt"`
+	Kind         string                 `json:"kind"`
+	Conversation *models.Conversation   `json:"conversation,omitempty"`
+	Message      *models.ChannelMessage `json:"message,omitempty"`
+	Artifact     *models.Artifact       `json:"artifact,omitempty"`
+	Run          *models.AgentRun       `json:"run,omitempty"`
+	Score        float64                `json:"score"`
+	UpdatedAt    time.Time              `json:"updatedAt"`
 }
 
 // SearchWorkspacePage searches existing active conversations and their full
 // message history. Expression indexes keep older records
 // searchable without a separate backfill or asynchronous indexing queue.
-func (s *PostgresStore) SearchWorkspacePage(ctx context.Context, scope Scope, query string, limit, offset int) ([]WorkspaceSearchHit, error) {
+func (s *PostgresStore) SearchWorkspacePage(ctx context.Context, scope models.Scope, query string, limit, offset int) ([]WorkspaceSearchHit, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -71,14 +73,14 @@ func (s *PostgresStore) SearchWorkspacePage(ctx context.Context, scope Scope, qu
 		}
 		switch hit.Kind {
 		case "chat":
-			var value Conversation
+			var value models.Conversation
 			if err := json.Unmarshal(payload, &value); err != nil {
 				return nil, err
 			}
 			hit.Conversation = &value
 		case "message":
-			var message ChannelMessage
-			var conversation Conversation
+			var message models.ChannelMessage
+			var conversation models.Conversation
 			if err := json.Unmarshal(payload, &message); err != nil {
 				return nil, err
 			}
@@ -87,13 +89,13 @@ func (s *PostgresStore) SearchWorkspacePage(ctx context.Context, scope Scope, qu
 			}
 			hit.Message, hit.Conversation = &message, &conversation
 		case "artifact":
-			var value Artifact
+			var value models.Artifact
 			if err := json.Unmarshal(payload, &value); err != nil {
 				return nil, err
 			}
 			hit.Artifact = &value
 		case "run":
-			var value AgentRun
+			var value models.AgentRun
 			if err := json.Unmarshal(payload, &value); err != nil {
 				return nil, err
 			}

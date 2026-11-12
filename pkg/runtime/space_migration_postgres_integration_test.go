@@ -6,6 +6,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func openSpacesPostgresStore(t *testing.T, prefix string) (*PostgresStore, string, string) {
@@ -24,13 +27,13 @@ func TestPostgresSpaceAccessBackfillAndRollback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	store, dsn, schema := openSpacesPostgresStore(t, "openseal_space_access_backfill_")
-	scope := Scope{Kind: "tenant", ID: "legacy"}
+	scope := models.Scope{Kind: "tenant", ID: "legacy"}
 	spaces := NewSpaceService(store)
-	work, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Work", Look: DefaultSpaceLook, OwnerID: "7"})
+	work, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Work", Look: models.DefaultSpaceLook, OwnerID: "7"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := spaces.SetSpaceAccess(ctx, scope, work.ID, SpaceAccessEveryone); err != nil {
+	if _, err := spaces.SetSpaceAccess(ctx, scope, work.ID, models.SpaceAccessEveryone); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := spaces.AddSpacePerson(ctx, AddSpacePersonRequest{Scope: scope, SpaceID: work.ID, UserID: "8", AddedBy: "7"}); err != nil {
@@ -41,7 +44,7 @@ func TestPostgresSpaceAccessBackfillAndRollback(t *testing.T) {
 	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("spaces")+` SET is_default = FALSE, position = 1 WHERE id = $1`, work.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("spaces")+` (`+postgresSpaceColumns+`)
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("spaces")+` (`+sqlstore.SpaceColumns+`)
 		VALUES ($1, $2, $3, 'Default', 'tidepool', 0, TRUE, 'everyone', $4, $5, $5)`,
 		legacyDefaultSpaceID(scope), scope.Kind, scope.ID, legacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
@@ -73,12 +76,12 @@ func TestPostgresSpacesBackfillAndRollback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	store, dsn, schema := openSpacesPostgresStore(t, "openseal_spaces_backfill_")
-	scope := Scope{Kind: "tenant", ID: "legacy"}
-	agentOnly := Scope{Kind: "tenant", ID: "agents-only"}
+	scope := models.Scope{Kind: "tenant", ID: "legacy"}
+	agentOnly := models.Scope{Kind: "tenant", ID: "agents-only"}
 	// The conversation needs a space to be created; the rollback below drops it.
 	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +97,7 @@ func TestPostgresSpacesBackfillAndRollback(t *testing.T) {
 	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	for _, row := range []struct {
 		table string
-		scope Scope
+		scope models.Scope
 		id    string
 		at    time.Time
 	}{

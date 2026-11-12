@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func (s *PostgresStore) postgresConversationActiveRunProjection() string {
@@ -17,7 +20,7 @@ func (s *PostgresStore) postgresConversationActiveRunProjection() string {
 }
 
 func (s *PostgresStore) migrateConversationActiveRuns(ctx context.Context, tx *sql.Tx) error {
-	insert := `INSERT INTO ` + s.table("conversation_active_runs") + ` ` + conversationActiveRunProjectionColumns + ` ` + s.postgresConversationActiveRunProjection()
+	insert := `INSERT INTO ` + s.table("conversation_active_runs") + ` ` + sqlstore.ConversationActiveRunProjectionColumns + ` ` + s.postgresConversationActiveRunProjection()
 	upsert := ` ON CONFLICT (scope_kind,scope_id,id) DO UPDATE SET owner_type=EXCLUDED.owner_type,owner_id=EXCLUDED.owner_id,
 		conversation_id=EXCLUDED.conversation_id,root_run_id=EXCLUDED.root_run_id,created_at=EXCLUDED.created_at`
 	identityChanged := `NEW.scope_kind IS DISTINCT FROM OLD.scope_kind OR NEW.scope_id IS DISTINCT FROM OLD.scope_id OR NEW.id IS DISTINCT FROM OLD.id
@@ -66,8 +69,8 @@ func (s *PostgresStore) migrateConversationActiveRuns(ctx context.Context, tx *s
 	return err
 }
 
-func (s *PostgresStore) ListConversationActiveRuns(ctx context.Context, scope Scope, owner ObjectiveOwner, conversationID string, limit int) ([]*AgentRun, error) {
-	if err := validateConversationActiveRunsQuery(scope, owner, conversationID, limit); err != nil {
+func (s *PostgresStore) ListConversationActiveRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit int) ([]*models.AgentRun, error) {
+	if err := models.ValidateConversationActiveRunsQuery(scope, owner, conversationID, limit); err != nil {
 		return nil, err
 	}
 	// Materializing the page before canonical point reads prevents the planner
@@ -94,5 +97,5 @@ func (s *PostgresStore) ListConversationActiveRuns(ctx context.Context, scope Sc
 		return nil, err
 	}
 	defer rows.Close()
-	return scanConversationActiveRunsSQL(rows)
+	return sqlstore.ScanConversationActiveRuns(rows)
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/lib/pq"
 )
 
@@ -19,7 +20,7 @@ import (
 // transaction. The …Tx helpers are the in-transaction variants for stores
 // that already hold the Run row lock (child Run create, promotion).
 
-var _ AgentSessionStore = (*PostgresStore)(nil)
+var _ models.AgentSessionStore = (*PostgresStore)(nil)
 
 func postgresSessionNow(now time.Time) time.Time {
 	if now.IsZero() {
@@ -30,18 +31,18 @@ func postgresSessionNow(now time.Time) time.Time {
 
 // lockPostgresSessionRunTx locks the Run row (FOR UPDATE) and checks the
 // lease as UpdateAgentRunWithEvent does.
-func (s *PostgresStore) lockPostgresSessionRunTx(ctx context.Context, tx *sql.Tx, scope Scope, runID string, lease *AgentRunLeaseGuard) (*AgentRun, error) {
+func (s *PostgresStore) lockPostgresSessionRunTx(ctx context.Context, tx *sql.Tx, scope models.Scope, runID string, lease *models.AgentRunLeaseGuard) (*models.AgentRun, error) {
 	run, err := s.getPostgresAgentRunTx(ctx, tx, scope, runID, true)
 	if err != nil {
 		return nil, err
 	}
 	if lease != nil && (run.LeaseOwner != lease.WorkerID || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(lease.Now)) {
-		return nil, ErrLeaseLost
+		return nil, models.ErrLeaseLost
 	}
 	return run, nil
 }
 
-func (s *PostgresStore) getPostgresAgentSessionTx(ctx context.Context, queryer postgresDependencyQueryer, scope Scope, sessionID string, lock bool) (*AgentSession, error) {
+func (s *PostgresStore) getPostgresAgentSessionTx(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, sessionID string, lock bool) (*models.AgentSession, error) {
 	query := `SELECT payload FROM ` + s.table("agent_sessions") + ` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`
 	if lock {
 		query += ` FOR UPDATE`
@@ -49,12 +50,12 @@ func (s *PostgresStore) getPostgresAgentSessionTx(ctx context.Context, queryer p
 	var payload string
 	err := queryer.QueryRowContext(ctx, query, scope.Kind, scope.ID, sessionID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrAgentSessionNotFound
+		return nil, models.ErrAgentSessionNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	var session AgentSession
+	var session models.AgentSession
 	if err := json.Unmarshal([]byte(payload), &session); err != nil {
 		return nil, err
 	}
@@ -64,7 +65,7 @@ func (s *PostgresStore) getPostgresAgentSessionTx(ctx context.Context, queryer p
 // insertPostgresAgentSessionTx inserts a validated session row. It reports
 // false (and writes nothing) when a row with the same id, lane or owner
 // already exists.
-func (s *PostgresStore) insertPostgresAgentSessionTx(ctx context.Context, tx *sql.Tx, session *AgentSession) (bool, error) {
+func (s *PostgresStore) insertPostgresAgentSessionTx(ctx context.Context, tx *sql.Tx, session *models.AgentSession) (bool, error) {
 	if err := session.Validate(); err != nil {
 		return false, err
 	}
@@ -90,7 +91,7 @@ func (s *PostgresStore) insertPostgresAgentSessionTx(ctx context.Context, tx *sq
 	return affected == 1, nil
 }
 
-func (s *PostgresStore) updatePostgresAgentSessionTx(ctx context.Context, tx *sql.Tx, session *AgentSession, expectedRevision int64) error {
+func (s *PostgresStore) updatePostgresAgentSessionTx(ctx context.Context, tx *sql.Tx, session *models.AgentSession, expectedRevision int64) error {
 	payload, err := json.Marshal(session)
 	if err != nil {
 		return err
@@ -107,20 +108,20 @@ func (s *PostgresStore) updatePostgresAgentSessionTx(ctx context.Context, tx *sq
 		return err
 	}
 	if affected != 1 {
-		return ErrAgentSessionConflict
+		return models.ErrAgentSessionConflict
 	}
 	return nil
 }
 
-func decodePostgresSessionEntries(rows *sql.Rows) ([]*SessionEntry, error) {
+func decodePostgresSessionEntries(rows *sql.Rows) ([]*models.SessionEntry, error) {
 	defer rows.Close()
-	var entries []*SessionEntry
+	var entries []*models.SessionEntry
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		var entry SessionEntry
+		var entry models.SessionEntry
 		if err := json.Unmarshal([]byte(payload), &entry); err != nil {
 			return nil, err
 		}
@@ -129,7 +130,7 @@ func decodePostgresSessionEntries(rows *sql.Rows) ([]*SessionEntry, error) {
 	return entries, rows.Err()
 }
 
-func (s *PostgresStore) queryPostgresSessionEntries(ctx context.Context, queryer postgresDependencyQueryer, query string, args ...interface{}) ([]*SessionEntry, error) {
+func (s *PostgresStore) queryPostgresSessionEntries(ctx context.Context, queryer postgresDependencyQueryer, query string, args ...interface{}) ([]*models.SessionEntry, error) {
 	rows, err := queryer.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -137,7 +138,7 @@ func (s *PostgresStore) queryPostgresSessionEntries(ctx context.Context, queryer
 	return decodePostgresSessionEntries(rows)
 }
 
-func (s *PostgresStore) getPostgresSessionEntryTx(ctx context.Context, queryer postgresDependencyQueryer, scope Scope, entryID string, lock bool) (*SessionEntry, error) {
+func (s *PostgresStore) getPostgresSessionEntryTx(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, entryID string, lock bool) (*models.SessionEntry, error) {
 	query := `SELECT payload FROM ` + s.table("agent_session_entries") + ` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`
 	if lock {
 		query += ` FOR UPDATE`
@@ -145,12 +146,12 @@ func (s *PostgresStore) getPostgresSessionEntryTx(ctx context.Context, queryer p
 	var payload string
 	err := queryer.QueryRowContext(ctx, query, scope.Kind, scope.ID, entryID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrSessionEntryNotFound
+		return nil, models.ErrSessionEntryNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	var entry SessionEntry
+	var entry models.SessionEntry
 	if err := json.Unmarshal([]byte(payload), &entry); err != nil {
 		return nil, err
 	}
@@ -158,7 +159,7 @@ func (s *PostgresStore) getPostgresSessionEntryTx(ctx context.Context, queryer p
 }
 
 // insertPostgresSessionEntriesTx stores stamped entries in one multi-row INSERT.
-func (s *PostgresStore) insertPostgresSessionEntriesTx(ctx context.Context, tx *sql.Tx, entries []*SessionEntry) error {
+func (s *PostgresStore) insertPostgresSessionEntriesTx(ctx context.Context, tx *sql.Tx, entries []*models.SessionEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -193,20 +194,20 @@ func (s *PostgresStore) insertPostgresSessionEntriesTx(ctx context.Context, tx *
 	}
 	if _, err := tx.ExecContext(ctx, query.String(), args...); err != nil {
 		if postgresUniqueViolation(err) {
-			return ErrAgentSessionConflict
+			return models.ErrAgentSessionConflict
 		}
 		return err
 	}
 	return nil
 }
 
-func (s *PostgresStore) insertPostgresSessionEventsTx(ctx context.Context, tx *sql.Tx, events []*ActivityEvent, now time.Time) ([]*ActivityEvent, error) {
+func (s *PostgresStore) insertPostgresSessionEventsTx(ctx context.Context, tx *sql.Tx, events []*models.ActivityEvent, now time.Time) ([]*models.ActivityEvent, error) {
 	if len(events) == 0 {
 		return nil, nil
 	}
-	out := make([]*ActivityEvent, 0, len(events))
+	out := make([]*models.ActivityEvent, 0, len(events))
 	for _, event := range events {
-		event = cloneActivityEvent(event)
+		event = models.CloneActivityEvent(event)
 		if event.CreatedAt.IsZero() {
 			event.CreatedAt = now
 		}
@@ -234,18 +235,18 @@ func (s *PostgresStore) beginPostgresSessionTx(ctx context.Context, run func(*sq
 // ---------------------------------------------------------------------------
 // Open / create
 
-func (s *PostgresStore) OpenConversationAgentSession(ctx context.Context, req OpenConversationAgentSessionRequest) (*OpenAgentSessionResult, error) {
+func (s *PostgresStore) OpenConversationAgentSession(ctx context.Context, req models.OpenConversationAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
 	if err := req.Scope.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidAgentSession, err)
+		return nil, fmt.Errorf("%w: %v", models.ErrInvalidAgentSession, err)
 	}
 	if strings.TrimSpace(req.ConversationID) == "" || strings.TrimSpace(req.AgentID) == "" ||
 		strings.TrimSpace(req.RunID) == "" || strings.TrimSpace(req.Lease.WorkerID) == "" {
-		return nil, fmt.Errorf("%w: conversationId, agentId, runId and a lease are required", ErrInvalidAgentSession)
+		return nil, fmt.Errorf("%w: conversationId, agentId, runId and a lease are required", models.ErrInvalidAgentSession)
 	}
 	now := postgresSessionNow(req.Now)
-	lane := ConversationRunLane(req.ConversationID, req.ThreadRootID, req.AgentID)
-	id := ConversationAgentSessionID(req.Scope, lane)
-	var result *OpenAgentSessionResult
+	lane := models.ConversationRunLane(req.ConversationID, req.ThreadRootID, req.AgentID)
+	id := models.ConversationAgentSessionID(req.Scope, lane)
+	var result *models.OpenAgentSessionResult
 	err := s.beginPostgresSessionTx(ctx, func(tx *sql.Tx) error {
 		lease := req.Lease
 		run, err := s.lockPostgresSessionRunTx(ctx, tx, req.Scope, req.RunID, &lease)
@@ -253,10 +254,10 @@ func (s *PostgresStore) OpenConversationAgentSession(ctx context.Context, req Op
 			return err
 		}
 		if run.SessionID != id {
-			return ErrSessionMoved
+			return models.ErrSessionMoved
 		}
-		session := &AgentSession{
-			ID: id, Scope: req.Scope, Kind: AgentSessionKindConversation, LaneKey: lane,
+		session := &models.AgentSession{
+			ID: id, Scope: req.Scope, Kind: models.AgentSessionKindConversation, LaneKey: lane,
 			ConversationID: req.ConversationID, ThreadRootID: req.ThreadRootID, AgentID: req.AgentID,
 			RootSessionID: id, NextSequence: 1, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
@@ -265,21 +266,21 @@ func (s *PostgresStore) OpenConversationAgentSession(ctx context.Context, req Op
 			return err
 		}
 		if created {
-			result = &OpenAgentSessionResult{Session: session, Created: true}
+			result = &models.OpenAgentSessionResult{Session: session, Created: true}
 			return nil
 		}
 		current, err := s.getPostgresAgentSessionTx(ctx, tx, req.Scope, id, true)
-		if errors.Is(err, ErrAgentSessionNotFound) {
+		if errors.Is(err, models.ErrAgentSessionNotFound) {
 			// The lane index holds another id for this lane.
-			return ErrAgentSessionConflict
+			return models.ErrAgentSessionConflict
 		}
 		if err != nil {
 			return err
 		}
-		if current.Kind != AgentSessionKindConversation || current.LaneKey != lane || current.AgentID != req.AgentID {
-			return ErrAgentSessionConflict
+		if current.Kind != models.AgentSessionKindConversation || current.LaneKey != lane || current.AgentID != req.AgentID {
+			return models.ErrAgentSessionConflict
 		}
-		result = &OpenAgentSessionResult{Session: current}
+		result = &models.OpenAgentSessionResult{Session: current}
 		return nil
 	})
 	if err != nil {
@@ -291,8 +292,8 @@ func (s *PostgresStore) OpenConversationAgentSession(ctx context.Context, req Op
 // CreateRunAgentSession creates the parentless run session of OwnerRunID at
 // its first claim, fenced by that Run's lease. A Run bound to another session
 // gets ErrSessionMoved.
-func (s *PostgresStore) CreateRunAgentSession(ctx context.Context, req CreateRunAgentSessionRequest) (*OpenAgentSessionResult, error) {
-	txReq := CreateRunAgentSessionTxRequest{
+func (s *PostgresStore) CreateRunAgentSession(ctx context.Context, req models.CreateRunAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
+	txReq := models.CreateRunAgentSessionTxRequest{
 		Scope:          req.Scope,
 		OwnerRunID:     req.OwnerRunID,
 		AgentID:        req.AgentID,
@@ -302,20 +303,20 @@ func (s *PostgresStore) CreateRunAgentSession(ctx context.Context, req CreateRun
 		Now:            postgresSessionNow(req.Now),
 	}
 	if strings.TrimSpace(req.Lease.WorkerID) == "" {
-		return nil, fmt.Errorf("%w: a lease is required", ErrInvalidAgentSession)
+		return nil, fmt.Errorf("%w: a lease is required", models.ErrInvalidAgentSession)
 	}
-	if err := validateCreateRunAgentSessionTxRequest(txReq); err != nil {
+	if err := models.ValidateCreateRunAgentSessionTxRequest(txReq); err != nil {
 		return nil, err
 	}
-	var result *OpenAgentSessionResult
+	var result *models.OpenAgentSessionResult
 	err := s.beginPostgresSessionTx(ctx, func(tx *sql.Tx) error {
 		lease := req.Lease
 		run, err := s.lockPostgresSessionRunTx(ctx, tx, req.Scope, req.OwnerRunID, &lease)
 		if err != nil {
 			return err
 		}
-		if id := RunAgentSessionID(req.Scope, req.OwnerRunID); run.SessionID != "" && run.SessionID != id {
-			return ErrSessionMoved
+		if id := models.RunAgentSessionID(req.Scope, req.OwnerRunID); run.SessionID != "" && run.SessionID != id {
+			return models.ErrSessionMoved
 		}
 		result, err = s.createRunAgentSessionCoreTx(ctx, tx, run, txReq)
 		return err
@@ -333,9 +334,9 @@ func (s *PostgresStore) CreateRunAgentSession(ctx context.Context, req CreateRun
 // the new session in the same transaction (Revision+1 when it changes). A
 // replay with the same parent and Agent returns the existing session with
 // Created=false and writes nothing.
-func (s *PostgresStore) createRunAgentSessionTx(ctx context.Context, tx *sql.Tx, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
+func (s *PostgresStore) createRunAgentSessionTx(ctx context.Context, tx *sql.Tx, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
 	req.Now = postgresSessionNow(req.Now)
-	if err := validateCreateRunAgentSessionTxRequest(req); err != nil {
+	if err := models.ValidateCreateRunAgentSessionTxRequest(req); err != nil {
 		return nil, err
 	}
 	run, err := s.lockPostgresSessionRunTx(ctx, tx, req.Scope, req.OwnerRunID, nil)
@@ -345,26 +346,26 @@ func (s *PostgresStore) createRunAgentSessionTx(ctx context.Context, tx *sql.Tx,
 	return s.createRunAgentSessionCoreTx(ctx, tx, run, req)
 }
 
-func (s *PostgresStore) createRunAgentSessionCoreTx(ctx context.Context, tx *sql.Tx, run *AgentRun, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
-	id := RunAgentSessionID(req.Scope, req.OwnerRunID)
-	matches := func(current *AgentSession) bool {
-		return current.Kind == AgentSessionKindRun && current.OwnerRunID == req.OwnerRunID &&
+func (s *PostgresStore) createRunAgentSessionCoreTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
+	id := models.RunAgentSessionID(req.Scope, req.OwnerRunID)
+	matches := func(current *models.AgentSession) bool {
+		return current.Kind == models.AgentSessionKindRun && current.OwnerRunID == req.OwnerRunID &&
 			current.ParentSessionID == req.ParentSessionID && current.AgentID == req.AgentID
 	}
 	current, err := s.getPostgresAgentSessionTx(ctx, tx, req.Scope, id, true)
 	switch {
 	case err == nil:
 		if !matches(current) {
-			return nil, ErrAgentSessionConflict
+			return nil, models.ErrAgentSessionConflict
 		}
-		return &OpenAgentSessionResult{Session: current}, nil
-	case !errors.Is(err, ErrAgentSessionNotFound):
+		return &models.OpenAgentSessionResult{Session: current}, nil
+	case !errors.Is(err, models.ErrAgentSessionNotFound):
 		return nil, err
 	}
-	session := &AgentSession{
+	session := &models.AgentSession{
 		ID:             id,
 		Scope:          req.Scope,
-		Kind:           AgentSessionKindRun,
+		Kind:           models.AgentSessionKindRun,
 		ConversationID: req.ConversationID,
 		ThreadRootID:   req.ThreadRootID,
 		AgentID:        req.AgentID,
@@ -381,10 +382,10 @@ func (s *PostgresStore) createRunAgentSessionCoreTx(ctx context.Context, tx *sql
 			return nil, err
 		}
 		if req.ForkSequence > parent.NextSequence-1 {
-			return nil, fmt.Errorf("%w: fork sequence %d is past the parent leaf %d", ErrInvalidAgentSession, req.ForkSequence, parent.NextSequence-1)
+			return nil, fmt.Errorf("%w: fork sequence %d is past the parent leaf %d", models.ErrInvalidAgentSession, req.ForkSequence, parent.NextSequence-1)
 		}
-		if parent.Depth+1 > MaxAgentSessionDepth {
-			return nil, ErrAgentSessionForkTooDeep
+		if parent.Depth+1 > models.MaxAgentSessionDepth {
+			return nil, models.ErrAgentSessionForkTooDeep
 		}
 		session.ParentSessionID = parent.ID
 		session.ForkSequence = req.ForkSequence
@@ -417,20 +418,20 @@ func (s *PostgresStore) createRunAgentSessionCoreTx(ctx context.Context, tx *sql
 		// Same id inserted concurrently (owner index or primary key).
 		current, err := s.getPostgresAgentSessionTx(ctx, tx, req.Scope, id, true)
 		if err != nil || !matches(current) {
-			return nil, ErrAgentSessionConflict
+			return nil, models.ErrAgentSessionConflict
 		}
-		return &OpenAgentSessionResult{Session: current}, nil
+		return &models.OpenAgentSessionResult{Session: current}, nil
 	}
 	stored := session
 	if len(req.InitialEntries) > 0 {
-		appended, err := s.appendAgentSessionEntriesCoreTx(ctx, tx, initialEntriesAppend(req, id))
+		appended, err := s.appendAgentSessionEntriesCoreTx(ctx, tx, models.InitialEntriesAppendRequest(req, id))
 		if err != nil {
 			return nil, err
 		}
 		stored = appended.Session
 	}
 	if run.SessionID != id {
-		next := cloneAgentRun(run)
+		next := models.CloneAgentRun(run)
 		next.SessionID = id
 		next.Revision = run.Revision + 1
 		next.UpdatedAt = req.Now
@@ -438,14 +439,14 @@ func (s *PostgresStore) createRunAgentSessionCoreTx(ctx context.Context, tx *sql
 			return nil, err
 		}
 	}
-	return &OpenAgentSessionResult{Session: stored, Created: true}, nil
+	return &models.OpenAgentSessionResult{Session: stored, Created: true}, nil
 }
 
 // postgresForkModelTx is the model of the latest model_change entry on the
 // parent's chain up to the fork point, or the parent's own model.
-func (s *PostgresStore) postgresForkModelTx(ctx context.Context, tx *sql.Tx, parent *AgentSession, forkSequence int64) (string, string, error) {
+func (s *PostgresStore) postgresForkModelTx(ctx context.Context, tx *sql.Tx, parent *models.AgentSession, forkSequence int64) (string, string, error) {
 	session, bound := parent, forkSequence
-	for depth := 0; depth <= MaxAgentSessionDepth; depth++ {
+	for depth := 0; depth <= models.MaxAgentSessionDepth; depth++ {
 		entries, err := s.queryPostgresSessionEntries(ctx, tx, `SELECT payload FROM `+s.table("agent_session_entries")+`
 			WHERE scope_kind = $1 AND scope_id = $2 AND session_id = $3 AND type = 'model_change' AND sequence <= $4
 			ORDER BY sequence DESC LIMIT 1`, session.Scope.Kind, session.Scope.ID, session.ID, bound)
@@ -470,16 +471,16 @@ func (s *PostgresStore) postgresForkModelTx(ctx context.Context, tx *sql.Tx, par
 // ---------------------------------------------------------------------------
 // Reads
 
-func (s *PostgresStore) GetAgentSession(ctx context.Context, scope Scope, sessionID string) (*AgentSession, error) {
+func (s *PostgresStore) GetAgentSession(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSession, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidAgentSession, err)
+		return nil, fmt.Errorf("%w: %v", models.ErrInvalidAgentSession, err)
 	}
 	return s.getPostgresAgentSessionTx(ctx, s.db, scope, sessionID, false)
 }
 
-func (s *PostgresStore) GetSessionEntry(ctx context.Context, scope Scope, entryID string) (*SessionEntry, error) {
+func (s *PostgresStore) GetSessionEntry(ctx context.Context, scope models.Scope, entryID string) (*models.SessionEntry, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidSessionEntry, err)
+		return nil, fmt.Errorf("%w: %v", models.ErrInvalidSessionEntry, err)
 	}
 	return s.getPostgresSessionEntryTx(ctx, s.db, scope, entryID, false)
 }
@@ -487,9 +488,9 @@ func (s *PostgresStore) GetSessionEntry(ctx context.Context, scope Scope, entryI
 // LoadAgentSessionPath builds the path in one REPEATABLE READ read-only
 // transaction, so a concurrent append or compaction is either wholly in the
 // snapshot or wholly absent.
-func (s *PostgresStore) LoadAgentSessionPath(ctx context.Context, scope Scope, sessionID string) (*AgentSessionPath, error) {
+func (s *PostgresStore) LoadAgentSessionPath(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSessionPath, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidAgentSession, err)
+		return nil, fmt.Errorf("%w: %v", models.ErrInvalidAgentSession, err)
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
@@ -514,15 +515,15 @@ func (s *PostgresStore) LoadAgentSessionPath(ctx context.Context, scope Scope, s
 // modified copy of the stored row), with extra not-yet-stored entries
 // appended to the leaf's segment. Only the entries from the start point on
 // are loaded.
-func (s *PostgresStore) postgresSessionPathTx(ctx context.Context, tx *sql.Tx, leaf *AgentSession, extra []*SessionEntry) (*AgentSessionPath, error) {
-	chain := []*AgentSession{leaf}
+func (s *PostgresStore) postgresSessionPathTx(ctx context.Context, tx *sql.Tx, leaf *models.AgentSession, extra []*models.SessionEntry) (*models.AgentSessionPath, error) {
+	chain := []*models.AgentSession{leaf}
 	for current := leaf; current.ParentSessionID != ""; {
-		if len(chain) > MaxAgentSessionDepth {
-			return nil, ErrAgentSessionForkTooDeep
+		if len(chain) > models.MaxAgentSessionDepth {
+			return nil, models.ErrAgentSessionForkTooDeep
 		}
 		parent, err := s.getPostgresAgentSessionTx(ctx, tx, current.Scope, current.ParentSessionID, false)
-		if errors.Is(err, ErrAgentSessionNotFound) {
-			return nil, fmt.Errorf("%w: parent session %s is missing", ErrInvalidAgentSession, current.ParentSessionID)
+		if errors.Is(err, models.ErrAgentSessionNotFound) {
+			return nil, fmt.Errorf("%w: parent session %s is missing", models.ErrInvalidAgentSession, current.ParentSessionID)
 		}
 		if err != nil {
 			return nil, err
@@ -549,9 +550,9 @@ func (s *PostgresStore) postgresSessionPathTx(ctx context.Context, tx *sql.Tx, l
 
 	// Latest compaction: the newest in the extra entries, else the first hit
 	// walking the stored segments from the leaf to the root.
-	var compaction *SessionEntry
+	var compaction *models.SessionEntry
 	for i := len(extra) - 1; i >= 0; i-- {
-		if extra[i].Type == SessionEntryCompaction {
+		if extra[i].Type == models.SessionEntryCompaction {
 			compaction = extra[i]
 			break
 		}
@@ -572,7 +573,7 @@ func (s *PostgresStore) postgresSessionPathTx(ctx context.Context, tx *sql.Tx, l
 	if compaction != nil {
 		seg, ok := index[compaction.SessionID]
 		if !ok {
-			return nil, fmt.Errorf("%w: compaction %s is not on the path", ErrInvalidSessionEntry, compaction.ID)
+			return nil, fmt.Errorf("%w: compaction %s is not on the path", models.ErrInvalidSessionEntry, compaction.ID)
 		}
 		startSegment, startSequence = seg, compaction.Sequence+1
 		if kept := compaction.Compaction.FirstKeptEntryID; kept != "" {
@@ -593,13 +594,13 @@ func (s *PostgresStore) postgresSessionPathTx(ctx context.Context, tx *sql.Tx, l
 			}
 			seg, ok := index[keptSession]
 			if !found || !ok || keptSequence < 1 || keptSequence > bounds[seg] {
-				return nil, fmt.Errorf("%w: compaction %s keeps %s, which is not on the path", ErrInvalidSessionEntry, compaction.ID, kept)
+				return nil, fmt.Errorf("%w: compaction %s keeps %s, which is not on the path", models.ErrInvalidSessionEntry, compaction.ID, kept)
 			}
 			startSegment, startSequence = seg, keptSequence
 		}
 	}
 
-	segments := make([][]*SessionEntry, len(chain))
+	segments := make([][]*models.SessionEntry, len(chain))
 	total := 0
 	for i := startSegment; i < len(chain); i++ {
 		from := int64(1)
@@ -612,26 +613,26 @@ func (s *PostgresStore) postgresSessionPathTx(ctx context.Context, tx *sql.Tx, l
 		loaded, err := s.queryPostgresSessionEntries(ctx, tx, `SELECT payload FROM `+entries+`
 			WHERE scope_kind = $1 AND scope_id = $2 AND session_id = $3 AND type <> 'compaction'
 			  AND sequence >= $4 AND sequence <= $5 ORDER BY sequence LIMIT $6`,
-			scope.Kind, scope.ID, chain[i].ID, from, bounds[i], MaxAgentSessionPathEntries+1-total)
+			scope.Kind, scope.ID, chain[i].ID, from, bounds[i], models.MaxAgentSessionPathEntries+1-total)
 		if err != nil {
 			return nil, err
 		}
 		total += len(loaded)
-		if total > MaxAgentSessionPathEntries {
-			return nil, ErrAgentSessionPathTooLarge
+		if total > models.MaxAgentSessionPathEntries {
+			return nil, models.ErrAgentSessionPathTooLarge
 		}
 		segments[i] = loaded
 	}
 	if len(extra) > 0 {
-		merged := make([]*SessionEntry, 0, len(segments[last])+len(extra))
+		merged := make([]*models.SessionEntry, 0, len(segments[last])+len(extra))
 		merged = append(merged, segments[last]...)
 		segments[last] = append(merged, extra...)
 	}
-	return buildAgentSessionPath(chain, segments, compaction)
+	return models.BuildAgentSessionPath(chain, segments, compaction)
 }
 
-func (s *PostgresStore) ListAgentSessionEntries(ctx context.Context, filter SessionEntryFilter) ([]*SessionEntry, error) {
-	filter, err := normalizeSessionEntryFilter(filter)
+func (s *PostgresStore) ListAgentSessionEntries(ctx context.Context, filter models.SessionEntryFilter) ([]*models.SessionEntry, error) {
+	filter, err := models.NormalizeSessionEntryFilter(filter)
 	if err != nil {
 		return nil, err
 	}
@@ -703,7 +704,7 @@ func (s *PostgresStore) ListAgentSessionEntries(ctx context.Context, filter Sess
 		return nil, err
 	}
 	if out == nil {
-		out = []*SessionEntry{}
+		out = []*models.SessionEntry{}
 	}
 	return out, nil
 }
@@ -715,25 +716,25 @@ func (s *PostgresStore) ListAgentSessionEntries(ctx context.Context, filter Sess
 // with Lease nil, by the Run being terminal) and by run.SessionID ==
 // req.SessionID. The watermark CAS, the intervention cursor, the entries and
 // the events commit together.
-func (s *PostgresStore) AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+func (s *PostgresStore) AppendAgentSessionEntries(ctx context.Context, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	req.Now = postgresSessionNow(req.Now)
-	if err := validateAppendAgentSessionEntries(req); err != nil {
+	if err := models.ValidateAppendAgentSessionEntries(req); err != nil {
 		return nil, err
 	}
-	if err := validateSessionEvents(req.Scope, req.RunID, req.Events, ErrInvalidSessionEntry); err != nil {
+	if err := models.ValidateSessionEvents(req.Scope, req.RunID, req.Events, models.ErrInvalidSessionEntry); err != nil {
 		return nil, err
 	}
-	var result *AppendAgentSessionEntriesResult
+	var result *models.AppendAgentSessionEntriesResult
 	err := s.beginPostgresSessionTx(ctx, func(tx *sql.Tx) error {
 		run, err := s.lockPostgresSessionRunTx(ctx, tx, req.Scope, req.RunID, req.Lease)
 		if err != nil {
 			return err
 		}
-		if req.Lease == nil && !isTerminalAgentRunStatus(run.Status) {
-			return ErrLeaseLost
+		if req.Lease == nil && !models.IsTerminalAgentRunStatus(run.Status) {
+			return models.ErrLeaseLost
 		}
 		if run.SessionID != req.SessionID {
-			return ErrSessionMoved
+			return models.ErrSessionMoved
 		}
 		result, err = s.appendAgentSessionEntriesCoreTx(ctx, tx, req)
 		return err
@@ -747,19 +748,19 @@ func (s *PostgresStore) AppendAgentSessionEntries(ctx context.Context, req Appen
 // appendAgentSessionEntriesTx is the in-transaction append. The caller owns
 // the fence (lease and session binding are not checked); everything else,
 // including the watermark CAS and the cursor, is as AppendAgentSessionEntries.
-func (s *PostgresStore) appendAgentSessionEntriesTx(ctx context.Context, tx *sql.Tx, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+func (s *PostgresStore) appendAgentSessionEntriesTx(ctx context.Context, tx *sql.Tx, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	req.Now = postgresSessionNow(req.Now)
-	if err := validateAppendAgentSessionEntries(req); err != nil {
+	if err := models.ValidateAppendAgentSessionEntries(req); err != nil {
 		return nil, err
 	}
-	if err := validateSessionEvents(req.Scope, req.RunID, req.Events, ErrInvalidSessionEntry); err != nil {
+	if err := models.ValidateSessionEvents(req.Scope, req.RunID, req.Events, models.ErrInvalidSessionEntry); err != nil {
 		return nil, err
 	}
 	return s.appendAgentSessionEntriesCoreTx(ctx, tx, req)
 }
 
-func (s *PostgresStore) appendAgentSessionEntriesCoreTx(ctx context.Context, tx *sql.Tx, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
-	var run *AgentRun
+func (s *PostgresStore) appendAgentSessionEntriesCoreTx(ctx context.Context, tx *sql.Tx, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
+	var run *models.AgentRun
 	if req.ConsumeInterventionsThrough != nil {
 		// Run before session (lock order); the caller usually holds it already.
 		var err error
@@ -777,49 +778,49 @@ func (s *PostgresStore) appendAgentSessionEntriesCoreTx(ctx context.Context, tx 
 	if run != nil {
 		through := *req.ConsumeInterventionsThrough
 		if through < run.ConsumedInterventions || through > len(run.PendingInterventions) {
-			return nil, invalidEntry("intervention cursor %d is outside %d..%d", through, run.ConsumedInterventions, len(run.PendingInterventions))
+			return nil, models.InvalidSessionEntryf("intervention cursor %d is outside %d..%d", through, run.ConsumedInterventions, len(run.PendingInterventions))
 		}
 	}
 	if req.ExpectedChannelWatermark != nil && session.ChannelWatermark != *req.ExpectedChannelWatermark {
-		return nil, ErrChannelWatermarkMoved
+		return nil, models.ErrChannelWatermarkMoved
 	}
 	existingKeys, err := s.postgresExistingSourceKeysTx(ctx, tx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	next := cloneAgentSession(session)
-	planned := make([]*SessionEntry, 0, len(req.Entries))
+	next := models.CloneAgentSession(session)
+	planned := make([]*models.SessionEntry, 0, len(req.Entries))
 	skipped := []string{}
 	skippedSteps := make(map[string]bool)
 	for _, entry := range req.Entries {
 		if entry.SourceKey != "" && existingKeys[entry.SourceKey] {
 			skipped = append(skipped, entry.ID)
-			if entry.Type == SessionEntryAssistant {
+			if entry.Type == models.SessionEntryAssistant {
 				skippedSteps[entry.StepID] = true
 			}
 			continue
 		}
-		if entry.Type == SessionEntryTool && len(entry.Tool.Directive) == 0 && skippedSteps[entry.StepID] {
+		if entry.Type == models.SessionEntryTool && len(entry.Tool.Directive) == 0 && skippedSteps[entry.StepID] {
 			skipped = append(skipped, entry.ID)
 			continue
 		}
-		stamped := stampAppendedSessionEntry(entry, req, next.NextSequence+int64(len(planned)))
+		stamped := models.StampAppendedSessionEntry(entry, req, next.NextSequence+int64(len(planned)))
 		if err := stamped.Validate(); err != nil {
 			return nil, err
 		}
-		if stamped.Type == SessionEntryCompaction {
-			leaf := cloneAgentSession(session)
+		if stamped.Type == models.SessionEntryCompaction {
+			leaf := models.CloneAgentSession(session)
 			leaf.NextSequence = stamped.Sequence
 			path, err := s.postgresSessionPathTx(ctx, tx, leaf, planned)
 			if err != nil {
 				return nil, err
 			}
-			if err := validateCompactionAgainstPath(path, stamped); err != nil {
+			if err := models.ValidateCompactionAgainstPath(path, stamped); err != nil {
 				return nil, err
 			}
 		}
-		if stamped.Type == SessionEntryModelChange {
+		if stamped.Type == models.SessionEntryModelChange {
 			next.ModelProvider = stamped.ModelChange.Provider
 			next.Model = stamped.ModelChange.Model
 		}
@@ -846,7 +847,7 @@ func (s *PostgresStore) appendAgentSessionEntriesCoreTx(ctx context.Context, tx 
 		}
 	}
 	if run != nil && *req.ConsumeInterventionsThrough != run.ConsumedInterventions {
-		updated := cloneAgentRun(run)
+		updated := models.CloneAgentRun(run)
 		updated.ConsumedInterventions = *req.ConsumeInterventionsThrough
 		updated.Revision = run.Revision + 1
 		updated.UpdatedAt = req.Now
@@ -858,13 +859,13 @@ func (s *PostgresStore) appendAgentSessionEntriesCoreTx(ctx context.Context, tx 
 	if err != nil {
 		return nil, err
 	}
-	return &AppendAgentSessionEntriesResult{Session: next, Entries: planned, Skipped: skipped, Events: events}, nil
+	return &models.AppendAgentSessionEntriesResult{Session: next, Entries: planned, Skipped: skipped, Events: events}, nil
 }
 
 // postgresAppendReplayTx reports a whole-batch replay: every request entry is
 // stored in this session already, or would be skipped by its SourceKey. An
 // entry id stored in another session, or a partial batch, is a conflict.
-func (s *PostgresStore) postgresAppendReplayTx(ctx context.Context, tx *sql.Tx, req AppendAgentSessionEntriesRequest, session *AgentSession) (*AppendAgentSessionEntriesResult, bool, error) {
+func (s *PostgresStore) postgresAppendReplayTx(ctx context.Context, tx *sql.Tx, req models.AppendAgentSessionEntriesRequest, session *models.AgentSession) (*models.AppendAgentSessionEntriesResult, bool, error) {
 	if len(req.Entries) == 0 {
 		return nil, false, nil
 	}
@@ -880,10 +881,10 @@ func (s *PostgresStore) postgresAppendReplayTx(ctx context.Context, tx *sql.Tx, 
 	if len(stored) == 0 {
 		return nil, false, nil
 	}
-	byID := make(map[string]*SessionEntry, len(stored))
+	byID := make(map[string]*models.SessionEntry, len(stored))
 	for _, entry := range stored {
 		if entry.SessionID != session.ID {
-			return nil, false, ErrAgentSessionConflict
+			return nil, false, models.ErrAgentSessionConflict
 		}
 		byID[entry.ID] = entry
 	}
@@ -891,7 +892,7 @@ func (s *PostgresStore) postgresAppendReplayTx(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return nil, false, err
 	}
-	result := &AppendAgentSessionEntriesResult{Session: session, Replayed: true, Entries: []*SessionEntry{}}
+	result := &models.AppendAgentSessionEntriesResult{Session: session, Replayed: true, Entries: []*models.SessionEntry{}}
 	for _, entry := range req.Entries {
 		if found := byID[entry.ID]; found != nil {
 			result.Entries = append(result.Entries, found)
@@ -901,12 +902,12 @@ func (s *PostgresStore) postgresAppendReplayTx(ctx context.Context, tx *sql.Tx, 
 			result.Skipped = append(result.Skipped, entry.ID)
 			continue
 		}
-		return nil, false, ErrAgentSessionConflict
+		return nil, false, models.ErrAgentSessionConflict
 	}
 	return result, true, nil
 }
 
-func (s *PostgresStore) postgresExistingSourceKeysTx(ctx context.Context, tx *sql.Tx, req AppendAgentSessionEntriesRequest) (map[string]bool, error) {
+func (s *PostgresStore) postgresExistingSourceKeysTx(ctx context.Context, tx *sql.Tx, req models.AppendAgentSessionEntriesRequest) (map[string]bool, error) {
 	var keys []string
 	for _, entry := range req.Entries {
 		if entry.SourceKey != "" {
@@ -940,23 +941,23 @@ func (s *PostgresStore) postgresExistingSourceKeysTx(ctx context.Context, tx *sq
 // TransitionToolEntry moves one tool entry (CAS on state and revision), fenced
 // by the lease of the entry's Run, or, with a zero Lease, by that Run being
 // terminal. The session row is neither locked nor bumped.
-func (s *PostgresStore) TransitionToolEntry(ctx context.Context, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
+func (s *PostgresStore) TransitionToolEntry(ctx context.Context, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
 	req.Now = postgresSessionNow(req.Now)
-	if err := validateToolEntryTransitionRequest(req); err != nil {
+	if err := models.ValidateToolEntryTransitionRequest(req); err != nil {
 		return nil, err
 	}
-	if err := validateSessionEvents(req.Scope, req.RunID, req.Events, ErrInvalidToolEntryTransition); err != nil {
+	if err := models.ValidateSessionEvents(req.Scope, req.RunID, req.Events, models.ErrInvalidToolEntryTransition); err != nil {
 		return nil, err
 	}
-	var result *ToolEntryTransitionResult
+	var result *models.ToolEntryTransitionResult
 	err := s.beginPostgresSessionTx(ctx, func(tx *sql.Tx) error {
 		if req.Lease.WorkerID == "" {
 			run, err := s.lockPostgresSessionRunTx(ctx, tx, req.Scope, req.RunID, nil)
 			if err != nil {
 				return err
 			}
-			if !isTerminalAgentRunStatus(run.Status) {
-				return ErrLeaseLost
+			if !models.IsTerminalAgentRunStatus(run.Status) {
+				return models.ErrLeaseLost
 			}
 		} else {
 			lease := req.Lease
@@ -976,23 +977,23 @@ func (s *PostgresStore) TransitionToolEntry(ctx context.Context, req ToolEntryTr
 
 // transitionToolEntryTx is the in-transaction transition. The caller owns the
 // lease check and has locked the Run row.
-func (s *PostgresStore) transitionToolEntryTx(ctx context.Context, tx *sql.Tx, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
+func (s *PostgresStore) transitionToolEntryTx(ctx context.Context, tx *sql.Tx, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
 	req.Now = postgresSessionNow(req.Now)
-	if err := validateToolEntryTransitionRequest(req); err != nil {
+	if err := models.ValidateToolEntryTransitionRequest(req); err != nil {
 		return nil, err
 	}
-	if err := validateSessionEvents(req.Scope, req.RunID, req.Events, ErrInvalidToolEntryTransition); err != nil {
+	if err := models.ValidateSessionEvents(req.Scope, req.RunID, req.Events, models.ErrInvalidToolEntryTransition); err != nil {
 		return nil, err
 	}
 	return s.transitionToolEntryCoreTx(ctx, tx, req)
 }
 
-func (s *PostgresStore) transitionToolEntryCoreTx(ctx context.Context, tx *sql.Tx, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
+func (s *PostgresStore) transitionToolEntryCoreTx(ctx context.Context, tx *sql.Tx, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
 	current, err := s.getPostgresSessionEntryTx(ctx, tx, req.Scope, req.EntryID, true)
 	if err != nil {
 		return nil, err
 	}
-	next, err := applyToolEntryTransition(current, req)
+	next, err := models.ApplyToolEntryTransition(current, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1013,11 +1014,11 @@ func (s *PostgresStore) transitionToolEntryCoreTx(ctx context.Context, tx *sql.T
 		return nil, err
 	}
 	if affected != 1 {
-		return nil, ErrToolEntryStateConflict
+		return nil, models.ErrToolEntryStateConflict
 	}
 	events, err := s.insertPostgresSessionEventsTx(ctx, tx, req.Events, req.Now)
 	if err != nil {
 		return nil, err
 	}
-	return &ToolEntryTransitionResult{Entry: next, Events: events}, nil
+	return &models.ToolEntryTransitionResult{Entry: next, Events: events}, nil
 }

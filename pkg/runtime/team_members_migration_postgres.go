@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // teamMembersMigrationVersion removes Team role slots. What a role carried
@@ -11,8 +13,8 @@ import (
 // designation) moves onto the roster members that held it.
 const teamMembersMigrationVersion int64 = 85
 
-func (s *PostgresStore) teamMembersMigration(ctx context.Context, tx *sql.Tx) teamMembersMigration {
-	return teamMembersMigration{
+func (s *PostgresStore) teamMembersMigration(ctx context.Context, tx *sql.Tx) sqlstore.TeamMembersMigration {
+	return sqlstore.TeamMembersMigration{
 		Ctx: ctx, DB: tx, Table: s.table, Placeholder: func(n int) string { return fmt.Sprintf("$%d", n) },
 		Exists: func(table string) (bool, error) {
 			var relation sql.NullString

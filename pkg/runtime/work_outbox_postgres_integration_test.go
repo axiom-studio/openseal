@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -36,10 +37,10 @@ func newWorkSignalPostgresStore(t *testing.T, schema string) (context.Context, *
 }
 
 // relayed drains the outbox and returns what it held, keyed by family.
-func relayed(t *testing.T, ctx context.Context, store *PostgresStore) map[WorkFamily][]WorkItem {
+func relayed(t *testing.T, ctx context.Context, store *PostgresStore) map[models.WorkFamily][]models.WorkItem {
 	t.Helper()
-	result := map[WorkFamily][]WorkItem{}
-	if _, err := store.RelayWorkOutbox(ctx, 500, func(_ context.Context, items []WorkItem) error {
+	result := map[models.WorkFamily][]models.WorkItem{}
+	if _, err := store.RelayWorkOutbox(ctx, 500, func(_ context.Context, items []models.WorkItem) error {
 		for _, item := range items {
 			result[item.Family] = append(result[item.Family], item)
 		}
@@ -53,8 +54,8 @@ func relayed(t *testing.T, ctx context.Context, store *PostgresStore) map[WorkFa
 func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 	ctx, store := newWorkSignalPostgresStore(t, "openseal_work_outbox_"+uuid.NewString()[:8])
 	_, foreign := newWorkSignalPostgresStore(t, "openseal_work_outbox_foreign_"+uuid.NewString()[:8])
-	scope := Scope{Kind: "tenant", ID: "work-outbox"}
-	expect := func(reason string, want map[WorkFamily]int) map[WorkFamily][]WorkItem {
+	scope := models.Scope{Kind: "tenant", ID: "work-outbox"}
+	expect := func(reason string, want map[models.WorkFamily]int) map[models.WorkFamily][]models.WorkItem {
 		t.Helper()
 		got := relayed(t, ctx, store)
 		for family, count := range want {
@@ -81,8 +82,8 @@ func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 	}
 
 	before := time.Now().UTC()
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "record", Source: RunSourceManual,
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "record", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,8 +93,8 @@ func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 	default:
 		t.Fatal("a committed write raised no work hint")
 	}
-	created := expect("a new Run", map[WorkFamily]int{WorkFamilyRun: 1})
-	if due := created[WorkFamilyRun][0].DueAt; due.Before(before.Add(-time.Second)) || due.After(time.Now().Add(time.Second)) {
+	created := expect("a new Run", map[models.WorkFamily]int{models.WorkFamilyRun: 1})
+	if due := created[models.WorkFamilyRun][0].DueAt; due.Before(before.Add(-time.Second)) || due.After(time.Now().Add(time.Second)) {
 		t.Fatalf("new Run due at %v", due)
 	}
 	select {
@@ -101,30 +102,30 @@ func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 		t.Fatal("the relay's own commit raised a work hint")
 	default:
 	}
-	if _, err := NewPortfolioService(foreign).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "elsewhere", Source: RunSourceManual,
+	if _, err := NewPortfolioService(foreign).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "elsewhere", Source: models.RunSourceManual,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	expect("a foreign schema's Run", map[WorkFamily]int{})
+	expect("a foreign schema's Run", map[models.WorkFamily]int{})
 
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	// A claim schedules its lease expiry, so a crashed worker's Run is reclaimed.
-	claim := expect("a claim", map[WorkFamily]int{WorkFamilyRun: 1, WorkFamilyRunDue: 1})
-	if due := claim[WorkFamilyRunDue][0].DueAt; due.Before(time.Now().Add(50 * time.Second)) {
+	claim := expect("a claim", map[models.WorkFamily]int{models.WorkFamilyRun: 1, models.WorkFamilyRunDue: 1})
+	if due := claim[models.WorkFamilyRunDue][0].DueAt; due.Before(time.Now().Add(50 * time.Second)) {
 		t.Fatalf("lease expiry due at %v", due)
 	}
 	if _, err := store.RenewAgentRunLease(ctx, scope, run.ID, "worker", time.Now(), 2*time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	expect("a lease renewal", map[WorkFamily]int{})
+	expect("a lease renewal", map[models.WorkFamily]int{})
 	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("agent_runs")+` SET payload = payload || '{"note":"x"}'::jsonb WHERE id=$1`, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	expect("a payload-only update", map[WorkFamily]int{})
+	expect("a payload-only update", map[models.WorkFamily]int{})
 
 	// A deferred retry is due at its availability.
 	now := time.Now().UTC()
@@ -132,17 +133,17 @@ func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("agent_runs")+` SET status='queued', lease_owner='', lease_expires_at=NULL, available_at=$2 WHERE id=$1`, run.ID, retryAt); err != nil {
 		t.Fatal(err)
 	}
-	if retry := expect("a deferred retry", map[WorkFamily]int{WorkFamilyRun: 1}); !retry[WorkFamilyRun][0].DueAt.Equal(retryAt) {
-		t.Fatalf("retry due at %v, want %v", retry[WorkFamilyRun][0].DueAt, retryAt)
+	if retry := expect("a deferred retry", map[models.WorkFamily]int{models.WorkFamilyRun: 1}); !retry[models.WorkFamilyRun][0].DueAt.Equal(retryAt) {
+		t.Fatalf("retry due at %v, want %v", retry[models.WorkFamilyRun][0].DueAt, retryAt)
 	}
-	if deadline, err := store.NextAgentRunDeadline(ctx, scope, RunKindAgentWork, "agent", now); err != nil || deadline == nil || !deadline.Equal(retryAt) {
+	if deadline, err := store.NextAgentRunDeadline(ctx, scope, models.RunKindAgentWork, "agent", now); err != nil || deadline == nil || !deadline.Equal(retryAt) {
 		t.Fatalf("retry deadline = %v, %v, want %v", deadline, err, retryAt)
 	}
 	pending, err := store.ListPendingWork(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].Family != WorkFamilyRunDue || pending[0].Scope != scope || !pending[0].DueAt.Equal(retryAt) {
+	if len(pending) != 1 || pending[0].Family != models.WorkFamilyRunDue || pending[0].Scope != scope || !pending[0].DueAt.Equal(retryAt) {
 		t.Fatalf("pending work = %#v", pending)
 	}
 
@@ -152,31 +153,31 @@ func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 		scope.Kind, scope.ID, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	expect("activity", map[WorkFamily]int{WorkFamilyActivity: 1})
+	expect("activity", map[models.WorkFamily]int{models.WorkFamilyActivity: 1})
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("run_activity")+` (scope_kind,scope_id,run_id,sequence,id,event_type,created_at,payload)
 		VALUES ($1,$2,$3,1002,'activity-preview','turn.answer_preview',now(),'{}'::jsonb)`, scope.Kind, scope.ID, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	expect("an answer preview", map[WorkFamily]int{WorkFamilyActivity: 1})
+	expect("an answer preview", map[models.WorkFamily]int{models.WorkFamilyActivity: 1})
 
 	// Leaving a pause also wakes action claimers.
 	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("agent_runs")+` SET status='paused' WHERE id=$1`, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	expect("a pause", map[WorkFamily]int{WorkFamilyRun: 1})
+	expect("a pause", map[models.WorkFamily]int{models.WorkFamilyRun: 1})
 	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("agent_runs")+` SET status='queued', available_at=now() WHERE id=$1`, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	expect("an unpause", map[WorkFamily]int{WorkFamilyRun: 1, WorkFamilyAction: 1})
+	expect("an unpause", map[models.WorkFamily]int{models.WorkFamilyRun: 1, models.WorkFamilyAction: 1})
 
 	// A failed publish keeps the rows for the next relay.
 	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("agent_runs")+` SET status='completed' WHERE id=$1`, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.RelayWorkOutbox(ctx, 500, func(context.Context, []WorkItem) error { return errors.New("queue down") }); err == nil {
+	if _, err := store.RelayWorkOutbox(ctx, 500, func(context.Context, []models.WorkItem) error { return errors.New("queue down") }); err == nil {
 		t.Fatal("relay ignored a publish failure")
 	}
-	expect("rows kept after a failed publish", map[WorkFamily]int{WorkFamilyRun: 1})
+	expect("rows kept after a failed publish", map[models.WorkFamily]int{models.WorkFamilyRun: 1})
 	if pending, err := store.ListPendingWork(ctx, true); err != nil || len(pending) != 0 {
 		t.Fatalf("pending work after completion = %#v, %v", pending, err)
 	}

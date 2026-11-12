@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // artifactWorkingFilesMigrationVersion adds the artifact_working_files table.
@@ -32,7 +34,7 @@ func (s *PostgresStore) migrateArtifactWorkingFiles(ctx context.Context, tx *sql
 	return err
 }
 
-func (s *PostgresStore) MarkArtifactFiles(ctx context.Context, scope Scope, working, results []string) error {
+func (s *PostgresStore) MarkArtifactFiles(ctx context.Context, scope models.Scope, working, results []string) error {
 	if err := scope.Validate(); err != nil {
 		return err
 	}
@@ -56,4 +58,4 @@ func (s *PostgresStore) MarkArtifactFiles(ctx context.Context, scope Scope, work
 	return tx.Commit()
 }
 
-var _ ArtifactWorkingFileStore = (*PostgresStore)(nil)
+var _ models.ArtifactWorkingFileStore = (*PostgresStore)(nil)

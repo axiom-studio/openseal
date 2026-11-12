@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // WithRunLoopCutoverLock holds the schema migration advisory lock for the
@@ -72,12 +75,12 @@ func (s *PostgresStore) acquireRunLoopCutoverLock(ctx context.Context, conn *sql
 	}
 }
 
-func (s *PostgresStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]RunLoopCutoverRef, error) {
+func (s *PostgresStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]models.RunLoopCutoverRef, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT scope_kind, scope_id, id FROM `+s.table("agent_runs")+`
 		WHERE status NOT IN ('completed', 'failed', 'canceled') AND COALESCE(payload->>'engine', '') = ''
 		ORDER BY created_at, id`)
 	if err != nil {
 		return nil, err
 	}
-	return scanRunLoopCutoverRefs(rows)
+	return sqlstore.ScanRunLoopCutoverRefs(rows)
 }

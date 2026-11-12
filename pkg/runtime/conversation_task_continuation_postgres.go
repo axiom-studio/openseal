@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const conversationTaskContinuationMigrationVersion int64 = 58
@@ -28,7 +31,7 @@ func (s *PostgresStore) migrateConversationTaskContinuations(ctx context.Context
 	return err
 }
 
-func (s *PostgresStore) ListDueConversationTaskRuns(ctx context.Context, filter ConversationTaskDueFilter) ([]*AgentRun, error) {
+func (s *PostgresStore) ListDueConversationTaskRuns(ctx context.Context, filter models.ConversationTaskDueFilter) ([]*models.AgentRun, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -46,13 +49,13 @@ func (s *PostgresStore) ListDueConversationTaskRuns(ctx context.Context, filter 
 		return nil, err
 	}
 	defer rows.Close()
-	runs := make([]*AgentRun, 0, filter.Limit)
+	runs := make([]*models.AgentRun, 0, filter.Limit)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +64,7 @@ func (s *PostgresStore) ListDueConversationTaskRuns(ctx context.Context, filter 
 	return runs, rows.Err()
 }
 
-func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req ConversationTaskPromotionRequest) (*ConversationTaskResult, error) {
+func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req models.ConversationTaskPromotionRequest) (*models.ConversationTaskResult, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -75,20 +78,20 @@ func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req Convers
 		return nil, err
 	}
 	if run == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	existing, err := s.getPostgresConversationTaskByWorkRun(ctx, tx, req.Scope, req.RunID)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return replayConversationTaskContinuation(existing, run)
+		return models.ReplayConversationTaskContinuation(existing, run)
 	}
-	if !conversationTaskContinuationCandidate(run) {
+	if !models.ConversationTaskContinuationCandidate(run) {
 		return nil, nil
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	messageID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	messageID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	// Final response publication uses this same conversation row lock. This
 	// serializes answer-first versus handoff-first without touching the runner.
 	conversation, err := s.getPostgresConversation(ctx, tx, req.Scope, conversationID, true)
@@ -99,7 +102,7 @@ func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req Convers
 	if err != nil {
 		return nil, err
 	}
-	for _, responseKey := range conversationTaskFinalResponseKeys(run) {
+	for _, responseKey := range models.ConversationTaskFinalResponseKeys(run) {
 		final, err := s.getPostgresChannelMessageByKey(ctx, tx, req.Scope, conversationID, responseKey, false)
 		if err != nil {
 			return nil, err
@@ -115,26 +118,26 @@ func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req Convers
 		return nil, err
 	}
 	if err == nil {
-		step, err := decodeAgentTurnRecord(turnPayload)
+		step, err := sqlstore.DecodeAgentTurnRecord(turnPayload)
 		if err != nil {
 			return nil, err
 		}
-		if conversationTaskFinishedBeforePromotion(step) {
+		if models.ConversationTaskFinishedBeforePromotion(step) {
 			return nil, nil
 		}
 	}
 	// Lock order: agent_runs, then agent_sessions (section 01 §3).
-	var chat *AgentSession
+	var chat *models.AgentSession
 	if run.SessionID != "" {
 		chat, err = s.getPostgresAgentSessionTx(ctx, tx, req.Scope, run.SessionID, true)
-		if errors.Is(err, ErrAgentSessionNotFound) {
+		if errors.Is(err, models.ErrAgentSessionNotFound) {
 			chat, err = nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
 	}
-	task, updated, event, fork, err := buildConversationTaskContinuation(req, run, conversation, message, chat)
+	task, updated, event, fork, err := models.BuildConversationTaskContinuation(req, run, conversation, message, chat)
 	if err != nil || task == nil {
 		return nil, err
 	}
@@ -144,10 +147,10 @@ func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req Convers
 			return nil, err
 		}
 		if root == nil || root.ConversationID != conversationID {
-			return nil, ErrInvalidConversationTask
+			return nil, models.ErrInvalidConversationTask
 		}
 	}
-	ack, err := buildConversationTaskAcknowledgment(task, conversation, message)
+	ack, err := models.BuildConversationTaskAcknowledgment(task, conversation, message)
 	if err != nil {
 		return nil, err
 	}
@@ -190,10 +193,10 @@ func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req Convers
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &ConversationTaskResult{Task: cloneConversationTask(task), WorkRun: cloneAgentRun(updated), SourceRun: cloneAgentRun(updated), AcknowledgmentMessageID: ack.Message.ID}, nil
+	return &models.ConversationTaskResult{Task: models.CloneConversationTask(task), WorkRun: models.CloneAgentRun(updated), SourceRun: models.CloneAgentRun(updated), AcknowledgmentMessageID: ack.Message.ID}, nil
 }
 
-func (s *PostgresStore) getPostgresConversationTaskByWorkRun(ctx context.Context, queryer postgresDependencyQueryer, scope Scope, runID string) (*ConversationTask, error) {
+func (s *PostgresStore) getPostgresConversationTaskByWorkRun(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, runID string) (*models.ConversationTask, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM `+s.table("conversation_tasks")+` WHERE scope_kind=$1 AND scope_id=$2 AND work_run_id=$3`, scope.Kind, scope.ID, runID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -202,5 +205,5 @@ func (s *PostgresStore) getPostgresConversationTaskByWorkRun(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversationTaskSQL(payload)
+	return sqlstore.DecodeConversationTask(payload)
 }

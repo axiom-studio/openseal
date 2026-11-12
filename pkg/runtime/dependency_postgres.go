@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/lib/pq"
 )
 
@@ -64,8 +66,8 @@ func (s *PostgresStore) migrateRunDependencies(ctx context.Context, tx *sql.Tx) 
 	return err
 }
 
-func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record RunDependencyGroupCreateRecord) (*RunDependencyResult, error) {
-	if err := validateRunDependencyGroupCreateRecord(record); err != nil {
+func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupCreateRecord) (*models.RunDependencyResult, error) {
+	if err := models.ValidateRunDependencyGroupCreateRecord(record); err != nil {
 		return nil, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -94,18 +96,18 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 		if err != nil {
 			return nil, err
 		}
-		if !sameDependencyGroupRecord(existing, edges, record) {
-			return nil, ErrDependencyConflict
+		if !models.SameDependencyGroupRecord(existing, edges, record) {
+			return nil, models.ErrDependencyConflict
 		}
 		source, err := s.getPostgresAgentRunTx(ctx, tx, existing.Scope, existing.SourceRunID, true)
 		if err != nil {
 			return nil, err
 		}
-		evaluation, err := EvaluateRunDependencies(existing, edges)
+		evaluation, err := models.EvaluateRunDependencies(existing, edges)
 		if err != nil {
 			return nil, err
 		}
-		replayed := &RunDependencyResult{Group: existing, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}
+		replayed := &models.RunDependencyResult{Group: existing, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}
 		if err := s.readPostgresDependencyGroupSessionState(ctx, tx, record, replayed); err != nil {
 			return nil, err
 		}
@@ -118,7 +120,7 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 	if err != nil {
 		return nil, err
 	}
-	if err := checkDependencyGroupCreateSource(currentSource, record); err != nil {
+	if err := models.CheckDependencyGroupCreateSource(currentSource, record); err != nil {
 		return nil, err
 	}
 	if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
@@ -141,7 +143,7 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
-			return nil, ErrDependencyConflict
+			return nil, models.ErrDependencyConflict
 		}
 		return nil, err
 	}
@@ -154,8 +156,8 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 	if err != nil {
 		return nil, err
 	}
-	result := &RunDependencyResult{
-		Group: cloneRunDependencyGroup(record.Group), Source: cloneAgentRun(record.SourceRun), Events: []*ActivityEvent{persisted},
+	result := &models.RunDependencyResult{
+		Group: models.CloneRunDependencyGroup(record.Group), Source: models.CloneAgentRun(record.SourceRun), Events: []*models.ActivityEvent{persisted},
 	}
 	if err := s.applyPostgresDependencyGroupSessionWrites(ctx, tx, record, currentSource.SessionID, result); err != nil {
 		return nil, err
@@ -163,8 +165,8 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	result.Dependencies = cloneDependencySlice(record.Dependencies)
-	result.Evaluation, err = EvaluateRunDependencies(record.Group, result.Dependencies)
+	result.Dependencies = models.CloneRunDependencies(record.Dependencies)
+	result.Evaluation, err = models.EvaluateRunDependencies(record.Group, result.Dependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -175,27 +177,27 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 // child sessions and moves the source's control tool entry inside the
 // create's transaction. The source Run row is already locked and fenced by
 // the caller, so the lock order stays Run -> session -> entry.
-func (s *PostgresStore) applyPostgresDependencyGroupSessionWrites(ctx context.Context, tx *sql.Tx, record RunDependencyGroupCreateRecord, sourceSessionID string, result *RunDependencyResult) error {
+func (s *PostgresStore) applyPostgresDependencyGroupSessionWrites(ctx context.Context, tx *sql.Tx, record models.RunDependencyGroupCreateRecord, sourceSessionID string, result *models.RunDependencyResult) error {
 	for i := range record.ChildSessions {
-		created, err := s.createRunAgentSessionTx(ctx, tx, dependencyGroupChildSession(record, i))
+		created, err := s.createRunAgentSessionTx(ctx, tx, models.DependencyGroupChildSession(record, i))
 		if err != nil {
 			return err
 		}
 		if !created.Created {
-			return ErrAgentSessionConflict
+			return models.ErrAgentSessionConflict
 		}
 		result.ChildSessions = append(result.ChildSessions, created.Session)
 	}
 	if record.ToolTransition == nil {
 		return nil
 	}
-	transition := dependencyGroupToolTransition(record)
+	transition := models.DependencyGroupToolTransition(record)
 	current, err := s.getPostgresSessionEntryTx(ctx, tx, transition.Scope, transition.EntryID, false)
 	if err != nil {
 		return err
 	}
 	if current.SessionID != sourceSessionID {
-		return ErrSessionMoved
+		return models.ErrSessionMoved
 	}
 	moved, err := s.transitionToolEntryTx(ctx, tx, transition)
 	if err != nil {
@@ -208,17 +210,17 @@ func (s *PostgresStore) applyPostgresDependencyGroupSessionWrites(ctx context.Co
 
 // readPostgresDependencyGroupSessionState fills a replay with the current
 // tool entry and child sessions; a replay writes nothing.
-func (s *PostgresStore) readPostgresDependencyGroupSessionState(ctx context.Context, tx *sql.Tx, record RunDependencyGroupCreateRecord, result *RunDependencyResult) error {
+func (s *PostgresStore) readPostgresDependencyGroupSessionState(ctx context.Context, tx *sql.Tx, record models.RunDependencyGroupCreateRecord, result *models.RunDependencyResult) error {
 	if transition := record.ToolTransition; transition != nil {
 		entry, err := s.getPostgresSessionEntryTx(ctx, tx, transition.Scope, transition.EntryID, false)
-		if err != nil && !errors.Is(err, ErrSessionEntryNotFound) {
+		if err != nil && !errors.Is(err, models.ErrSessionEntryNotFound) {
 			return err
 		}
 		result.ToolEntry = entry
 	}
 	for _, child := range record.ChildSessions {
-		session, err := s.getPostgresAgentSessionTx(ctx, tx, child.Scope, RunAgentSessionID(child.Scope, child.OwnerRunID), false)
-		if errors.Is(err, ErrAgentSessionNotFound) {
+		session, err := s.getPostgresAgentSessionTx(ctx, tx, child.Scope, models.RunAgentSessionID(child.Scope, child.OwnerRunID), false)
+		if errors.Is(err, models.ErrAgentSessionNotFound) {
 			continue
 		}
 		if err != nil {
@@ -229,14 +231,14 @@ func (s *PostgresStore) readPostgresDependencyGroupSessionState(ctx context.Cont
 	return nil
 }
 
-func (s *PostgresStore) GetRunDependencyGroup(ctx context.Context, scope Scope, groupID string) (*RunDependencyGroup, error) {
+func (s *PostgresStore) GetRunDependencyGroup(ctx context.Context, scope models.Scope, groupID string) (*models.RunDependencyGroup, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return s.getPostgresDependencyGroup(ctx, s.db, scope, strings.TrimSpace(groupID), "", false)
 }
 
-func (s *PostgresStore) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope Scope, key string) (*RunDependencyGroup, error) {
+func (s *PostgresStore) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.RunDependencyGroup, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -246,7 +248,7 @@ func (s *PostgresStore) FindRunDependencyGroupByIdempotencyKey(ctx context.Conte
 	return s.getPostgresDependencyGroup(ctx, s.db, scope, "", strings.TrimSpace(key), false)
 }
 
-func (s *PostgresStore) ListRunDependencies(ctx context.Context, scope Scope, groupID string) ([]*RunDependency, error) {
+func (s *PostgresStore) ListRunDependencies(ctx context.Context, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -255,13 +257,13 @@ func (s *PostgresStore) ListRunDependencies(ctx context.Context, scope Scope, gr
 		return nil, err
 	}
 	if group == nil {
-		return nil, ErrDependencyGroupNotFound
+		return nil, models.ErrDependencyGroupNotFound
 	}
 	return s.listPostgresDependencies(ctx, s.db, scope, group.ID, false)
 }
 
-func (s *PostgresStore) ResolveRunDependency(ctx context.Context, record RunDependencyResolutionRecord) (*RunDependencyResult, error) {
-	if err := validateRunDependencyResolutionRecord(record); err != nil {
+func (s *PostgresStore) ResolveRunDependency(ctx context.Context, record models.RunDependencyResolutionRecord) (*models.RunDependencyResult, error) {
+	if err := models.ValidateRunDependencyResolutionRecord(record); err != nil {
 		return nil, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -279,13 +281,13 @@ func (s *PostgresStore) ResolveRunDependency(ctx context.Context, record RunDepe
 	return result, nil
 }
 
-func (s *PostgresStore) resolvePostgresDependencyTx(ctx context.Context, tx *sql.Tx, record RunDependencyResolutionRecord) (*RunDependencyResult, error) {
+func (s *PostgresStore) resolvePostgresDependencyTx(ctx context.Context, tx *sql.Tx, record models.RunDependencyResolutionRecord) (*models.RunDependencyResult, error) {
 	group, err := s.getPostgresDependencyGroup(ctx, tx, record.Scope, record.GroupID, "", true)
 	if err != nil {
 		return nil, err
 	}
 	if group == nil {
-		return nil, ErrDependencyGroupNotFound
+		return nil, models.ErrDependencyGroupNotFound
 	}
 	edges, err := s.listPostgresDependencies(ctx, tx, record.Scope, group.ID, true)
 	if err != nil {
@@ -295,7 +297,7 @@ func (s *PostgresStore) resolvePostgresDependencyTx(ctx context.Context, tx *sql
 	if err != nil {
 		return nil, err
 	}
-	result, err := applyRunDependencyResolution(group, edges, source, record)
+	result, err := models.ApplyRunDependencyResolution(group, edges, source, record)
 	if err != nil || result.Replayed {
 		return result, err
 	}
@@ -310,7 +312,7 @@ type postgresDependencyQueryer interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 }
 
-func (s *PostgresStore) getPostgresDependencyGroup(ctx context.Context, queryer postgresDependencyQueryer, scope Scope, groupID, idempotencyKey string, lock bool) (*RunDependencyGroup, error) {
+func (s *PostgresStore) getPostgresDependencyGroup(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, groupID, idempotencyKey string, lock bool) (*models.RunDependencyGroup, error) {
 	query := `SELECT payload FROM ` + s.table("run_dependency_groups") + ` WHERE scope_kind = $1 AND scope_id = $2`
 	args := []interface{}{scope.Kind, scope.ID}
 	if strings.TrimSpace(groupID) != "" {
@@ -331,10 +333,10 @@ func (s *PostgresStore) getPostgresDependencyGroup(ctx context.Context, queryer 
 	if err != nil {
 		return nil, err
 	}
-	return decodeRunDependencyGroup(payload)
+	return sqlstore.DecodeRunDependencyGroup(payload)
 }
 
-func (s *PostgresStore) listPostgresDependencies(ctx context.Context, queryer postgresDependencyQueryer, scope Scope, groupID string, lock bool) ([]*RunDependency, error) {
+func (s *PostgresStore) listPostgresDependencies(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, groupID string, lock bool) ([]*models.RunDependency, error) {
 	query := `SELECT payload FROM ` + s.table("run_dependencies") + ` WHERE scope_kind = $1 AND scope_id = $2 AND group_id = $3 ORDER BY id`
 	if lock {
 		query += ` FOR UPDATE`
@@ -344,13 +346,13 @@ func (s *PostgresStore) listPostgresDependencies(ctx context.Context, queryer po
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*RunDependency, 0)
+	result := make([]*models.RunDependency, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		edge, err := decodeRunDependency(payload)
+		edge, err := sqlstore.DecodeRunDependency(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -359,7 +361,7 @@ func (s *PostgresStore) listPostgresDependencies(ctx context.Context, queryer po
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) getPostgresAgentRunTx(ctx context.Context, queryer postgresDependencyQueryer, scope Scope, runID string, lock bool) (*AgentRun, error) {
+func (s *PostgresStore) getPostgresAgentRunTx(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, runID string, lock bool) (*models.AgentRun, error) {
 	query := `SELECT payload FROM ` + s.table("agent_runs") + ` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`
 	if lock {
 		query += ` FOR UPDATE`
@@ -367,15 +369,15 @@ func (s *PostgresStore) getPostgresAgentRunTx(ctx context.Context, queryer postg
 	var payload string
 	err := queryer.QueryRowContext(ctx, query, scope.Kind, scope.ID, runID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return decodeAgentRun(payload)
+	return sqlstore.DecodeAgentRun(payload)
 }
 
-func (s *PostgresStore) insertPostgresDependencyTx(ctx context.Context, tx *sql.Tx, edge *RunDependency) error {
+func (s *PostgresStore) insertPostgresDependencyTx(ctx context.Context, tx *sql.Tx, edge *models.RunDependency) error {
 	payload, err := json.Marshal(edge)
 	if err != nil {
 		return err
@@ -388,7 +390,7 @@ func (s *PostgresStore) insertPostgresDependencyTx(ctx context.Context, tx *sql.
 	return err
 }
 
-func (s *PostgresStore) updatePostgresDependencyTx(ctx context.Context, tx *sql.Tx, edge *RunDependency, expectedRevision int64) error {
+func (s *PostgresStore) updatePostgresDependencyTx(ctx context.Context, tx *sql.Tx, edge *models.RunDependency, expectedRevision int64) error {
 	payload, err := json.Marshal(edge)
 	if err != nil {
 		return err
@@ -400,7 +402,7 @@ func (s *PostgresStore) updatePostgresDependencyTx(ctx context.Context, tx *sql.
 	return expectPostgresDependencyRow(result, err)
 }
 
-func (s *PostgresStore) updatePostgresDependencyGroupTx(ctx context.Context, tx *sql.Tx, group *RunDependencyGroup, expectedRevision int64) error {
+func (s *PostgresStore) updatePostgresDependencyGroupTx(ctx context.Context, tx *sql.Tx, group *models.RunDependencyGroup, expectedRevision int64) error {
 	payload, err := json.Marshal(group)
 	if err != nil {
 		return err
@@ -420,7 +422,7 @@ func expectPostgresDependencyRow(result sql.Result, err error) error {
 		return err
 	}
 	if affected != 1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	return nil
 }

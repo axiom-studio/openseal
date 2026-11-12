@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func (s *PostgresStore) migrateSkillSetupRequests(ctx context.Context, tx *sql.Tx) error {
@@ -22,9 +24,9 @@ func (s *PostgresStore) migrateSkillSetupRequests(ctx context.Context, tx *sql.T
 	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name) VALUES(45,'durable Skill setup requests') ON CONFLICT(version) DO NOTHING`)
 	return err
 }
-func (s *PostgresStore) GetSkillSetupRequest(ctx context.Context, scope Scope, id string) (*SkillSetupRequest, error) {
+func (s *PostgresStore) GetSkillSetupRequest(ctx context.Context, scope models.Scope, id string) (*models.SkillSetupRequest, error) {
 	if scope.Validate() != nil {
-		return nil, ErrInvalidSkillSetup
+		return nil, models.ErrInvalidSkillSetup
 	}
 	var payload []byte
 	err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_setup_requests")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`, scope.Kind, scope.ID, id).Scan(&payload)
@@ -34,26 +36,26 @@ func (s *PostgresStore) GetSkillSetupRequest(ctx context.Context, scope Scope, i
 	if err != nil {
 		return nil, err
 	}
-	var r SkillSetupRequest
+	var r models.SkillSetupRequest
 	err = json.Unmarshal(payload, &r)
 	return &r, err
 }
-func (s *PostgresStore) ListSkillSetupRequests(ctx context.Context, scope Scope, deploymentID, conversationID string) ([]*SkillSetupRequest, error) {
+func (s *PostgresStore) ListSkillSetupRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.SkillSetupRequest, error) {
 	if scope.Validate() != nil || conversationID == "" {
-		return nil, ErrInvalidSkillSetup
+		return nil, models.ErrInvalidSkillSetup
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("skill_setup_requests")+` WHERE scope_kind=$1 AND scope_id=$2 AND ($3='' OR deployment_id=$3) AND conversation_id=$4 ORDER BY created_at,id`, scope.Kind, scope.ID, deploymentID, conversationID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := []*SkillSetupRequest{}
+	result := []*models.SkillSetupRequest{}
 	for rows.Next() {
 		var payload []byte
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		var r SkillSetupRequest
+		var r models.SkillSetupRequest
 		if err := json.Unmarshal(payload, &r); err != nil {
 			return nil, err
 		}
@@ -61,12 +63,12 @@ func (s *PostgresStore) ListSkillSetupRequests(ctx context.Context, scope Scope,
 	}
 	return result, rows.Err()
 }
-func (s *PostgresStore) SaveSkillSetupRequest(ctx context.Context, r *SkillSetupRequest, expected int64) error {
+func (s *PostgresStore) SaveSkillSetupRequest(ctx context.Context, r *models.SkillSetupRequest, expected int64) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
 	if r.Revision != expected+1 {
-		return invalidSkillSetupField("revision", "must advance the expected request revision by one")
+		return models.NewSkillSetupValidationError("revision", "must advance the expected request revision by one")
 	}
 	payload, err := json.Marshal(r)
 	if err != nil {
@@ -86,7 +88,7 @@ func (s *PostgresStore) SaveSkillSetupRequest(ctx context.Context, r *SkillSetup
 		return err
 	}
 	if n != 1 {
-		return ErrSkillSetupConflict
+		return models.ErrSkillSetupConflict
 	}
 	return nil
 }

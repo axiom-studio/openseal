@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const skillUpgradeDrainMigrationVersion int64 = 52
@@ -28,7 +30,7 @@ func (s *PostgresStore) migrateSkillUpgradeDrain(ctx context.Context, tx *sql.Tx
 		skill_version=COALESCE(payload->>'skillVersion','')`); err != nil {
 		return err
 	}
-	for _, statement := range skillUpgradeDrainIndexStatements(s.table("action_calls"), s.table("agent_runs"), true) {
+	for _, statement := range sqlstore.SkillUpgradeDrainIndexStatements(s.table("action_calls"), s.table("agent_runs"), true) {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return err
 		}

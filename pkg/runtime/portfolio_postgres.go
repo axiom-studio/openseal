@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/lib/pq"
 )
 
@@ -71,7 +73,7 @@ func (s *PostgresStore) migratePortfolio(ctx context.Context, tx *sql.Tx) error 
 	return err
 }
 
-func (s *PostgresStore) CreateObjective(ctx context.Context, objective *Objective) error {
+func (s *PostgresStore) CreateObjective(ctx context.Context, objective *models.Objective) error {
 	if err := objective.Validate(); err != nil {
 		return err
 	}
@@ -87,7 +89,7 @@ func (s *PostgresStore) CreateObjective(ctx context.Context, objective *Objectiv
 	return err
 }
 
-func (s *PostgresStore) GetObjective(ctx context.Context, scope Scope, objectiveID string) (*Objective, error) {
+func (s *PostgresStore) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -99,10 +101,10 @@ func (s *PostgresStore) GetObjective(ctx context.Context, scope Scope, objective
 	if err != nil {
 		return nil, err
 	}
-	return decodeObjective(payload)
+	return sqlstore.DecodeObjective(payload)
 }
 
-func (s *PostgresStore) ListObjectives(ctx context.Context, filter ObjectiveFilter) ([]*Objective, error) {
+func (s *PostgresStore) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -111,17 +113,17 @@ func (s *PostgresStore) ListObjectives(ctx context.Context, filter ObjectiveFilt
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*Objective, 0)
+	result := make([]*models.Objective, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		objective, err := decodeObjective(payload)
+		objective, err := sqlstore.DecodeObjective(payload)
 		if err != nil {
 			return nil, err
 		}
-		if matchesObjectiveFilter(objective, filter) {
+		if models.MatchesObjectiveFilter(objective, filter) {
 			result = append(result, objective)
 		}
 	}
@@ -137,18 +139,18 @@ func (s *PostgresStore) ListObjectives(ctx context.Context, filter ObjectiveFilt
 		}
 		return result[i].ID < result[j].ID
 	})
-	return pageObjectives(result, filter.Offset, filter.Limit), nil
+	return models.PageObjectives(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *PostgresStore) ListObjectiveScopes(ctx context.Context) ([]Scope, error) {
+func (s *PostgresStore) ListObjectiveScopes(ctx context.Context) ([]models.Scope, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope_kind, scope_id FROM `+s.table("objectives")+` ORDER BY scope_kind, scope_id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]Scope, 0)
+	result := make([]models.Scope, 0)
 	for rows.Next() {
-		var scope Scope
+		var scope models.Scope
 		if err := rows.Scan(&scope.Kind, &scope.ID); err != nil {
 			return nil, err
 		}
@@ -157,12 +159,12 @@ func (s *PostgresStore) ListObjectiveScopes(ctx context.Context) ([]Scope, error
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateObjective(ctx context.Context, objective *Objective, expectedRevision int64) error {
+func (s *PostgresStore) UpdateObjective(ctx context.Context, objective *models.Objective, expectedRevision int64) error {
 	if err := objective.Validate(); err != nil {
 		return err
 	}
 	if objective.Revision != expectedRevision+1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	payload, err := json.Marshal(objective)
 	if err != nil {
@@ -181,12 +183,12 @@ func (s *PostgresStore) UpdateObjective(ctx context.Context, objective *Objectiv
 		return err
 	}
 	if affected != 1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	return nil
 }
 
-func (s *PostgresStore) CreateAgentRun(ctx context.Context, run *AgentRun) error {
+func (s *PostgresStore) CreateAgentRun(ctx context.Context, run *models.AgentRun) error {
 	if err := run.Validate(); err != nil {
 		return err
 	}
@@ -204,7 +206,7 @@ func (s *PostgresStore) CreateAgentRun(ctx context.Context, run *AgentRun) error
 	return tx.Commit()
 }
 
-func (s *PostgresStore) allocatePostgresObjectiveRunTx(ctx context.Context, tx *sql.Tx, run *AgentRun) error {
+func (s *PostgresStore) allocatePostgresObjectiveRunTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun) error {
 	if run == nil || run.ObjectiveID == "" || run.ParentRunID != "" {
 		return nil
 	}
@@ -212,15 +214,15 @@ func (s *PostgresStore) allocatePostgresObjectiveRunTx(ctx context.Context, tx *
 	if err := tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("objectives")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, run.Scope.Kind, run.Scope.ID, run.ObjectiveID).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrObjectiveNotFound
+			return models.ErrObjectiveNotFound
 		}
 		return err
 	}
-	objective, err := decodeObjective(payload)
+	objective, err := sqlstore.DecodeObjective(payload)
 	if err != nil {
 		return err
 	}
-	updated, err := allocateObjectiveRunBudget(objective, run, run.CreatedAt)
+	updated, err := models.AllocateObjectiveRunBudget(objective, run, run.CreatedAt)
 	if err != nil || updated == objective {
 		return err
 	}
@@ -239,12 +241,12 @@ func (s *PostgresStore) allocatePostgresObjectiveRunTx(ctx context.Context, tx *
 		return err
 	}
 	if affected != 1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	return nil
 }
 
-func (s *PostgresStore) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {
+func (s *PostgresStore) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -256,10 +258,10 @@ func (s *PostgresStore) GetAgentRun(ctx context.Context, scope Scope, runID stri
 	if err != nil {
 		return nil, err
 	}
-	return decodeAgentRun(payload)
+	return sqlstore.DecodeAgentRun(payload)
 }
 
-func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -313,7 +315,7 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 		}
 		add(` AND status = ANY($%d)`, pq.Array(statuses))
 	}
-	if filter.Order == AgentRunOrderCreatedDesc {
+	if filter.Order == models.AgentRunOrderCreatedDesc {
 		query += ` ORDER BY created_at DESC, id DESC`
 	} else {
 		query += ` ORDER BY priority DESC, created_at ASC, id ASC`
@@ -329,13 +331,13 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*AgentRun, 0)
+	result := make([]*models.AgentRun, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -347,12 +349,12 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 	return result, nil
 }
 
-func (s *PostgresStore) SummarizeAgentRuns(ctx context.Context, scope Scope, owners []ObjectiveOwner) ([]AgentRunOwnerSummary, error) {
+func (s *PostgresStore) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	if len(owners) == 0 {
-		return []AgentRunOwnerSummary{}, nil
+		return []models.AgentRunOwnerSummary{}, nil
 	}
 	keys := make([]string, 0, len(owners))
 	for _, owner := range owners {
@@ -365,13 +367,13 @@ func (s *PostgresStore) SummarizeAgentRuns(ctx context.Context, scope Scope, own
 		return nil, err
 	}
 	defer rows.Close()
-	runs := make([]*AgentRun, 0)
+	runs := make([]*models.AgentRun, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -380,10 +382,10 @@ func (s *PostgresStore) SummarizeAgentRuns(ctx context.Context, scope Scope, own
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return summarizeAgentRunOwners(runs, owners), nil
+	return models.SummarizeAgentRunOwners(runs, owners), nil
 }
 
-func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
+func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRun, error) {
 	decision, err := s.ClaimNextAgentRunWithDecision(ctx, claim)
 	if err != nil || decision == nil {
 		return nil, err
@@ -391,7 +393,7 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 	return decision.Run, nil
 }
 
-func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
+func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -406,12 +408,12 @@ func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:agent-claim:"+claim.Scope.Kind+":"+claim.Scope.ID); err != nil {
 		return nil, err
 	}
-	var selected *AgentRun
+	var selected *models.AgentRun
 	excluded := make([]string, 0)
-	provenanceBlocks := make([]AgentRunAdmissionBlock, 0)
+	provenanceBlocks := make([]models.AgentRunAdmissionBlock, 0)
 	for selection := 0; selection < 32; selection++ {
 		taskAdmissionSQL := ""
-		claimArgs := []interface{}{claim.Scope.Kind, claim.Scope.ID, claim.AssignedAgentID, AgentRunStatusQueued, AgentRunStatusRunning,
+		claimArgs := []interface{}{claim.Scope.Kind, claim.Scope.ID, claim.AssignedAgentID, models.AgentRunStatusQueued, models.AgentRunStatusRunning,
 			claim.Now, claim.MaxActiveForAgent, claim.AgingInterval.Seconds(), claim.Kind, claim.MaxActiveForConcurrencyKey,
 			claim.MaxActiveForOwner, claim.MaxActiveForObjective}
 		if claim.ConversationTaskForegroundReserve > 0 {
@@ -422,7 +424,7 @@ func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim
 		err = tx.QueryRowContext(ctx, s.agentRunAdmissionSQL(taskAdmissionSQL),
 			claimArgs...).Scan(&payload)
 		if errors.Is(err, sql.ErrNoRows) {
-			var decision *AgentRunAdmissionDecision
+			var decision *models.AgentRunAdmissionDecision
 			var explainErr error
 			if claim.ConversationTaskForegroundReserve > 0 {
 				decision, explainErr = s.explainPostgresConversationTaskAdmission(ctx, tx, claim)
@@ -440,21 +442,21 @@ func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim
 		if err != nil {
 			return nil, err
 		}
-		selected, err = decodeAgentRun(payload)
+		selected, err = sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			return nil, err
 		}
 		if claim.ConversationTaskForegroundReserve == 0 {
 			break
 		}
-		if err := s.preparePostgresConversationTaskAdmission(ctx, tx, &claim, []*AgentRun{selected}); err != nil {
+		if err := s.preparePostgresConversationTaskAdmission(ctx, tx, &claim, []*models.AgentRun{selected}); err != nil {
 			return nil, err
 		}
 		if !claim.InvalidConversationTaskRuns[selected.ID] {
 			break
 		}
-		provenanceBlocks = append(provenanceBlocks, AgentRunAdmissionBlock{RunID: selected.ID, ObjectiveID: selected.ObjectiveID,
-			AssignedAgentID: selected.AssignedAgentID, Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: AgentRunAdmissionReasonTaskProvenance})
+		provenanceBlocks = append(provenanceBlocks, models.AgentRunAdmissionBlock{RunID: selected.ID, ObjectiveID: selected.ObjectiveID,
+			AssignedAgentID: selected.AssignedAgentID, Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: models.AgentRunAdmissionReasonTaskProvenance})
 		excluded = append(excluded, selected.ID)
 		selected = nil
 	}
@@ -462,10 +464,10 @@ func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return &AgentRunAdmissionDecision{Outcome: AgentRunAdmissionBackpressured, Blocks: provenanceBlocks, EvaluatedAt: claim.Now}, nil
+		return &models.AgentRunAdmissionDecision{Outcome: models.AgentRunAdmissionBackpressured, Blocks: provenanceBlocks, EvaluatedAt: claim.Now}, nil
 	}
 	previousRevision := selected.Revision
-	if err := applyAgentRunClaim(selected, claim); err != nil {
+	if err := models.ApplyAgentRunClaim(selected, claim); err != nil {
 		return nil, err
 	}
 	updatedPayload, err := json.Marshal(selected)
@@ -487,37 +489,37 @@ func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim
 		return nil, err
 	}
 	if affected != 1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	decision := &AgentRunAdmissionDecision{Outcome: AgentRunAdmissionClaimed, Run: selected, EvaluatedAt: claim.Now}
-	if selected.Status == AgentRunStatusPaused && selected.BudgetState == BudgetStateExhausted {
-		decision.Outcome = AgentRunAdmissionBudgetStopped
-		decision.Blocks = []AgentRunAdmissionBlock{{
+	decision := &models.AgentRunAdmissionDecision{Outcome: models.AgentRunAdmissionClaimed, Run: selected, EvaluatedAt: claim.Now}
+	if selected.Status == models.AgentRunStatusPaused && selected.BudgetState == models.BudgetStateExhausted {
+		decision.Outcome = models.AgentRunAdmissionBudgetStopped
+		decision.Blocks = []models.AgentRunAdmissionBlock{{
 			RunID: selected.ID, ObjectiveID: selected.ObjectiveID, AssignedAgentID: selected.AssignedAgentID,
-			Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: AgentRunAdmissionReasonAttemptBudgetExhausted,
+			Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: models.AgentRunAdmissionReasonAttemptBudgetExhausted,
 		}}
 	}
 	return decision, nil
 }
 
-func (s *PostgresStore) explainPostgresAgentRunAdmission(ctx context.Context, tx *sql.Tx, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
+func (s *PostgresStore) explainPostgresAgentRunAdmission(ctx context.Context, tx *sql.Tx, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND status IN ($3, $4)`,
-		claim.Scope.Kind, claim.Scope.ID, AgentRunStatusQueued, AgentRunStatusRunning)
+		claim.Scope.Kind, claim.Scope.ID, models.AgentRunStatusQueued, models.AgentRunStatusRunning)
 	if err != nil {
 		return nil, err
 	}
-	runs := make([]*AgentRun, 0)
+	runs := make([]*models.AgentRun, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			rows.Close()
 			return nil, err
@@ -532,14 +534,14 @@ func (s *PostgresStore) explainPostgresAgentRunAdmission(ctx context.Context, tx
 	if err != nil {
 		return nil, err
 	}
-	objectives := make(map[string]*Objective)
+	objectives := make(map[string]*models.Objective)
 	for objectiveRows.Next() {
 		var id, payload string
 		if err := objectiveRows.Scan(&id, &payload); err != nil {
 			objectiveRows.Close()
 			return nil, err
 		}
-		objective, err := decodeObjective(payload)
+		objective, err := sqlstore.DecodeObjective(payload)
 		if err != nil {
 			objectiveRows.Close()
 			return nil, err
@@ -549,14 +551,14 @@ func (s *PostgresStore) explainPostgresAgentRunAdmission(ctx context.Context, tx
 	if err := objectiveRows.Close(); err != nil {
 		return nil, err
 	}
-	selected, decision := evaluateAgentRunAdmission(runs, objectives, claim)
+	selected, decision := models.EvaluateAgentRunAdmission(runs, objectives, claim)
 	if selected != nil {
 		return nil, errors.New("agent run admission query drifted from the canonical evaluator")
 	}
 	return decision, nil
 }
 
-func (s *PostgresStore) RenewAgentRunLease(ctx context.Context, scope Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentRun, error) {
+func (s *PostgresStore) RenewAgentRunLease(ctx context.Context, scope models.Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -569,17 +571,17 @@ func (s *PostgresStore) RenewAgentRunLease(ctx context.Context, scope Scope, run
 	err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, scope.Kind, scope.ID, runID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	run, err := decodeAgentRun(payload)
+	run, err := sqlstore.DecodeAgentRun(payload)
 	if err != nil {
 		return nil, err
 	}
-	if run.Status != AgentRunStatusRunning || run.LeaseOwner != workerID || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
-		return nil, ErrLeaseLost
+	if run.Status != models.AgentRunStatusRunning || run.LeaseOwner != workerID || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
+		return nil, models.ErrLeaseLost
 	}
 	previousRevision := run.Revision
 	expires := now.Add(leaseDuration)
@@ -602,7 +604,7 @@ func (s *PostgresStore) RenewAgentRunLease(ctx context.Context, scope Scope, run
 		return nil, err
 	}
 	if affected != 1 {
-		return nil, ErrLeaseLost
+		return nil, models.ErrLeaseLost
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

@@ -7,11 +7,13 @@ import (
 	"errors"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, application *SkillReferenceUpgradeMutation) error {
-	if err := validateSkillReferenceUpgradeMutation(application); err != nil {
+func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, application *models.SkillReferenceUpgradeMutation) error {
+	if err := models.ValidateSkillReferenceUpgradeMutation(application); err != nil {
 		return err
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
@@ -29,7 +31,7 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 	if err != nil {
 		return err
 	}
-	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+	if err := models.ValidateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
 		return err
 	}
 	// Every binding the upgrade moves is locked and checked before any write.
@@ -41,7 +43,7 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 			application.Plan.Scope.Kind, application.Plan.Scope.ID, application.Plan.DeploymentID,
 			member.Binding.ID, member.ExpectedRevision).Scan(&bindingPayload); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return ErrSkillReferenceUpgradeConflict
+				return models.ErrSkillReferenceUpgradeConflict
 			}
 			return err
 		}
@@ -49,21 +51,21 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 		if json.Unmarshal([]byte(bindingPayload), &currentBinding) != nil || currentBinding.Disabled ||
 			currentBinding.SkillID != application.Plan.From.ID || currentBinding.SkillVersion != application.Plan.From.Version ||
 			currentBinding.SourceIdentity != application.Plan.From.SourceIdentity {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
 		// The locked binding is also the proposal fence. A concurrent proposal
 		// either commits first and is visible here, or waits and fails its old pin.
-		busy, err := hasSkillRuntimeUsage(ctx, tx, skillBindingUpgradeUsageFilter(application, member.Binding.ID), s.table("action_calls"), s.table("agent_runs"), true)
+		busy, err := sqlstore.HasSkillRuntimeUsage(ctx, tx, models.SkillBindingUpgradeUsageFilter(application, member.Binding.ID), s.table("action_calls"), s.table("agent_runs"), true)
 		if err != nil {
 			return err
 		}
 		if busy {
-			return ErrSkillReferenceUpgradeBusy
+			return models.ErrSkillReferenceUpgradeBusy
 		}
 	}
 	// Binding and Team locks can wait behind another transaction. The logical
 	// fence prevents ownership changes; the current clock still fences expiry.
-	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+	if err := models.ValidateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
 		return err
 	}
 	var result sql.Result
@@ -82,7 +84,7 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 			return err
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
 	}
 	for _, mutation := range application.Objectives {
@@ -100,7 +102,7 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 			return err
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
 		if _, err = s.insertPostgresActivityTx(ctx, tx, mutation.Event); err != nil {
 			return err
@@ -120,7 +122,7 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 			return err
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
 	}
 	for _, mutation := range application.CallbackRegistrations {
@@ -137,7 +139,7 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 			return err
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
 	}
 	return tx.Commit()

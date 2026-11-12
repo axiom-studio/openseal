@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -28,7 +29,7 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 		t.Fatalf("migration = %q, %v", migration, err)
 	}
 
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	definition := slackConversationSkillDefinition()
 	catalog := skill.NewCatalogWithStore(primary)
 	if err := catalog.Register(ctx, definition); err != nil {
@@ -46,51 +47,51 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	adapter := ExternalConversationAdapterReference{
+	adapter := models.ExternalConversationAdapterReference{
 		SkillID: definition.ID, SkillVersion: definition.Version,
 		BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
 	}
 	endpoint, err := NewExternalConversationEndpointService(primary, catalog).Create(ctx, CreateExternalConversationEndpointRequest{
-		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
-		Policy: ExternalConversationPolicy{
-			MessageSelection: ExternalConversationSelectAllMessages,
-			ReplyMode:        ExternalConversationReplyThread,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: models.ExternalConversationPolicy{
+			MessageSelection: models.ExternalConversationSelectAllMessages,
+			ReplyMode:        models.ExternalConversationReplyThread,
 			IgnoreBots:       true,
 		},
-		Status: ExternalConversationEndpointActive,
+		Status: models.ExternalConversationEndpointActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	inbox := &ExternalConversationInboxItem{
+	inbox := &models.ExternalConversationInboxItem{
 		ID: "inbox-1", Scope: scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: NormalizedExternalConversationEvent{
+		Event: models.NormalizedExternalConversationEvent{
 			ID: "provider/event/1", Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "C/one", ExternalThreadID: "171.001",
 			ExternalMessageID: "M/one", ExternalParticipantID: "U/one", Text: "hello",
 			OrderingKey: "C/one:171.001", OccurredAt: now,
 		},
-		Status: ExternalConversationInboxPending, MaximumAttempts: 8, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status: models.ExternalConversationInboxPending, MaximumAttempts: 8, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, _, err := primary.ReceiveExternalConversationEvent(ctx, inbox); err != nil {
 		t.Fatal(err)
 	}
-	delivery := &ExternalConversationDelivery{
+	delivery := &models.ExternalConversationDelivery{
 		ID: "delivery-1", Scope: scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-out",
 		ExternalThreadID: "171.001", OrderingKey: "order-1", IdempotencyKey: "reply:message-out",
-		Correlation: &ExternalConversationDeliveryCorrelation{Kind: "approval", ID: "approval-1", Phase: "request"},
-		Status:      ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
+		Correlation: &models.ExternalConversationDeliveryCorrelation{Kind: "approval", ID: "approval-1", Phase: "request"},
+		Status:      models.ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, _, err := primary.EnqueueExternalConversationDelivery(ctx, delivery); err != nil {
 		t.Fatal(err)
 	}
-	if correlated, err := replica.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: scope, CorrelationKind: "approval", CorrelationID: "approval-1", Limit: 10}); err != nil || len(correlated) != 1 {
+	if correlated, err := replica.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{Scope: scope, CorrelationKind: "approval", CorrelationID: "approval-1", Limit: 10}); err != nil || len(correlated) != 1 {
 		t.Fatalf("correlated deliveries = %#v, %v", correlated, err)
 	}
 
@@ -141,16 +142,16 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 	if err != nil || reclaimedDelivery == nil || reclaimedDelivery.Attempt != 2 {
 		t.Fatalf("reclaimed delivery = %#v, %v", reclaimedDelivery, err)
 	}
-	applied := cloneExternalConversationInboxItem(reclaimedInbox)
-	applied.Status, applied.LeaseOwner, applied.LeaseExpiresAt = ExternalConversationInboxApplied, "", time.Time{}
+	applied := models.CloneExternalConversationInboxItem(reclaimedInbox)
+	applied.Status, applied.LeaseOwner, applied.LeaseExpiresAt = models.ExternalConversationInboxApplied, "", time.Time{}
 	applied.ConversationID, applied.ChannelMessageID = "conversation-1", "message-in"
 	applied.AppliedAt, applied.UpdatedAt = now.Add(61*time.Second), now.Add(61*time.Second)
 	applied.Revision++
 	if err := replica.SaveExternalConversationInbox(ctx, applied, reclaimedInbox.Revision, "restart-worker"); err != nil {
 		t.Fatal(err)
 	}
-	delivered := cloneExternalConversationDelivery(reclaimedDelivery)
-	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = ExternalConversationDeliveryDelivered, "", time.Time{}
+	delivered := models.CloneExternalConversationDelivery(reclaimedDelivery)
+	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = models.ExternalConversationDeliveryDelivered, "", time.Time{}
 	delivered.ProviderMessageID, delivered.DeliveredAt, delivered.UpdatedAt = "provider/message/1", now.Add(61*time.Second), now.Add(61*time.Second)
 	delivered.Revision++
 	if err := replica.SaveExternalConversationDelivery(ctx, delivered, reclaimedDelivery.Revision, "restart-worker"); err != nil {

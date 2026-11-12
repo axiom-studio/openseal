@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const conversationApprovalModeMigrationVersion int64 = 61
@@ -17,7 +19,7 @@ func (s *PostgresStore) migrateConversationApprovalMode(ctx context.Context, tx 
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("conversations")+`
 		SET payload = jsonb_set(payload, '{approvalMode}', to_jsonb($1::text), true)
-		WHERE COALESCE(payload->>'approvalMode', '') = ''`, string(DefaultConversationApprovalMode)); err != nil {
+		WHERE COALESCE(payload->>'approvalMode', '') = ''`, string(models.DefaultConversationApprovalMode)); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+

@@ -7,6 +7,9 @@ import (
 	"database/sql"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // Postgres store test (schema migrations): it moves to store/postgres in
@@ -23,13 +26,13 @@ import (
 func seedPostgresChangeSets(t *testing.T, store *PostgresStore) string {
 	t.Helper()
 	ctx := context.Background()
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: builderCutoverScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "author", Source: RunSourceManual,
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: builderCutoverScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "author", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	table := store.table(retiredChangeSetTable)
+	table := store.table(sqlstore.RetiredChangeSetTable)
 	statements := []string{
 		`CREATE TABLE ` + table + ` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
@@ -51,7 +54,7 @@ func seedPostgresChangeSets(t *testing.T, store *PostgresStore) string {
 			event, when = "UPDATE", statusChanged
 		}
 		statements = append(statements, store.workOutboxTriggerStatements(workOutboxTrigger{
-			table: retiredChangeSetTable, name: name, event: event, when: when, rows: []string{`('authoring', NULL, false)`},
+			table: sqlstore.RetiredChangeSetTable, name: name, event: event, when: when, rows: []string{`('authoring', NULL, false)`},
 		})...)
 	}
 	runFamily := func(family string) string {
@@ -140,7 +143,7 @@ func TestPostgresAgentBuilderMigrationKeepsLeafDraftsAndRetiresChangeSets(t *tes
 	}
 	assertPostgresLedgerCurrent(t, store)
 
-	if postgresRelationPresent(t, store, retiredChangeSetTable) || !postgresRelationPresent(t, store, agentBuilderCutoverTable) {
+	if postgresRelationPresent(t, store, sqlstore.RetiredChangeSetTable) || !postgresRelationPresent(t, store, sqlstore.AgentBuilderCutoverTable) {
 		t.Fatal("change-set table was not renamed to the cutover table")
 	}
 	for _, index := range append([]string{"agent_runs_global_recovery_idx"}, retiredChangeSetIndexes...) {
@@ -148,7 +151,7 @@ func TestPostgresAgentBuilderMigrationKeepsLeafDraftsAndRetiresChangeSets(t *tes
 			t.Fatalf("index %s survived", index)
 		}
 	}
-	if triggers := postgresCount(t, store, `SELECT COUNT(*) FROM pg_trigger WHERE tgrelid = to_regclass($1) AND NOT tgisinternal`, store.schema+"."+agentBuilderCutoverTable); triggers != 0 {
+	if triggers := postgresCount(t, store, `SELECT COUNT(*) FROM pg_trigger WHERE tgrelid = to_regclass($1) AND NOT tgisinternal`, store.schema+"."+sqlstore.AgentBuilderCutoverTable); triggers != 0 {
 		t.Fatalf("cutover table keeps %d outbox triggers", triggers)
 	}
 	if functions := postgresCount(t, store, `SELECT COUNT(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -171,7 +174,7 @@ func TestPostgresAgentBuilderMigrationKeepsLeafDraftsAndRetiresChangeSets(t *tes
 	assertCutoverLeafDrafts(t, drafts)
 
 	run, err := store.GetAgentRun(ctx, builderCutoverScope, runID)
-	if err != nil || run.Status != AgentRunStatusCanceled || run.LeaseOwner != "" || run.LeaseExpiresAt != nil {
+	if err != nil || run.Status != models.AgentRunStatusCanceled || run.LeaseOwner != "" || run.LeaseExpiresAt != nil {
 		t.Fatalf("authoring run = %#v, %v; want canceled without lease", run, err)
 	}
 	if status := postgresCount(t, store, `SELECT COUNT(*) FROM `+store.table("agent_runs")+` WHERE id = $1 AND status = 'canceled' AND lease_owner = '' AND lease_expires_at IS NULL`, runID); status != 1 {
@@ -218,7 +221,7 @@ func TestPostgresAgentBuilderMigrationFreshSchemaNeverHasChangeSets(t *testing.T
 	store, _, _ := newAgentSessionMigrationStore(t, "agent_builder_fresh_")
 	ctx := context.Background()
 	assertPostgresLedgerCurrent(t, store)
-	for _, name := range []string{retiredChangeSetTable, agentBuilderCutoverTable, "agent_runs_global_recovery_idx"} {
+	for _, name := range []string{sqlstore.RetiredChangeSetTable, sqlstore.AgentBuilderCutoverTable, "agent_runs_global_recovery_idx"} {
 		if postgresRelationPresent(t, store, name) {
 			t.Fatalf("fresh schema has %s", name)
 		}

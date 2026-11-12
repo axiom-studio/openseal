@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/lib/pq"
 )
@@ -38,7 +39,7 @@ func TestConversationTaskForegroundReservePostgresIndexedAdmissionPlan(t *testin
 	claim := storetest.ConversationTaskAdmissionClaim(time.Now().Add(time.Second), 1)
 	var planJSON string
 	err = store.db.QueryRowContext(t.Context(), `EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) `+store.agentRunAdmissionSQL(store.conversationTaskAdmissionSQL()),
-		claim.Scope.Kind, claim.Scope.ID, claim.AssignedAgentID, AgentRunStatusQueued, AgentRunStatusRunning,
+		claim.Scope.Kind, claim.Scope.ID, claim.AssignedAgentID, models.AgentRunStatusQueued, models.AgentRunStatusRunning,
 		claim.Now, claim.MaxActiveForAgent, claim.AgingInterval.Seconds(), claim.Kind, claim.MaxActiveForConcurrencyKey,
 		claim.MaxActiveForOwner, claim.MaxActiveForObjective, claim.MaxActiveForAgent-claim.ConversationTaskForegroundReserve, pq.Array([]string{})).Scan(&planJSON)
 	if err != nil {

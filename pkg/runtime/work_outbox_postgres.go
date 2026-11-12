@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/lib/pq"
 )
 
@@ -24,9 +25,9 @@ const (
 // project into chats: commentary messages and streamed answers.
 const workActivityTrigger = `NEW.event_type IN ('turn.commentary','turn.answer_preview')`
 
-var _ ActionDeadlineStore = (*PostgresStore)(nil)
-var _ AgentRunDeadlineStore = (*PostgresStore)(nil)
-var _ ExternalConversationDeadlineStore = (*PostgresStore)(nil)
+var _ models.ActionDeadlineStore = (*PostgresStore)(nil)
+var _ models.AgentRunDeadlineStore = (*PostgresStore)(nil)
+var _ models.ExternalConversationDeadlineStore = (*PostgresStore)(nil)
 
 // workOutboxTrigger records one family for rows of one table. Updates only
 // record when a claimability column changes, so ordinary payload writes and
@@ -244,7 +245,7 @@ func (s *PostgresStore) noteWorkCommitted() {
 
 // RelayWorkOutbox moves outbox rows into publish. SKIP LOCKED lets every
 // replica relay concurrently without waiting on each other's batches.
-func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish func(context.Context, []WorkItem) error) (int, error) {
+func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish func(context.Context, []models.WorkItem) error) (int, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -262,7 +263,7 @@ func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish 
 		return 0, err
 	}
 	removed := 0
-	earliest := make(map[workItemKey]time.Time)
+	earliest := make(map[models.WorkItemKey]time.Time)
 	for rows.Next() {
 		var family, kind, id string
 		var due time.Time
@@ -271,7 +272,7 @@ func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish 
 			return 0, err
 		}
 		removed++
-		key := workItemKey{Family: WorkFamily(family), Scope: Scope{Kind: kind, ID: id}}
+		key := models.WorkItemKey{Family: models.WorkFamily(family), Scope: models.Scope{Kind: kind, ID: id}}
 		if current, ok := earliest[key]; !ok || due.Before(current) {
 			earliest[key] = due.UTC()
 		}
@@ -285,9 +286,9 @@ func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish 
 	if removed == 0 {
 		return 0, nil
 	}
-	items := make([]WorkItem, 0, len(earliest))
+	items := make([]models.WorkItem, 0, len(earliest))
 	for key, due := range earliest {
-		items = append(items, WorkItem{Family: key.Family, Scope: key.Scope, DueAt: due})
+		items = append(items, models.WorkItem{Family: key.Family, Scope: key.Scope, DueAt: due})
 	}
 	if err := publish(ctx, items); err != nil {
 		return 0, err
@@ -298,7 +299,7 @@ func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish 
 // ListPendingWork lists scopes with durable work. Each query reads one small
 // partial index of active rows, so the sweep costs the active work, not the
 // number of scopes or the table sizes.
-func (s *PostgresStore) ListPendingWork(ctx context.Context, rebuild bool) ([]WorkItem, error) {
+func (s *PostgresStore) ListPendingWork(ctx context.Context, rebuild bool) ([]models.WorkItem, error) {
 	queries := []string{
 		`SELECT 'action', scope_kind, scope_id, MIN(CASE WHEN status='running' THEN COALESCE(lease_expires_at, now()) ELSE available_at END)
 			FROM ` + s.table("action_calls") + ` WHERE status IN ('ready','running') GROUP BY scope_kind, scope_id`,
@@ -332,14 +333,14 @@ func (s *PostgresStore) ListPendingWork(ctx context.Context, rebuild bool) ([]Wo
 		return nil, err
 	}
 	defer rows.Close()
-	items := []WorkItem{}
+	items := []models.WorkItem{}
 	for rows.Next() {
 		var family, kind, id string
 		var due sql.NullTime
 		if err := rows.Scan(&family, &kind, &id, &due); err != nil {
 			return nil, err
 		}
-		item := WorkItem{Family: WorkFamily(family), Scope: Scope{Kind: kind, ID: id}, DueAt: time.Now().UTC()}
+		item := models.WorkItem{Family: models.WorkFamily(family), Scope: models.Scope{Kind: kind, ID: id}, DueAt: time.Now().UTC()}
 		if due.Valid {
 			item.DueAt = due.Time.UTC()
 		}
@@ -364,7 +365,7 @@ func scanDeadline(row *sql.Row) (*time.Time, error) {
 // so they are excluded. Work that is claimable now is excluded too:
 // claims find it, and anything gated on another row is signalled when that
 // row changes.
-func (s *PostgresStore) NextActionDeadline(ctx context.Context, scope Scope, now time.Time) (*time.Time, error) {
+func (s *PostgresStore) NextActionDeadline(ctx context.Context, scope models.Scope, now time.Time) (*time.Time, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -373,12 +374,12 @@ func (s *PostgresStore) NextActionDeadline(ctx context.Context, scope Scope, now
 			AND COALESCE(payload->>'execution','') <> 'loop'),
 		(SELECT MIN(lease_expires_at) FROM `+s.table("action_calls")+` WHERE scope_kind=$1 AND scope_id=$2 AND status=$4 AND lease_expires_at > $5
 			AND COALESCE(payload->>'execution','') <> 'loop'))`,
-		scope.Kind, scope.ID, ActionCallStatusReady, ActionCallStatusRunning, now.UTC()))
+		scope.Kind, scope.ID, models.ActionCallStatusReady, models.ActionCallStatusRunning, now.UTC()))
 }
 
 // NextAgentRunDeadline returns the earliest future availability or lease
 // expiry among queued and running Runs that one pool could claim.
-func (s *PostgresStore) NextAgentRunDeadline(ctx context.Context, scope Scope, kind RunKind, assignedAgentID string, now time.Time) (*time.Time, error) {
+func (s *PostgresStore) NextAgentRunDeadline(ctx context.Context, scope models.Scope, kind models.RunKind, assignedAgentID string, now time.Time) (*time.Time, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -386,12 +387,12 @@ func (s *PostgresStore) NextAgentRunDeadline(ctx context.Context, scope Scope, k
 	return scanDeadline(s.db.QueryRowContext(ctx, `SELECT LEAST(
 		(SELECT MIN(available_at) FROM `+s.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND status=$6 AND available_at > $3`+filter+`),
 		(SELECT MIN(lease_expires_at) FROM `+s.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND status IN ($6, $7) AND lease_expires_at > $3`+filter+`))`,
-		scope.Kind, scope.ID, now.UTC(), string(kind), assignedAgentID, AgentRunStatusQueued, AgentRunStatusRunning))
+		scope.Kind, scope.ID, now.UTC(), string(kind), assignedAgentID, models.AgentRunStatusQueued, models.AgentRunStatusRunning))
 }
 
 // NextExternalConversationDeadline returns the earliest future time at which
 // external conversation work in the scope becomes due without another write.
-func (s *PostgresStore) NextExternalConversationDeadline(ctx context.Context, scope Scope, now time.Time) (*time.Time, error) {
+func (s *PostgresStore) NextExternalConversationDeadline(ctx context.Context, scope models.Scope, now time.Time) (*time.Time, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -407,9 +408,9 @@ func (s *PostgresStore) NextExternalConversationDeadline(ctx context.Context, sc
 		(SELECT MIN(lease_expires_at) FROM `+callbacks+` WHERE scope_kind=$1 AND scope_id=$2 AND status=$9 AND lease_expires_at > $3),
 		(SELECT MIN(expires_at) FROM `+s.table("approval_checkpoints")+` WHERE scope_kind=$1 AND scope_id=$2 AND status=$10 AND expires_at > $3))`,
 		scope.Kind, scope.ID, now.UTC(),
-		pq.Array([]string{string(ExternalConversationInboxPending), string(ExternalConversationInboxRetry)}), ExternalConversationInboxLeased,
-		pq.Array([]string{string(ExternalConversationDeliveryPending), string(ExternalConversationDeliveryRetry)}), ExternalConversationDeliveryLeased,
-		CallbackEventPending, CallbackEventLeased, ApprovalStatusPending))
+		pq.Array([]string{string(models.ExternalConversationInboxPending), string(models.ExternalConversationInboxRetry)}), models.ExternalConversationInboxLeased,
+		pq.Array([]string{string(models.ExternalConversationDeliveryPending), string(models.ExternalConversationDeliveryRetry)}), models.ExternalConversationDeliveryLeased,
+		models.CallbackEventPending, models.CallbackEventLeased, models.ApprovalStatusPending))
 }
 
 // workCommitHintKey marks a context whose writes must not raise the work

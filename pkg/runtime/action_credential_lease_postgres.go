@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-var _ ActionCredentialLeaseRedeemer = (*PostgresStore)(nil)
+var _ models.ActionCredentialLeaseRedeemer = (*PostgresStore)(nil)
 
 func (s *PostgresStore) migrateActionCredentialLeaseRedemptions(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
@@ -48,17 +50,17 @@ func (s *PostgresStore) migrateActionCredentialLeaseRedemptions(ctx context.Cont
 // authenticate the signature, tenant, issuer, and audience before invoking
 // this method. Secret resolution must happen only after this transaction
 // commits successfully.
-func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request ActionCredentialLeaseRedemptionRequest) error {
+func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request models.ActionCredentialLeaseRedemptionRequest) error {
 	if s == nil || s.db == nil {
 		return errors.New("PostgreSQL store is not configured")
 	}
-	request.Lease.Credentials = cloneActionCredentialFieldReferences(request.Lease.Credentials)
-	request.CredentialFields = cloneActionCredentialFields(request.CredentialFields)
+	request.Lease.Credentials = models.CloneActionCredentialFieldReferences(request.Lease.Credentials)
+	request.CredentialFields = models.CloneActionCredentialFields(request.CredentialFields)
 	if err := request.Lease.Validate(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(request.Transport) == "" {
-		return ErrActionCredentialLeaseMismatch
+		return models.ErrActionCredentialLeaseMismatch
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -80,13 +82,13 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if request.HostBinding == nil {
-			return ErrActionCredentialLeaseMismatch
+			return models.ErrActionCredentialLeaseMismatch
 		}
 		binding = *request.HostBinding
 	case err != nil:
 		return err
 	case request.HostBinding != nil:
-		return ErrActionCredentialLeaseMismatch
+		return models.ErrActionCredentialLeaseMismatch
 	default:
 		if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
 			return err
@@ -94,8 +96,8 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	}
 	// The remaining stable order is ActionCall, then its owning AgentRun.
 	call, err := s.getActionByID(ctx, tx, request.Lease.Scope, request.Lease.ActionCallID, true)
-	if errors.Is(err, ErrActionNotFound) {
-		return ErrActionCredentialLeaseMismatch
+	if errors.Is(err, models.ErrActionNotFound) {
+		return models.ErrActionCredentialLeaseMismatch
 	}
 	if err != nil {
 		return err
@@ -104,12 +106,12 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+`
 		WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, call.Scope.Kind, call.Scope.ID, call.RunID).Scan(&runPayload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrActionCredentialLeaseMismatch
+		return models.ErrActionCredentialLeaseMismatch
 	}
 	if err != nil {
 		return err
 	}
-	run, err := decodeAgentRun(runPayload)
+	run, err := sqlstore.DecodeAgentRun(runPayload)
 	if err != nil {
 		return err
 	}
@@ -119,23 +121,23 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return err
 	}
-	now = canonicalLeaseTime(now)
+	now = models.CanonicalLeaseTime(now)
 	if now.Before(request.Lease.IssuedAt) || !now.Before(request.Lease.ExpiresAt) || !now.Before(request.Lease.ActionLease.ExpiresAt) {
-		return ErrActionCredentialLeaseExpired
+		return models.ErrActionCredentialLeaseExpired
 	}
-	if call.LeaseExpiresAt == nil || !now.Before(canonicalLeaseTime(*call.LeaseExpiresAt)) {
-		return ErrActionCredentialLeaseExpired
+	if call.LeaseExpiresAt == nil || !now.Before(models.CanonicalLeaseTime(*call.LeaseExpiresAt)) {
+		return models.ErrActionCredentialLeaseExpired
 	}
-	if err := MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields); err != nil {
+	if err := models.MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields); err != nil {
 		return err
 	}
-	if err := matchCurrentActionCredentialBinding(request.Lease, call, &binding); err != nil {
+	if err := models.CheckCurrentActionCredentialBinding(request.Lease, call, &binding); err != nil {
 		return err
 	}
-	if err := matchActionCredentialLeaseUmbrella(request.Lease, run, &binding); err != nil {
+	if err := models.CheckActionCredentialLeaseUmbrella(request.Lease, run, &binding); err != nil {
 		return err
 	}
-	credentialFieldsDigest, err := digestActionCredentialFieldSelection(request.CredentialFields)
+	credentialFieldsDigest, err := models.ActionCredentialFieldSelectionDigest(request.CredentialFields)
 	if err != nil {
 		return err
 	}
@@ -144,10 +146,10 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 		WHERE (issuer, audience, nonce_digest) IN (
 			SELECT issuer, audience, nonce_digest FROM `+s.table("action_credential_lease_redemptions")+`
 			WHERE expires_at <= $1 ORDER BY expires_at LIMIT $2
-		)`, now, actionCredentialLeaseCleanupBatch); err != nil {
+		)`, now, sqlstore.ActionCredentialLeaseCleanupBatch); err != nil {
 		return err
 	}
-	digest := actionCredentialLeaseNonceDigest(request.Lease)
+	digest := models.ActionCredentialLeaseNonceDigest(request.Lease)
 	result, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("action_credential_lease_redemptions")+`
 		(issuer, audience, nonce_digest, scope_kind, scope_id, run_id, action_call_id, action_lease_id,
 		 deployment_id, binding_id, binding_revision, transport, credential_fields_digest, expires_at, consumed_at)
@@ -164,7 +166,7 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 		return err
 	}
 	if rows != 1 {
-		return ErrActionCredentialLeaseReplay
+		return models.ErrActionCredentialLeaseReplay
 	}
 	return tx.Commit()
 }

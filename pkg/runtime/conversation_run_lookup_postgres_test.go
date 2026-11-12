@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestPostgresConversationRunLookupUpgrade(t *testing.T) {
@@ -22,12 +24,12 @@ func TestPostgresConversationRunLookupUpgrade(t *testing.T) {
 		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
 		_ = store.Close()
 	})
-	scope := Scope{Kind: "tenant", ID: "one"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
 	now := time.Now().UTC()
 	for _, id := range []string{"match", "other-chat", "other-tenant", "other-owner"} {
-		run := &AgentRun{ID: id, Scope: scope, Owner: owner, Kind: RunKindConversation, ConcurrencyKey: "chat",
-			Goal: "Research", Source: RunSourceChat, Status: AgentRunStatusCompleted, Revision: 1,
+		run := &models.AgentRun{ID: id, Scope: scope, Owner: owner, Kind: models.RunKindConversation, ConcurrencyKey: "chat",
+			Goal: "Research", Source: models.RunSourceChat, Status: models.AgentRunStatusCompleted, Revision: 1,
 			CreatedAt: now, UpdatedAt: now, AvailableAt: now, QueueEnteredAt: now}
 		switch id {
 		case "other-chat":
@@ -56,7 +58,7 @@ func TestPostgresConversationRunLookupUpgrade(t *testing.T) {
 	if err := pgSchema.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname=$1 AND indexname='agent_runs_concurrency_idx'`, schema).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("upgrade index count=%d: %v", count, err)
 	}
-	runs, err := upgraded.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Owner: &owner, Kind: RunKindConversation, ConcurrencyKey: "chat", Limit: 1})
+	runs, err := upgraded.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Owner: &owner, Kind: models.RunKindConversation, ConcurrencyKey: "chat", Limit: 1})
 	if err != nil || len(runs) != 1 || runs[0].ID != "match" {
 		t.Fatalf("wrong scoped runs: %#v, %v", runs, err)
 	}

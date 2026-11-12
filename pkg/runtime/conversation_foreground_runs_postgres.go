@@ -2,10 +2,13 @@ package runtime
 
 import (
 	"context"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *PostgresStore) ListConversationForegroundRuns(ctx context.Context, scope Scope, owner ObjectiveOwner, conversationID string, limit, offset int) ([]*AgentRun, error) {
-	if err := validateConversationForegroundRunsQuery(scope, owner, conversationID, limit, offset); err != nil {
+func (s *PostgresStore) ListConversationForegroundRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit, offset int) ([]*models.AgentRun, error) {
+	if err := models.ValidateConversationForegroundRunsQuery(scope, owner, conversationID, limit, offset); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT payload,created_at,id FROM (SELECT payload,created_at,id FROM `+s.table("agent_runs")+`
@@ -23,10 +26,10 @@ func (s *PostgresStore) ListConversationForegroundRuns(ctx context.Context, scop
 			||CASE WHEN COALESCE(payload->>'assignedAgentId','')<>''
 				THEN ':agent:'||(payload->>'assignedAgentId') ELSE '' END
 		ORDER BY created_at DESC,id DESC LIMIT $8) lanes
-		ORDER BY created_at DESC,id DESC LIMIT $6 OFFSET $7`, scope.Kind, scope.ID, owner.Type, owner.ID, conversationID, limit, offset, conversationForegroundSQLPageSize(limit, offset))
+		ORDER BY created_at DESC,id DESC LIMIT $6 OFFSET $7`, scope.Kind, scope.ID, owner.Type, owner.ID, conversationID, limit, offset, sqlstore.ConversationForegroundPageSize(limit, offset))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanConversationForegroundRunsSQL(rows)
+	return sqlstore.ScanConversationForegroundRuns(rows)
 }

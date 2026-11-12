@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -17,13 +18,13 @@ func TestConversationTaskSQLPostgresMigrationRollbackAndReapply(t *testing.T) {
 	if err != nil || !current || version != currentPostgresSchemaVersion {
 		t.Fatalf("fresh migration ledger = current:%v version:%d err:%v", current, version, err)
 	}
-	legacyScope := Scope{Kind: "tenant", ID: "migration-backfill"}
-	legacyOwner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "legacy-agent"}
-	legacyRoot := storetest.ConversationReadRun("pre-upgrade-root", legacyScope, legacyOwner, RunKindConversation, AgentRunStatusCompleted, storetest.ConversationTaskFixtureTime)
-	legacyRoot.Context = map[string]interface{}{conversationRunContextConversationID: "pre-upgrade-conversation"}
-	legacyChild := storetest.ConversationReadRun("pre-upgrade-child", legacyScope, legacyOwner, RunKindAgentWork, AgentRunStatusQueued, storetest.ConversationTaskFixtureTime)
+	legacyScope := models.Scope{Kind: "tenant", ID: "migration-backfill"}
+	legacyOwner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "legacy-agent"}
+	legacyRoot := storetest.ConversationReadRun("pre-upgrade-root", legacyScope, legacyOwner, models.RunKindConversation, models.AgentRunStatusCompleted, storetest.ConversationTaskFixtureTime)
+	legacyRoot.Context = map[string]interface{}{models.ConversationRunConversationIDContextKey: "pre-upgrade-conversation"}
+	legacyChild := storetest.ConversationReadRun("pre-upgrade-child", legacyScope, legacyOwner, models.RunKindAgentWork, models.AgentRunStatusQueued, storetest.ConversationTaskFixtureTime)
 	legacyChild.RootRunID, legacyChild.ParentRunID = legacyRoot.ID, legacyRoot.ID
-	for _, run := range []*AgentRun{legacyRoot, legacyChild} {
+	for _, run := range []*models.AgentRun{legacyRoot, legacyChild} {
 		if err := store.CreateAgentRun(t.Context(), run); err != nil {
 			t.Fatal(err)
 		}
@@ -58,9 +59,9 @@ func TestConversationTaskSQLPostgresMigrationRollbackAndReapply(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := work.CreatedAt.Add(time.Second)
-	work.Status, work.CompletedAt, work.Revision = AgentRunStatusCanceled, &now, work.Revision+1
+	work.Status, work.CompletedAt, work.Revision = models.AgentRunStatusCanceled, &now, work.Revision+1
 	storetest.UpdateRun(t, restarted, work, work.Revision-1)
-	page, err := restarted.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: record.Task.Scope, Owner: record.Task.Owner,
+	page, err := restarted.ListConversationTasks(t.Context(), models.ConversationTaskFilter{Scope: record.Task.Scope, Owner: record.Task.Owner,
 		ConversationID: record.Task.ConversationID, ActiveOnly: true, Limit: 100})
 	if err != nil || len(page) != 0 {
 		t.Fatalf("reapplied active projection = %#v, %v", page, err)

@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // agentBuilderMigrationVersion retires workforce_change_sets (spec §3.6): the
@@ -26,15 +28,15 @@ func (s *PostgresStore) migrateAgentBuilder(ctx context.Context, tx *sql.Tx) err
 		return err
 	}
 	var relation sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, s.schema+"."+retiredChangeSetTable).Scan(&relation); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, s.schema+"."+sqlstore.RetiredChangeSetTable).Scan(&relation); err != nil {
 		return err
 	}
 	changeSets := relation.Valid
 	statements := []string{}
 	for _, name := range []string{"work_outbox_insert", "work_outbox_update"} {
-		trigger := workOutboxTrigger{table: retiredChangeSetTable, name: name}
+		trigger := workOutboxTrigger{table: sqlstore.RetiredChangeSetTable, name: name}
 		if changeSets {
-			statements = append(statements, `DROP TRIGGER IF EXISTS `+name+` ON `+s.table(retiredChangeSetTable))
+			statements = append(statements, `DROP TRIGGER IF EXISTS `+name+` ON `+s.table(sqlstore.RetiredChangeSetTable))
 		}
 		statements = append(statements, `DROP FUNCTION IF EXISTS `+s.table(trigger.function())+`()`)
 	}
@@ -60,15 +62,15 @@ func (s *PostgresStore) migrateAgentBuilder(ctx context.Context, tx *sql.Tx) err
 		}
 	}
 	if changeSets {
-		table := s.table(retiredChangeSetTable)
-		if err := foldChangeSetDrafts(ctx, tx, retiredChangeSetTable,
+		table := s.table(sqlstore.RetiredChangeSetTable)
+		if err := sqlstore.FoldChangeSetDrafts(ctx, tx, sqlstore.RetiredChangeSetTable,
 			`SELECT scope_kind, scope_id, id, status, payload->>'parentId', payload->>'prompt' FROM `+table+` ORDER BY created_at, id`,
 			`UPDATE `+table+` SET payload = jsonb_set(payload, '{cutoverPrompts}', $1::jsonb, true) WHERE scope_kind = $2 AND scope_id = $3 AND id = $4`,
 			`DELETE FROM `+table+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`,
 		); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE `+table+` RENAME TO `+agentBuilderCutoverTable); err != nil {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE `+table+` RENAME TO `+sqlstore.AgentBuilderCutoverTable); err != nil {
 			return err
 		}
 		for _, index := range retiredChangeSetIndexes {

@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const conversationReactionMigrationVersion int64 = 68
@@ -36,15 +39,15 @@ func (s *PostgresStore) migrateConversationReactions(ctx context.Context, tx *sq
 	return err
 }
 
-func (s *PostgresStore) AddMessageReaction(ctx context.Context, record MessageReactionRecord) (*ConversationReactionEvent, error) {
+func (s *PostgresStore) AddMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
 	return s.changePostgresReaction(ctx, record, true)
 }
 
-func (s *PostgresStore) RemoveMessageReaction(ctx context.Context, record MessageReactionRecord) (*ConversationReactionEvent, error) {
+func (s *PostgresStore) RemoveMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
 	return s.changePostgresReaction(ctx, record, false)
 }
 
-func (s *PostgresStore) changePostgresReaction(ctx context.Context, record MessageReactionRecord, add bool) (*ConversationReactionEvent, error) {
+func (s *PostgresStore) changePostgresReaction(ctx context.Context, record models.MessageReactionRecord, add bool) (*models.ConversationReactionEvent, error) {
 	if err := record.Validate(); err != nil {
 		return nil, err
 	}
@@ -63,17 +66,17 @@ func (s *PostgresStore) changePostgresReaction(ctx context.Context, record Messa
 		return nil, err
 	}
 	if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	key := []interface{}{record.Scope.Kind, record.Scope.ID, record.ConversationID, record.MessageID, record.Actor.Type, record.Actor.ID, record.Emoji}
-	eventType := ConversationReactionAdded
+	eventType := models.ConversationReactionAdded
 	var result sql.Result
 	if add {
 		result, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("conversation_message_reactions")+`
 			(scope_kind, scope_id, conversation_id, message_id, actor_type, actor_id, emoji, created_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`, append(key, record.CreatedAt)...)
 	} else {
-		eventType = ConversationReactionRemoved
+		eventType = models.ConversationReactionRemoved
 		result, err = tx.ExecContext(ctx, `DELETE FROM `+s.table("conversation_message_reactions")+`
 			WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND message_id=$4 AND actor_type=$5 AND actor_id=$6 AND emoji=$7`, key...)
 	}
@@ -93,7 +96,7 @@ func (s *PostgresStore) changePostgresReaction(ctx context.Context, record Messa
 		WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3`, record.Scope.Kind, record.Scope.ID, record.ConversationID).Scan(&sequence); err != nil {
 		return nil, err
 	}
-	event := newConversationReactionEvent(eventType, record, sequence)
+	event := models.NewConversationReactionEvent(eventType, record, sequence)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+events+`
 		(scope_kind, scope_id, conversation_id, sequence, type, message_id, actor_type, actor_id, emoji, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, record.Scope.Kind, record.Scope.ID, record.ConversationID, sequence, eventType,
@@ -106,35 +109,35 @@ func (s *PostgresStore) changePostgresReaction(ctx context.Context, record Messa
 	return event, nil
 }
 
-func (s *PostgresStore) ListMessageReactions(ctx context.Context, scope Scope, conversationID string, messageIDs []string) ([]*MessageReactionRecord, error) {
+func (s *PostgresStore) ListMessageReactions(ctx context.Context, scope models.Scope, conversationID string, messageIDs []string) ([]*models.MessageReactionRecord, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	if len(messageIDs) == 0 {
-		return []*MessageReactionRecord{}, nil
+		return []*models.MessageReactionRecord{}, nil
 	}
 	args := []interface{}{scope.Kind, scope.ID, conversationID}
 	for _, id := range messageIDs {
 		args = append(args, id)
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT message_id, actor_type, actor_id, emoji, created_at FROM `+s.table("conversation_message_reactions")+`
-		WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND message_id IN (`+reactionMessagePlaceholders(4, len(messageIDs), true)+`)
+		WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND message_id IN (`+sqlstore.ReactionMessagePlaceholders(4, len(messageIDs), true)+`)
 		ORDER BY created_at ASC, actor_type ASC, actor_id ASC, emoji ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
-	return scanMessageReactionRecords(rows, scope, conversationID)
+	return sqlstore.ScanMessageReactionRecords(rows, scope, conversationID)
 }
 
-func (s *PostgresStore) ListConversationReactionEvents(ctx context.Context, scope Scope, conversationID string, afterSequence int64, limit int) ([]*ConversationReactionEvent, error) {
+func (s *PostgresStore) ListConversationReactionEvents(ctx context.Context, scope models.Scope, conversationID string, afterSequence int64, limit int) ([]*models.ConversationReactionEvent, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT sequence, type, message_id, actor_type, actor_id, emoji, created_at FROM `+s.table("conversation_reaction_events")+`
 		WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND sequence > $4 ORDER BY sequence ASC LIMIT $5`,
-		scope.Kind, scope.ID, conversationID, afterSequence, reactionEventLimit(limit))
+		scope.Kind, scope.ID, conversationID, afterSequence, sqlstore.ReactionEventLimit(limit))
 	if err != nil {
 		return nil, err
 	}
-	return scanConversationReactionEvents(rows, scope, conversationID)
+	return sqlstore.ScanConversationReactionEvents(rows, scope, conversationID)
 }

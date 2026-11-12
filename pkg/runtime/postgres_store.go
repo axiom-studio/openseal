@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	_ "github.com/lib/pq"
 )
 
@@ -174,7 +175,7 @@ type PostgresStore struct {
 	migrationStats            PostgresMigrationStats
 }
 
-var _ KernelStore = (*PostgresStore)(nil)
+var _ models.KernelStore = (*PostgresStore)(nil)
 
 // NewPostgresStore opens PostgreSQL and applies OpenSeal's versioned schema.
 func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreOption) (*PostgresStore, error) {

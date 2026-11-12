@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // ownerDefaultSpaceMigrationVersion makes the default space a per-owner
@@ -22,7 +24,7 @@ func (s *PostgresStore) migrateOwnerDefaultSpace(ctx context.Context, tx *sql.Tx
 	for _, statement := range []string{
 		`DROP INDEX IF EXISTS ` + s.table("spaces_default_idx"),
 		`CREATE UNIQUE INDEX IF NOT EXISTS spaces_owner_default_idx ON ` + spaces + ` (scope_kind, scope_id, owner_id) WHERE is_default`,
-		markOwnerDefaultSpaces(spaces, "TRUE"),
+		sqlstore.MarkOwnerDefaultSpaces(spaces, "TRUE"),
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return err

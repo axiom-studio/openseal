@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -138,7 +139,7 @@ func (s *PostgresStore) ActivateTeamAmendment(ctx context.Context, amendment *ke
 	if err != nil {
 		return err
 	}
-	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.TeamRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -177,7 +178,7 @@ func (s *PostgresStore) CreateTeamDefinition(ctx context.Context, definition *ke
 	return s.createTeamDefinition(ctx, s.db, definition)
 }
 
-func (s *PostgresStore) createTeamDefinition(ctx context.Context, db sqlExecQueryer, definition *kernelteam.Definition) error {
+func (s *PostgresStore) createTeamDefinition(ctx context.Context, db sqlstore.ExecRowQuerier, definition *kernelteam.Definition) error {
 	payload, err := json.Marshal(definition)
 	if err != nil {
 		return err
@@ -234,7 +235,7 @@ func (s *PostgresStore) ListTeamDefinitionVersions(ctx context.Context, id strin
 }
 
 func (s *PostgresStore) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, activation workforce.DefinitionActivation) error {
-	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.TeamRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -307,7 +308,7 @@ func (s *PostgresStore) UpdateTeamDeployment(ctx context.Context, deployment *ke
 }
 
 func (s *PostgresStore) updateTeamDeploymentTx(ctx context.Context, tx *sql.Tx, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
-	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.TeamRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}

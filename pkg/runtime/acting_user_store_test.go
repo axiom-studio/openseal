@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -17,8 +18,8 @@ import (
 // store/sqlite.
 
 func TestAgentRunActingUserIsImmutable(t *testing.T) {
-	stores := map[string]func(*testing.T) KernelStore{
-		"sqlite": func(t *testing.T) KernelStore {
+	stores := map[string]func(*testing.T) models.KernelStore{
+		"sqlite": func(t *testing.T) models.KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "acting-user.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -26,16 +27,16 @@ func TestAgentRunActingUserIsImmutable(t *testing.T) {
 			t.Cleanup(func() { _ = store.Close() })
 			return store
 		},
-		"postgres": func(t *testing.T) KernelStore { return actingUserPostgresStore(t) },
+		"postgres": func(t *testing.T) models.KernelStore { return actingUserPostgresStore(t) },
 	}
 	for name, open := range stores {
 		t.Run(name, func(t *testing.T) {
 			store := open(t)
 			ctx := context.Background()
-			scope := Scope{Kind: "tenant", ID: "1"}
-			run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-				Goal: "work", Source: RunSourceManual, ActingUser: "7",
+			scope := models.Scope{Kind: "tenant", ID: "1"}
+			run, err := NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+				Goal: "work", Source: models.RunSourceManual, ActingUser: "7",
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -50,14 +51,14 @@ func TestAgentRunActingUserIsImmutable(t *testing.T) {
 				current.Priority++
 				current.Revision++
 				current.UpdatedAt = current.UpdatedAt.Add(time.Second)
-				event := &ActivityEvent{ID: uuid.NewString(), Scope: scope, EventType: "run.updated", Severity: ActivitySeverityInfo,
-					AgentID: "agent", RunID: run.ID, Actor: ActivityActor{Type: "system", ID: "openseal"}, Summary: "Run updated",
-					Visibility: ActivityVisibilityScope, CreatedAt: current.UpdatedAt}
+				event := &models.ActivityEvent{ID: uuid.NewString(), Scope: scope, EventType: "run.updated", Severity: models.ActivitySeverityInfo,
+					AgentID: "agent", RunID: run.ID, Actor: models.ActivityActor{Type: "system", ID: "openseal"}, Summary: "Run updated",
+					Visibility: models.ActivityVisibilityScope, CreatedAt: current.UpdatedAt}
 				_, err = store.UpdateAgentRunWithEvent(ctx, current, expected, event, nil)
 				return err
 			}
 			for _, changed := range []string{"8", ""} {
-				if err := update(changed); !errors.Is(err, ErrRevisionConflict) {
+				if err := update(changed); !errors.Is(err, models.ErrRevisionConflict) {
 					t.Fatalf("update to ActingUser %q error = %v", changed, err)
 				}
 			}
@@ -77,7 +78,7 @@ func TestAgentRunActingUserIsImmutable(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer tx.Rollback()
-				if err := postgres.updateAgentRunTx(ctx, tx, stored, expected); !errors.Is(err, ErrRevisionConflict) {
+				if err := postgres.updateAgentRunTx(ctx, tx, stored, expected); !errors.Is(err, models.ErrRevisionConflict) {
 					t.Fatalf("updateAgentRunTx changing ActingUser error = %v", err)
 				}
 			}

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/lib/pq"
 )
 
@@ -18,9 +20,9 @@ func (s *PostgresStore) conversationTaskLikeSQL(alias string) string {
 			AND admission_task.work_run_id = ` + alias + `.root_run_id OFFSET 0)`
 }
 
-func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Context, tx *sql.Tx, claim *AgentRunClaim, runs []*AgentRun) error {
-	return prepareConversationTaskAdmission(ctx, claim, runs, conversationTaskAdmissionLookup{
-		Task: func(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
+func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Context, tx *sql.Tx, claim *models.AgentRunClaim, runs []*models.AgentRun) error {
+	return models.PrepareConversationTaskAdmission(ctx, claim, runs, models.ConversationTaskAdmissionLookup{
+		Task: func(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 			var payload string
 			err := tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("conversation_tasks")+` WHERE scope_kind = $1 AND scope_id = $2 AND work_run_id = $3`, scope.Kind, scope.ID, id).Scan(&payload)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -29,18 +31,18 @@ func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Con
 			if err != nil {
 				return nil, err
 			}
-			return decodeConversationTaskSQL(payload)
+			return sqlstore.DecodeConversationTask(payload)
 		},
-		Run: func(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
+		Run: func(ctx context.Context, scope models.Scope, id string) (*models.AgentRun, error) {
 			return s.getPostgresAgentRunTx(ctx, tx, scope, id, true)
 		},
-		Conversation: func(ctx context.Context, scope Scope, id string) (*Conversation, error) {
+		Conversation: func(ctx context.Context, scope models.Scope, id string) (*models.Conversation, error) {
 			return s.getPostgresConversation(ctx, tx, scope, id, false)
 		},
-		Message: func(ctx context.Context, scope Scope, conversationID, id string) (*ChannelMessage, error) {
+		Message: func(ctx context.Context, scope models.Scope, conversationID, id string) (*models.ChannelMessage, error) {
 			return s.getPostgresChannelMessage(ctx, tx, scope, conversationID, id, false)
 		},
-		Request: func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
+		Request: func(ctx context.Context, scope models.Scope, id string) (*models.AgentRequest, error) {
 			var payload string
 			err := tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_requests")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, id).Scan(&payload)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -49,9 +51,9 @@ func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Con
 			if err != nil {
 				return nil, err
 			}
-			return decodeAgentRequest(payload)
+			return sqlstore.DecodeAgentRequest(payload)
 		},
-		Round: func(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
+		Round: func(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ParticipationRound, error) {
 			return s.getPostgresParticipationRoundByKey(ctx, tx, scope, conversationID, key, false)
 		},
 	})
@@ -59,17 +61,17 @@ func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Con
 
 // Reserve diagnostics inspect a bounded candidate page and only relevant live
 // claims. Historical and queued portfolio payloads are never loaded wholesale.
-func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Context, tx *sql.Tx, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
+func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Context, tx *sql.Tx, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND status IN ($3, $4)
 		AND ($5 = '' OR assigned_agent_id = $5) AND ($6 = '' OR COALESCE(payload->>'kind', 'agent_work') = $6)
 		AND ((status = $3 AND available_at <= $7 AND (lease_expires_at IS NULL OR lease_expires_at <= $7))
 			OR (status = $4 AND (lease_expires_at IS NULL OR lease_expires_at <= $7)))
-		ORDER BY queue_entered_at, id LIMIT 32`, claim.Scope.Kind, claim.Scope.ID, AgentRunStatusQueued, AgentRunStatusRunning, claim.AssignedAgentID, claim.Kind, claim.Now)
+		ORDER BY queue_entered_at, id LIMIT 32`, claim.Scope.Kind, claim.Scope.ID, models.AgentRunStatusQueued, models.AgentRunStatusRunning, claim.AssignedAgentID, claim.Kind, claim.Now)
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]*AgentRun, 0)
+	candidates := make([]*models.AgentRun, 0)
 	agents, owners, objectives, concurrency := make([]string, 0), make([]string, 0), make([]string, 0), make([]string, 0)
 	for rows.Next() {
 		var payload string
@@ -77,7 +79,7 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 			rows.Close()
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			rows.Close()
 			return nil, err
@@ -85,7 +87,7 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 		candidates = append(candidates, run)
 		agents = append(agents, run.AssignedAgentID)
 		if claim.MaxActiveForOwner > 0 {
-			owners = append(owners, agentRunOwnerSchedulingKey(run.Owner))
+			owners = append(owners, models.AgentRunOwnerSchedulingKey(run.Owner))
 		}
 		if run.ObjectiveID != "" {
 			objectives = append(objectives, run.ObjectiveID)
@@ -102,13 +104,13 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 		return nil, err
 	}
 	claim.ActiveConversationTaskRuns = make(map[string]bool)
-	runs := append([]*AgentRun(nil), candidates...)
+	runs := append([]*models.AgentRun(nil), candidates...)
 	rows, err = tx.QueryContext(ctx, `SELECT active.payload, (`+s.conversationTaskLikeSQL("active")+`) FROM `+s.table("agent_runs")+` AS active
 		WHERE active.scope_kind = $1 AND active.scope_id = $2 AND active.status = $3 AND active.lease_expires_at > $4
 		AND (active.assigned_agent_id = ANY($5) OR
 			((active.payload->'owner'->>'type') || chr(31) || (active.payload->'owner'->>'id')) = ANY($6) OR
 			active.objective_id = ANY($7) OR COALESCE(active.payload->>'concurrencyKey', '') = ANY($8))`,
-		claim.Scope.Kind, claim.Scope.ID, AgentRunStatusRunning, claim.Now, pq.Array(agents), pq.Array(owners), pq.Array(objectives), pq.Array(concurrency))
+		claim.Scope.Kind, claim.Scope.ID, models.AgentRunStatusRunning, claim.Now, pq.Array(agents), pq.Array(owners), pq.Array(objectives), pq.Array(concurrency))
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +122,7 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 			rows.Close()
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			rows.Close()
 			return nil, err
@@ -146,7 +148,7 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 	if err := s.preparePostgresConversationTaskAdmission(ctx, tx, &claim, runs); err != nil {
 		return nil, err
 	}
-	policy := make(map[string]*Objective)
+	policy := make(map[string]*models.Objective)
 	if len(objectives) > 0 {
 		rows, err = tx.QueryContext(ctx, `SELECT payload FROM `+s.table("objectives")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = ANY($3)`, claim.Scope.Kind, claim.Scope.ID, pq.Array(objectives))
 		if err != nil {
@@ -158,7 +160,7 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 				rows.Close()
 				return nil, err
 			}
-			objective, err := decodeObjective(payload)
+			objective, err := sqlstore.DecodeObjective(payload)
 			if err != nil {
 				rows.Close()
 				return nil, err
@@ -173,11 +175,11 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 			return nil, err
 		}
 	}
-	_, decision := evaluateAgentRunAdmission(runs, policy, claim)
+	_, decision := models.EvaluateAgentRunAdmission(runs, policy, claim)
 	// This is a bounded observation. A later candidate may be ready, but this
 	// diagnostic never grants authority or expands the selection batch.
-	if decision.Outcome == AgentRunAdmissionReady {
-		decision.Outcome = AgentRunAdmissionBackpressured
+	if decision.Outcome == models.AgentRunAdmissionReady {
+		decision.Outcome = models.AgentRunAdmissionBackpressured
 	}
 	return decision, nil
 }

@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const credentialRequestMigrationVersion int64 = 62
@@ -22,14 +25,14 @@ func (s *PostgresStore) migrateCredentialRequests(ctx context.Context, tx *sql.T
 	return err
 }
 
-func (s *PostgresStore) GetCredentialRequest(ctx context.Context, scope Scope, id string) (*CredentialRequest, error) {
-	return getCredentialRequest(ctx, s.db, s.table("credential_requests"), scope, id)
+func (s *PostgresStore) GetCredentialRequest(ctx context.Context, scope models.Scope, id string) (*models.CredentialRequest, error) {
+	return sqlstore.GetCredentialRequest(ctx, s.db, s.table("credential_requests"), scope, id)
 }
 
-func (s *PostgresStore) ListCredentialRequests(ctx context.Context, scope Scope, deploymentID, conversationID string) ([]*CredentialRequest, error) {
-	return listCredentialRequests(ctx, s.db, s.table("credential_requests"), scope, deploymentID, conversationID)
+func (s *PostgresStore) ListCredentialRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.CredentialRequest, error) {
+	return sqlstore.ListCredentialRequests(ctx, s.db, s.table("credential_requests"), scope, deploymentID, conversationID)
 }
 
-func (s *PostgresStore) SaveCredentialRequest(ctx context.Context, r *CredentialRequest, expected int64) error {
-	return saveCredentialRequest(ctx, s.db, s.table("credential_requests"), r, expected)
+func (s *PostgresStore) SaveCredentialRequest(ctx context.Context, r *models.CredentialRequest, expected int64) error {
+	return sqlstore.SaveCredentialRequest(ctx, s.db, s.table("credential_requests"), r, expected)
 }
