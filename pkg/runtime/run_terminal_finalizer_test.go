@@ -214,7 +214,7 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 	seen := make(map[string]bool, 206)
 	pool := &AgentRunWorkerPool{
 		config:    AgentRunWorkerConfig{Scope: scope},
-		portfolio: store,
+		portfolio: store, now: time.Now,
 		runFinalizer: RunTerminalFinalizerFunc(func(_ context.Context, run *AgentRun) error {
 			if seen[run.ID] {
 				return nil
@@ -288,7 +288,7 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	}
 	pool := &AgentRunWorkerPool{
 		config: AgentRunWorkerConfig{Scope: scope}, portfolio: store, collaboration: collaboration,
-		logger: zap.NewNop().Sugar(),
+		logger: zap.NewNop().Sugar(), now: time.Now,
 	}
 	pool.reconcileTerminalRunFinalizers(ctx)
 	request, err := collaboration.GetAgentRequest(ctx, scope, created.Request.ID)
@@ -345,7 +345,7 @@ func TestTerminalRunReconciliationCancelsOrphanedDescendantsAfterRestart(t *test
 	// state and must repair descendants without relying on the original worker.
 	pool := &AgentRunWorkerPool{
 		config: AgentRunWorkerConfig{Scope: scope}, portfolio: store,
-		runCommands: NewRunCommandService(store), logger: zap.NewNop().Sugar(),
+		runCommands: NewRunCommandService(store), logger: zap.NewNop().Sugar(), now: time.Now,
 	}
 	pool.finalizeTerminalRun(ctx, failed)
 	child, err := store.GetAgentRun(ctx, scope, childResult.Run.ID)

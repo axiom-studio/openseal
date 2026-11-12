@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -114,6 +115,7 @@ type AgentRunWorkerPool struct {
 	// expiry instead of polling. Stores without it always poll.
 	deadlines AgentRunDeadlineStore
 	usage     poolActivity
+	now       func() time.Time
 }
 
 // SetActionCoordinator opens each step's nested-action window (a running
@@ -143,7 +145,7 @@ func (p *AgentRunWorkerPool) IdleFor(now time.Time) time.Duration {
 	return p.usage.idleFor(now)
 }
 
-func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig) (*AgentRunWorkerPool, error) {
+func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
 	if store == nil || resolver == nil {
 		return nil, errors.New("kernel store and turn runner resolver are required")
 	}
@@ -153,36 +155,37 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
+	clock := models.ClockFrom(opts)
 	loop, err := NewRunLoop(store, nil, logger, RunLoopConfig{
-		StepLeaseDuration: config.TurnLeaseDuration,
-		PlanToolEntries:   workerPlanToolEntries(store), PlainTextFinal: workerPlainTextFinal,
+		StepLeaseDuration: config.TurnLeaseDuration, Now: clock,
+		PlanToolEntries: workerPlanToolEntries(store), PlainTextFinal: workerPlainTextFinal,
 	})
 	if err != nil {
 		return nil, err
 	}
 	pool := &AgentRunWorkerPool{
-		config: config, scheduler: NewAgentRunScheduler(store), portfolio: store, loop: loop,
-		wakeService: NewAgentRunWakeService(store, store), activity: NewRunActivityService(store, store),
-		runCommands: NewRunCommandService(store),
-		resolver:    resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: newWorkerPollSignal(),
+		config: config, scheduler: NewAgentRunScheduler(store, opts...), portfolio: store, loop: loop,
+		wakeService: NewAgentRunWakeService(store, store, opts...), activity: NewRunActivityService(store, store, opts...),
+		runCommands: NewRunCommandService(store, opts...), now: clock,
+		resolver: resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: newWorkerPollSignal(),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
 	}
 	pool.deadlines, _ = store.(AgentRunDeadlineStore)
 	pool.usage.touch()
 	if forkStore, ok := store.(RunForkStore); ok {
-		pool.forks = NewRunForkCoordinator(forkStore)
+		pool.forks = NewRunForkCoordinator(forkStore, opts...)
 		if _, indexed := forkStore.(RunDependencyReconciliationStore); indexed {
-			pool.dependencies = NewDependencyCoordinator(forkStore)
+			pool.dependencies = NewDependencyCoordinator(forkStore, opts...)
 		}
 	}
 	if collaborationStore, ok := store.(CollaborationKernelStore); ok {
-		pool.collaboration = NewCollaborationService(collaborationStore)
+		pool.collaboration = NewCollaborationService(collaborationStore, opts...)
 	}
 	if taskStore, ok := store.(ConversationTaskKernelStore); ok {
-		pool.conversationTasks = NewConversationTaskService(taskStore)
+		pool.conversationTasks = NewConversationTaskService(taskStore, opts...)
 	}
 	if inboxStore, ok := store.(AgentRequestInboxStore); ok {
-		pool.requestInbox, _ = NewAgentRequestInboxReconciler(inboxStore)
+		pool.requestInbox, _ = NewAgentRequestInboxReconciler(inboxStore, opts...)
 	}
 	if reportingStore, ok := store.(ConversationStore); ok {
 		pool.reportingStore = reportingStore
@@ -518,7 +521,7 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 			p.usage.end()
 			return
 		}
-		result, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, time.Now())
+		result, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, p.now())
 		var maintenanceDue *time.Time
 		maintenanceFailed := false
 		if err != nil {
@@ -561,7 +564,7 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 			// until woken. Claim and maintenance state only changes through
 			// committed writes, which the outbox publishes, or through time,
 			// which these deadlines cover.
-			now := time.Now()
+			now := p.now()
 			p.usage.begin()
 			deadline, deadlineErr := p.deadlines.NextAgentRunDeadline(ctx, p.config.Scope, p.config.Kind, p.config.AssignedAgentID, now.UTC())
 			p.usage.end()
@@ -600,7 +603,7 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		return nil
 	}
 	const interval = 10 * time.Second
-	now := time.Now().UTC()
+	now := p.now().UTC()
 	firstScan := p.lastFinalizationScan.IsZero()
 	if !firstScan && now.Sub(p.lastFinalizationScan) < interval {
 		return new(p.lastFinalizationScan.Add(interval))
@@ -778,7 +781,7 @@ func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) (*time.T
 			return nil, failed
 		}
 		// More waiting groups remain beyond this page.
-		return new(time.Now()), failed
+		return new(p.now()), failed
 	}
 	// Custom stores without the optional indexed contract retain their existing
 	// terminal-child recovery behavior.
