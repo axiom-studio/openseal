@@ -12,13 +12,19 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
+// runForkStore is the store the fork coordinator needs.
+type runForkStore interface {
+	models.KernelStore
+	models.RunDependencyStore
+}
+
 func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 	t.Parallel()
 	stores := []struct {
 		name string
-		open func(*testing.T) (atomicForkStore, func())
+		open func(*testing.T) (runForkStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (atomicForkStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (runForkStore, func()) {
 			store, err := sqlite.New(filepath.Join(t.TempDir(), "coordinator.db"))
 			if err != nil {
 				t.Fatal(err)

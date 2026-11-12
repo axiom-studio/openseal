@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -28,7 +29,10 @@ func forEachDependencySessionStore(t *testing.T, fn func(f *storetest.SessionFix
 		name string
 		open func(t *testing.T) dependencySessionStore
 	}{
-		{"sqlite", func(t *testing.T) dependencySessionStore { return openTestSQLiteSessionStore(t) }},
+		{"sqlite", func(t *testing.T) dependencySessionStore {
+			store, _ := kerneltest.NewSQLiteFileStore(t)
+			return store
+		}},
 		{"postgres", openDependencySessionPostgres},
 	}
 	for _, backend := range backends {
