@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func claimedForkTaskFixture(t *testing.T) (*SQLiteStore, *AgentRun, *ConversationTaskResult) {
@@ -19,7 +21,8 @@ func claimedForkTaskFixture(t *testing.T) (*SQLiteStore, *AgentRun, *Conversatio
 	root.Context["privateBrief"] = "source-only"
 	root.Context["release"] = "original"
 	root.Plan = map[string]interface{}{"research": "canonical-plan"}
-	putStoredRun(t, store, root)
+	root.Revision++
+	storetest.UpdateRun(t, store, root, root.Revision-1)
 	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
 		Scope: accepted.Task.Scope, Kind: RunKindAgentWork, AssignedAgentID: accepted.Task.TargetAgentID,
 		WorkerID: "fork-worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,

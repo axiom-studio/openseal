@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
@@ -30,21 +31,23 @@ func continuationLifecycleFixture(t *testing.T, store *SQLiteStore, id string) (
 	return result.Run, conversation, message
 }
 
-func backdateContinuationLifecycleRun(t *testing.T, store *SQLiteStore, run *AgentRun, createdAt time.Time) *AgentRun {
+// backdateContinuationLifecycleRun makes the Run look created at createdAt.
+// No store method changes a Run's creation time, so it rewrites the row on
+// db, the test's own connection to the store's file.
+func backdateContinuationLifecycleRun(t *testing.T, store *SQLiteStore, db *sql.DB, run *AgentRun, createdAt time.Time) *AgentRun {
 	t.Helper()
-	current := getStoredRun(t, store, run.Scope, run.ID)
-	current.CreatedAt = createdAt
-	putStoredRun(t, store, current)
-	return cloneAgentRun(current)
+	execSQL(t, db, `UPDATE agent_runs SET created_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, createdAt, run.Scope.Kind, run.Scope.ID, run.ID)
+	rewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.CreatedAt = createdAt })
+	return getStoredRun(t, store, run.Scope, run.ID)
 }
 
 func TestConversationTaskContinuationReconcilesQueuedRunFromCreationTime(t *testing.T) {
-	store := newTestKernelStore(t)
+	store, db := newTestSQLiteStore(t)
 	run, conversation, _ := continuationLifecycleFixture(t, store, "queued-continuation")
 	now := time.Now().UTC()
-	run = backdateContinuationLifecycleRun(t, store, run, now.Add(-ConversationTaskForegroundTimeout))
+	run = backdateContinuationLifecycleRun(t, store, db, run, now.Add(-ConversationTaskForegroundTimeout))
 	// A fresh activity timestamp is not a new foreground deadline.
-	rewriteStoredPayload(t, store, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.UpdatedAt = now })
+	rewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.UpdatedAt = now })
 	reconciler, err := NewConversationTaskContinuationReconciler(store)
 	if err != nil {
 		t.Fatal(err)
@@ -168,9 +171,9 @@ func (p *promotionTurnPublisher) PublishTurnOutput(ctx context.Context, run *Age
 }
 
 func TestAgentRunWorkerContinuationAbsorbsNativeTaskProposal(t *testing.T) {
-	store := newTestKernelStore(t)
+	store, db := newTestSQLiteStore(t)
 	run, conversation, _ := continuationLifecycleFixture(t, store, "native-continuation")
-	run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-ConversationTaskForegroundTimeout-time.Second))
+	run = backdateContinuationLifecycleRun(t, store, db, run, time.Now().Add(-ConversationTaskForegroundTimeout-time.Second))
 	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil {
 		t.Fatalf("claim: %#v %v", claimed, err)
@@ -242,9 +245,9 @@ func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *
 func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 	for _, status := range []AgentRunStatus{AgentRunStatusQueued, AgentRunStatusRunning} {
 		t.Run(string(status), func(t *testing.T) {
-			store := newTestKernelStore(t)
+			store, db := newTestSQLiteStore(t)
 			run, conversation, trigger := continuationLifecycleFixture(t, store, "reconcile-foreground")
-			run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-time.Minute))
+			run = backdateContinuationLifecycleRun(t, store, db, run, time.Now().Add(-time.Minute))
 			if status == AgentRunStatusRunning {
 				claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 				if err != nil || claimed == nil {

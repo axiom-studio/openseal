@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func promotedContinuationAuthorityFixture(t *testing.T, id string) (*SQLiteStore, *ConversationTaskResult, *Conversation, *ChannelMessage) {
 	t.Helper()
-	store := newTestKernelStore(t)
+	store, db := newTestSQLiteStore(t)
 	run, conversation, message := continuationLifecycleFixture(t, store, id)
 	now := time.Now().UTC()
-	run = backdateContinuationLifecycleRun(t, store, run, now.Add(-ConversationTaskForegroundTimeout-time.Second))
+	run = backdateContinuationLifecycleRun(t, store, db, run, now.Add(-ConversationTaskForegroundTimeout-time.Second))
 	result, err := store.PromoteConversationTask(t.Context(), ConversationTaskPromotionRequest{Scope: run.Scope, RunID: run.ID, Now: now})
 	if err != nil || result == nil {
 		t.Fatalf("promote continuation: %#v %v", result, err)
@@ -31,15 +33,15 @@ func finishContinuationAuthorityRun(t *testing.T, store *SQLiteStore, run *Agent
 	current.Status, current.LeaseOwner, current.LeaseExpiresAt = status, "", nil
 	current.CompletedAt, current.UpdatedAt = &now, now
 	current.Revision++
-	putStoredRun(t, store, current)
+	storetest.UpdateRun(t, store, current, current.Revision-1)
 	return current
 }
 
 func TestConversationTaskContinuationUsesTaskReserveAndLeavesForegroundSlot(t *testing.T) {
-	store := newTestKernelStore(t)
+	store, db := newTestSQLiteStore(t)
 	base, _, _ := continuationLifecycleFixture(t, store, "continuation-reserve")
 	now := time.Now().UTC()
-	base = backdateContinuationLifecycleRun(t, store, base, now.Add(-ConversationTaskForegroundTimeout-time.Second))
+	base = backdateContinuationLifecycleRun(t, store, db, base, now.Add(-ConversationTaskForegroundTimeout-time.Second))
 	for i := range 4 {
 		run := cloneAgentRun(base)
 		if i > 0 {
@@ -107,7 +109,15 @@ func TestConversationTaskContinuationAdmitsOriginalDelegatedAuthorityOnly(t *tes
 	if err := store.CreateAgentRun(t.Context(), child); err != nil {
 		t.Fatal(err)
 	}
-	putStoredAgentRequest(t, store, request)
+	// The handoff moves the parent to its next revision, as a delegation
+	// does.
+	source := getStoredRun(t, store, parent.Scope, parent.ID)
+	source.Revision++
+	if _, err := store.CreateAgentRequest(t.Context(), AgentRequestCreateRecord{Request: request, SourceRun: source, ExpectedSourceRevision: source.Revision - 1,
+		Event: &ActivityEvent{ID: "original-request-created", Scope: parent.Scope, RunID: parent.ID, EventType: "agent_request.created", Summary: "Hand off the specialist portion",
+			Actor: ActivityActor{Type: "agent", ID: parent.Owner.ID}, Visibility: ActivityVisibilityScope, CreatedAt: parent.UpdatedAt}}); err != nil {
+		t.Fatal(err)
+	}
 	getRun := func(id string) (*AgentRun, error) { return store.GetAgentRun(t.Context(), parent.Scope, id) }
 	getRequest := func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
 		return store.GetAgentRequest(ctx, scope, id)
@@ -118,12 +128,16 @@ func TestConversationTaskContinuationAdmitsOriginalDelegatedAuthorityOnly(t *tes
 	}
 	claim := AgentRunClaim{Scope: child.Scope, Kind: RunKindConversation, WorkerID: "specialist", AssignedAgentID: child.AssignedAgentID,
 		Now: time.Now().Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 4, ConversationTaskForegroundReserve: 1}
-	conn, err := store.db.Conn(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = store.prepareConversationTaskAdmissionConn(t.Context(), conn, &claim, []*AgentRun{child})
-	conn.Close()
+	// The store prepares admission with the same reads inside its claim
+	// transaction; nothing writes between them here.
+	err = prepareConversationTaskAdmission(t.Context(), &claim, []*AgentRun{child}, conversationTaskAdmissionLookup{
+		Task: store.FindConversationTaskByWorkRunID, Run: store.GetAgentRun, Conversation: store.GetConversation,
+		Message: store.GetChannelMessage, Request: store.GetAgentRequest,
+		Round: func(context.Context, Scope, string, string) (*ParticipationRound, error) {
+			t.Fatal("a chat continuation needs no participation round proof")
+			return nil, nil
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

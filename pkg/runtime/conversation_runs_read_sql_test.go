@@ -18,45 +18,19 @@ func seedConversationReadSQLHistory(t *testing.T, store conversationTaskSQLTestS
 	if err := run.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	seed := func(insert func(*AgentRun) error) {
-		for i := 0; i < 10000; i++ {
-			run.ID = fmt.Sprintf("unrelated-root-%05d", i)
-			run.RootRunID = run.ID
-			if i%2 == 0 {
-				run.Context[conversationRunContextConversationID] = conversationID
-			} else {
-				run.Context[conversationRunContextConversationID] = "unrelated-conversation"
-			}
-			if err := insert(run); err != nil {
-				t.Fatal(err)
-			}
+	// No store method writes Runs in bulk, so the history takes a few
+	// seconds to build.
+	for i := 0; i < 10000; i++ {
+		run.ID = fmt.Sprintf("unrelated-root-%05d", i)
+		run.RootRunID = run.ID
+		if i%2 == 0 {
+			run.Context[conversationRunContextConversationID] = conversationID
+		} else {
+			run.Context[conversationRunContextConversationID] = "unrelated-conversation"
 		}
-	}
-	switch store := store.(type) {
-	case *SQLiteStore:
-		conn, err := beginImmediateSQLite(t.Context(), store.db)
-		if err != nil {
+		if err := store.CreateAgentRun(t.Context(), run); err != nil {
 			t.Fatal(err)
 		}
-		committed := false
-		defer rollbackSQLiteConn(conn, &committed)
-		seed(func(run *AgentRun) error { return insertSQLiteAgentRunConn(t.Context(), conn, run) })
-		if _, err := conn.ExecContext(t.Context(), "COMMIT"); err != nil {
-			t.Fatal(err)
-		}
-		committed = true
-	case *PostgresStore:
-		tx, err := store.db.BeginTx(t.Context(), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tx.Rollback()
-		seed(func(run *AgentRun) error { return store.insertPostgresAgentRunTx(t.Context(), tx, run) })
-		if err := tx.Commit(); err != nil {
-			t.Fatal(err)
-		}
-	default:
-		t.Fatal("unsupported SQL history fixture store")
 	}
 }
 

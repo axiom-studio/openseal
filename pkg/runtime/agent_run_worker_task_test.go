@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // Conversation task tests over the run loop: chat source Runs are driven by
@@ -262,7 +264,8 @@ func expireRunLease(t *testing.T, store *SQLiteStore, run *AgentRun) {
 	current := getStoredRun(t, store, run.Scope, run.ID)
 	past := time.Now().UTC().Add(-time.Second)
 	current.LeaseExpiresAt = &past
-	putStoredRun(t, store, current)
+	current.Revision++
+	storetest.UpdateRun(t, store, current, current.Revision-1)
 }
 
 func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *testing.T) {
