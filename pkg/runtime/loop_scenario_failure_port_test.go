@@ -17,8 +17,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
+
+// portVisualArtifactID is the stable artifact ID of the visual on the answer
+// to trigger: a replayed answer must reference the visual its first attempt
+// stored.
+func portVisualArtifactID(runID, triggerID string) string {
+	return "visual-" + strings.TrimPrefix(models.SHA256DigestString(runID+"\x00"+triggerID), "sha256:")[:40]
+}
 
 // answerVisualContent is the artifact content store visuals are written to.
 type answerVisualContent struct {
@@ -166,14 +174,15 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 			f := newLoopFixture(t, store, withRules(&modelRule{name: "down",
 				err: &TurnHostFailure{Code: "host_draining", Message: "The step host is restarting.", Retryable: true}}))
 			conversation, run := f.startChat("check issue 1")
-			failed := f.driveToRest(run.ID, len(hostRetryDelays)+2)
+			const hostRetries = 3 // the run loop requeues a retryable host failure three times
+			failed := f.driveToRest(run.ID, hostRetries+2)
 			f.mustStatus(failed, AgentRunStatusFailed)
 			portRequireTypedFailure(t, failed)
 			if failed.FailureExplanation.Code != StepFailureHostUnavailable || failed.FailureExplanation.Explained {
 				t.Fatalf("failure = %#v, want an unexplained %s", failed.FailureExplanation, StepFailureHostUnavailable)
 			}
-			if got := len(f.model.calls("")); got != len(hostRetryDelays)+1 {
-				t.Fatalf("model calls = %d, want %d (3 requeues, then the failure)", got, len(hostRetryDelays)+1)
+			if got := len(f.model.calls("")); got != hostRetries+1 {
+				t.Fatalf("model calls = %d, want %d (3 requeues, then the failure)", got, hostRetries+1)
 			}
 			if len(portAgentMessages(f, conversation.ID)) != 0 {
 				t.Fatal("the loop posted a reply for an unexplained failure")
@@ -295,10 +304,10 @@ func TestLoopCompletionChecksReturnToolErrors(t *testing.T) {
 	t.Run("unevidenced_completion_claim", func(t *testing.T) {
 		// The claim vocabulary is claimsExternalMutation's; "I updated the
 		// status" (spec 12 §5.1) is not in it.
-		chatCheck(t, "port_unevidenced", "Done: I sent the email to Ana.", finalUnevidencedClaimCode)
+		chatCheck(t, "port_unevidenced", "Done: I sent the email to Ana.", "unevidenced_external_claim")
 	})
 	t.Run("unverified_approval_claim", func(t *testing.T) {
-		chatCheck(t, "port_approval_claim", "Your approval request has been submitted.", finalApprovalClaimCode)
+		chatCheck(t, "port_approval_claim", "Your approval request has been submitted.", "approval_claim")
 	})
 
 }
@@ -321,7 +330,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			trigger := f.messages(conversation.ID)[0]
 			done := f.driveToRest(run.ID, 3)
 			f.mustStatus(done, AgentRunStatusCompleted)
-			id := answerVisualArtifactID(run.ID, trigger.ID, "")
+			id := portVisualArtifactID(run.ID, trigger.ID)
 			answers := portAgentMessages(f, conversation.ID)
 			want := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}, {Kind: ConversationReferenceArtifact, ID: id, Version: 1}}
 			if len(answers) != 1 || answers[0].Content != "Revenue is up." || answers[0].Intent != MessageIntentAnswer ||
@@ -367,14 +376,14 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			done := f.driveToRest(run.ID, 3)
 			f.mustStatus(done, AgentRunStatusCompleted)
 			finals := portFinalEntries(f, run.ID)
-			if len(finals) != 2 || finals[0].State != ToolEntryError || !strings.HasPrefix(portEntryText(finals[0]), conversationVisualRejectedText) {
+			if len(finals) != 2 || finals[0].State != ToolEntryError || !strings.HasPrefix(portEntryText(finals[0]), "The visual failed its checks: ") {
 				t.Fatalf("final entries = %v (%q)", f.entryTypes(run.ID), portEntryText(finals[0]))
 			}
 			answers := portAgentMessages(f, conversation.ID)
 			if len(answers) != 1 || answers[0].Content != "Revenue is up." || len(answers[0].References) != 1 || content.puts != 0 {
 				t.Fatalf("answers = %#v (%d visual puts), want the answer without the visual", answers, content.puts)
 			}
-			if events := f.events(run.ID, answerVisualRejectedEvent); len(events) != 1 || events[0].Severity != ActivitySeverityWarning {
+			if events := f.events(run.ID, "turn.visual_rejected"); len(events) != 1 || events[0].Severity != ActivitySeverityWarning {
 				t.Fatalf("visual rejected events = %#v", events)
 			}
 		})
