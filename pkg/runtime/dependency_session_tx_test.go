@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -44,17 +43,14 @@ func forEachDependencySessionStore(t *testing.T, fn func(f *sessionConformance, 
 
 func openDependencySessionPostgres(t *testing.T) dependencySessionStore {
 	t.Helper()
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL tests")
-	}
+	pgSchema := newTestPostgresSchema(t, "dependency_session_")
+	dsn := pgSchema.dsn
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema("dependency_session_"+uuid.NewString()[:8]))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 		_ = store.Close()
 	})
 	return store

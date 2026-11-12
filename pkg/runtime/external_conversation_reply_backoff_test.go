@@ -2,14 +2,12 @@ package runtime
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/google/uuid"
 )
 
 func appliedReplyItem(endpoint *ExternalConversationEndpoint, id, endpointID, runID string, now time.Time) *ExternalConversationInboxItem {
@@ -168,20 +166,18 @@ func TestExternalConversationReplyProgressDurableStores(t *testing.T) {
 			return store
 		}},
 		{name: "postgres", open: func(t *testing.T) replyProgressTestStore {
-			dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-			if dsn == "" {
-				t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL regressions")
-			}
+			pgSchema := newTestPostgresSchema(t, "openseal_reply_progress_")
+			dsn := pgSchema.dsn
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema("openseal_reply_progress_"+uuid.NewString()[:8]))
+			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				_, _ = store.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+				_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
 				_ = store.Close()
 			})
 			return store

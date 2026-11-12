@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -15,25 +14,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill/openclaw"
 	"github.com/axiom-studio/openseal/pkg/skill/sourceartifact"
-	"github.com/google/uuid"
 )
 
 func TestPostgresSkillSourceArtifactsAreReplicaSafeScopedDurableAndCollectable(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	schema := "openseal_skill_source_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_skill_source_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +103,7 @@ func TestPostgresSkillSourceArtifactsAreReplicaSafeScopedDurableAndCollectable(t
 		t.Fatal(err)
 	}
 	var tables int
-	if err := primary.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=$1 AND table_name IN ('skill_source_artifacts','skill_source_artifact_references')`, primary.schema).Scan(&tables); err != nil || tables != 0 {
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=$1 AND table_name IN ('skill_source_artifacts','skill_source_artifact_references')`, pgSchema.name).Scan(&tables); err != nil || tables != 0 {
 		t.Fatalf("source artifact tables after rollback=%d err=%v", tables, err)
 	}
 	if err := primary.migrate(ctx); err != nil {

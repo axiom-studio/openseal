@@ -2,13 +2,10 @@ package runtime
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func conversationOriginFilterStores() map[string]func(*testing.T) ConversationStore {
@@ -22,18 +19,15 @@ func conversationOriginFilterStores() map[string]func(*testing.T) ConversationSt
 			return store
 		},
 		"postgres": func(t *testing.T) ConversationStore {
-			dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-			if dsn == "" {
-				t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-			}
+			pgSchema := newTestPostgresSchema(t, "openseal_origin_filter_")
+			dsn := pgSchema.dsn
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
-			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema("openseal_origin_filter_"+uuid.NewString()[:8]))
+			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
-				_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 				_ = store.Close()
 			})
 			return store

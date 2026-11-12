@@ -4,12 +4,9 @@ package runtime
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // A v77 database keeps its Personal space: migration 78 renames the column,
@@ -17,18 +14,16 @@ import (
 // keeps a name someone gave the space. Migration 86 leaves it the default
 // space of the owner it has.
 func TestPostgresDefaultSpaceMigration(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN")
-	}
+	pgSchema := newTestPostgresSchema(t, "default_space_")
+	dsn := pgSchema.dsn
+	schema := pgSchema.name
 	ctx := context.Background()
-	schema := "default_space_" + uuid.NewString()[:8]
 	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
 		_ = store.Close()
 	})
 	scope := Scope{Kind: "tenant", ID: "9"}
@@ -47,20 +42,20 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	// Rewind to the Personal schema: one space per scope, owned by no person.
 	// The space keeps a name someone gave it.
 	for _, statement := range []string{
-		`DROP TABLE ` + store.table("space_people"),
-		`DROP INDEX ` + store.table("spaces_owner_default_idx"),
-		`ALTER TABLE ` + store.table("spaces") + ` DROP COLUMN access`,
-		`ALTER TABLE ` + store.table("spaces") + ` RENAME COLUMN owner_id TO created_by`,
-		`ALTER TABLE ` + store.table("spaces") + ` RENAME COLUMN is_default TO is_personal`,
-		`CREATE UNIQUE INDEX spaces_personal_idx ON ` + store.table("spaces") + ` (scope_kind, scope_id) WHERE is_personal`,
-		`ALTER TABLE ` + store.table("space_members") + ` DROP CONSTRAINT space_members_scope_kind_scope_id_space_id_fkey`,
-		`UPDATE ` + store.table("spaces") + ` SET id = '` + oldID + `', name = 'Shared', created_by = '` + legacyDefaultSpaceOwner + `'`,
-		`UPDATE ` + store.table("space_members") + ` SET space_id = '` + oldID + `'`,
-		`ALTER TABLE ` + store.table("space_members") + ` ADD FOREIGN KEY (scope_kind, scope_id, space_id) REFERENCES ` + store.table("spaces") + ` (scope_kind, scope_id, id) ON DELETE CASCADE`,
-		`UPDATE ` + store.table("conversations") + ` SET space_id = '` + oldID + `', payload = jsonb_set(payload, '{spaceId}', to_jsonb('` + oldID + `'::text))`,
-		`DELETE FROM ` + store.table("schema_migrations") + ` WHERE version IN (78, 84, 86)`,
+		`DROP TABLE ` + pgSchema.table("space_people"),
+		`DROP INDEX ` + pgSchema.table("spaces_owner_default_idx"),
+		`ALTER TABLE ` + pgSchema.table("spaces") + ` DROP COLUMN access`,
+		`ALTER TABLE ` + pgSchema.table("spaces") + ` RENAME COLUMN owner_id TO created_by`,
+		`ALTER TABLE ` + pgSchema.table("spaces") + ` RENAME COLUMN is_default TO is_personal`,
+		`CREATE UNIQUE INDEX spaces_personal_idx ON ` + pgSchema.table("spaces") + ` (scope_kind, scope_id) WHERE is_personal`,
+		`ALTER TABLE ` + pgSchema.table("space_members") + ` DROP CONSTRAINT space_members_scope_kind_scope_id_space_id_fkey`,
+		`UPDATE ` + pgSchema.table("spaces") + ` SET id = '` + oldID + `', name = 'Shared', created_by = '` + legacyDefaultSpaceOwner + `'`,
+		`UPDATE ` + pgSchema.table("space_members") + ` SET space_id = '` + oldID + `'`,
+		`ALTER TABLE ` + pgSchema.table("space_members") + ` ADD FOREIGN KEY (scope_kind, scope_id, space_id) REFERENCES ` + pgSchema.table("spaces") + ` (scope_kind, scope_id, id) ON DELETE CASCADE`,
+		`UPDATE ` + pgSchema.table("conversations") + ` SET space_id = '` + oldID + `', payload = jsonb_set(payload, '{spaceId}', to_jsonb('` + oldID + `'::text))`,
+		`DELETE FROM ` + pgSchema.table("schema_migrations") + ` WHERE version IN (78, 84, 86)`,
 	} {
-		if _, err := store.db.ExecContext(ctx, statement); err != nil {
+		if _, err := pgSchema.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}

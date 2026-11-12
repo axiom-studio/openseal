@@ -4,26 +4,13 @@ package runtime
 
 import (
 	"context"
-	"os"
 	"testing"
-
-	"github.com/google/uuid"
 )
 
 func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
-	schema := "gateway_authority_" + uuid.NewString()[:8]
-	store, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
-		_ = store.Close()
-	})
+	store, pgSchema := openTestPostgresStore(t, "gateway_authority_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	replica, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
@@ -66,11 +53,11 @@ func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testin
 	}
 	// The fixture began at the current schema. Remove only this isolated
 	// schema's migration marker to exercise an actual legacy-row upgrade.
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM `+store.table("schema_migrations")+` WHERE version=$1`, externalConversationGatewayAuthorityMigrationVersion); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version=$1`, externalConversationGatewayAuthorityMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		tx, err := store.db.BeginTx(ctx, nil)
+		tx, err := pgSchema.db.BeginTx(ctx, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

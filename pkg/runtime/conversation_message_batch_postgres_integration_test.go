@@ -4,26 +4,20 @@ package runtime
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func TestConversationMessageBatchPostgresScopesExactIDsAndBoundsHistoricalReads(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
+	pgSchema := newTestPostgresSchema(t, "openseal_message_batch_")
+	dsn := pgSchema.dsn
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema("openseal_message_batch_"+uuid.NewString()[:8]))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 		_ = store.Close()
 	})
 	conversation, runs := channelMessageBatchHistory(t, store, 100)

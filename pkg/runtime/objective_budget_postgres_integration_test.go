@@ -5,30 +5,17 @@ package runtime
 import (
 	"context"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	schema := "openseal_budget_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_budget_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)

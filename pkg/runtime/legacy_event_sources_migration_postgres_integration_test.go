@@ -5,30 +5,26 @@ package runtime
 import (
 	"context"
 	"database/sql"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
-	"github.com/google/uuid"
 )
 
 // Migration 79 drops the event source tables. A fresh database never has
 // them; a database at 78 loses them with their rows, and the retired ledger
 // rows 20 and 22 it keeps do not make the schema look incomplete.
 func TestPostgresMigration79DropsEventSources(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN")
-	}
+	pgSchema := newTestPostgresSchema(t, "event_sources_")
+	dsn := pgSchema.dsn
+	schema := pgSchema.name
 	ctx := context.Background()
-	schema := "event_sources_" + uuid.NewString()[:8]
 	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
 		_ = store.Close()
 	})
 	assertNoEventSourceTables(t, ctx, store)
@@ -36,21 +32,21 @@ func TestPostgresMigration79DropsEventSources(t *testing.T) {
 
 	// Put the database back at 78 as an old release left it.
 	for _, statement := range []string{
-		`CREATE TABLE ` + store.table("event_source_checkpoints") + ` (scope_kind TEXT, scope_id TEXT, source TEXT, payload JSONB)`,
-		`CREATE TABLE ` + store.table("event_source_subscriptions") + ` (scope_kind TEXT, scope_id TEXT, id TEXT, PRIMARY KEY (scope_kind, scope_id, id))`,
-		`CREATE TABLE ` + store.table("event_source_health") + ` (scope_kind TEXT, scope_id TEXT, subscription_id TEXT,
-			FOREIGN KEY (scope_kind, scope_id, subscription_id) REFERENCES ` + store.table("event_source_subscriptions") + ` (scope_kind, scope_id, id))`,
-		`INSERT INTO ` + store.table("event_source_checkpoints") + ` VALUES ('tenant', 'one', 'forum', '{}')`,
-		`INSERT INTO ` + store.table("event_source_subscriptions") + ` VALUES ('tenant', 'one', 'watch')`,
-		`INSERT INTO ` + store.table("event_source_health") + ` VALUES ('tenant', 'one', 'watch')`,
-		`INSERT INTO ` + store.table("schema_migrations") + ` (version, name) VALUES (20, 'durable event source checkpoints'), (22, 'durable event source subscriptions and health')`,
-		`DELETE FROM ` + store.table("schema_migrations") + ` WHERE version = 79`,
+		`CREATE TABLE ` + pgSchema.table("event_source_checkpoints") + ` (scope_kind TEXT, scope_id TEXT, source TEXT, payload JSONB)`,
+		`CREATE TABLE ` + pgSchema.table("event_source_subscriptions") + ` (scope_kind TEXT, scope_id TEXT, id TEXT, PRIMARY KEY (scope_kind, scope_id, id))`,
+		`CREATE TABLE ` + pgSchema.table("event_source_health") + ` (scope_kind TEXT, scope_id TEXT, subscription_id TEXT,
+			FOREIGN KEY (scope_kind, scope_id, subscription_id) REFERENCES ` + pgSchema.table("event_source_subscriptions") + ` (scope_kind, scope_id, id))`,
+		`INSERT INTO ` + pgSchema.table("event_source_checkpoints") + ` VALUES ('tenant', 'one', 'forum', '{}')`,
+		`INSERT INTO ` + pgSchema.table("event_source_subscriptions") + ` VALUES ('tenant', 'one', 'watch')`,
+		`INSERT INTO ` + pgSchema.table("event_source_health") + ` VALUES ('tenant', 'one', 'watch')`,
+		`INSERT INTO ` + pgSchema.table("schema_migrations") + ` (version, name) VALUES (20, 'durable event source checkpoints'), (22, 'durable event source subscriptions and health')`,
+		`DELETE FROM ` + pgSchema.table("schema_migrations") + ` WHERE version = 79`,
 	} {
-		if _, err := store.db.ExecContext(ctx, statement); err != nil {
+		if _, err := pgSchema.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}
-	if current, _, err := store.postgresSchemaCurrent(ctx, store.db); err != nil || current {
+	if current, _, err := store.postgresSchemaCurrent(ctx, pgSchema.db); err != nil || current {
 		t.Fatalf("a database at 78 looks current: %v, %v", current, err)
 	}
 	_ = store.Close()

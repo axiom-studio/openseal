@@ -4,13 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func surfaceInteractionStores(t *testing.T) []struct {
@@ -38,18 +35,15 @@ func surfaceInteractionStores(t *testing.T) []struct {
 
 func newSurfaceInteractionPostgresStore(t *testing.T) (context.Context, *PostgresStore) {
 	t.Helper()
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
+	pgSchema := newTestPostgresSchema(t, "openseal_surface_interactions_")
+	dsn := pgSchema.dsn
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema("openseal_surface_interactions_"+uuid.NewString()[:8]))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 		_ = store.Close()
 	})
 	return ctx, store

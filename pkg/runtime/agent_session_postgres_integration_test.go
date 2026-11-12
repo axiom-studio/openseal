@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -19,12 +18,10 @@ import (
 // schema. The schema is dropped when the test ends.
 func newAgentSessionPostgresStores(t *testing.T, n int) []*PostgresStore {
 	t.Helper()
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN")
-	}
+	pgSchema := newTestPostgresSchema(t, "agent_session_")
+	dsn := pgSchema.dsn
+	schema := pgSchema.name
 	ctx := context.Background()
-	schema := "agent_session_" + uuid.NewString()[:8]
 	stores := make([]*PostgresStore, n)
 	for i := range stores {
 		store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))

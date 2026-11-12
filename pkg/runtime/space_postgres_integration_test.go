@@ -4,28 +4,15 @@ package runtime
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func openSpacesPostgresStore(t *testing.T, prefix string) (*PostgresStore, string, string) {
 	t.Helper()
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
-	schema := prefix + uuid.NewString()[:8]
-	store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
-		_ = store.Close()
-	})
+	store, pgSchema := openTestPostgresStore(t, prefix)
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	return store, dsn, schema
 }
 

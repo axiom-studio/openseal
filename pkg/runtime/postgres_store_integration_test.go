@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -18,13 +17,11 @@ import (
 )
 
 func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
+	pgSchema := newTestPostgresSchema(t, "openseal_migration_race_")
+	dsn := pgSchema.dsn
+	schema := pgSchema.name
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	schema := "openseal_migration_race_" + uuid.NewString()[:8]
 	cleanup, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -94,21 +91,11 @@ func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) 
 }
 
 func TestPostgresCurrentSchemaStartupIsBounded(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	schema := "openseal_migration_current_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	_, pgSchema := openTestPostgresStore(t, "openseal_migration_current_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 
 	events := make(chan PostgresMigrationEvent, 4)
 	startedAt := time.Now()
@@ -135,35 +122,25 @@ func TestPostgresCurrentSchemaStartupIsBounded(t *testing.T) {
 }
 
 func TestPostgresLaterMigrationDoesNotReplayActivityProjectionBackfill(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	schema := "openseal_migration_activity_gate_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
-	if _, err = primary.db.ExecContext(ctx, `INSERT INTO `+primary.table("run_activity")+`
+	_, pgSchema := openTestPostgresStore(t, "openseal_migration_activity_gate_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
+	if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("run_activity")+`
 		(scope_kind,scope_id,run_id,sequence,id,event_type,created_at,payload)
 		VALUES ('tenant','1','migration-proof',1,'migration-proof','proof',CURRENT_TIMESTAMP,'{}'::jsonb)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = primary.db.ExecContext(ctx, `
-		CREATE FUNCTION `+primary.quotedSchema()+`.reject_activity_backfill() RETURNS trigger
+	if _, err := pgSchema.db.ExecContext(ctx, `
+		CREATE FUNCTION `+pgSchema.quoted()+`.reject_activity_backfill() RETURNS trigger
 		LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'activity projection backfill replayed'; END $$;
-		CREATE TRIGGER reject_activity_backfill BEFORE UPDATE ON `+primary.table("run_activity")+`
-		FOR EACH STATEMENT EXECUTE FUNCTION `+primary.quotedSchema()+`.reject_activity_backfill()
+		CREATE TRIGGER reject_activity_backfill BEFORE UPDATE ON `+pgSchema.table("run_activity")+`
+		FOR EACH STATEMENT EXECUTE FUNCTION `+pgSchema.quoted()+`.reject_activity_backfill()
 	`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = primary.db.ExecContext(ctx, `DELETE FROM `+primary.table("schema_migrations")+` WHERE version = $1`, currentPostgresSchemaVersion); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version = $1`, currentPostgresSchemaVersion); err != nil {
 		t.Fatal(err)
 	}
 
@@ -182,13 +159,11 @@ func TestPostgresLaterMigrationDoesNotReplayActivityProjectionBackfill(t *testin
 }
 
 func TestPostgresMigrationLockWaitIsObservableAndBounded(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
+	pgSchema := newTestPostgresSchema(t, "openseal_migration_wait_")
+	dsn := pgSchema.dsn
+	schema := pgSchema.name
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	schema := "openseal_migration_wait_" + uuid.NewString()[:8]
 	blocker, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -271,21 +246,11 @@ func TestPostgresMigrationLockWaitIsObservableAndBounded(t *testing.T) {
 }
 
 func TestPostgresSkillCatalogSourceVariantsMigrateAndRestart(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	schema := "openseal_skill_variants_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_skill_variants_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	catalog := skill.NewCatalogWithStore(primary)
 	identities := []string{"catalog::@alice/research", "catalog::@bob/research"}
 	for _, identity := range identities {
@@ -326,10 +291,10 @@ func TestPostgresSkillCatalogSourceVariantsMigrateAndRestart(t *testing.T) {
 	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("failed rollback changed schema version = %d, %v", version, err)
 	}
-	if _, err := primary.db.ExecContext(ctx, `DELETE FROM `+primary.table("skill_bindings")+` WHERE source_identity = $1`, identities[1]); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("skill_bindings")+` WHERE source_identity = $1`, identities[1]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := primary.db.ExecContext(ctx, `DELETE FROM `+primary.table("skill_definitions")+` WHERE source_identity = $1`, identities[1]); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("skill_definitions")+` WHERE source_identity = $1`, identities[1]); err != nil {
 		t.Fatal(err)
 	}
 	if err := primary.RollbackPostgresMigrations(ctx, 17); err != nil {
@@ -346,23 +311,13 @@ func TestPostgresSkillCatalogSourceVariantsMigrateAndRestart(t *testing.T) {
 }
 
 func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	schema := "openseal_test_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_test_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	var retiredTable sql.NullString
-	if err := primary.db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, schema+".runs").Scan(&retiredTable); err != nil {
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, schema+".runs").Scan(&retiredTable); err != nil {
 		t.Fatal(err)
 	}
 	if retiredTable.Valid {
@@ -813,11 +768,11 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("rolled-back schema version = %d, %v", version, err)
 	}
 	var actionTables int
-	if err := primary.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('action_calls','approval_checkpoints')`, primary.schema).Scan(&actionTables); err != nil || actionTables != 0 {
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('action_calls','approval_checkpoints')`, pgSchema.name).Scan(&actionTables); err != nil || actionTables != 0 {
 		t.Fatalf("action tables after rollback = %d, %v", actionTables, err)
 	}
 	var recentTables int
-	if err := primary.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('projects','agent_builder_cutover_drafts')`, primary.schema).Scan(&recentTables); err != nil || recentTables != 0 {
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('projects','agent_builder_cutover_drafts')`, pgSchema.name).Scan(&recentTables); err != nil || recentTables != 0 {
 		t.Fatalf("recent tables after rollback = %d, %v", recentTables, err)
 	}
 	if err := primary.migrate(ctx); err != nil {
@@ -829,21 +784,11 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 }
 
 func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	schema := "openseal_collab_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_collab_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
@@ -911,21 +856,11 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 }
 
 func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	schema := "openseal_commands_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_commands_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
@@ -1028,13 +963,11 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 }
 
 func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
+	pgSchema := newTestPostgresSchema(t, "openseal_pool_budget_")
+	dsn := pgSchema.dsn
+	schema := pgSchema.name
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	schema := "openseal_pool_budget_" + uuid.NewString()[:8]
 	store, err := NewPostgresStore(ctx, dsn,
 		WithPostgresSchema(schema),
 		WithPostgresPool(PostgresPoolConfig{
@@ -1046,7 +979,6 @@ func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 		_ = store.Close()
 	})
 
@@ -1059,7 +991,7 @@ func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing
 		go func() {
 			defer group.Done()
 			<-start
-			_, queryErr := store.db.ExecContext(ctx, `SELECT pg_sleep(0.1)`)
+			_, queryErr := pgSchema.db.ExecContext(ctx, `SELECT pg_sleep(0.1)`)
 			errorsFound <- queryErr
 		}()
 	}
@@ -1078,13 +1010,11 @@ func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing
 }
 
 func TestPostgresPoolBudgetBoundsTwoOverlappingReplicas(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
+	pgSchema := newTestPostgresSchema(t, "openseal_pool_replicas_")
+	dsn := pgSchema.dsn
+	schema := pgSchema.name
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	schema := "openseal_pool_replicas_" + uuid.NewString()[:8]
 	pool := PostgresPoolConfig{
 		MaxOpenConnections: 3, MaxIdleConnections: 1,
 		ConnectionLifetime: time.Minute, ConnectionIdleTime: time.Minute,
@@ -1099,7 +1029,6 @@ func TestPostgresPoolBudgetBoundsTwoOverlappingReplicas(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
 		_ = replacement.Close()
 		_ = primary.Close()
 	})

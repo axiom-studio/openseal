@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
-	"github.com/google/uuid"
 )
 
 func TestActionWorkerLifecyclePreservesCompletedDispatchAcrossRunChanges(t *testing.T) {
@@ -220,20 +218,18 @@ func forActionLifecycleStores(t *testing.T, test func(*testing.T, KernelStore)) 
 			return store
 		}},
 		{name: "postgres", open: func(t *testing.T) KernelStore {
-			dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-			if dsn == "" {
-				t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL lifecycle regressions")
-			}
+			pgSchema := newTestPostgresSchema(t, "openseal_action_lifecycle_")
+			dsn := pgSchema.dsn
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema("openseal_action_lifecycle_"+uuid.NewString()[:8]))
+			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				_, _ = store.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+				_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
 				_ = store.Close()
 			})
 			return store

@@ -4,28 +4,23 @@ package runtime
 
 import (
 	"context"
-	"os"
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/google/uuid"
 )
 
 func newAgentSessionMigrationStore(t *testing.T, prefix string) (*PostgresStore, string, string) {
 	t.Helper()
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN")
-	}
+	pgSchema := newTestPostgresSchema(t, prefix)
+	dsn := pgSchema.dsn
+	schema := pgSchema.name
 	ctx := context.Background()
-	schema := prefix + uuid.NewString()[:8]
 	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
 		_ = store.Close()
 	})
 	return store, dsn, schema

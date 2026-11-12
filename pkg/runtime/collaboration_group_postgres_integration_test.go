@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,25 +13,14 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
-	"github.com/google/uuid"
 )
 
 func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	schema := "openseal_grouped_collaboration_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_grouped_collaboration_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
@@ -123,21 +111,11 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 }
 
 func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	schema := "openseal_team_bids_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_team_bids_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)

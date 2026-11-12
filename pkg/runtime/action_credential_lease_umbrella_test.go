@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -141,17 +140,14 @@ func TestSQLiteActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *tes
 }
 
 func TestPostgresActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
+	pgSchema := newTestPostgresSchema(t, "openseal_lease_umbrella_")
+	dsn := pgSchema.dsn
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema("openseal_lease_umbrella_"+uuid.NewString()[:8]))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 		_ = store.Close()
 	})
 	insert := func(t *testing.T, ctx context.Context, call *ActionCall) {
@@ -159,7 +155,7 @@ func TestPostgresActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("action_calls")+`
+		if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("action_calls")+`
 			(id,scope_kind,scope_id,run_id,status,available_at,lease_owner,lease_expires_at,revision,created_at,payload)
 			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`, call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.Status,
 			call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload)); err != nil {

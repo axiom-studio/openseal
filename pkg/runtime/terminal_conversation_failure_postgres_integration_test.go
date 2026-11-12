@@ -3,30 +3,16 @@
 package runtime
 
 import (
-	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func terminalFailureMigrationPostgres(t *testing.T) (*PostgresStore, string, string) {
 	t.Helper()
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN")
-	}
-	schema := "failure_reporting_" + uuid.NewString()[:8]
-	store, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
-		_ = store.Close()
-	})
+	store, pgSchema := openTestPostgresStore(t, "failure_reporting_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	return store, dsn, schema
 }
 

@@ -3,12 +3,9 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // agentBuilderDraftSeed is one scope's builder conversations: ana's "made"
@@ -185,18 +182,16 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 		assertAgentBuilderDrafts(t, reopened, seed)
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-		if dsn == "" {
-			t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-		}
+		pgSchema := newTestPostgresSchema(t, "openseal_builder_drafts_")
+		dsn := pgSchema.dsn
+		schema := pgSchema.name
 		ctx := context.Background()
-		schema := "openseal_builder_drafts_" + uuid.NewString()[:8]
 		store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			_, _ = store.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+			_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
 			_ = store.Close()
 		})
 		seed := seedAgentBuilderDrafts(t, store)
@@ -204,7 +199,7 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 			t.Fatal(err)
 		}
 		var columns int
-		if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+		if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
 			WHERE table_schema = $1 AND table_name = 'conversations' AND column_name = 'builder_draft_requester'`, schema).Scan(&columns); err != nil || columns != 0 {
 			t.Fatalf("rollback kept the column: %d, %v", columns, err)
 		}

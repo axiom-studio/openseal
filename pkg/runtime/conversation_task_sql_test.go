@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -43,11 +42,9 @@ func forConversationTaskSQLStores(t *testing.T, test func(*testing.T, conversati
 		test(t, conversationTaskSQLTestFixture{store: open(t), reopen: open})
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-		if dsn == "" {
-			t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL conversation task regressions")
-		}
-		schema := "openseal_task_sql_" + uuid.NewString()[:8]
+		pgSchema := newTestPostgresSchema(t, "openseal_task_sql_")
+		dsn := pgSchema.dsn
+		schema := pgSchema.name
 		open := func(t *testing.T) conversationTaskSQLTestStore {
 			store, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
 			if err != nil {
@@ -63,7 +60,7 @@ func forConversationTaskSQLStores(t *testing.T, test func(*testing.T, conversati
 				return
 			}
 			defer cleanup.Close()
-			_, _ = cleanup.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.(*PostgresStore).quotedSchema()+` CASCADE`)
+			_, _ = cleanup.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
 		})
 		test(t, conversationTaskSQLTestFixture{store: store, reopen: open})
 	})

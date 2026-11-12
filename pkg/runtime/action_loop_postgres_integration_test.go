@@ -5,11 +5,8 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // The store scenarios of action_loop_store_test.go run on Postgres through
@@ -18,16 +15,13 @@ import (
 
 func openLoopActionPostgresStore(t *testing.T) *PostgresStore {
 	t.Helper()
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("OPENSEAL_TEST_POSTGRES_DSN is not set")
-	}
-	store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema("openseal_loop_actions_"+uuid.NewString()[:8]))
+	pgSchema := newTestPostgresSchema(t, "openseal_loop_actions_")
+	dsn := pgSchema.dsn
+	store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(pgSchema.name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 		_ = store.Close()
 	})
 	return store

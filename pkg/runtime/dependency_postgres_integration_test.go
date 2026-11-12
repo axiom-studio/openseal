@@ -5,31 +5,18 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func TestPostgresDependencyFanInIsConcurrentRecoverableAndIsolated(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	schema := "openseal_dependencies_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_dependencies_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
@@ -173,21 +160,11 @@ func TestPostgresDependencyFanInIsConcurrentRecoverableAndIsolated(t *testing.T)
 }
 
 func TestPostgresDependencyFanInPreservesIndependentMultiObjectiveProgress(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	schema := "openseal_dependency_load_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "openseal_dependency_load_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)

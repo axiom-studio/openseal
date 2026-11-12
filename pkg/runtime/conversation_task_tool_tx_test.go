@@ -1,15 +1,11 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type conversationTaskToolTestStore interface {
@@ -30,16 +26,13 @@ func forConversationTaskToolStores(t *testing.T, test func(*testing.T, conversat
 		test(t, store)
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-		if dsn == "" {
-			t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL conversation task regressions")
-		}
-		store, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema("openseal_task_tool_"+uuid.NewString()[:8]))
+		pgSchema := newTestPostgresSchema(t, "openseal_task_tool_")
+		dsn := pgSchema.dsn
+		store, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(pgSchema.name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 			_ = store.Close()
 		})
 		test(t, store)

@@ -4,26 +4,20 @@ package runtime
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
+	pgSchema := newTestPostgresSchema(t, "search_")
+	dsn := pgSchema.dsn
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema("search_"+uuid.NewString()[:8]))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 		_ = store.Close()
 	})
 	service := NewConversationService(store)
@@ -53,10 +47,10 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	if len(other) != 1 || other[0].Kind != "chat" || other[0].Conversation.Scope.ID != "two" {
 		t.Fatalf("other tenant hits = %#v", other)
 	}
-	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("artifacts")+` (scope_kind,scope_id,id,version,type,media_type,classification,digest,content_ref,created_at,payload) VALUES ('tenant','one','artifact-1',1,'report','text/plain','internal','digest','object',now(),'{"id":"artifact-1","name":"Nebula report","provenance":{"owner":{"type":"agent","id":"agent"}}}'::jsonb)`); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("artifacts")+` (scope_kind,scope_id,id,version,type,media_type,classification,digest,content_ref,created_at,payload) VALUES ('tenant','one','artifact-1',1,'report','text/plain','internal','digest','object',now(),'{"id":"artifact-1","name":"Nebula report","provenance":{"owner":{"type":"agent","id":"agent"}}}'::jsonb)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("agent_runs")+` (id,scope_kind,scope_id,root_run_id,status,revision,available_at,queue_entered_at,created_at,payload) VALUES ('run-1','tenant','one','run-1','completed',1,now(),now(),now(),'{"id":"run-1","goal":"Publish status","owner":{"type":"agent","id":"agent"},"output":{"summary":"Nebula release approved"},"updatedAt":"2026-09-29T00:00:00Z"}'::jsonb)`); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("agent_runs")+` (id,scope_kind,scope_id,root_run_id,status,revision,available_at,queue_entered_at,created_at,payload) VALUES ('run-1','tenant','one','run-1','completed',1,now(),now(),now(),'{"id":"run-1","goal":"Publish status","owner":{"type":"agent","id":"agent"},"output":{"summary":"Nebula release approved"},"updatedAt":"2026-09-29T00:00:00Z"}'::jsonb)`); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct{ query, kind string }{{"Nebula report", "artifact"}, {"release approved", "run"}} {
@@ -74,7 +68,7 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 			t.Fatalf("%s search did not find %s: %#v", test.query, test.kind, matches)
 		}
 	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("conversations")+` SET status='archived' WHERE scope_kind='tenant' AND scope_id='one'`); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `UPDATE `+pgSchema.table("conversations")+` SET status='archived' WHERE scope_kind='tenant' AND scope_id='one'`); err != nil {
 		t.Fatal(err)
 	}
 	archived, err := store.SearchWorkspacePage(ctx, Scope{Kind: "tenant", ID: "one"}, "nebula", 20, 0)
@@ -89,18 +83,18 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	// Simulate an existing version 45 installation and verify the versioned
 	// upgrade builds every search index for already-persisted records.
 	for _, name := range []string{"conversations_search_idx", "channel_messages_search_idx", "artifacts_search_idx", "agent_runs_search_idx"} {
-		if _, err := store.db.ExecContext(ctx, `DROP INDEX `+store.table(name)); err != nil {
+		if _, err := pgSchema.db.ExecContext(ctx, `DROP INDEX `+pgSchema.table(name)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM `+store.table("schema_migrations")+` WHERE version=46`); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version=46`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
 	var indexCount int
-	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname=$1 AND indexname IN ('conversations_search_idx','channel_messages_search_idx','artifacts_search_idx','agent_runs_search_idx')`, store.schema).Scan(&indexCount); err != nil {
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname=$1 AND indexname IN ('conversations_search_idx','channel_messages_search_idx','artifacts_search_idx','agent_runs_search_idx')`, pgSchema.name).Scan(&indexCount); err != nil {
 		t.Fatal(err)
 	}
 	if indexCount != 4 {

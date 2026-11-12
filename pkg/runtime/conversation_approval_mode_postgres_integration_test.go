@@ -5,29 +5,16 @@ package runtime
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	schema := "openseal_approval_mode_" + uuid.NewString()[:8]
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
-		_ = store.Close()
-	})
+	store, pgSchema := openTestPostgresStore(t, "openseal_approval_mode_")
+	schema := pgSchema.name
+	dsn := pgSchema.dsn
 	scope := Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
@@ -41,7 +28,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	var raw string
-	if err := store.db.QueryRowContext(ctx, `SELECT COALESCE(payload->>'approvalMode', '') FROM `+store.table("conversations")).Scan(&raw); err != nil || raw != "" {
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COALESCE(payload->>'approvalMode', '') FROM `+pgSchema.table("conversations")).Scan(&raw); err != nil || raw != "" {
 		t.Fatalf("rolled back approval mode = %q, %v", raw, err)
 	}
 	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
@@ -52,7 +39,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
-	if err := reopened.db.QueryRowContext(ctx, `SELECT payload->>'approvalMode' FROM `+reopened.table("conversations")).Scan(&raw); err != nil || raw != "auto" {
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT payload->>'approvalMode' FROM `+pgSchema.table("conversations")).Scan(&raw); err != nil || raw != "auto" {
 		t.Fatalf("migrated approval mode = %q, %v", raw, err)
 	}
 	service := NewConversationApprovalModeService(reopened)

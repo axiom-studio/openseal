@@ -6,20 +6,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/google/uuid"
-	"os"
 	"testing"
 	"time"
 )
 
 func TestPostgresSkillSetupLifecycleAndMigration(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN")
-	}
+	pgSchema := newTestPostgresSchema(t, "openseal_setup_")
+	dsn := pgSchema.dsn
+	schema := pgSchema.name
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	schema := "openseal_setup_" + uuid.NewString()[:8]
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatal(err)
