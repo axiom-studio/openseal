@@ -14,7 +14,7 @@ import (
 // CreateRunAgentSession for parentless run sessions at first claim).
 
 // conversationSessionID is the stable id of the chat session of one lane
-// (conversationRunLane). It never changes, including across task promotion:
+// (ConversationRunLane). It never changes, including across task promotion:
 // the promoted Run moves to a child session and the lane keeps this one.
 func conversationSessionID(scope Scope, lane string) string {
 	return ConversationAgentSessionID(scope, lane)
@@ -26,13 +26,13 @@ func conversationLaneSessionID(scope Scope, conversationID, threadRoot, agentID 
 	if strings.TrimSpace(agentID) == "" {
 		return ""
 	}
-	return conversationSessionID(scope, conversationRunLane(conversationID, threadRoot, agentID))
+	return conversationSessionID(scope, ConversationRunLane(conversationID, threadRoot, agentID))
 }
 
 // conversationLaneSession is the in-memory shape of a lane session before its
 // row exists. The store creates the row lazily at the Run's first step.
 func conversationLaneSession(scope Scope, conversationID, threadRoot, agentID string) *AgentSession {
-	lane := conversationRunLane(conversationID, threadRoot, agentID)
+	lane := ConversationRunLane(conversationID, threadRoot, agentID)
 	id := conversationSessionID(scope, lane)
 	return &AgentSession{
 		ID: id, Scope: scope, Kind: AgentSessionKindConversation, LaneKey: lane,

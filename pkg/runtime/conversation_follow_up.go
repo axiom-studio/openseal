@@ -133,7 +133,7 @@ func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, 
 		if !isTeamMemberRun(run) || isTerminalAgentRunStatus(run.Status) {
 			continue
 		}
-		lane := conversationRunLane(conversation.ID, root, run.AssignedAgentID)
+		lane := ConversationRunLane(conversation.ID, root, run.AssignedAgentID)
 		if run.ConcurrencyKey != lane || lanes[lane] {
 			continue
 		}
@@ -387,7 +387,7 @@ func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Conte
 		return err
 	}
 	for _, run := range runs {
-		if !isTeamMemberRun(run) || routed[run.AssignedAgentID] || run.ConcurrencyKey != conversationRunLane(conversation.ID, root, run.AssignedAgentID) {
+		if !isTeamMemberRun(run) || routed[run.AssignedAgentID] || run.ConcurrencyKey != ConversationRunLane(conversation.ID, root, run.AssignedAgentID) {
 			continue
 		}
 		if conversationID, _ := run.Context[conversationRunContextConversationID].(string); conversationID != conversation.ID {

@@ -243,7 +243,7 @@ func (s *PostgresStore) OpenConversationAgentSession(ctx context.Context, req Op
 		return nil, fmt.Errorf("%w: conversationId, agentId, runId and a lease are required", ErrInvalidAgentSession)
 	}
 	now := postgresSessionNow(req.Now)
-	lane := conversationRunLane(req.ConversationID, req.ThreadRootID, req.AgentID)
+	lane := ConversationRunLane(req.ConversationID, req.ThreadRootID, req.AgentID)
 	id := ConversationAgentSessionID(req.Scope, lane)
 	var result *OpenAgentSessionResult
 	err := s.beginPostgresSessionTx(ctx, func(tx *sql.Tx) error {

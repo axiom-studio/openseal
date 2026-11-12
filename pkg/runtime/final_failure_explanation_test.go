@@ -193,7 +193,7 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	trigger := posted.Message
-	lane := conversationRunLane(conversation.ID, trigger.ID, owner.ID)
+	lane := ConversationRunLane(conversation.ID, trigger.ID, owner.ID)
 	created, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
 		Goal: "Check my email", ConcurrencyKey: lane, SessionID: ConversationAgentSessionID(scope, lane),

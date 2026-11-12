@@ -88,7 +88,7 @@ func putTestSQLiteSessionRun(t *testing.T, store *SQLiteStore, runID, sessionID 
 func TestSQLiteInTxHelpersSkipFence(t *testing.T) {
 	ctx := context.Background()
 	store := openTestSQLiteSessionStore(t)
-	sessionID := ConversationAgentSessionID(testSessionScope, conversationRunLane("c1", "", "agent-a"))
+	sessionID := ConversationAgentSessionID(testSessionScope, ConversationRunLane("c1", "", "agent-a"))
 	putTestSQLiteSessionRun(t, store, "r1", sessionID, AgentRunStatusRunning)
 	opened, err := store.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{
 		Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r1", Lease: testSessionLease(), Now: testSessionNow,

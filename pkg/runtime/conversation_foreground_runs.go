@@ -5,7 +5,7 @@ import "context"
 // ConversationForegroundRunsReadStore lists a conversation's foreground Runs
 // (the channel lane, explicit threads and Team members' lanes) without
 // scanning unrelated Runs. Every store matches lanes exactly as
-// conversationRunLane builds them.
+// ConversationRunLane builds them.
 type ConversationForegroundRunsReadStore interface {
 	ListConversationForegroundRuns(context.Context, Scope, ObjectiveOwner, string, int, int) ([]*AgentRun, error)
 }

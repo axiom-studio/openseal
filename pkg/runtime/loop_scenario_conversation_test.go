@@ -668,7 +668,7 @@ func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 		// Each member has its own lane session; the router has none.
 		for _, run := range []*AgentRun{finn, scout} {
 			agent := run.AssignedAgentID
-			lane := conversationRunLane(conversation.ID, "", agent)
+			lane := ConversationRunLane(conversation.ID, "", agent)
 			session := f.session(run.ID)
 			if run.ConcurrencyKey != lane || session.ID != conversationSessionID(f.scope, lane) || session.AgentID != agent || session.ConversationID != conversation.ID {
 				t.Fatalf("%s session = %#v (run lane %q)", agent, session, run.ConcurrencyKey)
@@ -821,7 +821,7 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 			r.RequiresResponse = true
 		})
 		run := convSchedule(f, conversation.ID, inThread)
-		lane := conversationRunLane(conversation.ID, root.ID, loopFixtureAgent)
+		lane := ConversationRunLane(conversation.ID, root.ID, loopFixtureAgent)
 		if run.Context["threadRootMessageId"] != root.ID || run.ConcurrencyKey != lane {
 			t.Fatalf("thread Run = key %q context %#v", run.ConcurrencyKey, run.Context)
 		}
@@ -844,7 +844,7 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 		// The unthreaded chat has its own lane: the outside message starts a
 		// Run there, not in the thread's.
 		ordinary := convSchedule(f, conversation.ID, outside)
-		if ordinary.ConcurrencyKey != conversationRunLane(conversation.ID, "", loopFixtureAgent) || ordinary.ID == run.ID {
+		if ordinary.ConcurrencyKey != ConversationRunLane(conversation.ID, "", loopFixtureAgent) || ordinary.ID == run.ID {
 			t.Fatalf("unthreaded Run = %#v", ordinary)
 		}
 	})
@@ -930,7 +930,7 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 			t.Fatalf("a Telegram DM reply root became a thread: %s", root)
 		}
 		run := convSchedule(f, conversation.ID, reply)
-		if run.ConcurrencyKey != conversationRunLane(conversation.ID, "", loopFixtureAgent) || run.Context["threadRootMessageId"] != nil {
+		if run.ConcurrencyKey != ConversationRunLane(conversation.ID, "", loopFixtureAgent) || run.Context["threadRootMessageId"] != nil {
 			t.Fatalf("Telegram DM reply Run = key %q context %#v", run.ConcurrencyKey, run.Context)
 		}
 		run = steerToRest(f, run.ID, 6)

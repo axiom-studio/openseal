@@ -216,7 +216,7 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 	request := CreateAgentRunRequest{
 		Scope: conversation.Scope, Kind: RunKindConversation, Owner: conversation.Owner,
 		AssignedAgentID: assignedAgentID, ActingUser: MessageActingUser(conversation, message),
-		ConcurrencyKey: conversationRunLane(conversation.ID, "", assignedAgentID), Goal: goal, Source: RunSourceChat,
+		ConcurrencyKey: ConversationRunLane(conversation.ID, "", assignedAgentID), Goal: goal, Source: RunSourceChat,
 		Context: map[string]interface{}{
 			conversationRunContextConversationID: conversation.ID,
 			conversationRunContextTriggerID:      message.ID,
@@ -228,7 +228,7 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 	}
 	if root := externalConversationThreadRoot(conversation, message); root != "" {
 		request.Context["threadRootMessageId"] = root
-		request.ConcurrencyKey = conversationRunLane(conversation.ID, root, assignedAgentID)
+		request.ConcurrencyKey = ConversationRunLane(conversation.ID, root, assignedAgentID)
 	}
 	if message.ResponseMode != "" {
 		request.Context["responseMode"] = message.ResponseMode
@@ -1090,7 +1090,7 @@ func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context,
 		// lane against the canonical Task ledger.
 		run = cloneAgentRun(run)
 		root, _ := run.Context["threadRootMessageId"].(string)
-		run.ConcurrencyKey = conversationRunLane(task.ConversationID, root, run.AssignedAgentID)
+		run.ConcurrencyKey = ConversationRunLane(task.ConversationID, root, run.AssignedAgentID)
 	}
 	return validateConversationRun(run)
 }
@@ -1161,7 +1161,7 @@ func validateConversationRun(run *AgentRun) error {
 	}
 	reason, _ := run.Context[routingReasonContextKey].(string)
 	if !conversationOK || !triggerOK || !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) ||
-		run.ConcurrencyKey != conversationRunLane(conversationID, root, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
+		run.ConcurrencyKey != ConversationRunLane(conversationID, root, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
 		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
 	}
 	return validateConversationRunSession(run)

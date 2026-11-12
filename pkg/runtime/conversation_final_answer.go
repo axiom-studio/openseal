@@ -33,7 +33,7 @@ const (
 type conversationFinalHandler struct {
 	runner   *ConversationRunTurnRunner
 	sessions loopSessionEntryLister
-	actions  actionCallReader
+	actions  ActionCallReader
 	activity activityAppender
 }
 
@@ -46,7 +46,7 @@ type activityAppender interface {
 // loop binding already holds. sessions and actions read this Run's tool
 // entries and governed calls (reactions, artifact references, prior delivery
 // rejections); activity may be nil (no visual_rejected event).
-func newConversationFinalHandler(runner *ConversationRunTurnRunner, sessions loopSessionEntryLister, actions actionCallReader, activity activityAppender) *conversationFinalHandler {
+func newConversationFinalHandler(runner *ConversationRunTurnRunner, sessions loopSessionEntryLister, actions ActionCallReader, activity activityAppender) *conversationFinalHandler {
 	return &conversationFinalHandler{runner: runner, sessions: sessions, actions: actions, activity: activity}
 }
 

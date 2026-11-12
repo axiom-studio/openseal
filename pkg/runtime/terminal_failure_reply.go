@@ -157,7 +157,7 @@ func terminalFailureReplyOf(f *RunFailureExplanation, stoppingCall, latestFailed
 // attempt, and gives the typed rate-limit, browser and file-size replies. A
 // failure the model already moved past (later steps ran tools) is not named.
 // A store that cannot be read only loses that detail, never the reply.
-func terminalRunFailureReply(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) string {
+func terminalRunFailureReply(ctx context.Context, sessions loopSessionEntryLister, actions ActionCallReader, run *AgentRun) string {
 	if run == nil {
 		return TerminalFailureReply("execution_failed")
 	}
@@ -185,15 +185,11 @@ func terminalRunFailureReply(ctx context.Context, sessions loopSessionEntryListe
 	return terminalFailureReplyOf(run.FailureExplanation, stopping, latest)
 }
 
-type actionCallReader interface {
-	GetActionCall(ctx context.Context, scope Scope, id string) (*ActionCall, error)
-}
-
 const latestFailedCallScanLimit = 50
 
 // latestFailedRunActionCall is the call of the Run's newest error tool entry
 // that carries an action call, when that call is this Run's and failed.
-func latestFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) *ActionCall {
+func latestFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions ActionCallReader, run *AgentRun) *ActionCall {
 	if sessions == nil || actions == nil || run.ID == "" {
 		return nil
 	}
@@ -210,7 +206,7 @@ func latestFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLis
 // stoppingFailedRunActionCall is like latestFailedRunActionCall, but only
 // looks at the Run's last step with tool entries: a failure in an earlier
 // step was followed by more work, so it did not stop the attempt.
-func stoppingFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) *ActionCall {
+func stoppingFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions ActionCallReader, run *AgentRun) *ActionCall {
 	if sessions == nil || actions == nil || run.ID == "" {
 		return nil
 	}
@@ -235,7 +231,7 @@ func stoppingFailedRunActionCall(ctx context.Context, sessions loopSessionEntryL
 // firstFailedRunActionCall walks entries newest first (stopping at the first
 // entry of another step when stepID is set) to the first error entry with an
 // action call, and returns that call if it is this Run's and failed.
-func firstFailedRunActionCall(ctx context.Context, actions actionCallReader, run *AgentRun, entries []*SessionEntry, stepID string) *ActionCall {
+func firstFailedRunActionCall(ctx context.Context, actions ActionCallReader, run *AgentRun, entries []*SessionEntry, stepID string) *ActionCall {
 	for _, entry := range entries {
 		if entry == nil || entry.RunID != run.ID {
 			continue

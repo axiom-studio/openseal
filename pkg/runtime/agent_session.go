@@ -72,7 +72,7 @@ type AgentSession struct {
 	ID               string           `json:"id"`
 	Scope            Scope            `json:"scope"`
 	Kind             AgentSessionKind `json:"kind"`
-	LaneKey          string           `json:"laneKey,omitempty"`        // conversationRunLane(conv, threadRoot, agent); Kind conversation only
+	LaneKey          string           `json:"laneKey,omitempty"`        // ConversationRunLane(conv, threadRoot, agent); Kind conversation only
 	ConversationID   string           `json:"conversationId,omitempty"` // conversation sessions and their forks
 	ThreadRootID     string           `json:"threadRootId,omitempty"`
 	AgentID          string           `json:"agentId"`              // the Agent whose context this is (Team member, not the Team)

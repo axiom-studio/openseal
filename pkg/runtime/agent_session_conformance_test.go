@@ -119,7 +119,7 @@ func (f *sessionConformance) expiredLease() AgentRunLeaseGuard {
 }
 
 func (f *sessionConformance) laneSessionID(agentID string) string {
-	return ConversationAgentSessionID(f.scope, conversationRunLane("c1", "", agentID))
+	return ConversationAgentSessionID(f.scope, ConversationRunLane("c1", "", agentID))
 }
 
 // createRun stores a queued Run bound to sessionID (may be "").
@@ -390,7 +390,7 @@ func conformOpenConversationCreatesOnce(f *sessionConformance) {
 		f.t.Fatalf("first open = %+v, %v", first, err)
 	}
 	s := first.Session
-	if s.ID != f.laneSessionID("agent-a") || s.Kind != AgentSessionKindConversation || s.LaneKey != conversationRunLane("c1", "", "agent-a") ||
+	if s.ID != f.laneSessionID("agent-a") || s.Kind != AgentSessionKindConversation || s.LaneKey != ConversationRunLane("c1", "", "agent-a") ||
 		s.ConversationID != "c1" || s.AgentID != "agent-a" || s.RootSessionID != s.ID || s.Depth != 0 || s.NextSequence != 1 || s.ChannelWatermark != 0 {
 		f.t.Fatalf("new session = %+v", s)
 	}

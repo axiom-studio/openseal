@@ -61,7 +61,7 @@ func testStoredSessionRun(t *testing.T, store *SQLiteStore, runID string) *Agent
 
 func openTestConversationSession(t *testing.T, store *SQLiteStore, runID string) *AgentSession {
 	t.Helper()
-	sessionID := ConversationAgentSessionID(testSessionScope, conversationRunLane("c1", "", "agent-a"))
+	sessionID := ConversationAgentSessionID(testSessionScope, ConversationRunLane("c1", "", "agent-a"))
 	putTestSessionRun(t, store, runID, sessionID, AgentRunStatusRunning, 0)
 	opened, err := store.OpenConversationAgentSession(context.Background(), OpenConversationAgentSessionRequest{
 		Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: runID, Lease: testSessionLease(), Now: testSessionNow,

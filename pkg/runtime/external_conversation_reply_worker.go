@@ -534,7 +534,7 @@ func canonicalExternalRunReply(message *ChannelMessage, item *ExternalConversati
 	return false
 }
 
-func externalConversationRunReply(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) (string, bool) {
+func externalConversationRunReply(ctx context.Context, sessions loopSessionEntryLister, actions ActionCallReader, run *AgentRun) (string, bool) {
 	if run == nil {
 		return "", false
 	}

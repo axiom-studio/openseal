@@ -177,7 +177,7 @@ func validateRunDependencyResolutionRecord(record RunDependencyResolutionRecord)
 	if record.State != RunDependencyStateSatisfied && record.State != RunDependencyStateFailed && record.State != RunDependencyStateCanceled {
 		return ErrInvalidRunDependency
 	}
-	if err := validateCredentialFreeContext(record.Result); err != nil {
+	if err := ValidateCredentialFreeContext(record.Result); err != nil {
 		return err
 	}
 	return validateArtifactReferences(nil, record.Artifacts)

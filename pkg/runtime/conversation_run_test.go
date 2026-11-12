@@ -34,7 +34,7 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	if err != nil || replayed || created == nil || created.Run == nil {
 		t.Fatalf("initial schedule = %#v, replayed=%v, err=%v", created, replayed, err)
 	}
-	if created.Event == nil || created.Run.Kind != RunKindConversation || created.Run.ConcurrencyKey != conversationRunLane(conversation.ID, "", created.Run.AssignedAgentID) ||
+	if created.Event == nil || created.Run.Kind != RunKindConversation || created.Run.ConcurrencyKey != ConversationRunLane(conversation.ID, "", created.Run.AssignedAgentID) ||
 		created.Run.Owner != conversation.Owner || created.Run.Context[conversationRunContextTriggerID] != first.ID {
 		t.Fatalf("scheduled conversation Run = %#v", created)
 	}
@@ -438,7 +438,7 @@ func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 			t.Fatalf("routing Run = %s %#v", done.Status, done.Output)
 		}
 		member := f.run(fmt.Sprint(ids[0]))
-		lane := conversationRunLane(f.conversation.ID, "", "agent-1")
+		lane := ConversationRunLane(f.conversation.ID, "", "agent-1")
 		if member.Kind != RunKindConversation || member.AssignedAgentID != "agent-1" || member.ConcurrencyKey != lane ||
 			member.SessionID != conversationSessionID(f.conversation.Scope, lane) || member.Context[teamRoutingRunContextKey] != claimed.ID {
 			t.Fatalf("member Run = %#v", member)

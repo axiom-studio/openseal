@@ -286,7 +286,7 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	message := postConversationRunTestMessage(t, conversations, chat, ConversationParticipantUser, MessageIntentQuestion, "Read the community in the background", "team-task-source")
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: "task-agent", Goal: "Answer", Source: RunSourceChat,
-		ConcurrencyKey: conversationRunLane(chat.ID, message.ThreadRootID, "task-agent"),
+		ConcurrencyKey: ConversationRunLane(chat.ID, message.ThreadRootID, "task-agent"),
 		Context:        map[string]interface{}{conversationRunContextConversationID: chat.ID, conversationRunContextTriggerID: message.ID, "threadRootMessageId": message.ThreadRootID},
 	})
 	if err != nil {

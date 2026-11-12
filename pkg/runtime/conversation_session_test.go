@@ -10,14 +10,14 @@ import (
 
 func TestConversationSessionIDIsStablePerLane(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "sessions"}
-	lane := conversationRunLane("chat", "", "agent-a")
+	lane := ConversationRunLane("chat", "", "agent-a")
 	if conversationSessionID(scope, lane) != conversationSessionID(scope, lane) {
 		t.Fatal("same lane gave two ids")
 	}
 	ids := map[string]string{
 		"base":   conversationSessionID(scope, lane),
-		"thread": conversationSessionID(scope, conversationRunLane("chat", "root", "agent-a")),
-		"agent":  conversationSessionID(scope, conversationRunLane("chat", "", "agent-b")),
+		"thread": conversationSessionID(scope, ConversationRunLane("chat", "root", "agent-a")),
+		"agent":  conversationSessionID(scope, ConversationRunLane("chat", "", "agent-b")),
 		"scope":  conversationSessionID(Scope{Kind: "tenant", ID: "other"}, lane),
 	}
 	seen := map[string]string{}
@@ -77,7 +77,7 @@ func TestTeamRoutingRunHasNoSession(t *testing.T) {
 
 func TestValidateConversationRunRejectsForeignSession(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "sessions"}
-	lane := conversationRunLane("chat", "", "agent-a")
+	lane := ConversationRunLane("chat", "", "agent-a")
 	valid := func() *AgentRun {
 		return &AgentRun{ID: "run", Scope: scope, Kind: RunKindConversation,
 			Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a", ConcurrencyKey: lane,
@@ -96,8 +96,8 @@ func TestValidateConversationRunRejectsForeignSession(t *testing.T) {
 		t.Fatalf("unbound run: %v", err)
 	}
 	for name, sessionID := range map[string]string{
-		"other agent":  conversationSessionID(scope, conversationRunLane("chat", "", "agent-b")),
-		"other thread": conversationSessionID(scope, conversationRunLane("chat", "root", "agent-a")),
+		"other agent":  conversationSessionID(scope, ConversationRunLane("chat", "", "agent-b")),
+		"other thread": conversationSessionID(scope, ConversationRunLane("chat", "root", "agent-a")),
 		"other scope":  conversationSessionID(Scope{Kind: "tenant", ID: "other"}, lane),
 		"run session":  RunAgentSessionID(scope, "run"),
 	} {
@@ -120,7 +120,7 @@ func TestValidateConversationRunRejectsForeignSession(t *testing.T) {
 func TestConversationRunSessionResolvesLaneAndChildSessions(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	lane := conversationRunLane("c1", "", "agent-a")
+	lane := ConversationRunLane("c1", "", "agent-a")
 	run := putTestSessionRun(t, store, "r1", conversationSessionID(testSessionScope, lane), AgentRunStatusRunning, 0)
 	run.AssignedAgentID = "agent-a"
 	run.Context = map[string]interface{}{conversationRunContextConversationID: "c1"}

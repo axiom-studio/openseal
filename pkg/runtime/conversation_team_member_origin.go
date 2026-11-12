@@ -132,7 +132,7 @@ func verifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversa
 		return false, nil
 	}
 	return run.ID == runIDForIdempotencyKey(run.Scope, teamMemberRunKey(routing, run.AssignedAgentID)) &&
-		run.ConcurrencyKey == conversationRunLane(conversation.ID, root, run.AssignedAgentID) &&
+		run.ConcurrencyKey == ConversationRunLane(conversation.ID, root, run.AssignedAgentID) &&
 		run.Context[conversationRunContextConversationID] == conversation.ID && run.Context[conversationRunContextTriggerID] == trigger.ID, nil
 }
 

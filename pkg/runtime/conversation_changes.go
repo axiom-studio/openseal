@@ -556,7 +556,7 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 			}
 			// An Agent's lane of this conversation, or of one of its threads.
 			thread, _ := run.Context["threadRootMessageId"].(string)
-			if run.ConcurrencyKey != conversationRunLane(conversation.ID, thread, run.AssignedAgentID) {
+			if run.ConcurrencyKey != ConversationRunLane(conversation.ID, thread, run.AssignedAgentID) {
 				continue
 			}
 			if thread != "" {

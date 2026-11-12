@@ -38,12 +38,13 @@ func isTeamRoutingRun(run *AgentRun) bool {
 		strings.TrimSpace(run.AssignedAgentID) == ""
 }
 
-// conversationRunLane is a conversation Run's concurrency key: the channel or
+// ConversationRunLane is a conversation Run's concurrency key: the channel or
 // one thread of it, then the Agent working in it. It is the same rule for an
 // Agent's own chat and a Team member's, so once a member is assigned its Run
 // is an Agent Run like any other. Only a Team's unassigned routing Run keeps
-// the bare channel lane.
-func conversationRunLane(conversationID, threadRoot, assignedAgentID string) string {
+// the bare channel lane. Hosts that verify a Run's chat origin compare against
+// it.
+func ConversationRunLane(conversationID, threadRoot, assignedAgentID string) string {
 	lane := conversationID
 	if threadRoot != "" {
 		lane += ":thread:" + threadRoot
@@ -52,12 +53,6 @@ func conversationRunLane(conversationID, threadRoot, assignedAgentID string) str
 		lane += ":agent:" + assignedAgentID
 	}
 	return lane
-}
-
-// ConversationRunLane is the concurrency key a chat's conversation Run is
-// queued under. Hosts that verify a Run's chat origin compare against it.
-func ConversationRunLane(conversationID, threadRoot, assignedAgentID string) string {
-	return conversationRunLane(conversationID, threadRoot, assignedAgentID)
 }
 
 func conversationRoutingKey(scope Scope, conversationID, triggerID string) string {
@@ -106,7 +101,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 			return nil, err
 		}
 		if existing == nil {
-			delivered, err := followUps.deliverToConversationLane(ctx, conversation, trigger, conversationRunLane(conversation.ID, root, responder.Participant.ID))
+			delivered, err := followUps.deliverToConversationLane(ctx, conversation, trigger, ConversationRunLane(conversation.ID, root, responder.Participant.ID))
 			if err != nil {
 				return nil, err
 			}
@@ -146,7 +141,7 @@ func teamMemberRunRequest(routing *AgentRun, conversation *Conversation, trigger
 		context[routingReasonContextKey] = responder.Reason
 	}
 	root, _ := routing.Context["threadRootMessageId"].(string)
-	lane := conversationRunLane(conversation.ID, root, responder.Participant.ID)
+	lane := ConversationRunLane(conversation.ID, root, responder.Participant.ID)
 	return CreateAgentRunRequest{
 		Scope: routing.Scope, Kind: RunKindConversation, Owner: routing.Owner,
 		AssignedAgentID: responder.Participant.ID, ActingUser: routing.ActingUser,

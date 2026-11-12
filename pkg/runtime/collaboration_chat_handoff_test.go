@@ -15,7 +15,7 @@ func TestCollaborationChildAnswersInTheSameChat(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "handoff"}
 	source := &AgentRun{ID: "marlow-run", RootRunID: "marlow-run", Kind: RunKindConversation, Scope: scope,
 		Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}, AssignedAgentID: "marlow",
-		ConcurrencyKey: conversationRunLane("chat", "root", "marlow"), Source: RunSourceChat,
+		ConcurrencyKey: ConversationRunLane("chat", "root", "marlow"), Source: RunSourceChat,
 		Context: map[string]interface{}{conversationRunContextConversationID: "chat", conversationRunContextTriggerID: "ask", "threadRootMessageId": "root"}}
 	for _, kind := range []AgentRequestKind{AgentRequestKindRequest, AgentRequestKindHandoff} {
 		request := &AgentRequest{ID: "request", Kind: kind, Goal: "Suggest one launch step",
@@ -25,7 +25,7 @@ func TestCollaborationChildAnswersInTheSameChat(t *testing.T) {
 		if child.Owner != source.Owner || child.AssignedAgentID != "harp" {
 			t.Fatalf("%s child owner = %v, Agent %q", kind, child.Owner, child.AssignedAgentID)
 		}
-		if child.Kind != RunKindConversation || child.ConcurrencyKey != conversationRunLane("chat", "root", "harp") {
+		if child.Kind != RunKindConversation || child.ConcurrencyKey != ConversationRunLane("chat", "root", "harp") {
 			t.Fatalf("%s child = %s %q", kind, child.Kind, child.ConcurrencyKey)
 		}
 		if err := validateConversationRun(child); err != nil {
@@ -74,7 +74,7 @@ func TestTeamChatHandOffAcceptanceRechecksTheRoster(t *testing.T) {
 	service.teams = team
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: "marlow", Goal: "Answer", Source: RunSourceChat,
-		ConcurrencyKey: conversationRunLane("chat", "", "marlow"),
+		ConcurrencyKey: ConversationRunLane("chat", "", "marlow"),
 		Context:        map[string]interface{}{conversationRunContextConversationID: "chat", conversationRunContextTriggerID: "ask"},
 	})
 	if err != nil {

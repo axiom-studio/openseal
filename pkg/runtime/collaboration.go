@@ -281,10 +281,10 @@ func (r *AgentRequest) Validate() error {
 	if r.DependencyGroupID != "" && (!validOpaqueIdentifier(r.DependencyGroupID, 128) || !validOpaqueIdentifier(r.DependencyID, 128)) {
 		return errors.New("agent request dependency identifiers must be portable opaque identifiers")
 	}
-	if err := validateCredentialFreeContext(r.SharedContext); err != nil {
+	if err := ValidateCredentialFreeContext(r.SharedContext); err != nil {
 		return err
 	}
-	if err := validateCredentialFreeContext(r.ChildCheckpoint); err != nil {
+	if err := ValidateCredentialFreeContext(r.ChildCheckpoint); err != nil {
 		return err
 	}
 	if r.BudgetAllocation != nil {
@@ -317,7 +317,7 @@ func (r *AgentRequest) Validate() error {
 	if r.Status != AgentRequestStatusFailed && r.Status != AgentRequestStatusCanceled && strings.TrimSpace(r.ResolutionReason) != "" {
 		return errors.New("resolution reason is only valid for a failed or canceled agent request")
 	}
-	if err := validateCredentialFreeContext(r.AcceptanceEvidence); err != nil {
+	if err := ValidateCredentialFreeContext(r.AcceptanceEvidence); err != nil {
 		return err
 	}
 	return nil
@@ -741,10 +741,10 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if strings.TrimSpace(req.SourceRunID) == "" || strings.TrimSpace(req.Goal) == "" {
 		return nil, errors.New("source run and goal are required")
 	}
-	if err := validateCredentialFreeContext(req.SharedContext); err != nil {
+	if err := ValidateCredentialFreeContext(req.SharedContext); err != nil {
 		return nil, err
 	}
-	if err := validateCredentialFreeContext(req.ChildCheckpoint); err != nil {
+	if err := ValidateCredentialFreeContext(req.ChildCheckpoint); err != nil {
 		return nil, err
 	}
 	if err := validateArtifactRequirements(req.ArtifactRequirements); err != nil {
@@ -933,7 +933,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		if strings.TrimSpace(spec.Goal) == "" {
 			return nil, fmt.Errorf("request %d goal is required", index+1)
 		}
-		if err := validateCredentialFreeContext(spec.SharedContext); err != nil {
+		if err := ValidateCredentialFreeContext(spec.SharedContext); err != nil {
 			return nil, err
 		}
 		if err := validateArtifactRequirements(spec.ArtifactRequirements); err != nil {
@@ -1308,7 +1308,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	if len(request.AcceptanceCriteria) > 0 && len(req.AcceptanceEvidence) == 0 {
 		return nil, errors.New("acceptance evidence is required")
 	}
-	if err := validateCredentialFreeContext(req.AcceptanceEvidence); err != nil {
+	if err := ValidateCredentialFreeContext(req.AcceptanceEvidence); err != nil {
 		return nil, err
 	}
 	source, err := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
@@ -1878,7 +1878,7 @@ func collaborationChatPlacement(source *AgentRun, assignedAgent string, context 
 	}
 	conversationID, _ := context[conversationRunContextConversationID].(string)
 	root, _ := context["threadRootMessageId"].(string)
-	return conversationRunLane(conversationID, root, assignedAgent)
+	return ConversationRunLane(conversationID, root, assignedAgent)
 }
 
 // validateChatDelegationSource allows chat hand-offs only between Team
@@ -2424,7 +2424,10 @@ func collaborationCompletionEvent(run *AgentRun, request *AgentRequest, eventTyp
 	return event
 }
 
-func validateCredentialFreeContext(value interface{}) error {
+// ValidateCredentialFreeContext rejects resolved credentials and secret-shaped
+// values before portable work state can reach persistence or model context.
+// Opaque credential references belong in governed skill bindings instead.
+func ValidateCredentialFreeContext(value interface{}) error {
 	var walk func(interface{}) error
 	walk = func(candidate interface{}) error {
 		switch typed := candidate.(type) {
@@ -2450,13 +2453,6 @@ func validateCredentialFreeContext(value interface{}) error {
 		return nil
 	}
 	return walk(value)
-}
-
-// ValidateCredentialFreeContext rejects resolved credentials and secret-shaped
-// values before portable work state can reach persistence or model context.
-// Opaque credential references belong in governed skill bindings instead.
-func ValidateCredentialFreeContext(value interface{}) error {
-	return validateCredentialFreeContext(value)
 }
 
 func validateArtifactRequirements(requirements []ArtifactRequirement) error {
@@ -2512,7 +2508,7 @@ func validateArtifactReferences(requirements []ArtifactRequirement, artifacts []
 				return fmt.Errorf("artifact %q digest is invalid", artifact.ID)
 			}
 		}
-		if err := validateCredentialFreeContext(artifact.Metadata); err != nil {
+		if err := ValidateCredentialFreeContext(artifact.Metadata); err != nil {
 			return fmt.Errorf("artifact %q metadata: %w", artifact.ID, err)
 		}
 		for _, evidenceRef := range artifact.EvidenceRefs {

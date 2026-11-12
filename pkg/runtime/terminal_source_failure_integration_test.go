@@ -39,7 +39,7 @@ func sourceFailureRun(t *testing.T, store sourceFailureStore, at time.Time) (*Ag
 		t.Fatal(err)
 	}
 	trigger := posted.Message
-	lane := conversationRunLane(conversation.ID, trigger.ID, owner.ID)
+	lane := ConversationRunLane(conversation.ID, trigger.ID, owner.ID)
 	commands := NewRunCommandService(store)
 	commands.now = func() time.Time { return at }
 	created, err := commands.CreateAgentRun(ctx, CreateAgentRunRequest{

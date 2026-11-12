@@ -336,7 +336,7 @@ func (s *SQLiteStore) OpenConversationAgentSession(ctx context.Context, req Open
 		return nil, fmt.Errorf("%w: conversationId, agentId, runId and a lease are required", ErrInvalidAgentSession)
 	}
 	now := sessionNow(req.Now)
-	lane := conversationRunLane(req.ConversationID, req.ThreadRootID, req.AgentID)
+	lane := ConversationRunLane(req.ConversationID, req.ThreadRootID, req.AgentID)
 	id := ConversationAgentSessionID(req.Scope, lane)
 
 	var result *OpenAgentSessionResult

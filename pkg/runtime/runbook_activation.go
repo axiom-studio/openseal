@@ -274,10 +274,10 @@ func (a *RunbookActivation) Validate() error {
 			return fmt.Errorf("Runbook activation trigger: %w", err)
 		}
 	}
-	if err := validateCredentialFreeContext(a.Input); err != nil {
+	if err := ValidateCredentialFreeContext(a.Input); err != nil {
 		return fmt.Errorf("Runbook activation input: %w", err)
 	}
-	if err := validateCredentialFreeContext(a.Policy); err != nil {
+	if err := ValidateCredentialFreeContext(a.Policy); err != nil {
 		return fmt.Errorf("Runbook activation policy: %w", err)
 	}
 	if a.Budget != nil {

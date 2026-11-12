@@ -236,7 +236,7 @@ func (f *chatLoopFixture) startMember(trigger *ChannelMessage, agentID string) *
 	f.t.Helper()
 	request := conversationAgentRunRequest(f.conversation, trigger)
 	request.AssignedAgentID = agentID
-	request.ConcurrencyKey = conversationRunLane(f.conversation.ID, "", agentID)
+	request.ConcurrencyKey = ConversationRunLane(f.conversation.ID, "", agentID)
 	request.SessionID = conversationSessionID(f.conversation.Scope, request.ConcurrencyKey)
 	request.IdempotencyKey = "member-" + agentID + "-" + trigger.ID
 	commands := NewRunCommandService(f.store)

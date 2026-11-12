@@ -515,7 +515,7 @@ func (f *loopFixture) chatRun(conversation *Conversation, message *ChannelMessag
 	request := conversationAgentRunRequest(conversation, message)
 	request.AssignedAgentID = member
 	threadRoot, _ := request.Context["threadRootMessageId"].(string)
-	request.ConcurrencyKey = conversationRunLane(conversation.ID, threadRoot, member)
+	request.ConcurrencyKey = ConversationRunLane(conversation.ID, threadRoot, member)
 	request.SessionID = conversationSessionID(f.scope, request.ConcurrencyKey)
 	request.IdempotencyKey = "member-" + member + "-" + message.ID
 	created, err := f.portfolio.CreateAgentRun(f.ctx, request)

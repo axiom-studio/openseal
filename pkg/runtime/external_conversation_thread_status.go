@@ -82,9 +82,9 @@ func externalThreadHasActiveWork(ctx context.Context, store PortfolioStore, run 
 		if err != nil {
 			return false, err
 		}
-		lanes = append(lanes, conversationRunLane(conversationID, root, ""))
+		lanes = append(lanes, ConversationRunLane(conversationID, root, ""))
 		for _, member := range append(roster, members...) {
-			lanes = append(lanes, conversationRunLane(conversationID, root, member))
+			lanes = append(lanes, ConversationRunLane(conversationID, root, member))
 		}
 	}
 	checked := make(map[string]bool, len(lanes))

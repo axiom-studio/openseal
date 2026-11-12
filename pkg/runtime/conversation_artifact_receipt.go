@@ -17,7 +17,7 @@ const conversationArtifactReceiptService = "openseal.artifact-delivery"
 // succeeded governed tool calls, in entry order, deduplicated by (id,
 // version). They ride on the Run's final answer. A Run with no session log
 // (or stores that cannot read it) has none.
-func runActionArtifactReferences(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) ([]savedArtifact, error) {
+func runActionArtifactReferences(ctx context.Context, sessions loopSessionEntryLister, actions ActionCallReader, run *AgentRun) ([]savedArtifact, error) {
 	if sessions == nil || actions == nil || run == nil || run.ID == "" {
 		return nil, nil
 	}

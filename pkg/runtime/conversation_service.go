@@ -259,7 +259,7 @@ type ConversationStore interface {
 	// Terminal failure reports read the Run's session log and its action
 	// calls to name what stopped the attempt, and note the reply there.
 	AgentSessionStore
-	actionCallReader
+	ActionCallReader
 }
 
 type ConversationService struct {

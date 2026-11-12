@@ -168,7 +168,7 @@ func (a *Artifact) Validate() error {
 	if a.Provenance.SpaceID != "" && !validOpaqueIdentifier(a.Provenance.SpaceID, 128) {
 		return fmt.Errorf("%w: provenance space id must be a portable opaque identifier", ErrInvalidArtifactRecord)
 	}
-	if err := validateCredentialFreeContext(a.Metadata); err != nil {
+	if err := ValidateCredentialFreeContext(a.Metadata); err != nil {
 		return fmt.Errorf("%w: metadata: %v", ErrInvalidArtifactRecord, err)
 	}
 	if a.MetadataSchema != nil {

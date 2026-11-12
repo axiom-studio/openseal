@@ -111,7 +111,7 @@ func newFinalDeliveryFixture(t *testing.T, base conversationThreadStartTestStore
 	request := conversationAgentRunRequest(conversation, trigger)
 	if options.team {
 		request.AssignedAgentID = "agent-1"
-		request.ConcurrencyKey = conversationRunLane(conversation.ID, "", "agent-1")
+		request.ConcurrencyKey = ConversationRunLane(conversation.ID, "", "agent-1")
 		request.SessionID = conversationSessionID(scope, request.ConcurrencyKey)
 		request.IdempotencyKey = "member-" + trigger.ID
 	}

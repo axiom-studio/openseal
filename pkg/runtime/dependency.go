@@ -499,7 +499,7 @@ func (d *RunDependency) Validate() error {
 	default:
 		return fmt.Errorf("%w: invalid dependency state %q", ErrInvalidRunDependency, d.State)
 	}
-	if err := validateCredentialFreeContext(d.Result); err != nil {
+	if err := ValidateCredentialFreeContext(d.Result); err != nil {
 		return fmt.Errorf("%w: dependency result: %v", ErrInvalidRunDependency, err)
 	}
 	if err := validateArtifactReferences(nil, d.Artifacts); err != nil {
