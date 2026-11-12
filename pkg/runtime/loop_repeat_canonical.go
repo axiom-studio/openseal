@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -84,7 +86,7 @@ func repeatGovernedOperation(skillID, action string) string {
 // repeatGovernedCardOperation reports whether a governed call is an in-chat
 // card (setup, credential, connection request): those are control.
 func repeatGovernedCardOperation(operation string) bool {
-	prefix := SkillManagementSkillID + "."
+	prefix := models.SkillManagementSkillID + "."
 	if !strings.HasPrefix(operation, prefix) {
 		return false
 	}
@@ -139,7 +141,7 @@ type RepeatSubject struct {
 	// arguments handed to ActionCoordinator (review envelope removed); for host
 	// tools the tool args.
 	Arguments         map[string]interface{}
-	ExternalOperation *ExternalOperationIdentity
+	ExternalOperation *activity.ExternalOperationIdentity
 	Effect            RepeatEffect
 }
 
@@ -188,7 +190,7 @@ func repeatKey(subject RepeatSubject) (string, error) {
 		if err := subject.ExternalOperation.Validate(); err != nil {
 			return "", fmt.Errorf("repeat key: %w", err)
 		}
-		resource, err := canonicalExternalOperationResource(subject.ExternalOperation.Resource)
+		resource, err := activity.CanonicalExternalOperationResource(subject.ExternalOperation.Resource)
 		if err != nil {
 			return "", fmt.Errorf("repeat key: %w", err)
 		}

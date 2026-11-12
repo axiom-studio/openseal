@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -26,14 +27,14 @@ type stepSteering struct {
 	// Plan goes to every StepPreparer.
 	Plan agentrun.SteeringPlan
 	// Entries are the user entries for the unconsumed prefix, in order.
-	Entries []*SessionEntry
+	Entries []*models.SessionEntry
 	// Through is the cursor value the append writes: len(PendingInterventions)
 	// when anything is unconsumed, nil otherwise.
 	Through *int
 }
 
 // unconsumedInterventions is PendingInterventions[ConsumedInterventions:].
-func unconsumedInterventions(run *AgentRun) []AgentRunIntervention {
+func unconsumedInterventions(run *models.AgentRun) []models.AgentRunIntervention {
 	if run == nil {
 		return nil
 	}
@@ -53,11 +54,11 @@ func unconsumedInterventions(run *AgentRun) []AgentRunIntervention {
 // catch-up, not its entry id: an id the catch-up already stored would turn
 // the whole step append into a replay conflict, while a stored SourceKey just
 // skips the duplicate.
-func steeringEntryID(intervention AgentRunIntervention) string {
+func steeringEntryID(intervention models.AgentRunIntervention) string {
 	if m := intervention.ConversationMessage; m != nil && strings.TrimSpace(m.MessageID) != "" {
-		return "steering:" + ChannelMessageSourceKey(m.MessageID)
+		return "steering:" + models.ChannelMessageSourceKey(m.MessageID)
 	}
-	return InterventionSourceKey(intervention.ID)
+	return models.InterventionSourceKey(intervention.ID)
 }
 
 // consumeSteering classifies the unconsumed prefix of run's interventions:
@@ -70,7 +71,7 @@ func steeringEntryID(intervention AgentRunIntervention) string {
 //   - otherwise: a user entry, Origin intervention, SourceKey intervention:<id>.
 //
 // The cursor moves to len(PendingInterventions) whatever the kinds were.
-func consumeSteering(run *AgentRun, step *AgentTurn, session *AgentSession) (stepSteering, error) {
+func consumeSteering(run *models.AgentRun, step *models.AgentTurn, session *models.AgentSession) (stepSteering, error) {
 	prefix := unconsumedInterventions(run)
 	if len(prefix) == 0 {
 		return stepSteering{}, nil
@@ -80,7 +81,7 @@ func consumeSteering(run *AgentRun, step *AgentTurn, session *AgentSession) (ste
 	}
 	through := len(run.PendingInterventions)
 	out := stepSteering{
-		Plan:    agentrun.SteeringPlan{Prefix: append([]AgentRunIntervention(nil), prefix...)},
+		Plan:    agentrun.SteeringPlan{Prefix: append([]models.AgentRunIntervention(nil), prefix...)},
 		Through: &through,
 	}
 	var stepSequence int64
@@ -88,7 +89,7 @@ func consumeSteering(run *AgentRun, step *AgentTurn, session *AgentSession) (ste
 		stepSequence = step.Sequence
 	}
 	for _, intervention := range prefix {
-		var entry *SessionEntry
+		var entry *models.SessionEntry
 		switch {
 		case intervention.ActionCallID != "":
 			continue
@@ -99,11 +100,11 @@ func consumeSteering(run *AgentRun, step *AgentTurn, session *AgentSession) (ste
 			if message.Sequence > out.Plan.ThroughMessageSequence {
 				out.Plan.ThroughMessageSequence = message.Sequence
 			}
-			entry = &SessionEntry{
-				Type:      SessionEntryUser,
-				SourceKey: ChannelMessageSourceKey(message.MessageID),
-				User: &UserEntry{
-					Origin:          UserEntryChannelMessage,
+			entry = &models.SessionEntry{
+				Type:      models.SessionEntryUser,
+				SourceKey: models.ChannelMessageSourceKey(message.MessageID),
+				User: &models.UserEntry{
+					Origin:          models.UserEntryChannelMessage,
 					Author:          steeringParticipantAuthor(message.Sender),
 					MessageID:       message.MessageID,
 					ThreadRootID:    message.ThreadRootMessageID,
@@ -115,11 +116,11 @@ func consumeSteering(run *AgentRun, step *AgentTurn, session *AgentSession) (ste
 			if strings.TrimSpace(intervention.ID) == "" {
 				return stepSteering{}, fmt.Errorf("steering run %s: intervention without id", run.ID)
 			}
-			entry = &SessionEntry{
-				Type:      SessionEntryUser,
-				SourceKey: InterventionSourceKey(intervention.ID),
-				User: &UserEntry{
-					Origin:         UserEntryIntervention,
+			entry = &models.SessionEntry{
+				Type:      models.SessionEntryUser,
+				SourceKey: models.InterventionSourceKey(intervention.ID),
+				User: &models.UserEntry{
+					Origin:         models.UserEntryIntervention,
 					Author:         steeringActorAuthor(intervention.Actor),
 					InterventionID: intervention.ID,
 				},
@@ -129,7 +130,7 @@ func consumeSteering(run *AgentRun, step *AgentTurn, session *AgentSession) (ste
 		if err != nil {
 			return stepSteering{}, fmt.Errorf("steering run %s intervention %s: %w", run.ID, intervention.ID, err)
 		}
-		entry.ID = SessionEntryID(session.ID, steeringEntryID(intervention))
+		entry.ID = models.SessionEntryID(session.ID, steeringEntryID(intervention))
 		entry.Step = stepSequence
 		entry.User.Content = content
 		entry.Tokens = modelstep.EstimateEntryTokens(entry)
@@ -139,24 +140,24 @@ func consumeSteering(run *AgentRun, step *AgentTurn, session *AgentSession) (ste
 }
 
 // steeringContent is the intervention text, then its setup receipt verbatim.
-func steeringContent(intervention AgentRunIntervention) ([]ContentPart, error) {
-	parts := []ContentPart{{Type: ContentPartText, Text: cutUTF8(intervention.Instruction, MaxUserEntryContentBytes/2)}}
+func steeringContent(intervention models.AgentRunIntervention) ([]models.ContentPart, error) {
+	parts := []models.ContentPart{{Type: models.ContentPartText, Text: models.TruncateUTF8(intervention.Instruction, models.MaxUserEntryContentBytes/2)}}
 	if receipt := intervention.SkillSetupResolution; receipt != nil {
 		value, err := json.Marshal(map[string]interface{}{"skillSetupResolution": receipt})
 		if err != nil {
 			return nil, err
 		}
-		parts = append(parts, ContentPart{Type: ContentPartJSON, Value: value})
+		parts = append(parts, models.ContentPart{Type: models.ContentPartJSON, Value: value})
 	}
 	return parts, nil
 }
 
-func steeringParticipantAuthor(p ConversationParticipant) SessionAuthor {
-	return SessionAuthor{Type: steeringAuthorType(string(p.Type)), ID: p.ID}
+func steeringParticipantAuthor(p models.ConversationParticipant) models.SessionAuthor {
+	return models.SessionAuthor{Type: steeringAuthorType(string(p.Type)), ID: p.ID}
 }
 
-func steeringActorAuthor(a ActivityActor) SessionAuthor {
-	return SessionAuthor{Type: steeringAuthorType(a.Type), ID: a.ID}
+func steeringActorAuthor(a models.ActivityActor) models.SessionAuthor {
+	return models.SessionAuthor{Type: steeringAuthorType(a.Type), ID: a.ID}
 }
 
 func steeringAuthorType(kind string) string {
@@ -171,12 +172,12 @@ func steeringAuthorType(kind string) string {
 // entries in preparer order, then the steering entries no preparer already
 // carried, the cursor and the (single) watermark CAS. It returns ok=false
 // when there is nothing to write. EarlyFinal is the first preparer's.
-func stepContextAppendRequest(run *AgentRun, session *AgentSession, workerID string, now time.Time, steering stepSteering, prepared []*agentrun.StepContextAppend) (req AppendAgentSessionEntriesRequest, early *agentrun.LoopFinal, ok bool, err error) {
-	req = AppendAgentSessionEntriesRequest{
+func stepContextAppendRequest(run *models.AgentRun, session *models.AgentSession, workerID string, now time.Time, steering stepSteering, prepared []*agentrun.StepContextAppend) (req models.AppendAgentSessionEntriesRequest, early *agentrun.LoopFinal, ok bool, err error) {
+	req = models.AppendAgentSessionEntriesRequest{
 		Scope:                       run.Scope,
 		SessionID:                   session.ID,
 		RunID:                       run.ID,
-		Lease:                       &AgentRunLeaseGuard{WorkerID: workerID, Now: now},
+		Lease:                       &models.AgentRunLeaseGuard{WorkerID: workerID, Now: now},
 		ConsumeInterventionsThrough: steering.Through,
 		Now:                         now,
 	}
@@ -187,7 +188,7 @@ func stepContextAppendRequest(run *AgentRun, session *AgentSession, workerID str
 		}
 		if part.ExpectedChannelWatermark != nil {
 			if req.ExpectedChannelWatermark != nil {
-				return AppendAgentSessionEntriesRequest{}, nil, false, errors.New("step context: two preparers moved the channel watermark")
+				return models.AppendAgentSessionEntriesRequest{}, nil, false, errors.New("step context: two preparers moved the channel watermark")
 			}
 			expected := *part.ExpectedChannelWatermark
 			req.ExpectedChannelWatermark = &expected
@@ -220,9 +221,9 @@ func stepContextAppendRequest(run *AgentRun, session *AgentSession, workerID str
 type stepContextResult struct {
 	Steering agentrun.SteeringPlan
 	// Append is nil when nothing was written.
-	Append *AppendAgentSessionEntriesResult
+	Append *models.AppendAgentSessionEntriesResult
 	// Session is the session after the append (or as loaded).
-	Session    *AgentSession
+	Session    *models.AgentSession
 	EarlyFinal *agentrun.LoopFinal
 	// CursorMoved means the append moved the Run's cursor and so bumped its
 	// revision: the caller's Run copy is stale and must be reloaded before the
@@ -234,7 +235,7 @@ type stepContextResult struct {
 // append. ErrChannelWatermarkMoved re-reads the session and re-runs the
 // preparers; after stepContextAttempts it is returned (the loop requeues the
 // Run as host-unavailable). in.Run must be the Run as read for this step.
-func appendStepContext(ctx context.Context, store AgentSessionStore, in agentrun.StepInput, preparers []agentrun.StepPreparer, now time.Time) (*stepContextResult, error) {
+func appendStepContext(ctx context.Context, store models.AgentSessionStore, in agentrun.StepInput, preparers []agentrun.StepPreparer, now time.Time) (*stepContextResult, error) {
 	if in.Run == nil || in.Session == nil {
 		return nil, errors.New("step context: run and session are required")
 	}
@@ -260,7 +261,7 @@ func appendStepContext(ctx context.Context, store AgentSessionStore, in agentrun
 			return result, nil
 		}
 		appended, err := store.AppendAgentSessionEntries(ctx, req)
-		if errors.Is(err, ErrChannelWatermarkMoved) && attempt < stepContextAttempts {
+		if errors.Is(err, models.ErrChannelWatermarkMoved) && attempt < stepContextAttempts {
 			session, getErr := store.GetAgentSession(ctx, in.Run.Scope, in.Session.ID)
 			if getErr != nil {
 				return nil, getErr

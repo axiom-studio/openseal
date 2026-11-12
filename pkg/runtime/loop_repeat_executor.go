@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -43,7 +44,7 @@ const maxRepeatNotesPerAppend = 128
 
 // stampRepeatFields sets a tool entry's ArgumentsDigest and RepeatEffect from
 // the call's repeat subject (§5.5 step 1).
-func stampRepeatFields(tool *ToolEntry, subject RepeatSubject) error {
+func stampRepeatFields(tool *models.ToolEntry, subject RepeatSubject) error {
 	if tool == nil {
 		return errors.New("repeat fields need a tool entry")
 	}
@@ -64,8 +65,8 @@ func stampRepeatFields(tool *ToolEntry, subject RepeatSubject) error {
 // (§5.5 step 4), and Parked when the entry leaves an awaiting_* state, which
 // makes a completed control entry a reset point (R2). A transition that
 // already carries a Guard is a refusal, not an execution, and gets no digest.
-func withRepeatKernelFields(req ToolEntryTransitionRequest) ToolEntryTransitionRequest {
-	var patch ToolEntryKernelPatch
+func withRepeatKernelFields(req models.ToolEntryTransitionRequest) models.ToolEntryTransitionRequest {
+	var patch models.ToolEntryKernelPatch
 	if req.Kernel != nil {
 		patch = *req.Kernel
 	}
@@ -88,7 +89,7 @@ func withRepeatKernelFields(req ToolEntryTransitionRequest) ToolEntryTransitionR
 // loopRepeatCall is one tool entry of a step, as appended, in model order.
 // The key and effect are read from the entry (stampRepeatFields).
 type loopRepeatCall struct {
-	Entry *SessionEntry
+	Entry *models.SessionEntry
 	// Governed is set for a Skill/MCP action call: a refusal by count then
 	// also gets its refused action_calls row (§5.7). Nil for host and kernel
 	// tools.
@@ -113,14 +114,14 @@ type loopRepeatGovernedCall struct {
 // loopRepeatSessionStore is the part of AgentSessionStore the guard uses.
 type loopRepeatSessionStore interface {
 	conversation.LoopSessionEntryLister
-	AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error)
-	TransitionToolEntry(ctx context.Context, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error)
+	AppendAgentSessionEntries(ctx context.Context, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error)
+	TransitionToolEntry(ctx context.Context, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error)
 }
 
 // refusedLoopCallRecorder stores a refused governed loop call
 // (*ActionCoordinator).
 type refusedLoopCallRecorder interface {
-	RecordRefusedLoopCall(ctx context.Context, req action.RefusedLoopCallRequest) (*ActionProposalResult, error)
+	RecordRefusedLoopCall(ctx context.Context, req action.RefusedLoopCallRequest) (*models.ActionProposalResult, error)
 }
 
 type loopRepeatGuardConfig struct {
@@ -128,8 +129,8 @@ type loopRepeatGuardConfig struct {
 	// Refusals records the refused row of a governed refusal; required only
 	// when a governed call is refused by count.
 	Refusals refusedLoopCallRecorder
-	Run      *AgentRun // the Run whose lease the executor holds; SessionID is its session
-	WorkerID string    // the Run lease owner
+	Run      *models.AgentRun // the Run whose lease the executor holds; SessionID is its session
+	WorkerID string           // the Run lease owner
 	// WaitOffered says the step's tools include wait; the note then adds
 	// the wait hint for reads and stateful calls.
 	WaitOffered bool
@@ -167,7 +168,7 @@ func startLoopRepeatGuard(ctx context.Context, cfg loopRepeatGuardConfig, calls 
 	}
 	for i, call := range calls {
 		entry := call.Entry
-		if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.ID == "" || entry.RunID != cfg.Run.ID {
+		if entry == nil || entry.Type != models.SessionEntryTool || entry.Tool == nil || entry.ID == "" || entry.RunID != cfg.Run.ID {
 			return nil, fmt.Errorf("repeat guard call %d is not a tool entry of Run %s", i, cfg.Run.ID)
 		}
 		if g.stepID == "" {
@@ -180,7 +181,7 @@ func startLoopRepeatGuard(ctx context.Context, cfg loopRepeatGuardConfig, calls 
 			return nil, fmt.Errorf("repeat guard got tool entry %s twice", entry.ID)
 		}
 		g.index[entry.ID] = i
-		if entry.State == ToolEntryPending {
+		if entry.State == models.ToolEntryPending {
 			effect := RepeatEffect(entry.Tool.RepeatEffect)
 			if !effect.Valid() || (effect != RepeatEffectControl && entry.Tool.ArgumentsDigest == "") {
 				return nil, fmt.Errorf("tool entry %s has no repeat key or effect", entry.ID)
@@ -192,13 +193,13 @@ func startLoopRepeatGuard(ctx context.Context, cfg loopRepeatGuardConfig, calls 
 		return nil, err
 	}
 	g.ledger = ledger
-	stepKeys := map[string]*SessionEntry{}
+	stepKeys := map[string]*models.SessionEntry{}
 	for i, call := range calls {
 		entry := call.Entry
 		effect := RepeatEffect(entry.Tool.RepeatEffect)
 		key := entry.Tool.ArgumentsDigest
 		switch {
-		case entry.State == ToolEntryPending:
+		case entry.State == models.ToolEntryPending:
 			g.pending[i] = true
 			g.verdicts[i] = ledger.evaluate(RepeatSubject{Effect: effect}, key, stepKeys)
 			if g.verdicts[i].Kind == repeatFailRun {
@@ -243,8 +244,8 @@ func (g *loopRepeatGuard) Verdict(entryID string) (repeatVerdict, bool) {
 // Failed reports that the step fails the Run with repeat_limit.
 func (g *loopRepeatGuard) Failed() bool { return g.failed }
 
-func (g *loopRepeatGuard) lease() AgentRunLeaseGuard {
-	return AgentRunLeaseGuard{WorkerID: g.cfg.WorkerID, Now: g.cfg.Now()}
+func (g *loopRepeatGuard) lease() models.AgentRunLeaseGuard {
+	return models.AgentRunLeaseGuard{WorkerID: g.cfg.WorkerID, Now: g.cfg.Now()}
 }
 
 // ApplyRefusals moves every pending call whose verdict is not run to error
@@ -253,8 +254,8 @@ func (g *loopRepeatGuard) lease() AgentRunLeaseGuard {
 // names it on the transition. It returns the transitioned entries in model
 // order. A lost lease or a concurrent close comes back as the store's error
 // (ErrLeaseLost, ErrToolEntryStateConflict).
-func (g *loopRepeatGuard) ApplyRefusals(ctx context.Context) ([]*SessionEntry, error) {
-	var out []*SessionEntry
+func (g *loopRepeatGuard) ApplyRefusals(ctx context.Context) ([]*models.SessionEntry, error) {
+	var out []*models.SessionEntry
 	for i, call := range g.calls {
 		if !g.pending[i] {
 			continue
@@ -272,18 +273,18 @@ func (g *loopRepeatGuard) ApplyRefusals(ctx context.Context) ([]*SessionEntry, e
 			}
 			actionCallID = id
 		}
-		next := cloneSessionEntry(entry)
-		next.State = ToolEntryError
+		next := models.CloneSessionEntry(entry)
+		next.State = models.ToolEntryError
 		next.ActionCallID = firstNonEmpty(entry.ActionCallID, actionCallID)
 		next.Tool.Result = refusal.Result
 		next.Tool.Guard = refusal.Guard
 		next.Tool.DuplicateOfEntryID = refusal.DuplicateOfEntryID
 		lease := g.lease()
-		result, err := g.cfg.Sessions.TransitionToolEntry(ctx, ToolEntryTransitionRequest{
+		result, err := g.cfg.Sessions.TransitionToolEntry(ctx, models.ToolEntryTransitionRequest{
 			Scope: g.cfg.Run.Scope, EntryID: entry.ID, RunID: g.cfg.Run.ID, Lease: lease,
-			From: ToolEntryPending, ExpectedRevision: entry.Revision, To: ToolEntryError,
+			From: models.ToolEntryPending, ExpectedRevision: entry.Revision, To: models.ToolEntryError,
 			ActionCallID: actionCallID, Result: refusal.Result, Tokens: modelstep.EstimateEntryTokens(next),
-			Kernel: &ToolEntryKernelPatch{Guard: refusal.Guard, DuplicateOfEntryID: refusal.DuplicateOfEntryID},
+			Kernel: &models.ToolEntryKernelPatch{Guard: refusal.Guard, DuplicateOfEntryID: refusal.DuplicateOfEntryID},
 			Now:    lease.Now,
 		})
 		if err != nil {
@@ -296,7 +297,7 @@ func (g *loopRepeatGuard) ApplyRefusals(ctx context.Context) ([]*SessionEntry, e
 	return out, nil
 }
 
-func (g *loopRepeatGuard) recordRefusedRow(ctx context.Context, entry *SessionEntry, governed *loopRepeatGovernedCall, refusal *repeatRefusal) (string, error) {
+func (g *loopRepeatGuard) recordRefusedRow(ctx context.Context, entry *models.SessionEntry, governed *loopRepeatGovernedCall, refusal *repeatRefusal) (string, error) {
 	if g.cfg.Refusals == nil {
 		return "", errors.New("a governed repeat refusal needs the action coordinator")
 	}
@@ -320,7 +321,7 @@ func (g *loopRepeatGuard) recordRefusedRow(ctx context.Context, entry *SessionEn
 
 // Observe records an entry the executor transitioned (or appended) during
 // the step. Safe for concurrent dispatch.
-func (g *loopRepeatGuard) Observe(entry *SessionEntry) {
+func (g *loopRepeatGuard) Observe(entry *models.SessionEntry) {
 	if entry == nil {
 		return
 	}
@@ -342,9 +343,9 @@ func (g *loopRepeatGuard) Observe(entry *SessionEntry) {
 // the Run's last loopErrorStreakLimit steps all ended in errors (G13).
 func (g *loopRepeatGuard) Finish(ctx context.Context) (*agentrun.LoopFailure, error) {
 	g.mu.Lock()
-	var stepEntries []*SessionEntry
+	var stepEntries []*models.SessionEntry
 	for _, entry := range g.ledger.entries {
-		if entry.Type == SessionEntryTool && entry.StepID == g.stepID {
+		if entry.Type == models.SessionEntryTool && entry.StepID == g.stepID {
 			stepEntries = append(stepEntries, entry)
 		}
 	}
@@ -359,7 +360,7 @@ func (g *loopRepeatGuard) Finish(ctx context.Context) (*agentrun.LoopFailure, er
 			open = true
 		}
 	}
-	var notes []*SessionEntry
+	var notes []*models.SessionEntry
 	if !open {
 		for _, entry := range stepEntries {
 			text, ok := g.ledger.noteAfter(entry, g.cfg.WaitOffered)
@@ -380,7 +381,7 @@ func (g *loopRepeatGuard) Finish(ctx context.Context) (*agentrun.LoopFailure, er
 	for start := 0; start < len(notes); start += maxRepeatNotesPerAppend {
 		end := min(start+maxRepeatNotesPerAppend, len(notes))
 		lease := g.lease()
-		if _, err := g.cfg.Sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+		if _, err := g.cfg.Sessions.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 			Scope: g.cfg.Run.Scope, SessionID: g.cfg.Run.SessionID, RunID: g.cfg.Run.ID,
 			Lease: &lease, Entries: notes[start:end], Now: lease.Now,
 		}); err != nil {
@@ -397,13 +398,13 @@ func (g *loopRepeatGuard) Finish(ctx context.Context) (*agentrun.LoopFailure, er
 	return nil, nil
 }
 
-func (g *loopRepeatGuard) repeatNote(after *SessionEntry, text string) *SessionEntry {
+func (g *loopRepeatGuard) repeatNote(after *models.SessionEntry, text string) *models.SessionEntry {
 	key := RepeatNoteSourceKey(after.ID)
 	data, _ := json.Marshal(map[string]string{"toolEntryId": after.ID, "toolCallId": after.ToolCallID})
-	note := &SessionEntry{
-		ID: SessionEntryID(g.cfg.Run.SessionID, key), Scope: g.cfg.Run.Scope, SessionID: g.cfg.Run.SessionID,
-		RunID: g.cfg.Run.ID, StepID: after.StepID, Step: after.Step, Type: SessionEntryNote, SourceKey: key,
-		Note: &NoteEntry{Kind: NoteRepeat, Text: text, Data: data},
+	note := &models.SessionEntry{
+		ID: models.SessionEntryID(g.cfg.Run.SessionID, key), Scope: g.cfg.Run.Scope, SessionID: g.cfg.Run.SessionID,
+		RunID: g.cfg.Run.ID, StepID: after.StepID, Step: after.Step, Type: models.SessionEntryNote, SourceKey: key,
+		Note: &models.NoteEntry{Kind: models.NoteRepeat, Text: text, Data: data},
 	}
 	note.Tokens = modelstep.EstimateEntryTokens(note)
 	return note

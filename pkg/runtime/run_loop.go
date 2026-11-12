@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -74,7 +75,7 @@ const (
 // entry and calls is nil; for a deterministic step assistant is nil and calls
 // are the producer's calls (Directive kept on the entry). Entry ids are
 // SessionEntryID(session, ToolEntryKey(step.ID, callID)).
-type StepToolEntryPlanner func(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error)
+type StepToolEntryPlanner func(binding *agentrun.TurnRunnerBinding, session *models.AgentSession, step *models.AgentTurn, assistant *models.SessionEntry, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error)
 
 // PlainTextFinalizer judges the text of a model step that made no tool calls
 // (CTL-14 ControlExecutor.PlainTextFinal): ControlFinal accepts it,
@@ -94,10 +95,10 @@ type RunLoopConfig struct {
 }
 
 type RunLoop struct {
-	store    KernelStore
-	sessions AgentSessionStore
-	activity *RunActivityService
-	turns    *AgentTurnService
+	store    models.KernelStore
+	sessions models.AgentSessionStore
+	activity *runtimeactivity.RunActivityService
+	turns    *runtimeactivity.AgentTurnService
 	actions  *action.ActionCoordinator // nil: no nested-action window
 	config   RunLoopConfig
 	logger   *zap.SugaredLogger
@@ -105,11 +106,11 @@ type RunLoop struct {
 
 // NewRunLoop builds the loop over the kernel store. The store must also be
 // the session log (AgentSessionStore).
-func NewRunLoop(store KernelStore, actions *action.ActionCoordinator, logger *zap.SugaredLogger, config RunLoopConfig) (*RunLoop, error) {
+func NewRunLoop(store models.KernelStore, actions *action.ActionCoordinator, logger *zap.SugaredLogger, config RunLoopConfig) (*RunLoop, error) {
 	if store == nil {
 		return nil, errors.New("run loop needs a kernel store")
 	}
-	sessions, ok := store.(AgentSessionStore)
+	sessions, ok := store.(models.AgentSessionStore)
 	if !ok {
 		return nil, errors.New("run loop needs a kernel store with the agent session log")
 	}
@@ -131,8 +132,8 @@ func NewRunLoop(store KernelStore, actions *action.ActionCoordinator, logger *za
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	activity := NewRunActivityService(store, store, models.WithClock(config.Now))
-	turns := NewAgentTurnService(store, store, models.WithClock(config.Now))
+	activity := runtimeactivity.NewRunActivityService(store, store, models.WithClock(config.Now))
+	turns := runtimeactivity.NewAgentTurnService(store, store, models.WithClock(config.Now))
 	return &RunLoop{
 		store: store, sessions: sessions, activity: activity, turns: turns,
 		actions: actions, config: config, logger: logger,
@@ -145,7 +146,7 @@ func (l *RunLoop) now() time.Time { return l.config.Now().UTC() }
 func (l *RunLoop) setActionCoordinator(actions *action.ActionCoordinator) { l.actions = actions }
 
 type RunLoopClaim struct {
-	Run      *AgentRun // claimed, status running, LeaseOwner == WorkerID
+	Run      *models.AgentRun // claimed, status running, LeaseOwner == WorkerID
 	WorkerID string
 	Binding  *agentrun.TurnRunnerBinding // resolved by the worker
 }
@@ -164,7 +165,7 @@ const (
 )
 
 type RunLoopExit struct {
-	Run    *AgentRun
+	Run    *models.AgentRun
 	Reason RunLoopExitReason
 	Steps  int // producer calls in this claim
 	Err    error
@@ -173,9 +174,9 @@ type RunLoopExit struct {
 // drive is the state of one claim.
 type drive struct {
 	l        *RunLoop
-	run      *AgentRun // latest Run this claim read or wrote
+	run      *models.AgentRun // latest Run this claim read or wrote
 	binding  *agentrun.TurnRunnerBinding
-	session  *AgentSession // current session (moves on promotion)
+	session  *models.AgentSession // current session (moves on promotion)
 	workerID string
 	steps    int
 }
@@ -189,10 +190,10 @@ func (l *RunLoop) Drive(ctx context.Context, claim RunLoopClaim) RunLoopExit {
 	if claim.Run == nil || strings.TrimSpace(claim.WorkerID) == "" || claim.Binding == nil || claim.Binding.Producer == nil {
 		return RunLoopExit{Run: claim.Run, Reason: RunLoopExitFailed, Err: errors.New("run loop claim needs a Run, a worker and a binding with a producer")}
 	}
-	if claim.Run.Status != AgentRunStatusRunning || claim.Run.LeaseOwner != claim.WorkerID {
-		return RunLoopExit{Run: claim.Run, Reason: RunLoopExitLeaseLost, Err: ErrLeaseLost}
+	if claim.Run.Status != models.AgentRunStatusRunning || claim.Run.LeaseOwner != claim.WorkerID {
+		return RunLoopExit{Run: claim.Run, Reason: RunLoopExitLeaseLost, Err: models.ErrLeaseLost}
 	}
-	d := &drive{l: l, run: cloneAgentRun(claim.Run), binding: claim.Binding, session: claim.Binding.Session, workerID: claim.WorkerID}
+	d := &drive{l: l, run: models.CloneAgentRun(claim.Run), binding: claim.Binding, session: claim.Binding.Session, workerID: claim.WorkerID}
 	started := l.now()
 	if err := validatePreparedSkillRuntimes(claim.Binding); err != nil {
 		return d.failWithoutStep(ctx, agentrun.LoopFailure{
@@ -212,7 +213,7 @@ func (l *RunLoop) Drive(ctx context.Context, claim RunLoopClaim) RunLoopExit {
 		if d.steps >= l.config.MaxStepsPerClaim || l.now().Sub(started) >= l.config.MaxClaimDuration {
 			return d.withSteps(d.yield(ctx))
 		}
-		if runAttemptBudgetExceeded(d.run) {
+		if models.RunAttemptBudgetExceeded(d.run) {
 			return d.withSteps(d.pauseAttempts(ctx))
 		}
 		res := d.runStep(ctx, resumed)
@@ -245,7 +246,9 @@ func (d *drive) withSteps(exit RunLoopExit) RunLoopExit {
 	return exit
 }
 
-func (d *drive) actor() ActivityActor { return ActivityActor{Type: "worker", ID: d.workerID} }
+func (d *drive) actor() models.ActivityActor {
+	return models.ActivityActor{Type: "worker", ID: d.workerID}
+}
 
 // ---------------------------------------------------------------------------
 // Run writes
@@ -259,7 +262,7 @@ func (d *drive) actor() ActivityActor { return ActivityActor{Type: "worker", ID:
 // With cas, a revision conflict or ErrSteeringArrived is returned as is (park
 // planning re-plans instead of re-applying). Otherwise the Run is reloaded and
 // the request rebuilt, at most maximumRunWriteAttempts times.
-func (d *drive) commitRun(ctx context.Context, st *stepState, req RunTransitionRequest, cas bool) (*AgentRun, error) {
+func (d *drive) commitRun(ctx context.Context, st *stepState, req runtimeactivity.RunTransitionRequest, cas bool) (*models.AgentRun, error) {
 	run := d.run
 	var lastErr error
 	for attempt := 0; attempt < maximumRunWriteAttempts; attempt++ {
@@ -270,11 +273,11 @@ func (d *drive) commitRun(ctx context.Context, st *stepState, req RunTransitionR
 			}
 			run = reloaded
 		}
-		if run.Status != AgentRunStatusRunning || run.LeaseOwner != d.workerID {
-			if isTerminalAgentRunStatus(run.Status) {
+		if run.Status != models.AgentRunStatusRunning || run.LeaseOwner != d.workerID {
+			if models.IsTerminalAgentRunStatus(run.Status) {
 				return run, errRunEnded
 			}
-			return run, ErrLeaseLost
+			return run, models.ErrLeaseLost
 		}
 		if st != nil && st.finished && !st.applied && st.step.Sequence <= run.LastAppliedTurn {
 			st.applied = true
@@ -283,9 +286,9 @@ func (d *drive) commitRun(ctx context.Context, st *stepState, req RunTransitionR
 		r.ExpectedRevision = run.Revision
 		r.LeaseOwner = d.workerID
 		if r.Status == "" {
-			r.Status = AgentRunStatusRunning
+			r.Status = models.AgentRunStatusRunning
 		}
-		if r.Actor == (ActivityActor{}) {
+		if r.Actor == (models.ActivityActor{}) {
 			r.Actor = d.actor()
 		}
 		r.Payload = maps.Clone(req.Payload)
@@ -304,7 +307,7 @@ func (d *drive) commitRun(ctx context.Context, st *stepState, req RunTransitionR
 			return updated, nil
 		}
 		lastErr = err
-		if cas || !errors.Is(err, ErrRevisionConflict) {
+		if cas || !errors.Is(err, models.ErrRevisionConflict) {
 			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
@@ -323,11 +326,11 @@ var errRunEnded = errors.New("run ended")
 // compactor already charged them to the bounded budget (SettleCompaction), so
 // the budget settlement and the exhaustion check use the usage without them,
 // while the activity usage carries all of it.
-func (d *drive) fillStepApplication(req *RunTransitionRequest, run *AgentRun, st *stepState) {
+func (d *drive) fillStepApplication(req *runtimeactivity.RunTransitionRequest, run *models.AgentRun, st *stepState) {
 	step := st.step
 	budgetStep := step
-	if st.compaction != (TurnUsage{}) {
-		budgetStep = cloneAgentTurn(step)
+	if st.compaction != (models.TurnUsage{}) {
+		budgetStep = models.CloneAgentTurn(step)
 		budgetStep.Usage = subtractCompactionUsage(step.Usage, st.compaction)
 	}
 	req.AppliedTurn = step.Sequence
@@ -342,14 +345,14 @@ func (d *drive) fillStepApplication(req *RunTransitionRequest, run *AgentRun, st
 	if step.StopReason != "" {
 		req.Payload["stopReason"] = step.StopReason
 	}
-	req.Payload["skillSelections"] = append([]HostedSkillSelection(nil), step.SkillSelections...)
+	req.Payload["skillSelections"] = append([]models.HostedSkillSelection(nil), step.SkillSelections...)
 	if id := strings.TrimSpace(step.DefinitionID); id != "" {
 		req.Payload["definitionId"] = id
 	}
 	if version := strings.TrimSpace(step.DefinitionVersion); version != "" {
 		req.Payload["definitionVersion"] = version
 	}
-	if step.Status == AgentTurnStatusFailed && strings.TrimSpace(step.Error) != "" {
+	if step.Status == models.AgentTurnStatusFailed && strings.TrimSpace(step.Error) != "" {
 		req.Payload["stepError"] = conversation.BoundedTurnFailureText(step.Error)
 	}
 	if st.kernelState != nil {
@@ -362,19 +365,19 @@ func (d *drive) fillStepApplication(req *RunTransitionRequest, run *AgentRun, st
 		}
 	}
 	if req.Summary == "" {
-		if step.OutputSummary != "" && step.Status == AgentTurnStatusCompleted {
+		if step.OutputSummary != "" && step.Status == models.AgentTurnStatusCompleted {
 			req.Summary = step.OutputSummary
 		} else {
 			req.Summary = fmt.Sprintf("Applied step %d", step.Sequence)
 		}
 	}
-	if req.Status == AgentRunStatusRunning && stepExhaustsBudget(run, budgetStep, st.produced) {
-		req.Status = AgentRunStatusPaused
+	if req.Status == models.AgentRunStatusRunning && stepExhaustsBudget(run, budgetStep, st.produced) {
+		req.Status = models.AgentRunStatusPaused
 		req.Summary = stepBudgetExhaustedAfterStepSummary
 	}
 	fillStepBudgetSettlement(req, run, budgetStep, st.produced)
-	if st.compaction != (TurnUsage{}) {
-		if activity := budgetUsageForStep(step.Usage, st.produced); activity != (BudgetUsage{}) {
+	if st.compaction != (models.TurnUsage{}) {
+		if activity := budgetUsageForStep(step.Usage, st.produced); activity != (models.BudgetUsage{}) {
 			req.ActivityUsageDelta = &activity
 		}
 	}
@@ -382,7 +385,7 @@ func (d *drive) fillStepApplication(req *RunTransitionRequest, run *AgentRun, st
 
 // subtractCompactionUsage removes a step's compaction usage from its row
 // usage (never below zero).
-func subtractCompactionUsage(usage, compaction TurnUsage) TurnUsage {
+func subtractCompactionUsage(usage, compaction models.TurnUsage) models.TurnUsage {
 	usage.InputTokens = max(usage.InputTokens-compaction.InputTokens, 0)
 	usage.OutputTokens = max(usage.OutputTokens-compaction.OutputTokens, 0)
 	usage.Cost = max(usage.Cost-compaction.Cost, 0)
@@ -400,13 +403,13 @@ func runbookCurrentStep(state map[string]interface{}) string {
 	return strings.TrimSpace(current)
 }
 
-func (d *drive) reloadRun(ctx context.Context) (*AgentRun, error) {
+func (d *drive) reloadRun(ctx context.Context) (*models.AgentRun, error) {
 	run, err := d.l.store.GetAgentRun(ctx, d.run.Scope, d.run.ID)
 	if err != nil {
 		return nil, err
 	}
 	if run == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	d.run = run
 	return run, nil
@@ -416,20 +419,20 @@ func (d *drive) reloadRun(ctx context.Context) (*AgentRun, error) {
 // Exits
 
 // statusExit maps a Run that stopped running after a loop write to its exit.
-func (d *drive) statusExit(run *AgentRun) *RunLoopExit {
+func (d *drive) statusExit(run *models.AgentRun) *RunLoopExit {
 	exit := RunLoopExit{Run: run}
 	switch {
-	case run.Status == AgentRunStatusPaused:
+	case run.Status == models.AgentRunStatusPaused:
 		exit.Reason = RunLoopExitPaused
-	case run.Status == AgentRunStatusQueued:
+	case run.Status == models.AgentRunStatusQueued:
 		exit.Reason = RunLoopExitRequeued
-	case isWaitingRunStatus(run.Status):
+	case models.IsWaitingRunStatus(run.Status):
 		exit.Reason = RunLoopExitParked
-	case run.Status == AgentRunStatusCompleted:
+	case run.Status == models.AgentRunStatusCompleted:
 		exit.Reason = RunLoopExitFinal
-	case run.Status == AgentRunStatusFailed:
+	case run.Status == models.AgentRunStatusFailed:
 		exit.Reason = RunLoopExitFailed
-	case isTerminalAgentRunStatus(run.Status):
+	case models.IsTerminalAgentRunStatus(run.Status):
 		exit.Reason = RunLoopExitEnded
 	default:
 		exit.Reason = RunLoopExitLeaseLost
@@ -455,13 +458,13 @@ func (d *drive) writeErrorExit(err error) *RunLoopExit {
 }
 
 func isLeaseLoss(err error) bool {
-	return errors.Is(err, ErrLeaseLost) || errors.Is(err, ErrTurnLeaseHeld) || errors.Is(err, context.Canceled)
+	return errors.Is(err, models.ErrLeaseLost) || errors.Is(err, models.ErrTurnLeaseHeld) || errors.Is(err, context.Canceled)
 }
 
 // yield ends the claim for fairness (D13); the next claim resumes from the log.
 func (d *drive) yield(ctx context.Context) RunLoopExit {
-	run, err := d.commitRun(ctx, nil, RunTransitionRequest{
-		Status: AgentRunStatusQueued, EventType: "run.yielded", Summary: "Run yielded after its step slice",
+	run, err := d.commitRun(ctx, nil, runtimeactivity.RunTransitionRequest{
+		Status: models.AgentRunStatusQueued, EventType: "run.yielded", Summary: "Run yielded after its step slice",
 		Payload: map[string]interface{}{"steps": d.steps},
 	}, false)
 	if err != nil {
@@ -473,8 +476,8 @@ func (d *drive) yield(ctx context.Context) RunLoopExit {
 // requeue puts the Run back in the queue, claimable at availableAt. st's
 // finished step, when not yet applied, is applied by the same write.
 func (d *drive) requeue(ctx context.Context, st *stepState, availableAt *time.Time, reason, summary string) RunLoopExit {
-	run, err := d.commitRun(ctx, st, RunTransitionRequest{
-		Status: AgentRunStatusQueued, EventType: "run.requeued", Summary: summary, AvailableAt: availableAt,
+	run, err := d.commitRun(ctx, st, runtimeactivity.RunTransitionRequest{
+		Status: models.AgentRunStatusQueued, EventType: "run.requeued", Summary: summary, AvailableAt: availableAt,
 		Payload: map[string]interface{}{"reason": reason},
 	}, false)
 	if err != nil {
@@ -485,11 +488,11 @@ func (d *drive) requeue(ctx context.Context, st *stepState, availableAt *time.Ti
 
 // pauseAttempts pauses a Run that used up its attempt budget.
 func (d *drive) pauseAttempts(ctx context.Context) RunLoopExit {
-	run, err := d.commitRun(ctx, nil, RunTransitionRequest{
-		Status: AgentRunStatusPaused, EventType: "budget.exhausted",
+	run, err := d.commitRun(ctx, nil, runtimeactivity.RunTransitionRequest{
+		Status: models.AgentRunStatusPaused, EventType: "budget.exhausted",
 		Summary: "Run paused before exceeding its autonomous attempt budget",
 		Payload: map[string]interface{}{
-			"budgetState": BudgetStateExhausted, "dimension": "attempts",
+			"budgetState": models.BudgetStateExhausted, "dimension": "attempts",
 			"used": d.run.BudgetUsage.Attempts, "limit": d.run.Budget.MaxAttempts,
 		},
 	}, false)

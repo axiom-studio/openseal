@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
@@ -30,11 +31,11 @@ import (
 
 // StepToolDispatcherConfig wires the services shared by every claim.
 type StepToolDispatcherConfig struct {
-	Sessions AgentSessionStore
-	Turns    AgentTurnStore
+	Sessions models.AgentSessionStore
+	Turns    models.AgentTurnStore
 	// Actions reads the Run's action calls (image rejection, live browser and
 	// setup guards).
-	Actions ActionStore
+	Actions models.ActionStore
 	// Coordinator records the refused row of a governed repeat refusal.
 	Coordinator *runtimeaction.ActionCoordinator
 	Governed    *GovernedToolExecutor
@@ -45,7 +46,7 @@ type StepToolDispatcherConfig struct {
 	Host *modelstep.HostToolDispatcher
 	// Output keeps governed results over the 64 KiB cap as chat files
 	// (optional; without it they are compacted).
-	Output ToolOutputKeeper
+	Output models.ToolOutputKeeper
 	Logger *zap.SugaredLogger
 	Now    func() time.Time
 }
@@ -76,7 +77,7 @@ func NewStepToolDispatcher(cfg StepToolDispatcherConfig) (*StepToolDispatcher, e
 // capability set bounds and the routine-script command pins.
 type LoopToolClaim struct {
 	Workspace        *workspace.Authority // nil: no host tools
-	SkillPrompts     []HostedSkillPrompt
+	SkillPrompts     []models.HostedSkillPrompt
 	CapabilityConfig modelstep.CapabilitySetConfig
 	CommandPins      []workspace.CommandPin
 }
@@ -90,7 +91,7 @@ func (d *StepToolDispatcher) ForClaim(claim LoopToolClaim) agentrun.LoopToolExec
 // governed actions and runbook operations, the claim's Skill prompts and the
 // host tools of its Workspace. The model-step preparer builds its tool list
 // from the same catalog, so offered and executable tools agree.
-func LoopCapabilityCatalog(run *AgentRun, binding *agentrun.TurnRunnerBinding, claim LoopToolClaim) modelstep.CapabilityCatalog {
+func LoopCapabilityCatalog(run *models.AgentRun, binding *agentrun.TurnRunnerBinding, claim LoopToolClaim) modelstep.CapabilityCatalog {
 	catalog := modelstep.CapabilityCatalog{SkillPrompts: claim.SkillPrompts, HostTools: modelstep.HostToolSpecs(claim.Workspace)}
 	if run != nil {
 		catalog.Scope, catalog.AgentID = run.Scope, run.AssignedAgentID
@@ -130,11 +131,11 @@ const (
 // barrier see it.
 type resolvedLoopTool struct {
 	Route      loopToolRoute
-	Control    ControlToolName
+	Control    models.ControlToolName
 	Phase      control.ControlPhase // control tools only
 	Host       modelstep.HostToolSpec
 	Action     *capability.ModelAction
-	SideEffect ToolSideEffect
+	SideEffect models.ToolSideEffect
 	Subject    RepeatSubject
 }
 
@@ -146,7 +147,7 @@ func (t resolvedLoopTool) settle() bool {
 // concurrent reports a call that may run beside its neighbours (§5.2):
 // side effect none or read.
 func (t resolvedLoopTool) concurrent() bool {
-	return t.SideEffect == ToolSideEffectNone || t.SideEffect == ToolSideEffectRead
+	return t.SideEffect == models.ToolSideEffectNone || t.SideEffect == models.ToolSideEffectRead
 }
 
 // resolveLoopTool routes a call by name: control tools, then capability
@@ -158,7 +159,7 @@ func (x *claimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding,
 		phase, _ := control.ControlToolPhase(name)
 		effect := repeatEffectOf(LoopToolKernel, "", false, name)
 		return resolvedLoopTool{
-			Route: loopRouteControl, Control: ControlToolName(name), Phase: phase,
+			Route: loopRouteControl, Control: models.ControlToolName(name), Phase: phase,
 			SideEffect: kernelToolSideEffect(effect),
 			Subject:    RepeatSubject{Identity: name, Arguments: args, Effect: effect},
 		}, nil
@@ -170,9 +171,9 @@ func (x *claimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding,
 		}, nil
 	}
 	if spec, ok := modelstep.LookupHostTool(x.hostTools, name); ok {
-		side := ToolSideEffectWrite
+		side := models.ToolSideEffectWrite
 		if spec.SideEffect == capability.SideEffectRead {
-			side = ToolSideEffectRead
+			side = models.ToolSideEffectRead
 		}
 		return resolvedLoopTool{
 			Route: loopRouteHost, Host: spec, SideEffect: side,
@@ -188,7 +189,7 @@ func (x *claimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding,
 	}
 	if action == nil {
 		return resolvedLoopTool{
-			Route: loopRouteUnknown, SideEffect: ToolSideEffectNone,
+			Route: loopRouteUnknown, SideEffect: models.ToolSideEffectNone,
 			Subject: RepeatSubject{Identity: "unknown:" + name, Arguments: args, Effect: RepeatEffectControl},
 		}, nil
 	}
@@ -204,24 +205,24 @@ func (x *claimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding,
 	if input, err := modelstep.ParseGovernedToolInput(*action, raw, governedDirective(directive)); err == nil {
 		subject.Arguments, subject.ExternalOperation = input.Arguments, input.ExternalOperation
 	}
-	side := ToolSideEffectWrite
+	side := models.ToolSideEffectWrite
 	switch action.SideEffect {
 	case capability.SideEffectNone:
-		side = ToolSideEffectNone
+		side = models.ToolSideEffectNone
 	case capability.SideEffectRead:
-		side = ToolSideEffectRead
+		side = models.ToolSideEffectRead
 	}
 	return resolvedLoopTool{Route: loopRouteGoverned, Action: action, SideEffect: side, Subject: subject}, nil
 }
 
-func kernelToolSideEffect(effect RepeatEffect) ToolSideEffect {
+func kernelToolSideEffect(effect RepeatEffect) models.ToolSideEffect {
 	switch effect {
 	case RepeatEffectRead:
-		return ToolSideEffectRead
+		return models.ToolSideEffectRead
 	case RepeatEffectControl:
-		return ToolSideEffectNone
+		return models.ToolSideEffectNone
 	}
-	return ToolSideEffectWrite
+	return models.ToolSideEffectWrite
 }
 
 // decodeLoopToolArguments decodes a call's JSON object arguments; anything
@@ -237,7 +238,7 @@ func decodeLoopToolArguments(raw json.RawMessage) map[string]interface{} {
 	return args
 }
 
-func loopEntryDirective(entry *SessionEntry) (*agentrun.ToolCallDirective, error) {
+func loopEntryDirective(entry *models.SessionEntry) (*agentrun.ToolCallDirective, error) {
 	if entry == nil || entry.Tool == nil || len(entry.Tool.Directive) == 0 {
 		return nil, nil
 	}
@@ -253,8 +254,8 @@ func loopEntryDirective(entry *SessionEntry) (*agentrun.ToolCallDirective, error
 
 // toolEntryPlanner is implemented by the claim executor.
 type toolEntryPlanner interface {
-	planToolEntries(binding *agentrun.TurnRunnerBinding, assistant *SessionEntry) ([]*SessionEntry, error)
-	planToolCallEntries(binding *agentrun.TurnRunnerBinding, run *AgentRun, step *AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*SessionEntry, error)
+	planToolEntries(binding *agentrun.TurnRunnerBinding, assistant *models.SessionEntry) ([]*models.SessionEntry, error)
+	planToolCallEntries(binding *agentrun.TurnRunnerBinding, run *models.AgentRun, step *models.AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error)
 }
 
 // Plan-time refusal code and texts.
@@ -273,7 +274,7 @@ const (
 // appended already error/refused. assistant must carry its session, Run and
 // step identity; binding.Tools must be a claim executor from
 // StepToolDispatcher.ForClaim.
-func PlanToolEntries(binding *agentrun.TurnRunnerBinding, assistant *SessionEntry) ([]*SessionEntry, error) {
+func PlanToolEntries(binding *agentrun.TurnRunnerBinding, assistant *models.SessionEntry) ([]*models.SessionEntry, error) {
 	planner, err := bindingToolPlanner(binding)
 	if err != nil {
 		return nil, err
@@ -283,7 +284,7 @@ func PlanToolEntries(binding *agentrun.TurnRunnerBinding, assistant *SessionEntr
 
 // PlanToolCallEntries builds the tool entries of a deterministic producer's
 // tool calls (StepOutput.ToolCalls). Each entry stores its directive.
-func PlanToolCallEntries(binding *agentrun.TurnRunnerBinding, run *AgentRun, step *AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
+func PlanToolCallEntries(binding *agentrun.TurnRunnerBinding, run *models.AgentRun, step *models.AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
 	planner, err := bindingToolPlanner(binding)
 	if err != nil {
 		return nil, err
@@ -302,21 +303,21 @@ func bindingToolPlanner(binding *agentrun.TurnRunnerBinding) (toolEntryPlanner, 
 	return planner, nil
 }
 
-func (x *claimToolExecutor) planToolEntries(binding *agentrun.TurnRunnerBinding, assistant *SessionEntry) ([]*SessionEntry, error) {
-	if assistant == nil || assistant.Type != SessionEntryAssistant || assistant.Assistant == nil {
+func (x *claimToolExecutor) planToolEntries(binding *agentrun.TurnRunnerBinding, assistant *models.SessionEntry) ([]*models.SessionEntry, error) {
+	if assistant == nil || assistant.Type != models.SessionEntryAssistant || assistant.Assistant == nil {
 		return nil, errors.New("plan tool entries needs an assistant entry")
 	}
 	if assistant.SessionID == "" || assistant.StepID == "" {
 		return nil, errors.New("plan tool entries needs the assistant entry's session and step")
 	}
-	entries := make([]*SessionEntry, 0, len(assistant.Assistant.ToolCalls))
+	entries := make([]*models.SessionEntry, 0, len(assistant.Assistant.ToolCalls))
 	for _, call := range assistant.Assistant.ToolCalls {
-		entry := &SessionEntry{
-			ID:    SessionEntryID(assistant.SessionID, ToolEntryKey(assistant.StepID, call.ID)),
+		entry := &models.SessionEntry{
+			ID:    models.SessionEntryID(assistant.SessionID, models.ToolEntryKey(assistant.StepID, call.ID)),
 			Scope: assistant.Scope, SessionID: assistant.SessionID, RunID: assistant.RunID,
 			StepID: assistant.StepID, Step: assistant.Step,
-			Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: call.ID,
-			Tool: &ToolEntry{Name: call.Name, Arguments: call.Arguments, ArgumentsError: call.ArgumentsError, SideEffect: ToolSideEffectNone},
+			Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: call.ID,
+			Tool: &models.ToolEntry{Name: call.Name, Arguments: call.Arguments, ArgumentsError: call.ArgumentsError, SideEffect: models.ToolSideEffectNone},
 		}
 		if err := x.planEntry(binding, entry, nil); err != nil {
 			return nil, err
@@ -326,17 +327,17 @@ func (x *claimToolExecutor) planToolEntries(binding *agentrun.TurnRunnerBinding,
 	return entries, nil
 }
 
-func (x *claimToolExecutor) planToolCallEntries(binding *agentrun.TurnRunnerBinding, run *AgentRun, step *AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
+func (x *claimToolExecutor) planToolCallEntries(binding *agentrun.TurnRunnerBinding, run *models.AgentRun, step *models.AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
 	if run == nil || step == nil || sessionID == "" {
 		return nil, errors.New("plan tool call entries needs the Run, its step and its session")
 	}
-	entries := make([]*SessionEntry, 0, len(calls))
+	entries := make([]*models.SessionEntry, 0, len(calls))
 	for _, call := range calls {
-		entry := &SessionEntry{
-			ID:    SessionEntryID(sessionID, ToolEntryKey(step.ID, call.ID)),
+		entry := &models.SessionEntry{
+			ID:    models.SessionEntryID(sessionID, models.ToolEntryKey(step.ID, call.ID)),
 			Scope: run.Scope, SessionID: sessionID, RunID: run.ID, StepID: step.ID, Step: step.Sequence,
-			Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: call.ID,
-			Tool: &ToolEntry{Name: call.Name, Arguments: call.Arguments, SideEffect: ToolSideEffectNone},
+			Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: call.ID,
+			Tool: &models.ToolEntry{Name: call.Name, Arguments: call.Arguments, SideEffect: models.ToolSideEffectNone},
 		}
 		if call.Directive != nil {
 			encoded, err := json.Marshal(call.Directive)
@@ -355,18 +356,18 @@ func (x *claimToolExecutor) planToolCallEntries(binding *agentrun.TurnRunnerBind
 
 // planEntry stamps one pending entry, or ends it error/refused when its
 // arguments cannot be used.
-func (x *claimToolExecutor) planEntry(binding *agentrun.TurnRunnerBinding, entry *SessionEntry, directive *agentrun.ToolCallDirective) error {
+func (x *claimToolExecutor) planEntry(binding *agentrun.TurnRunnerBinding, entry *models.SessionEntry, directive *agentrun.ToolCallDirective) error {
 	tool := entry.Tool
-	if len(tool.Arguments) > MaxToolArgumentsBytes {
-		tool.ArgumentsError = fmt.Sprintf("The tool arguments are %d bytes; the limit is %d.", len(tool.Arguments), MaxToolArgumentsBytes)
+	if len(tool.Arguments) > models.MaxToolArgumentsBytes {
+		tool.ArgumentsError = fmt.Sprintf("The tool arguments are %d bytes; the limit is %d.", len(tool.Arguments), models.MaxToolArgumentsBytes)
 		tool.Arguments = nil
-		entry.State = ToolEntryError
-		tool.Result = control.ErrorResult(ToolResultRefused, loopToolArgumentsTooLargeCode, tool.ArgumentsError, nil)
+		entry.State = models.ToolEntryError
+		tool.Result = control.ErrorResult(models.ToolResultRefused, loopToolArgumentsTooLargeCode, tool.ArgumentsError, nil)
 		return nil
 	}
 	if tool.ArgumentsError != "" {
-		entry.State = ToolEntryError
-		tool.Result = control.ErrorResult(ToolResultRefused, control.ArgumentsInvalidCode, tool.ArgumentsError, nil)
+		entry.State = models.ToolEntryError
+		tool.Result = control.ErrorResult(models.ToolResultRefused, control.ArgumentsInvalidCode, tool.ArgumentsError, nil)
 		return nil
 	}
 	resolved, err := x.resolveLoopTool(binding, tool.Name, tool.Arguments, directive)
@@ -387,19 +388,19 @@ type stepToolRun struct {
 	binding *agentrun.TurnRunnerBinding
 	// step produced the entries; current is the claim's running step (the
 	// TurnID of new governed calls and the nested VM fence of host calls).
-	step    *AgentTurn
-	current *AgentTurn
+	step    *models.AgentTurn
+	current *models.AgentTurn
 	// narration is the step's assistant text.
 	narration string
 
-	entries []*SessionEntry
+	entries []*models.SessionEntry
 	tools   []resolvedLoopTool
 	guard   *loopRepeatGuard
 
 	mu        sync.Mutex
 	chain     loopRunChain
 	batch     bool
-	batchRuns []*AgentRun
+	batchRuns []*models.AgentRun
 	governed  []GovernedToolOutcome // awaiting governed outcomes, in call order
 	held      bool                  // a call of the step reached awaiting_* (or waits for a foreign call lease)
 	retryAt   *time.Time
@@ -421,16 +422,16 @@ type stepToolRun struct {
 	viewErr  error
 }
 
-func (x *claimToolExecutor) newStepToolRun(in agentrun.StepToolsInput, step *AgentTurn, entries []*SessionEntry) (*stepToolRun, error) {
+func (x *claimToolExecutor) newStepToolRun(in agentrun.StepToolsInput, step *models.AgentTurn, entries []*models.SessionEntry) (*stepToolRun, error) {
 	if in.Run == nil || in.Binding == nil {
 		return nil, errors.New("step tools need the Run and its binding")
 	}
-	if in.Run.Status != AgentRunStatusRunning || in.WorkerID == "" || in.Run.LeaseOwner != in.WorkerID {
-		return nil, ErrLeaseLost
+	if in.Run.Status != models.AgentRunStatusRunning || in.WorkerID == "" || in.Run.LeaseOwner != in.WorkerID {
+		return nil, models.ErrLeaseLost
 	}
 	r := &stepToolRun{
 		x: x, in: in, binding: in.Binding, step: step, current: in.Step,
-		entries: make([]*SessionEntry, len(entries)), tools: make([]resolvedLoopTool, len(entries)),
+		entries: make([]*models.SessionEntry, len(entries)), tools: make([]resolvedLoopTool, len(entries)),
 		chain: loopRunChain{known: in.Run},
 	}
 	if r.current == nil {
@@ -440,7 +441,7 @@ func (x *claimToolExecutor) newStepToolRun(in agentrun.StepToolsInput, step *Age
 		r.narration = in.Assistant.Assistant.Text
 	}
 	for i, entry := range entries {
-		if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.RunID != in.Run.ID {
+		if entry == nil || entry.Type != models.SessionEntryTool || entry.Tool == nil || entry.RunID != in.Run.ID {
 			return nil, fmt.Errorf("step tool entry %d is not a tool entry of Run %s", i, in.Run.ID)
 		}
 		r.entries[i] = entry
@@ -457,7 +458,7 @@ func (x *claimToolExecutor) newStepToolRun(in agentrun.StepToolsInput, step *Age
 	return r, nil
 }
 
-func (r *stepToolRun) run() *AgentRun {
+func (r *stepToolRun) run() *models.AgentRun {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.chain.known
@@ -473,8 +474,8 @@ func (r *stepToolRun) input() agentrun.StepToolsInput {
 	return in
 }
 
-func (r *stepToolRun) lease() AgentRunLeaseGuard {
-	return AgentRunLeaseGuard{WorkerID: r.in.WorkerID, Now: r.x.now()}
+func (r *stepToolRun) lease() models.AgentRunLeaseGuard {
+	return models.AgentRunLeaseGuard{WorkerID: r.in.WorkerID, Now: r.x.now()}
 }
 
 func (r *stepToolRun) sessionID() string {
@@ -486,7 +487,7 @@ func (r *stepToolRun) sessionID() string {
 
 // adoptRun follows the Run through the executor's own writes. Inside a
 // concurrent batch the writes are collected and adopted by endBatch.
-func (r *stepToolRun) adoptRun(run *AgentRun) {
+func (r *stepToolRun) adoptRun(run *models.AgentRun) {
 	if run == nil {
 		return
 	}
@@ -504,18 +505,18 @@ func (r *stepToolRun) adoptRun(run *AgentRun) {
 // told apart from a foreign write, so two of them break the chain: the loop's
 // park CAS then fails on the stale revision and re-plans (SPEC §3.2).
 type loopRunChain struct {
-	known  *AgentRun
+	known  *models.AgentRun
 	broken bool
 }
 
-func (c *loopRunChain) adopt(run *AgentRun) {
+func (c *loopRunChain) adopt(run *models.AgentRun) {
 	if c.broken || run == nil || c.known == nil || run.Revision <= c.known.Revision {
 		return
 	}
 	c.known = run
 }
 
-func (c *loopRunChain) adoptBatch(runs []*AgentRun) {
+func (c *loopRunChain) adoptBatch(runs []*models.AgentRun) {
 	switch len(runs) {
 	case 0:
 	case 1:
@@ -537,7 +538,7 @@ func (r *stepToolRun) isHeld() bool {
 	return r.held
 }
 
-func (r *stepToolRun) setEntry(i int, entry *SessionEntry) {
+func (r *stepToolRun) setEntry(i int, entry *models.SessionEntry) {
 	r.mu.Lock()
 	r.entries[i] = entry
 	r.mu.Unlock()
@@ -546,7 +547,7 @@ func (r *stepToolRun) setEntry(i int, entry *SessionEntry) {
 	}
 }
 
-func (r *stepToolRun) entry(i int) *SessionEntry {
+func (r *stepToolRun) entry(i int) *models.SessionEntry {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.entries[i]
@@ -554,13 +555,13 @@ func (r *stepToolRun) entry(i int) *SessionEntry {
 
 // transition moves entry i to to. executed marks the transition of a call
 // that ran (D9 result digest, Parked when it leaves an awaiting state).
-func (r *stepToolRun) transition(ctx context.Context, i int, to ToolEntryState, result *ToolResult, wait *ToolEntryWait, actionCallID string, kernel *ToolEntryKernelPatch, executed bool) error {
+func (r *stepToolRun) transition(ctx context.Context, i int, to models.ToolEntryState, result *models.ToolResult, wait *models.ToolEntryWait, actionCallID string, kernel *models.ToolEntryKernelPatch, executed bool) error {
 	entry := r.entry(i)
 	if actionCallID == entry.ActionCallID {
 		actionCallID = ""
 	}
 	lease := r.lease()
-	req := ToolEntryTransitionRequest{
+	req := models.ToolEntryTransitionRequest{
 		Scope: r.in.Run.Scope, EntryID: entry.ID, RunID: r.in.Run.ID, Lease: lease,
 		From: entry.State, ExpectedRevision: entry.Revision, To: to,
 		ActionCallID: actionCallID, Wait: wait, Result: result, Kernel: kernel, Now: lease.Now,
@@ -580,7 +581,7 @@ func (r *stepToolRun) transition(ctx context.Context, i int, to ToolEntryState, 
 }
 
 // adopted records an entry another executor (control, guard) transitioned.
-func (r *stepToolRun) adopted(ctx context.Context, i int, entry *SessionEntry) error {
+func (r *stepToolRun) adopted(ctx context.Context, i int, entry *models.SessionEntry) error {
 	if entry == nil {
 		return nil
 	}
@@ -588,7 +589,7 @@ func (r *stepToolRun) adopted(ctx context.Context, i int, entry *SessionEntry) e
 	return r.afterTool(ctx, entry)
 }
 
-func (r *stepToolRun) afterTool(ctx context.Context, entry *SessionEntry) error {
+func (r *stepToolRun) afterTool(ctx context.Context, entry *models.SessionEntry) error {
 	if entry == nil || !entry.State.Terminal() || r.binding.AfterTool == nil {
 		return nil
 	}
@@ -599,12 +600,12 @@ func (r *stepToolRun) afterTool(ctx context.Context, entry *SessionEntry) error 
 }
 
 // refuse ends a call that does not run with an is_error result.
-func (r *stepToolRun) refuse(ctx context.Context, i int, result *ToolResult, guard *ToolGuardOutcome) error {
-	var kernel *ToolEntryKernelPatch
+func (r *stepToolRun) refuse(ctx context.Context, i int, result *models.ToolResult, guard *models.ToolGuardOutcome) error {
+	var kernel *models.ToolEntryKernelPatch
 	if guard != nil {
-		kernel = &ToolEntryKernelPatch{Guard: guard}
+		kernel = &models.ToolEntryKernelPatch{Guard: guard}
 	}
-	return r.transition(ctx, i, ToolEntryError, result, nil, "", kernel, false)
+	return r.transition(ctx, i, models.ToolEntryError, result, nil, "", kernel, false)
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +639,7 @@ func (r *stepToolRun) visible(ctx context.Context, tool resolvedLoopTool) (bool,
 	defer r.setMu.Unlock()
 	switch tool.Route {
 	case loopRouteGoverned:
-		return set.Loaded(capabilityActionPrefix + tool.Action.Name), nil
+		return set.Loaded(models.CapabilityActionPrefix + tool.Action.Name), nil
 	case loopRouteHost:
 		return set.Loaded(modelstep.CapabilityWorkspacePrefix + tool.Host.Operation), nil
 	}
@@ -654,7 +655,7 @@ func (r *stepToolRun) precheck(ctx context.Context) error {
 	if r.in.Assistant != nil && r.in.Assistant.Assistant != nil {
 		refusals := control.CallRefusals(r.in.Assistant.Assistant.ToolCalls, authority)
 		for i, entry := range r.entries {
-			if result := refusals[entry.ToolCallID]; result != nil && entry.State == ToolEntryPending {
+			if result := refusals[entry.ToolCallID]; result != nil && entry.State == models.ToolEntryPending {
 				if err := r.refuse(ctx, i, result, nil); err != nil {
 					return err
 				}
@@ -663,7 +664,7 @@ func (r *stepToolRun) precheck(ctx context.Context) error {
 	}
 	for i := range r.entries {
 		entry := r.entry(i)
-		if entry.State != ToolEntryPending || entry.ActionCallID != "" {
+		if entry.State != models.ToolEntryPending || entry.ActionCallID != "" {
 			continue
 		}
 		result, err := r.offerRefusal(ctx, i)
@@ -676,7 +677,7 @@ func (r *stepToolRun) precheck(ctx context.Context) error {
 				return fmt.Errorf("check tool call %s: %w", entry.ToolCallID, err)
 			}
 			if strings.TrimSpace(refusal) != "" {
-				result = control.ErrorResult(ToolResultRefused, loopToolRefusedCode, strings.TrimSpace(refusal), nil)
+				result = control.ErrorResult(models.ToolResultRefused, loopToolRefusedCode, strings.TrimSpace(refusal), nil)
 			}
 		}
 		if result != nil {
@@ -691,16 +692,16 @@ func (r *stepToolRun) precheck(ctx context.Context) error {
 // offerRefusal is the is_error result of a call the claim does not offer,
 // nil when it may run. Kernel-origin (directive) calls are preauthorized by
 // their producer.
-func (r *stepToolRun) offerRefusal(ctx context.Context, i int) (*ToolResult, error) {
+func (r *stepToolRun) offerRefusal(ctx context.Context, i int) (*models.ToolResult, error) {
 	entry, tool := r.entry(i), r.tools[i]
 	kernel := len(entry.Tool.Directive) > 0
-	notAvailable := func() *ToolResult {
-		return control.ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+	notAvailable := func() *models.ToolResult {
+		return control.ErrorResult(models.ToolResultRefused, loopToolNotAvailableCode,
 			"This tool is not available in this conversation.", map[string]interface{}{"tool": entry.Tool.Name})
 	}
 	switch tool.Route {
 	case loopRouteUnknown:
-		return control.ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+		return control.ErrorResult(models.ToolResultRefused, loopToolNotAvailableCode,
 			fmt.Sprintf("No tool named %q is available here.", entry.Tool.Name), map[string]interface{}{"tool": entry.Tool.Name}), nil
 	case loopRouteControl:
 		if !kernel && (r.x.cfg.Control == nil || !modelstep.ControlToolOffered(tool.Control, r.binding.Authority)) {
@@ -732,7 +733,7 @@ func (r *stepToolRun) offerRefusal(ctx context.Context, i int) (*ToolResult, err
 			return nil, err
 		}
 		if !ok {
-			return control.ErrorResult(ToolResultRefused, loopToolNotLoadedCode,
+			return control.ErrorResult(models.ToolResultRefused, loopToolNotLoadedCode,
 				"This tool is not loaded yet; load its capability with load_capabilities, then call it in your next step.",
 				map[string]interface{}{"tool": entry.Tool.Name}), nil
 		}
@@ -750,7 +751,7 @@ func (r *stepToolRun) startGuard(ctx context.Context) error {
 	run := r.run()
 	guard, err := startLoopRepeatGuard(ctx, loopRepeatGuardConfig{
 		Sessions: r.x.cfg.Sessions, Refusals: r.refusals(), Run: run, WorkerID: r.in.WorkerID,
-		WaitOffered: modelstep.ControlToolOffered(ControlToolWait, r.binding.Authority), Now: r.x.cfg.Now,
+		WaitOffered: modelstep.ControlToolOffered(models.ControlToolWait, r.binding.Authority), Now: r.x.cfg.Now,
 	}, calls)
 	if err != nil {
 		return err
@@ -800,7 +801,7 @@ func (r *stepToolRun) repeatGoverned(i int) *loopRepeatGovernedCall {
 // lets run.
 func (r *stepToolRun) dispatchable(i int) bool {
 	entry := r.entry(i)
-	if entry.State != ToolEntryPending || r.tools[i].settle() {
+	if entry.State != models.ToolEntryPending || r.tools[i].settle() {
 		return false
 	}
 	return r.guard == nil || r.guard.Dispatch(entry.ID)
@@ -822,17 +823,17 @@ func (r *stepToolRun) runCall(ctx context.Context, i int) error {
 		return r.runControlInline(ctx, i)
 	}
 	entry := r.entry(i)
-	return r.refuse(ctx, i, control.ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+	return r.refuse(ctx, i, control.ErrorResult(models.ToolResultRefused, loopToolNotAvailableCode,
 		fmt.Sprintf("No tool named %q is available here.", entry.Tool.Name), nil), nil)
 }
 
 func (r *stepToolRun) runHost(ctx context.Context, i int) error {
 	entry, spec := r.entry(i), r.tools[i].Host
 	if r.x.cfg.Host == nil || r.x.claim.Workspace == nil {
-		return r.refuse(ctx, i, modelstep.HostToolErrorResult(ToolResultFailed, modelstep.HostToolUnsupportedMessage), nil)
+		return r.refuse(ctx, i, modelstep.HostToolErrorResult(models.ToolResultFailed, modelstep.HostToolUnsupportedMessage), nil)
 	}
-	if entry.State != ToolEntryRunning {
-		if err := r.transition(ctx, i, ToolEntryRunning, nil, nil, "", nil, false); err != nil {
+	if entry.State != models.ToolEntryRunning {
+		if err := r.transition(ctx, i, models.ToolEntryRunning, nil, nil, "", nil, false); err != nil {
 			return err
 		}
 		entry = r.entry(i)
@@ -851,7 +852,7 @@ func (r *stepToolRun) runHost(ctx context.Context, i int) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return ErrLeaseLost
+		return models.ErrLeaseLost
 	}
 	kernel, err := outcome.KernelPatch()
 	if err != nil {
@@ -885,31 +886,31 @@ func (r *stepToolRun) runCapability(ctx context.Context, i int) error {
 		}
 	}
 	r.setMu.Unlock()
-	status, to := ToolResultSucceeded, ToolEntryCompleted
+	status, to := models.ToolResultSucceeded, models.ToolEntryCompleted
 	if isError {
-		status, to = ToolResultFailed, ToolEntryError
+		status, to = models.ToolResultFailed, models.ToolEntryError
 	}
-	var kernel *ToolEntryKernelPatch
+	var kernel *models.ToolEntryKernelPatch
 	if len(loaded) > 0 {
 		kernel = loadKernelPatch(set, r.binding.ModelActions, loaded)
 	}
-	result := &ToolResult{Status: status, IsError: isError, Content: []ContentPart{{Type: ContentPartJSON, Value: content}}}
+	result := &models.ToolResult{Status: status, IsError: isError, Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: content}}}
 	return r.transition(ctx, i, to, result, nil, "", kernel, true)
 }
 
 // loadKernelPatch freezes what a load made visible on its tool entry: the
 // definition of each new tool exactly as later steps declare it, and the IDs
 // of the instructions and runbooks its result carried.
-func loadKernelPatch(set *modelstep.CapabilitySet, actions []capability.ModelAction, loaded []string) *ToolEntryKernelPatch {
+func loadKernelPatch(set *modelstep.CapabilitySet, actions []capability.ModelAction, loaded []string) *models.ToolEntryKernelPatch {
 	names := conversation.LoopGovernedToolNames(actions)
-	patch := &ToolEntryKernelPatch{}
+	patch := &models.ToolEntryKernelPatch{}
 	for _, id := range loaded {
 		if action, ok := set.CatalogAction(id); ok {
-			patch.SurfacedTools = append(patch.SurfacedTools, modelstep.NewSurfacedTool(id, governedModelStepTool(action, names[action.Name], ModelStepToolLoaded)))
+			patch.SurfacedTools = append(patch.SurfacedTools, modelstep.NewSurfacedTool(id, governedModelStepTool(action, names[action.Name], models.ModelStepToolLoaded)))
 			continue
 		}
 		if spec, ok := set.CatalogHostTool(id); ok {
-			patch.SurfacedTools = append(patch.SurfacedTools, modelstep.NewSurfacedTool(id, hostModelStepTool(spec, ModelStepToolLoaded)))
+			patch.SurfacedTools = append(patch.SurfacedTools, modelstep.NewSurfacedTool(id, hostModelStepTool(spec, models.ModelStepToolLoaded)))
 			continue
 		}
 		patch.LoadedInstructions = append(patch.LoadedInstructions, id)
@@ -927,7 +928,7 @@ func (r *stepToolRun) controlContext(i int) agentrun.ControlContext {
 
 func (r *stepToolRun) runControlInline(ctx context.Context, i int) error {
 	if r.x.cfg.Control == nil {
-		return r.refuse(ctx, i, control.ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+		return r.refuse(ctx, i, control.ErrorResult(models.ToolResultRefused, loopToolNotAvailableCode,
 			"This tool is not available in this conversation.", nil), nil)
 	}
 	result, err := r.x.cfg.Control.Inline(ctx, r.controlContext(i))
@@ -977,7 +978,7 @@ func (r *stepToolRun) governedCall(i int) (GovernedToolCall, error) {
 // yet, after the image rejection and live browser guards.
 func (r *stepToolRun) runGoverned(ctx context.Context, i int) error {
 	entry, action := r.entry(i), r.tools[i].Action
-	if entry.State == ToolEntryPending && entry.ActionCallID == "" {
+	if entry.State == models.ToolEntryPending && entry.ActionCallID == "" {
 		prior, err := priorImageProviderRejection(ctx, r.x.cfg.Actions, r.in.Run.Scope, r.in.Run.ID, imageGenerationTarget{
 			SkillID: action.SkillID, Action: action.Action, BindingID: action.BindingID, BindingRevision: action.BindingRevision,
 		})
@@ -998,8 +999,8 @@ func (r *stepToolRun) runGoverned(ctx context.Context, i int) error {
 			}
 		}
 	}
-	if entry.State == ToolEntryPending {
-		if err := r.transition(ctx, i, ToolEntryRunning, nil, nil, "", nil, false); err != nil {
+	if entry.State == models.ToolEntryPending {
+		if err := r.transition(ctx, i, models.ToolEntryRunning, nil, nil, "", nil, false); err != nil {
 			return err
 		}
 	}
@@ -1008,7 +1009,7 @@ func (r *stepToolRun) runGoverned(ctx context.Context, i int) error {
 		return err
 	}
 	var outcome GovernedToolOutcome
-	if r.entry(i).ActionCallID == "" && entry.State == ToolEntryPending {
+	if r.entry(i).ActionCallID == "" && entry.State == models.ToolEntryPending {
 		outcome, err = r.x.cfg.Governed.Execute(ctx, call)
 	} else {
 		outcome, err = r.x.cfg.Governed.Resume(ctx, call, r.entry(i), r.run().PendingInterventions)
@@ -1061,9 +1062,9 @@ func (r *stepToolRun) applyGoverned(ctx context.Context, i int, outcome Governed
 	if !state.Valid() {
 		return fmt.Errorf("governed outcome of %s has state %q", entry.ToolCallID, state)
 	}
-	if state == ToolEntryRunning {
-		if entry.State != ToolEntryRunning {
-			if err := r.transition(ctx, i, ToolEntryRunning, nil, nil, outcome.ActionCallID, nil, false); err != nil {
+	if state == models.ToolEntryRunning {
+		if entry.State != models.ToolEntryRunning {
+			if err := r.transition(ctx, i, models.ToolEntryRunning, nil, nil, outcome.ActionCallID, nil, false); err != nil {
 				return err
 			}
 		}
@@ -1081,14 +1082,14 @@ func (r *stepToolRun) applyGoverned(ctx context.Context, i int, outcome Governed
 		r.recordAwaiting(outcome)
 		return nil
 	}
-	if !ValidToolEntryTransition(entry.State, state) {
-		if err := r.transition(ctx, i, ToolEntryRunning, nil, nil, outcome.ActionCallID, nil, true); err != nil {
+	if !models.ValidToolEntryTransition(entry.State, state) {
+		if err := r.transition(ctx, i, models.ToolEntryRunning, nil, nil, outcome.ActionCallID, nil, true); err != nil {
 			return err
 		}
 	}
 	result := outcome.Result
 	if result != nil {
-		bounded, err := BoundToolResult(ctx, r.x.cfg.Output, toolOutputInvocation(r.in.Run, entry.Tool.Name, r.tools[i].Action.SkillID, r.tools[i].Action.Action, outcome.ActionCallID), *result)
+		bounded, err := models.BoundToolResult(ctx, r.x.cfg.Output, toolOutputInvocation(r.in.Run, entry.Tool.Name, r.tools[i].Action.SkillID, r.tools[i].Action.Action, outcome.ActionCallID), *result)
 		if err != nil {
 			return err
 		}
@@ -1101,7 +1102,7 @@ func (r *stepToolRun) applyGoverned(ctx context.Context, i int, outcome Governed
 		r.recordAwaiting(outcome)
 		return nil
 	}
-	if r.tools[i].Action.SkillID == SkillManagementSkillID && state == ToolEntryCompleted {
+	if r.tools[i].Action.SkillID == models.SkillManagementSkillID && state == models.ToolEntryCompleted {
 		r.mu.Lock()
 		r.setupIdx = append(r.setupIdx, i)
 		r.mu.Unlock()
@@ -1149,7 +1150,7 @@ func (r *stepToolRun) planPark(ctx context.Context) (park *agentrun.LoopPark, se
 	if retryAt != nil {
 		at := *retryAt
 		return &agentrun.LoopPark{
-			Status: AgentRunStatusSleeping, Wake: &WakeCondition{Type: "timer", WakeAt: &at},
+			Status: models.AgentRunStatusSleeping, Wake: &models.WakeCondition{Type: "timer", WakeAt: &at},
 			Summary: "Waiting for a tool call that is still running elsewhere",
 		}, false, nil
 	}
@@ -1228,9 +1229,9 @@ func (r *stepToolRun) appendSetupNotes(ctx context.Context) error {
 		}
 		note.Tokens = modelstep.EstimateEntryTokens(note)
 		lease := r.lease()
-		if _, err := r.x.cfg.Sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+		if _, err := r.x.cfg.Sessions.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 			Scope: run.Scope, SessionID: r.sessionID(), RunID: run.ID, Lease: &lease,
-			Entries: []*SessionEntry{note}, Now: lease.Now,
+			Entries: []*models.SessionEntry{note}, Now: lease.Now,
 		}); err != nil {
 			return fmt.Errorf("append setup note: %w", err)
 		}
@@ -1254,8 +1255,8 @@ func (r *stepToolRun) outcome() agentrun.StepToolsOutcome {
 // toolOutputInvocation is the call a long tool output is kept for. The keeper
 // finds the Run, and so its chat, by scope and id: without the scope every
 // output over the inline cap failed with "chat files are unavailable".
-func toolOutputInvocation(run *AgentRun, name, skillID, action, actionCallID string) ToolInvocation {
-	invocation := ToolInvocation{Name: name, SkillID: skillID, Action: action, ActionCallID: actionCallID}
+func toolOutputInvocation(run *models.AgentRun, name, skillID, action, actionCallID string) models.ToolInvocation {
+	invocation := models.ToolInvocation{Name: name, SkillID: skillID, Action: action, ActionCallID: actionCallID}
 	if run != nil {
 		invocation.RunID = run.ID
 		invocation.Scope = skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}

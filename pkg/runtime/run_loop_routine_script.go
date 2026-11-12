@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
@@ -43,7 +44,7 @@ var routineScriptRunCommandTool = modelstep.HostToolName(workspace.OperationRunC
 // loopRoutineScript is a claim's routine script: the approved script and the
 // pins every run_command of the claim carries.
 type loopRoutineScript struct {
-	Script *RoutineScript
+	Script *models.RoutineScript
 	Pins   []workspace.CommandPin
 }
 
@@ -52,7 +53,7 @@ type loopRoutineScript struct {
 // only where workspace_run_command is offered (hostTools of the claim's chat
 // workspace); otherwise, or when the pinned script is invalid, the claim
 // cannot run.
-func prepareLoopRoutineScript(run *AgentRun, hostTools []modelstep.HostToolSpec) (*loopRoutineScript, error) {
+func prepareLoopRoutineScript(run *models.AgentRun, hostTools []modelstep.HostToolSpec) (*loopRoutineScript, error) {
 	if run == nil || run.Context == nil {
 		return nil, nil
 	}
@@ -82,22 +83,22 @@ func (s *loopRoutineScript) CommandPins() []workspace.CommandPin {
 // Section is the routine_script kernel system section. A routine's session
 // is its own (a fresh run session), so the script's facts are stable for the
 // session and belong in the section.
-func (s *loopRoutineScript) Section() ModelStepSystemSection {
-	return ModelStepSystemSection{
+func (s *loopRoutineScript) Section() models.ModelStepSystemSection {
+	return models.ModelStepSystemSection{
 		ID:    modelstep.LoopSectionRoutineScript,
 		Title: modelstep.LoopKernelSectionTitles[modelstep.LoopSectionRoutineScript],
 		Text:  routineScriptSectionText(s.Script),
 	}
 }
 
-func routineScriptSectionText(script *RoutineScript) string {
+func routineScriptSectionText(script *models.RoutineScript) string {
 	return fmt.Sprintf("%s\nApproved script: %s\nCommand: %s\ntimeoutSeconds: %d", RoutineScriptRulesText, script.Path, script.Command, script.TimeoutSeconds)
 }
 
 // CompletionFailure is why the Run cannot complete with the run_command tool
 // entries among entries (any order), or "" when the approved command ran
 // cleanly at the approved version.
-func (s *loopRoutineScript) CompletionFailure(entries []*SessionEntry) string {
+func (s *loopRoutineScript) CompletionFailure(entries []*models.SessionEntry) string {
 	pin := s.Pins[0]
 	script := s.Script
 	var last *routineScriptAttempt
@@ -153,7 +154,7 @@ func (s *loopRoutineScript) CompletionFailure(entries []*SessionEntry) string {
 // running in explain mode), appends failureExplanationNote, and the Run
 // fails after the tool-free explanation step. The full message, with the
 // output tail's line breaks, is StepError's source too, bounded like it.
-func (s *loopRoutineScript) FinalFailure(run *AgentRun, entries []*SessionEntry) *RunFailureExplanation {
+func (s *loopRoutineScript) FinalFailure(run *models.AgentRun, entries []*models.SessionEntry) *models.RunFailureExplanation {
 	if s == nil {
 		return nil
 	}
@@ -175,10 +176,10 @@ type routineScriptAttempt struct {
 // (or tried to run) a pinned file, oldest first. An interrupted entry whose
 // command invokes a pinned file counts even without a record (a resumed
 // write has none): the script may have started.
-func routineScriptAttempts(pins []workspace.CommandPin, entries []*SessionEntry) []routineScriptAttempt {
-	ordered := make([]*SessionEntry, 0, len(entries))
+func routineScriptAttempts(pins []workspace.CommandPin, entries []*models.SessionEntry) []routineScriptAttempt {
+	ordered := make([]*models.SessionEntry, 0, len(entries))
 	for _, entry := range entries {
-		if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || !entry.State.Terminal() {
+		if entry == nil || entry.Type != models.SessionEntryTool || entry.Tool == nil || !entry.State.Terminal() {
 			continue
 		}
 		if entry.Tool.Name != routineScriptRunCommandTool && entry.Tool.Name != workspace.OperationRunCommand {
@@ -196,7 +197,7 @@ func routineScriptAttempts(pins []workspace.CommandPin, entries []*SessionEntry)
 				record = &decoded
 			}
 		}
-		interrupted := entry.State == ToolEntryInterrupted
+		interrupted := entry.State == models.ToolEntryInterrupted
 		if record == nil && !(interrupted && invokesPinnedFile(pins, entry.Tool.Arguments)) {
 			continue // a command that ran no pinned file
 		}

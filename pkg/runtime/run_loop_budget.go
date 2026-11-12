@@ -7,6 +7,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -38,7 +40,7 @@ const (
 // runTransitioner is the Run write the budget phase needs
 // (RunActivityService.TransitionRun).
 type runTransitioner interface {
-	TransitionRun(ctx context.Context, scope Scope, runID string, req RunTransitionRequest) (*AgentRun, *ActivityEvent, error)
+	TransitionRun(ctx context.Context, scope models.Scope, runID string, req activity.RunTransitionRequest) (*models.AgentRun, *models.ActivityEvent, error)
 }
 
 // reserveStepBudget reserves the step's capacity on a bounded Run:
@@ -49,19 +51,19 @@ type runTransitioner interface {
 // step (stepBudgetAdmissionFinish) and pauses the Run (stepBudgetPause). An
 // unbounded Run, or a reservation equal to the one already held for the step,
 // is returned unchanged with no write.
-func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time, run *AgentRun, step *AgentTurn, binding *agentrun.TurnRunnerBinding, in agentrun.StepInput, workerID string) (*AgentRun, *BudgetAdmission, error) {
+func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time, run *models.AgentRun, step *models.AgentTurn, binding *agentrun.TurnRunnerBinding, in agentrun.StepInput, workerID string) (*models.AgentRun, *models.BudgetAdmission, error) {
 	if run == nil || step == nil {
 		return nil, nil, errors.New("step budget reservation requires a Run and a step")
 	}
 	if run.Budget == nil {
 		return run, nil, nil
 	}
-	refuse := func(admission BudgetAdmission) (*AgentRun, *BudgetAdmission, error) {
+	refuse := func(admission models.BudgetAdmission) (*models.AgentRun, *models.BudgetAdmission, error) {
 		admission.TurnID = step.ID
 		admission.EvaluatedAt = now
 		return run, &admission, nil
 	}
-	usage := BudgetUsage{}
+	usage := models.BudgetUsage{}
 	if binding != nil {
 		usage = binding.BudgetReservation
 	}
@@ -71,18 +73,18 @@ func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time,
 	}
 	if planner, ok := producer.(modelstep.StepBudgetPlanner); ok {
 		planIn := in
-		planIn.Run = cloneAgentRun(run)
-		planIn.Step = cloneAgentTurn(step)
+		planIn.Run = models.CloneAgentRun(run)
+		planIn.Step = models.CloneAgentTurn(step)
 		planned, err := planner.PlanStepBudget(ctx, planIn)
 		if err != nil {
-			if !errors.Is(err, ErrBudgetExhausted) {
+			if !errors.Is(err, models.ErrBudgetExhausted) {
 				return nil, nil, fmt.Errorf("plan step budget: %w", err)
 			}
-			var admissionErr *BudgetAdmissionError
+			var admissionErr *models.BudgetAdmissionError
 			if errors.As(err, &admissionErr) {
 				return refuse(admissionErr.Admission)
 			}
-			return refuse(BudgetAdmission{Reason: BudgetAdmissionHostedInput, Dimension: "unknown"})
+			return refuse(models.BudgetAdmission{Reason: models.BudgetAdmissionHostedInput, Dimension: "unknown"})
 		}
 		if usage, err = usage.Add(planned); err != nil {
 			return nil, nil, err
@@ -96,7 +98,7 @@ func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time,
 	if reserved && existing.Usage == usage {
 		return run, nil, nil
 	}
-	effective, err := EffectiveBudgetUsage(run.BudgetUsage, otherStepReservations(run, step.ID))
+	effective, err := models.EffectiveBudgetUsage(run.BudgetUsage, otherStepReservations(run, step.ID))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -104,21 +106,21 @@ func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time,
 	if err != nil {
 		return nil, nil, err
 	}
-	exceeded, _, err := BudgetWouldExceed(*run.Budget, projected)
+	exceeded, _, err := models.BudgetWouldExceed(*run.Budget, projected)
 	if err != nil {
 		return nil, nil, err
 	}
 	if exceeded {
-		return refuse(budgetReservationAdmission(*run.Budget, effective, usage))
+		return refuse(models.BudgetReservationAdmission(*run.Budget, effective, usage))
 	}
 	if runs == nil {
 		return nil, nil, errors.New("step budget reservation requires a Run transitioner")
 	}
-	reservation := &BudgetReservation{ID: step.ID, Usage: usage, CreatedAt: now}
-	transition := RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
+	reservation := &models.BudgetReservation{ID: step.ID, Usage: usage, CreatedAt: now}
+	transition := activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning,
 		Summary: stepBudgetReservedSummary, EventType: "budget.reserved",
-		Actor: ActivityActor{Type: "worker", ID: workerID}, LeaseOwner: stepLeaseOwner(run, workerID),
+		Actor: models.ActivityActor{Type: "worker", ID: workerID}, LeaseOwner: stepLeaseOwner(run, workerID),
 		BudgetReservation: reservation,
 	}
 	if reserved {
@@ -137,15 +139,15 @@ func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time,
 
 // stepLeaseOwner fences a Run write on the worker's lease when the Run is
 // leased.
-func stepLeaseOwner(run *AgentRun, workerID string) string {
+func stepLeaseOwner(run *models.AgentRun, workerID string) string {
 	if run == nil || run.LeaseOwner == "" {
 		return ""
 	}
 	return workerID
 }
 
-func otherStepReservations(run *AgentRun, stepID string) map[string]BudgetReservation {
-	others := make(map[string]BudgetReservation, len(run.BudgetReservations))
+func otherStepReservations(run *models.AgentRun, stepID string) map[string]models.BudgetReservation {
+	others := make(map[string]models.BudgetReservation, len(run.BudgetReservations))
 	for id, reservation := range run.BudgetReservations {
 		if id != stepID {
 			others[id] = reservation
@@ -155,9 +157,9 @@ func otherStepReservations(run *AgentRun, stepID string) map[string]BudgetReserv
 }
 
 // stepBudgetAdmissionFinish cancels a step whose reservation was refused.
-func stepBudgetAdmissionFinish(step *AgentTurn, workerID string, admission BudgetAdmission) FinishAgentTurnRequest {
-	return FinishAgentTurnRequest{
-		ExpectedRevision: step.Revision, Status: AgentTurnStatusCanceled, WorkerID: workerID,
+func stepBudgetAdmissionFinish(step *models.AgentTurn, workerID string, admission models.BudgetAdmission) activity.FinishAgentTurnRequest {
+	return activity.FinishAgentTurnRequest{
+		ExpectedRevision: step.Revision, Status: models.AgentTurnStatusCanceled, WorkerID: workerID,
 		OutputSummary: stepBudgetAdmissionSummary, BudgetAdmission: &admission,
 		FailureCode: StepFailureBudgetExhausted,
 	}
@@ -167,11 +169,11 @@ func stepBudgetAdmissionFinish(step *AgentTurn, workerID string, admission Budge
 // budget.exhausted). The payload is {admission} for a refused reservation,
 // otherwise {dimension, used, limit} for each exhausted dimension's first
 // entry. The caller adds the step settlement (applyStep).
-func stepBudgetPause(run *AgentRun, workerID, summary string, admission *BudgetAdmission, dimension string) RunTransitionRequest {
+func stepBudgetPause(run *models.AgentRun, workerID, summary string, admission *models.BudgetAdmission, dimension string) activity.RunTransitionRequest {
 	if summary == "" {
 		summary = stepBudgetAdmissionSummary
 	}
-	payload := map[string]interface{}{"budgetState": BudgetStateExhausted}
+	payload := map[string]interface{}{"budgetState": models.BudgetStateExhausted}
 	if admission != nil {
 		payload["admission"] = *admission
 	} else if dimension != "" {
@@ -181,16 +183,16 @@ func stepBudgetPause(run *AgentRun, workerID, summary string, admission *BudgetA
 			payload["limit"] = limit
 		}
 	}
-	return RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusPaused, Summary: summary,
-		EventType: "budget.exhausted", Actor: ActivityActor{Type: "worker", ID: workerID},
+	return activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusPaused, Summary: summary,
+		EventType: "budget.exhausted", Actor: models.ActivityActor{Type: "worker", ID: workerID},
 		LeaseOwner: stepLeaseOwner(run, workerID), BudgetAdmission: admission, Payload: payload,
 	}
 }
 
 // budgetDimensionUsage reports committed usage and the limit of one named
 // budget dimension (the names of budgetReservationAdmission).
-func budgetDimensionUsage(run *AgentRun, dimension string) (used, limit int64, ok bool) {
+func budgetDimensionUsage(run *models.AgentRun, dimension string) (used, limit int64, ok bool) {
 	if run == nil || run.Budget == nil {
 		return 0, 0, false
 	}
@@ -222,7 +224,7 @@ func budgetDimensionUsage(run *AgentRun, dimension string) (used, limit int64, o
 // {dimension: "duration_ms"} without starting the producer. chargeMS is the
 // remaining duration the deadline was set from (0 when unbounded); a step
 // cut by the deadline is charged at least that much.
-func stepDurationDeadline(ctx context.Context, run *AgentRun, stepID string) (context.Context, context.CancelFunc, int64, bool) {
+func stepDurationDeadline(ctx context.Context, run *models.AgentRun, stepID string) (context.Context, context.CancelFunc, int64, bool) {
 	if run == nil || run.Budget == nil || run.Budget.MaxDurationMS <= 0 {
 		stepCtx, cancel := context.WithCancel(ctx)
 		return stepCtx, cancel, 0, true
@@ -250,9 +252,9 @@ func stepDurationExpired(parent, stepCtx context.Context) bool {
 // before it started (elapsedMS 0) or during the producer. Nothing the
 // producer returned is appended, but its valid usage stays chargeable and the
 // duration is at least the deadline's chargeMS.
-func stepDurationExpiredFinish(step *AgentTurn, workerID string, usage TurnUsage, elapsedMS, chargeMS int64) FinishAgentTurnRequest {
+func stepDurationExpiredFinish(step *models.AgentTurn, workerID string, usage models.TurnUsage, elapsedMS, chargeMS int64) activity.FinishAgentTurnRequest {
 	if usage.Validate() != nil {
-		usage = TurnUsage{}
+		usage = models.TurnUsage{}
 	}
 	if elapsedMS > 0 || chargeMS > 0 {
 		usage.DurationMS = max(usage.DurationMS, elapsedMS, chargeMS)
@@ -261,8 +263,8 @@ func stepDurationExpiredFinish(step *AgentTurn, workerID string, usage TurnUsage
 	if elapsedMS == 0 && chargeMS == 0 {
 		summary = stepDurationExpiredSummary
 	}
-	return FinishAgentTurnRequest{
-		ExpectedRevision: step.Revision, Status: AgentTurnStatusCanceled, WorkerID: workerID,
+	return activity.FinishAgentTurnRequest{
+		ExpectedRevision: step.Revision, Status: models.AgentTurnStatusCanceled, WorkerID: workerID,
 		OutputSummary: summary, Usage: usage, FailureCode: StepFailureDurationBudget,
 	}
 }
@@ -270,7 +272,7 @@ func stepDurationExpiredFinish(step *AgentTurn, workerID string, usage TurnUsage
 // budgetUsageForStep converts a step's usage into Run budget usage. Turns
 // counts steps that ran a producer (D12): a step canceled before its
 // producer ran charges no Turn.
-func budgetUsageForStep(usage TurnUsage, produced bool) BudgetUsage {
+func budgetUsageForStep(usage models.TurnUsage, produced bool) models.BudgetUsage {
 	costMicros := int64(0)
 	if usage.Cost > 0 {
 		costMicros = int64(math.Round(usage.Cost * 1_000_000))
@@ -279,7 +281,7 @@ func budgetUsageForStep(usage TurnUsage, produced bool) BudgetUsage {
 	if produced {
 		turns = 1
 	}
-	return BudgetUsage{
+	return models.BudgetUsage{
 		Turns: turns, InputTokens: int64(usage.InputTokens), OutputTokens: int64(usage.OutputTokens),
 		CostMicros: costMicros, DurationMS: usage.DurationMS, Actions: int64(usage.NativeOperations),
 	}
@@ -288,7 +290,7 @@ func budgetUsageForStep(usage TurnUsage, produced bool) BudgetUsage {
 // stepExhaustsBudget reports whether settling step leaves the bounded Run
 // exhausted (other steps' reservations still count). The caller pauses a Run
 // that would otherwise continue.
-func stepExhaustsBudget(run *AgentRun, step *AgentTurn, produced bool) bool {
+func stepExhaustsBudget(run *models.AgentRun, step *models.AgentTurn, produced bool) bool {
 	if run == nil || step == nil || run.Budget == nil {
 		return false
 	}
@@ -296,17 +298,17 @@ func stepExhaustsBudget(run *AgentRun, step *AgentTurn, produced bool) bool {
 	if err != nil {
 		return false
 	}
-	effective, err := EffectiveBudgetUsage(usage, otherStepReservations(run, step.ID))
+	effective, err := models.EffectiveBudgetUsage(usage, otherStepReservations(run, step.ID))
 	if err != nil {
 		return false
 	}
-	state, _, err := EvaluateBudget(*run.Budget, effective)
-	return err == nil && state == BudgetStateExhausted
+	state, _, err := models.EvaluateBudget(*run.Budget, effective)
+	return err == nil && state == models.BudgetStateExhausted
 }
 
 // stepReservationID is the reservation to settle when step is applied: the
 // step id when a bounded Run holds a reservation for it, else "".
-func stepReservationID(run *AgentRun, step *AgentTurn) string {
+func stepReservationID(run *models.AgentRun, step *models.AgentTurn) string {
 	if run == nil || step == nil || run.Budget == nil {
 		return ""
 	}
@@ -321,12 +323,12 @@ func stepReservationID(run *AgentRun, step *AgentTurn) string {
 // SettleBudgetReservationID (bounded and reserved only) and the step's
 // BudgetAdmission. A pause on an exhausted bounded budget is marked
 // budget.exhausted.
-func fillStepBudgetSettlement(req *RunTransitionRequest, run *AgentRun, step *AgentTurn, produced bool) {
+func fillStepBudgetSettlement(req *activity.RunTransitionRequest, run *models.AgentRun, step *models.AgentTurn, produced bool) {
 	if req == nil || run == nil || step == nil {
 		return
 	}
 	delta := budgetUsageForStep(step.Usage, produced)
-	if delta != (BudgetUsage{}) {
+	if delta != (models.BudgetUsage{}) {
 		activity := delta
 		req.ActivityUsageDelta = &activity
 	}
@@ -340,17 +342,17 @@ func fillStepBudgetSettlement(req *RunTransitionRequest, run *AgentRun, step *Ag
 		req.BudgetAdmission = &admission
 		req.EventType = "budget.exhausted"
 		setStepBudgetPayload(req, "admission", admission)
-	} else if req.Status == AgentRunStatusPaused && stepExhaustsBudget(run, step, produced) {
+	} else if req.Status == models.AgentRunStatusPaused && stepExhaustsBudget(run, step, produced) {
 		req.EventType = "budget.exhausted"
 		setStepBudgetPayload(req, "", nil)
 	}
 }
 
-func setStepBudgetPayload(req *RunTransitionRequest, key string, value interface{}) {
+func setStepBudgetPayload(req *activity.RunTransitionRequest, key string, value interface{}) {
 	if req.Payload == nil {
 		req.Payload = map[string]interface{}{}
 	}
-	req.Payload["budgetState"] = BudgetStateExhausted
+	req.Payload["budgetState"] = models.BudgetStateExhausted
 	if key != "" {
 		req.Payload[key] = value
 	}

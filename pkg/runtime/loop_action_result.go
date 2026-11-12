@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -22,12 +23,12 @@ type GovernedToolOutcome struct {
 	ToolCallID string
 	// State is completed, error, interrupted, awaiting_approval,
 	// awaiting_event or running (a foreign live call lease; see RetryAt).
-	State ToolEntryState
+	State models.ToolEntryState
 	// Result is set for terminal states only.
-	Result *ToolResult
+	Result *models.ToolResult
 	// Wait is set for awaiting states: ApprovalID for awaiting_approval,
 	// EventWaitID (the card request id) or Reason/RetryAt for awaiting_event.
-	Wait *ToolEntryWait
+	Wait *models.ToolEntryWait
 	// ActionCallID is "" only for refusals before any row exists.
 	ActionCallID string
 	// Park is set for awaiting states only. It is never committed: the loop
@@ -48,15 +49,15 @@ type GovernedToolOutcome struct {
 	// never a fresh read, so a decision made while the Run was held still
 	// fails the loop's step-end park CAS. The caller replaces its Run with it
 	// before its next revision-fenced write.
-	Run *AgentRun
+	Run *models.AgentRun
 }
 
 // GovernedPark is the park a governed tool entry asks for. The kernel tool
 // executor turns it into the loop's LoopPark{Status, Wake, Summary} with
 // Committed false.
 type GovernedPark struct {
-	Status  AgentRunStatus
-	Wake    *WakeCondition
+	Status  models.AgentRunStatus
+	Wake    *models.WakeCondition
 	Summary string
 }
 
@@ -87,16 +88,16 @@ const governedMediaMaxBytes = 1 << 20
 // Status, never parsed from call.Error. settled is the settled card or human
 // intervention text (section 03 §10.4), "" when none. A call that is not
 // terminal (ready, waiting_for_approval, running) renders as ("", nil).
-func renderGovernedResult(call *ActionCall, approval *ApprovalCheckpoint, settled string) (ToolEntryState, *ToolResult) {
+func renderGovernedResult(call *models.ActionCall, approval *models.ApprovalCheckpoint, settled string) (models.ToolEntryState, *models.ToolResult) {
 	if call == nil {
 		return "", nil
 	}
 	ref := GovernedEvidenceRef(call.ID)
 	switch call.Status {
-	case ActionCallStatusSucceeded:
+	case models.ActionCallStatusSucceeded:
 		if call.DuplicateOfActionCallID != "" {
-			return ToolEntryError, governedJSONResult(ToolResultDuplicateSuppressed, map[string]interface{}{
-				"evidenceRef": ref, "status": string(ToolResultDuplicateSuppressed),
+			return models.ToolEntryError, governedJSONResult(models.ToolResultDuplicateSuppressed, map[string]interface{}{
+				"evidenceRef": ref, "status": string(models.ToolResultDuplicateSuppressed),
 				"priorEvidenceRef": GovernedEvidenceRef(call.DuplicateOfActionCallID), "note": governedDuplicateNote,
 			})
 		}
@@ -105,25 +106,25 @@ func renderGovernedResult(call *ActionCall, approval *ApprovalCheckpoint, settle
 		if settled != "" {
 			value["outcome"] = settled
 		}
-		result := governedJSONResult(ToolResultSucceeded, value)
+		result := governedJSONResult(models.ToolResultSucceeded, value)
 		if image != nil {
 			result.Content = append(result.Content, *image)
 		}
-		return ToolEntryCompleted, result
-	case ActionCallStatusFailed:
+		return models.ToolEntryCompleted, result
+	case models.ActionCallStatusFailed:
 		if call.RecoveredRunning && !governedReadOnly(call.SideEffect) {
-			return ToolEntryInterrupted, governedJSONResult(ToolResultInterrupted, map[string]interface{}{
-				"evidenceRef": ref, "status": string(ToolResultInterrupted), "error": governedInterruptedError,
+			return models.ToolEntryInterrupted, governedJSONResult(models.ToolResultInterrupted, map[string]interface{}{
+				"evidenceRef": ref, "status": string(models.ToolResultInterrupted), "error": governedInterruptedError,
 			})
 		}
 		if skillbinding.IsParkedConnectAccountCall(call) {
-			value := map[string]interface{}{"evidenceRef": ref, "status": string(ToolResultFailed), "error": governedConnectAccountError}
+			value := map[string]interface{}{"evidenceRef": ref, "status": string(models.ToolResultFailed), "error": governedConnectAccountError}
 			if settled != "" {
 				value["outcome"] = settled
 			}
-			return ToolEntryError, governedJSONResult(ToolResultFailed, value)
+			return models.ToolEntryError, governedJSONResult(models.ToolResultFailed, value)
 		}
-		value := map[string]interface{}{"evidenceRef": ref, "status": string(ToolResultFailed)}
+		value := map[string]interface{}{"evidenceRef": ref, "status": string(models.ToolResultFailed)}
 		putNonEmpty(value, "error", call.Error)
 		putNonEmpty(value, "errorCode", call.ErrorCode)
 		putNonEmpty(value, "failurePhase", string(call.FailurePhase))
@@ -134,20 +135,20 @@ func renderGovernedResult(call *ActionCall, approval *ApprovalCheckpoint, settle
 			}
 			value["errorDetails"] = details
 		}
-		return ToolEntryError, governedJSONResult(ToolResultFailed, value)
-	case ActionCallStatusDenied:
+		return models.ToolEntryError, governedJSONResult(models.ToolResultFailed, value)
+	case models.ActionCallStatusDenied:
 		return renderGovernedDenial(call, approval)
-	case ActionCallStatusCanceled:
-		return ToolEntryError, governedJSONResult(ToolResultCanceled, map[string]interface{}{
-			"evidenceRef": ref, "status": string(ToolResultCanceled), "reason": call.Error,
+	case models.ActionCallStatusCanceled:
+		return models.ToolEntryError, governedJSONResult(models.ToolResultCanceled, map[string]interface{}{
+			"evidenceRef": ref, "status": string(models.ToolResultCanceled), "reason": call.Error,
 		})
-	case ActionCallStatusRefused:
-		return ToolEntryError, governedJSONResult(ToolResultRefused, map[string]interface{}{
-			"evidenceRef": ref, "status": string(ToolResultRefused), "code": call.ErrorCode, "error": call.Error,
+	case models.ActionCallStatusRefused:
+		return models.ToolEntryError, governedJSONResult(models.ToolResultRefused, map[string]interface{}{
+			"evidenceRef": ref, "status": string(models.ToolResultRefused), "code": call.ErrorCode, "error": call.Error,
 		})
-	case ActionCallStatusCompensating, ActionCallStatusCompensated:
-		return ToolEntryError, governedJSONResult(ToolResultFailed, map[string]interface{}{
-			"evidenceRef": ref, "status": string(ToolResultFailed), "error": governedRevertedError,
+	case models.ActionCallStatusCompensating, models.ActionCallStatusCompensated:
+		return models.ToolEntryError, governedJSONResult(models.ToolResultFailed, map[string]interface{}{
+			"evidenceRef": ref, "status": string(models.ToolResultFailed), "error": governedRevertedError,
 		})
 	}
 	return "", nil
@@ -155,71 +156,71 @@ func renderGovernedResult(call *ActionCall, approval *ApprovalCheckpoint, settle
 
 // renderGovernedDenial renders a denied call by its approval outcome; a
 // denial without a decided approval is a policy or budget denial.
-func renderGovernedDenial(call *ActionCall, approval *ApprovalCheckpoint) (ToolEntryState, *ToolResult) {
+func renderGovernedDenial(call *models.ActionCall, approval *models.ApprovalCheckpoint) (models.ToolEntryState, *models.ToolResult) {
 	ref := GovernedEvidenceRef(call.ID)
 	if approval != nil && approval.ID == call.ApprovalID {
 		switch approval.Status {
-		case ApprovalStatusRejected:
-			return ToolEntryError, governedJSONResult(ToolResultDenied, map[string]interface{}{
+		case models.ApprovalStatusRejected:
+			return models.ToolEntryError, governedJSONResult(models.ToolResultDenied, map[string]interface{}{
 				"evidenceRef": ref, "status": "rejected", "reason": approval.DecisionReason,
 			})
-		case ApprovalStatusChangesRequested:
-			return ToolEntryError, governedJSONResult(ToolResultChangesRequested, map[string]interface{}{
-				"evidenceRef": ref, "status": string(ToolResultChangesRequested), "guidance": approval.DecisionReason,
+		case models.ApprovalStatusChangesRequested:
+			return models.ToolEntryError, governedJSONResult(models.ToolResultChangesRequested, map[string]interface{}{
+				"evidenceRef": ref, "status": string(models.ToolResultChangesRequested), "guidance": approval.DecisionReason,
 			})
-		case ApprovalStatusSuperseded:
-			return ToolEntryError, governedJSONResult(ToolResultSuperseded, map[string]interface{}{
-				"evidenceRef": ref, "status": string(ToolResultSuperseded), "reason": action.ApprovalSupersededReason,
+		case models.ApprovalStatusSuperseded:
+			return models.ToolEntryError, governedJSONResult(models.ToolResultSuperseded, map[string]interface{}{
+				"evidenceRef": ref, "status": string(models.ToolResultSuperseded), "reason": action.ApprovalSupersededReason,
 			})
-		case ApprovalStatusExpired:
-			return ToolEntryError, governedJSONResult(ToolResultExpired, map[string]interface{}{
-				"evidenceRef": ref, "status": string(ToolResultExpired), "reason": governedExpiredReason,
+		case models.ApprovalStatusExpired:
+			return models.ToolEntryError, governedJSONResult(models.ToolResultExpired, map[string]interface{}{
+				"evidenceRef": ref, "status": string(models.ToolResultExpired), "reason": governedExpiredReason,
 			})
-		case ApprovalStatusCanceled:
-			return ToolEntryError, governedJSONResult(ToolResultCanceled, map[string]interface{}{
-				"evidenceRef": ref, "status": string(ToolResultCanceled), "reason": call.Error,
+		case models.ApprovalStatusCanceled:
+			return models.ToolEntryError, governedJSONResult(models.ToolResultCanceled, map[string]interface{}{
+				"evidenceRef": ref, "status": string(models.ToolResultCanceled), "reason": call.Error,
 			})
 		}
 	}
 	if call.Error == action.ActionBudgetExhaustedReason {
 		return renderGovernedBudgetExhausted(call)
 	}
-	return ToolEntryError, governedJSONResult(ToolResultDenied, map[string]interface{}{
-		"evidenceRef": ref, "status": string(ToolResultDenied), "reason": call.Error,
+	return models.ToolEntryError, governedJSONResult(models.ToolResultDenied, map[string]interface{}{
+		"evidenceRef": ref, "status": string(models.ToolResultDenied), "reason": call.Error,
 	})
 }
 
 // renderGovernedBudgetExhausted renders a call denied because the Run's
 // action budget is used up.
-func renderGovernedBudgetExhausted(call *ActionCall) (ToolEntryState, *ToolResult) {
-	value := map[string]interface{}{"status": string(ToolResultDenied), "reason": governedBudgetExhaustedReason}
+func renderGovernedBudgetExhausted(call *models.ActionCall) (models.ToolEntryState, *models.ToolResult) {
+	value := map[string]interface{}{"status": string(models.ToolResultDenied), "reason": governedBudgetExhaustedReason}
 	if call != nil {
 		value["evidenceRef"] = GovernedEvidenceRef(call.ID)
 	}
-	return ToolEntryError, governedJSONResult(ToolResultDenied, value)
+	return models.ToolEntryError, governedJSONResult(models.ToolResultDenied, value)
 }
 
 // renderGovernedRejection renders a proposal the coordinator rejected before
 // any row existed.
-func renderGovernedRejection(rejection *action.ActionProposalRejection) (ToolEntryState, *ToolResult) {
-	return ToolEntryError, governedJSONResult(ToolResultRefused, map[string]interface{}{
-		"status": string(ToolResultRefused), "code": rejection.Code, "error": rejection.Message,
+func renderGovernedRejection(rejection *action.ActionProposalRejection) (models.ToolEntryState, *models.ToolResult) {
+	return models.ToolEntryError, governedJSONResult(models.ToolResultRefused, map[string]interface{}{
+		"status": string(models.ToolResultRefused), "code": rejection.Code, "error": rejection.Message,
 	})
 }
 
 // renderGovernedMaintenanceRefusal renders a proposal refused because its
 // Skill runtime is under maintenance.
-func renderGovernedMaintenanceRefusal() (ToolEntryState, *ToolResult) {
-	return ToolEntryError, governedJSONResult(ToolResultRefused, map[string]interface{}{
-		"status": string(ToolResultRefused), "code": governedMaintenanceRefusalCode, "error": governedMaintenanceError,
+func renderGovernedMaintenanceRefusal() (models.ToolEntryState, *models.ToolResult) {
+	return models.ToolEntryError, governedJSONResult(models.ToolResultRefused, map[string]interface{}{
+		"status": string(models.ToolResultRefused), "code": governedMaintenanceRefusalCode, "error": governedMaintenanceError,
 	})
 }
 
 // renderGovernedInFlight renders a proposal whose external operation is
 // already in flight in priorActionCallID.
-func renderGovernedInFlight(priorActionCallID string) (ToolEntryState, *ToolResult) {
-	return ToolEntryError, governedJSONResult(ToolResultDuplicateSuppressed, map[string]interface{}{
-		"status": string(ToolResultDuplicateSuppressed), "priorEvidenceRef": GovernedEvidenceRef(priorActionCallID),
+func renderGovernedInFlight(priorActionCallID string) (models.ToolEntryState, *models.ToolResult) {
+	return models.ToolEntryError, governedJSONResult(models.ToolResultDuplicateSuppressed, map[string]interface{}{
+		"status": string(models.ToolResultDuplicateSuppressed), "priorEvidenceRef": GovernedEvidenceRef(priorActionCallID),
 		"error": governedInFlightError,
 	})
 }
@@ -228,7 +229,7 @@ func renderGovernedInFlight(priorActionCallID string) (ToolEntryState, *ToolResu
 // when modelMedia is a valid image, one image part that references the call.
 // The renderer resolves the bytes from the call (SPEC §3.6); persisted parts
 // never carry them. Invalid media is dropped without a part.
-func splitGovernedModelMedia(call *ActionCall) (map[string]interface{}, *ContentPart) {
+func splitGovernedModelMedia(call *models.ActionCall) (map[string]interface{}, *models.ContentPart) {
 	output := maps.Clone(call.Output)
 	raw, present := output["modelMedia"]
 	if !present {
@@ -258,8 +259,8 @@ func splitGovernedModelMedia(call *ActionCall) (map[string]interface{}, *Content
 		return output, nil
 	}
 	digest := sha256.Sum256(decoded)
-	return output, &ContentPart{
-		Type: ContentPartImage, MediaType: mediaType, Detail: detail,
+	return output, &models.ContentPart{
+		Type: models.ContentPartImage, MediaType: mediaType, Detail: detail,
 		SHA256: hex.EncodeToString(digest[:]), ActionCallID: call.ID,
 	}
 }
@@ -271,16 +272,16 @@ func governedReadOnly(effect skill.SideEffect) bool {
 }
 
 // governedJSONResult is a result with one json part holding value.
-func governedJSONResult(status ToolResultStatus, value map[string]interface{}) *ToolResult {
+func governedJSONResult(status models.ToolResultStatus, value map[string]interface{}) *models.ToolResult {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		// Output values come from decoded JSON; an unencodable value is a
 		// kernel bug, reported to the model rather than lost.
 		encoded, _ = json.Marshal(map[string]interface{}{"status": string(status), "error": "the action result could not be encoded"})
 	}
-	return &ToolResult{
-		Status: status, IsError: status != ToolResultSucceeded,
-		Content: []ContentPart{{Type: ContentPartJSON, Value: encoded}},
+	return &models.ToolResult{
+		Status: status, IsError: status != models.ToolResultSucceeded,
+		Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: encoded}},
 	}
 }
 

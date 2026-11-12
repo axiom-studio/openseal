@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -16,16 +17,16 @@ import (
 // the pending card a terminal call opened, the approval park at step end, and
 // the re-plan after a failed park CAS. The governed executor embeds it.
 type governedParker struct {
-	actions ActionStore
+	actions models.ActionStore
 	// runs reads (and at the deadline cancels) try_agent trial children.
-	runs        RunCommandStore
-	setups      SkillSetupRequestStore
-	credentials CredentialRequestStore
+	runs        models.RunCommandStore
+	setups      models.SkillSetupRequestStore
+	credentials models.CredentialRequestStore
 	approvals   *action.ApprovalCoordinator
 	now         func() time.Time
 }
 
-func newGovernedParker(store KernelStore, approvals *action.ApprovalCoordinator, now func() time.Time) governedParker {
+func newGovernedParker(store models.KernelStore, approvals *action.ApprovalCoordinator, now func() time.Time) governedParker {
 	if now == nil {
 		now = time.Now
 	}
@@ -46,7 +47,7 @@ type GovernedParkPlan struct {
 	Settled bool
 	// Run is the Run after superseding (each held decision bumps its
 	// revision); nil when planning wrote nothing.
-	Run *AgentRun
+	Run *models.AgentRun
 }
 
 // governedMaintenanceWaitReason is the ToolEntryWait.Reason of a call that
@@ -61,38 +62,38 @@ const governedHumanInterventionWakeType = "human_intervention"
 // any: a human intervention, a credential request, a connect app card, a
 // running try_agent trial, or a connect account card of a parked call. Every check reads the durable
 // record, so a card settled before this point never parks the Run.
-func (p *governedParker) governedCardWait(ctx context.Context, run *AgentRun, call *ActionCall) (*WakeCondition, string, error) {
+func (p *governedParker) governedCardWait(ctx context.Context, run *models.AgentRun, call *models.ActionCall) (*models.WakeCondition, string, error) {
 	if call == nil {
 		return nil, "", nil
 	}
 	switch call.Status {
-	case ActionCallStatusSucceeded:
+	case models.ActionCallStatusSucceeded:
 		if request := pendingHumanInterventionForCall(run, call); request != nil {
-			return &WakeCondition{Type: governedHumanInterventionWakeType, Reference: request.ID}, request.Summary, nil
+			return &models.WakeCondition{Type: governedHumanInterventionWakeType, Reference: request.ID}, request.Summary, nil
 		}
 		if skillbinding.InteractionRequestRefused(call) {
 			return nil, "", nil
 		}
 		if p.credentials != nil {
 			if request := skillbinding.PendingCredentialRequestFromAction(ctx, p.credentials, call); request != nil {
-				return &WakeCondition{Type: skillbinding.CredentialRequestWakeType, Reference: request.ID}, "Waiting for the user to save a requested credential", nil
+				return &models.WakeCondition{Type: skillbinding.CredentialRequestWakeType, Reference: request.ID}, "Waiting for the user to save a requested credential", nil
 			}
 		}
 		if request := skillbinding.PendingConnectAppRequestFromAction(ctx, p.setups, call); request != nil {
-			return &WakeCondition{Type: skillbinding.ConnectAppWakeType, Reference: request.ID}, "Waiting for the user to connect " + request.SkillName, nil
+			return &models.WakeCondition{Type: skillbinding.ConnectAppWakeType, Reference: request.ID}, "Waiting for the user to connect " + request.SkillName, nil
 		}
 		if agentbuilder.IsAgentTrialCall(call) {
 			return p.agentTrialWait(ctx, call)
 		}
-	case ActionCallStatusFailed:
+	case models.ActionCallStatusFailed:
 		if request := skillbinding.PendingConnectAccountRequestFromAction(ctx, p.setups, call); request != nil {
-			return &WakeCondition{Type: ConnectAccountWakeType, Reference: request.ID}, skillbinding.ConnectAccountWaitSummary(request), nil
+			return &models.WakeCondition{Type: models.ConnectAccountWakeType, Reference: request.ID}, skillbinding.ConnectAccountWaitSummary(request), nil
 		}
 	}
 	return nil, "", nil
 }
 
-func pendingHumanInterventionForCall(run *AgentRun, call *ActionCall) *HumanInterventionRequest {
+func pendingHumanInterventionForCall(run *models.AgentRun, call *models.ActionCall) *models.HumanInterventionRequest {
 	if run == nil || call == nil {
 		return nil
 	}
@@ -101,7 +102,7 @@ func pendingHumanInterventionForCall(run *AgentRun, call *ActionCall) *HumanInte
 	}
 	for i := len(run.HumanInterventions) - 1; i >= 0; i-- {
 		request := run.HumanInterventions[i]
-		if request.ActionCallID == call.ID && request.Status == HumanInterventionStatusPending {
+		if request.ActionCallID == call.ID && request.Status == models.HumanInterventionStatusPending {
 			return &request
 		}
 	}
@@ -110,40 +111,40 @@ func pendingHumanInterventionForCall(run *AgentRun, call *ActionCall) *HumanInte
 
 // governedApprovalOutcome is the awaiting_approval outcome of a call waiting
 // on approval.
-func governedApprovalOutcome(toolCallID string, call *ActionCall, approval *ApprovalCheckpoint) GovernedToolOutcome {
+func governedApprovalOutcome(toolCallID string, call *models.ActionCall, approval *models.ApprovalCheckpoint) GovernedToolOutcome {
 	return GovernedToolOutcome{
-		ToolCallID: toolCallID, State: ToolEntryAwaitingApproval, ActionCallID: call.ID,
-		Wait: &ToolEntryWait{ApprovalID: approval.ID},
+		ToolCallID: toolCallID, State: models.ToolEntryAwaitingApproval, ActionCallID: call.ID,
+		Wait: &models.ToolEntryWait{ApprovalID: approval.ID},
 		Park: governedApprovalPark(approval),
 	}
 }
 
-func governedApprovalPark(approval *ApprovalCheckpoint) *GovernedPark {
+func governedApprovalPark(approval *models.ApprovalCheckpoint) *GovernedPark {
 	return &GovernedPark{
-		Status:  AgentRunStatusWaitingForApproval,
-		Wake:    &WakeCondition{Type: "approval", Reference: approval.ID},
+		Status:  models.AgentRunStatusWaitingForApproval,
+		Wake:    &models.WakeCondition{Type: "approval", Reference: approval.ID},
 		Summary: "Waiting for approval: " + approval.Summary,
 	}
 }
 
 // governedCardOutcome is the awaiting_event outcome of a call that opened a
 // pending card.
-func governedCardOutcome(toolCallID string, call *ActionCall, wake *WakeCondition, summary string) GovernedToolOutcome {
+func governedCardOutcome(toolCallID string, call *models.ActionCall, wake *models.WakeCondition, summary string) GovernedToolOutcome {
 	return GovernedToolOutcome{
-		ToolCallID: toolCallID, State: ToolEntryAwaitingEvent, ActionCallID: call.ID,
-		Wait: &ToolEntryWait{EventWaitID: wake.Reference},
-		Park: &GovernedPark{Status: AgentRunStatusWaitingForEvent, Wake: wake, Summary: summary},
+		ToolCallID: toolCallID, State: models.ToolEntryAwaitingEvent, ActionCallID: call.ID,
+		Wait: &models.ToolEntryWait{EventWaitID: wake.Reference},
+		Park: &GovernedPark{Status: models.AgentRunStatusWaitingForEvent, Wake: wake, Summary: summary},
 	}
 }
 
 // governedMaintenanceOutcome is the awaiting_event outcome of a ready call
 // whose Skill runtime is under maintenance: the Run sleeps until retryAt and
 // the call executes on resume.
-func governedMaintenanceOutcome(toolCallID string, call *ActionCall, retryAt time.Time) GovernedToolOutcome {
+func governedMaintenanceOutcome(toolCallID string, call *models.ActionCall, retryAt time.Time) GovernedToolOutcome {
 	at := retryAt.UTC()
 	return GovernedToolOutcome{
-		ToolCallID: toolCallID, State: ToolEntryAwaitingEvent, ActionCallID: call.ID,
-		Wait: &ToolEntryWait{Reason: governedMaintenanceWaitReason, RetryAt: &at},
+		ToolCallID: toolCallID, State: models.ToolEntryAwaitingEvent, ActionCallID: call.ID,
+		Wait: &models.ToolEntryWait{Reason: governedMaintenanceWaitReason, RetryAt: &at},
 		Park: governedMaintenancePark(call.ID, at),
 	}
 }
@@ -151,15 +152,15 @@ func governedMaintenanceOutcome(toolCallID string, call *ActionCall, retryAt tim
 func governedMaintenancePark(actionCallID string, retryAt time.Time) *GovernedPark {
 	at := retryAt
 	return &GovernedPark{
-		Status:  AgentRunStatusSleeping,
-		Wake:    &WakeCondition{Type: "timer", WakeAt: &at, Reference: actionCallID},
+		Status:  models.AgentRunStatusSleeping,
+		Wake:    &models.WakeCondition{Type: "timer", WakeAt: &at, Reference: actionCallID},
 		Summary: governedMaintenanceWaitSummary,
 	}
 }
 
 // newestSteeringMessage is the newest unconsumed conversation message
 // delivered to run as steering; nil when none.
-func newestSteeringMessage(run *AgentRun) *AgentRunIntervention {
+func newestSteeringMessage(run *models.AgentRun) *models.AgentRunIntervention {
 	if run == nil {
 		return nil
 	}
@@ -182,16 +183,16 @@ func newestSteeringMessage(run *AgentRun) *AgentRunIntervention {
 // held approvals created before it instead of parking on them. Approvals win
 // over cards; within a kind the first call in step order wins. The other open
 // entries stay open and are settled or re-parked when the Run resumes.
-func (p *governedParker) PlanPark(ctx context.Context, run *AgentRun, outcomes []GovernedToolOutcome) (GovernedParkPlan, error) {
+func (p *governedParker) PlanPark(ctx context.Context, run *models.AgentRun, outcomes []GovernedToolOutcome) (GovernedParkPlan, error) {
 	var plan GovernedParkPlan
 	message := newestSteeringMessage(run)
 	var approvals []GovernedToolOutcome
 	var cards []GovernedToolOutcome
 	for _, outcome := range outcomes {
 		switch {
-		case outcome.State == ToolEntryAwaitingApproval && outcome.Wait != nil && outcome.Wait.ApprovalID != "":
+		case outcome.State == models.ToolEntryAwaitingApproval && outcome.Wait != nil && outcome.Wait.ApprovalID != "":
 			approvals = append(approvals, outcome)
-		case outcome.State == ToolEntryAwaitingEvent && outcome.Park != nil:
+		case outcome.State == models.ToolEntryAwaitingEvent && outcome.Park != nil:
 			cards = append(cards, outcome)
 		}
 	}
@@ -240,18 +241,18 @@ func (p *governedParker) PlanPark(ctx context.Context, run *AgentRun, outcomes [
 // call are ignored). Held approvals created before a newer message are
 // superseded; any approval decided or card settled since gives Settled (do
 // not park).
-func (p *governedParker) ReplanPark(ctx context.Context, run *AgentRun, entries []*SessionEntry) (GovernedParkPlan, error) {
+func (p *governedParker) ReplanPark(ctx context.Context, run *models.AgentRun, entries []*models.SessionEntry) (GovernedParkPlan, error) {
 	var plan GovernedParkPlan
 	message := newestSteeringMessage(run)
 	var approval *GovernedPark
 	var event *GovernedPark
 	for _, entry := range entries {
-		if entry == nil || entry.Type != SessionEntryTool || entry.ActionCallID == "" || entry.Tool == nil || entry.Tool.Wait == nil {
+		if entry == nil || entry.Type != models.SessionEntryTool || entry.ActionCallID == "" || entry.Tool == nil || entry.Tool.Wait == nil {
 			continue
 		}
 		wait := entry.Tool.Wait
 		switch entry.State {
-		case ToolEntryAwaitingApproval:
+		case models.ToolEntryAwaitingApproval:
 			if wait.ApprovalID == "" {
 				continue
 			}
@@ -273,14 +274,14 @@ func (p *governedParker) ReplanPark(ctx context.Context, run *AgentRun, entries 
 			if err != nil {
 				return GovernedParkPlan{}, err
 			}
-			if current.Status != ApprovalStatusPending {
+			if current.Status != models.ApprovalStatusPending {
 				plan.Settled = true
 				continue
 			}
 			if approval == nil {
 				approval = governedApprovalPark(current)
 			}
-		case ToolEntryAwaitingEvent:
+		case models.ToolEntryAwaitingEvent:
 			park, err := p.currentEventPark(ctx, run, entry)
 			if err != nil {
 				return GovernedParkPlan{}, err
@@ -307,7 +308,7 @@ func (p *governedParker) ReplanPark(ctx context.Context, run *AgentRun, entries 
 
 // currentEventPark is the park an awaiting_event governed entry still needs,
 // nil when its target settled.
-func (p *governedParker) currentEventPark(ctx context.Context, run *AgentRun, entry *SessionEntry) (*GovernedPark, error) {
+func (p *governedParker) currentEventPark(ctx context.Context, run *models.AgentRun, entry *models.SessionEntry) (*GovernedPark, error) {
 	wait := entry.Tool.Wait
 	if wait.Reason == governedMaintenanceWaitReason {
 		if wait.RetryAt == nil || !p.now().Before(*wait.RetryAt) {
@@ -323,7 +324,7 @@ func (p *governedParker) currentEventPark(ctx context.Context, run *AgentRun, en
 	if err != nil || wake == nil {
 		return nil, err
 	}
-	return &GovernedPark{Status: AgentRunStatusWaitingForEvent, Wake: wake, Summary: summary}, nil
+	return &GovernedPark{Status: models.AgentRunStatusWaitingForEvent, Wake: wake, Summary: summary}, nil
 }
 
 // supersedeHeld supersedes the pending approval approvalID when it was
@@ -331,12 +332,12 @@ func (p *governedParker) currentEventPark(ctx context.Context, run *AgentRun, en
 // the approval is no longer pending (or another decision raced this one), or
 // neither when the approval stays pending. plan.Run tracks the Run after each
 // held supersede.
-func (p *governedParker) supersedeHeld(ctx context.Context, run *AgentRun, toolCallID, approvalID string, message *AgentRunIntervention, plan *GovernedParkPlan) (*GovernedToolOutcome, bool, error) {
+func (p *governedParker) supersedeHeld(ctx context.Context, run *models.AgentRun, toolCallID, approvalID string, message *models.AgentRunIntervention, plan *GovernedParkPlan) (*GovernedToolOutcome, bool, error) {
 	approval, err := p.actions.GetApproval(ctx, run.Scope, approvalID)
 	if err != nil {
 		return nil, false, err
 	}
-	if approval.Status != ApprovalStatusPending {
+	if approval.Status != models.ApprovalStatusPending {
 		return nil, true, nil
 	}
 	if !approval.CreatedAt.Before(message.CreatedAt) {
@@ -346,7 +347,7 @@ func (p *governedParker) supersedeHeld(ctx context.Context, run *AgentRun, toolC
 		return nil, false, errors.New("governed parker has no approval coordinator")
 	}
 	result, err := p.approvals.ResolveSupersededByMessage(ctx, run.Scope, approval.ID, approval.Revision, message.ConversationMessage.MessageID)
-	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, action.ErrApprovalExpired) || errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, models.ErrApprovalResolved) || errors.Is(err, action.ErrApprovalExpired) || errors.Is(err, models.ErrRevisionConflict) {
 		return nil, true, nil
 	}
 	if err != nil {
@@ -366,7 +367,7 @@ func (p *governedParker) supersedeHeld(ctx context.Context, run *AgentRun, toolC
 // newest settled intervention carrying its ActionCallID, else (settled while
 // the Run still held the call) the resolution derived from the durable
 // record. "" when the call opened no settled card.
-func (p *governedParker) settledText(ctx context.Context, run *AgentRun, call *ActionCall, settled []AgentRunIntervention) string {
+func (p *governedParker) settledText(ctx context.Context, run *models.AgentRun, call *models.ActionCall, settled []models.AgentRunIntervention) string {
 	if call == nil {
 		return ""
 	}
@@ -378,17 +379,17 @@ func (p *governedParker) settledText(ctx context.Context, run *AgentRun, call *A
 		}
 	}
 	switch call.Status {
-	case ActionCallStatusSucceeded:
+	case models.ActionCallStatusSucceeded:
 		if requiresHuman, _ := call.Output["requiresHuman"].(bool); requiresHuman && run != nil {
 			for i := len(run.HumanInterventions) - 1; i >= 0; i-- {
 				request := run.HumanInterventions[i]
-				if request.ActionCallID == call.ID && request.Status != HumanInterventionStatusPending {
+				if request.ActionCallID == call.ID && request.Status != models.HumanInterventionStatusPending {
 					return strings.TrimSpace(request.Resolution)
 				}
 			}
 			return ""
 		}
-		if skillbinding.InteractionRequestRefused(call) || call.SkillID != SkillManagementSkillID {
+		if skillbinding.InteractionRequestRefused(call) || call.SkillID != models.SkillManagementSkillID {
 			return ""
 		}
 		switch call.Action {
@@ -398,7 +399,7 @@ func (p *governedParker) settledText(ctx context.Context, run *AgentRun, call *A
 				return ""
 			}
 			request, err := p.credentials.GetCredentialRequest(ctx, call.Scope, id)
-			if err != nil || request == nil || request.RunID != call.RunID || request.Status == CredentialRequestStatusPending {
+			if err != nil || request == nil || request.RunID != call.RunID || request.Status == models.CredentialRequestStatusPending {
 				return ""
 			}
 			return skillbinding.CredentialRequestResolutionInstruction(request)
@@ -408,17 +409,17 @@ func (p *governedParker) settledText(ctx context.Context, run *AgentRun, call *A
 				return ""
 			}
 			request, err := p.setups.GetSkillSetupRequest(ctx, call.Scope, id)
-			if err != nil || request == nil || request.Kind != SkillSetupKindConnectApp || request.RunID != call.RunID || request.Status == "pending" {
+			if err != nil || request == nil || request.Kind != models.SkillSetupKindConnectApp || request.RunID != call.RunID || request.Status == "pending" {
 				return ""
 			}
 			return skillbinding.ConnectAppResolutionInstruction(request, nil)
 		}
-	case ActionCallStatusFailed:
+	case models.ActionCallStatusFailed:
 		if !skillbinding.IsParkedConnectAccountCall(call) || p.setups == nil {
 			return ""
 		}
 		request, err := p.setups.GetSkillSetupRequest(ctx, call.Scope, skillbinding.ConnectAccountRequestPrefix+call.ID)
-		if err != nil || request == nil || request.Kind != SkillSetupKindConnectAccount || request.RunID != call.RunID || request.Status == "pending" {
+		if err != nil || request == nil || request.Kind != models.SkillSetupKindConnectAccount || request.RunID != call.RunID || request.Status == "pending" {
 			return ""
 		}
 		return skillbinding.ConnectAccountResolutionInstruction(request)

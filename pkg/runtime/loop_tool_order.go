@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -28,7 +29,7 @@ import (
 
 // loopToolMaxConcurrent bounds the concurrent calls of one step (host reads
 // and governed reads share it).
-const loopToolMaxConcurrent = GovernedMaxConcurrentReads
+const loopToolMaxConcurrent = models.GovernedMaxConcurrentReads
 
 // dispatchInOrder runs entries indexes (in model order) with run, applying
 // the ordering rules. A non-read call reached while an earlier call is held
@@ -166,7 +167,7 @@ func (r *stepToolRun) endOfToolWork(ctx context.Context) (agentrun.StepToolsOutc
 }
 
 // openSettleEntry is the step's open settle-phase control entry, if any.
-func (r *stepToolRun) openSettleEntry() *SessionEntry {
+func (r *stepToolRun) openSettleEntry() *models.SessionEntry {
 	for i := range r.entries {
 		if entry := r.entry(i); r.tools[i].settle() && entry.State.Open() {
 			return entry
@@ -178,13 +179,13 @@ func (r *stepToolRun) openSettleEntry() *SessionEntry {
 // refuseUnsettled closes the pending/running settle-phase entry of a step
 // that was canceled or failed before its settle phase, as not run. The
 // model sees the refusal in its next step.
-func (r *stepToolRun) refuseUnsettled(ctx context.Context, settle *SessionEntry, status AgentTurnStatus) error {
-	if settle.State != ToolEntryPending && settle.State != ToolEntryRunning || !r.onlyOpen(settle) {
+func (r *stepToolRun) refuseUnsettled(ctx context.Context, settle *models.SessionEntry, status models.AgentTurnStatus) error {
+	if settle.State != models.ToolEntryPending && settle.State != models.ToolEntryRunning || !r.onlyOpen(settle) {
 		return nil
 	}
 	for i := range r.entries {
 		if r.entry(i).ID == settle.ID {
-			return r.refuse(ctx, i, control.ErrorResult(ToolResultRefused, loopToolNotRunCode,
+			return r.refuse(ctx, i, control.ErrorResult(models.ToolResultRefused, loopToolNotRunCode,
 				fmt.Sprintf("not run: the step that made this call was %s before it ran", status), nil), nil)
 		}
 	}
@@ -192,7 +193,7 @@ func (r *stepToolRun) refuseUnsettled(ctx context.Context, settle *SessionEntry,
 }
 
 // onlyOpen reports that entry is the step's only open entry.
-func (r *stepToolRun) onlyOpen(entry *SessionEntry) bool {
+func (r *stepToolRun) onlyOpen(entry *models.SessionEntry) bool {
 	for i := range r.entries {
 		if other := r.entry(i); other.ID != entry.ID && other.State.Open() {
 			return false
@@ -238,15 +239,15 @@ func (r *stepToolRun) settle(ctx context.Context) error {
 			return nil
 		}
 		switch entry.State {
-		case ToolEntryAwaitingChild, ToolEntryAwaitingEvent:
+		case models.ToolEntryAwaitingChild, models.ToolEntryAwaitingEvent:
 			return r.resumeControl(ctx, i)
 		}
 		if status := r.earlierBlockingStatus(i); status != "" {
-			return r.refuse(ctx, i, control.ErrorResult(ToolResultRefused, loopToolNotRunCode,
+			return r.refuse(ctx, i, control.ErrorResult(models.ToolResultRefused, loopToolNotRunCode,
 				fmt.Sprintf("not run: an earlier call in this step was %s", status), nil), nil)
 		}
 		if r.x.cfg.Control == nil {
-			return r.refuse(ctx, i, control.ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+			return r.refuse(ctx, i, control.ErrorResult(models.ToolResultRefused, loopToolNotAvailableCode,
 				"This tool is not available in this conversation.", nil), nil)
 		}
 		result, err := r.x.cfg.Control.Settle(ctx, r.controlContext(i))
@@ -260,14 +261,14 @@ func (r *stepToolRun) settle(ctx context.Context) error {
 
 // earlierBlockingStatus is the result status of an earlier call of the step
 // that ended without its decision being carried out ("" when none).
-func (r *stepToolRun) earlierBlockingStatus(i int) ToolResultStatus {
+func (r *stepToolRun) earlierBlockingStatus(i int) models.ToolResultStatus {
 	for j := 0; j < i; j++ {
 		entry := r.entry(j)
 		if entry.Tool.Result == nil {
 			continue
 		}
 		switch status := entry.Tool.Result.Status; status {
-		case ToolResultDenied, ToolResultChangesRequested, ToolResultSuperseded, ToolResultExpired:
+		case models.ToolResultDenied, models.ToolResultChangesRequested, models.ToolResultSuperseded, models.ToolResultExpired:
 			return status
 		}
 	}
@@ -368,7 +369,7 @@ func (x *claimToolExecutor) ResumeOpenTools(ctx context.Context, in agentrun.Ste
 			run, total.Run = out.Run, out.Run
 		}
 		if out.Park != nil || out.Final != nil || out.Failure != nil || out.BudgetExhausted != nil ||
-			isTerminalAgentRunStatus(run.Status) || out.SettlePending {
+			models.IsTerminalAgentRunStatus(run.Status) || out.SettlePending {
 			total.Park, total.Final, total.Failure, total.BudgetExhausted = out.Park, out.Final, out.Failure, out.BudgetExhausted
 			total.SettlePending = out.SettlePending
 			return total, nil
@@ -390,11 +391,11 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in agentrun.StepTool
 	if err != nil {
 		return agentrun.StepToolsOutcome{}, err
 	}
-	assistant, err := x.cfg.Sessions.GetSessionEntry(ctx, in.Run.Scope, SessionEntryID(sessionID, AssistantEntryKey(stepID)))
+	assistant, err := x.cfg.Sessions.GetSessionEntry(ctx, in.Run.Scope, models.SessionEntryID(sessionID, models.AssistantEntryKey(stepID)))
 	switch {
-	case err == nil && assistant != nil && assistant.Type == SessionEntryAssistant:
+	case err == nil && assistant != nil && assistant.Type == models.SessionEntryAssistant:
 		in.Assistant = assistant
-	case err == nil, errors.Is(err, ErrSessionEntryNotFound):
+	case err == nil, errors.Is(err, models.ErrSessionEntryNotFound):
 		in.Assistant = nil
 	default:
 		return agentrun.StepToolsOutcome{}, err
@@ -415,10 +416,10 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in agentrun.StepTool
 	var indexes []int
 	for i := range r.entries {
 		entry := r.entry(i)
-		if !entry.State.Open() || r.tools[i].settle() && (entry.State == ToolEntryPending || entry.State == ToolEntryRunning) {
+		if !entry.State.Open() || r.tools[i].settle() && (entry.State == models.ToolEntryPending || entry.State == models.ToolEntryRunning) {
 			continue
 		}
-		if entry.State == ToolEntryPending && r.guard != nil && !r.guard.Dispatch(entry.ID) {
+		if entry.State == models.ToolEntryPending && r.guard != nil && !r.guard.Dispatch(entry.ID) {
 			continue
 		}
 		indexes = append(indexes, i)
@@ -441,14 +442,14 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in agentrun.StepTool
 	}
 	if settle := r.openSettleEntry(); settle != nil {
 		switch {
-		case in.Step != nil && step.ID == in.Step.ID && step.Status == AgentTurnStatusRunning:
+		case in.Step != nil && step.ID == in.Step.ID && step.Status == models.AgentTurnStatusRunning:
 			// The entry's step is the claim's resumed running step (a crash
 			// before its FinishTurn): it settles after FinishTurn+applyStep,
 			// like a step that just ran its inline phase.
 			out = r.outcome()
 			out.SettlePending = r.onlyOpen(settle)
 			return out, nil
-		case step.Status == AgentTurnStatusCanceled || step.Status == AgentTurnStatusFailed:
+		case step.Status == models.AgentTurnStatusCanceled || step.Status == models.AgentTurnStatusFailed:
 			// The step ended (duration budget, host outage) before its
 			// settle phase: the call never ran and never will.
 			if err := r.refuseUnsettled(ctx, settle, step.Status); err != nil {
@@ -491,33 +492,33 @@ func (r *stepToolRun) resumeCall(ctx context.Context, i int) error {
 		if r.x.cfg.Governed == nil {
 			return fmt.Errorf("governed tool entry %s is open but there is no governed executor", entry.ID)
 		}
-		if entry.State == ToolEntryPending && entry.ActionCallID == "" {
+		if entry.State == models.ToolEntryPending && entry.ActionCallID == "" {
 			return r.runGoverned(ctx, i)
 		}
 		return r.resumeGoverned(ctx, i)
 	case loopRouteHost:
-		if entry.State == ToolEntryRunning {
+		if entry.State == models.ToolEntryRunning {
 			state, result := modelstep.HostToolResumeState(tool.Host)
-			if state != ToolEntryPending {
+			if state != models.ToolEntryPending {
 				return r.transition(ctx, i, state, result, nil, "", nil, false)
 			}
-			if err := r.transition(ctx, i, ToolEntryPending, nil, nil, "", nil, false); err != nil {
+			if err := r.transition(ctx, i, models.ToolEntryPending, nil, nil, "", nil, false); err != nil {
 				return err
 			}
 		}
 		return r.runHost(ctx, i)
 	case loopRouteControl:
 		switch entry.State {
-		case ToolEntryAwaitingChild, ToolEntryAwaitingEvent:
+		case models.ToolEntryAwaitingChild, models.ToolEntryAwaitingEvent:
 			return r.resumeControl(ctx, i)
-		case ToolEntryPending, ToolEntryRunning:
+		case models.ToolEntryPending, models.ToolEntryRunning:
 			return r.runControlInline(ctx, i)
 		}
 		return fmt.Errorf("control tool entry %s is %s", entry.ID, entry.State)
 	case loopRouteCapability:
 		return r.runCapability(ctx, i)
 	}
-	if entry.State == ToolEntryPending || entry.State == ToolEntryRunning {
+	if entry.State == models.ToolEntryPending || entry.State == models.ToolEntryRunning {
 		return r.runCall(ctx, i)
 	}
 	return fmt.Errorf("tool entry %s of an unknown tool is %s", entry.ID, entry.State)
@@ -549,7 +550,7 @@ func (x *claimToolExecutor) ReplanPark(ctx context.Context, in agentrun.StepTool
 	if err != nil {
 		return nil, err
 	}
-	var governed []*SessionEntry
+	var governed []*models.SessionEntry
 	for i, entry := range r.entries {
 		if r.tools[i].Route == loopRouteGoverned {
 			governed = append(governed, entry)
@@ -572,7 +573,7 @@ func (x *claimToolExecutor) ReplanPark(ctx context.Context, in agentrun.StepTool
 	}
 	for i := range r.entries {
 		entry := r.entry(i)
-		if r.tools[i].Route != loopRouteControl || (entry.State != ToolEntryAwaitingChild && entry.State != ToolEntryAwaitingEvent) {
+		if r.tools[i].Route != loopRouteControl || (entry.State != models.ToolEntryAwaitingChild && entry.State != models.ToolEntryAwaitingEvent) {
 			continue
 		}
 		// The control wait is resolved against its own step.
@@ -606,9 +607,9 @@ func (x *claimToolExecutor) sessionOf(in agentrun.StepToolsInput) string {
 }
 
 // stepEntries lists one step's tool entries of run in call (sequence) order.
-func (x *claimToolExecutor) stepEntries(ctx context.Context, run *AgentRun, sessionID, stepID string) ([]*SessionEntry, error) {
-	entries, err := x.listToolEntries(ctx, SessionEntryFilter{
-		Scope: run.Scope, SessionID: sessionID, RunID: run.ID, StepID: stepID, Types: []SessionEntryType{SessionEntryTool},
+func (x *claimToolExecutor) stepEntries(ctx context.Context, run *models.AgentRun, sessionID, stepID string) ([]*models.SessionEntry, error) {
+	entries, err := x.listToolEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, SessionID: sessionID, RunID: run.ID, StepID: stepID, Types: []models.SessionEntryType{models.SessionEntryTool},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("load tool entries of step %s: %w", stepID, err)
@@ -616,15 +617,15 @@ func (x *claimToolExecutor) stepEntries(ctx context.Context, run *AgentRun, sess
 	return entries, nil
 }
 
-var openToolEntryStates = []ToolEntryState{
-	ToolEntryPending, ToolEntryRunning, ToolEntryAwaitingApproval, ToolEntryAwaitingChild, ToolEntryAwaitingEvent,
+var openToolEntryStates = []models.ToolEntryState{
+	models.ToolEntryPending, models.ToolEntryRunning, models.ToolEntryAwaitingApproval, models.ToolEntryAwaitingChild, models.ToolEntryAwaitingEvent,
 }
 
 // openEntries lists the Run's open tool entries in sequence order.
-func (x *claimToolExecutor) openEntries(ctx context.Context, run *AgentRun, sessionID string) ([]*SessionEntry, error) {
-	entries, err := x.listToolEntries(ctx, SessionEntryFilter{
+func (x *claimToolExecutor) openEntries(ctx context.Context, run *models.AgentRun, sessionID string) ([]*models.SessionEntry, error) {
+	entries, err := x.listToolEntries(ctx, models.SessionEntryFilter{
 		Scope: run.Scope, SessionID: sessionID, RunID: run.ID,
-		Types: []SessionEntryType{SessionEntryTool}, States: openToolEntryStates,
+		Types: []models.SessionEntryType{models.SessionEntryTool}, States: openToolEntryStates,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("load open tool entries: %w", err)
@@ -632,16 +633,16 @@ func (x *claimToolExecutor) openEntries(ctx context.Context, run *AgentRun, sess
 	return entries, nil
 }
 
-func (x *claimToolExecutor) listToolEntries(ctx context.Context, filter SessionEntryFilter) ([]*SessionEntry, error) {
-	var out []*SessionEntry
-	filter.Limit = maxSessionEntryListLimit
+func (x *claimToolExecutor) listToolEntries(ctx context.Context, filter models.SessionEntryFilter) ([]*models.SessionEntry, error) {
+	var out []*models.SessionEntry
+	filter.Limit = models.MaxSessionEntryListLimit
 	for {
 		page, err := x.cfg.Sessions.ListAgentSessionEntries(ctx, filter)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, page...)
-		if len(page) < maxSessionEntryListLimit {
+		if len(page) < models.MaxSessionEntryListLimit {
 			break
 		}
 		next := page[len(page)-1].Sequence
@@ -654,7 +655,7 @@ func (x *claimToolExecutor) listToolEntries(ctx context.Context, filter SessionE
 	return out, nil
 }
 
-func (x *claimToolExecutor) stepStillOpen(ctx context.Context, run *AgentRun, sessionID, stepID string) bool {
+func (x *claimToolExecutor) stepStillOpen(ctx context.Context, run *models.AgentRun, sessionID, stepID string) bool {
 	entries, err := x.stepEntries(ctx, run, sessionID, stepID)
 	if err != nil {
 		return true

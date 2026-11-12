@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -39,7 +40,7 @@ func exitResultPtr(exit *RunLoopExit) stepResult { return exitResult(*exit) }
 // stepState is what the loop knows about the running step.
 type stepState struct {
 	lease *stepLease
-	step  *AgentTurn // the finished row once finished; the begun row before
+	step  *models.AgentTurn // the finished row once finished; the begun row before
 	mode  agentrun.StepMode
 
 	started  time.Time
@@ -51,26 +52,26 @@ type stepState struct {
 	produced  bool // the step ran a producer (Turns budget dimension)
 	finished  bool
 	applied   bool
-	usage     TurnUsage
+	usage     models.TurnUsage
 	hostCalls int
 	// compaction is the usage of this step's compaction calls (phase 4 and
 	// the forced retry). It is added to the step row's usage; the compactor
 	// already charged the bounded budget for it.
-	compaction TurnUsage
+	compaction models.TurnUsage
 
-	path        *AgentSessionPath
-	output      *AssistantEntry // the step's model output
-	assistant   *SessionEntry   // its stored entry (nil without a session)
-	entries     []*SessionEntry // this step's tool entries
-	finalEntry  string          // id of this step's final-tool entry, if any
-	settle      bool            // a settle-phase call is pending (phase 10)
+	path        *models.AgentSessionPath
+	output      *models.AssistantEntry // the step's model output
+	assistant   *models.SessionEntry   // its stored entry (nil without a session)
+	entries     []*models.SessionEntry // this step's tool entries
+	finalEntry  string                 // id of this step's final-tool entry, if any
+	settle      bool                   // a settle-phase call is pending (phase 10)
 	kernelState map[string]interface{}
 
 	preview previewTracker
 }
 
 // current is the latest row of the running step (the heartbeat renews it).
-func (st *stepState) current() *AgentTurn {
+func (st *stepState) current() *models.AgentTurn {
 	if st.finished || st.lease == nil {
 		return st.step
 	}
@@ -85,7 +86,7 @@ func (st *stepState) current() *AgentTurn {
 // uses turn.Revision as ExpectedRevision and replaces turn with the result.
 type stepLease struct {
 	mu   sync.Mutex
-	turn *AgentTurn
+	turn *models.AgentTurn
 	lost atomic.Bool
 
 	stopOnce sync.Once
@@ -93,14 +94,14 @@ type stepLease struct {
 	done     chan struct{}
 }
 
-func (s *stepLease) get() *AgentTurn {
+func (s *stepLease) get() *models.AgentTurn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.turn
 }
 
 // write runs fn on the latest row under mu and stores its result.
-func (s *stepLease) write(fn func(turn *AgentTurn) (*AgentTurn, error)) (*AgentTurn, error) {
+func (s *stepLease) write(fn func(turn *models.AgentTurn) (*models.AgentTurn, error)) (*models.AgentTurn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next, err := fn(s.turn)
@@ -115,7 +116,7 @@ func (s *stepLease) write(fn func(turn *AgentTurn) (*AgentTurn, error)) (*AgentT
 
 // startHeartbeat renews the step lease every duration/3. A failed renewal
 // marks the lease lost and cancels the step context.
-func (s *stepLease) startHeartbeat(ctx context.Context, cancelStep context.CancelFunc, turns *AgentTurnService, duration time.Duration, workerID string) {
+func (s *stepLease) startHeartbeat(ctx context.Context, cancelStep context.CancelFunc, turns *activity.AgentTurnService, duration time.Duration, workerID string) {
 	hbCtx, stop := context.WithCancel(ctx)
 	s.stop = stop
 	s.done = make(chan struct{})
@@ -132,7 +133,7 @@ func (s *stepLease) startHeartbeat(ctx context.Context, cancelStep context.Cance
 			case <-hbCtx.Done():
 				return
 			case <-ticker.C:
-				_, err := s.write(func(turn *AgentTurn) (*AgentTurn, error) {
+				_, err := s.write(func(turn *models.AgentTurn) (*models.AgentTurn, error) {
 					return turns.RenewTurn(hbCtx, turn.Scope, turn.ID, workerID, duration)
 				})
 				if err != nil {
@@ -166,11 +167,11 @@ func (d *drive) runStep(ctx context.Context, resumed *resumedStep) stepResult {
 	if conversation.RunExplainingFailure(d.run) {
 		mode = agentrun.StepModeExplainFailure
 	}
-	var step *AgentTurn
+	var step *models.AgentTurn
 	if resumed != nil {
 		step = resumed.step
 	} else {
-		begun, err := d.l.turns.BeginTurn(ctx, BeginAgentTurnRequest{
+		begun, err := d.l.turns.BeginTurn(ctx, activity.BeginAgentTurnRequest{
 			Scope: d.run.Scope, RunID: d.run.ID, SessionID: d.sessionID(), Producer: d.binding.Producer.Kind(),
 			DefinitionID: d.binding.DefinitionID, DefinitionVersion: d.binding.DefinitionVersion,
 			ModelProvider: d.binding.ModelProvider, Model: d.binding.Model, InputContextRefs: d.binding.InputContextRefs,
@@ -190,7 +191,7 @@ func (d *drive) runStep(ctx context.Context, resumed *resumedStep) stepResult {
 	defer st.lease.stopHeartbeat()
 	defer d.releaseUnfinished(ctx, st)
 	if d.l.actions != nil {
-		closeNested := d.l.actions.OpenNestedActionTurn(cloneAgentRun(d.run), cloneAgentTurn(step), d.binding)
+		closeNested := d.l.actions.OpenNestedActionTurn(models.CloneAgentRun(d.run), models.CloneAgentTurn(step), d.binding)
 		defer closeNested()
 	}
 	stepCtx = d.observeStepProgress(stepCtx, st)
@@ -221,10 +222,10 @@ func (d *drive) releaseUnfinished(ctx context.Context, st *stepState) {
 	}
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), runLoopCleanupTimeout)
 	defer cancel()
-	_, err := st.lease.write(func(turn *AgentTurn) (*AgentTurn, error) {
+	_, err := st.lease.write(func(turn *models.AgentTurn) (*models.AgentTurn, error) {
 		return d.l.turns.ReleaseTurn(cleanup, turn.Scope, turn.ID, turn.Revision, d.workerID)
 	})
-	if err != nil && !errors.Is(err, ErrTurnLeaseHeld) && !errors.Is(err, ErrLeaseLost) {
+	if err != nil && !errors.Is(err, models.ErrTurnLeaseHeld) && !errors.Is(err, models.ErrLeaseLost) {
 		d.l.logger.Warnw("release unfinished step", "run", d.run.ID, "step", st.step.ID, "error", err)
 	}
 }
@@ -232,15 +233,15 @@ func (d *drive) releaseUnfinished(ctx context.Context, st *stepState) {
 // stepInput is the producer/preparer/compactor view of the step.
 func (d *drive) stepInput(st *stepState, attempt int) agentrun.StepInput {
 	return agentrun.StepInput{
-		Run: cloneAgentRun(d.run), Step: cloneAgentTurn(st.current()), Session: cloneAgentSession(d.session),
+		Run: models.CloneAgentRun(d.run), Step: models.CloneAgentTurn(st.current()), Session: models.CloneAgentSession(d.session),
 		Path: st.path, Binding: d.binding, Mode: st.mode, Attempt: attempt, WorkerID: d.workerID,
 	}
 }
 
 // toolsInput is the executor's view of the step.
-func (d *drive) toolsInput(st *stepState, entries []*SessionEntry) agentrun.StepToolsInput {
+func (d *drive) toolsInput(st *stepState, entries []*models.SessionEntry) agentrun.StepToolsInput {
 	return agentrun.StepToolsInput{
-		Run: cloneAgentRun(d.run), Step: cloneAgentTurn(st.current()), Session: cloneAgentSession(d.session),
+		Run: models.CloneAgentRun(d.run), Step: models.CloneAgentTurn(st.current()), Session: models.CloneAgentSession(d.session),
 		Path: st.path, Binding: d.binding, WorkerID: d.workerID, Assistant: st.assistant, Entries: entries,
 	}
 }
@@ -271,7 +272,7 @@ func (d *drive) stepPhases(ctx context.Context, st *stepState, resumed *resumedS
 	// Phase 3: steering, preparers, one context append.
 	early, err := d.appendContext(ctx, st)
 	if err != nil {
-		if errors.Is(err, ErrChannelWatermarkMoved) {
+		if errors.Is(err, models.ErrChannelWatermarkMoved) {
 			return d.hostUnavailable(ctx, st, err)
 		}
 		return d.stepError(ctx, st, err, StepFailurePreparationFailed)
@@ -298,7 +299,7 @@ func (d *drive) stepPhases(ctx context.Context, st *stepState, resumed *resumedS
 		return res
 	}
 	// Phase 7: record.
-	if d.binding.Producer.Kind() == StepProducerModel {
+	if d.binding.Producer.Kind() == models.StepProducerModel {
 		if err := d.recordModelStep(ctx, st, out); err != nil {
 			return d.stepError(ctx, st, err, StepFailureHostConfiguration)
 		}
@@ -331,7 +332,7 @@ func (d *drive) reserveBudget(ctx context.Context, st *stepState) (stepResult, b
 	}
 	for attempt := 0; ; attempt++ {
 		run, admission, err := reserveStepBudget(st.durCtx, d.l.activity, d.l.now(), d.run, st.current(), d.binding, d.stepInput(st, 0), d.workerID)
-		if errors.Is(err, ErrRevisionConflict) && attempt < maximumRunWriteAttempts {
+		if errors.Is(err, models.ErrRevisionConflict) && attempt < maximumRunWriteAttempts {
 			if _, err := d.reloadRun(ctx); err != nil {
 				return d.storeError(ctx, st, err, StepFailurePreparationFailed), true
 			}
@@ -385,7 +386,7 @@ func (d *drive) resumeOpenTools(ctx context.Context, st *stepState) (stepResult,
 	if d.binding.Tools == nil {
 		return stepResult{}, false
 	}
-	open, err := d.l.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
+	open, err := d.l.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: d.run.Scope, RunID: d.run.ID, States: models.OpenToolEntryStateValues(), Limit: openToolEntryPage,
 	})
 	if err != nil {
@@ -414,14 +415,14 @@ func (d *drive) resumeOpenTools(ctx context.Context, st *stepState) (stepResult,
 
 // resumeRecordedStep continues a running step whose assistant entry an
 // earlier claim already appended (D14): the model is not called again.
-func (d *drive) resumeRecordedStep(ctx context.Context, st *stepState, assistant *SessionEntry) stepResult {
+func (d *drive) resumeRecordedStep(ctx context.Context, st *stepState, assistant *models.SessionEntry) stepResult {
 	st.assistant = assistant
 	st.produced = true
 	a := assistant.Assistant
 	st.output = a
 	if len(a.ToolCalls) > 0 {
-		entries, err := d.l.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-			Scope: d.run.Scope, StepID: st.step.ID, Types: []SessionEntryType{SessionEntryTool}, Limit: openToolEntryPage,
+		entries, err := d.l.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+			Scope: d.run.Scope, StepID: st.step.ID, Types: []models.SessionEntryType{models.SessionEntryTool}, Limit: openToolEntryPage,
 		})
 		if err != nil {
 			return d.storeError(ctx, st, err, StepFailurePreparationFailed)
@@ -457,11 +458,11 @@ func (d *drive) appendContext(ctx context.Context, st *stepState) (*agentrun.Loo
 		note := conversation.FailureExplanationNote(d.session.ID, d.run.ID, st.step.ID, d.run.FailureExplanation)
 		note.Scope, note.Step = d.run.Scope, st.step.Sequence
 		note.Tokens = modelstep.EstimateEntryTokens(note)
-		preparers = []agentrun.StepPreparer{fixedEntriesPreparer{entries: []*SessionEntry{note}}}
+		preparers = []agentrun.StepPreparer{fixedEntriesPreparer{entries: []*models.SessionEntry{note}}}
 	}
 	for attempt := 0; ; attempt++ {
 		result, err := appendStepContext(st.durCtx, d.l.sessions, d.stepInput(st, 0), preparers, d.l.now())
-		if errors.Is(err, ErrSessionMoved) && attempt == 0 {
+		if errors.Is(err, models.ErrSessionMoved) && attempt == 0 {
 			if err := d.followSession(ctx); err != nil {
 				return nil, err
 			}
@@ -488,7 +489,7 @@ func (d *drive) appendContext(ctx context.Context, st *stepState) (*agentrun.Loo
 
 // fixedEntriesPreparer contributes fixed entries to the context append (the
 // explanation step's failure note).
-type fixedEntriesPreparer struct{ entries []*SessionEntry }
+type fixedEntriesPreparer struct{ entries []*models.SessionEntry }
 
 func (p fixedEntriesPreparer) BeforeStep(context.Context, agentrun.StepInput, agentrun.SteeringPlan) (*agentrun.StepContextAppend, error) {
 	return &agentrun.StepContextAppend{Entries: p.entries}, nil
@@ -502,7 +503,7 @@ func (d *drive) followSession(ctx context.Context) error {
 		return err
 	}
 	if run.SessionID == "" || d.session != nil && run.SessionID == d.session.ID {
-		return ErrSessionMoved
+		return models.ErrSessionMoved
 	}
 	session, err := d.l.sessions.GetAgentSession(ctx, run.Scope, run.SessionID)
 	if err != nil {
@@ -587,16 +588,16 @@ func (d *drive) checkRunAfterProduce(ctx context.Context, st *stepState) (stepRe
 		return exitResultPtr(d.errorExit(err)), true
 	}
 	if run == nil {
-		return exitResultPtr(d.errorExit(ErrRunNotFound)), true
+		return exitResultPtr(d.errorExit(models.ErrRunNotFound)), true
 	}
-	if isTerminalAgentRunStatus(run.Status) {
+	if models.IsTerminalAgentRunStatus(run.Status) {
 		d.run = run
 		d.endStep(cleanup, st)
 		return exitResult(RunLoopExit{Run: run, Reason: RunLoopExitEnded}), true
 	}
-	if run.Status != AgentRunStatusRunning || run.LeaseOwner != d.workerID || st.lease.lost.Load() || ctx.Err() != nil {
+	if run.Status != models.AgentRunStatusRunning || run.LeaseOwner != d.workerID || st.lease.lost.Load() || ctx.Err() != nil {
 		d.run = run
-		return exitResult(RunLoopExit{Run: run, Reason: RunLoopExitLeaseLost, Err: ErrLeaseLost}), true
+		return exitResult(RunLoopExit{Run: run, Reason: RunLoopExitLeaseLost, Err: models.ErrLeaseLost}), true
 	}
 	return stepResult{}, false
 }
@@ -604,10 +605,10 @@ func (d *drive) checkRunAfterProduce(ctx context.Context, st *stepState) (stepRe
 // endStep finishes the step of a Run that became terminal as
 // canceled/run_ended. The terminal close may already have finished it.
 func (d *drive) endStep(ctx context.Context, st *stepState) {
-	err := d.finishStep(ctx, st, FinishAgentTurnRequest{
-		Status: AgentTurnStatusCanceled, FailureCode: agentrun.StepFailureRunEnded, Error: agentrun.TerminalCloseStepError,
+	err := d.finishStep(ctx, st, activity.FinishAgentTurnRequest{
+		Status: models.AgentTurnStatusCanceled, FailureCode: agentrun.StepFailureRunEnded, Error: agentrun.TerminalCloseStepError,
 	})
-	if err != nil && !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrTurnLeaseHeld) {
+	if err != nil && !errors.Is(err, models.ErrRevisionConflict) && !errors.Is(err, models.ErrTurnLeaseHeld) {
 		d.l.logger.Warnw("finish step of an ended run", "run", d.run.ID, "step", st.step.ID, "error", err)
 	}
 	st.finished = true
@@ -628,13 +629,13 @@ func (d *drive) recordModelStep(ctx context.Context, st *stepState, out agentrun
 		return d.recordStep(ctx, st, out.ModelProvider, out.Model, a, st.usage, out.SkillSelections)
 	}
 	step := st.current()
-	appended, err := d.appendStepEntries(ctx, func(session *AgentSession) ([]*SessionEntry, error) {
-		assistant := &SessionEntry{
-			ID: SessionEntryID(session.ID, AssistantEntryKey(step.ID)), Scope: d.run.Scope, SessionID: session.ID,
-			RunID: d.run.ID, StepID: step.ID, Step: step.Sequence, Type: SessionEntryAssistant, Assistant: a,
+	appended, err := d.appendStepEntries(ctx, func(session *models.AgentSession) ([]*models.SessionEntry, error) {
+		assistant := &models.SessionEntry{
+			ID: models.SessionEntryID(session.ID, models.AssistantEntryKey(step.ID)), Scope: d.run.Scope, SessionID: session.ID,
+			RunID: d.run.ID, StepID: step.ID, Step: step.Sequence, Type: models.SessionEntryAssistant, Assistant: a,
 		}
 		assistant.Tokens = modelstep.EstimateEntryTokens(assistant)
-		entries := []*SessionEntry{assistant}
+		entries := []*models.SessionEntry{assistant}
 		if len(a.ToolCalls) == 0 {
 			return entries, nil
 		}
@@ -674,19 +675,19 @@ const explanationToolRefusal = "refused: no tools can run while the agent explai
 
 // refuseExplanationToolEntries ends the planned tool entries of an
 // explanation step with a refused result.
-func refuseExplanationToolEntries(entries []*SessionEntry, now time.Time) {
+func refuseExplanationToolEntries(entries []*models.SessionEntry, now time.Time) {
 	for _, entry := range entries {
 		if entry == nil || entry.Tool == nil || entry.State.Terminal() {
 			continue
 		}
 		completed := now
-		entry.State = ToolEntryError
+		entry.State = models.ToolEntryError
 		entry.Tool.Wait = nil
 		entry.Tool.Parked = false
 		entry.Tool.CompletedAt = &completed
-		entry.Tool.Result = &ToolResult{
-			Status: ToolResultRefused, IsError: true,
-			Content: []ContentPart{{Type: ContentPartText, Text: explanationToolRefusal}},
+		entry.Tool.Result = &models.ToolResult{
+			Status: models.ToolResultRefused, IsError: true,
+			Content: []models.ContentPart{{Type: models.ContentPartText, Text: explanationToolRefusal}},
 		}
 	}
 }
@@ -695,18 +696,18 @@ func refuseExplanationToolEntries(entries []*SessionEntry, now time.Time) {
 // fenced by the Run lease. After ErrSessionMoved (promotion) it follows the
 // Run to its new session and appends there once. It returns the stored
 // entries in request order.
-func (d *drive) appendStepEntries(ctx context.Context, build func(session *AgentSession) ([]*SessionEntry, error)) ([]*SessionEntry, error) {
+func (d *drive) appendStepEntries(ctx context.Context, build func(session *models.AgentSession) ([]*models.SessionEntry, error)) ([]*models.SessionEntry, error) {
 	for attempt := 0; ; attempt++ {
 		entries, err := build(d.session)
 		if err != nil {
 			return nil, err
 		}
 		now := d.l.now()
-		result, err := d.l.sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+		result, err := d.l.sessions.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 			Scope: d.run.Scope, SessionID: d.session.ID, RunID: d.run.ID,
-			Lease: &AgentRunLeaseGuard{WorkerID: d.workerID, Now: now}, Entries: entries, Now: now,
+			Lease: &models.AgentRunLeaseGuard{WorkerID: d.workerID, Now: now}, Entries: entries, Now: now,
 		})
-		if errors.Is(err, ErrSessionMoved) && attempt == 0 {
+		if errors.Is(err, models.ErrSessionMoved) && attempt == 0 {
 			if err := d.followSession(ctx); err != nil {
 				return nil, err
 			}
@@ -728,8 +729,8 @@ func (d *drive) appendStepEntries(ctx context.Context, build func(session *Agent
 
 // recordStep writes RecordStepModel for the step. Narration is the assistant
 // text of a step that has tool calls (D11).
-func (d *drive) recordStep(ctx context.Context, st *stepState, provider, model string, a *AssistantEntry, usage TurnUsage, selections []HostedSkillSelection) error {
-	record := StepModelRecord{WorkerID: d.workerID, ModelProvider: provider, Model: model, Usage: usage, SkillSelections: selections}
+func (d *drive) recordStep(ctx context.Context, st *stepState, provider, model string, a *models.AssistantEntry, usage models.TurnUsage, selections []models.HostedSkillSelection) error {
+	record := activity.StepModelRecord{WorkerID: d.workerID, ModelProvider: provider, Model: model, Usage: usage, SkillSelections: selections}
 	if st.assistant != nil {
 		record.AssistantEntryID = st.assistant.ID
 	}
@@ -741,7 +742,7 @@ func (d *drive) recordStep(ctx context.Context, st *stepState, provider, model s
 		}
 		record.Final = record.ToolCallCount == 0 || st.finalEntry != ""
 	}
-	_, err := st.lease.write(func(turn *AgentTurn) (*AgentTurn, error) {
+	_, err := st.lease.write(func(turn *models.AgentTurn) (*models.AgentTurn, error) {
 		record.ExpectedRevision = turn.Revision
 		return d.l.turns.RecordStepModel(ctx, turn.Scope, turn.ID, record)
 	})
@@ -750,11 +751,11 @@ func (d *drive) recordStep(ctx context.Context, st *stepState, provider, model s
 
 // recordDeterministicStep records a deterministic step (no assistant entry).
 func (d *drive) recordDeterministicStep(ctx context.Context, st *stepState, out agentrun.StepOutput) error {
-	record := StepModelRecord{
+	record := activity.StepModelRecord{
 		WorkerID: d.workerID, ModelProvider: out.ModelProvider, Model: out.Model,
 		ToolCallCount: len(out.ToolCalls), Usage: st.usage, SkillSelections: out.SkillSelections,
 	}
-	_, err := st.lease.write(func(turn *AgentTurn) (*AgentTurn, error) {
+	_, err := st.lease.write(func(turn *models.AgentTurn) (*models.AgentTurn, error) {
 		record.ExpectedRevision = turn.Revision
 		return d.l.turns.RecordStepModel(ctx, turn.Scope, turn.ID, record)
 	})
@@ -763,9 +764,9 @@ func (d *drive) recordDeterministicStep(ctx context.Context, st *stepState, out 
 
 // finalToolEntryID is the id of the final-tool entry among a step's tool
 // entries, or "".
-func finalToolEntryID(entries []*SessionEntry) string {
+func finalToolEntryID(entries []*models.SessionEntry) string {
 	for _, entry := range entries {
-		if entry != nil && entry.Tool != nil && control.IsFinalTool(ControlToolName(entry.Tool.Name)) {
+		if entry != nil && entry.Tool != nil && control.IsFinalTool(models.ControlToolName(entry.Tool.Name)) {
 			return entry.ID
 		}
 	}
@@ -838,7 +839,7 @@ func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) 
 		return d.stepError(ctx, st, err, StepFailureProducerFailed)
 	}
 	if result.Run != nil && result.Run.Revision >= d.run.Revision {
-		d.run = cloneAgentRun(result.Run)
+		d.run = models.CloneAgentRun(result.Run)
 	}
 	switch result.Kind {
 	case control.ControlFinal:
@@ -876,7 +877,7 @@ func (d *drive) deterministicStep(ctx context.Context, st *stepState, out agentr
 		}, nil, StepFailureHostConfiguration)
 	}
 	step := st.current()
-	entries, err := d.appendStepEntries(ctx, func(session *AgentSession) ([]*SessionEntry, error) {
+	entries, err := d.appendStepEntries(ctx, func(session *models.AgentSession) ([]*models.SessionEntry, error) {
 		return d.l.config.PlanToolEntries(d.binding, session, step, nil, out.ToolCalls)
 	})
 	if err != nil {
@@ -893,7 +894,7 @@ func (d *drive) deterministicStep(ctx context.Context, st *stepState, out agentr
 func (d *drive) toolOutcome(ctx context.Context, st *stepState, out agentrun.StepToolsOutcome, err error) (stepResult, bool) {
 	st.hostCalls += out.HostToolCalls
 	if out.Run != nil && out.Run.Revision >= d.run.Revision {
-		d.run = cloneAgentRun(out.Run)
+		d.run = models.CloneAgentRun(out.Run)
 	}
 	if err != nil {
 		return d.stepError(ctx, st, err, ""), true
@@ -907,7 +908,7 @@ func (d *drive) toolOutcome(ctx context.Context, st *stepState, out agentrun.Ste
 		return d.finishFinal(ctx, st, out.Final, ""), true
 	case out.Park != nil:
 		return d.park(ctx, st, *out.Park), true
-	case out.Run != nil && isTerminalAgentRunStatus(out.Run.Status):
+	case out.Run != nil && models.IsTerminalAgentRunStatus(out.Run.Status):
 		// A control tool ended the Run in its own transaction (A4).
 		return d.endedByTool(ctx, st, out.Run), true
 	}
@@ -921,11 +922,11 @@ func (d *drive) finishAndSettle(ctx context.Context, st *stepState) stepResult {
 	if err := d.finishCompleted(ctx, st); err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
 	}
-	run, err := d.commitRun(ctx, st, RunTransitionRequest{Status: AgentRunStatusRunning}, false)
+	run, err := d.commitRun(ctx, st, activity.RunTransitionRequest{Status: models.AgentRunStatusRunning}, false)
 	if err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
 	}
-	if run.Status != AgentRunStatusRunning {
+	if run.Status != models.AgentRunStatusRunning {
 		return exitResultPtr(d.statusExit(run))
 	}
 	if st.settle {
@@ -948,7 +949,7 @@ func (d *drive) finalRejected(ctx context.Context, st *stepState) bool {
 		return false
 	}
 	entry, err := d.l.sessions.GetSessionEntry(ctx, d.run.Scope, st.finalEntry)
-	return err == nil && entry != nil && entry.State == ToolEntryError
+	return err == nil && entry != nil && entry.State == models.ToolEntryError
 }
 
 // continueAfter applies the step (if it is not yet) with the Run running and
@@ -960,23 +961,23 @@ func (d *drive) continueAfter(ctx context.Context, st *stepState, kind stepResul
 	if st.applied {
 		return stepResult{kind: kind}
 	}
-	run, err := d.commitRun(ctx, st, RunTransitionRequest{Status: AgentRunStatusRunning}, false)
+	run, err := d.commitRun(ctx, st, activity.RunTransitionRequest{Status: models.AgentRunStatusRunning}, false)
 	if err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
 	}
-	if run.Status != AgentRunStatusRunning {
+	if run.Status != models.AgentRunStatusRunning {
 		return exitResultPtr(d.statusExit(run))
 	}
 	return stepResult{kind: kind}
 }
 
 // endedByTool finishes the step of a Run a tool ended in its own transaction.
-func (d *drive) endedByTool(ctx context.Context, st *stepState, run *AgentRun) stepResult {
-	if err := d.finishCompleted(ctx, st); err != nil && !errors.Is(err, ErrTurnLeaseHeld) && !errors.Is(err, ErrRevisionConflict) {
+func (d *drive) endedByTool(ctx context.Context, st *stepState, run *models.AgentRun) stepResult {
+	if err := d.finishCompleted(ctx, st); err != nil && !errors.Is(err, models.ErrTurnLeaseHeld) && !errors.Is(err, models.ErrRevisionConflict) {
 		return exitResultPtr(d.writeErrorExit(err))
 	}
 	if run != nil {
-		d.run = cloneAgentRun(run)
+		d.run = models.CloneAgentRun(run)
 	}
 	return exitResultPtr(d.statusExit(d.run))
 }
@@ -1022,13 +1023,13 @@ func (d *drive) park(ctx context.Context, st *stepState, park agentrun.LoopPark)
 		if summary == "" {
 			summary = fmt.Sprintf("Run is %s", strings.ReplaceAll(string(park.Status), "_", " "))
 		}
-		run, err := d.commitRun(ctx, st, RunTransitionRequest{
+		run, err := d.commitRun(ctx, st, activity.RunTransitionRequest{
 			Status: park.Status, WakeCondition: park.Wake, Summary: summary, RequireInterventionCount: &count,
 		}, true)
 		if err == nil {
 			return exitResultPtr(d.statusExit(run))
 		}
-		if !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrSteeringArrived) {
+		if !errors.Is(err, models.ErrRevisionConflict) && !errors.Is(err, models.ErrSteeringArrived) {
 			return exitResultPtr(d.writeErrorExit(err))
 		}
 		if replans+1 >= maximumParkReplans {
@@ -1038,7 +1039,7 @@ func (d *drive) park(ctx context.Context, st *stepState, park agentrun.LoopPark)
 		if err != nil {
 			return exitResultPtr(d.errorExit(err))
 		}
-		if reloaded.Status != AgentRunStatusRunning || reloaded.LeaseOwner != d.workerID {
+		if reloaded.Status != models.AgentRunStatusRunning || reloaded.LeaseOwner != d.workerID {
 			return exitResultPtr(d.statusExit(reloaded))
 		}
 		var next *agentrun.LoopPark
@@ -1061,15 +1062,15 @@ func (d *drive) park(ctx context.Context, st *stepState, park agentrun.LoopPark)
 
 // finishStep finishes the running step (phase 9 and every exit). The
 // heartbeat stops first, so the finish holds the latest revision.
-func (d *drive) finishStep(ctx context.Context, st *stepState, req FinishAgentTurnRequest) error {
+func (d *drive) finishStep(ctx context.Context, st *stepState, req activity.FinishAgentTurnRequest) error {
 	if st.finished {
 		return nil
 	}
 	st.lease.stopHeartbeat()
 	if st.lease.lost.Load() {
-		return ErrTurnLeaseHeld
+		return models.ErrTurnLeaseHeld
 	}
-	if req.Usage == (TurnUsage{}) {
+	if req.Usage == (models.TurnUsage{}) {
 		req.Usage = st.usage
 	}
 	req.Usage.InputTokens += st.compaction.InputTokens
@@ -1079,7 +1080,7 @@ func (d *drive) finishStep(ctx context.Context, st *stepState, req FinishAgentTu
 	req.Usage.Cost += st.compaction.Cost
 	req.Usage.NativeOperations += st.hostCalls
 	req.WorkerID = d.workerID
-	finished, err := st.lease.write(func(turn *AgentTurn) (*AgentTurn, error) {
+	finished, err := st.lease.write(func(turn *models.AgentTurn) (*models.AgentTurn, error) {
 		req.ExpectedRevision = turn.Revision
 		return d.l.turns.FinishTurn(context.WithoutCancel(ctx), turn.Scope, turn.ID, req)
 	})
@@ -1092,7 +1093,7 @@ func (d *drive) finishStep(ctx context.Context, st *stepState, req FinishAgentTu
 }
 
 // addCompaction adds the usage of one compaction call to the step.
-func (st *stepState) addCompaction(u ModelStepUsage) {
+func (st *stepState) addCompaction(u models.ModelStepUsage) {
 	st.compaction.InputTokens += int(u.InputTokens)
 	st.compaction.OutputTokens += int(u.OutputTokens)
 	st.compaction.CacheReadTokens += int(u.CacheReadTokens)
@@ -1106,7 +1107,7 @@ func (d *drive) finishCompleted(ctx context.Context, st *stepState) error {
 	if st.usage.DurationMS == 0 {
 		st.usage.DurationMS = d.l.now().Sub(st.started).Milliseconds()
 	}
-	return d.finishStep(ctx, st, FinishAgentTurnRequest{Status: AgentTurnStatusCompleted})
+	return d.finishStep(ctx, st, activity.FinishAgentTurnRequest{Status: models.AgentTurnStatusCompleted})
 }
 
 // stepError classifies an error of a step phase. defaultCode is the step
@@ -1142,7 +1143,7 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 		}, err, code)
 	case errors.Is(err, modelstep.ErrTurnHostConfiguration):
 		message := "The agent's step host is not configured correctly."
-		if errors.Is(err, ErrInvalidModelStepRequest) {
+		if errors.Is(err, models.ErrInvalidModelStepRequest) {
 			// The host is fine; the step built from the session was refused.
 			message = "The agent's next step could not be prepared from this conversation."
 		}
@@ -1175,9 +1176,9 @@ func (d *drive) storeError(ctx context.Context, st *stepState, err error, defaul
 		st.durCtx != nil && stepDurationExpired(st.stepCtx, st.durCtx),
 		errors.Is(err, modelstep.ErrTurnHostUnavailable), errors.Is(err, modelstep.ErrTurnHostConfiguration),
 		errors.As(err, &loopFailure), errors.As(err, &hostFailure),
-		errors.Is(err, ErrAgentSessionNotFound), errors.Is(err, ErrAgentSessionPathTooLarge), errors.Is(err, ErrAgentSessionForkTooDeep):
+		errors.Is(err, models.ErrAgentSessionNotFound), errors.Is(err, models.ErrAgentSessionPathTooLarge), errors.Is(err, models.ErrAgentSessionForkTooDeep):
 		return d.stepError(ctx, st, err, defaultCode)
-	case errors.Is(err, ErrBudgetExhausted):
+	case errors.Is(err, models.ErrBudgetExhausted):
 		return d.stepError(ctx, st, err, StepFailureBudgetExhausted)
 	}
 	d.l.logger.Warnw("step store error; the run is left for lease recovery", "run", d.run.ID, "step", st.step.ID, "error", err)
@@ -1191,21 +1192,21 @@ func (d *drive) storeError(ctx context.Context, st *stepState, err error, defaul
 // Run still this claim's. Observers call it from host and executor
 // goroutines, so it takes the ids captured when the step began and never
 // reads the loop's d.run or st.
-func (d *drive) stepFenced(ctx context.Context, scope Scope, runID, stepID string) error {
+func (d *drive) stepFenced(ctx context.Context, scope models.Scope, runID, stepID string) error {
 	current, err := d.l.store.GetAgentTurn(ctx, scope, stepID)
 	if err != nil {
 		return err
 	}
-	if current == nil || current.Status != AgentTurnStatusRunning || current.LeaseOwner != d.workerID ||
+	if current == nil || current.Status != models.AgentTurnStatusRunning || current.LeaseOwner != d.workerID ||
 		current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(d.l.now()) {
-		return ErrTurnLeaseHeld
+		return models.ErrTurnLeaseHeld
 	}
 	active, err := d.l.store.GetAgentRun(ctx, scope, runID)
 	if err != nil {
 		return err
 	}
-	if active == nil || active.Status != AgentRunStatusRunning || active.LeaseOwner != "" && active.LeaseOwner != d.workerID {
-		return ErrLeaseLost
+	if active == nil || active.Status != models.AgentRunStatusRunning || active.LeaseOwner != "" && active.LeaseOwner != d.workerID {
+		return models.ErrLeaseLost
 	}
 	return nil
 }
@@ -1215,14 +1216,14 @@ func (d *drive) stepFenced(ctx context.Context, scope Scope, runID, stepID strin
 func (d *drive) observeStepProgress(ctx context.Context, st *stepState) context.Context {
 	var mu sync.Mutex
 	lastSummary, lastKind, lastOrigin := "", "", ""
-	run := cloneAgentRun(d.run)
+	run := models.CloneAgentRun(d.run)
 	stepID := st.step.ID
-	return WithTurnProgress(ctx, func(progressCtx context.Context, summary string) error {
+	return models.WithTurnProgress(ctx, func(progressCtx context.Context, summary string) error {
 		kind := "turn.progress"
-		if IsTurnCommentary(progressCtx) {
+		if models.IsTurnCommentary(progressCtx) {
 			kind = "turn.commentary"
 		}
-		origin := TurnProgressOrigin(progressCtx)
+		origin := models.TurnProgressOrigin(progressCtx)
 		mu.Lock()
 		defer mu.Unlock()
 		if summary == lastSummary && kind == lastKind && origin == lastOrigin {
@@ -1231,9 +1232,9 @@ func (d *drive) observeStepProgress(ctx context.Context, st *stepState) context.
 		if err := d.stepFenced(progressCtx, run.Scope, run.ID, stepID); err != nil {
 			return err
 		}
-		event := &ActivityEvent{
-			Scope: run.Scope, RunID: run.ID, TurnID: stepID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: teamIDForRun(run),
-			EventType: kind, Summary: summary, Actor: d.actor(), Visibility: ActivityVisibilityScope,
+		event := &models.ActivityEvent{
+			Scope: run.Scope, RunID: run.ID, TurnID: stepID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: models.TeamIDForRun(run),
+			EventType: kind, Summary: summary, Actor: d.actor(), Visibility: models.ActivityVisibilityScope,
 		}
 		if origin != "" {
 			event.Payload = map[string]interface{}{"originRef": origin}
@@ -1254,7 +1255,7 @@ type previewTracker struct {
 	sequence  uint64
 }
 
-func (p *previewTracker) seen(preview TurnAnswerPreview) {
+func (p *previewTracker) seen(preview models.TurnAnswerPreview) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if preview.AttemptID != p.attemptID || preview.Sequence > p.sequence {
@@ -1269,10 +1270,10 @@ func (p *previewTracker) last() (string, uint64) {
 }
 
 func (d *drive) observeStepPreview(ctx context.Context, st *stepState) context.Context {
-	run := cloneAgentRun(d.run)
+	run := models.CloneAgentRun(d.run)
 	stepID := st.step.ID
 	tracker := &st.preview
-	return WithTurnAnswerPreview(ctx, func(previewCtx context.Context, preview TurnAnswerPreview) error {
+	return models.WithTurnAnswerPreview(ctx, func(previewCtx context.Context, preview models.TurnAnswerPreview) error {
 		if err := d.stepFenced(previewCtx, run.Scope, run.ID, stepID); err != nil {
 			return err
 		}
@@ -1284,10 +1285,10 @@ func (d *drive) observeStepPreview(ctx context.Context, st *stepState) context.C
 	})
 }
 
-func (d *drive) appendPreview(ctx context.Context, run *AgentRun, stepID string, preview TurnAnswerPreview) error {
-	_, err := d.l.activity.AppendActivity(ctx, &ActivityEvent{
-		Scope: run.Scope, RunID: run.ID, TurnID: stepID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: teamIDForRun(run),
-		EventType: "turn.answer_preview", Summary: "Reply preview updated", Actor: d.actor(), Visibility: ActivityVisibilityScope,
+func (d *drive) appendPreview(ctx context.Context, run *models.AgentRun, stepID string, preview models.TurnAnswerPreview) error {
+	_, err := d.l.activity.AppendActivity(ctx, &models.ActivityEvent{
+		Scope: run.Scope, RunID: run.ID, TurnID: stepID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: models.TeamIDForRun(run),
+		EventType: "turn.answer_preview", Summary: "Reply preview updated", Actor: d.actor(), Visibility: models.ActivityVisibilityScope,
 		Payload: map[string]interface{}{"attemptId": preview.AttemptID, "sequence": preview.Sequence, "text": preview.Text, "reset": preview.Reset},
 	})
 	return err
@@ -1301,7 +1302,7 @@ func (d *drive) resetPreview(ctx context.Context, st *stepState) {
 	if attemptID == "" {
 		return
 	}
-	reset := TurnAnswerPreview{AttemptID: attemptID, Sequence: sequence + 1, Reset: true}
+	reset := models.TurnAnswerPreview{AttemptID: attemptID, Sequence: sequence + 1, Reset: true}
 	if err := d.appendPreview(ctx, d.run, st.step.ID, reset); err != nil {
 		d.l.logger.Warnw("reset answer preview", "run", d.run.ID, "step", st.step.ID, "error", err)
 		return

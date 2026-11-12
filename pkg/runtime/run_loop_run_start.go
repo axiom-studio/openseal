@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -38,11 +39,11 @@ func RateLimitedSourceKey(runID, actionCallID string) string {
 // runStartPreparer is the StepPreparer the RunLoop runs first. Actions may be
 // nil (no governed tools); then it produces no notes.
 type runStartPreparer struct {
-	sessions AgentSessionStore
-	actions  ActionStore
+	sessions models.AgentSessionStore
+	actions  models.ActionStore
 }
 
-func newRunStartPreparer(sessions AgentSessionStore, actions ActionStore) *runStartPreparer {
+func newRunStartPreparer(sessions models.AgentSessionStore, actions models.ActionStore) *runStartPreparer {
 	return &runStartPreparer{sessions: sessions, actions: actions}
 }
 
@@ -53,7 +54,7 @@ func (p *runStartPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput
 	if p == nil || run == nil || session == nil || step == nil {
 		return nil, nil
 	}
-	var notes []*SessionEntry
+	var notes []*models.SessionEntry
 	if p.actions != nil && newGovernedEvidence(in.Path, run.ID) {
 		views, err := control.LoadGovernedToolViews(ctx, p.actions, run.Scope, in.Path, run.ID)
 		if err != nil {
@@ -85,7 +86,7 @@ func (p *runStartPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput
 
 // holds reports whether the session already has the entry: on the loaded
 // path, or (compacted away or not loaded) in the store.
-func (p *runStartPreparer) holds(ctx context.Context, scope Scope, path *AgentSessionPath, entryID string) (bool, error) {
+func (p *runStartPreparer) holds(ctx context.Context, scope models.Scope, path *models.AgentSessionPath, entryID string) (bool, error) {
 	if path != nil {
 		for _, entry := range path.Entries {
 			if entry != nil && entry.ID == entryID {
@@ -100,19 +101,19 @@ func (p *runStartPreparer) holds(ctx context.Context, scope Scope, path *AgentSe
 	switch {
 	case err == nil:
 		return true, nil
-	case errors.Is(err, ErrSessionEntryNotFound):
+	case errors.Is(err, models.ErrSessionEntryNotFound):
 		return false, nil
 	default:
 		return false, err
 	}
 }
 
-func runStartNote(run *AgentRun, sessionID string, step *AgentTurn, key string, kind NoteKind, text string, data interface{}) *SessionEntry {
+func runStartNote(run *models.AgentRun, sessionID string, step *models.AgentTurn, key string, kind models.NoteKind, text string, data interface{}) *models.SessionEntry {
 	encoded, _ := json.Marshal(data)
-	return &SessionEntry{
-		ID: SessionEntryID(sessionID, key), Scope: run.Scope, SessionID: sessionID,
-		RunID: run.ID, StepID: step.ID, Step: step.Sequence, Type: SessionEntryNote, SourceKey: key,
-		Note: &NoteEntry{Kind: kind, Text: text, Data: encoded},
+	return &models.SessionEntry{
+		ID: models.SessionEntryID(sessionID, key), Scope: run.Scope, SessionID: sessionID,
+		RunID: run.ID, StepID: step.ID, Step: step.Sequence, Type: models.SessionEntryNote, SourceKey: key,
+		Note: &models.NoteEntry{Kind: kind, Text: text, Data: encoded},
 	}
 }
 
@@ -120,7 +121,7 @@ func runStartNote(run *AgentRun, sessionID string, step *AgentTurn, key string, 
 // or after its newest assistant entry, so the governed history may have
 // changed since the previous step. It keeps the action-call read off steps
 // that ran no governed call.
-func newGovernedEvidence(path *AgentSessionPath, runID string) bool {
+func newGovernedEvidence(path *models.AgentSessionPath, runID string) bool {
 	if path == nil {
 		return false
 	}
@@ -129,11 +130,11 @@ func newGovernedEvidence(path *AgentSessionPath, runID string) bool {
 		if entry == nil || entry.RunID != runID {
 			continue
 		}
-		if entry.Type == SessionEntryAssistant {
+		if entry.Type == models.SessionEntryAssistant {
 			return false
 		}
-		if entry.Type == SessionEntryTool && entry.ActionCallID != "" &&
-			(entry.State == ToolEntryCompleted || entry.State == ToolEntryError) {
+		if entry.Type == models.SessionEntryTool && entry.ActionCallID != "" &&
+			(entry.State == models.ToolEntryCompleted || entry.State == models.ToolEntryError) {
 			return true
 		}
 	}
@@ -142,13 +143,13 @@ func newGovernedEvidence(path *AgentSessionPath, runID string) bool {
 
 // rateLimitedSourceNote follows browserSourceRateLimited: the newest Lightpanda
 // call decides; a success clears, a typed source_* failure sets or clears.
-func rateLimitedSourceNote(run *AgentRun, sessionID string, step *AgentTurn, views []control.GovernedToolView) *SessionEntry {
+func rateLimitedSourceNote(run *models.AgentRun, sessionID string, step *models.AgentTurn, views []control.GovernedToolView) *models.SessionEntry {
 	for index := len(views) - 1; index >= 0; index-- {
 		view := views[index]
 		if view.SkillID != control.LightpandaBrowserSkillID {
 			continue
 		}
-		if view.Status == string(ActionCallStatusSucceeded) {
+		if view.Status == string(models.ActionCallStatusSucceeded) {
 			return nil
 		}
 		limited, relevant := control.TypedSourceFailure(view)
@@ -158,7 +159,7 @@ func rateLimitedSourceNote(run *AgentRun, sessionID string, step *AgentTurn, vie
 		if !limited || view.ActionCallID == "" {
 			return nil
 		}
-		return runStartNote(run, sessionID, step, RateLimitedSourceKey(run.ID, view.ActionCallID), NoteRateLimitedSource,
+		return runStartNote(run, sessionID, step, RateLimitedSourceKey(run.ID, view.ActionCallID), models.NoteRateLimitedSource,
 			control.LiveBrowserRateLimitedError, map[string]string{"actionCallId": view.ActionCallID, "code": control.LiveBrowserRateLimitedCode})
 	}
 	return nil
@@ -167,13 +168,13 @@ func rateLimitedSourceNote(run *AgentRun, sessionID string, step *AgentTurn, vie
 // runStartSetupPendingNote follows pendingSkillSetupID and builds the same
 // entry as pendingSkillSetupNote (id, source key, text, data), for foreground
 // Runs only.
-func runStartSetupPendingNote(run *AgentRun, sessionID string, step *AgentTurn, views []control.GovernedToolView) *SessionEntry {
+func runStartSetupPendingNote(run *models.AgentRun, sessionID string, step *models.AgentTurn, views []control.GovernedToolView) *models.SessionEntry {
 	if control.IsBackgroundTaskRun(run) {
 		return nil
 	}
 	for index := len(views) - 1; index >= 0; index-- {
 		view := views[index]
-		if view.SkillID != SkillManagementSkillID || view.Status != string(ActionCallStatusSucceeded) ||
+		if view.SkillID != models.SkillManagementSkillID || view.Status != string(models.ActionCallStatusSucceeded) ||
 			view.Action != agentrun.SkillActionRequestSetup && view.Action != skillbinding.SkillActionListSetupRequests {
 			continue
 		}
@@ -181,7 +182,7 @@ func runStartSetupPendingNote(run *AgentRun, sessionID string, step *AgentTurn, 
 		if id == "" || view.ActionCallID == "" {
 			return nil
 		}
-		return runStartNote(run, sessionID, step, control.SkillSetupPendingSourceKey(run.ID, id), NoteSetupPending,
+		return runStartNote(run, sessionID, step, control.SkillSetupPendingSourceKey(run.ID, id), models.NoteSetupPending,
 			control.SkillSetupPendingNote, map[string]string{"requestId": id, "actionCallId": view.ActionCallID})
 	}
 	return nil

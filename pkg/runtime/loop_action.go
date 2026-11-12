@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -22,9 +23,9 @@ import (
 // kernel tool executor hands it to the governed executor.
 type GovernedToolCall struct {
 	// Run is the claimed Run (a clone): running, LeaseOwner == WorkerID.
-	Run *AgentRun
+	Run *models.AgentRun
 	// Step is the running step row; its id is the call's TurnID.
-	Step     *AgentTurn
+	Step     *models.AgentTurn
 	WorkerID string
 	Binding  *agentrun.TurnRunnerBinding
 	// ToolCallID is the provider tool call id (LoopToolCall.ID).
@@ -65,11 +66,11 @@ func (call GovernedToolCall) idempotencyKey() string {
 // loop that revision would let its step-end park CAS succeed on a wait that
 // was already decided. The loop's park then fails its CAS and re-plans.
 type governedRunChain struct {
-	known  *AgentRun
+	known  *models.AgentRun
 	broken bool
 }
 
-func (c *governedRunChain) adopt(written *AgentRun) {
+func (c *governedRunChain) adopt(written *models.AgentRun) {
 	if c == nil || written == nil || c.broken {
 		return
 	}
@@ -86,7 +87,7 @@ type GovernedToolExecutorConfig struct {
 	Approvals *runtimeaction.ApprovalCoordinator
 	// Worker executes loop calls inline in the claiming replica.
 	Worker *runtimeaction.ActionWorker
-	Store  KernelStore
+	Store  models.KernelStore
 	// Observer projects created proposals (optional).
 	Observer ActionProposalObserver
 	// Logger reports observer failures (optional).
@@ -102,7 +103,7 @@ type GovernedToolExecutor struct {
 	governedParker
 	actions  *runtimeaction.ActionCoordinator
 	worker   *runtimeaction.ActionWorker
-	store    KernelStore
+	store    models.KernelStore
 	observer ActionProposalObserver
 	logger   *zap.SugaredLogger
 	now      func() time.Time
@@ -189,7 +190,7 @@ func (x *GovernedToolExecutor) Execute(ctx context.Context, call GovernedToolCal
 // step after a crash): it executes calls that never got a row or are ready,
 // re-parks waiting ones, renders terminal ones with their settled card text,
 // and supersedes approvals a newer message already replaced in a sibling.
-func (x *GovernedToolExecutor) Resume(ctx context.Context, call GovernedToolCall, entry *SessionEntry, settled []AgentRunIntervention) (GovernedToolOutcome, error) {
+func (x *GovernedToolExecutor) Resume(ctx context.Context, call GovernedToolCall, entry *models.SessionEntry, settled []models.AgentRunIntervention) (GovernedToolOutcome, error) {
 	if err := validateGovernedToolCall(call); err != nil {
 		return GovernedToolOutcome{}, err
 	}
@@ -199,7 +200,7 @@ func (x *GovernedToolExecutor) Resume(ctx context.Context, call GovernedToolCall
 		}
 		call.keyStepID = entry.StepID
 	}
-	var current *ActionCall
+	var current *models.ActionCall
 	var err error
 	if entry != nil && entry.ActionCallID != "" {
 		current, err = x.store.GetActionCall(ctx, call.Run.Scope, entry.ActionCallID)
@@ -213,11 +214,11 @@ func (x *GovernedToolExecutor) Resume(ctx context.Context, call GovernedToolCall
 		// Never proposed: nothing was dispatched, so reads and writes both run.
 		return x.Execute(ctx, call)
 	}
-	if current.RunID != call.Run.ID || current.Origin != ActionOriginLoop {
+	if current.RunID != call.Run.ID || current.Origin != models.ActionOriginLoop {
 		return GovernedToolOutcome{}, fmt.Errorf("action call %s is not a loop call of Run %s", current.ID, call.Run.ID)
 	}
 	return x.finish(call, func(call GovernedToolCall) (GovernedToolOutcome, error) {
-		if current.Status == ActionCallStatusWaitingApproval {
+		if current.Status == models.ActionCallStatusWaitingApproval {
 			if replaced, ok, err := x.supersedeSibling(ctx, call, current, settled); err != nil || ok {
 				return replaced, err
 			}
@@ -231,7 +232,7 @@ func validateGovernedToolCall(call GovernedToolCall) error {
 	case call.Run == nil || call.Step == nil:
 		return errors.New("governed tool call requires its Run and step")
 	case strings.TrimSpace(call.WorkerID) == "" || call.Run.LeaseOwner != call.WorkerID:
-		return ErrLeaseLost
+		return models.ErrLeaseLost
 	case strings.TrimSpace(call.ToolCallID) == "":
 		return errors.New("governed tool call requires a tool call id")
 	}
@@ -240,10 +241,10 @@ func validateGovernedToolCall(call GovernedToolCall) error {
 
 // callByKey is the Run's call for this tool call's idempotency key, nil when
 // none was proposed.
-func (x *GovernedToolExecutor) callByKey(ctx context.Context, call GovernedToolCall) (*ActionCall, error) {
+func (x *GovernedToolExecutor) callByKey(ctx context.Context, call GovernedToolCall) (*models.ActionCall, error) {
 	key := call.idempotencyKey()
 	existing, err := x.store.GetActionCallByIdempotencyKey(ctx, call.Run.Scope, call.Run.ID, key)
-	if errors.Is(err, ErrActionNotFound) {
+	if errors.Is(err, models.ErrActionNotFound) {
 		return nil, nil
 	}
 	return existing, err
@@ -267,7 +268,7 @@ func (x *GovernedToolExecutor) finish(call GovernedToolCall, body func(GovernedT
 }
 
 // refused is a refusal before any row exists.
-func refusedOutcome(state ToolEntryState, result *ToolResult) (GovernedToolOutcome, error) {
+func refusedOutcome(state models.ToolEntryState, result *models.ToolResult) (GovernedToolOutcome, error) {
 	return GovernedToolOutcome{State: state, Result: result}, nil
 }
 
@@ -303,15 +304,15 @@ func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCal
 		Arguments:       action.ActionInput(input.Arguments),
 		PreparedRuntime: runtimeaction.PreparedRuntimeForAction(call.Binding, action),
 		IdempotencyKey:  key, Summary: summary,
-		Actor:             ActivityActor{Type: "worker", ID: call.WorkerID},
+		Actor:             models.ActivityActor{Type: "worker", ID: call.WorkerID},
 		EvidenceRefs:      append([]string(nil), input.EvidenceRefs...),
 		ExternalOperation: input.ExternalOperation, ReviewContext: input.ReviewContext,
-		Origin: ActionOriginLoop, Execution: ActionExecutionLoop, CausationID: call.Step.ID,
+		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, CausationID: call.Step.ID,
 	}
-	var proposal *ActionProposalResult
+	var proposal *models.ActionProposalResult
 	for attempt := 0; attempt < governedProposeAttempts; attempt++ {
 		proposal, err = x.actions.Propose(ctx, req)
-		if !errors.Is(err, ErrRevisionConflict) {
+		if !errors.Is(err, models.ErrRevisionConflict) {
 			break
 		}
 		if ctx.Err() != nil {
@@ -320,8 +321,8 @@ func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCal
 	}
 	if err != nil {
 		var rejection *runtimeaction.ActionProposalRejection
-		var maintenance *SkillRuntimeMaintenanceError
-		var inFlight *ExternalOperationConflictError
+		var maintenance *models.SkillRuntimeMaintenanceError
+		var inFlight *models.ExternalOperationConflictError
 		switch {
 		case errors.As(err, &rejection):
 			return refusedOutcome(renderGovernedRejection(rejection))
@@ -374,17 +375,17 @@ func injectGovernedIdempotencyKey(action capability.ModelAction, arguments map[s
 // settle turns the call's current row into its outcome, executing a ready
 // (or lease-expired running) call inline. retried is set after one
 // not-claimable re-read.
-func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall, current *ActionCall, settled []AgentRunIntervention, retried bool) (GovernedToolOutcome, error) {
+func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall, current *models.ActionCall, settled []models.AgentRunIntervention, retried bool) (GovernedToolOutcome, error) {
 	switch current.Status {
-	case ActionCallStatusReady:
+	case models.ActionCallStatusReady:
 		return x.executeInline(ctx, call, current, settled, retried)
-	case ActionCallStatusRunning:
+	case models.ActionCallStatusRunning:
 		if current.LeaseExpiresAt != nil && current.LeaseExpiresAt.After(x.now().UTC()) {
 			at := current.LeaseExpiresAt.UTC()
-			return GovernedToolOutcome{State: ToolEntryRunning, ActionCallID: current.ID, RetryAt: &at}, nil
+			return GovernedToolOutcome{State: models.ToolEntryRunning, ActionCallID: current.ID, RetryAt: &at}, nil
 		}
 		return x.executeInline(ctx, call, current, settled, retried)
-	case ActionCallStatusWaitingApproval:
+	case models.ActionCallStatusWaitingApproval:
 		approval, err := x.store.GetApproval(ctx, call.Run.Scope, current.ApprovalID)
 		if err != nil {
 			return GovernedToolOutcome{}, err
@@ -417,11 +418,11 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 			return GovernedToolOutcome{}, err
 		}
 		return GovernedToolOutcome{
-			State: ToolEntryCompleted, ActionCallID: current.ID, Output: maps.Clone(output),
-			Result: governedJSONResult(ToolResultSucceeded, map[string]interface{}{"evidenceRef": GovernedEvidenceRef(current.ID), "output": output}),
+			State: models.ToolEntryCompleted, ActionCallID: current.ID, Output: maps.Clone(output),
+			Result: governedJSONResult(models.ToolResultSucceeded, map[string]interface{}{"evidenceRef": GovernedEvidenceRef(current.ID), "output": output}),
 		}, nil
 	}
-	var approval *ApprovalCheckpoint
+	var approval *models.ApprovalCheckpoint
 	if current.ApprovalID != "" {
 		if approval, err = x.store.GetApproval(ctx, call.Run.Scope, current.ApprovalID); err != nil {
 			return GovernedToolOutcome{}, err
@@ -432,10 +433,10 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 		return GovernedToolOutcome{}, fmt.Errorf("action call %s has status %s, which a governed tool entry cannot take", current.ID, current.Status)
 	}
 	outcome := GovernedToolOutcome{State: state, Result: result, ActionCallID: current.ID}
-	if current.Status == ActionCallStatusSucceeded && current.DuplicateOfActionCallID == "" {
+	if current.Status == models.ActionCallStatusSucceeded && current.DuplicateOfActionCallID == "" {
 		outcome.Output = maps.Clone(current.Output)
 	}
-	if current.Status == ActionCallStatusDenied && current.Error == runtimeaction.ActionBudgetExhaustedReason {
+	if current.Status == models.ActionCallStatusDenied && current.Error == runtimeaction.ActionBudgetExhaustedReason {
 		outcome.BudgetExhausted = true
 	}
 	return outcome, nil
@@ -443,7 +444,7 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 
 // executeInline claims the call for the Run's lease owner and executes it in
 // this replica.
-func (x *GovernedToolExecutor) executeInline(ctx context.Context, call GovernedToolCall, current *ActionCall, settled []AgentRunIntervention, retried bool) (GovernedToolOutcome, error) {
+func (x *GovernedToolExecutor) executeInline(ctx context.Context, call GovernedToolCall, current *models.ActionCall, settled []models.AgentRunIntervention, retried bool) (GovernedToolOutcome, error) {
 	result, err := x.worker.ExecuteOwnLoopCall(ctx, call.Run.Scope, current.ID, call.WorkerID)
 	var maintenance *runtimeaction.LoopActionMaintenanceError
 	switch {
@@ -452,7 +453,7 @@ func (x *GovernedToolExecutor) executeInline(ctx context.Context, call GovernedT
 	case errors.Is(err, runtimeaction.ErrLoopActionNotClaimable):
 		if retried {
 			at := x.now().UTC().Add(governedNotClaimableRetry)
-			return GovernedToolOutcome{State: ToolEntryRunning, ActionCallID: current.ID, RetryAt: &at}, nil
+			return GovernedToolOutcome{State: models.ToolEntryRunning, ActionCallID: current.ID, RetryAt: &at}, nil
 		}
 		reread, readErr := x.store.GetActionCall(ctx, call.Run.Scope, current.ID)
 		if readErr != nil {
@@ -472,7 +473,7 @@ func (x *GovernedToolExecutor) executeInline(ctx context.Context, call GovernedT
 	return x.settle(ctx, call, result.Call, settled, retried)
 }
 
-func runHasHumanInterventionFor(run *AgentRun, actionCallID string) bool {
+func runHasHumanInterventionFor(run *models.AgentRun, actionCallID string) bool {
 	for i := range run.HumanInterventions {
 		if run.HumanInterventions[i].ActionCallID == actionCallID {
 			return true
@@ -481,10 +482,10 @@ func runHasHumanInterventionFor(run *AgentRun, actionCallID string) bool {
 	return false
 }
 
-func isTerminalGovernedStatus(status ActionCallStatus) bool {
+func isTerminalGovernedStatus(status models.ActionCallStatus) bool {
 	switch status {
-	case ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied, ActionCallStatusCanceled,
-		ActionCallStatusRefused, ActionCallStatusCompensating, ActionCallStatusCompensated:
+	case models.ActionCallStatusSucceeded, models.ActionCallStatusFailed, models.ActionCallStatusDenied, models.ActionCallStatusCanceled,
+		models.ActionCallStatusRefused, models.ActionCallStatusCompensating, models.ActionCallStatusCompensated:
 		return true
 	}
 	return false
@@ -494,15 +495,15 @@ func isTerminalGovernedStatus(status ActionCallStatus) bool {
 // when a newer message already superseded another approval of this Run and
 // current's approval was created before that message (section 03 §9.3). ok
 // is false when current stays waiting.
-func (x *GovernedToolExecutor) supersedeSibling(ctx context.Context, call GovernedToolCall, current *ActionCall, settled []AgentRunIntervention) (GovernedToolOutcome, bool, error) {
+func (x *GovernedToolExecutor) supersedeSibling(ctx context.Context, call GovernedToolCall, current *models.ActionCall, settled []models.AgentRunIntervention) (GovernedToolOutcome, bool, error) {
 	approval, err := x.store.GetApproval(ctx, call.Run.Scope, current.ApprovalID)
 	if err != nil {
 		return GovernedToolOutcome{}, false, err
 	}
-	if approval.Status != ApprovalStatusPending {
+	if approval.Status != models.ApprovalStatusPending {
 		return GovernedToolOutcome{}, false, nil
 	}
-	superseded, err := x.store.ListApprovals(ctx, ApprovalFilter{Scope: call.Run.Scope, RunID: call.Run.ID, Status: []ApprovalStatus{ApprovalStatusSuperseded}})
+	superseded, err := x.store.ListApprovals(ctx, models.ApprovalFilter{Scope: call.Run.Scope, RunID: call.Run.ID, Status: []models.ApprovalStatus{models.ApprovalStatusSuperseded}})
 	if err != nil {
 		return GovernedToolOutcome{}, false, err
 	}
@@ -521,7 +522,7 @@ func (x *GovernedToolExecutor) supersedeSibling(ctx context.Context, call Govern
 		return GovernedToolOutcome{}, false, nil
 	}
 	result, err := x.approvals.ResolveSupersededByMessage(ctx, call.Run.Scope, approval.ID, approval.Revision, messageID)
-	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, runtimeaction.ErrApprovalExpired) || errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, models.ErrApprovalResolved) || errors.Is(err, runtimeaction.ErrApprovalExpired) || errors.Is(err, models.ErrRevisionConflict) {
 		// Someone else decided it first; settle from the fresh row.
 		fresh, readErr := x.store.GetActionCall(ctx, call.Run.Scope, current.ID)
 		if readErr != nil {
@@ -543,7 +544,7 @@ func (x *GovernedToolExecutor) supersedeSibling(ctx context.Context, call Govern
 
 // supersedingMessageTime is when the message that superseded approval
 // reached the Run: its delivered intervention, else the supersede decision.
-func supersedingMessageTime(run *AgentRun, approval *ApprovalCheckpoint) (time.Time, bool) {
+func supersedingMessageTime(run *models.AgentRun, approval *models.ApprovalCheckpoint) (time.Time, bool) {
 	for i := len(run.PendingInterventions) - 1; i >= 0; i-- {
 		message := run.PendingInterventions[i].ConversationMessage
 		if message != nil && message.MessageID == approval.SupersededByMessageID {
@@ -570,5 +571,5 @@ func GovernedBudgetExhaustion(outcome GovernedToolOutcome) *agentrun.BudgetExhau
 // the authoritative action; observers must be idempotent and repairable from
 // the persisted proposal.
 type ActionProposalObserver interface {
-	ObserveActionProposal(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error
+	ObserveActionProposal(context.Context, *models.AgentRun, *models.AgentTurn, *models.ActionProposalResult) error
 }

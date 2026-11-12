@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -31,8 +33,8 @@ import (
 // resumedStep is a running step row of this Run left by an earlier claim and
 // now claimed by this worker.
 type resumedStep struct {
-	step      *AgentTurn
-	assistant *SessionEntry // nil when the model output was never recorded
+	step      *models.AgentTurn
+	assistant *models.SessionEntry // nil when the model output was never recorded
 }
 
 // reconcileTurnPage bounds the unapplied step rows one claim reads. A Run
@@ -44,7 +46,7 @@ const reconcileTurnPage = 8
 // one. A running row whose dead owner's lease is still live requeues the Run
 // at its expiry.
 func (d *drive) reconcile(ctx context.Context) (*resumedStep, *RunLoopExit) {
-	rows, err := d.l.turns.ListTurns(ctx, AgentTurnFilter{
+	rows, err := d.l.turns.ListTurns(ctx, models.AgentTurnFilter{
 		Scope: d.run.Scope, RunID: d.run.ID, AfterSequence: d.run.LastAppliedTurn, Limit: reconcileTurnPage,
 	})
 	if err != nil {
@@ -55,7 +57,7 @@ func (d *drive) reconcile(ctx context.Context) (*resumedStep, *RunLoopExit) {
 		if row == nil || row.Sequence <= d.run.LastAppliedTurn {
 			continue
 		}
-		if terminalAgentTurnStatus(row.Status) {
+		if models.IsTerminalAgentTurnStatus(row.Status) {
 			if exit, handled := d.resumePlainFinal(ctx, row); handled {
 				if exit != nil {
 					return nil, exit
@@ -63,11 +65,11 @@ func (d *drive) reconcile(ctx context.Context) (*resumedStep, *RunLoopExit) {
 				continue
 			}
 			st := &stepState{step: row, finished: true, produced: stepRowProduced(row)}
-			run, err := d.commitRun(ctx, st, RunTransitionRequest{Status: AgentRunStatusRunning}, false)
+			run, err := d.commitRun(ctx, st, activity.RunTransitionRequest{Status: models.AgentRunStatusRunning}, false)
 			if err != nil {
 				return nil, d.writeErrorExit(err)
 			}
-			if run.Status != AgentRunStatusRunning {
+			if run.Status != models.AgentRunStatusRunning {
 				return nil, d.statusExit(run)
 			}
 			continue
@@ -76,7 +78,7 @@ func (d *drive) reconcile(ctx context.Context) (*resumedStep, *RunLoopExit) {
 			return nil, d.errorExit(fmt.Errorf("run %s has more than one running step", d.run.ID))
 		}
 		claimed, err := d.l.turns.ClaimTurn(ctx, row.Scope, row.ID, d.workerID, d.l.config.StepLeaseDuration)
-		if errors.Is(err, ErrTurnLeaseHeld) {
+		if errors.Is(err, models.ErrTurnLeaseHeld) {
 			exit := d.requeue(ctx, nil, row.LeaseExpiresAt, runRequeueReasonStepLeaseHeld, "Run requeued until its previous step lease expires")
 			return nil, &exit
 		}
@@ -95,17 +97,17 @@ func (d *drive) reconcile(ctx context.Context) (*resumedStep, *RunLoopExit) {
 
 // stepAssistantEntry is the assistant entry of a step in the current
 // session, or nil when the step never recorded its model output.
-func (d *drive) stepAssistantEntry(ctx context.Context, stepID string) (*SessionEntry, error) {
+func (d *drive) stepAssistantEntry(ctx context.Context, stepID string) (*models.SessionEntry, error) {
 	if d.session == nil {
 		return nil, nil
 	}
-	entry, err := d.l.sessions.GetSessionEntry(ctx, d.run.Scope, SessionEntryID(d.session.ID, AssistantEntryKey(stepID)))
+	entry, err := d.l.sessions.GetSessionEntry(ctx, d.run.Scope, models.SessionEntryID(d.session.ID, models.AssistantEntryKey(stepID)))
 	switch {
-	case errors.Is(err, ErrSessionEntryNotFound):
+	case errors.Is(err, models.ErrSessionEntryNotFound):
 		return nil, nil
 	case err != nil:
 		return nil, err
-	case entry == nil || entry.Type != SessionEntryAssistant || entry.Assistant == nil:
+	case entry == nil || entry.Type != models.SessionEntryAssistant || entry.Assistant == nil:
 		return nil, nil
 	}
 	return entry, nil
@@ -113,7 +115,7 @@ func (d *drive) stepAssistantEntry(ctx context.Context, stepID string) (*Session
 
 // stepRowProduced reports whether a finished step row ran its producer, for
 // the Turns budget dimension (D12).
-func stepRowProduced(step *AgentTurn) bool {
+func stepRowProduced(step *models.AgentTurn) bool {
 	return step != nil && (step.AssistantEntryID != "" || step.ToolCallCount > 0 || step.Final || step.StopReason != "")
 }
 
@@ -130,8 +132,8 @@ func stepRowProduced(step *AgentTurn) bool {
 // before the settle phase, a pending final entry is settled by the next
 // step's phase 2 (ResumeOpenTools re-runs §3.3 from step 1), and a reply
 // already posted is replayed by its delivery key.
-func (d *drive) resumePlainFinal(ctx context.Context, row *AgentTurn) (*RunLoopExit, bool) {
-	if row.Status != AgentTurnStatusCompleted || !row.Final || row.ToolCallCount > 0 || d.session == nil {
+func (d *drive) resumePlainFinal(ctx context.Context, row *models.AgentTurn) (*RunLoopExit, bool) {
+	if row.Status != models.AgentTurnStatusCompleted || !row.Final || row.ToolCallCount > 0 || d.session == nil {
 		return nil, false
 	}
 	assistant, err := d.stepAssistantEntry(ctx, row.ID)
@@ -141,11 +143,11 @@ func (d *drive) resumePlainFinal(ctx context.Context, row *AgentTurn) (*RunLoopE
 	if assistant == nil {
 		return nil, false
 	}
-	rejection, err := d.l.sessions.GetSessionEntry(ctx, d.run.Scope, SessionEntryID(d.session.ID, FinalRejectionEntryKey(row.ID)))
+	rejection, err := d.l.sessions.GetSessionEntry(ctx, d.run.Scope, models.SessionEntryID(d.session.ID, models.FinalRejectionEntryKey(row.ID)))
 	switch {
 	case err == nil && rejection != nil:
 		return nil, false
-	case err != nil && !errors.Is(err, ErrSessionEntryNotFound):
+	case err != nil && !errors.Is(err, models.ErrSessionEntryNotFound):
 		return d.errorExit(err), true
 	}
 	st := d.finishedStepState(ctx, row)
@@ -157,11 +159,11 @@ func (d *drive) resumePlainFinal(ctx context.Context, row *AgentTurn) (*RunLoopE
 	if !st.applied {
 		// The chain continued without applying (a re-check that left the
 		// Run running): apply the step like any finished row.
-		run, err := d.commitRun(ctx, st, RunTransitionRequest{Status: AgentRunStatusRunning}, false)
+		run, err := d.commitRun(ctx, st, activity.RunTransitionRequest{Status: models.AgentRunStatusRunning}, false)
 		if err != nil {
 			return d.writeErrorExit(err), true
 		}
-		if run.Status != AgentRunStatusRunning {
+		if run.Status != models.AgentRunStatusRunning {
 			return d.statusExit(run), true
 		}
 	}
@@ -170,7 +172,7 @@ func (d *drive) resumePlainFinal(ctx context.Context, row *AgentTurn) (*RunLoopE
 
 // finishedStepState is the loop's view of a finished step an earlier claim
 // left unapplied: the final chain and the Run writes treat it as finished.
-func (d *drive) finishedStepState(ctx context.Context, row *AgentTurn) *stepState {
+func (d *drive) finishedStepState(ctx context.Context, row *models.AgentTurn) *stepState {
 	mode := agentrun.StepModeNormal
 	if conversation.RunExplainingFailure(d.run) {
 		mode = agentrun.StepModeExplainFailure

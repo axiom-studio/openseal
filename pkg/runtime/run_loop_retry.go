@@ -4,7 +4,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -23,8 +25,8 @@ const hostUnavailableMessage = "The agent's step host is unavailable, so the run
 // consecutiveHostUnavailableSteps counts the newest step rows of the Run at
 // or before sequence through, newest first, while each failed with
 // host_unavailable. It reads at most len(hostRetryDelays)+1 rows.
-func consecutiveHostUnavailableSteps(ctx context.Context, turns AgentTurnStore, scope Scope, runID string, through int64) (int, error) {
-	rows, err := turns.ListAgentTurns(ctx, AgentTurnFilter{
+func consecutiveHostUnavailableSteps(ctx context.Context, turns models.AgentTurnStore, scope models.Scope, runID string, through int64) (int, error) {
+	rows, err := turns.ListAgentTurns(ctx, models.AgentTurnFilter{
 		Scope: scope, RunID: runID, Descending: true, Limit: len(hostRetryDelays) + 2,
 	})
 	if err != nil {
@@ -35,7 +37,7 @@ func consecutiveHostUnavailableSteps(ctx context.Context, turns AgentTurnStore, 
 		if row == nil || row.Sequence > through {
 			continue
 		}
-		if row.Status != AgentTurnStatusFailed || row.FailureCode != StepFailureHostUnavailable {
+		if row.Status != models.AgentTurnStatusFailed || row.FailureCode != StepFailureHostUnavailable {
 			break
 		}
 		count++
@@ -45,7 +47,7 @@ func consecutiveHostUnavailableSteps(ctx context.Context, turns AgentTurnStore, 
 
 // hostRetryAvailableAt is when a Run requeued after its retries-th
 // consecutive unavailable step may be claimed again.
-func hostRetryAvailableAt(step *AgentTurn, retries int) *time.Time {
+func hostRetryAvailableAt(step *models.AgentTurn, retries int) *time.Time {
 	if step == nil || step.CompletedAt == nil || retries < 1 || retries > len(hostRetryDelays) {
 		return nil
 	}
@@ -58,8 +60,8 @@ func hostRetryAvailableAt(step *AgentTurn, retries int) *time.Time {
 // produced applies, and it charges no Turn.
 func (d *drive) hostUnavailable(ctx context.Context, st *stepState, cause error) stepResult {
 	st.produced = false
-	if err := d.finishStep(ctx, st, FinishAgentTurnRequest{
-		Status: AgentTurnStatusFailed, FailureCode: StepFailureHostUnavailable,
+	if err := d.finishStep(ctx, st, activity.FinishAgentTurnRequest{
+		Status: models.AgentTurnStatusFailed, FailureCode: StepFailureHostUnavailable,
 		Error: conversation.BoundedTurnFailureText(action.SanitizeActionError(cause, nil)),
 	}); err != nil {
 		return exitResultPtr(d.writeErrorExit(err))

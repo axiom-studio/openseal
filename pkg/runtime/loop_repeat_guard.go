@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -45,7 +46,7 @@ type repeatVerdict struct {
 	// Prior is the counted prior entry (texts, suppressed result,
 	// DuplicateOfEntryID); for same_step_duplicate the earlier call of the
 	// step; nil for run_stopping.
-	Prior *SessionEntry
+	Prior *models.SessionEntry
 	// Count is this call's position in the counted sequence (3 = 3rd
 	// identical); 0 for same_step_duplicate and run_stopping.
 	Count int
@@ -53,7 +54,7 @@ type repeatVerdict struct {
 
 // repeatLedger holds one Run's tool and user entries in sequence order.
 type repeatLedger struct {
-	entries []*SessionEntry
+	entries []*models.SessionEntry
 	byID    map[string]int
 }
 
@@ -63,17 +64,17 @@ func newRepeatLedger() *repeatLedger {
 
 // loadRepeatLedger pages the Run's tool and user entries of sessionID until
 // exhausted.
-func loadRepeatLedger(ctx context.Context, store conversation.LoopSessionEntryLister, scope Scope, sessionID, runID string) (*repeatLedger, error) {
+func loadRepeatLedger(ctx context.Context, store conversation.LoopSessionEntryLister, scope models.Scope, sessionID, runID string) (*repeatLedger, error) {
 	if store == nil || sessionID == "" || runID == "" {
 		return nil, errors.New("repeat ledger needs a session store, session and Run")
 	}
 	ledger := newRepeatLedger()
 	after := int64(0)
 	for {
-		page, err := store.ListAgentSessionEntries(ctx, SessionEntryFilter{
+		page, err := store.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 			Scope: scope, SessionID: sessionID, RunID: runID,
-			Types:         []SessionEntryType{SessionEntryTool, SessionEntryUser},
-			AfterSequence: after, Limit: maxSessionEntryListLimit,
+			Types:         []models.SessionEntryType{models.SessionEntryTool, models.SessionEntryUser},
+			AfterSequence: after, Limit: models.MaxSessionEntryListLimit,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("load repeat ledger: %w", err)
@@ -81,7 +82,7 @@ func loadRepeatLedger(ctx context.Context, store conversation.LoopSessionEntryLi
 		for _, entry := range page {
 			ledger.observe(entry)
 		}
-		if len(page) < maxSessionEntryListLimit {
+		if len(page) < models.MaxSessionEntryListLimit {
 			return ledger, nil
 		}
 		next := page[len(page)-1].Sequence
@@ -94,8 +95,8 @@ func loadRepeatLedger(ctx context.Context, store conversation.LoopSessionEntryLi
 
 // observe records an appended entry or the new revision of a transitioned
 // one. Only tool and user entries matter; others are ignored.
-func (l *repeatLedger) observe(entry *SessionEntry) {
-	if l == nil || entry == nil || (entry.Type != SessionEntryTool && entry.Type != SessionEntryUser) {
+func (l *repeatLedger) observe(entry *models.SessionEntry) {
+	if l == nil || entry == nil || (entry.Type != models.SessionEntryTool && entry.Type != models.SessionEntryUser) {
 		return
 	}
 	if l.byID == nil {
@@ -116,14 +117,14 @@ func (l *repeatLedger) observe(entry *SessionEntry) {
 	}
 }
 
-func repeatEntryEffect(entry *SessionEntry) RepeatEffect {
+func repeatEntryEffect(entry *models.SessionEntry) RepeatEffect {
 	if entry == nil || entry.Tool == nil {
 		return ""
 	}
 	return RepeatEffect(entry.Tool.RepeatEffect)
 }
 
-func repeatGuardKind(entry *SessionEntry) string {
+func repeatGuardKind(entry *models.SessionEntry) string {
 	if entry == nil || entry.Tool == nil || entry.Tool.Guard == nil {
 		return ""
 	}
@@ -132,14 +133,14 @@ func repeatGuardKind(entry *SessionEntry) string {
 
 // repeatCounted: terminal, not interrupted, and not refused as a same-step
 // duplicate or a stopping sibling.
-func repeatCounted(entry *SessionEntry) bool {
-	if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.Tool.ArgumentsDigest == "" {
+func repeatCounted(entry *models.SessionEntry) bool {
+	if entry == nil || entry.Type != models.SessionEntryTool || entry.Tool == nil || entry.Tool.ArgumentsDigest == "" {
 		return false
 	}
-	if !entry.State.Terminal() || entry.State == ToolEntryInterrupted {
+	if !entry.State.Terminal() || entry.State == models.ToolEntryInterrupted {
 		return false
 	}
-	if entry.Tool.Result != nil && entry.Tool.Result.Status == ToolResultInterrupted {
+	if entry.Tool.Result != nil && entry.Tool.Result.Status == models.ToolResultInterrupted {
 		return false
 	}
 	switch repeatGuardKind(entry) {
@@ -150,11 +151,11 @@ func repeatCounted(entry *SessionEntry) bool {
 }
 
 // repeatExecuted: counted and not refused by any guard.
-func repeatExecuted(entry *SessionEntry) bool {
+func repeatExecuted(entry *models.SessionEntry) bool {
 	return repeatCounted(entry) && entry.Tool.Guard == nil
 }
 
-func repeatRefused(entry *SessionEntry) bool {
+func repeatRefused(entry *models.SessionEntry) bool {
 	switch repeatGuardKind(entry) {
 	case action.RefusedLoopCallRepeat, action.RefusedLoopCallDuplicateSuppressed:
 		return repeatCounted(entry)
@@ -164,7 +165,7 @@ func repeatRefused(entry *SessionEntry) bool {
 
 // repeatEntryResultDigest is the stored ResultDigest, or the digest of the
 // stored result when the executor did not set one.
-func repeatEntryResultDigest(entry *SessionEntry) string {
+func repeatEntryResultDigest(entry *models.SessionEntry) string {
 	if entry.Tool.ResultDigest != "" {
 		return entry.Tool.ResultDigest
 	}
@@ -176,14 +177,14 @@ func repeatEntryResultDigest(entry *SessionEntry) string {
 // results with no reset point between, the last executed entry and the
 // executed entry before it. trailing applies the reset points after the last
 // counted entry (the "now" check before a new call).
-func (l *repeatLedger) repeatStreak(key string, effect RepeatEffect, through int64, trailing bool) (streak int, last, previous *SessionEntry) {
+func (l *repeatLedger) repeatStreak(key string, effect RepeatEffect, through int64, trailing bool) (streak int, last, previous *models.SessionEntry) {
 	digests := map[string]string{} // key -> last executed digest (R4)
 	resetSince := false
 	for _, entry := range l.entries {
 		if through > 0 && entry.Sequence > through {
 			break
 		}
-		if entry.Type == SessionEntryUser {
+		if entry.Type == models.SessionEntryUser {
 			resetSince = true // R3
 			continue
 		}
@@ -222,10 +223,10 @@ func (l *repeatLedger) repeatStreak(key string, effect RepeatEffect, through int
 			continue
 		}
 		switch {
-		case executed && entry.State == ToolEntryCompleted &&
+		case executed && entry.State == models.ToolEntryCompleted &&
 			(entryEffect == RepeatEffectWrite || entryEffect == RepeatEffectStateful):
 			resetSince = true // R1: a successful write elsewhere
-		case entryEffect == RepeatEffectControl && entry.State == ToolEntryCompleted && entry.Tool.Parked:
+		case entryEffect == RepeatEffectControl && entry.State == models.ToolEntryCompleted && entry.Tool.Parked:
 			resetSince = true // R2: a wait elapsed, a card answered, a child finished
 		case effect == RepeatEffectStateful && changed:
 			resetSince = true // R4: an observed change
@@ -239,7 +240,7 @@ func (l *repeatLedger) repeatStreak(key string, effect RepeatEffect, through int
 
 // evaluate decides one call before dispatch. stepKeys holds the keys of the
 // calls of the same assistant entry already evaluated (key -> entry).
-func (l *repeatLedger) evaluate(subject RepeatSubject, key string, stepKeys map[string]*SessionEntry) repeatVerdict {
+func (l *repeatLedger) evaluate(subject RepeatSubject, key string, stepKeys map[string]*models.SessionEntry) repeatVerdict {
 	if subject.Effect == RepeatEffectControl || key == "" {
 		return repeatVerdict{Kind: repeatRun}
 	}
@@ -249,14 +250,14 @@ func (l *repeatLedger) evaluate(subject RepeatSubject, key string, stepKeys map[
 	if subject.Effect == RepeatEffectWrite {
 		// The duplicate rule ignores reset points: a done write stays done
 		// for the whole Run.
-		var succeeded *SessionEntry
+		var succeeded *models.SessionEntry
 		suppressed := 0
 		for _, entry := range l.entries {
 			if entry.Tool == nil || entry.Tool.ArgumentsDigest != key || !repeatCounted(entry) {
 				continue
 			}
 			switch {
-			case repeatExecuted(entry) && entry.State == ToolEntryCompleted:
+			case repeatExecuted(entry) && entry.State == models.ToolEntryCompleted:
 				succeeded, suppressed = entry, 0
 			case succeeded != nil && repeatGuardKind(entry) == action.RefusedLoopCallDuplicateSuppressed:
 				suppressed++
@@ -289,7 +290,7 @@ func (l *repeatLedger) evaluate(subject RepeatSubject, key string, stepKeys map[
 // counted identical result with no reset between. waitOffered says the
 // step's tools include wait; the note then suggests it for reads and
 // stateful calls.
-func (l *repeatLedger) noteAfter(entry *SessionEntry, waitOffered bool) (string, bool) {
+func (l *repeatLedger) noteAfter(entry *models.SessionEntry, waitOffered bool) (string, bool) {
 	if !repeatExecuted(entry) {
 		return "", false
 	}
@@ -308,7 +309,7 @@ func (l *repeatLedger) noteAfter(entry *SessionEntry, waitOffered bool) (string,
 // repeatStepCall is one call of a step, in model order, as the executor
 // appended it pending.
 type repeatStepCall struct {
-	Entry   *SessionEntry
+	Entry   *models.SessionEntry
 	Subject RepeatSubject
 	Key     string // = Entry.Tool.ArgumentsDigest
 }
@@ -319,7 +320,7 @@ type repeatStepCall struct {
 // runs. failed reports that the Run fails with repeat_limit after the step.
 func (l *repeatLedger) planStep(calls []repeatStepCall) (verdicts []repeatVerdict, failed bool) {
 	verdicts = make([]repeatVerdict, len(calls))
-	stepKeys := map[string]*SessionEntry{}
+	stepKeys := map[string]*models.SessionEntry{}
 	for i, call := range calls {
 		verdicts[i] = l.evaluate(call.Subject, call.Key, stepKeys)
 		if verdicts[i].Kind == repeatFailRun {
@@ -345,8 +346,8 @@ func (l *repeatLedger) planStep(calls []repeatStepCall) (verdicts []repeatVerdic
 // the pending -> error transition's Result, Guard and DuplicateOfEntryID,
 // and for governed calls the refused action_calls row fields.
 type repeatRefusal struct {
-	Result             *ToolResult
-	Guard              *ToolGuardOutcome
+	Result             *models.ToolResult
+	Guard              *models.ToolGuardOutcome
 	DuplicateOfEntryID string
 	// Message is the refusal text without appended result blocks
 	// (RefusedLoopCallRequest.Message).
@@ -366,15 +367,15 @@ func (v repeatVerdict) refusal() (*repeatRefusal, bool) {
 		return nil, false
 	}
 	out := &repeatRefusal{Count: v.Count}
-	status := ToolResultRefused
-	var extra []ContentPart
+	status := models.ToolResultRefused
+	var extra []models.ContentPart
 	switch v.Code {
 	case action.RefusedLoopCallRepeat:
 		out.Message = repeatRefusedText(v.Count, repeatPriorStep(v.Prior))
 	case action.RefusedLoopCallRepeatLimit:
 		out.Message = repeatLimitText(v.Count)
 	case action.RefusedLoopCallDuplicateSuppressed:
-		status = ToolResultDuplicateSuppressed
+		status = models.ToolResultDuplicateSuppressed
 		out.Message = repeatSuppressedText(repeatPriorStep(v.Prior))
 		if v.Prior != nil && v.Prior.Tool != nil && v.Prior.Tool.Result != nil {
 			extra = append(extra, v.Prior.Tool.Result.Content...)
@@ -403,13 +404,13 @@ func (v repeatVerdict) refusal() (*repeatRefusal, bool) {
 			out.DuplicateOfEntryID = v.Prior.ID
 		}
 	}
-	out.Guard = &ToolGuardOutcome{Kind: v.Code, Count: v.Count, PriorEntryID: out.DuplicateOfEntryID}
-	content := append([]ContentPart{{Type: ContentPartText, Text: out.Message}}, extra...)
-	out.Result = &ToolResult{Status: status, IsError: true, Content: content}
+	out.Guard = &models.ToolGuardOutcome{Kind: v.Code, Count: v.Count, PriorEntryID: out.DuplicateOfEntryID}
+	content := append([]models.ContentPart{{Type: models.ContentPartText, Text: out.Message}}, extra...)
+	out.Result = &models.ToolResult{Status: status, IsError: true, Content: content}
 	return out, true
 }
 
-func repeatPriorStep(entry *SessionEntry) int64 {
+func repeatPriorStep(entry *models.SessionEntry) int64 {
 	if entry == nil {
 		return 0
 	}

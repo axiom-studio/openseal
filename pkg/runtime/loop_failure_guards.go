@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -50,7 +51,7 @@ const imageProviderRejectedRefusalText = "The image provider rejected this reque
 //     terminal (still pending or parked), ends the streak.
 //   - A user entry (steering or catch-up) ends the streak: new guidance
 //     changes what the agent is trying.
-func loopErrorStreak(entries []*SessionEntry) int {
+func loopErrorStreak(entries []*models.SessionEntry) int {
 	streak := 0
 	type stepTally struct {
 		terminal, errors int
@@ -75,23 +76,23 @@ func loopErrorStreak(entries []*SessionEntry) int {
 			continue
 		}
 		switch entry.Type {
-		case SessionEntryUser:
+		case models.SessionEntryUser:
 			closeStep()
 			currentStep = -1
 			streak = 0
-		case SessionEntryTool:
+		case models.SessionEntryTool:
 			if current == nil || entry.Step != currentStep {
 				closeStep()
 				current, currentStep = &stepTally{}, entry.Step
 			}
-			if entry.State == ToolEntryInterrupted {
+			if entry.State == models.ToolEntryInterrupted {
 				continue
 			}
 			if entry.Tool == nil || entry.Tool.Result == nil || !entry.State.Terminal() {
 				current.open = true
 				continue
 			}
-			if entry.Tool.Result.Status == ToolResultInterrupted {
+			if entry.Tool.Result.Status == models.ToolResultInterrupted {
 				continue
 			}
 			current.terminal++
@@ -108,23 +109,23 @@ func loopErrorStreak(entries []*SessionEntry) int {
 // the error_streak Run failure when its last loopErrorStreakLimit steps all
 // ended in errors, or nil. The executor calls it after every tool entry of a
 // step is terminal and no other guard failed the step.
-func loopErrorStreakFailure(ctx context.Context, store conversation.LoopSessionEntryLister, scope Scope, sessionID, runID string) (*modelstep.GuardRunFailure, error) {
+func loopErrorStreakFailure(ctx context.Context, store conversation.LoopSessionEntryLister, scope models.Scope, sessionID, runID string) (*modelstep.GuardRunFailure, error) {
 	if store == nil || sessionID == "" || runID == "" {
 		return nil, errors.New("error streak needs a session store, session and Run")
 	}
-	var entries []*SessionEntry
+	var entries []*models.SessionEntry
 	after := int64(0)
 	for {
-		page, err := store.ListAgentSessionEntries(ctx, SessionEntryFilter{
+		page, err := store.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 			Scope: scope, SessionID: sessionID, RunID: runID,
-			Types:         []SessionEntryType{SessionEntryTool, SessionEntryUser},
-			AfterSequence: after, Limit: maxSessionEntryListLimit,
+			Types:         []models.SessionEntryType{models.SessionEntryTool, models.SessionEntryUser},
+			AfterSequence: after, Limit: models.MaxSessionEntryListLimit,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("load error streak: %w", err)
 		}
 		entries = append(entries, page...)
-		if len(page) < maxSessionEntryListLimit {
+		if len(page) < models.MaxSessionEntryListLimit {
 			break
 		}
 		next := page[len(page)-1].Sequence
@@ -157,7 +158,7 @@ func (t imageGenerationTarget) isImageGeneration() bool {
 // rejected, or nil. Rewording the prompt still selects the same provider, so
 // the rejection holds for the rest of the Run; a binding revision is a
 // configuration change and starts clean. Calls of every origin count.
-func priorImageProviderRejection(ctx context.Context, actions control.ActionCallLister, scope Scope, runID string, target imageGenerationTarget) (*ActionCall, error) {
+func priorImageProviderRejection(ctx context.Context, actions control.ActionCallLister, scope models.Scope, runID string, target imageGenerationTarget) (*models.ActionCall, error) {
 	if !target.isImageGeneration() {
 		return nil, nil
 	}
@@ -165,15 +166,15 @@ func priorImageProviderRejection(ctx context.Context, actions control.ActionCall
 		return nil, errors.New("image rejection guard needs an action store and Run")
 	}
 	for offset := 0; ; offset += control.ActionCallPageSize {
-		page, err := actions.ListActionCalls(ctx, ActionFilter{
-			Scope: scope, RunID: runID, Status: []ActionCallStatus{ActionCallStatusFailed},
+		page, err := actions.ListActionCalls(ctx, models.ActionFilter{
+			Scope: scope, RunID: runID, Status: []models.ActionCallStatus{models.ActionCallStatusFailed},
 			Limit: control.ActionCallPageSize, Offset: offset,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("load image rejections: %w", err)
 		}
 		for _, call := range page {
-			if call != nil && call.RunID == runID && call.Status == ActionCallStatusFailed &&
+			if call != nil && call.RunID == runID && call.Status == models.ActionCallStatusFailed &&
 				call.ErrorCode == ActionErrorCodeImageProviderRejected &&
 				call.SkillID == target.SkillID && call.Action == target.Action &&
 				call.BindingID == target.BindingID && call.BindingRevision == target.BindingRevision {
@@ -189,19 +190,19 @@ func priorImageProviderRejection(ctx context.Context, actions control.ActionCall
 // imageProviderRejectionRefusal is the refused tool result and guard outcome
 // for a generate_image call after prior's rejection. The executor transitions
 // the pending entry to error with them; nothing is dispatched.
-func imageProviderRejectionRefusal(prior *ActionCall) (*ToolResult, *ToolGuardOutcome) {
+func imageProviderRejectionRefusal(prior *models.ActionCall) (*models.ToolResult, *models.ToolGuardOutcome) {
 	value := map[string]interface{}{
-		"status": string(ToolResultRefused),
+		"status": string(models.ToolResultRefused),
 		"code":   ActionErrorCodeImageProviderRejected,
 		"error":  imageProviderRejectedRefusalText,
 	}
-	guard := &ToolGuardOutcome{Kind: ToolGuardImageProviderRejected}
+	guard := &models.ToolGuardOutcome{Kind: ToolGuardImageProviderRejected}
 	if prior != nil && prior.ID != "" {
 		value["priorEvidenceRef"] = "action-call:" + prior.ID
 	}
 	encoded, _ := json.Marshal(value)
-	return &ToolResult{
-		Status: ToolResultRefused, IsError: true,
-		Content: []ContentPart{{Type: ContentPartJSON, Value: encoded}},
+	return &models.ToolResult{
+		Status: models.ToolResultRefused, IsError: true,
+		Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: encoded}},
 	}, guard
 }
