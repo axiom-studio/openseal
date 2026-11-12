@@ -19,7 +19,7 @@ type taskFailureReportingStore interface {
 	KernelStore
 	AgentSessionStore
 	ConversationTaskKernelStore
-	terminalReportingContractStore
+	TerminalReportingStore
 }
 
 func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore, threaded bool) (*ConversationTaskResult, *ChannelMessage) {
@@ -180,7 +180,7 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 					if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, work); err != nil {
 						t.Fatal(err)
 					}
-					worker := terminalReportingContractWorker(t, store, time.Now().Add(time.Second))
+					worker := TerminalReportingWorker(t, store, time.Now().Add(time.Second))
 					if _, err := worker.ProcessBatch(t.Context()); err != nil {
 						t.Fatal(err)
 					}

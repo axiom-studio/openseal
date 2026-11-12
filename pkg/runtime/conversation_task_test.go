@@ -175,7 +175,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			work := terminalReportingContractComplete(t, store, accepted.WorkRun, time.Now())
+			work := CompleteTerminalReportingRun(t, store, accepted.WorkRun, time.Now())
 			// Deliver a final claim first, as a concurrent outbox worker or a fast
 			// completed task can do. It must durably post the acknowledgment first.
 			if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, work); err != nil {
@@ -333,7 +333,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err != nil || snapshot.TerminalReportMessageID == "" {
 		t.Fatalf("terminal delivery receipt missing: %#v %v", snapshot, err)
 	}
-	worker := terminalReportingContractWorker(t, store, time.Now())
+	worker := TerminalReportingWorker(t, store, time.Now())
 	if _, err := worker.ProcessBatch(t.Context()); err != nil {
 		t.Fatal(err)
 	}

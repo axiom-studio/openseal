@@ -50,9 +50,9 @@ func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *ExternalC
 func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t *testing.T) {
 	ctx := t.Context()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	host := &recordingContextHost{result: &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextUnavailable}}
+	host := &RecordingContextHost{Result: &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextUnavailable}}
 	worker, err := NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, ExternalConversationInboxWorkerConfig{
-		WorkerID: "reply-alias-worker", ContextHost: host, ContextCatalog: contextHistoryResolver{catalog},
+		WorkerID: "reply-alias-worker", ContextHost: host, ContextCatalog: ContextHistoryResolver{catalog},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t
 	}
 	// The alias must already resolve to the canonical root before any provider
 	// context read, so returned history cannot accidentally start a new thread.
-	host.afterRead = func() {
+	host.AfterRead = func() {
 		mapping, err := store.GetExternalConversationMapping(ctx, endpoint.Scope, endpoint.ID, "chat-A", "reply:102")
 		if err != nil || mapping == nil || mapping.ThreadRootMessageID != root.ID {
 			t.Fatalf("root was not established before hydration: %#v, %v", mapping, err)

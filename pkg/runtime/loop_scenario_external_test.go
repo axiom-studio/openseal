@@ -42,7 +42,7 @@ type externalLoopFixture struct {
 	ext      externalLoopStore
 	adapters *skill.Catalog
 	endpoint *ExternalConversationEndpoint
-	host     *streamChatHost
+	host     *StreamChatHost
 	progress *RunProgressAcknowledgementWorker
 	replies  *ExternalConversationReplyWorker
 	delivery *ExternalConversationDeliveryWorker
@@ -66,7 +66,7 @@ func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, op
 	if !ok {
 		t.Fatalf("%T is not an external conversation store", store)
 	}
-	f := &externalLoopFixture{loopFixture: newLoopFixture(t, store, opts...), ext: ext, host: &streamChatHost{messages: map[string]string{}}}
+	f := &externalLoopFixture{loopFixture: newLoopFixture(t, store, opts...), ext: ext, host: &StreamChatHost{Messages: map[string]string{}}}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}
 	if len(f.config.team) > 0 {
 		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}
@@ -224,8 +224,8 @@ func (f *externalLoopFixture) replyDelivery(itemID string) *ExternalConversation
 }
 
 func (f *externalLoopFixture) operations() []capability.ConversationDeliveryOperation {
-	out := make([]capability.ConversationDeliveryOperation, 0, len(f.host.requests))
-	for _, request := range f.host.requests {
+	out := make([]capability.ConversationDeliveryOperation, 0, len(f.host.Requests))
+	for _, request := range f.host.Requests {
 		out = append(out, request.Delivery.Operation)
 	}
 	return out
@@ -492,8 +492,8 @@ func TestExternalAnswerStreamFollowsTheLoopPreview(t *testing.T) {
 					if err := stream(); err != nil {
 						return err
 					}
-					if len(f.host.messages) != 1 || f.host.messages["chat-1"] != firstPreview {
-						return fmt.Errorf("chat after the reset = %#v", f.host.messages)
+					if len(f.host.Messages) != 1 || f.host.Messages["chat-1"] != firstPreview {
+						return fmt.Errorf("chat after the reset = %#v", f.host.Messages)
 					}
 					if err := ReportTurnAnswerPreview(ctx, TurnAnswerPreview{AttemptID: "attempt-2", Sequence: 1, Text: secondPreview}); err != nil {
 						return err
@@ -504,8 +504,8 @@ func TestExternalAnswerStreamFollowsTheLoopPreview(t *testing.T) {
 		))
 		chat := f.startExternal("Is issue 7 open?")
 		f.mustStatus(f.driveToRest(chat.run.ID, 4), AgentRunStatusCompleted)
-		if len(f.host.messages) != 1 || f.host.messages["chat-1"] != secondPreview {
-			t.Fatalf("chat before the reply = %#v", f.host.messages)
+		if len(f.host.Messages) != 1 || f.host.Messages["chat-1"] != secondPreview {
+			t.Fatalf("chat before the reply = %#v", f.host.Messages)
 		}
 
 		// A finished Run streams nothing more; the committed answer finishes
@@ -532,8 +532,8 @@ func TestExternalAnswerStreamFollowsTheLoopPreview(t *testing.T) {
 		if got := f.operations(); fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Fatalf("provider operations = %v, want %v", got, want)
 		}
-		if len(f.host.messages) != 1 || f.host.messages["chat-1"] != finalAnswer {
-			t.Fatalf("chat = %#v", f.host.messages)
+		if len(f.host.Messages) != 1 || f.host.Messages["chat-1"] != finalAnswer {
+			t.Fatalf("chat = %#v", f.host.Messages)
 		}
 	})
 }

@@ -206,7 +206,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
 		t.Fatal(err)
 	}
-	gateway := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
+	gateway := CreateActiveGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "synthetic-gateway", Name: "Synthetic gateway",
 		Gateway: ExternalConversationIngressGateway{
 			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "synthetic-agent"}, DeploymentID: "synthetic-agent", Provider: "synthetic",
@@ -234,7 +234,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 	if err != nil || resolved == nil || resolved.Adapter.Features != nil || resolved.Adapter.Credentials != nil {
 		t.Fatalf("restarted adapter = %#v, %v", resolved, err)
 	}
-	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{
+	host := &GatewayHostStub{Result: &ExternalConversationGatewayHostResult{
 		StatusCode: http.StatusOK,
 		Events: []ExternalConversationGatewayEvent{{
 			InstallationID: "installation-1", ApplicationID: "application-1", Address: "channel-1",

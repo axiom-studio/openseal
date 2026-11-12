@@ -25,7 +25,7 @@ func TestGatewayAuthorityPinsRejectForeignProviderInstallation(t *testing.T) {
 		{"owned-installation", "foreign-application"},
 		{"owned-installation", ""},
 	} {
-		host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{
+		host := &GatewayHostStub{Result: &ExternalConversationGatewayHostResult{
 			StatusCode: http.StatusOK, Events: []ExternalConversationGatewayEvent{{
 				InstallationID: identity.installation, ApplicationID: identity.application, Address: "unbound-channel",
 				Event: NormalizedExternalConversationEvent{
@@ -67,7 +67,7 @@ func TestGatewayAuthorityDerivesOnlyUniqueReviewedExactBinding(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	gateway := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
+	gateway := CreateActiveGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "uniquely-pinned", Name: "Exact reviewed installation",
 		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
 		Actor:   ActivityActor{Type: "test", ID: "operator"}, Reason: "Use reviewed provider connection identity",
@@ -99,7 +99,7 @@ func TestLegacyUnpinnedGatewayDoesNotAcceptUnboundEvent(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	service := NewExternalConversationTransportService(store, catalog)
-	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK,
+	host := &GatewayHostStub{Result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK,
 		Events: []ExternalConversationGatewayEvent{{InstallationID: "installation", Address: "unbound-channel", Event: NormalizedExternalConversationEvent{
 			ID: "unbound-event", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "unbound-channel",
 			ExternalMessageID: "message", ExternalParticipantID: "person", Text: "A provider reply", OrderingKey: "message", OccurredAt: time.Now().UTC(),
@@ -116,7 +116,7 @@ func TestLegacyUnpinnedGatewayDoesNotAcceptUnboundEvent(t *testing.T) {
 func TestSQLiteGatewayAuthorityBackfillSurvivesRestartAndRejectsAmbiguity(t *testing.T) {
 	ctx := context.Background()
 	memory, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	legacy := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(memory, nil), CreateExternalConversationGatewayRequest{
+	legacy := CreateActiveGateway(t, ctx, NewExternalConversationGatewayService(memory, nil), CreateExternalConversationGatewayRequest{
 		ID: "legacy-gateway", Name: "Legacy gateway",
 		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
 		Actor:   ActivityActor{Type: "test", ID: "operator"}, Reason: "Create pre-migration provider routing",

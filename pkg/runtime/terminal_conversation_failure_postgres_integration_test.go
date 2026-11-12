@@ -24,7 +24,7 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 	now := runStoreContractEpoch
 	// The conversation exists before the rollback: conversations need the
 	// space schema, which is newer than 58.
-	run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "pg58-lease"}, now)
+	run, conversation, trigger := TerminalReportingRun(t, store, Scope{Kind: "tenant", ID: "pg58-lease"}, now)
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 	if err := schema.DB.QueryRowContext(t.Context(), `SELECT pg_get_functiondef(($1||'.enqueue_run_terminal_report()')::regprocedure)`, schema.Name).Scan(&oldFunction); err != nil || strings.Contains(oldFunction, "terminal_revision") {
 		t.Fatalf("rollback did not restore exact old conflict contract: %v", err)
 	}
-	run = terminalReportingContractComplete(t, store, run, now)
+	run = CompleteTerminalReportingRun(t, store, run, now)
 	expires := now.Add(time.Minute)
 	if _, err := schema.DB.ExecContext(t.Context(), `UPDATE `+schema.Table("run_terminal_reports")+` SET lease_owner='old-reader',lease_expires_at=$1,available_at=$1,attempts=1 WHERE run_id=$2`, expires, run.ID); err != nil {
 		t.Fatal(err)
@@ -48,13 +48,13 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 	if err != nil || intent.Run == nil || intent.TerminalRevision != run.Revision || intent.LeaseOwner != "old-reader" || intent.Attempts != 1 || intent.LeaseExpiresAt == nil || !intent.LeaseExpiresAt.Equal(expires) {
 		t.Fatalf("migration lost old receipt/fence: %#v %v", intent, err)
 	}
-	if count, err := terminalReportingContractWorker(t, upgraded, now).ProcessBatch(t.Context()); err != nil || count != 0 {
+	if count, err := TerminalReportingWorker(t, upgraded, now).ProcessBatch(t.Context()); err != nil || count != 0 {
 		t.Fatalf("migration stole old lease: %d %v", count, err)
 	}
-	if count, err := terminalReportingContractWorker(t, upgraded, now.Add(2*time.Minute)).ProcessBatch(t.Context()); err != nil || count != 1 {
+	if count, err := TerminalReportingWorker(t, upgraded, now.Add(2*time.Minute)).ProcessBatch(t.Context()); err != nil || count != 1 {
 		t.Fatalf("migration lost old promised reply: %d %v", count, err)
 	}
-	terminalReportingContractAssertMessage(t, upgraded, run, conversation, trigger)
+	AssertTerminalReport(t, upgraded, run, conversation, trigger)
 	var function string
 	if err := schema.DB.QueryRowContext(t.Context(), `SELECT pg_get_functiondef(($1||'.enqueue_run_terminal_report()')::regprocedure)`, schema.Name).Scan(&function); err != nil || !strings.Contains(function, "terminal_revision") || !strings.Contains(function, "OLD.status IS DISTINCT FROM NEW.status") {
 		t.Fatalf("version59 trigger lacks attempt identity/transition fence: %v", err)
@@ -95,7 +95,7 @@ func TestTerminalFailurePostgres59RollbackRequiresNewFailureDelivery(t *testing.
 	if version, err := store.PostgresSchemaVersion(t.Context()); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("rejected rollback changed ledger: %d %v", version, err)
 	}
-	if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
+	if count, err := TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 		t.Fatalf("rejected rollback lost promised failure: %d %v", count, err)
 	}
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err != nil {

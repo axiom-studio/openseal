@@ -98,12 +98,12 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 			endpoint.InstallationID = "T123"
 			endpoint.ApplicationID = ""
 			endpoint.Address = "C123"
-			host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []ExternalConversationGatewayEvent{{
+			host := &GatewayHostStub{Result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []ExternalConversationGatewayEvent{{
 				InstallationID: "T123", ApplicationID: "A123", Address: "C123",
 				Event: NormalizedExternalConversationEvent{ID: "event-1", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C123", ExternalMessageID: "171.003", ExternalParticipantID: "U123", Text: "hi", OrderingKey: "C123:171.003", OccurredAt: time.Now().UTC()},
 			}}}}
 			if tc.mutate != nil {
-				tc.mutate(endpoint, host.result)
+				tc.mutate(endpoint, host.Result)
 			}
 			// Reinsert to allow a foreign-scope fixture without weakening normal update checks.
 			storetest.ExecSQL(t, db, `DELETE FROM external_conversation_endpoints`)

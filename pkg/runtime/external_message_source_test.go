@@ -17,12 +17,12 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 	ctx := t.Context()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	item := receiveContextTestEvent(t, store, endpoint, "identity-message", "trigger", "thread", now)
-	host := &recordingContextHost{result: &ExternalConversationContextResult{Status: conversation.ExternalConversationContextUnavailable, Source: &ExternalMessageSource{
+	item := ReceiveContextEvent(t, store, endpoint, "identity-message", "trigger", "thread", now)
+	host := &RecordingContextHost{Result: &ExternalConversationContextResult{Status: conversation.ExternalConversationContextUnavailable, Source: &ExternalMessageSource{
 		ChannelID: item.Event.ExternalConversationID, ParticipantID: item.Event.ExternalParticipantID, ParticipantDisplayName: "Kev",
 		ChannelName: "engineering", ChannelType: "private_channel",
 	}}}
-	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false, models.WithClock(func() time.Time { return now }))
+	worker, _ := NewContextWorker(t, store, ContextHistoryResolver{catalog}, host, false, models.WithClock(func() time.Time { return now }))
 	applied, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil {
 		t.Fatal(err)

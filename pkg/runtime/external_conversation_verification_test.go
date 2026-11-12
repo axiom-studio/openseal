@@ -121,10 +121,10 @@ func TestPausedGatewayVerificationRequiresOptInAndNeverAcceptsEvents(t *testing.
 	}
 	t.Run("legacy host never invoked", func(t *testing.T) {
 		_, _, service, registration, _ := newGatewayVerificationFixture(t)
-		host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK}}
+		host := &GatewayHostStub{Result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK}}
 		_, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), ExternalConversationPublicIngressRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`)}, host)
-		if !errors.Is(err, ErrExternalConversationConflict) || host.request.Request != nil {
-			t.Fatalf("paused route invoked non-opt-in host: %#v, %v", host.request, err)
+		if !errors.Is(err, ErrExternalConversationConflict) || host.Request.Request != nil {
+			t.Fatalf("paused route invoked non-opt-in host: %#v, %v", host.Request, err)
 		}
 	})
 }
