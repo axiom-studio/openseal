@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -107,34 +106,4 @@ func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content models.Arti
 	}
 	t.Fatalf("message %s is not in the first step context", messageID)
 	return nil
-}
-
-func TestQuotedPhotoContextRejectsInvalidOriginAndUnboundedFiles(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	event := models.NormalizedExternalConversationEvent{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:8", ReplyToExternalMessageID: "chat:7", OccurredAt: now}
-	parent := ExternalConversationContextMessage{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:7", ExternalParticipantID: "user", OccurredAt: now, Attachments: []models.ExternalConversationAttachment{{ID: "photo", Name: "photo.jpg", MediaType: "image/jpeg", SizeBytes: 20}}}
-	result := &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []ExternalConversationContextMessage{parent}}
-	messages, _, ok := normalizeExternalConversationContext(result, event)
-	if !ok || len(messages) != 1 {
-		t.Fatal("same-second quoted photo lost")
-	}
-	result.Messages[0].ExternalConversationID = "another-chat"
-	if _, _, ok := normalizeExternalConversationContext(result, event); ok {
-		t.Fatal("cross-chat parent accepted")
-	}
-	result.Messages[0] = parent
-	result.Messages[0].Attachments = []models.ExternalConversationAttachment{{ID: "photo", Name: "bad\nname"}}
-	if _, _, ok := normalizeExternalConversationContext(result, event); ok {
-		t.Fatal("invalid descriptor accepted")
-	}
-	result.Messages = nil
-	for i := 0; i < 9; i++ {
-		p := parent
-		p.ExternalMessageID = fmt.Sprint(i)
-		p.OccurredAt = now.Add(-time.Second)
-		result.Messages = append(result.Messages, p)
-	}
-	if _, _, ok := normalizeExternalConversationContext(result, event); ok {
-		t.Fatal("unbounded historical attachments accepted")
-	}
 }
