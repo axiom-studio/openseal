@@ -53,6 +53,7 @@ type loopFixtureConfig struct {
 	contextWindow int64
 	maxSteps      int
 	team          []string
+	credentials   CredentialResolver
 }
 
 type loopOption func(*loopFixtureConfig)
@@ -92,6 +93,11 @@ func withMaxSteps(n int) loopOption {
 // and these Agents are its roster (the first one is the routed responder).
 func withTeam(members ...string) loopOption {
 	return func(c *loopFixtureConfig) { c.team = append(c.team, members...) }
+}
+
+// withCredentials gives the action worker a credential resolver.
+func withCredentials(resolver CredentialResolver) loopOption {
+	return func(c *loopFixtureConfig) { c.credentials = resolver }
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +427,7 @@ func (f *loopFixture) build() {
 	clock := models.WithClock(f.clock.Now)
 	f.actions = NewActionCoordinator(f.store, f.store, f.catalog, policy, nil, clock)
 	f.approve = NewApprovalCoordinator(f.store, f.store, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }), clock)
-	f.executor = NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(f.dispatch.Dispatch), clock)
+	f.executor = NewActionWorker(f.store, f.catalog, f.config.credentials, ActionDispatcherFunc(f.dispatch.Dispatch), clock)
 	governed, err := NewGovernedToolExecutor(GovernedToolExecutorConfig{
 		Actions: f.actions, Approvals: f.approve, Worker: f.executor, Store: f.store, Now: f.clock.Now,
 	})
