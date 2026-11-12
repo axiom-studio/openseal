@@ -11,7 +11,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // Dispatcher limits and intervals (SPEC §4).
@@ -689,7 +688,7 @@ func routineEventBatchHeader(kind RoutineEventKind, batch *RoutineEventBatch, re
 		}
 		header = fmt.Sprintf("%d new %s", count, noun)
 	}
-	return conversation.TruncateUTF8Bytes(header, RoutineEventHeaderMaxBytes)
+	return models.TruncateUTF8(header, RoutineEventHeaderMaxBytes)
 }
 
 // PauseRoutine pauses one event routine for a system reason (needs_sign_in,

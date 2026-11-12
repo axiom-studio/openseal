@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
@@ -261,7 +260,7 @@ func boundRunContextText(order []string, texts map[string]string) string {
 		if keep <= 0 {
 			texts[longest] = "…"
 		} else {
-			texts[longest] = TruncateUTF8Bytes(texts[longest], keep) + "…"
+			texts[longest] = models.TruncateUTF8(texts[longest], keep) + "…"
 		}
 		text = joinRunContext(order, texts)
 	}
@@ -284,21 +283,6 @@ func shrinkRunContextList(section string, over int) string {
 		}
 	}
 	return strings.Join(kept, "\n")
-}
-
-// TruncateUTF8Bytes cuts value to at most limit bytes on a rune boundary.
-func TruncateUTF8Bytes(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	if limit <= 0 {
-		return ""
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(value[cut]) {
-		cut--
-	}
-	return value[:cut]
 }
 
 // BoundedRunContextValue is value on one line, at most limit runes.
@@ -379,7 +363,7 @@ func RunContextMessage(in ConversationContextInput, message *models.ChannelMessa
 	if content == "" {
 		content = conversationMessageNoText
 	} else if len(content) > limit {
-		content = TruncateUTF8Bytes(content, limit) + "…"
+		content = models.TruncateUTF8(content, limit) + "…"
 	}
 	return renderConversationMessageHeader(message, attribution) + "\n" + content
 }
