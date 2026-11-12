@@ -115,7 +115,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 		dispatched = true
 		return map[string]interface{}{}, nil
 	}))
-	worker.setCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
 		t.Fatal("a run without a person is refused before the host check")
 		return CredentialAvailability{}, nil
 	}))
@@ -154,7 +154,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 		dispatches++
 		return map[string]interface{}{"sent": true}, nil
 	}))
-	worker.setCredentialAvailabilityChecker(availabilityFunc(func(_ context.Context, req CredentialAvailabilityRequest) (CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(_ context.Context, req CredentialAvailabilityRequest) (CredentialAvailability, error) {
 		checks = append(checks, req)
 		if connected {
 			return CredentialAvailability{}, nil
@@ -234,7 +234,7 @@ func TestParkedCallReleasesExternalOperation(t *testing.T) {
 	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{}, nil
 	}))
-	worker.setCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
 		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapPersonSignIn}}, nil
 	}))
 	executePersonAction(t, worker, scope, proposal)
@@ -256,7 +256,7 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 		t.Fatal("a shared gap must not dispatch")
 		return nil, nil
 	}))
-	worker.setCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
 		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapSharedSignIn}}, nil
 	}))
 	result := executePersonAction(t, worker, scope, proposal)
@@ -280,7 +280,7 @@ func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 		t.Fatal("a no_person gap must not dispatch")
 		return nil, nil
 	}))
-	worker.setCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
 		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapNoPerson}}, nil
 	}))
 	result := executePersonAction(t, worker, scope, proposal)
