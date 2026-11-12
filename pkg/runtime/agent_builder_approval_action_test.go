@@ -33,7 +33,7 @@ func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
 	}
 
 	// A create_team card gets the same policy as an agent card.
-	coordinator := NewActionCoordinator(newTestKernelStore(t), newTestKernelStore(t), skill.NewCatalog(), NewDefaultActionPolicy(), nil)
+	coordinator := NewActionCoordinator(newActionTestStore(t), newActionTestStore(t), skill.NewCatalog(), NewDefaultActionPolicy(), nil)
 	coordinator.newID = func() string { return "approval-team" }
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	team := bound(models.TeamManagementSkillID, "create_team")

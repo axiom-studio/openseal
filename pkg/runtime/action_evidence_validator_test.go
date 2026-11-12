@@ -25,7 +25,7 @@ type runHistoryFixture struct {
 }
 
 func newRunHistoryFixture(t *testing.T) *runHistoryFixture {
-	return &runHistoryFixture{t: t, store: newTestKernelStore(t), scope: models.Scope{Kind: "tenant", ID: "one"}, base: time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)}
+	return &runHistoryFixture{t: t, store: newActionTestStore(t), scope: models.Scope{Kind: "tenant", ID: "one"}, base: time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)}
 }
 
 // add stores call as completed after every call added before it.
