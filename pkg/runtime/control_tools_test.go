@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -509,7 +510,7 @@ func TestControlDispatcherPhaseAndStateRules(t *testing.T) {
 
 func TestControlSettleEntryPicksOpenSettleCall(t *testing.T) {
 	entries := []*SessionEntry{
-		testToolEntry("t1", "s1", "c1", ToolEntryPending),
+		storetest.ToolSessionEntry("t1", "s1", "c1", ToolEntryPending),
 		{ID: "t2", Type: SessionEntryTool, State: ToolEntryCompleted, Tool: &ToolEntry{Name: "control_fork"}},
 		{ID: "t3", Type: SessionEntryTool, State: ToolEntryPending, Tool: &ToolEntry{Name: "react"}},
 		{ID: "t4", Type: SessionEntryTool, State: ToolEntryPending, Tool: &ToolEntry{Name: "ask_user"}},

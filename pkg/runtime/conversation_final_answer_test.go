@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -226,7 +227,7 @@ func (f *finalDeliveryFixture) settle(entry *SessionEntry, to ToolEntryState, ac
 	_, err := f.store.TransitionToolEntry(f.ctx, ToolEntryTransitionRequest{
 		Scope: f.run.Scope, EntryID: entry.ID, RunID: f.run.ID, Lease: *f.lease(),
 		From: ToolEntryPending, To: to, ActionCallID: actionCallID,
-		Result: &ToolResult{Status: status, IsError: isError, Content: []ContentPart{testTextPart(text)}}, Now: f.now,
+		Result: &ToolResult{Status: status, IsError: isError, Content: []ContentPart{storetest.TextPart(text)}}, Now: f.now,
 	})
 	if err != nil {
 		f.t.Fatalf("settle %s: %v", entry.ID, err)

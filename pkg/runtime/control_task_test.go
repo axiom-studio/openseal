@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -108,7 +109,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 	sessionID := run.SessionID
 	user := &SessionEntry{ID: SessionEntryID(sessionID, "message:"+message.ID), RunID: run.ID, Type: SessionEntryUser,
 		SourceKey: "message:" + message.ID, User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: message.Sender.ID},
-			Content: []ContentPart{testTextPart(message.Content)}, MessageID: message.ID}}
+			Content: []ContentPart{storetest.TextPart(message.Content)}, MessageID: message.ID}}
 	assistant := &SessionEntry{ID: SessionEntryID(sessionID, AssistantEntryKey(step.ID)), RunID: run.ID, StepID: step.ID, Step: step.Sequence,
 		Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x",
 			StopReason: ModelStopToolCalls, ToolCalls: calls}}

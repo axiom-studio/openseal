@@ -118,7 +118,7 @@ func openWorkerTaskSession(ctx context.Context, store *SQLiteStore, run *AgentRu
 	}
 	user := &SessionEntry{ID: userID, RunID: run.ID, Type: SessionEntryUser, SourceKey: "message:" + triggerID,
 		User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: message.Sender.ID},
-			Content: []ContentPart{testTextPart(message.Content)}, MessageID: triggerID}}
+			Content: []ContentPart{storetest.TextPart(message.Content)}, MessageID: triggerID}}
 	if _, err := store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
 		Scope: run.Scope, SessionID: session.ID, RunID: run.ID, Lease: &lease, Entries: []*SessionEntry{user}, Now: now,
 	}); err != nil {

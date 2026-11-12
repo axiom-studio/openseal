@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 type terminalCloseTestStore interface {
@@ -235,10 +237,10 @@ func seedTerminalCloseToolEntries(t *testing.T, store terminalCloseTestStore, ru
 		t.Fatal(err)
 	}
 	prefix := run.ID + ":"
-	assistant := testAssistantEntry(prefix+"assistant", step.ID, "call-1", "call-2", "call-3")
-	pending := testToolEntry(prefix+"tool-1", step.ID, "call-1", ToolEntryPending)
-	awaiting := testToolEntry(prefix+"tool-2", step.ID, "call-2", ToolEntryPending)
-	completed := testToolEntry(prefix+"tool-3", step.ID, "call-3", ToolEntryCompleted)
+	assistant := storetest.AssistantSessionEntry(prefix+"assistant", step.ID, "call-1", "call-2", "call-3")
+	pending := storetest.ToolSessionEntry(prefix+"tool-1", step.ID, "call-1", ToolEntryPending)
+	awaiting := storetest.ToolSessionEntry(prefix+"tool-2", step.ID, "call-2", ToolEntryPending)
+	completed := storetest.ToolSessionEntry(prefix+"tool-3", step.ID, "call-3", ToolEntryCompleted)
 	if _, err := sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
 		Scope: run.Scope, SessionID: opened.Session.ID, RunID: run.ID, Lease: &lease, Now: now,
 		Entries: []*SessionEntry{assistant, pending, awaiting, completed},

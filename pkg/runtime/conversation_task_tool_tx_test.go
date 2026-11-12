@@ -70,7 +70,7 @@ func conversationTaskToolRecord(t *testing.T, store conversationTaskToolTestStor
 	callID := "call-" + suffix
 	user := &SessionEntry{ID: SessionEntryID(sessionID, "message:m-"+suffix), RunID: task.SourceRunID, Type: SessionEntryUser,
 		SourceKey: "message:m-" + suffix, User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: "requester"},
-			Content: []ContentPart{testTextPart("Please prepare the result.")}, MessageID: "m-" + suffix}}
+			Content: []ContentPart{storetest.TextPart("Please prepare the result.")}, MessageID: "m-" + suffix}}
 	assistant := &SessionEntry{ID: SessionEntryID(sessionID, AssistantEntryKey(task.SourceTurnID)), RunID: task.SourceRunID,
 		StepID: task.SourceTurnID, Step: task.SourceTurnNumber, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
 			Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,

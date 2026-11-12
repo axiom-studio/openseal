@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestConversationSessionIDIsStablePerLane(t *testing.T) {
@@ -142,7 +144,7 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 	// A valid request forks the parent at the given entry through the store.
 	store := newTestKernelStore(t)
 	parent := openTestConversationSession(t, store, "r1")
-	if _, err := testAppend(store, parent.ID, "r1", testUserEntry("p1", "a"), testUserEntry("p2", "b"), testUserEntry("p3", "c")); err != nil {
+	if _, err := testAppend(store, parent.ID, "r1", storetest.UserSessionEntry("p1", "a"), storetest.UserSessionEntry("p2", "b"), storetest.UserSessionEntry("p3", "c")); err != nil {
 		t.Fatal(err)
 	}
 	putTestSessionRun(t, store, "child", "", AgentRunStatusQueued, 0)

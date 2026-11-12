@@ -7,17 +7,19 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // SQLite store test: it moves to store/sqlite in U2.9. It runs the session
-// conformance suite (agent_session_conformance_test.go, for storetest) and
+// conformance suite (storetest.RunAgentSessionContract) and
 // the testSession* helpers of agent_session_test.go and
 // agent_session_store_test.go.
 
 // TestSQLiteAgentSessionStore runs the session store conformance suite
-// (agent_session_conformance_test.go) against the SQLite backend.
+// (storetest.RunAgentSessionContract) against the SQLite backend.
 func TestSQLiteAgentSessionStore(t *testing.T) {
-	runAgentSessionStoreConformance(t, func(t *testing.T) (agentSessionConformanceStore, createRunSessionInOwnTx) {
+	storetest.RunAgentSessionContract(t, func(t *testing.T) (storetest.AgentSessionContractStore, storetest.CreateRunSessionInOwnTx) {
 		store := openTestSQLiteSessionStore(t)
 		return store, func(ctx context.Context, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
 			return createSQLiteRunSessionInOwnTx(ctx, store, req)
@@ -108,7 +110,7 @@ func TestSQLiteInTxHelpersSkipFence(t *testing.T) {
 	}
 	if _, err := store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: sessionID, RunID: "r1", Lease: testSessionLeasePtr(), Now: testSessionNow,
-		Entries: []*SessionEntry{testAssistantEntry("a1", "t1", "c1"), testToolEntry("e1", "t1", "c1", ToolEntryPending)},
+		Entries: []*SessionEntry{storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", ToolEntryPending)},
 	}); err != nil {
 		t.Fatal(err)
 	}

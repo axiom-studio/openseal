@@ -4,15 +4,17 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 	store := newTestKernelStore(t)
 	parent := openTestConversationSession(t, store, "r1")
-	if _, err := testAppend(store, parent.ID, "r1", testUserEntry("p1", "a"), testUserEntry("p2", "b")); err != nil {
+	if _, err := testAppend(store, parent.ID, "r1", storetest.UserSessionEntry("p1", "a"), storetest.UserSessionEntry("p2", "b")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testAppend(store, parent.ID, "r1", testAssistantEntry("a1", "t1", "c1"), testToolEntry("e1", "t1", "c1", ToolEntryPending)); err != nil {
+	if _, err := testAppend(store, parent.ID, "r1", storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", ToolEntryPending)); err != nil {
 		t.Fatal(err)
 	}
 	path, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, parent.ID)

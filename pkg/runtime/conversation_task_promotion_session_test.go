@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // promotionSessionStore is a continuation test store that also holds the
@@ -47,7 +49,7 @@ func promotionSessionFixture(t *testing.T, base conversationContinuationTestStor
 	if entries > 0 {
 		batch := make([]*SessionEntry, entries)
 		for i := range batch {
-			batch[i] = noteEntry(SessionEntryID(chat.ID, "chat-note:"+string(rune('a'+i))), NoteHost)
+			batch[i] = storetest.NoteSessionEntry(SessionEntryID(chat.ID, "chat-note:"+string(rune('a'+i))), NoteHost)
 		}
 		lease := promotionLease()
 		appended, err := store.AppendAgentSessionEntries(t.Context(), AppendAgentSessionEntriesRequest{Scope: run.Scope, SessionID: chat.ID, RunID: run.ID,
@@ -124,8 +126,8 @@ func TestPromotionRebindsRunToChildSession(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if idsOf(path.Entries) != idsOf(parentEntries) {
-			t.Fatalf("child path = %s, want the parent up to the fork %s", idsOf(path.Entries), idsOf(parentEntries))
+		if storetest.EntryIDs(path.Entries) != storetest.EntryIDs(parentEntries) {
+			t.Fatalf("child path = %s, want the parent up to the fork %s", storetest.EntryIDs(path.Entries), storetest.EntryIDs(parentEntries))
 		}
 
 		restarted := reopen(t).(promotionSessionStore)
@@ -145,7 +147,7 @@ func TestLoopAppendAfterPromotionGetsSessionMoved(t *testing.T) {
 		if promoteAtDeadline(t, store, run) == nil {
 			t.Fatal("Run was not promoted")
 		}
-		entry := noteEntry(SessionEntryID(chat.ID, "after-promotion"), NoteHost)
+		entry := storetest.NoteSessionEntry(SessionEntryID(chat.ID, "after-promotion"), NoteHost)
 		lease := promotionLease()
 		_, err := store.AppendAgentSessionEntries(t.Context(), AppendAgentSessionEntriesRequest{Scope: run.Scope, SessionID: chat.ID, RunID: run.ID,
 			Lease: &lease, Entries: []*SessionEntry{entry}, Now: time.Now()})
@@ -156,7 +158,7 @@ func TestLoopAppendAfterPromotionGetsSessionMoved(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		retry := noteEntry(SessionEntryID(reloaded.SessionID, "after-promotion"), NoteHost)
+		retry := storetest.NoteSessionEntry(SessionEntryID(reloaded.SessionID, "after-promotion"), NoteHost)
 		appended, err := store.AppendAgentSessionEntries(t.Context(), AppendAgentSessionEntriesRequest{Scope: run.Scope, SessionID: reloaded.SessionID, RunID: run.ID,
 			Lease: &lease, Entries: []*SessionEntry{retry}, Now: time.Now()})
 		if err != nil {
@@ -170,7 +172,7 @@ func TestLoopAppendAfterPromotionGetsSessionMoved(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(path.Entries) != 2 || path.Entries[1].ID != retry.ID {
-			t.Fatalf("child path = %s", idsOf(path.Entries))
+			t.Fatalf("child path = %s", storetest.EntryIDs(path.Entries))
 		}
 		for _, e := range promotionSessionEntries(t, store, run.Scope, chat.ID) {
 			if e.ID == entry.ID {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // steeringRun stores run r1 (bound to a conversation session) with the given
@@ -126,7 +128,7 @@ func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
 			Entries: []*SessionEntry{{
 				ID: SessionEntryID(in.Session.ID, ChannelMessageSourceKey("m7")), Type: SessionEntryUser, SourceKey: ChannelMessageSourceKey("m7"),
 				User: &UserEntry{Origin: UserEntryChannelMessage, MessageID: "m7", MessageSequence: 7,
-					Author: SessionAuthor{Type: "user", ID: "u1"}, Content: []ContentPart{testTextPart("[u1] also check the invoice")}},
+					Author: SessionAuthor{Type: "user", ID: "u1"}, Content: []ContentPart{storetest.TextPart("[u1] also check the invoice")}},
 			}},
 			ExpectedChannelWatermark: &expected, ChannelWatermark: plan.ThroughMessageSequence,
 		}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -156,7 +157,7 @@ func textResult(text string, failed bool) *ToolResult {
 	if failed {
 		status = ToolResultFailed
 	}
-	return &ToolResult{Status: status, IsError: failed, Content: []ContentPart{testTextPart(text)}}
+	return &ToolResult{Status: status, IsError: failed, Content: []ContentPart{storetest.TextPart(text)}}
 }
 
 // runStep plays a whole step: plan, refuse, execute what may run with

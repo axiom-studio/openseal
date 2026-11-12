@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
 
@@ -142,7 +143,7 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 						failedSourceCall(t, store, store, running, call.step, call.skillID, call.err, call.code, call.details, now)
 					}
 					for _, step := range tc.completed {
-						appendSourceStep(t, store, running, step, now, testToolEntry(running.ID+":"+step+":tool", step, "call-"+step, ToolEntryCompleted))
+						appendSourceStep(t, store, running, step, now, storetest.ToolSessionEntry(running.ID+":"+step+":tool", step, "call-"+step, ToolEntryCompleted))
 					}
 					running, err = store.GetAgentRun(t.Context(), running.Scope, running.ID)
 					if err != nil {
