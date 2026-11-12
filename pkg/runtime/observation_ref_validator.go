@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -36,7 +37,7 @@ func (ObservationRefActionProposalValidator) ValidateActionProposal(ctx context.
 		skillID = input.Bound.Definition.ID
 	}
 	var (
-		observation       *ActionCall
+		observation       *models.ActionCall
 		observationLoaded bool
 	)
 	properties, _ := input.Bound.Action.InputSchema["properties"].(map[string]interface{})
@@ -89,7 +90,7 @@ func (ObservationRefActionProposalValidator) ValidateActionProposal(ctx context.
 // latestSkillActionCall returns the newest terminal call of skillID in the
 // Run's history, or nil. Scoping to the Skill keeps the observation check
 // correct when unrelated reads ran after the observation.
-func latestSkillActionCall(ctx context.Context, history agentrun.RunActionHistory, skillID string) (*ActionCall, error) {
+func latestSkillActionCall(ctx context.Context, history agentrun.RunActionHistory, skillID string) (*models.ActionCall, error) {
 	if history == nil {
 		return nil, nil
 	}
@@ -107,11 +108,11 @@ func latestSkillActionCall(ctx context.Context, history agentrun.RunActionHistor
 
 // currentObservationElement finds ref in last, the latest observation of the
 // Skill (see latestSkillActionCall).
-func currentObservationElement(last *ActionCall, ref string) (map[string]interface{}, error) {
+func currentObservationElement(last *models.ActionCall, ref string) (map[string]interface{}, error) {
 	if last == nil {
 		return nil, errors.New("current observation is unavailable")
 	}
-	if last.Status != ActionCallStatusSucceeded {
+	if last.Status != models.ActionCallStatusSucceeded {
 		return nil, errors.New("latest action is not a successful observation; take a new observation")
 	}
 	result := last.Output

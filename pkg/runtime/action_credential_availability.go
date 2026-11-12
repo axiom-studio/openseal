@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // connectAccountParked holds a call before dispatch until someone connects
 // the account its card asks for.
-type connectAccountParked struct{ request *SkillSetupRequest }
+type connectAccountParked struct{ request *models.SkillSetupRequest }
 
 func (e *connectAccountParked) Error() string {
 	return skillbinding.ConnectAccountRequiredPrefix + e.request.Reason
@@ -44,13 +45,13 @@ func (w *ActionWorker) credentialAvailabilityChecker() CredentialAvailabilityChe
 // checkCredentialAvailability is the pre-dispatch gate for an action with
 // credentials. It returns the run's umbrella, or the failure to persist: a
 // plain error, a person_unavailable failure, or a connect_account park.
-func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *AgentRun, call *ActionCall, bound *skill.BoundAction) (ObjectiveOwner, error) {
-	umbrella, err := RunUmbrella(ctx, w.teams, run)
+func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *models.AgentRun, call *models.ActionCall, bound *skill.BoundAction) (models.ObjectiveOwner, error) {
+	umbrella, err := models.RunUmbrella(ctx, w.teams, run)
 	if err != nil {
-		if !errors.Is(err, ErrRunUmbrellaUnavailable) {
-			err = fmt.Errorf("%w: %v", ErrRunUmbrellaUnavailable, err)
+		if !errors.Is(err, models.ErrRunUmbrellaUnavailable) {
+			err = fmt.Errorf("%w: %v", models.ErrRunUmbrellaUnavailable, err)
 		}
-		return ObjectiveOwner{}, err
+		return models.ObjectiveOwner{}, err
 	}
 	if skillbinding.CallUsesPersonCredential(call) && run.ActingUser == "" {
 		return umbrella, skillbinding.NewPersonUnavailableError(bound, umbrella)
@@ -82,9 +83,9 @@ func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *Age
 	mode, slots := "", []string(nil)
 	switch {
 	case len(person) > 0:
-		mode, slots = skillSetupModePerPerson, person
+		mode, slots = models.SkillSetupModePerPerson, person
 	case len(shared) > 0:
-		mode, slots = skillSetupModeShared, shared
+		mode, slots = models.SkillSetupModeShared, shared
 	default:
 		return umbrella, nil
 	}

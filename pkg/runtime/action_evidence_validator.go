@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -40,7 +41,7 @@ func (RequiredActionEvidenceValidator) ValidateActionProposal(ctx context.Contex
 	if input.Run == nil || input.Bound == nil || input.Bound.Definition == nil || len(input.Bound.Action.RequiredEvidence) == 0 {
 		return nil, nil
 	}
-	var calls []*ActionCall
+	var calls []*models.ActionCall
 	if input.History != nil {
 		listed, err := input.History.Calls(ctx)
 		if err != nil {
@@ -52,7 +53,7 @@ func (RequiredActionEvidenceValidator) ValidateActionProposal(ctx context.Contex
 		action := strings.TrimSpace(requirement.Action)
 		matched := false
 		for _, call := range calls {
-			if call == nil || call.Status != ActionCallStatusSucceeded ||
+			if call == nil || call.Status != models.ActionCallStatusSucceeded ||
 				call.SkillID != input.Bound.Definition.ID ||
 				call.SkillVersion != input.Bound.Definition.Version ||
 				call.Action != action {

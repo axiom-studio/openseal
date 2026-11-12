@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -27,7 +29,7 @@ const loopWorkerID = "loop-worker"
 type loopActionSpec struct {
 	id, skillID, version, action string
 	arguments                    map[string]interface{}
-	externalOperation            *ExternalOperationIdentity
+	externalOperation            *activity.ExternalOperationIdentity
 }
 
 // proposeLoopAction stores a ready loop call of step-1 for the Run's lease
@@ -49,7 +51,7 @@ func loopActionCredentialRefs(bound *skill.BoundAction) map[string]skill.Credent
 	return refs
 }
 
-func proposeLoopAction(t *testing.T, store KernelStore, catalog agentrun.ActionExecutionCatalog, run *AgentRun, workerID string, now time.Time, spec loopActionSpec) *ActionProposalResult {
+func proposeLoopAction(t *testing.T, store models.KernelStore, catalog agentrun.ActionExecutionCatalog, run *models.AgentRun, workerID string, now time.Time, spec loopActionSpec) *models.ActionProposalResult {
 	t.Helper()
 	ctx := context.Background()
 	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
@@ -60,33 +62,33 @@ func proposeLoopAction(t *testing.T, store KernelStore, catalog agentrun.ActionE
 	if err != nil {
 		t.Fatal(err)
 	}
-	call := &ActionCall{
+	call := &models.ActionCall{
 		ID: spec.id, Scope: current.Scope, RunID: current.ID, TurnID: "step-1", DeploymentID: current.AssignedAgentID,
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
-		SkillID: spec.skillID, SkillVersion: spec.version, Action: spec.action, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-		Status: ActionCallStatusReady, Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: bound.Action.Review,
+		SkillID: spec.skillID, SkillVersion: spec.version, Action: spec.action, Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+		Status: models.ActionCallStatusReady, Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: bound.Action.Review,
 		Arguments: maps.Clone(spec.arguments), CredentialRefs: loopActionCredentialRefs(bound), IdempotencyKey: "tool-call:step-1:" + spec.id,
 		MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if spec.externalOperation != nil {
-		call.ExternalOperationDigest, err = computeExternalOperationDigest(current.Scope, current.Owner, current.ObjectiveID, spec.externalOperation, call.IdempotencyKey)
+		call.ExternalOperationDigest, err = activity.ComputeExternalOperationDigest(current.Scope, current.Owner, current.ObjectiveID, spec.externalOperation, call.IdempotencyKey)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	call.InvocationDigest = ComputeActionInvocationDigest(call)
-	call.SemanticDigest = ComputeActionSemanticDigest(call)
-	record := ActionProposalRecord{
-		Call: call, ExpectedRunRevision: current.Revision, Lease: &AgentRunLeaseGuard{WorkerID: workerID, Now: now},
-		Event: &ActivityEvent{
-			ID: "proposed-" + spec.id, Scope: current.Scope, EventType: "action.proposed", Severity: ActivitySeverityInfo, AgentID: current.AssignedAgentID,
-			RunID: current.ID, TurnID: "step-1", Actor: ActivityActor{Type: "worker", ID: workerID}, Summary: "Proposed " + spec.action,
-			Visibility: ActivityVisibilityScope, CreatedAt: now, Payload: map[string]interface{}{"actionCallId": spec.id},
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	call.SemanticDigest = models.ComputeActionSemanticDigest(call)
+	record := models.ActionProposalRecord{
+		Call: call, ExpectedRunRevision: current.Revision, Lease: &models.AgentRunLeaseGuard{WorkerID: workerID, Now: now},
+		Event: &models.ActivityEvent{
+			ID: "proposed-" + spec.id, Scope: current.Scope, EventType: "action.proposed", Severity: models.ActivitySeverityInfo, AgentID: current.AssignedAgentID,
+			RunID: current.ID, TurnID: "step-1", Actor: models.ActivityActor{Type: "worker", ID: workerID}, Summary: "Proposed " + spec.action,
+			Visibility: models.ActivityVisibilityScope, CreatedAt: now, Payload: map[string]interface{}{"actionCallId": spec.id},
 		},
 	}
 	if current.Budget != nil {
-		updated := cloneAgentRun(current)
-		if err := reserveRunBudget(updated, BudgetReservation{ID: agentrun.ActionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: now}); err != nil {
+		updated := models.CloneAgentRun(current)
+		if err := models.ReserveRunBudget(updated, models.BudgetReservation{ID: agentrun.ActionBudgetReservationID(call.ID), Usage: models.BudgetUsage{Actions: 1}, CreatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 		updated.Revision++
@@ -102,7 +104,7 @@ func proposeLoopAction(t *testing.T, store KernelStore, catalog agentrun.ActionE
 
 // loopWorkerCatalog binds release-agent to a Skill with a production write
 // (deploy) and a read (status), both using one credential.
-func loopWorkerCatalog(t *testing.T, scope Scope) *skill.Catalog {
+func loopWorkerCatalog(t *testing.T, scope models.Scope) *skill.Catalog {
 	t.Helper()
 	ctx := context.Background()
 	schema := map[string]interface{}{
@@ -135,36 +137,36 @@ func loopWorkerCatalog(t *testing.T, scope Scope) *skill.Catalog {
 // loopWorkerID for an hour, whose step-1 proposes loop calls.
 type loopWorkerFixture struct {
 	t       *testing.T
-	store   KernelStore
+	store   models.KernelStore
 	catalog *skill.Catalog
-	scope   Scope
+	scope   models.Scope
 	now     time.Time
 	clock   time.Time
-	run     *AgentRun
+	run     *models.AgentRun
 
 	catalogCalls, credentialCalls, dispatches int
 }
 
-func newLoopWorkerFixture(t *testing.T, store KernelStore, budget *BudgetPolicy) *loopWorkerFixture {
+func newLoopWorkerFixture(t *testing.T, store models.KernelStore, budget *models.BudgetPolicy) *loopWorkerFixture {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "loop-worker"}
+	scope := models.Scope{Kind: "tenant", ID: "loop-worker"}
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	created, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
-		Goal: "ship the release", Source: RunSourceObjective, Budget: budget,
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	created, err := portfolio.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
+		Goal: "ship the release", Source: models.RunSourceObjective, Budget: budget,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.ClaimNextAgentRun(context.Background(), AgentRunClaim{Scope: scope, WorkerID: loopWorkerID, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	run, err := store.ClaimNextAgentRun(context.Background(), models.AgentRunClaim{Scope: scope, WorkerID: loopWorkerID, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || run == nil || run.ID != created.ID {
 		t.Fatalf("claim = %#v, %v", run, err)
 	}
 	return &loopWorkerFixture{t: t, store: store, catalog: loopWorkerCatalog(t, scope), scope: scope, now: now, clock: now.Add(2 * time.Second), run: run}
 }
 
-func (f *loopWorkerFixture) propose(id, action string) *ActionCall {
+func (f *loopWorkerFixture) propose(id, action string) *models.ActionCall {
 	f.t.Helper()
 	result := proposeLoopAction(f.t, f.store, f.catalog, f.run, loopWorkerID, f.now.Add(time.Second), loopActionSpec{
 		id: id, skillID: "release", version: "1.0.0", action: action, arguments: map[string]interface{}{"environment": "production"},
@@ -192,11 +194,11 @@ func (f *loopWorkerFixture) workerWithClock(dispatch ActionDispatcherFunc, clock
 	return worker
 }
 
-func (f *loopWorkerFixture) execute(worker *ActionWorker, id string) (*ActionExecutionResult, error) {
+func (f *loopWorkerFixture) execute(worker *ActionWorker, id string) (*models.ActionExecutionResult, error) {
 	return worker.ExecuteOwnLoopCall(context.Background(), f.scope, id, loopWorkerID)
 }
 
-func (f *loopWorkerFixture) currentRun() *AgentRun {
+func (f *loopWorkerFixture) currentRun() *models.AgentRun {
 	f.t.Helper()
 	run, err := f.store.GetAgentRun(context.Background(), f.scope, f.run.ID)
 	if err != nil || run == nil {
@@ -205,7 +207,7 @@ func (f *loopWorkerFixture) currentRun() *AgentRun {
 	return run
 }
 
-func (f *loopWorkerFixture) call(id string) *ActionCall {
+func (f *loopWorkerFixture) call(id string) *models.ActionCall {
 	f.t.Helper()
 	call, err := f.store.GetActionCall(context.Background(), f.scope, id)
 	if err != nil {
@@ -216,21 +218,21 @@ func (f *loopWorkerFixture) call(id string) *ActionCall {
 
 // setRunStatus moves the Run to status outside its lease, as a park, pause
 // or cancel does.
-func (f *loopWorkerFixture) setRunStatus(status AgentRunStatus) {
+func (f *loopWorkerFixture) setRunStatus(status models.AgentRunStatus) {
 	f.t.Helper()
 	current := f.currentRun()
-	updated := cloneAgentRun(current)
+	updated := models.CloneAgentRun(current)
 	updated.Status = status
 	updated.Revision++
 	updated.UpdatedAt = f.clock
-	if status != AgentRunStatusRunning {
+	if status != models.AgentRunStatusRunning {
 		updated.LeaseOwner, updated.LeaseExpiresAt = "", nil
 	}
-	if isTerminalAgentRunStatus(status) {
+	if models.IsTerminalAgentRunStatus(status) {
 		completed := f.clock
 		updated.CompletedAt = &completed
 	}
-	event := actionLifecycleEvent(&ActionCall{Scope: f.scope, RunID: f.run.ID, DeploymentID: "release-agent"}, fmt.Sprintf("status-%s-%d", status, updated.Revision), "run.status_changed", f.clock)
+	event := actionLifecycleEvent(&models.ActionCall{Scope: f.scope, RunID: f.run.ID, DeploymentID: "release-agent"}, fmt.Sprintf("status-%s-%d", status, updated.Revision), "run.status_changed", f.clock)
 	if _, err := f.store.UpdateAgentRunWithEvent(context.Background(), updated, current.Revision, event, nil); err != nil {
 		f.t.Fatalf("set Run %s: %v", status, err)
 	}
@@ -249,18 +251,18 @@ func succeedDispatch(context.Context, agentrun.ActionDispatchInput) (map[string]
 }
 
 func TestExecuteOwnLoopCallDispatchesInlineUnderCallLease(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		call := f.propose("deploy-1", "deploy")
 		before := f.currentRun()
 		poolClaimedDuringDispatch := false
 		var clockTicks atomic.Int64
 		worker := f.workerWithClock(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
-			if input.Call.Status != ActionCallStatusRunning || input.Call.LeaseOwner != loopWorkerID || input.Credentials["token"] != "loop-secret" ||
+			if input.Call.Status != models.ActionCallStatusRunning || input.Call.LeaseOwner != loopWorkerID || input.Credentials["token"] != "loop-secret" ||
 				input.Run == nil || input.Run.ID != call.RunID || input.Arguments["environment"] != "production" {
 				t.Fatalf("dispatch input = %#v", input)
 			}
-			if claimed, err := store.ClaimNextAction(ctx, ActionClaim{Scope: f.scope, WorkerID: "pool-worker", Now: f.now.Add(time.Hour), LeaseDuration: time.Minute}); err != nil || claimed != nil {
+			if claimed, err := store.ClaimNextAction(ctx, models.ActionClaim{Scope: f.scope, WorkerID: "pool-worker", Now: f.now.Add(time.Hour), LeaseDuration: time.Minute}); err != nil || claimed != nil {
 				poolClaimedDuringDispatch = true
 			}
 			deadline := time.NewTimer(2 * time.Second)
@@ -291,30 +293,30 @@ func TestExecuteOwnLoopCallDispatchesInlineUnderCallLease(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Call.Status != ActionCallStatusSucceeded || result.Call.Attempt != 1 || result.Call.LeaseOwner != "" || result.Call.Output["deploymentId"] != "deploy-123" ||
+		if result.Call.Status != models.ActionCallStatusSucceeded || result.Call.Attempt != 1 || result.Call.LeaseOwner != "" || result.Call.Output["deploymentId"] != "deploy-123" ||
 			result.Call.Output["echo"] != "Bearer [REDACTED]" || f.dispatches != 1 || onClaim || poolClaimedDuringDispatch {
 			t.Fatalf("inline execution = %#v dispatches=%d onClaim=%t pool=%t", result.Call, f.dispatches, onClaim, poolClaimedDuringDispatch)
 		}
 		if result.Run != nil {
 			t.Fatalf("an unbudgeted loop outcome changed its Run: %#v", result.Run)
 		}
-		if after := f.currentRun(); after.Revision != before.Revision || after.Status != AgentRunStatusRunning || after.LeaseOwner != loopWorkerID {
+		if after := f.currentRun(); after.Revision != before.Revision || after.Status != models.AgentRunStatusRunning || after.LeaseOwner != loopWorkerID {
 			t.Fatalf("loop outcome touched the Run: before=%#v after=%#v", before, after)
 		}
 		encoded, _ := json.Marshal(result.Event)
-		if result.Event.EventType != "action.succeeded" || result.Event.Payload["origin"] != string(ActionOriginLoop) || result.Event.Payload["execution"] != string(ActionExecutionLoop) ||
+		if result.Event.EventType != "action.succeeded" || result.Event.Payload["origin"] != string(models.ActionOriginLoop) || result.Event.Payload["execution"] != string(models.ActionExecutionLoop) ||
 			strings.Contains(string(encoded), "loop-secret") || strings.Contains(string(encoded), "deploy-123") {
 			t.Fatalf("outcome event = %s", encoded)
 		}
-		assertActionLifecycleTerminalEvents(t, store, call, ActionCallStatusSucceeded, 1)
+		assertActionLifecycleTerminalEvents(t, store, call, models.ActionCallStatusSucceeded, 1)
 	})
 }
 
 func TestExecuteOwnLoopCallNotClaimable(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		live := f.propose("live-lease", "deploy")
-		if claimed, err := store.ClaimNextAction(t.Context(), ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: time.Hour, OwnActionID: live.ID}); err != nil || claimed == nil {
+		if claimed, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: time.Hour, OwnActionID: live.ID}); err != nil || claimed == nil {
 			t.Fatalf("own claim = %#v, %v", claimed, err)
 		}
 		worker := f.worker(succeedDispatch)
@@ -322,13 +324,13 @@ func TestExecuteOwnLoopCallNotClaimable(t *testing.T) {
 			t.Fatalf("running call with a live lease = %v", err)
 		}
 		done := f.propose("done", "status")
-		if result, err := f.execute(worker, done.ID); err != nil || result.Call.Status != ActionCallStatusSucceeded {
+		if result, err := f.execute(worker, done.ID); err != nil || result.Call.Status != models.ActionCallStatusSucceeded {
 			t.Fatalf("first execution = %#v, %v", result, err)
 		}
 		if _, err := f.execute(worker, done.ID); !errors.Is(err, ErrLoopActionNotClaimable) || f.dispatches != 1 {
 			t.Fatalf("terminal call = %v dispatches=%d", err, f.dispatches)
 		}
-		if _, err := f.execute(worker, "missing"); !errors.Is(err, ErrActionNotFound) {
+		if _, err := f.execute(worker, "missing"); !errors.Is(err, models.ErrActionNotFound) {
 			t.Fatalf("missing call = %v", err)
 		}
 	})
@@ -337,8 +339,8 @@ func TestExecuteOwnLoopCallNotClaimable(t *testing.T) {
 func TestExecuteOwnLoopCallNotOwnedAfterLeaseLossCancels(t *testing.T) {
 	for _, loss := range []string{"foreign_worker", "expired_run_lease", "parked_run", "canceled_during_credentials"} {
 		t.Run(loss, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
-				f := newLoopWorkerFixture(t, store, &BudgetPolicy{MaxActions: 10})
+			forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+				f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 				call := f.propose("deploy-1", "deploy")
 				worker := f.worker(succeedDispatch)
 				workerID := loopWorkerID
@@ -348,11 +350,11 @@ func TestExecuteOwnLoopCallNotOwnedAfterLeaseLossCancels(t *testing.T) {
 				case "expired_run_lease":
 					f.clock = f.now.Add(2 * time.Hour)
 				case "parked_run":
-					f.setRunStatus(AgentRunStatusWaitingForApproval)
+					f.setRunStatus(models.AgentRunStatusWaitingForApproval)
 				case "canceled_during_credentials":
 					worker.credentials = CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 						f.credentialCalls++
-						f.setRunStatus(AgentRunStatusCanceled)
+						f.setRunStatus(models.AgentRunStatusCanceled)
 						return map[string]string{"token": "loop-secret"}, nil
 					})
 				}
@@ -361,7 +363,7 @@ func TestExecuteOwnLoopCallNotOwnedAfterLeaseLossCancels(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if result.Call.Status != ActionCallStatusCanceled || result.Call.CompletedAt == nil || result.Call.LeaseOwner != "" ||
+				if result.Call.Status != models.ActionCallStatusCanceled || result.Call.CompletedAt == nil || result.Call.LeaseOwner != "" ||
 					result.Call.Error != "owning Run no longer waits for this action" || f.dispatches != 0 {
 					t.Fatalf("unowned loop call = %#v dispatches=%d", result.Call, f.dispatches)
 				}
@@ -378,17 +380,17 @@ func TestExecuteOwnLoopCallNotOwnedAfterLeaseLossCancels(t *testing.T) {
 				if _, reserved := after.BudgetReservations[agentrun.ActionBudgetReservationID(call.ID)]; reserved || after.BudgetUsage.Actions != 0 {
 					t.Fatalf("cancellation did not release the action reservation: %#v", after)
 				}
-				assertActionLifecycleTerminalEvents(t, store, call, ActionCallStatusCanceled, 0)
+				assertActionLifecycleTerminalEvents(t, store, call, models.ActionCallStatusCanceled, 0)
 			})
 		})
 	}
 }
 
 func TestLoopRecoveredRunningWriteFailsWithoutDispatch(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
-		f := newLoopWorkerFixture(t, store, &BudgetPolicy{MaxActions: 10})
+	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+		f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 		call := f.propose("deploy-1", "deploy")
-		first, err := store.ClaimNextAction(t.Context(), ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: LoopActionLease, OwnActionID: call.ID})
+		first, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: models.LoopActionLease, OwnActionID: call.ID})
 		if err != nil || first == nil {
 			t.Fatalf("crashed claim = %#v, %v", first, err)
 		}
@@ -397,13 +399,13 @@ func TestLoopRecoveredRunningWriteFailsWithoutDispatch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Call.Status != ActionCallStatusFailed || !result.Call.RecoveredRunning || result.Call.FailurePhase != ActionFailureAfterDispatch || result.Call.Attempt != 2 ||
+		if result.Call.Status != models.ActionCallStatusFailed || !result.Call.RecoveredRunning || result.Call.FailurePhase != models.ActionFailureAfterDispatch || result.Call.Attempt != 2 ||
 			!strings.Contains(result.Call.Error, "may already have taken effect") {
 			t.Fatalf("recovered write = %#v", result.Call)
 		}
 		f.requireNoAuthority()
 		after := f.currentRun()
-		if after.Status != AgentRunStatusRunning || after.LeaseOwner != loopWorkerID || after.BudgetUsage.Actions != 1 || len(after.BudgetReservations) != 0 {
+		if after.Status != models.AgentRunStatusRunning || after.LeaseOwner != loopWorkerID || after.BudgetUsage.Actions != 1 || len(after.BudgetReservations) != 0 {
 			t.Fatalf("recovered write changed the Run beyond its budget: %#v", after)
 		}
 		assertActionLifecycleUnclaimable(t, store, call, f.clock.Add(time.Hour))
@@ -411,40 +413,40 @@ func TestLoopRecoveredRunningWriteFailsWithoutDispatch(t *testing.T) {
 }
 
 func TestRecoveredRunningWriteHasInterruptedCode(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		write := f.propose("deploy-1", "deploy")
 		read := f.propose("status-1", "status")
-		for _, call := range []*ActionCall{write, read} {
-			if claimed, err := store.ClaimNextAction(t.Context(), ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: LoopActionLease, OwnActionID: call.ID}); err != nil || claimed == nil {
+		for _, call := range []*models.ActionCall{write, read} {
+			if claimed, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: models.LoopActionLease, OwnActionID: call.ID}); err != nil || claimed == nil {
 				t.Fatalf("crashed claim = %#v, %v", claimed, err)
 			}
 		}
-		f.clock = f.clock.Add(LoopActionLease + time.Second)
+		f.clock = f.clock.Add(models.LoopActionLease + time.Second)
 		worker := f.worker(succeedDispatch)
 		interrupted, err := f.execute(worker, write.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if interrupted.Call.ErrorCode != ActionErrorCodeInterrupted || interrupted.Call.ErrorDetails != nil {
+		if interrupted.Call.ErrorCode != models.ActionErrorCodeInterrupted || interrupted.Call.ErrorDetails != nil {
 			t.Fatalf("recovered write error code = %#v", interrupted.Call)
 		}
 		stored := f.call(write.ID)
-		if stored.Status != ActionCallStatusFailed || stored.ErrorCode != ActionErrorCodeInterrupted {
+		if stored.Status != models.ActionCallStatusFailed || stored.ErrorCode != models.ActionErrorCodeInterrupted {
 			t.Fatalf("stored recovered write = %#v", stored)
 		}
 		reread, err := f.execute(worker, read.ID)
-		if err != nil || reread.Call.Status != ActionCallStatusSucceeded || reread.Call.ErrorCode != "" {
+		if err != nil || reread.Call.Status != models.ActionCallStatusSucceeded || reread.Call.ErrorCode != "" {
 			t.Fatalf("recovered read = %#v, %v", reread, err)
 		}
 	})
 }
 
 func TestLoopRecoveredRunningReadRedispatches(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		call := f.propose("status-1", "status")
-		first, err := store.ClaimNextAction(t.Context(), ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: LoopActionLease, OwnActionID: call.ID})
+		first, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: models.LoopActionLease, OwnActionID: call.ID})
 		if err != nil || first == nil {
 			t.Fatalf("crashed claim = %#v, %v", first, err)
 		}
@@ -455,7 +457,7 @@ func TestLoopRecoveredRunningReadRedispatches(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Call.Status != ActionCallStatusSucceeded || !result.Call.RecoveredRunning || result.Call.FailurePhase != "" || result.Call.Attempt != 2 || result.Call.Output["healthy"] != true {
+		if result.Call.Status != models.ActionCallStatusSucceeded || !result.Call.RecoveredRunning || result.Call.FailurePhase != "" || result.Call.Attempt != 2 || result.Call.Output["healthy"] != true {
 			t.Fatalf("recovered read = %#v", result.Call)
 		}
 		if f.catalogCalls != 1 || f.credentialCalls != 1 || f.dispatches != 1 {
@@ -467,16 +469,16 @@ func TestLoopRecoveredRunningReadRedispatches(t *testing.T) {
 func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 	for _, boundary := range []string{"before_claim", "after_claim", "after_catalog"} {
 		t.Run(boundary, func(t *testing.T) {
-			forActionLifecycleBackends(t, func(t *testing.T, store KernelStore, backend actionLifecycleBackend) {
+			forActionLifecycleBackends(t, func(t *testing.T, store models.KernelStore, backend actionLifecycleBackend) {
 				if boundary == "before_claim" {
 					if _, ok := store.(*sqlite.Store); !ok {
 						t.Skip("the store-side claim gate is seeded through the SQLite store")
 					}
 				}
-				f := newLoopWorkerFixture(t, store, &BudgetPolicy{MaxActions: 10})
+				f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 				call := f.propose("deploy-1", "deploy")
 				before := f.currentRun()
-				gate := &SkillRuntimeMaintenance{Scope: f.scope, SkillID: "release", OperationID: "upgrade-release", Owner: "controller", Active: true, Revision: 1}
+				gate := &models.SkillRuntimeMaintenance{Scope: f.scope, SkillID: "release", OperationID: "upgrade-release", Owner: "controller", Active: true, Revision: 1}
 				wrapped := &loopMaintenanceStore{KernelStore: store, gate: gate, active: boundary != "after_catalog"}
 				if boundary == "before_claim" {
 					if err := sqlstore.WriteSkillRuntimeMaintenance(t.Context(), backend.db, "skill_runtime_maintenance", gate, false); err != nil {
@@ -497,18 +499,18 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				}), models.WithClock(func() time.Time { return f.clock }))
 				result, err := f.execute(worker, call.ID)
 				var held *LoopActionMaintenanceError
-				if result != nil || !errors.As(err, &held) || !errors.Is(err, ErrSkillRuntimeMaintenance) {
+				if result != nil || !errors.As(err, &held) || !errors.Is(err, models.ErrSkillRuntimeMaintenance) {
 					t.Fatalf("maintenance at execution = %#v, %v", result, err)
 				}
 				if held.Maintenance.OperationID != "upgrade-release" || !held.RetryAt.Equal(f.clock.Add(loopActionMaintenanceRetry)) ||
-					held.Call == nil || held.Call.ID != call.ID || held.Call.Status != ActionCallStatusReady {
+					held.Call == nil || held.Call.ID != call.ID || held.Call.Status != models.ActionCallStatusReady {
 					t.Fatalf("maintenance park = %#v", held)
 				}
 				if f.dispatches != 0 || boundary != "after_catalog" && (catalogCalls != 0 || f.credentialCalls != 0) {
 					t.Fatalf("maintenance reached authority: catalog=%d credentials=%d dispatches=%d", catalogCalls, f.credentialCalls, f.dispatches)
 				}
 				stored := f.call(call.ID)
-				if stored.Status != ActionCallStatusReady || stored.CompletedAt != nil || stored.LeaseOwner != "" || stored.Error != "" {
+				if stored.Status != models.ActionCallStatusReady || stored.CompletedAt != nil || stored.LeaseOwner != "" || stored.Error != "" {
 					t.Fatalf("maintenance closed the call: %#v", stored)
 				}
 				if after := f.currentRun(); !reflect.DeepEqual(before, after) {
@@ -523,31 +525,31 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				catalog.afterResolve = nil
 				f.clock = held.RetryAt
 				resumed, err := f.execute(worker, call.ID)
-				if err != nil || resumed.Call.Status != ActionCallStatusSucceeded || f.dispatches != 1 {
+				if err != nil || resumed.Call.Status != models.ActionCallStatusSucceeded || f.dispatches != 1 {
 					t.Fatalf("resumed call = %#v, %v dispatches=%d", resumed, err, f.dispatches)
 				}
-				assertActionLifecycleTerminalEvents(t, store, call, ActionCallStatusSucceeded, 1)
+				assertActionLifecycleTerminalEvents(t, store, call, models.ActionCallStatusSucceeded, 1)
 			})
 		})
 	}
 }
 
 type loopMaintenanceStore struct {
-	KernelStore
-	gate   *SkillRuntimeMaintenance
+	models.KernelStore
+	gate   *models.SkillRuntimeMaintenance
 	active bool
 }
 
-func (s *loopMaintenanceStore) GetSkillRuntimeMaintenance(ctx context.Context, scope Scope, skillID string) (*SkillRuntimeMaintenance, error) {
+func (s *loopMaintenanceStore) GetSkillRuntimeMaintenance(ctx context.Context, scope models.Scope, skillID string) (*models.SkillRuntimeMaintenance, error) {
 	if s.active && scope == s.gate.Scope && skillID == s.gate.SkillID {
 		gate := *s.gate
 		return &gate, nil
 	}
-	return nil, ErrSkillRuntimeMaintenanceNotFound
+	return nil, models.ErrSkillRuntimeMaintenanceNotFound
 }
 
 func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		succeeded := f.propose("status-ok", "status")
 		failed := f.propose("deploy-fails", "deploy")
@@ -569,27 +571,27 @@ func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testin
 			return id
 		}
 		ok, err := f.execute(worker, succeeded.ID)
-		if err != nil || ok.Call.Status != ActionCallStatusSucceeded || ok.Run != nil {
+		if err != nil || ok.Call.Status != models.ActionCallStatusSucceeded || ok.Run != nil {
 			t.Fatalf("succeeded = %#v, %v", ok, err)
 		}
 		requested, err := f.execute(worker, human.ID)
-		if err != nil || requested.Call.Status != ActionCallStatusSucceeded || requested.Run == nil {
+		if err != nil || requested.Call.Status != models.ActionCallStatusSucceeded || requested.Run == nil {
 			t.Fatalf("human intervention = %#v, %v", requested, err)
 		}
-		if requested.Run.Status != AgentRunStatusRunning || requested.Run.WakeCondition != nil || requested.Run.LeaseOwner != loopWorkerID || len(requested.Run.HumanInterventions) != 1 {
+		if requested.Run.Status != models.AgentRunStatusRunning || requested.Run.WakeCondition != nil || requested.Run.LeaseOwner != loopWorkerID || len(requested.Run.HumanInterventions) != 1 {
 			t.Fatalf("human intervention changed more than the request list: %#v", requested.Run)
 		}
 		request := requested.Run.HumanInterventions[0]
 		encoded, _ := json.Marshal(request)
-		if request.ID != "human-request" || request.ActionCallID != human.ID || request.Status != HumanInterventionStatusPending ||
+		if request.ID != "human-request" || request.ActionCallID != human.ID || request.Status != models.HumanInterventionStatusPending ||
 			len(request.Challenge) != 1 || request.Challenge[0] != "captcha" || strings.Contains(string(encoded), "loop-secret") {
 			t.Fatalf("human intervention request = %s", encoded)
 		}
-		if requested.Event.EventType != "action.human_intervention_required" || requested.Event.Payload["humanInterventionId"] != "human-request" || requested.Event.Severity != ActivitySeverityWarning {
+		if requested.Event.EventType != "action.human_intervention_required" || requested.Event.Payload["humanInterventionId"] != "human-request" || requested.Event.Severity != models.ActivitySeverityWarning {
 			t.Fatalf("human intervention event = %#v", requested.Event)
 		}
 		failure, err := f.execute(worker, failed.ID)
-		if err != nil || failure.Call.Status != ActionCallStatusFailed || failure.Run != nil || failure.Call.FailurePhase != ActionFailureAfterDispatch ||
+		if err != nil || failure.Call.Status != models.ActionCallStatusFailed || failure.Run != nil || failure.Call.FailurePhase != models.ActionFailureAfterDispatch ||
 			!strings.Contains(failure.Call.Error, "[REDACTED]") || strings.Contains(failure.Call.Error, "loop-secret") || failure.Call.ErrorCode != "" {
 			t.Fatalf("failed = %#v, %v", failure, err)
 		}
@@ -600,8 +602,8 @@ func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testin
 		}
 	})
 	t.Run("budget", func(t *testing.T) {
-		forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
-			f := newLoopWorkerFixture(t, store, &BudgetPolicy{MaxActions: 10})
+		forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+			f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 			call := f.propose("deploy-1", "deploy")
 			reserved := f.currentRun()
 			if _, ok := reserved.BudgetReservations[agentrun.ActionBudgetReservationID(call.ID)]; !ok {
@@ -612,7 +614,7 @@ func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testin
 				t.Fatalf("budgeted outcome = %#v, %v", result, err)
 			}
 			after := f.currentRun()
-			if after.BudgetUsage.Actions != 1 || len(after.BudgetReservations) != 0 || after.Status != AgentRunStatusRunning ||
+			if after.BudgetUsage.Actions != 1 || len(after.BudgetReservations) != 0 || after.Status != models.AgentRunStatusRunning ||
 				after.LeaseOwner != loopWorkerID || !reflect.DeepEqual(after.Checkpoint, reserved.Checkpoint) || after.Revision != reserved.Revision+1 {
 				t.Fatalf("budget settlement changed more than the budget: before=%#v after=%#v", reserved, after)
 			}
@@ -627,7 +629,7 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
 	proposal := proposeLoopAction(t, store, catalog, run, "agent-worker", now, loopActionSpec{
 		id: "send-1", skillID: "mail", version: "1.0.0", action: "send", arguments: map[string]interface{}{"to": "ana@example.com"},
-		externalOperation: &ExternalOperationIdentity{Resource: "mailbox-ana", Operation: "send"},
+		externalOperation: &activity.ExternalOperationIdentity{Resource: "mailbox-ana", Operation: "send"},
 	})
 	if proposal.Call.ExternalOperationDigest == "" {
 		t.Fatal("test needs an external operation")
@@ -648,7 +650,7 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := result.Call
-	if dispatches != 0 || call.Status != ActionCallStatusFailed || call.FailurePhase != ActionFailureBeforeDispatch ||
+	if dispatches != 0 || call.Status != models.ActionCallStatusFailed || call.FailurePhase != models.ActionFailureBeforeDispatch ||
 		!strings.HasPrefix(call.Error, "connect_account_required: ") || call.ExternalOperationDigest != "" || !skillbinding.IsParkedConnectAccountCall(call) {
 		t.Fatalf("parked call = %#v", call)
 	}
@@ -663,26 +665,26 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 		t.Fatalf("parked outcome = event %#v run %#v", result.Event, result.Run)
 	}
 	after, _ := store.GetAgentRun(t.Context(), scope, run.ID)
-	if after.Status != AgentRunStatusRunning || after.WakeCondition != nil || after.Revision != before.Revision {
+	if after.Status != models.AgentRunStatusRunning || after.WakeCondition != nil || after.Revision != before.Revision {
 		t.Fatalf("a parked loop call parked the Run itself: %#v", after)
 	}
 }
 
 func TestPoolClosesAbandonedLoopCallOfEndedRun(t *testing.T) {
-	for _, ended := range []AgentRunStatus{AgentRunStatusCanceled, AgentRunStatusFailed, AgentRunStatusCompleted} {
+	for _, ended := range []models.AgentRunStatus{models.AgentRunStatusCanceled, models.AgentRunStatusFailed, models.AgentRunStatusCompleted} {
 		t.Run(string(ended), func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
-				f := newLoopWorkerFixture(t, store, &BudgetPolicy{MaxActions: 10})
+			forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+				f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 				ready := f.propose("ready-call", "deploy")
 				running := f.propose("running-call", "status")
-				if claimed, err := store.ClaimNextAction(t.Context(), ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: LoopActionLease, OwnActionID: running.ID}); err != nil || claimed == nil {
+				if claimed, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: models.LoopActionLease, OwnActionID: running.ID}); err != nil || claimed == nil {
 					t.Fatalf("loop claim = %#v, %v", claimed, err)
 				}
 				f.setRunStatus(ended)
 				endedRun := f.currentRun()
-				f.clock = f.clock.Add(LoopActionLease + time.Second)
+				f.clock = f.clock.Add(models.LoopActionLease + time.Second)
 				worker := f.worker(succeedDispatch)
-				closed := map[string]*ActionCall{}
+				closed := map[string]*models.ActionCall{}
 				for range 2 {
 					result, err := worker.RunOnce(t.Context(), f.scope, "pool-worker", time.Minute)
 					if err != nil || result == nil {
@@ -691,10 +693,10 @@ func TestPoolClosesAbandonedLoopCallOfEndedRun(t *testing.T) {
 					closed[result.Call.ID] = result.Call
 				}
 				f.requireNoAuthority()
-				if call := closed[ready.ID]; call == nil || call.Status != ActionCallStatusCanceled || call.Error != errLoopActionAbandoned.Error() || call.CompletedAt == nil {
+				if call := closed[ready.ID]; call == nil || call.Status != models.ActionCallStatusCanceled || call.Error != errLoopActionAbandoned.Error() || call.CompletedAt == nil {
 					t.Fatalf("abandoned ready call = %#v", call)
 				}
-				if call := closed[running.ID]; call == nil || call.Status != ActionCallStatusFailed || call.FailurePhase != ActionFailureAfterDispatch ||
+				if call := closed[running.ID]; call == nil || call.Status != models.ActionCallStatusFailed || call.FailurePhase != models.ActionFailureAfterDispatch ||
 					call.Error != errLoopActionAbandoned.Error() || !call.RecoveredRunning {
 					t.Fatalf("abandoned running call = %#v", call)
 				}
@@ -709,12 +711,12 @@ func TestPoolClosesAbandonedLoopCallOfEndedRun(t *testing.T) {
 }
 
 func TestPoolWorkerNeverRunsLoopCallOfLiveRun(t *testing.T) {
-	for _, status := range []AgentRunStatus{AgentRunStatusRunning, AgentRunStatusQueued, AgentRunStatusWaitingForApproval, AgentRunStatusWaitingForEvent, AgentRunStatusPaused} {
+	for _, status := range []models.AgentRunStatus{models.AgentRunStatusRunning, models.AgentRunStatusQueued, models.AgentRunStatusWaitingForApproval, models.AgentRunStatusWaitingForEvent, models.AgentRunStatusPaused} {
 		t.Run(string(status), func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+			forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
 				f := newLoopWorkerFixture(t, store, nil)
 				call := f.propose("deploy-1", "deploy")
-				if status != AgentRunStatusRunning {
+				if status != models.AgentRunStatusRunning {
 					f.setRunStatus(status)
 				}
 				worker := f.worker(succeedDispatch)
@@ -723,7 +725,7 @@ func TestPoolWorkerNeverRunsLoopCallOfLiveRun(t *testing.T) {
 					t.Fatalf("pool took a live Run's loop call: %#v, %v", result, err)
 				}
 				f.requireNoAuthority()
-				if stored := f.call(call.ID); stored.Status != ActionCallStatusReady || stored.Attempt != 0 {
+				if stored := f.call(call.ID); stored.Status != models.ActionCallStatusReady || stored.Attempt != 0 {
 					t.Fatalf("pool touched the loop call: %#v", stored)
 				}
 			})

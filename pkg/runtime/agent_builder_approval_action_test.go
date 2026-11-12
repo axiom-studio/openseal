@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -16,14 +17,14 @@ func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
 		bound *skill.BoundAction
 		want  bool
 	}{
-		{bound(AgentManagementSkillID, AgentActionCreateAgent), true},
-		{bound(AgentManagementSkillID, AgentActionUpdateAgent), true},
-		{bound(TeamManagementSkillID, "create_team"), true},
-		{bound(AgentManagementSkillID, AgentActionTryAgent), false},
-		{bound(AgentManagementSkillID, AgentActionListAgents), false},
-		{bound(AgentManagementSkillID, AgentActionAmendBehavior), false},
-		{bound(TeamManagementSkillID, TeamActionUpdateMember), false},
-		{bound("acme.notes", AgentActionCreateAgent), false},
+		{bound(models.AgentManagementSkillID, models.AgentActionCreateAgent), true},
+		{bound(models.AgentManagementSkillID, models.AgentActionUpdateAgent), true},
+		{bound(models.TeamManagementSkillID, "create_team"), true},
+		{bound(models.AgentManagementSkillID, models.AgentActionTryAgent), false},
+		{bound(models.AgentManagementSkillID, models.AgentActionListAgents), false},
+		{bound(models.AgentManagementSkillID, models.AgentActionAmendBehavior), false},
+		{bound(models.TeamManagementSkillID, TeamActionUpdateMember), false},
+		{bound("acme.notes", models.AgentActionCreateAgent), false},
 		{nil, false},
 	} {
 		if got := isAgentBuilderApprovalAction(tc.bound); got != tc.want {
@@ -35,17 +36,17 @@ func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
 	coordinator := NewActionCoordinator(newTestKernelStore(t), newTestKernelStore(t), skill.NewCatalog(), NewDefaultActionPolicy(), nil)
 	coordinator.newID = func() string { return "approval-team" }
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
-	team := bound(TeamManagementSkillID, "create_team")
+	team := bound(models.TeamManagementSkillID, "create_team")
 	team.Action.Risk, team.Action.Review = skill.RiskLevelWrite, skill.ActionReviewAlways
-	call := &ActionCall{ID: "call-team"}
+	call := &models.ActionCall{ID: "call-team"}
 	approval := coordinator.newApprovalCheckpoint(context.Background(),
-		ProposeActionRequest{Scope: Scope{Kind: "tenant", ID: "tenant-a"}}, &AgentRun{ID: "run-team"}, team, map[string]interface{}{},
+		ProposeActionRequest{Scope: models.Scope{Kind: "tenant", ID: "tenant-a"}}, &models.AgentRun{ID: "run-team"}, team, map[string]interface{}{},
 		map[string]interface{}{"resourceType": "team", "operation": "create_team"}, call,
 		ActionPolicyDecision{
-			Disposition: ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}},
-			ApprovalTTL: time.Hour, ApprovalTimeout: ApprovalTimeoutApprove, ApprovalDestinations: []ApprovalDestination{{EndpointID: "slack"}},
+			Disposition: ActionDispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}},
+			ApprovalTTL: time.Hour, ApprovalTimeout: models.ApprovalTimeoutApprove, ApprovalDestinations: []models.ApprovalDestination{{EndpointID: "slack"}},
 		}, "Create the team", now)
-	if !approval.ExpiresAt.Equal(now.Add(agentBuilderApprovalTTL)) || approval.TimeoutDecision != ApprovalTimeoutExpire || len(approval.Destinations) != 0 {
+	if !approval.ExpiresAt.Equal(now.Add(agentBuilderApprovalTTL)) || approval.TimeoutDecision != models.ApprovalTimeoutExpire || len(approval.Destinations) != 0 {
 		t.Fatalf("create_team card = %#v", approval)
 	}
 }

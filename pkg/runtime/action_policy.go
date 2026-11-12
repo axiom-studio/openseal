@@ -8,18 +8,19 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 type DefaultActionPolicy struct {
-	Approvers       []ApprovalPrincipal
+	Approvers       []models.ApprovalPrincipal
 	ApprovalTTL     time.Duration
-	ApprovalTimeout ApprovalTimeoutDecision
+	ApprovalTimeout models.ApprovalTimeoutDecision
 }
 
 func NewDefaultActionPolicy() *DefaultActionPolicy {
-	return &DefaultActionPolicy{Approvers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ApprovalTTL: 24 * time.Hour}
+	return &DefaultActionPolicy{Approvers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}}, ApprovalTTL: 24 * time.Hour}
 }
 
 func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
@@ -39,10 +40,10 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	}
 	// Creating a routine always shows its brief, in every approval mode, and
 	// so does making it run a new version of its script.
-	if input.Bound.Definition.ID == RunbookManagementSkillID && (action.Name == RunbookActionCreateTask || action.Name == RunbookActionSetScript) {
+	if input.Bound.Definition.ID == models.RunbookManagementSkillID && (action.Name == RunbookActionCreateTask || action.Name == RunbookActionSetScript) {
 		decision, err := p.requireApproval("a routine's brief is always approved before it is created")
-		if decision.ApprovalTimeout == ApprovalTimeoutApprove {
-			decision.ApprovalTimeout = ApprovalTimeoutExpire
+		if decision.ApprovalTimeout == models.ApprovalTimeoutApprove {
+			decision.ApprovalTimeout = models.ApprovalTimeoutExpire
 		}
 		return decision, err
 	}
@@ -50,7 +51,7 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	// it is reviewed in every approval mode, like create_agent and update_agent.
 	if skillbinding.IsTargetedSkillBindingAction(input.Bound, input.Arguments) {
 		decision, err := p.requireApproval("a skill change for another agent is always approved by a person")
-		decision.ApprovalTimeout = ApprovalTimeoutExpire
+		decision.ApprovalTimeout = models.ApprovalTimeoutExpire
 		return decision, err
 	}
 	// A routine run performs what the user approved in its brief without
@@ -86,14 +87,14 @@ func (p *DefaultActionPolicy) requireApproval(reason string) (ActionPolicyDecisi
 	return ActionPolicyDecision{
 		Disposition:       ActionDispositionRequireApproval,
 		Reason:            reason,
-		EligibleApprovers: append([]ApprovalPrincipal(nil), p.Approvers...), ApprovalTTL: ttl,
+		EligibleApprovers: append([]models.ApprovalPrincipal(nil), p.Approvers...), ApprovalTTL: ttl,
 		ApprovalTimeout: p.ApprovalTimeout,
 	}, nil
 }
 
 type EligibleApprovalAuthorizer struct{}
 
-func (EligibleApprovalAuthorizer) AuthorizeApproval(_ context.Context, principal ApprovalPrincipal, approval *ApprovalCheckpoint) error {
+func (EligibleApprovalAuthorizer) AuthorizeApproval(_ context.Context, principal models.ApprovalPrincipal, approval *models.ApprovalCheckpoint) error {
 	if approval == nil {
 		return errors.New("approval is required")
 	}

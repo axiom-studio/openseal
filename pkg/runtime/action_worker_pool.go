@@ -16,7 +16,7 @@ import (
 )
 
 type ActionWorkerConfig struct {
-	Scope          Scope
+	Scope          models.Scope
 	Concurrency    int
 	PollInterval   time.Duration
 	LeaseDuration  time.Duration
@@ -58,23 +58,23 @@ type ActionWorkerPool struct {
 	signals atomic.Pointer[workqueue.WorkSignalStatus]
 	// deadlines lets a queue-driven pool schedule its next retry or lease
 	// expiry instead of polling. Stores without it always poll.
-	deadlines ActionDeadlineStore
+	deadlines models.ActionDeadlineStore
 	activity  workqueue.PoolActivity
 	now       func() time.Time
 }
 
-func NewActionWorkerPool(store KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+func NewActionWorkerPool(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
 	return newActionWorkerPool(store, catalog, credentials, nil, dispatcher, logger, config, opts...)
 }
 
-func NewActionCredentialLeaseWorkerPool(store KernelStore, catalog agentrun.ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+func NewActionCredentialLeaseWorkerPool(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
 	if issuer == nil {
 		return nil, errors.New("action credential lease issuer is required")
 	}
 	return newActionWorkerPool(store, catalog, nil, issuer, dispatcher, logger, config, opts...)
 }
 
-func newActionWorkerPool(store KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+func newActionWorkerPool(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
 	if store == nil || catalog == nil || dispatcher == nil {
 		return nil, errors.New("action store, catalog, and dispatcher are required")
 	}
@@ -89,7 +89,7 @@ func newActionWorkerPool(store KernelStore, catalog agentrun.ActionExecutionCata
 		worker = NewActionWorkerWithCredentialLeaseIssuer(store, catalog, issuer, dispatcher, opts...)
 	}
 	pool := &ActionWorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1), poll: workqueue.NewWorkerPollSignal(), now: models.ClockFrom(opts)}
-	pool.deadlines, _ = store.(ActionDeadlineStore)
+	pool.deadlines, _ = store.(models.ActionDeadlineStore)
 	pool.activity.Touch()
 	worker.onClaim = pool.requestClaim
 	return pool, nil
@@ -128,7 +128,7 @@ func (p *ActionWorkerPool) Wake() {
 	p.requestClaim()
 }
 
-func (p *ActionWorkerPool) WakeScope(scope Scope) {
+func (p *ActionWorkerPool) WakeScope(scope models.Scope) {
 	if scope == p.config.Scope {
 		p.Wake()
 	}
@@ -185,10 +185,10 @@ func (p *ActionWorkerPool) pollClaims(ctx context.Context) {
 				}
 				failures++
 				p.logger.Warnw("action deadline lookup failed", "scopeKind", p.config.Scope.Kind, "scopeId", p.config.Scope.ID, "error", err)
-				signals.ScheduleIn(WorkFamilyAction, p.config.Scope, workqueue.WorkerPollDelay(p.config.PollInterval, failures, seed))
+				signals.ScheduleIn(models.WorkFamilyAction, p.config.Scope, workqueue.WorkerPollDelay(p.config.PollInterval, failures, seed))
 			} else {
 				failures = 0
-				signals.Schedule(WorkFamilyAction, p.config.Scope, deadline)
+				signals.Schedule(models.WorkFamilyAction, p.config.Scope, deadline)
 			}
 			wait = workqueue.WaitForever()
 		} else {

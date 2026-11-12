@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -20,10 +22,10 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
-	storetest.SeedActionCall(t, store, &ActionCall{
+	storetest.SeedActionCall(t, store, &models.ActionCall{
 		ID: "prepared-comment", Scope: scope, RunID: run.ID, TurnID: "step-0", DeploymentID: "release-agent",
-		SkillID: "browser", SkillVersion: "2.0.0", Action: "fill", Status: ActionCallStatusSucceeded,
-		Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
+		SkillID: "browser", SkillVersion: "2.0.0", Action: "fill", Status: models.ActionCallStatusSucceeded,
+		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
 		Arguments: map[string]interface{}{
 			"value": "The exact reviewed comment.", "target": "comment-box", "apiToken": "legacy-secret",
 		},
@@ -35,8 +37,8 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 		}
 		return ActionPolicyDecision{
 			Disposition: ActionDispositionRequireApproval, Reason: "production change",
-			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "release-manager"}}, ApprovalTTL: time.Hour,
-			ApprovalTimeout: ApprovalTimeoutApprove,
+			EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "release-manager"}}, ApprovalTTL: time.Hour,
+			ApprovalTimeout: models.ApprovalTimeoutApprove,
 		}, nil
 	})
 	coordinator := NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now.Add(time.Second) }))
@@ -51,8 +53,8 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
 		Arguments: map[string]interface{}{"environment": "production", "credentialField": "username", "apiToken": "raw-secret", "nested": map[string]interface{}{"password": "also-secret", "region": "us"}},
 		Summary:   "Deploy release to production",
-		Actor:     ActivityActor{Type: "agent", ID: "release-agent"}, EvidenceRefs: []string{"artifact://change-plan", "action-call:prepared-comment"},
-		ReviewContext: &ApprovalReviewContext{
+		Actor:     models.ActivityActor{Type: "agent", ID: "release-agent"}, EvidenceRefs: []string{"artifact://change-plan", "action-call:prepared-comment"},
+		ReviewContext: &activity.ApprovalReviewContext{
 			Summary: "Deploy release 42", Target: "production", Audience: "All customers",
 			Purpose: "Ship the reviewed release", Consequences: []string{"Updates the production service"},
 		},
@@ -60,10 +62,10 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Call.Status != ActionCallStatusWaitingApproval || result.Approval == nil || result.Approval.ID != "approval" {
+	if result.Call.Status != models.ActionCallStatusWaitingApproval || result.Approval == nil || result.Approval.ID != "approval" {
 		t.Fatalf("approval proposal mismatch: %#v", result)
 	}
-	if result.Approval.TimeoutDecision != ApprovalTimeoutApprove {
+	if result.Approval.TimeoutDecision != models.ApprovalTimeoutApprove {
 		t.Fatalf("approval timeout policy was not persisted: %#v", result.Approval)
 	}
 	review := result.Approval.ProposedAction["reviewContext"].(map[string]interface{})
@@ -124,7 +126,7 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 	stale := loopProposeRequest(base, "stale")
 	stale.Arguments = map[string]interface{}{"environment": "staging"}
 	stale.WorkerID = "other-worker"
-	if _, err := coordinator.Propose(ctx, stale); !errors.Is(err, ErrLeaseLost) {
+	if _, err := coordinator.Propose(ctx, stale); !errors.Is(err, models.ErrLeaseLost) {
 		t.Fatalf("stale worker error = %v", err)
 	}
 	allowed := loopProposeRequest(base, "allowed")
@@ -133,7 +135,7 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Call.Status != ActionCallStatusReady || result.Approval != nil || result.Run != nil {
+	if result.Call.Status != models.ActionCallStatusReady || result.Approval != nil || result.Run != nil {
 		t.Fatalf("allowed call mismatch: %#v", result)
 	}
 	assertLoopRunUntouched(t, store, run)
@@ -148,7 +150,7 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 		policyEvaluations++
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
 	}), nil)
-	identity := &ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}
+	identity := &activity.ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}
 
 	firstRun := claimedActionRun(t, store, scope, time.Now().UTC(), "worker-one")
 	first, err := coordinator.Propose(ctx, loopProposeRequest(ProposeActionRequest{
@@ -168,7 +170,7 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Call.Status != ActionCallStatusReady || second.Call.DuplicateOfActionCallID != "" || second.Event.EventType == "action.duplicate_suppressed" {
+	if second.Call.Status != models.ActionCallStatusReady || second.Call.DuplicateOfActionCallID != "" || second.Event.EventType == "action.duplicate_suppressed" {
 		t.Fatalf("separate occurrence was suppressed: %#v", second)
 	}
 	if first.Call.ExternalOperationDigest == second.Call.ExternalOperationDigest || policyEvaluations != 2 {
@@ -188,7 +190,7 @@ func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 	var rejection *ActionProposalRejection
 	forbidden := base
 	forbidden.Action = "click"
-	forbidden.ExternalOperation = &ExternalOperationIdentity{Resource: "browser-session:one", Operation: "login"}
+	forbidden.ExternalOperation = &activity.ExternalOperationIdentity{Resource: "browser-session:one", Operation: "login"}
 	if _, err := coordinator.Propose(ctx, forbidden); !errors.As(err, &rejection) || rejection.Code != ProposalRejectionExternalIdentityInvalid || !strings.Contains(err.Error(), "forbids an external operation identity") {
 		t.Fatalf("forbidden error=%v", err)
 	}
@@ -197,7 +199,7 @@ func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 	if _, err := coordinator.Propose(ctx, required); !errors.As(err, &rejection) || rejection.Code != ProposalRejectionExternalIdentityInvalid || !strings.Contains(err.Error(), "requires an external operation identity") {
 		t.Fatalf("required error=%v", err)
 	}
-	calls, err := store.ListActionCalls(ctx, ActionFilter{Scope: scope, RunID: run.ID})
+	calls, err := store.ListActionCalls(ctx, models.ActionFilter{Scope: scope, RunID: run.ID})
 	if err != nil || len(calls) != 0 {
 		t.Fatalf("rejected proposals were recorded: %#v, %v", calls, err)
 	}
@@ -206,7 +208,7 @@ func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 // loopProposeRequest is req as the loop proposes tool call toolCallID of
 // step-1: loop origin and execution and the per-call idempotency key.
 func loopProposeRequest(req ProposeActionRequest, toolCallID string) ProposeActionRequest {
-	req.Origin, req.Execution = ActionOriginLoop, ActionExecutionLoop
+	req.Origin, req.Execution = models.ActionOriginLoop, models.ActionExecutionLoop
 	if req.TurnID == "" {
 		req.TurnID = "step-1"
 	}
@@ -218,20 +220,20 @@ func loopProposeRequest(req ProposeActionRequest, toolCallID string) ProposeActi
 
 // assertLoopRunUntouched checks a loop proposal left the Run as claimed:
 // running, same lease, same revision, no wake condition.
-func assertLoopRunUntouched(t *testing.T, store PortfolioStore, run *AgentRun) {
+func assertLoopRunUntouched(t *testing.T, store models.PortfolioStore, run *models.AgentRun) {
 	t.Helper()
 	current, err := store.GetAgentRun(context.Background(), run.Scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Status != AgentRunStatusRunning || current.Revision != run.Revision || current.LeaseOwner != run.LeaseOwner || current.WakeCondition != nil {
+	if current.Status != models.AgentRunStatusRunning || current.Revision != run.Revision || current.LeaseOwner != run.LeaseOwner || current.WakeCondition != nil {
 		t.Fatalf("loop proposal changed the Run: %#v", current)
 	}
 }
 
-func externalOperationPolicyCatalog(t *testing.T) (*skill.Catalog, Scope) {
+func externalOperationPolicyCatalog(t *testing.T) (*skill.Catalog, models.Scope) {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	catalog := skill.NewCatalog()
 	definition := &skill.Definition{ID: "browser", Version: "1.0.0", Name: "Browser", Transport: skill.TransportReference{Kind: "tool", Endpoint: "browser"}, Actions: map[string]skill.Action{
 		"click":  {Name: "click", Description: "Session-local click", InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}, Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, ExternalOperationPolicy: skill.ExternalOperationForbidden},
@@ -246,10 +248,10 @@ func externalOperationPolicyCatalog(t *testing.T) (*skill.Catalog, Scope) {
 	return catalog, scope
 }
 
-func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
+func governedActionCatalog(t *testing.T) (*skill.Catalog, models.Scope) {
 	t.Helper()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	catalog := skill.NewCatalog()
 	definition := &skill.Definition{
 		ID: "release", Version: "1.0.0", Name: "Release", Transport: skill.TransportReference{Kind: "http", Endpoint: "https://release.invalid"},
@@ -281,22 +283,22 @@ func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 	return catalog, scope
 }
 
-func claimedActionRun(t *testing.T, store *sqlite.Store, scope Scope, now time.Time, worker string) *AgentRun {
+func claimedActionRun(t *testing.T, store *sqlite.Store, scope models.Scope, now time.Time, worker string) *models.AgentRun {
 	t.Helper()
-	return claimedOwnedActionRun(t, store, scope, now, worker, ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"})
+	return claimedOwnedActionRun(t, store, scope, now, worker, models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release-team"})
 }
 
 // claimedOwnedActionRun claims a run of release-agent under owner.
-func claimedOwnedActionRun(t *testing.T, store *sqlite.Store, scope Scope, now time.Time, worker string, owner ObjectiveOwner) *AgentRun {
+func claimedOwnedActionRun(t *testing.T, store *sqlite.Store, scope models.Scope, now time.Time, worker string, owner models.ObjectiveOwner) *models.AgentRun {
 	t.Helper()
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(context.Background(), AgentRunClaim{Scope: scope, WorkerID: worker, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(context.Background(), models.AgentRunClaim{Scope: scope, WorkerID: worker, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

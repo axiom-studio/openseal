@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -24,8 +25,8 @@ const ActivityEventActionRefused = "action.refused"
 // RefusedLoopCallRequest describes one governed tool call of a step that the
 // kernel's repeat guard refused before dispatch.
 type RefusedLoopCallRequest struct {
-	Scope           Scope
-	Run             *AgentRun
+	Scope           models.Scope
+	Run             *models.AgentRun
 	StepID          string // ActionCall.TurnID (D1)
 	DeploymentID    string
 	SkillID         string
@@ -47,7 +48,7 @@ type RefusedLoopCallRequest struct {
 	PriorStep               int64
 	// Count is the call's position in the counted sequence (3 = 3rd identical).
 	Count int
-	Lease *AgentRunLeaseGuard
+	Lease *models.AgentRunLeaseGuard
 }
 
 func (r RefusedLoopCallRequest) validate() error {
@@ -73,7 +74,7 @@ func (r RefusedLoopCallRequest) validate() error {
 
 // NewRefusedLoopCall builds the refused row and its activity event. It does
 // not resolve policy, approval, budget or credentials: the call never runs.
-func (c *ActionCoordinator) NewRefusedLoopCall(req RefusedLoopCallRequest) (*ActionCall, *ActivityEvent, error) {
+func (c *ActionCoordinator) NewRefusedLoopCall(req RefusedLoopCallRequest) (*models.ActionCall, *models.ActivityEvent, error) {
 	if c == nil {
 		return nil, nil, errors.New("action coordinator is required")
 	}
@@ -82,17 +83,17 @@ func (c *ActionCoordinator) NewRefusedLoopCall(req RefusedLoopCallRequest) (*Act
 	}
 	now := c.now().UTC()
 	run := req.Run
-	call := &ActionCall{
+	call := &models.ActionCall{
 		ID: c.newID(), Scope: req.Scope, RunID: run.ID, TurnID: req.StepID, DeploymentID: req.DeploymentID,
 		BindingID: req.BindingID, BindingRevision: req.BindingRevision, SkillID: req.SkillID, SkillVersion: req.SkillVersion,
-		Action: req.Action, Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Status: ActionCallStatusRefused,
+		Action: req.Action, Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Status: models.ActionCallStatusRefused,
 		Risk: req.Risk, SideEffect: req.SideEffect, Arguments: persistedActionArguments(req.Arguments, req.InputSchema),
 		DuplicateOfActionCallID: req.DuplicateOfActionCallID, ErrorCode: req.Code, Error: req.Message,
 		ErrorDetails: map[string]string{"step": strconv.FormatInt(req.PriorStep, 10), "count": strconv.Itoa(req.Count)},
 		MaxAttempts:  1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now, CompletedAt: &now,
 	}
-	call.InvocationDigest = ComputeActionInvocationDigest(call)
-	call.SemanticDigest = ComputeActionSemanticDigest(call)
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	call.SemanticDigest = models.ComputeActionSemanticDigest(call)
 	if err := call.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -100,14 +101,14 @@ func (c *ActionCoordinator) NewRefusedLoopCall(req RefusedLoopCallRequest) (*Act
 	if req.Code == RefusedLoopCallDuplicateSuppressed {
 		summary = "Already done; not repeated"
 	}
-	actor := ActivityActor{Type: "worker"}
+	actor := models.ActivityActor{Type: "worker"}
 	if req.Lease != nil {
 		actor.ID = req.Lease.WorkerID
 	}
-	event := &ActivityEvent{
-		ID: c.newID(), Scope: req.Scope, EventType: ActivityEventActionRefused, Severity: ActivitySeverityInfo,
-		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TurnID: req.StepID, TeamID: teamIDForRun(run),
-		ParentRunID: run.ParentRunID, Actor: actor, Summary: summary, Visibility: ActivityVisibilityScope, CreatedAt: now,
+	event := &models.ActivityEvent{
+		ID: c.newID(), Scope: req.Scope, EventType: ActivityEventActionRefused, Severity: models.ActivitySeverityInfo,
+		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TurnID: req.StepID, TeamID: models.TeamIDForRun(run),
+		ParentRunID: run.ParentRunID, Actor: actor, Summary: summary, Visibility: models.ActivityVisibilityScope, CreatedAt: now,
 		Payload: map[string]interface{}{
 			"actionCallId": call.ID, "duplicateOfActionCallId": call.DuplicateOfActionCallID,
 			"skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "errorCode": call.ErrorCode,
@@ -120,7 +121,7 @@ func (c *ActionCoordinator) NewRefusedLoopCall(req RefusedLoopCallRequest) (*Act
 // lease (the loop fence of CreateActionProposal), without changing the Run.
 // The executor then names the row on the tool entry's terminal transition
 // (ToolEntryTransitionRequest.ActionCallID), which requires it to exist.
-func (c *ActionCoordinator) RecordRefusedLoopCall(ctx context.Context, req RefusedLoopCallRequest) (*ActionProposalResult, error) {
+func (c *ActionCoordinator) RecordRefusedLoopCall(ctx context.Context, req RefusedLoopCallRequest) (*models.ActionProposalResult, error) {
 	if req.Lease == nil {
 		return nil, errors.New("a refused loop call requires its Run lease")
 	}
@@ -128,7 +129,7 @@ func (c *ActionCoordinator) RecordRefusedLoopCall(ctx context.Context, req Refus
 	if err != nil {
 		return nil, err
 	}
-	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{
+	return c.actions.CreateActionProposal(ctx, models.ActionProposalRecord{
 		Call: call, ExpectedRunRevision: req.Run.Revision, Lease: req.Lease, Event: event,
 	})
 }

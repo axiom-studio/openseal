@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -17,13 +18,13 @@ type testCredentialLeaseSigner struct{ key []byte }
 
 const testActionCredentialLeaseTransport = "reddit_search"
 
-func (s testCredentialLeaseSigner) SignActionCredentialLease(_ context.Context, payload []byte) (ActionCredentialLeaseSignature, error) {
+func (s testCredentialLeaseSigner) SignActionCredentialLease(_ context.Context, payload []byte) (models.ActionCredentialLeaseSignature, error) {
 	mac := hmac.New(sha256.New, s.key)
 	_, _ = mac.Write(payload)
-	return ActionCredentialLeaseSignature{Algorithm: "hmac-sha256", KeyID: "test-key", Value: mac.Sum(nil)}, nil
+	return models.ActionCredentialLeaseSignature{Algorithm: "hmac-sha256", KeyID: "test-key", Value: mac.Sum(nil)}, nil
 }
 
-func (s testCredentialLeaseSigner) VerifyActionCredentialLease(_ context.Context, payload []byte, signature ActionCredentialLeaseSignature) error {
+func (s testCredentialLeaseSigner) VerifyActionCredentialLease(_ context.Context, payload []byte, signature models.ActionCredentialLeaseSignature) error {
 	expected, _ := s.SignActionCredentialLease(context.Background(), payload)
 	if signature.Algorithm != expected.Algorithm || signature.KeyID != expected.KeyID || !hmac.Equal(signature.Value, expected.Value) {
 		return errors.New("invalid signature")
@@ -34,10 +35,10 @@ func (s testCredentialLeaseSigner) VerifyActionCredentialLease(_ context.Context
 type testCredentialLeaseRedeemer struct {
 	mu        sync.Mutex
 	seen      map[string]bool
-	authorize func(ActionCredentialLeaseRedemptionRequest) error
+	authorize func(models.ActionCredentialLeaseRedemptionRequest) error
 }
 
-func (g *testCredentialLeaseRedeemer) RedeemActionCredentialLease(_ context.Context, request ActionCredentialLeaseRedemptionRequest) error {
+func (g *testCredentialLeaseRedeemer) RedeemActionCredentialLease(_ context.Context, request models.ActionCredentialLeaseRedemptionRequest) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.authorize != nil {
@@ -47,7 +48,7 @@ func (g *testCredentialLeaseRedeemer) RedeemActionCredentialLease(_ context.Cont
 	}
 	key := request.Lease.Issuer + "\x00" + request.Lease.Audience + "\x00" + request.Lease.Nonce
 	if g.seen[key] {
-		return ErrActionCredentialLeaseReplay
+		return models.ErrActionCredentialLeaseReplay
 	}
 	g.seen[key] = true
 	return nil
@@ -55,7 +56,7 @@ func (g *testCredentialLeaseRedeemer) RedeemActionCredentialLease(_ context.Cont
 
 func TestSignedActionCredentialLeaseBindsExactDurableAuthority(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+	lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000001",
 	})
@@ -67,8 +68,8 @@ func TestSignedActionCredentialLeaseBindsExactDurableAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	redeemer := &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request ActionCredentialLeaseRedemptionRequest) error {
-		return MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields)
+	redeemer := &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request models.ActionCredentialLeaseRedemptionRequest) error {
+		return models.MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields)
 	}}
 	validator, err := NewActionCredentialLeaseValidator(signer, redeemer)
 	if err != nil {
@@ -94,9 +95,9 @@ func TestSignedActionCredentialLeaseBindsExactDurableAuthority(t *testing.T) {
 
 func TestActionCredentialLeaseValidationFailsClosed(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
-	newEnvelope := func(t *testing.T) (*SignedActionCredentialLease, testCredentialLeaseSigner) {
+	newEnvelope := func(t *testing.T) (*models.SignedActionCredentialLease, testCredentialLeaseSigner) {
 		t.Helper()
-		lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+		lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 			TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 			Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000002",
 		})
@@ -110,32 +111,32 @@ func TestActionCredentialLeaseValidationFailsClosed(t *testing.T) {
 		}
 		return envelope, signer
 	}
-	request := func(envelope *SignedActionCredentialLease) ActionCredentialLeaseValidationRequest {
+	request := func(envelope *models.SignedActionCredentialLease) ActionCredentialLeaseValidationRequest {
 		return ActionCredentialLeaseValidationRequest{Envelope: envelope, TenantID: "tenant-7", Scope: call.Scope, TrustedIssuer: "control-plane", Audience: "execution-host", Now: now.Add(time.Second), Transport: testActionCredentialLeaseTransport, CredentialFields: fields}
 	}
 	for _, test := range []struct {
 		name   string
-		mutate func(*SignedActionCredentialLease, *ActionCredentialLeaseValidationRequest)
+		mutate func(*models.SignedActionCredentialLease, *ActionCredentialLeaseValidationRequest)
 	}{
-		{"cross tenant", func(_ *SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
+		{"cross tenant", func(_ *models.SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
 			req.TenantID = "tenant-8"
 		}},
-		{"wrong scope", func(_ *SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
+		{"wrong scope", func(_ *models.SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
 			req.Scope.ID = "tenant-8"
 		}},
-		{"wrong issuer", func(_ *SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
+		{"wrong issuer", func(_ *models.SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
 			req.TrustedIssuer = "other-control-plane"
 		}},
-		{"wrong audience", func(_ *SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
+		{"wrong audience", func(_ *models.SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
 			req.Audience = "other-host"
 		}},
-		{"expired", func(_ *SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
+		{"expired", func(_ *models.SignedActionCredentialLease, req *ActionCredentialLeaseValidationRequest) {
 			req.Now = now.Add(2 * time.Minute)
 		}},
-		{"signature drift", func(envelope *SignedActionCredentialLease, _ *ActionCredentialLeaseValidationRequest) {
+		{"signature drift", func(envelope *models.SignedActionCredentialLease, _ *ActionCredentialLeaseValidationRequest) {
 			envelope.Lease.Action = "delete"
 		}},
-		{"lease identity drift", func(envelope *SignedActionCredentialLease, _ *ActionCredentialLeaseValidationRequest) {
+		{"lease identity drift", func(envelope *models.SignedActionCredentialLease, _ *ActionCredentialLeaseValidationRequest) {
 			envelope.Lease.ActionLease.Attempt++
 		}},
 	} {
@@ -143,8 +144,8 @@ func TestActionCredentialLeaseValidationFailsClosed(t *testing.T) {
 			envelope, signer := newEnvelope(t)
 			req := request(envelope)
 			test.mutate(envelope, &req)
-			validator, err := NewActionCredentialLeaseValidator(signer, &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request ActionCredentialLeaseRedemptionRequest) error {
-				return MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields)
+			validator, err := NewActionCredentialLeaseValidator(signer, &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request models.ActionCredentialLeaseRedemptionRequest) error {
+				return models.MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields)
 			}})
 			if err != nil {
 				t.Fatal(err)
@@ -158,7 +159,7 @@ func TestActionCredentialLeaseValidationFailsClosed(t *testing.T) {
 
 func TestActionCredentialLeaseAuthorityRejectsSignedExtraFieldsAndBindingDrift(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+	lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000003",
 	})
@@ -168,25 +169,29 @@ func TestActionCredentialLeaseAuthorityRejectsSignedExtraFieldsAndBindingDrift(t
 	signer := testCredentialLeaseSigner{key: []byte("lease-signing-key")}
 	for _, test := range []struct {
 		name   string
-		mutate func(*ActionCredentialLease, *ActionCall)
+		mutate func(*models.ActionCredentialLease, *models.ActionCall)
 	}{
-		{"extra credential field", func(candidate *ActionCredentialLease, _ *ActionCall) {
+		{"extra credential field", func(candidate *models.ActionCredentialLease, _ *models.ActionCall) {
 			candidate.Credentials[0].Fields = append(candidate.Credentials[0].Fields, "api.unexpected")
 		}},
-		{"binding revision drift", func(_ *ActionCredentialLease, durable *ActionCall) { durable.BindingRevision++ }},
-		{"assigned agent drift", func(candidate *ActionCredentialLease, _ *ActionCall) { candidate.AssignedAgentID = "agent-other" }},
-		{"transport drift", func(candidate *ActionCredentialLease, _ *ActionCall) { candidate.Transport = "other_tool" }},
+		{"binding revision drift", func(_ *models.ActionCredentialLease, durable *models.ActionCall) { durable.BindingRevision++ }},
+		{"assigned agent drift", func(candidate *models.ActionCredentialLease, _ *models.ActionCall) {
+			candidate.AssignedAgentID = "agent-other"
+		}},
+		{"transport drift", func(candidate *models.ActionCredentialLease, _ *models.ActionCall) {
+			candidate.Transport = "other_tool"
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			candidate, durable := *lease, cloneActionCall(call)
-			candidate.Credentials = cloneActionCredentialFieldReferences(lease.Credentials)
+			candidate, durable := *lease, models.CloneActionCall(call)
+			candidate.Credentials = models.CloneActionCredentialFieldReferences(lease.Credentials)
 			test.mutate(&candidate, durable)
 			envelope, err := SignActionCredentialLease(t.Context(), candidate, signer)
 			if err != nil {
 				t.Fatal(err)
 			}
-			validator, _ := NewActionCredentialLeaseValidator(signer, &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request ActionCredentialLeaseRedemptionRequest) error {
-				return MatchActionCredentialLease(request.Lease, durable, run, request.Transport, request.CredentialFields)
+			validator, _ := NewActionCredentialLeaseValidator(signer, &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request models.ActionCredentialLeaseRedemptionRequest) error {
+				return models.MatchActionCredentialLease(request.Lease, durable, run, request.Transport, request.CredentialFields)
 			}})
 			if _, err := validator.Validate(t.Context(), ActionCredentialLeaseValidationRequest{Envelope: envelope, TenantID: "tenant-7", Scope: call.Scope, TrustedIssuer: "control-plane", Audience: "execution-host", Now: now.Add(time.Second), Transport: testActionCredentialLeaseTransport, CredentialFields: fields}); err == nil {
 				t.Fatal("signed authority drift was accepted")
@@ -197,53 +202,56 @@ func TestActionCredentialLeaseAuthorityRejectsSignedExtraFieldsAndBindingDrift(t
 
 func TestActionCredentialLeaseAuthorityAcceptsHeartbeatButRejectsReclaim(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+	lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000006",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	renewed := cloneActionCall(call)
+	renewed := models.CloneActionCall(call)
 	renewed.Revision += 2
 	renewedExpiry := call.LeaseExpiresAt.Add(time.Minute)
 	renewed.LeaseExpiresAt = &renewedExpiry
-	if err := MatchActionCredentialLease(*lease, renewed, run, testActionCredentialLeaseTransport, fields); err != nil {
+	if err := models.MatchActionCredentialLease(*lease, renewed, run, testActionCredentialLeaseTransport, fields); err != nil {
 		t.Fatalf("same-owner heartbeat renewal was rejected: %v", err)
 	}
 
-	reclaimed := cloneActionCall(renewed)
+	reclaimed := models.CloneActionCall(renewed)
 	reclaimed.Attempt++
 	reclaimed.LeaseOwner = "runtime-worker-2"
-	if err := MatchActionCredentialLease(*lease, reclaimed, run, testActionCredentialLeaseTransport, fields); err == nil {
+	if err := models.MatchActionCredentialLease(*lease, reclaimed, run, testActionCredentialLeaseTransport, fields); err == nil {
 		t.Fatal("reclaimed ActionCall accepted an earlier credential lease")
 	}
 }
 
 func TestNewActionCredentialLeaseRejectsIncompleteOrOverbroadRequests(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
-	valid := func() CreateActionCredentialLeaseRequest {
-		return CreateActionCredentialLeaseRequest{TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport, Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000004"}
+	valid := func() models.CreateActionCredentialLeaseRequest {
+		return models.CreateActionCredentialLeaseRequest{TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport, Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000004"}
 	}
 	for _, test := range []struct {
 		name   string
-		mutate func(*CreateActionCredentialLeaseRequest)
+		mutate func(*models.CreateActionCredentialLeaseRequest)
 	}{
-		{"unclaimed action", func(req *CreateActionCredentialLeaseRequest) {
-			req.Call = cloneActionCall(call)
+		{"unclaimed action", func(req *models.CreateActionCredentialLeaseRequest) {
+			req.Call = models.CloneActionCall(call)
 			req.Call.LeaseOwner = ""
 		}},
-		{"wrong run", func(req *CreateActionCredentialLeaseRequest) { req.Run = cloneAgentRun(run); req.Run.ID = "run-other" }},
-		{"missing fields", func(req *CreateActionCredentialLeaseRequest) { req.CredentialFields = map[string][]string{} }},
-		{"missing transport", func(req *CreateActionCredentialLeaseRequest) { req.Transport = "" }},
-		{"short nonce", func(req *CreateActionCredentialLeaseRequest) { req.Nonce = "short" }},
-		{"extra credential", func(req *CreateActionCredentialLeaseRequest) {
+		{"wrong run", func(req *models.CreateActionCredentialLeaseRequest) {
+			req.Run = models.CloneAgentRun(run)
+			req.Run.ID = "run-other"
+		}},
+		{"missing fields", func(req *models.CreateActionCredentialLeaseRequest) { req.CredentialFields = map[string][]string{} }},
+		{"missing transport", func(req *models.CreateActionCredentialLeaseRequest) { req.Transport = "" }},
+		{"short nonce", func(req *models.CreateActionCredentialLeaseRequest) { req.Nonce = "short" }},
+		{"extra credential", func(req *models.CreateActionCredentialLeaseRequest) {
 			req.CredentialFields = map[string][]string{"reddit": {"api.token"}, "other": {"token"}}
 		}},
-		{"expiry beyond action lease", func(req *CreateActionCredentialLeaseRequest) { req.ExpiresAt = now.Add(3 * time.Minute) }},
-		{"overlong ttl", func(req *CreateActionCredentialLeaseRequest) {
+		{"expiry beyond action lease", func(req *models.CreateActionCredentialLeaseRequest) { req.ExpiresAt = now.Add(3 * time.Minute) }},
+		{"overlong ttl", func(req *models.CreateActionCredentialLeaseRequest) {
 			expiry := now.Add(10 * time.Minute)
-			req.Call = cloneActionCall(call)
+			req.Call = models.CloneActionCall(call)
 			req.Call.LeaseExpiresAt = &expiry
 			req.ExpiresAt = expiry
 		}},
@@ -251,7 +259,7 @@ func TestNewActionCredentialLeaseRejectsIncompleteOrOverbroadRequests(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			req := valid()
 			test.mutate(&req)
-			if _, err := NewActionCredentialLease(req); err == nil {
+			if _, err := models.NewActionCredentialLease(req); err == nil {
 				t.Fatal("invalid credential lease request was accepted")
 			}
 		})
@@ -260,7 +268,7 @@ func TestNewActionCredentialLeaseRejectsIncompleteOrOverbroadRequests(t *testing
 
 func TestActionCredentialLeaseContainsOnlyOpaqueReferences(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport, Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000005"})
+	lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport, Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000005"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,23 +290,23 @@ func TestActionCredentialLeaseBindingMayCarryCredentialsForOtherCapabilities(t *
 			"SIGNING_SECRET": {Kind: "slack_signing_secret", ID: "credential://007 Slack.signing_secret"},
 		},
 	}
-	lease := ActionCredentialLease{
+	lease := models.ActionCredentialLease{
 		Scope: call.Scope, SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: call.Action,
 		BindingOwnerID: call.DeploymentID, BindingID: call.BindingID, BindingRevision: call.BindingRevision,
 	}
-	if err := matchCurrentActionCredentialBinding(lease, call, binding); err != nil {
+	if err := models.CheckCurrentActionCredentialBinding(lease, call, binding); err != nil {
 		t.Fatalf("binding with an unrelated adapter credential was rejected: %v", err)
 	}
 	binding.Credentials["reddit"] = skill.CredentialReference{Kind: "reddit-oauth", ID: "credential://other.oauth"}
-	if err := matchCurrentActionCredentialBinding(lease, call, binding); !errors.Is(err, ErrActionCredentialLeaseMismatch) {
-		t.Fatalf("selected credential drift error = %v, want %v", err, ErrActionCredentialLeaseMismatch)
+	if err := models.CheckCurrentActionCredentialBinding(lease, call, binding); !errors.Is(err, models.ErrActionCredentialLeaseMismatch) {
+		t.Fatalf("selected credential drift error = %v, want %v", err, models.ErrActionCredentialLeaseMismatch)
 	}
 }
 
 func TestActionCredentialLeaseAcceptsOpaqueReferencesWithSpaces(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
 	call.CredentialRefs["reddit"] = skill.CredentialReference{Kind: "slack_bot_token", ID: "credential://007 Slack.bot_token"}
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+	lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000006",
 	})
@@ -315,7 +323,7 @@ func TestActionCredentialLeaseRejectsNonCanonicalOpaqueReferences(t *testing.T) 
 		t.Run(referenceID, func(t *testing.T) {
 			now, call, run, fields := actionCredentialLeaseFixture()
 			call.CredentialRefs["reddit"] = skill.CredentialReference{Kind: "token", ID: referenceID}
-			if _, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+			if _, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 				TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 				Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000007",
 			}); err == nil {
@@ -325,18 +333,18 @@ func TestActionCredentialLeaseRejectsNonCanonicalOpaqueReferences(t *testing.T) 
 	}
 }
 
-func actionCredentialLeaseFixture() (time.Time, *ActionCall, *AgentRun, map[string][]string) {
+func actionCredentialLeaseFixture() (time.Time, *models.ActionCall, *models.AgentRun, map[string][]string) {
 	now := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
 	expires := now.Add(2 * time.Minute)
-	scope := Scope{Kind: "tenant", ID: "tenant-7"}
-	call := &ActionCall{
+	scope := models.Scope{Kind: "tenant", ID: "tenant-7"}
+	call := &models.ActionCall{
 		ID: "action-1", Scope: scope, RunID: "run-1", TurnID: loopProposalStep, DeploymentID: "team-marketing", BindingID: "reddit-binding", BindingRevision: 3,
-		Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-		SkillID: "reddit-research", SkillVersion: "1.2.0", Action: "search", Status: ActionCallStatusRunning,
+		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+		SkillID: "reddit-research", SkillVersion: "1.2.0", Action: "search", Status: models.ActionCallStatusRunning,
 		CredentialRefs: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "opaque://tenant-7/reddit"}},
 		Attempt:        1, MaxAttempts: 3, LeaseOwner: "runtime-worker-1", LeaseExpiresAt: &expires, Revision: 4,
 	}
-	run := &AgentRun{ID: "run-1", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-marketing"}, AssignedAgentID: "agent-researcher"}
+	run := &models.AgentRun{ID: "run-1", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-marketing"}, AssignedAgentID: "agent-researcher"}
 	return now, call, run, map[string][]string{"reddit": {"api.token"}}
 }
 

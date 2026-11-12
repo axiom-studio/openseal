@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -49,7 +50,7 @@ type deadlineActionStore struct {
 	deadlineReads atomic.Int64
 }
 
-func (s *deadlineActionStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
+func (s *deadlineActionStore) ClaimNextAction(ctx context.Context, claim models.ActionClaim) (*models.ActionCall, error) {
 	s.claims.Add(1)
 	call, err := s.Store.ClaimNextAction(ctx, claim)
 	s.claimsDone.Add(1)
@@ -59,18 +60,18 @@ func (s *deadlineActionStore) ClaimNextAction(ctx context.Context, claim ActionC
 	return call, err
 }
 
-func (s *deadlineActionStore) NextActionDeadline(ctx context.Context, scope Scope, now time.Time) (*time.Time, error) {
+func (s *deadlineActionStore) NextActionDeadline(ctx context.Context, scope models.Scope, now time.Time) (*time.Time, error) {
 	s.deadlineReads.Add(1)
-	calls, err := s.Store.ListActionCalls(ctx, ActionFilter{Scope: scope, Status: []ActionCallStatus{ActionCallStatusReady, ActionCallStatusRunning}, Limit: 500})
+	calls, err := s.Store.ListActionCalls(ctx, models.ActionFilter{Scope: scope, Status: []models.ActionCallStatus{models.ActionCallStatusReady, models.ActionCallStatusRunning}, Limit: 500})
 	if err != nil {
 		return nil, err
 	}
 	var result *time.Time
 	for _, call := range calls {
-		if call.Status == ActionCallStatusReady && call.AvailableAt.After(now) {
+		if call.Status == models.ActionCallStatusReady && call.AvailableAt.After(now) {
 			result = workqueue.EarliestDeadline(result, &call.AvailableAt)
 		}
-		if call.Status == ActionCallStatusRunning && call.LeaseExpiresAt != nil && call.LeaseExpiresAt.After(now) {
+		if call.Status == models.ActionCallStatusRunning && call.LeaseExpiresAt != nil && call.LeaseExpiresAt.After(now) {
 			result = workqueue.EarliestDeadline(result, call.LeaseExpiresAt)
 		}
 	}
@@ -123,7 +124,7 @@ func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
 	// work itself and hides whether the other scope's wake did.
 	waitForCondition(t, time.Second, func() bool { return store.claimsDone.Load() > 0 && store.deadlineReads.Load() > 0 }, "initial probe was not observed")
 	createActionPoolWork(t, store.Store, catalog, scope)
-	pool.WakeScope(Scope{Kind: scope.Kind, ID: "another"})
+	pool.WakeScope(models.Scope{Kind: scope.Kind, ID: "another"})
 	select {
 	case <-dispatched:
 		t.Fatal("a signal for another scope woke this pool")
@@ -139,10 +140,10 @@ func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
 
 // scheduleActionRetry claims the ready call as an earlier worker would and
 // persists that attempt's outcome: ready again at retryAt.
-func scheduleActionRetry(t *testing.T, store KernelStore, call *ActionCall, retryAt time.Time) {
+func scheduleActionRetry(t *testing.T, store models.KernelStore, call *models.ActionCall, retryAt time.Time) {
 	t.Helper()
 	now := time.Now().UTC()
-	claimed, err := store.ClaimNextAction(t.Context(), ActionClaim{Scope: call.Scope, WorkerID: "earlier-worker", Now: now, LeaseDuration: time.Minute})
+	claimed, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: call.Scope, WorkerID: "earlier-worker", Now: now, LeaseDuration: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != call.ID {
 		t.Fatalf("earlier claim = %#v, %v", claimed, err)
 	}
@@ -150,13 +151,13 @@ func scheduleActionRetry(t *testing.T, store KernelStore, call *ActionCall, retr
 	if err != nil || run == nil {
 		t.Fatalf("run = %#v, %v", run, err)
 	}
-	retry := cloneActionCall(claimed)
-	retry.Status, retry.AvailableAt, retry.LeaseOwner, retry.LeaseExpiresAt = ActionCallStatusReady, retryAt, "", nil
+	retry := models.CloneActionCall(claimed)
+	retry.Status, retry.AvailableAt, retry.LeaseOwner, retry.LeaseExpiresAt = models.ActionCallStatusReady, retryAt, "", nil
 	retry.Revision++
 	retry.UpdatedAt = now
-	if _, err := store.PersistActionExecution(t.Context(), ActionExecutionRecord{
+	if _, err := store.PersistActionExecution(t.Context(), models.ActionExecutionRecord{
 		Call: retry, ExpectedCallRevision: claimed.Revision, ExpectedRunRevision: run.Revision, WorkerID: "earlier-worker", Now: now,
-		Event: &ActivityEvent{ID: "retry-" + call.ID, Scope: call.Scope, RunID: call.RunID, EventType: "action.retry_scheduled", Summary: "Retry scheduled", CreatedAt: now},
+		Event: &models.ActivityEvent{ID: "retry-" + call.ID, Scope: call.Scope, RunID: call.RunID, EventType: "action.retry_scheduled", Summary: "Retry scheduled", CreatedAt: now},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +177,7 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 				scheduleActionRetry(t, store.Store, proposal.Call, due)
 			} else {
 				// A crashed worker holds the lease until it expires.
-				claimed, err := store.Store.ClaimNextAction(t.Context(), ActionClaim{Scope: scope, WorkerID: "crashed", Now: time.Now().UTC(), LeaseDuration: time.Until(due)})
+				claimed, err := store.Store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: scope, WorkerID: "crashed", Now: time.Now().UTC(), LeaseDuration: time.Until(due)})
 				if err != nil || claimed == nil {
 					t.Fatalf("crashed claim = %#v, %v", claimed, err)
 				}
@@ -189,7 +190,7 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 			harness := newQueueHarness(t)
 			delivered := atomic.Int64{}
 			harness.onDelivery(func(signal workqueue.WorkSignal) {
-				if signal.Family == WorkFamilyAction {
+				if signal.Family == models.WorkFamilyAction {
 					delivered.Add(1)
 					pool.WakeScope(signal.Scope)
 				}
@@ -244,22 +245,22 @@ type deadlineAgentRunStore struct {
 	deadline      atomic.Pointer[time.Time]
 }
 
-func (s *deadlineAgentRunStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
+func (s *deadlineAgentRunStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	s.claims.Add(1)
 	return s.Store.ClaimNextAgentRunWithDecision(ctx, claim)
 }
 
-func (s *deadlineAgentRunStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
+func (s *deadlineAgentRunStore) ClaimNextAgentRun(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRun, error) {
 	s.claims.Add(1)
 	return s.Store.ClaimNextAgentRun(ctx, claim)
 }
 
-func (s *deadlineAgentRunStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+func (s *deadlineAgentRunStore) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	s.lists.Add(1)
 	return s.Store.ListAgentRuns(ctx, filter)
 }
 
-func (s *deadlineAgentRunStore) NextAgentRunDeadline(context.Context, Scope, RunKind, string, time.Time) (*time.Time, error) {
+func (s *deadlineAgentRunStore) NextAgentRunDeadline(context.Context, models.Scope, models.RunKind, string, time.Time) (*time.Time, error) {
 	s.deadlineReads.Add(1)
 	return s.deadline.Load(), nil
 }
@@ -270,8 +271,8 @@ func (s *deadlineAgentRunStore) reads() int64 {
 
 func TestQueueDrivenAgentRunPoolIssuesNoReadsWhileIdleAndWakesOnDeadline(t *testing.T) {
 	store := &deadlineAgentRunStore{Store: newTestKernelStore(t)}
-	scope := Scope{Kind: "tenant", ID: "idle-runs"}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	scope := models.Scope{Kind: "tenant", ID: "idle-runs"}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected idle turn")
 	}), nil, AgentRunWorkerConfig{Scope: scope, Concurrency: 4, PollInterval: 5 * time.Millisecond})
 	if err != nil {
@@ -279,7 +280,7 @@ func TestQueueDrivenAgentRunPoolIssuesNoReadsWhileIdleAndWakesOnDeadline(t *test
 	}
 	harness := newQueueHarness(t)
 	harness.onDelivery(func(signal workqueue.WorkSignal) {
-		if signal.Family == WorkFamilyRunDue {
+		if signal.Family == models.WorkFamilyRunDue {
 			pool.WakeScope(signal.Scope)
 		}
 	})
@@ -315,14 +316,14 @@ func TestQueueDrivenAgentRunPoolIssuesNoReadsWhileIdleAndWakesOnDeadline(t *test
 }
 
 type countingScopeSource struct {
-	scopes atomic.Pointer[[]Scope]
+	scopes atomic.Pointer[[]models.Scope]
 	lists  atomic.Int64
 }
 
-func (s *countingScopeSource) ListWorkerScopes(context.Context) ([]Scope, error) {
+func (s *countingScopeSource) ListWorkerScopes(context.Context) ([]models.Scope, error) {
 	s.lists.Add(1)
 	if scopes := s.scopes.Load(); scopes != nil {
-		return append([]Scope(nil), (*scopes)...), nil
+		return append([]models.Scope(nil), (*scopes)...), nil
 	}
 	return nil, nil
 }
@@ -334,7 +335,7 @@ type checkedScopeSource struct {
 	active atomic.Bool
 }
 
-func (s *checkedScopeSource) WorkerScopeActive(context.Context, Scope) (bool, error) {
+func (s *checkedScopeSource) WorkerScopeActive(context.Context, models.Scope) (bool, error) {
 	s.checks.Add(1)
 	return s.active.Load(), nil
 }
@@ -364,7 +365,7 @@ func TestQueueDrivenSupervisorAdmitsScopesWithoutListingAndRetiresIdlePools(t *t
 		t.Fatalf("admission listed scopes %d times and checked %d times", lists, checks)
 	}
 	// An inactive scope is never admitted; the cached answer is reused.
-	inactive := Scope{Kind: "tenant", ID: "suspended"}
+	inactive := models.Scope{Kind: "tenant", ID: "suspended"}
 	source.active.Store(false)
 	supervisor.WakeScope(inactive)
 	waitForCondition(t, time.Second, func() bool { return source.checks.Load() == 2 }, "inactive scope was not checked")
@@ -377,7 +378,7 @@ func TestQueueDrivenSupervisorAdmitsScopesWithoutListingAndRetiresIdlePools(t *t
 func TestScopeWakeQueueDefersBusyScopes(t *testing.T) {
 	queue := workqueue.NewScopeWakeQueue()
 	now := time.Now()
-	a, b := Scope{Kind: "tenant", ID: "a"}, Scope{Kind: "tenant", ID: "b"}
+	a, b := models.Scope{Kind: "tenant", ID: "a"}, models.Scope{Kind: "tenant", ID: "b"}
 	queue.WakeScope(b)
 	queue.WakeScope(a)
 	ready, deferred := queue.Take(now, 0)
@@ -404,14 +405,14 @@ func TestScopeWakeQueueDefersBusyScopes(t *testing.T) {
 
 func TestMemoryWorkQueueKeepsEarliestDueAndAsksForRebuild(t *testing.T) {
 	queue := workqueue.NewMemoryWorkQueue()
-	scope := Scope{Kind: "tenant", ID: "a"}
+	scope := models.Scope{Kind: "tenant", ID: "a"}
 	now := time.Now()
-	if err := queue.PublishWork(t.Context(), []WorkItem{
-		{Family: WorkFamilyAction, Scope: scope, DueAt: now.Add(time.Hour)},
-		{Family: WorkFamilyAction, Scope: scope, DueAt: now.Add(40 * time.Millisecond)},
-		{Family: WorkFamilyAction, Scope: scope, DueAt: now.Add(time.Minute)},
-		{Family: WorkFamilyRun, Scope: scope, DueAt: now.Add(-time.Second)},
-		{Family: WorkFamilyRun, Scope: Scope{}, DueAt: now},
+	if err := queue.PublishWork(t.Context(), []models.WorkItem{
+		{Family: models.WorkFamilyAction, Scope: scope, DueAt: now.Add(time.Hour)},
+		{Family: models.WorkFamilyAction, Scope: scope, DueAt: now.Add(40 * time.Millisecond)},
+		{Family: models.WorkFamilyAction, Scope: scope, DueAt: now.Add(time.Minute)},
+		{Family: models.WorkFamilyRun, Scope: scope, DueAt: now.Add(-time.Second)},
+		{Family: models.WorkFamilyRun, Scope: models.Scope{}, DueAt: now},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -420,12 +421,12 @@ func TestMemoryWorkQueueKeepsEarliestDueAndAsksForRebuild(t *testing.T) {
 	if connected := <-signals; connected.Kind != workqueue.WorkSignalConnected || !connected.Rebuild {
 		t.Fatalf("first signal = %#v", connected)
 	}
-	if run := <-signals; run.Family != WorkFamilyRun || run.Scope != scope {
+	if run := <-signals; run.Family != models.WorkFamilyRun || run.Scope != scope {
 		t.Fatalf("overdue item = %#v", run)
 	}
 	select {
 	case action := <-signals:
-		if action.Family != WorkFamilyAction || time.Now().Before(now.Add(40*time.Millisecond)) {
+		if action.Family != models.WorkFamilyAction || time.Now().Before(now.Add(40*time.Millisecond)) {
 			t.Fatalf("action item = %#v", action)
 		}
 	case <-time.After(time.Second):
@@ -443,7 +444,7 @@ type signalConversationStore struct {
 	conversationLists atomic.Int64
 }
 
-func (s *signalConversationStore) ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error) {
+func (s *signalConversationStore) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
 	s.conversationLists.Add(1)
 	return s.Store.ListConversations(ctx, filter)
 }
@@ -454,17 +455,17 @@ func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope, other := Scope{Kind: "tenant", ID: "a"}, Scope{Kind: "tenant", ID: "b"}
+	scope, other := models.Scope{Kind: "tenant", ID: "a"}, models.Scope{Kind: "tenant", ID: "b"}
 	source := &checkedScopeSource{}
 	source.active.Store(true)
-	source.scopes.Store(&[]Scope{scope, other})
+	source.scopes.Store(&[]models.Scope{scope, other})
 	reconciler, err := NewConversationRunReconciler(scheduler, source, nil, ConversationRunReconcilerConfig{Interval: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
 	harness := newQueueHarness(t)
 	harness.onDelivery(func(signal workqueue.WorkSignal) {
-		if signal.Family == WorkFamilyConversationDue {
+		if signal.Family == models.WorkFamilyConversationDue {
 			reconciler.WakeScope(signal.Scope)
 		}
 	})

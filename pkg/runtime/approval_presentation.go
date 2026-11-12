@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ApprovalPresentation is the reviewer-facing description of exactly what an
@@ -61,7 +63,7 @@ var approvalCurrencySymbols = map[string]string{"INR": "₹", "USD": "$", "EUR":
 
 // PresentApproval describes an approval for a reviewer. A pending approval
 // asks; a decided one states its outcome while keeping what was decided.
-func PresentApproval(approval *ApprovalCheckpoint) ApprovalPresentation {
+func PresentApproval(approval *models.ApprovalCheckpoint) ApprovalPresentation {
 	if approval == nil {
 		return ApprovalPresentation{Title: "Your agent wants to make a change"}
 	}
@@ -104,7 +106,7 @@ func PresentApproval(approval *ApprovalCheckpoint) ApprovalPresentation {
 	}
 	target := approvalProse(review["target"], 200)
 	details := []string{}
-	if alwaysAsks && approval.Status == ApprovalStatusPending {
+	if alwaysAsks && approval.Status == models.ApprovalStatusPending {
 		details = append(details, "Always asks, even with approvals skipped")
 	}
 	if label := approvalRiskLabels[risk]; label != "" {
@@ -123,7 +125,7 @@ func PresentApproval(approval *ApprovalCheckpoint) ApprovalPresentation {
 	return approvalWithDecisionReason(approval, result)
 }
 
-func presentPayment(approval *ApprovalCheckpoint, proposed, review, args map[string]interface{}, alwaysAsks bool) ApprovalPresentation {
+func presentPayment(approval *models.ApprovalCheckpoint, proposed, review, args map[string]interface{}, alwaysAsks bool) ApprovalPresentation {
 	amount := ""
 	raw := ""
 	switch value := args["amount"].(type) {
@@ -199,25 +201,25 @@ func presentPayment(approval *ApprovalCheckpoint, proposed, review, args map[str
 	return result
 }
 
-func approvalOutcome(status ApprovalStatus) string {
+func approvalOutcome(status models.ApprovalStatus) string {
 	switch status {
-	case ApprovalStatusApproved:
+	case models.ApprovalStatusApproved:
 		return "Approved"
-	case ApprovalStatusRejected:
+	case models.ApprovalStatusRejected:
 		return "Declined"
-	case ApprovalStatusExpired:
+	case models.ApprovalStatusExpired:
 		return "Expired"
-	case ApprovalStatusCanceled:
+	case models.ApprovalStatusCanceled:
 		return "Canceled"
-	case ApprovalStatusSuperseded:
+	case models.ApprovalStatusSuperseded:
 		return "Replaced by your message"
 	default:
 		return ""
 	}
 }
 
-func approvalWithDecisionReason(approval *ApprovalCheckpoint, result ApprovalPresentation) ApprovalPresentation {
-	if approval.Status != ApprovalStatusApproved && approval.Status != ApprovalStatusPending {
+func approvalWithDecisionReason(approval *models.ApprovalCheckpoint, result ApprovalPresentation) ApprovalPresentation {
+	if approval.Status != models.ApprovalStatusApproved && approval.Status != models.ApprovalStatusPending {
 		if reason := approvalProse(approval.DecisionReason, 300); reason != "" {
 			result.Lines = append(result.Lines, reason)
 		}

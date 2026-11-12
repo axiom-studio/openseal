@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
@@ -48,7 +49,7 @@ func (c *DynamicActionWorkerConfig) applyDefaults() error {
 // ActionWorkerSupervisor runs an isolated worker pool per scope with
 // ActionCall work. See workqueue.ScopePools for when a scope has a pool.
 type ActionWorkerSupervisor struct {
-	store       KernelStore
+	store       models.KernelStore
 	catalog     agentrun.ActionExecutionCatalog
 	credentials CredentialResolver
 	leaseIssuer ActionCredentialLeaseIssuer
@@ -62,7 +63,7 @@ type ActionWorkerSupervisor struct {
 }
 
 func NewActionWorkerSupervisor(
-	store KernelStore,
+	store models.KernelStore,
 	catalog agentrun.ActionExecutionCatalog,
 	credentials CredentialResolver,
 	dispatcher agentrun.ActionDispatcher,
@@ -74,7 +75,7 @@ func NewActionWorkerSupervisor(
 }
 
 func NewActionCredentialLeaseWorkerSupervisor(
-	store KernelStore,
+	store models.KernelStore,
 	catalog agentrun.ActionExecutionCatalog,
 	issuer ActionCredentialLeaseIssuer,
 	dispatcher agentrun.ActionDispatcher,
@@ -89,7 +90,7 @@ func NewActionCredentialLeaseWorkerSupervisor(
 }
 
 func newActionWorkerSupervisor(
-	store KernelStore,
+	store models.KernelStore,
 	catalog agentrun.ActionExecutionCatalog,
 	credentials CredentialResolver,
 	issuer ActionCredentialLeaseIssuer,
@@ -112,11 +113,11 @@ func newActionWorkerSupervisor(
 		store: store, catalog: catalog, credentials: credentials, leaseIssuer: issuer, dispatcher: dispatcher,
 		config: config, logger: logger,
 	}
-	supervisor.pools = workqueue.NewScopePools("action", source, config.ReconcileInterval, retire, WorkFamilyAction, logger, supervisor.newPool)
+	supervisor.pools = workqueue.NewScopePools("action", source, config.ReconcileInterval, retire, models.WorkFamilyAction, logger, supervisor.newPool)
 	return supervisor, nil
 }
 
-func (s *ActionWorkerSupervisor) newPool(scope Scope) (*ActionWorkerPool, error) {
+func (s *ActionWorkerSupervisor) newPool(scope models.Scope) (*ActionWorkerPool, error) {
 	pool, err := newActionWorkerPool(s.store, s.catalog, s.credentials, s.leaseIssuer, s.dispatcher, s.logger, ActionWorkerConfig{
 		Scope: scope, Concurrency: s.config.Concurrency, PollInterval: s.config.PollInterval,
 		LeaseDuration:  s.config.LeaseDuration,
@@ -145,7 +146,7 @@ func (s *ActionWorkerSupervisor) Stop() { s.pools.Stop() }
 
 func (s *ActionWorkerSupervisor) Wake() { s.pools.Wake() }
 
-func (s *ActionWorkerSupervisor) WakeScope(scope Scope) { s.pools.WakeScope(scope) }
+func (s *ActionWorkerSupervisor) WakeScope(scope models.Scope) { s.pools.WakeScope(scope) }
 
 // RefreshScopes lists worker scopes now while polling.
 func (s *ActionWorkerSupervisor) RefreshScopes() { s.pools.Request() }

@@ -9,7 +9,9 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -32,7 +34,7 @@ func ObjectiveManagementSkill() *skill.Definition {
 	delete(createFields, "expectedRevision")
 	updateFields := maps.Clone(fields)
 	return &skill.Definition{
-		ID: ObjectiveManagementSkillID, Version: ObjectiveManagementSkillVersion,
+		ID: models.ObjectiveManagementSkillID, Version: ObjectiveManagementSkillVersion,
 		Name: "Objectives", Description: "Propose governed changes to the current Agent or Team's objectives.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: ObjectiveManagementEndpoint},
 		Actions: map[string]skill.Action{
@@ -91,9 +93,9 @@ func objectiveMutableSchema() map[string]interface{} {
 
 // ObjectiveActionValidator enforces ownership, target existence, lifecycle,
 // and CAS before an Objective mutation can become an approval request.
-type ObjectiveActionValidator struct{ store PortfolioStore }
+type ObjectiveActionValidator struct{ store models.PortfolioStore }
 
-func NewObjectiveActionValidator(store PortfolioStore) (*ObjectiveActionValidator, error) {
+func NewObjectiveActionValidator(store models.PortfolioStore) (*ObjectiveActionValidator, error) {
 	if store == nil {
 		return nil, errors.New("portfolio store is required")
 	}
@@ -106,7 +108,7 @@ func (v *ObjectiveActionValidator) ResolveActionProposalArguments(ctx context.Co
 	}
 	arguments := maps.Clone(input.Arguments)
 	if target, _ := arguments["objectiveId"].(string); strings.TrimSpace(target) == "" && input.Run != nil {
-		if conversations, ok := v.store.(ConversationStore); ok {
+		if conversations, ok := v.store.(models.ConversationStore); ok {
 			objectiveID, err := conversationObjectiveOrigin(ctx, conversations, input.Run)
 			if err != nil {
 				return nil, true, err
@@ -132,7 +134,7 @@ func (v *ObjectiveActionValidator) ResolveActionProposalArguments(ctx context.Co
 		return nil, true, err
 	}
 	if objective == nil {
-		return nil, true, ErrObjectiveNotFound
+		return nil, true, models.ErrObjectiveNotFound
 	}
 	arguments["expectedRevision"] = objective.Revision
 	return arguments, true, nil
@@ -150,7 +152,7 @@ func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, i
 	}
 	preview := map[string]interface{}{"resourceType": "objective", "operation": input.Bound.Action.Name, "owner": input.Run.Owner, "changes": maps.Clone(input.Arguments)}
 	if input.Bound.Action.Name == ObjectiveActionCreate {
-		preview["resultingStatus"] = ObjectiveStatusDraft
+		preview["resultingStatus"] = models.ObjectiveStatusDraft
 		return preview, validateObjectiveCreateArguments(input.Arguments)
 	}
 	target, expectedRevision, err := objectiveTarget(input.Arguments)
@@ -162,13 +164,13 @@ func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, i
 		return nil, err
 	}
 	if objective == nil {
-		return nil, ErrObjectiveNotFound
+		return nil, models.ErrObjectiveNotFound
 	}
 	if objective.Owner != input.Run.Owner {
 		return nil, errors.New("objective action target is not owned by the conversation Agent or Team")
 	}
 	if objective.Revision != expectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	if input.Bound.Action.Name == ObjectiveActionUpdate {
 		var args objectiveUpdateArguments
@@ -178,20 +180,20 @@ func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, i
 		if !args.hasChanges() {
 			return nil, errors.New("objective update requires at least one changed field")
 		}
-		candidate := cloneObjective(objective)
-		applyObjectiveUpdate(candidate, args.updateRequest(ActivityActor{}))
+		candidate := models.CloneObjective(objective)
+		portfolio.ApplyObjectiveUpdate(candidate, args.updateRequest(models.ActivityActor{}))
 		if err := candidate.Validate(); err != nil {
 			return nil, err
 		}
 	}
-	if input.Bound.Action.Name == ObjectiveActionPause && !canTransitionObjective(objective.Status, ObjectiveStatusPaused) {
-		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidObjectiveTransition, objective.Status, ObjectiveStatusPaused)
+	if input.Bound.Action.Name == ObjectiveActionPause && !models.CanTransitionObjective(objective.Status, models.ObjectiveStatusPaused) {
+		return nil, fmt.Errorf("%w: %s -> %s", portfolio.ErrInvalidObjectiveTransition, objective.Status, models.ObjectiveStatusPaused)
 	}
 	preview["objectiveId"] = objective.ID
 	preview["expectedRevision"] = expectedRevision
 	preview["current"] = map[string]interface{}{"revision": objective.Revision, "title": objective.Title, "goal": objective.Goal, "status": objective.Status, "priority": objective.Priority, "executionPolicy": objective.ExecutionPolicy}
 	if input.Bound.Action.Name == ObjectiveActionPause {
-		preview["changes"] = map[string]interface{}{"status": ObjectiveStatusPaused}
+		preview["changes"] = map[string]interface{}{"status": models.ObjectiveStatusPaused}
 	}
 	return preview, nil
 }
@@ -200,11 +202,11 @@ func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, i
 // calls are delegated, allowing one worker to compose kernel and external
 // Skills without a parallel execution runtime.
 type ObjectiveActionDispatcher struct {
-	store    KernelStore
+	store    models.KernelStore
 	fallback agentrun.ActionDispatcher
 }
 
-func NewObjectiveActionDispatcher(store KernelStore, fallback agentrun.ActionDispatcher) (*ObjectiveActionDispatcher, error) {
+func NewObjectiveActionDispatcher(store models.KernelStore, fallback agentrun.ActionDispatcher) (*ObjectiveActionDispatcher, error) {
 	if store == nil {
 		return nil, errors.New("kernel store is required")
 	}
@@ -224,16 +226,16 @@ func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input ag
 	run, err := d.store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil || run == nil {
 		if err == nil {
-			err = ErrRunNotFound
+			err = models.ErrRunNotFound
 		}
 		return nil, err
 	}
 	if strings.TrimSpace(run.AssignedAgentID) == "" {
 		return nil, errors.New("objective actions require the Run's acting Agent")
 	}
-	service := NewPortfolioService(d.store)
-	actor := ActivityActor{Type: "agent", ID: run.AssignedAgentID}
-	var objective *Objective
+	service := portfolio.NewPortfolioService(d.store)
+	actor := models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}
+	var objective *models.Objective
 	created := false
 	switch input.Bound.Action.Name {
 	case ObjectiveActionCreate:
@@ -241,10 +243,10 @@ func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input ag
 		if err := decodeObjectiveArguments(input.Arguments, &args); err != nil {
 			return nil, err
 		}
-		result, err := service.CreateObjectiveIdempotent(ctx, CreateObjectiveRequest{
-			Scope: run.Scope, Owner: run.Owner, Title: args.Title, Goal: args.Goal, Status: ObjectiveStatusDraft, Priority: args.Priority,
+		result, err := service.CreateObjectiveIdempotent(ctx, portfolio.CreateObjectiveRequest{
+			Scope: run.Scope, Owner: run.Owner, Title: args.Title, Goal: args.Goal, Status: models.ObjectiveStatusDraft, Priority: args.Priority,
 			ExecutionPolicy: args.ExecutionPolicy, Budget: args.Budget, Constraints: args.Constraints, SuccessCriteria: args.SuccessCriteria,
-			IdempotencyKey: input.Call.IdempotencyKey, Actor: actor, Visibility: ActivityVisibilityScope,
+			IdempotencyKey: input.Call.IdempotencyKey, Actor: actor, Visibility: models.ActivityVisibilityScope,
 		})
 		if err != nil {
 			return nil, err
@@ -260,18 +262,18 @@ func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input ag
 			return nil, err
 		}
 		if current == nil {
-			return nil, ErrObjectiveNotFound
+			return nil, models.ErrObjectiveNotFound
 		}
 		if current.Owner != run.Owner {
 			return nil, errors.New("objective action target is not owned by the conversation Agent or Team")
 		}
 		request := args.updateRequest(actor)
 		if input.Bound.Action.Name == ObjectiveActionPause {
-			paused := ObjectiveStatusPaused
+			paused := models.ObjectiveStatusPaused
 			request.Status = &paused
 		}
 		objective, err = service.UpdateObjective(ctx, run.Scope, args.ObjectiveID, request)
-		if errors.Is(err, ErrRevisionConflict) {
+		if errors.Is(err, models.ErrRevisionConflict) {
 			latest, getErr := service.GetObjective(ctx, run.Scope, args.ObjectiveID)
 			if getErr == nil && objectiveActionAlreadyApplied(latest, args, input.Bound.Action.Name) {
 				objective, err = latest, nil
@@ -287,36 +289,36 @@ func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input ag
 }
 
 type objectiveCreateArguments struct {
-	Title           string                    `json:"title"`
-	Goal            string                    `json:"goal"`
-	Priority        int                       `json:"priority,omitempty"`
-	ExecutionPolicy *ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
-	Budget          *BudgetPolicy             `json:"budget,omitempty"`
-	Constraints     map[string]interface{}    `json:"constraints,omitempty"`
-	SuccessCriteria map[string]interface{}    `json:"successCriteria,omitempty"`
+	Title           string                           `json:"title"`
+	Goal            string                           `json:"goal"`
+	Priority        int                              `json:"priority,omitempty"`
+	ExecutionPolicy *models.ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
+	Budget          *models.BudgetPolicy             `json:"budget,omitempty"`
+	Constraints     map[string]interface{}           `json:"constraints,omitempty"`
+	SuccessCriteria map[string]interface{}           `json:"successCriteria,omitempty"`
 }
 
 type objectiveUpdateArguments struct {
-	ObjectiveID      string                    `json:"objectiveId"`
-	ExpectedRevision int64                     `json:"expectedRevision"`
-	Title            *string                   `json:"title,omitempty"`
-	Goal             *string                   `json:"goal,omitempty"`
-	Priority         *int                      `json:"priority,omitempty"`
-	ExecutionPolicy  *ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
-	Budget           *BudgetPolicy             `json:"budget,omitempty"`
-	Constraints      map[string]interface{}    `json:"constraints,omitempty"`
-	SuccessCriteria  map[string]interface{}    `json:"successCriteria,omitempty"`
+	ObjectiveID      string                           `json:"objectiveId"`
+	ExpectedRevision int64                            `json:"expectedRevision"`
+	Title            *string                          `json:"title,omitempty"`
+	Goal             *string                          `json:"goal,omitempty"`
+	Priority         *int                             `json:"priority,omitempty"`
+	ExecutionPolicy  *models.ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
+	Budget           *models.BudgetPolicy             `json:"budget,omitempty"`
+	Constraints      map[string]interface{}           `json:"constraints,omitempty"`
+	SuccessCriteria  map[string]interface{}           `json:"successCriteria,omitempty"`
 }
 
 func (a objectiveUpdateArguments) hasChanges() bool {
 	return a.Title != nil || a.Goal != nil || a.Priority != nil || a.ExecutionPolicy != nil || a.Budget != nil || a.Constraints != nil || a.SuccessCriteria != nil
 }
 
-func (a objectiveUpdateArguments) updateRequest(actor ActivityActor) UpdateObjectiveRequest {
-	return UpdateObjectiveRequest{
+func (a objectiveUpdateArguments) updateRequest(actor models.ActivityActor) portfolio.UpdateObjectiveRequest {
+	return portfolio.UpdateObjectiveRequest{
 		ExpectedRevision: a.ExpectedRevision, Title: a.Title, Goal: a.Goal, Priority: a.Priority,
 		ExecutionPolicy: a.ExecutionPolicy, Budget: a.Budget, Constraints: a.Constraints, SuccessCriteria: a.SuccessCriteria,
-		Actor: actor, Visibility: ActivityVisibilityScope, Summary: "Objective changed through conversation",
+		Actor: actor, Visibility: models.ActivityVisibilityScope, Summary: "Objective changed through conversation",
 	}
 }
 
@@ -325,7 +327,7 @@ func validateObjectiveCreateArguments(arguments map[string]interface{}) error {
 	if err := decodeObjectiveArguments(arguments, &args); err != nil {
 		return err
 	}
-	probe := &Objective{Scope: Scope{Kind: "validation", ID: "validation"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "validation"}, Title: args.Title, Goal: args.Goal, Status: ObjectiveStatusDraft, Priority: args.Priority, ExecutionPolicy: args.ExecutionPolicy, Budget: args.Budget, Constraints: args.Constraints, SuccessCriteria: args.SuccessCriteria, Revision: 1}
+	probe := &models.Objective{Scope: models.Scope{Kind: "validation", ID: "validation"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "validation"}, Title: args.Title, Goal: args.Goal, Status: models.ObjectiveStatusDraft, Priority: args.Priority, ExecutionPolicy: args.ExecutionPolicy, Budget: args.Budget, Constraints: args.Constraints, SuccessCriteria: args.SuccessCriteria, Revision: 1}
 	return probe.Validate()
 }
 
@@ -353,12 +355,12 @@ func decodeObjectiveArguments(arguments map[string]interface{}, target interface
 	return nil
 }
 
-func objectiveActionAlreadyApplied(objective *Objective, args objectiveUpdateArguments, action string) bool {
+func objectiveActionAlreadyApplied(objective *models.Objective, args objectiveUpdateArguments, action string) bool {
 	if objective == nil || objective.Revision != args.ExpectedRevision+1 {
 		return false
 	}
 	if action == ObjectiveActionPause {
-		return objective.Status == ObjectiveStatusPaused
+		return objective.Status == models.ObjectiveStatusPaused
 	}
 	return (args.Title == nil || objective.Title == *args.Title) && (args.Goal == nil || objective.Goal == *args.Goal) &&
 		(args.Priority == nil || objective.Priority == *args.Priority) && (args.ExecutionPolicy == nil || reflect.DeepEqual(objective.ExecutionPolicy, args.ExecutionPolicy)) && (args.Budget == nil || reflect.DeepEqual(objective.Budget, args.Budget)) &&
@@ -366,7 +368,7 @@ func objectiveActionAlreadyApplied(objective *Objective, args objectiveUpdateArg
 }
 
 func isObjectiveAction(bound *skill.BoundAction) bool {
-	if bound == nil || bound.Definition == nil || bound.Definition.ID != ObjectiveManagementSkillID || bound.Definition.Version != ObjectiveManagementSkillVersion {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != models.ObjectiveManagementSkillID || bound.Definition.Version != ObjectiveManagementSkillVersion {
 		return false
 	}
 	switch bound.Action.Name {
@@ -376,8 +378,8 @@ func isObjectiveAction(bound *skill.BoundAction) bool {
 	return false
 }
 
-func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, run *AgentRun) (string, error) {
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+func conversationObjectiveOrigin(ctx context.Context, store models.ConversationStore, run *models.AgentRun) (string, error) {
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	if strings.TrimSpace(conversationID) == "" {
 		return "", nil
 	}
@@ -385,7 +387,7 @@ func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, r
 	if err != nil {
 		return "", err
 	}
-	if conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceObjective {
+	if conversation.Origin != nil && conversation.Origin.Kind == models.ConversationReferenceObjective {
 		return conversation.Origin.ID, nil
 	}
 	return "", nil

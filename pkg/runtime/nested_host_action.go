@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -36,7 +37,7 @@ var (
 // one binding, as the model would see it. Arguments are that action's input
 // and are validated, governed and shown for approval as such.
 type NestedHostActionRequest struct {
-	Scope     Scope                  `json:"scope"`
+	Scope     models.Scope           `json:"scope"`
 	RunID     string                 `json:"runId"`
 	TurnID    string                 `json:"turnId"`
 	SkillID   string                 `json:"skillId"`
@@ -54,15 +55,15 @@ type NestedHostActionRequest struct {
 // claimed call and a signed, single-use credential lease for it. The lease
 // carries opaque credential references only; the host resolves them.
 type NestedHostActionGrant struct {
-	Call  *ActionCall                  `json:"call"`
-	Lease *SignedActionCredentialLease `json:"lease"`
+	Call  *models.ActionCall                  `json:"call"`
+	Lease *models.SignedActionCredentialLease `json:"lease"`
 }
 
 // NestedHostActionOutcome is how a host call ended. Performed says whether
 // any of the work reached the provider. Output is recorded on the call and
 // must carry no credential.
 type NestedHostActionOutcome struct {
-	Scope        Scope
+	Scope        models.Scope
 	RunID        string
 	TurnID       string
 	ActionCallID string
@@ -84,8 +85,8 @@ func (c *ActionCoordinator) ProposeNestedHost(ctx context.Context, req NestedHos
 	}
 	return c.proposeNested(ctx, NestedActionRequest{
 		Scope: req.Scope, RunID: req.RunID, TurnID: req.TurnID, Capability: skillID + "/" + action, Arguments: req.Arguments,
-		Origin: ActionOriginVM, OriginRef: req.OriginRef, IdempotencyKey: req.IdempotencyKey, Summary: req.Summary,
-	}, ActionExecutionHost, func(binding *agentrun.TurnRunnerBinding) (*capability.ModelAction, error) {
+		Origin: models.ActionOriginVM, OriginRef: req.OriginRef, IdempotencyKey: req.IdempotencyKey, Summary: req.Summary,
+	}, models.ActionExecutionHost, func(binding *agentrun.TurnRunnerBinding) (*capability.ModelAction, error) {
 		return selectOfferedSkillAction(binding.ModelActions, skillID, action)
 	})
 }
@@ -112,7 +113,7 @@ func selectOfferedSkillAction(actions []capability.ModelAction, skillID, action 
 
 // hostCall returns the host call actionCallID of the in-flight Turn and the
 // Turn's authority.
-func (c *ActionCoordinator) hostCall(ctx context.Context, scope Scope, runID, turnID, actionCallID string) (*nestedActionAuthority, *ActionCall, error) {
+func (c *ActionCoordinator) hostCall(ctx context.Context, scope models.Scope, runID, turnID, actionCallID string) (*nestedActionAuthority, *models.ActionCall, error) {
 	if c == nil || c.actions == nil {
 		return nil, nil, errors.New("action coordinator is not configured")
 	}
@@ -121,20 +122,20 @@ func (c *ActionCoordinator) hostCall(ctx context.Context, scope Scope, runID, tu
 	}
 	authority := c.nested.lookup(scope, turnID)
 	if authority == nil || authority.runID != runID {
-		return nil, nil, ErrNestedTurnNotActive
+		return nil, nil, models.ErrNestedTurnNotActive
 	}
 	call, err := c.actions.GetActionCall(ctx, scope, actionCallID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if call == nil || call.RunID != runID || call.TurnID != turnID || call.Origin != ActionOriginVM || call.Execution != ActionExecutionHost {
-		return nil, nil, ErrActionNotFound
+	if call == nil || call.RunID != runID || call.TurnID != turnID || call.Origin != models.ActionOriginVM || call.Execution != models.ActionExecutionHost {
+		return nil, nil, models.ErrActionNotFound
 	}
 	return authority, call, nil
 }
 
 func (c *ActionCoordinator) hostWorker() (*ActionWorker, error) {
-	store, ok := c.actions.(KernelStore)
+	store, ok := c.actions.(models.KernelStore)
 	if !ok {
 		return nil, errors.New("host calls need a kernel store")
 	}
@@ -146,7 +147,7 @@ func (c *ActionCoordinator) hostWorker() (*ActionWorker, error) {
 // through issuer. A host acquires once per piece of work (for example each
 // HTTP request of one git operation); every lease is single-use and expires
 // within MaximumActionCredentialLeaseTTL.
-func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope Scope, runID, turnID, actionCallID string, issuer ActionCredentialLeaseIssuer) (*NestedHostActionGrant, error) {
+func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope models.Scope, runID, turnID, actionCallID string, issuer ActionCredentialLeaseIssuer) (*NestedHostActionGrant, error) {
 	if issuer == nil {
 		return nil, errors.New("host calls need a credential lease issuer")
 	}
@@ -160,8 +161,8 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope S
 	}
 	now := c.now().UTC()
 	switch {
-	case call.Status == ActionCallStatusReady:
-		claimed, err := worker.store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: authority.workerID, Now: now, LeaseDuration: NestedHostActionLease, OwnActionID: call.ID})
+	case call.Status == models.ActionCallStatusReady:
+		claimed, err := worker.store.ClaimNextAction(ctx, models.ActionClaim{Scope: scope, WorkerID: authority.workerID, Now: now, LeaseDuration: NestedHostActionLease, OwnActionID: call.ID})
 		if err != nil {
 			return nil, err
 		}
@@ -169,11 +170,11 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope S
 			return nil, ErrNestedHostActionNotReady
 		}
 		call = claimed
-	case call.Status == ActionCallStatusRunning && call.LeaseOwner == authority.workerID && call.LeaseExpiresAt != nil && call.LeaseExpiresAt.After(now):
+	case call.Status == models.ActionCallStatusRunning && call.LeaseOwner == authority.workerID && call.LeaseExpiresAt != nil && call.LeaseExpiresAt.After(now):
 		if call, err = worker.store.RenewActionLease(ctx, scope, call.ID, authority.workerID, now, NestedHostActionLease); err != nil {
 			return nil, err
 		}
-	case call.Status == ActionCallStatusWaitingApproval, call.Status == ActionCallStatusRunning:
+	case call.Status == models.ActionCallStatusWaitingApproval, call.Status == models.ActionCallStatusRunning:
 		return nil, ErrNestedHostActionNotReady
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrNestedHostActionClosed, call.Status)
@@ -191,13 +192,13 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope S
 		if run != nil {
 			_, _ = worker.persistOutcome(ctx, call, nil, nil, nil, nil, authority.workerID, false)
 		}
-		return nil, ErrNestedTurnNotActive
+		return nil, models.ErrNestedTurnNotActive
 	}
 	selection := []skill.BindingReference(nil)
 	if call.BindingID != "" || call.BindingRevision != 0 {
 		selection = append(selection, skill.BindingReference{ID: call.BindingID, Revision: call.BindingRevision})
 	}
-	bound, err := c.catalog.Resolve(skill.WithRunActor(ctx, RunSkillActor(run)), skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+	bound, err := c.catalog.Resolve(skill.WithRunActor(ctx, models.RunSkillActor(run)), skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 		call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, selection...)
 	if err != nil {
 		return nil, err
@@ -210,7 +211,7 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope S
 		return nil, fmt.Errorf("host call credential lease transport: %w", err)
 	}
 	lease, err := issuer.IssueActionCredentialLease(ctx, ActionCredentialLeaseIssueRequest{
-		Call: cloneActionCall(call), Run: cloneAgentRun(run), References: maps.Clone(call.CredentialRefs), Transport: transport,
+		Call: models.CloneActionCall(call), Run: models.CloneAgentRun(run), References: maps.Clone(call.CredentialRefs), Transport: transport,
 	})
 	if err != nil {
 		return nil, err
@@ -218,12 +219,12 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope S
 	if err := MatchActionCredentialLeaseReferences(lease, call, run, transport); err != nil {
 		return nil, err
 	}
-	return &NestedHostActionGrant{Call: cloneActionCall(call), Lease: lease}, nil
+	return &NestedHostActionGrant{Call: models.CloneActionCall(call), Lease: lease}, nil
 }
 
 // FinishNestedHostAction records how the host's work on a host call ended
 // and releases the call. A call still ready is closed without having run.
-func (c *ActionCoordinator) FinishNestedHostAction(ctx context.Context, outcome NestedHostActionOutcome) (*ActionCall, error) {
+func (c *ActionCoordinator) FinishNestedHostAction(ctx context.Context, outcome NestedHostActionOutcome) (*models.ActionCall, error) {
 	authority, call, err := c.hostCall(ctx, outcome.Scope, outcome.RunID, outcome.TurnID, outcome.ActionCallID)
 	if err != nil {
 		return nil, err
@@ -234,8 +235,8 @@ func (c *ActionCoordinator) FinishNestedHostAction(ctx context.Context, outcome 
 	}
 	worker.hostSummary = strings.TrimSpace(outcome.Summary)
 	now := c.now().UTC()
-	if call.Status == ActionCallStatusReady {
-		claimed, err := worker.store.ClaimNextAction(ctx, ActionClaim{Scope: outcome.Scope, WorkerID: authority.workerID, Now: now, LeaseDuration: time.Minute, OwnActionID: call.ID})
+	if call.Status == models.ActionCallStatusReady {
+		claimed, err := worker.store.ClaimNextAction(ctx, models.ActionClaim{Scope: outcome.Scope, WorkerID: authority.workerID, Now: now, LeaseDuration: time.Minute, OwnActionID: call.ID})
 		if err != nil {
 			return nil, err
 		}
@@ -245,8 +246,8 @@ func (c *ActionCoordinator) FinishNestedHostAction(ctx context.Context, outcome 
 		call, outcome.Performed = claimed, false
 	}
 	switch {
-	case call.Status == ActionCallStatusRunning && call.LeaseOwner == authority.workerID:
-	case call.Status == ActionCallStatusWaitingApproval || call.Status == ActionCallStatusRunning:
+	case call.Status == models.ActionCallStatusRunning && call.LeaseOwner == authority.workerID:
+	case call.Status == models.ActionCallStatusWaitingApproval || call.Status == models.ActionCallStatusRunning:
 		return nil, ErrNestedHostActionNotReady
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrNestedHostActionClosed, call.Status)

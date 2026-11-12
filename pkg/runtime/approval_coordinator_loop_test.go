@@ -11,30 +11,31 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
 
-var loopApprover = ApprovalPrincipal{Type: "user", ID: "user"}
+var loopApprover = models.ApprovalPrincipal{Type: "user", ID: "user"}
 
 // newLoopApprovalFixture is newLoopStoreFixture with an optional Run budget.
-func newLoopApprovalFixture(t *testing.T, store KernelStore, budget *BudgetPolicy) *loopStoreFixture {
+func newLoopApprovalFixture(t *testing.T, store models.KernelStore, budget *models.BudgetPolicy) *loopStoreFixture {
 	t.Helper()
 	if budget == nil {
 		return newLoopStoreFixture(t, store)
 	}
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "loop-" + uuid.NewString()[:8]}
+	scope := models.Scope{Kind: "tenant", ID: "loop-" + uuid.NewString()[:8]}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	created, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "push the fix", Source: RunSourceObjective,
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	created, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "push the fix", Source: models.RunSourceObjective,
 		Budget: budget,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: loopStoreWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	run, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: loopStoreWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || run == nil || run.ID != created.ID {
 		t.Fatalf("claim = %#v, %v", run, err)
 	}
@@ -43,35 +44,35 @@ func newLoopApprovalFixture(t *testing.T, store KernelStore, budget *BudgetPolic
 
 type loopApprovalOptions struct {
 	reserveBudget bool
-	timeout       ApprovalTimeoutDecision
+	timeout       models.ApprovalTimeoutDecision
 	alwaysReview  bool
 }
 
 // proposeLoopApproval commits a write loop call of step-1 waiting on its
 // approval, with the Run unchanged unless the call reserves budget.
-func (f *loopStoreFixture) proposeLoopApproval(id string, opts loopApprovalOptions) (*ActionCall, *ApprovalCheckpoint) {
+func (f *loopStoreFixture) proposeLoopApproval(id string, opts loopApprovalOptions) (*models.ActionCall, *models.ApprovalCheckpoint) {
 	f.t.Helper()
 	call := f.loopCall(id)
 	call.Action, call.Risk, call.SideEffect = "push", skill.RiskLevelExternal, skill.SideEffectExternal
-	call.Status, call.ApprovalID = ActionCallStatusWaitingApproval, "approval-"+id
-	call.InvocationDigest = ComputeActionInvocationDigest(call)
-	call.SemanticDigest = ComputeActionSemanticDigest(call)
+	call.Status, call.ApprovalID = models.ActionCallStatusWaitingApproval, "approval-"+id
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	call.SemanticDigest = models.ComputeActionSemanticDigest(call)
 	proposed := map[string]interface{}{"skillId": call.SkillID, "action": call.Action, "arguments": maps.Clone(call.Arguments)}
 	if opts.alwaysReview {
 		proposed["review"] = "always"
 	}
-	approval := &ApprovalCheckpoint{
-		ID: call.ApprovalID, Scope: f.scope, RunID: f.run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
+	approval := &models.ApprovalCheckpoint{
+		ID: call.ApprovalID, Scope: f.scope, RunID: f.run.ID, ActionCallID: call.ID, Status: models.ApprovalStatusPending,
 		Risk: skill.RiskLevelExternal, Summary: "Push the fix to the release branch", ProposedAction: proposed,
-		EligibleApprovers: []ApprovalPrincipal{loopApprover}, TimeoutDecision: opts.timeout,
+		EligibleApprovers: []models.ApprovalPrincipal{loopApprover}, TimeoutDecision: opts.timeout,
 		ExpiresAt: f.now.Add(time.Hour), Revision: 1, CreatedAt: f.now, UpdatedAt: f.now,
 	}
 	proposal := f.proposal(call)
 	proposal.Approval = approval
 	if opts.reserveBudget {
 		current := f.currentRun()
-		reserved := cloneAgentRun(current)
-		if err := reserveRunBudget(reserved, BudgetReservation{ID: agentrun.ActionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: f.now}); err != nil {
+		reserved := models.CloneAgentRun(current)
+		if err := models.ReserveRunBudget(reserved, models.BudgetReservation{ID: agentrun.ActionBudgetReservationID(call.ID), Usage: models.BudgetUsage{Actions: 1}, CreatedAt: f.now}); err != nil {
 			f.t.Fatal(err)
 		}
 		reserved.Revision++
@@ -90,9 +91,9 @@ func (f *loopStoreFixture) proposeLoopApproval(id string, opts loopApprovalOptio
 func (f *loopStoreFixture) parkOn(approvalID string) {
 	f.t.Helper()
 	current := f.currentRun()
-	parked := cloneAgentRun(current)
-	parked.Status = AgentRunStatusWaitingForApproval
-	parked.WakeCondition = &WakeCondition{Type: "approval", Reference: approvalID}
+	parked := models.CloneAgentRun(current)
+	parked.Status = models.AgentRunStatusWaitingForApproval
+	parked.WakeCondition = &models.WakeCondition{Type: "approval", Reference: approvalID}
 	parked.LeaseOwner, parked.LeaseExpiresAt = "", nil
 	parked.Revision++
 	parked.UpdatedAt = f.now
@@ -107,33 +108,33 @@ func (f *loopStoreFixture) approvalCoordinator(at time.Time) *ApprovalCoordinato
 	return coordinator
 }
 
-func (f *loopStoreFixture) decide(coordinator *ApprovalCoordinator, approval *ApprovalCheckpoint, decision ApprovalDecision, reason string) (*ApprovalResolutionResult, error) {
+func (f *loopStoreFixture) decide(coordinator *ApprovalCoordinator, approval *models.ApprovalCheckpoint, decision models.ApprovalDecision, reason string) (*models.ApprovalResolutionResult, error) {
 	return coordinator.Resolve(f.ctx, ResolveApprovalRequest{
 		Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
 		DecisionID: "decision-" + approval.ID, Decision: decision, Principal: loopApprover, Reason: reason,
 	})
 }
 
-func requireQueuedAfterDecision(t *testing.T, run *AgentRun, decisionID string, at time.Time) {
+func requireQueuedAfterDecision(t *testing.T, run *models.AgentRun, decisionID string, at time.Time) {
 	t.Helper()
-	if run.Status != AgentRunStatusQueued || run.WakeCondition != nil || run.LeaseOwner != "" || run.LeaseExpiresAt != nil ||
+	if run.Status != models.AgentRunStatusQueued || run.WakeCondition != nil || run.LeaseOwner != "" || run.LeaseExpiresAt != nil ||
 		!run.AvailableAt.Equal(at) || !run.QueueEnteredAt.Equal(at) || run.LastWakeSignalID != decisionID {
 		t.Fatalf("Run after parked decision = %#v", run)
 	}
 }
 
 func TestLoopParkedApprovalApprovedQueuesRunAndReadiesCall(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		call, approval := f.proposeLoopApproval("push", loopApprovalOptions{})
 		f.parkOn(approval.ID)
 		parkedRevision := f.run.Revision
 		at := f.now.Add(2 * time.Second)
-		result, err := f.decide(f.approvalCoordinator(at), approval, ApprovalDecisionApprove, "")
+		result, err := f.decide(f.approvalCoordinator(at), approval, models.ApprovalDecisionApprove, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !result.Resolved || result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady || result.Call.ID != call.ID {
+		if !result.Resolved || result.Approval.Status != models.ApprovalStatusApproved || result.Call.Status != models.ActionCallStatusReady || result.Call.ID != call.ID {
 			t.Fatalf("resolution = %#v", result)
 		}
 		run := f.currentRun()
@@ -141,36 +142,36 @@ func TestLoopParkedApprovalApprovedQueuesRunAndReadiesCall(t *testing.T) {
 		if run.Revision != parkedRevision+1 {
 			t.Fatalf("Run revision = %d, want %d", run.Revision, parkedRevision+1)
 		}
-		claimed, err := store.ClaimNextAgentRun(f.ctx, AgentRunClaim{Scope: f.scope, WorkerID: "next-worker", Now: at.Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+		claimed, err := store.ClaimNextAgentRun(f.ctx, models.AgentRunClaim{Scope: f.scope, WorkerID: "next-worker", Now: at.Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 		if err != nil || claimed == nil || claimed.ID != run.ID {
 			t.Fatalf("the approved Run is not claimable: %#v, %v", claimed, err)
 		}
-		if replay, err := f.decide(f.approvalCoordinator(at), approval, ApprovalDecisionApprove, ""); err != nil || replay.Resolved {
+		if replay, err := f.decide(f.approvalCoordinator(at), approval, models.ApprovalDecisionApprove, ""); err != nil || replay.Resolved {
 			t.Fatalf("replay = %#v, %v", replay, err)
 		}
 		if _, err := f.approvalCoordinator(at).Resolve(f.ctx, ResolveApprovalRequest{
 			Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: result.Approval.Revision,
-			DecisionID: "other", Decision: ApprovalDecisionReject, Principal: loopApprover,
-		}); !errors.Is(err, ErrApprovalResolved) {
+			DecisionID: "other", Decision: models.ApprovalDecisionReject, Principal: loopApprover,
+		}); !errors.Is(err, models.ErrApprovalResolved) {
 			t.Fatalf("second decision = %v", err)
 		}
 	})
 }
 
 func TestLoopParkedApprovalRejectedQueuesRunAndDeniesCall(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
-		f := newLoopApprovalFixture(t, store, &BudgetPolicy{MaxActions: 2})
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+		f := newLoopApprovalFixture(t, store, &models.BudgetPolicy{MaxActions: 2})
 		_, approval := f.proposeLoopApproval("push", loopApprovalOptions{reserveBudget: true})
 		if len(f.run.BudgetReservations) != 1 {
 			t.Fatalf("reservation = %#v", f.run.BudgetReservations)
 		}
 		f.parkOn(approval.ID)
 		at := f.now.Add(2 * time.Second)
-		result, err := f.decide(f.approvalCoordinator(at), approval, ApprovalDecisionReject, "not this branch")
+		result, err := f.decide(f.approvalCoordinator(at), approval, models.ApprovalDecisionReject, "not this branch")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Approval.Status != ApprovalStatusRejected || result.Call.Status != ActionCallStatusDenied ||
+		if result.Approval.Status != models.ApprovalStatusRejected || result.Call.Status != models.ActionCallStatusDenied ||
 			result.Call.Error != "rejected: not this branch" || result.Call.CompletedAt == nil {
 			t.Fatalf("rejection = %#v", result)
 		}
@@ -183,24 +184,24 @@ func TestLoopParkedApprovalRejectedQueuesRunAndDeniesCall(t *testing.T) {
 }
 
 func TestLoopParkedApprovalChangesRequestedRequiresGuidance(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		_, approval := f.proposeLoopApproval("push", loopApprovalOptions{})
 		f.parkOn(approval.ID)
 		at := f.now.Add(2 * time.Second)
-		if _, err := f.decide(f.approvalCoordinator(at), approval, ApprovalDecisionRequestChanges, " "); err == nil || !strings.Contains(err.Error(), "reviewer guidance is required") {
+		if _, err := f.decide(f.approvalCoordinator(at), approval, models.ApprovalDecisionRequestChanges, " "); err == nil || !strings.Contains(err.Error(), "reviewer guidance is required") {
 			t.Fatalf("missing guidance = %v", err)
 		}
-		if run := f.currentRun(); run.Status != AgentRunStatusWaitingForApproval {
+		if run := f.currentRun(); run.Status != models.AgentRunStatusWaitingForApproval {
 			t.Fatalf("a refused change request moved the Run: %#v", run)
 		}
 		const guidance = "Push to the staging branch first."
-		result, err := f.decide(f.approvalCoordinator(at), approval, ApprovalDecisionRequestChanges, guidance)
+		result, err := f.decide(f.approvalCoordinator(at), approval, models.ApprovalDecisionRequestChanges, guidance)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Approval.Status != ApprovalStatusChangesRequested || result.Approval.DecisionReason != guidance ||
-			result.Call.Status != ActionCallStatusDenied || result.Call.Error != "changes_requested: "+guidance ||
+		if result.Approval.Status != models.ApprovalStatusChangesRequested || result.Approval.DecisionReason != guidance ||
+			result.Call.Status != models.ActionCallStatusDenied || result.Call.Error != "changes_requested: "+guidance ||
 			result.Event.EventType != "approval.changes_requested" {
 			t.Fatalf("change request = %#v", result)
 		}
@@ -209,7 +210,7 @@ func TestLoopParkedApprovalChangesRequestedRequiresGuidance(t *testing.T) {
 }
 
 func TestLoopParkedApprovalExpiredQueues(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		_, approval := f.proposeLoopApproval("push", loopApprovalOptions{})
 		f.parkOn(approval.ID)
@@ -222,7 +223,7 @@ func TestLoopParkedApprovalExpiredQueues(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Approval.Status != ApprovalStatusExpired || result.Call.Status != ActionCallStatusDenied || result.Event.EventType != "approval.expired" {
+		if result.Approval.Status != models.ApprovalStatusExpired || result.Call.Status != models.ActionCallStatusDenied || result.Event.EventType != "approval.expired" {
 			t.Fatalf("expiry = %#v", result)
 		}
 		requireQueuedAfterDecision(t, f.currentRun(), "approval-timeout:"+approval.ID, at)
@@ -230,10 +231,10 @@ func TestLoopParkedApprovalExpiredQueues(t *testing.T) {
 }
 
 func TestLoopParkedApprovalTimeoutAutoApproveNeverForAlwaysReview(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopStoreFixture(t, store)
-		_, reviewed := f.proposeLoopApproval("always", loopApprovalOptions{timeout: ApprovalTimeoutApprove, alwaysReview: true})
-		_, plain := f.proposeLoopApproval("plain", loopApprovalOptions{timeout: ApprovalTimeoutApprove})
+		_, reviewed := f.proposeLoopApproval("always", loopApprovalOptions{timeout: models.ApprovalTimeoutApprove, alwaysReview: true})
+		_, plain := f.proposeLoopApproval("plain", loopApprovalOptions{timeout: models.ApprovalTimeoutApprove})
 		f.parkOn(reviewed.ID)
 		at := reviewed.ExpiresAt.Add(time.Second)
 		coordinator := f.approvalCoordinator(at)
@@ -241,7 +242,7 @@ func TestLoopParkedApprovalTimeoutAutoApproveNeverForAlwaysReview(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Approval.Status != ApprovalStatusExpired || result.Call.Status != ActionCallStatusDenied {
+		if result.Approval.Status != models.ApprovalStatusExpired || result.Call.Status != models.ActionCallStatusDenied {
 			t.Fatalf("an always-review approval auto-approved: %#v", result)
 		}
 		requireQueuedAfterDecision(t, f.currentRun(), "approval-timeout:"+reviewed.ID, at)
@@ -252,47 +253,47 @@ func TestLoopParkedApprovalTimeoutAutoApproveNeverForAlwaysReview(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if auto.Approval.Status != ApprovalStatusApproved || auto.Call.Status != ActionCallStatusReady || auto.Event.EventType != "approval.auto_approved" {
+		if auto.Approval.Status != models.ApprovalStatusApproved || auto.Call.Status != models.ActionCallStatusReady || auto.Event.EventType != "approval.auto_approved" {
 			t.Fatalf("timeout auto-approve = %#v", auto)
 		}
-		if after := f.currentRun(); after.Status != AgentRunStatusQueued || after.Revision != before.Revision+1 {
+		if after := f.currentRun(); after.Status != models.AgentRunStatusQueued || after.Revision != before.Revision+1 {
 			t.Fatalf("held auto-approve Run = %#v (before revision %d)", after, before.Revision)
 		}
 	})
 }
 
 func TestLoopHeldApprovalDecisionBumpsRunRevision(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
-		f := newLoopApprovalFixture(t, store, &BudgetPolicy{MaxActions: 3})
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+		f := newLoopApprovalFixture(t, store, &models.BudgetPolicy{MaxActions: 3})
 		_, approved := f.proposeLoopApproval("approved", loopApprovalOptions{reserveBudget: true})
 		_, rejected := f.proposeLoopApproval("rejected", loopApprovalOptions{reserveBudget: true})
 		at := f.now.Add(2 * time.Second)
 		coordinator := f.approvalCoordinator(at)
 
 		before := f.currentRun()
-		result, err := f.decide(coordinator, approved, ApprovalDecisionApprove, "")
+		result, err := f.decide(coordinator, approved, models.ApprovalDecisionApprove, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady {
+		if result.Approval.Status != models.ApprovalStatusApproved || result.Call.Status != models.ActionCallStatusReady {
 			t.Fatalf("held approve = %#v", result)
 		}
 		after := f.currentRun()
-		if after.Revision != before.Revision+1 || after.Status != AgentRunStatusRunning || after.LeaseOwner != loopStoreWorker ||
+		if after.Revision != before.Revision+1 || after.Status != models.AgentRunStatusRunning || after.LeaseOwner != loopStoreWorker ||
 			after.LeaseExpiresAt == nil || !after.LeaseExpiresAt.Equal(*before.LeaseExpiresAt) || after.WakeCondition != nil ||
 			len(after.BudgetReservations) != 2 || after.LastWakeSignalID != before.LastWakeSignalID {
 			t.Fatalf("held approve Run = %#v (before %#v)", after, before)
 		}
 
-		result, err = f.decide(coordinator, rejected, ApprovalDecisionReject, "no")
+		result, err = f.decide(coordinator, rejected, models.ApprovalDecisionReject, "no")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Approval.Status != ApprovalStatusRejected || result.Call.Status != ActionCallStatusDenied {
+		if result.Approval.Status != models.ApprovalStatusRejected || result.Call.Status != models.ActionCallStatusDenied {
 			t.Fatalf("held reject = %#v", result)
 		}
 		final := f.currentRun()
-		if final.Revision != after.Revision+1 || final.Status != AgentRunStatusRunning || final.LeaseOwner != loopStoreWorker {
+		if final.Revision != after.Revision+1 || final.Status != models.AgentRunStatusRunning || final.LeaseOwner != loopStoreWorker {
 			t.Fatalf("held reject Run = %#v", final)
 		}
 		if _, still := final.BudgetReservations[agentrun.ActionBudgetReservationID("rejected")]; still || len(final.BudgetReservations) != 1 {
@@ -305,48 +306,48 @@ func TestLoopHeldApprovalDecisionBumpsRunRevision(t *testing.T) {
 // revision it read; the decision's bump makes that park fail its check, so
 // the loop re-plans and sees the decision.
 func TestLoopHeldApprovalDecisionFailsStalePark(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		_, approval := f.proposeLoopApproval("push", loopApprovalOptions{})
 		planned := f.currentRun()
-		if _, err := f.decide(f.approvalCoordinator(f.now.Add(time.Second)), approval, ApprovalDecisionApprove, ""); err != nil {
+		if _, err := f.decide(f.approvalCoordinator(f.now.Add(time.Second)), approval, models.ApprovalDecisionApprove, ""); err != nil {
 			t.Fatal(err)
 		}
-		parked := cloneAgentRun(planned)
-		parked.Status = AgentRunStatusWaitingForApproval
-		parked.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
+		parked := models.CloneAgentRun(planned)
+		parked.Status = models.AgentRunStatusWaitingForApproval
+		parked.WakeCondition = &models.WakeCondition{Type: "approval", Reference: approval.ID}
 		parked.LeaseOwner, parked.LeaseExpiresAt = "", nil
 		parked.Revision++
-		if _, err := store.UpdateAgentRunWithEvent(f.ctx, parked, planned.Revision, f.event("stale-park", "run.waiting"), nil); !errors.Is(err, ErrRevisionConflict) {
+		if _, err := store.UpdateAgentRunWithEvent(f.ctx, parked, planned.Revision, f.event("stale-park", "run.waiting"), nil); !errors.Is(err, models.ErrRevisionConflict) {
 			t.Fatalf("stale park = %v", err)
 		}
-		if run := f.currentRun(); run.Status != AgentRunStatusRunning {
+		if run := f.currentRun(); run.Status != models.AgentRunStatusRunning {
 			t.Fatalf("Run = %#v", run)
 		}
 	})
 }
 
 func TestLoopHeldApprovalApprovalModeSweep(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		_, approval := f.proposeLoopApproval("push", loopApprovalOptions{})
 		before := f.currentRun()
-		result, err := f.approvalCoordinator(f.now.Add(time.Second)).ResolveByApprovalMode(f.ctx, f.scope, approval.ID, approval.Revision, ConversationApprovalSkip, "mode-change")
+		result, err := f.approvalCoordinator(f.now.Add(time.Second)).ResolveByApprovalMode(f.ctx, f.scope, approval.ID, approval.Revision, models.ConversationApprovalSkip, "mode-change")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Approval.Status != ApprovalStatusApproved || result.Approval.DecisionBy == nil || *result.Approval.DecisionBy != ApprovalModePrincipal ||
-			result.Call.Status != ActionCallStatusReady {
+		if result.Approval.Status != models.ApprovalStatusApproved || result.Approval.DecisionBy == nil || *result.Approval.DecisionBy != ApprovalModePrincipal ||
+			result.Call.Status != models.ActionCallStatusReady {
 			t.Fatalf("mode sweep = %#v", result)
 		}
-		if after := f.currentRun(); after.Status != AgentRunStatusRunning || after.Revision != before.Revision+1 || after.LeaseOwner != loopStoreWorker {
+		if after := f.currentRun(); after.Status != models.AgentRunStatusRunning || after.Revision != before.Revision+1 || after.LeaseOwner != loopStoreWorker {
 			t.Fatalf("mode sweep Run = %#v", after)
 		}
 	})
 }
 
 func TestLoopSupersededRecordsMessageID(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		_, held := f.proposeLoopApproval("held", loopApprovalOptions{})
 		_, parked := f.proposeLoopApproval("parked", loopApprovalOptions{})
@@ -357,11 +358,11 @@ func TestLoopSupersededRecordsMessageID(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Approval.Status != ApprovalStatusSuperseded || result.Approval.SupersededByMessageID != "message-1" ||
-			result.Call.Status != ActionCallStatusDenied || result.Call.Error != "superseded: "+ApprovalSupersededReason {
+		if result.Approval.Status != models.ApprovalStatusSuperseded || result.Approval.SupersededByMessageID != "message-1" ||
+			result.Call.Status != models.ActionCallStatusDenied || result.Call.Error != "superseded: "+ApprovalSupersededReason {
 			t.Fatalf("held supersede = %#v", result)
 		}
-		if after := f.currentRun(); after.Status != AgentRunStatusRunning || after.Revision != before.Revision+1 {
+		if after := f.currentRun(); after.Status != models.AgentRunStatusRunning || after.Revision != before.Revision+1 {
 			t.Fatalf("held supersede Run = %#v", after)
 		}
 		stored, err := store.GetApproval(f.ctx, f.scope, held.ID)
@@ -382,32 +383,32 @@ func TestLoopSupersededRecordsMessageID(t *testing.T) {
 }
 
 func TestLoopPausedParkedApprovalResolvesToPausedQueued(t *testing.T) {
-	for _, decision := range []ApprovalDecision{ApprovalDecisionApprove, ApprovalDecisionReject} {
+	for _, decision := range []models.ApprovalDecision{models.ApprovalDecisionApprove, models.ApprovalDecisionReject} {
 		t.Run(string(decision), func(t *testing.T) {
-			runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+			runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 				f := newLoopStoreFixture(t, store)
 				_, approval := f.proposeLoopApproval("push", loopApprovalOptions{})
 				f.parkOn(approval.ID)
 				paused, err := agentrun.NewRunCommandService(store).CommandAgentRun(f.ctx, agentrun.AgentRunCommandRequest{
 					Scope: f.scope, RunID: f.run.ID, ExpectedRevision: f.run.Revision, Kind: agentrun.AgentRunCommandPause,
-					Actor: ActivityActor{Type: "user", ID: "operator"},
+					Actor: models.ActivityActor{Type: "user", ID: "operator"},
 				})
-				if err != nil || paused.Run.Status != AgentRunStatusPaused || paused.Run.PausedFrom != AgentRunStatusWaitingForApproval {
+				if err != nil || paused.Run.Status != models.AgentRunStatusPaused || paused.Run.PausedFrom != models.AgentRunStatusWaitingForApproval {
 					t.Fatalf("pause = %#v, %v", paused, err)
 				}
 				result, err := f.decide(f.approvalCoordinator(f.now.Add(time.Second)), approval, decision, "reason")
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := ActionCallStatusReady
-				if decision == ApprovalDecisionReject {
-					want = ActionCallStatusDenied
+				want := models.ActionCallStatusReady
+				if decision == models.ApprovalDecisionReject {
+					want = models.ActionCallStatusDenied
 				}
 				if result.Call.Status != want {
 					t.Fatalf("call = %#v", result.Call)
 				}
 				run := f.currentRun()
-				if run.Status != AgentRunStatusPaused || run.PausedFrom != AgentRunStatusQueued || run.PausedWakeCondition != nil ||
+				if run.Status != models.AgentRunStatusPaused || run.PausedFrom != models.AgentRunStatusQueued || run.PausedWakeCondition != nil ||
 					run.Revision != paused.Run.Revision+1 {
 					t.Fatalf("paused Run = %#v", run)
 				}
@@ -417,19 +418,19 @@ func TestLoopPausedParkedApprovalResolvesToPausedQueued(t *testing.T) {
 }
 
 func TestLoopApprovalOfEndedRun(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		_, approval := f.proposeLoopApproval("push", loopApprovalOptions{})
-		f.setRunStatus(AgentRunStatusFailed)
+		f.setRunStatus(models.AgentRunStatusFailed)
 		ended := f.currentRun()
-		if _, err := f.decide(f.approvalCoordinator(f.now.Add(time.Second)), approval, ApprovalDecisionApprove, ""); !errors.Is(err, ErrInvalidRunTransition) {
+		if _, err := f.decide(f.approvalCoordinator(f.now.Add(time.Second)), approval, models.ApprovalDecisionApprove, ""); !errors.Is(err, models.ErrInvalidRunTransition) {
 			t.Fatalf("decision on an ended Run = %v", err)
 		}
 		result, err := f.approvalCoordinator(approval.ExpiresAt.Add(time.Second)).ResolveTimeout(f.ctx, f.scope, approval.ID, approval.Revision, approval.ID)
-		if err != nil || result.Approval.Status != ApprovalStatusExpired || result.Call.Status != ActionCallStatusDenied {
+		if err != nil || result.Approval.Status != models.ApprovalStatusExpired || result.Call.Status != models.ActionCallStatusDenied {
 			t.Fatalf("expiry of an ended Run's approval = %#v, %v", result, err)
 		}
-		if run := f.currentRun(); run.Revision != ended.Revision || run.Status != AgentRunStatusFailed {
+		if run := f.currentRun(); run.Revision != ended.Revision || run.Status != models.AgentRunStatusFailed {
 			t.Fatalf("expiry touched the ended Run: %#v", run)
 		}
 	})
@@ -438,13 +439,13 @@ func TestLoopApprovalOfEndedRun(t *testing.T) {
 // raceRunPortfolio bumps the Run revision with a lease heartbeat right after
 // the coordinator reads the Run, the first `races` times.
 type raceRunPortfolio struct {
-	PortfolioStore
-	store KernelStore
+	models.PortfolioStore
+	store models.KernelStore
 	races atomic.Int32
 	now   time.Time
 }
 
-func (p *raceRunPortfolio) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {
+func (p *raceRunPortfolio) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	run, err := p.PortfolioStore.GetAgentRun(ctx, scope, runID)
 	if err == nil && p.races.Add(-1) >= 0 {
 		if _, renewErr := p.store.RenewAgentRunLease(ctx, scope, runID, loopStoreWorker, p.now, time.Hour); renewErr != nil {
@@ -455,7 +456,7 @@ func (p *raceRunPortfolio) GetAgentRun(ctx context.Context, scope Scope, runID s
 }
 
 func TestLoopHeldApprovalRetriesWhenRunMoves(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		_, approval := f.proposeLoopApproval("push", loopApprovalOptions{})
 		_, starved := f.proposeLoopApproval("starved", loopApprovalOptions{})
@@ -463,15 +464,15 @@ func TestLoopHeldApprovalRetriesWhenRunMoves(t *testing.T) {
 		portfolio := &raceRunPortfolio{PortfolioStore: store, store: store, now: at}
 		portfolio.races.Store(approvalResolveAttempts - 1)
 		coordinator := NewApprovalCoordinator(portfolio, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return at }))
-		result, err := f.decide(coordinator, approval, ApprovalDecisionApprove, "")
-		if err != nil || !result.Resolved || result.Call.Status != ActionCallStatusReady {
+		result, err := f.decide(coordinator, approval, models.ApprovalDecisionApprove, "")
+		if err != nil || !result.Resolved || result.Call.Status != models.ActionCallStatusReady {
 			t.Fatalf("decision after racing heartbeats = %#v, %v", result, err)
 		}
 		portfolio.races.Store(approvalResolveAttempts)
-		if _, err := f.decide(coordinator, starved, ApprovalDecisionApprove, ""); !errors.Is(err, ErrRevisionConflict) {
+		if _, err := f.decide(coordinator, starved, models.ApprovalDecisionApprove, ""); !errors.Is(err, models.ErrRevisionConflict) {
 			t.Fatalf("decision losing every race = %v", err)
 		}
-		if stored, err := store.GetApproval(f.ctx, f.scope, starved.ID); err != nil || stored.Status != ApprovalStatusPending {
+		if stored, err := store.GetApproval(f.ctx, f.scope, starved.ID); err != nil || stored.Status != models.ApprovalStatusPending {
 			t.Fatalf("starved approval = %#v, %v", stored, err)
 		}
 	})

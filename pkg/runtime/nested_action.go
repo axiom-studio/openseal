@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -33,12 +34,12 @@ var (
 // model action name exactly as the step offered it (a Skill action or
 // mcp.<binding>.<tool>), and Arguments are the model-facing input for it.
 type NestedActionRequest struct {
-	Scope      Scope                  `json:"scope"`
+	Scope      models.Scope           `json:"scope"`
 	RunID      string                 `json:"runId"`
 	TurnID     string                 `json:"turnId"`
 	Capability string                 `json:"capability"`
 	Arguments  map[string]interface{} `json:"arguments,omitempty"`
-	Origin     ActionOrigin           `json:"origin"`
+	Origin     models.ActionOrigin    `json:"origin"`
 	// OriginRef groups calls in activity, such as the command they ran under.
 	OriginRef string `json:"originRef,omitempty"`
 	// IdempotencyKey identifies this request within the step. Repeating a
@@ -50,9 +51,9 @@ type NestedActionRequest struct {
 // NestedActionResult is the current state of one nested call. Approval is set
 // while (and after) the call needed a person's decision.
 type NestedActionResult struct {
-	Call     *ActionCall         `json:"call"`
-	Approval *ApprovalCheckpoint `json:"approval,omitempty"`
-	Created  bool                `json:"created"`
+	Call     *models.ActionCall         `json:"call"`
+	Approval *models.ApprovalCheckpoint `json:"approval,omitempty"`
+	Created  bool                       `json:"created"`
 }
 
 // Settled reports whether the call needs no more waiting by its caller: it
@@ -61,13 +62,13 @@ func (r *NestedActionResult) Settled() bool {
 	if r == nil || r.Call == nil {
 		return false
 	}
-	if r.Call.Execution == ActionExecutionHost {
+	if r.Call.Execution == models.ActionExecutionHost {
 		// No action worker moves a host call on: ready or running, it waits
 		// for its host.
 		return true
 	}
 	switch r.Call.Status {
-	case ActionCallStatusReady, ActionCallStatusRunning:
+	case models.ActionCallStatusReady, models.ActionCallStatusRunning:
 		return false
 	}
 	return true
@@ -76,8 +77,8 @@ func (r *NestedActionResult) Settled() bool {
 // nestedActionTurnLive reports whether a nested call's step is still a
 // running step of its running Run, leased by the Run's lease owner. Execution
 // checks it before dispatch; a call whose step has ended is canceled.
-func nestedActionTurnLive(ctx context.Context, turns AgentTurnStore, run *AgentRun, call *ActionCall, now time.Time) (bool, error) {
-	if run == nil || call == nil || run.Scope != call.Scope || run.ID != call.RunID || run.Status != AgentRunStatusRunning ||
+func nestedActionTurnLive(ctx context.Context, turns models.AgentTurnStore, run *models.AgentRun, call *models.ActionCall, now time.Time) (bool, error) {
+	if run == nil || call == nil || run.Scope != call.Scope || run.ID != call.RunID || run.Status != models.AgentRunStatusRunning ||
 		run.LeaseOwner == "" || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
 		return false, nil
 	}
@@ -85,7 +86,7 @@ func nestedActionTurnLive(ctx context.Context, turns AgentTurnStore, run *AgentR
 	if err != nil || turn == nil {
 		return false, err
 	}
-	return turn.RunID == run.ID && turn.Status == AgentTurnStatusRunning && turn.LeaseOwner == run.LeaseOwner &&
+	return turn.RunID == run.ID && turn.Status == models.AgentTurnStatusRunning && turn.LeaseOwner == run.LeaseOwner &&
 		turn.LeaseExpiresAt != nil && turn.LeaseExpiresAt.After(now), nil
 }
 
@@ -94,7 +95,7 @@ func nestedActionTurnLive(ctx context.Context, turns AgentTurnStore, run *AgentR
 type nestedActionAuthority struct {
 	runID    string
 	workerID string
-	run      *AgentRun
+	run      *models.AgentRun
 	binding  *agentrun.TurnRunnerBinding
 }
 
@@ -103,17 +104,17 @@ type nestedActionTurns struct {
 	turns map[string]*nestedActionAuthority
 }
 
-func nestedActionTurnKey(scope Scope, turnID string) string {
+func nestedActionTurnKey(scope models.Scope, turnID string) string {
 	return portfolioKey(scope, turnID)
 }
 
 // open records the step's authority until the returned function is called.
-func (t *nestedActionTurns) open(run *AgentRun, turn *AgentTurn, binding *agentrun.TurnRunnerBinding) func() {
+func (t *nestedActionTurns) open(run *models.AgentRun, turn *models.AgentTurn, binding *agentrun.TurnRunnerBinding) func() {
 	if t == nil || run == nil || turn == nil || binding == nil || turn.RunID != run.ID || turn.LeaseOwner == "" {
 		return func() {}
 	}
 	key := nestedActionTurnKey(turn.Scope, turn.ID)
-	authority := &nestedActionAuthority{runID: run.ID, workerID: turn.LeaseOwner, run: cloneAgentRun(run), binding: binding}
+	authority := &nestedActionAuthority{runID: run.ID, workerID: turn.LeaseOwner, run: models.CloneAgentRun(run), binding: binding}
 	t.mu.Lock()
 	if t.turns == nil {
 		t.turns = make(map[string]*nestedActionAuthority)
@@ -129,7 +130,7 @@ func (t *nestedActionTurns) open(run *AgentRun, turn *AgentTurn, binding *agentr
 	}
 }
 
-func (t *nestedActionTurns) lookup(scope Scope, turnID string) *nestedActionAuthority {
+func (t *nestedActionTurns) lookup(scope models.Scope, turnID string) *nestedActionAuthority {
 	if t == nil {
 		return nil
 	}
@@ -142,7 +143,7 @@ func (t *nestedActionTurns) lookup(scope Scope, turnID string) *nestedActionAuth
 // calls until the returned function is called. The run loop calls it when a
 // step begins and closes it when the step ends, so nested calls and their
 // bounds are scoped to one step.
-func (c *ActionCoordinator) OpenNestedActionTurn(run *AgentRun, turn *AgentTurn, binding *agentrun.TurnRunnerBinding) func() {
+func (c *ActionCoordinator) OpenNestedActionTurn(run *models.AgentRun, turn *models.AgentTurn, binding *agentrun.TurnRunnerBinding) func() {
 	if c == nil {
 		return func() {}
 	}
@@ -158,14 +159,14 @@ func (c *ActionCoordinator) ProposeNested(ctx context.Context, req NestedActionR
 	return c.proposeNested(ctx, req, "", nil)
 }
 
-func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionRequest, execution ActionExecution, choose func(*agentrun.TurnRunnerBinding) (*capability.ModelAction, error)) (*NestedActionResult, error) {
+func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionRequest, execution models.ActionExecution, choose func(*agentrun.TurnRunnerBinding) (*capability.ModelAction, error)) (*NestedActionResult, error) {
 	if c == nil {
 		return nil, errors.New("action coordinator is not configured")
 	}
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	if req.Origin != ActionOriginVM {
+	if req.Origin != models.ActionOriginVM {
 		return nil, fmt.Errorf("unsupported nested action origin %q", req.Origin)
 	}
 	if strings.TrimSpace(req.RunID) == "" || strings.TrimSpace(req.TurnID) == "" || strings.TrimSpace(req.Capability) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
@@ -173,9 +174,9 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 	}
 	authority := c.nested.lookup(req.Scope, req.TurnID)
 	if authority == nil || authority.runID != req.RunID {
-		return nil, ErrNestedTurnNotActive
+		return nil, models.ErrNestedTurnNotActive
 	}
-	if authority.run.Kind == RunKindConversation && strings.TrimSpace(authority.run.AssignedAgentID) == "" {
+	if authority.run.Kind == models.RunKindConversation && strings.TrimSpace(authority.run.AssignedAgentID) == "" {
 		return nil, errors.New("nested action calls require the Run's acting Agent")
 	}
 	binding := authority.binding
@@ -184,7 +185,7 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 	if choose != nil {
 		selected, err = choose(binding)
 	} else {
-		selected, err = selectTurnModelAction(binding.ModelActions, TurnAction{Capability: req.Capability})
+		selected, err = selectTurnModelAction(binding.ModelActions, activity.TurnAction{Capability: req.Capability})
 	}
 	if err != nil {
 		return nil, err
@@ -198,7 +199,7 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 		summary = "Called " + selected.Name + " from the chat's VM"
 	}
 	idempotencyPrefix := "vm:"
-	if execution == ActionExecutionHost {
+	if execution == models.ActionExecutionHost {
 		idempotencyPrefix = "vm-host:"
 	}
 	proposal, err := c.Propose(ctx, ProposeActionRequest{
@@ -208,13 +209,13 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 		Arguments:       selected.ActionInput(maps.Clone(req.Arguments)),
 		PreparedRuntime: preparedRuntimeForAction(binding, selected),
 		IdempotencyKey:  idempotencyPrefix + req.TurnID + ":" + strings.TrimSpace(req.IdempotencyKey),
-		Summary:         summary, Actor: ActivityActor{Type: "worker", ID: authority.workerID},
-		Origin: ActionOriginVM, OriginRef: strings.TrimSpace(req.OriginRef), CausationID: req.TurnID, Execution: execution,
+		Summary:         summary, Actor: models.ActivityActor{Type: "worker", ID: authority.workerID},
+		Origin: models.ActionOriginVM, OriginRef: strings.TrimSpace(req.OriginRef), CausationID: req.TurnID, Execution: execution,
 	})
-	if errors.Is(err, ErrLeaseLost) {
+	if errors.Is(err, models.ErrLeaseLost) {
 		// The worker that hosts this step no longer holds the Run's lease, so
 		// the step is no longer the Run's running step.
-		return nil, fmt.Errorf("%w: %w", ErrNestedTurnNotActive, err)
+		return nil, fmt.Errorf("%w: %w", models.ErrNestedTurnNotActive, err)
 	}
 	if err != nil {
 		return nil, err
@@ -222,8 +223,8 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 	if proposal == nil || proposal.Call == nil {
 		return nil, errors.New("nested action proposal returned no ActionCall")
 	}
-	if proposal.Call.Origin != ActionOriginVM || proposal.Call.TurnID != req.TurnID || proposal.Call.Execution != execution {
-		return nil, ErrIdempotencyConflict
+	if proposal.Call.Origin != models.ActionOriginVM || proposal.Call.TurnID != req.TurnID || proposal.Call.Execution != execution {
+		return nil, models.ErrIdempotencyConflict
 	}
 	return &NestedActionResult{Call: proposal.Call, Approval: proposal.Approval, Created: proposal.Created}, nil
 }
@@ -248,7 +249,7 @@ func actionDeploymentForSelection(binding *agentrun.TurnRunnerBinding, selected 
 }
 
 // GetNested returns the current state of one nested call of a Run.
-func (c *ActionCoordinator) GetNested(ctx context.Context, scope Scope, runID, actionCallID string) (*NestedActionResult, error) {
+func (c *ActionCoordinator) GetNested(ctx context.Context, scope models.Scope, runID, actionCallID string) (*NestedActionResult, error) {
 	if c == nil || c.actions == nil {
 		return nil, errors.New("action coordinator is not configured")
 	}
@@ -256,8 +257,8 @@ func (c *ActionCoordinator) GetNested(ctx context.Context, scope Scope, runID, a
 	if err != nil {
 		return nil, err
 	}
-	if call == nil || call.RunID != runID || call.Origin != ActionOriginVM {
-		return nil, ErrActionNotFound
+	if call == nil || call.RunID != runID || call.Origin != models.ActionOriginVM {
+		return nil, models.ErrActionNotFound
 	}
 	result := &NestedActionResult{Call: call}
 	if call.ApprovalID != "" {
@@ -286,7 +287,7 @@ func preparedRuntimeForAction(binding *agentrun.TurnRunnerBinding, selected *cap
 // selectTurnModelAction resolves a proposal exactly by name and, when the
 // proposal carries one, binding. A name exposed twice is refused even when the
 // proposal names a binding: a catalog with duplicate names is itself invalid.
-func selectTurnModelAction(actions []capability.ModelAction, request TurnAction) (*capability.ModelAction, error) {
+func selectTurnModelAction(actions []capability.ModelAction, request activity.TurnAction) (*capability.ModelAction, error) {
 	var selected *capability.ModelAction
 	matches := 0
 	for index := range actions {
@@ -303,7 +304,7 @@ func selectTurnModelAction(actions []capability.ModelAction, request TurnAction)
 		selected = candidate
 	}
 	if request.ExpectedSkillVersion != "" && (selected == nil || selected.Version != request.ExpectedSkillVersion) {
-		return nil, fmt.Errorf("%w: requested capability %q version %q is not authorized by the current binding", ErrRunSkillDependencyUnavailable, request.Capability, request.ExpectedSkillVersion)
+		return nil, fmt.Errorf("%w: requested capability %q version %q is not authorized by the current binding", models.ErrRunSkillDependencyUnavailable, request.Capability, request.ExpectedSkillVersion)
 	}
 	return selected, nil
 }

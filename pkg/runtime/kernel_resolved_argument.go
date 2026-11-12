@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -58,7 +59,7 @@ func (KernelResolvedActionArgumentResolver) ValidateActionProposal(context.Conte
 	return nil, nil
 }
 
-func kernelAgentSessionID(run *AgentRun) (string, error) {
+func kernelAgentSessionID(run *models.AgentRun) (string, error) {
 	if run == nil {
 		return "", errors.New("durable Run is required")
 	}
@@ -69,6 +70,6 @@ func kernelAgentSessionID(run *AgentRun) (string, error) {
 	if portableAgentSessionID.MatchString(agentID) {
 		return agentID, nil
 	}
-	digest := strings.TrimPrefix(hashString(agentID), "sha256:")
+	digest := strings.TrimPrefix(models.SHA256DigestString(agentID), "sha256:")
 	return "agent-" + digest[:32], nil
 }

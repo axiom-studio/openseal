@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -16,30 +18,30 @@ import (
 // (its approved create card succeeded), "one" and "two" (in another space,
 // newest), and bo's "theirs".
 type agentBuilderDraftSeed struct {
-	scope                     Scope
+	scope                     models.Scope
 	made, one, two, theirs    string
 	defaultSpace, secondSpace string
 }
 
-func seedAgentBuilderDrafts(t *testing.T, store KernelStore) agentBuilderDraftSeed {
+func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilderDraftSeed {
 	t.Helper()
-	f, card := cardApproval(t, store, "create", createAgentCard(), ApprovalTimeoutExpire)
+	f, card := cardApproval(t, store, "create", createAgentCard(), models.ApprovalTimeoutExpire)
 	ctx := f.ctx
-	service := NewConversationService(store.(ConversationStore))
+	service := NewConversationService(store.(models.ConversationStore))
 	// Each requester's first space is their default; the plain chat has no
 	// person behind it and goes to the empty owner's.
-	seedTestSpaceFor(t, store.(SpaceStore), f.scope, "ana")
-	seedTestSpaceFor(t, store.(SpaceStore), f.scope, "bo")
-	seedTestSpace(t, store.(SpaceStore), f.scope)
-	second, err := NewSpaceService(store.(SpaceStore)).CreateSpace(ctx, CreateSpaceRequest{Scope: f.scope, Name: "Second", Look: DefaultSpaceLook, OwnerID: "ana"})
+	seedTestSpaceFor(t, store.(models.SpaceStore), f.scope, "ana")
+	seedTestSpaceFor(t, store.(models.SpaceStore), f.scope, "bo")
+	seedTestSpace(t, store.(models.SpaceStore), f.scope)
+	second, err := portfolio.NewSpaceService(store.(models.SpaceStore)).CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: f.scope, Name: "Second", Look: models.DefaultSpaceLook, OwnerID: "ana"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := func(requester, key, spaceID string) *Conversation {
+	start := func(requester, key, spaceID string) *models.Conversation {
 		t.Helper()
-		result, err := StartAgentBuilderConversation(ctx, service, StartAgentBuilderRequest{
-			Scope: f.scope, Requester: ConversationParticipant{Type: ConversationParticipantUser, ID: requester},
-			Prompt: "Build " + key, Parameters: AgentBuilderParameters{Name: key}, SpaceID: spaceID, IdempotencyKey: key,
+		result, err := StartAgentBuilderConversation(ctx, service, models.StartAgentBuilderRequest{
+			Scope: f.scope, Requester: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: requester},
+			Prompt: "Build " + key, Parameters: models.AgentBuilderParameters{Name: key}, SpaceID: spaceID, IdempotencyKey: key,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -60,28 +62,28 @@ func seedAgentBuilderDrafts(t *testing.T, store KernelStore) agentBuilderDraftSe
 		t.Fatal(err)
 	}
 	if _, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
-		Scope: f.scope, ConversationID: plain.ID, ExpectedRevision: plain.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "ana"},
-		Intent: MessageIntentUpdate, Content: "Hi", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "plain-1",
+		Scope: f.scope, ConversationID: plain.ID, ExpectedRevision: plain.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"},
+		Intent: models.MessageIntentUpdate, Content: "Hi", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "plain-1",
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// The card's Run belongs to "made"; approving it and succeeding its call creates the Agent.
 	run := f.currentRun()
-	withConversation := cloneAgentRun(run)
+	withConversation := models.CloneAgentRun(run)
 	withConversation.Context = map[string]interface{}{"conversationId": made.ID}
 	withConversation.Revision++
 	if _, err := store.UpdateAgentRunWithEvent(ctx, withConversation, run.Revision, f.event("run-conversation", "run.updated"), nil); err != nil {
 		t.Fatal(err)
 	}
-	if created, err := createdAgentBuilderConversation(ctx, store, &ActionCall{Scope: f.scope, ApprovalID: card.ID}, withConversation); err != nil || created != "" {
+	if created, err := createdAgentBuilderConversation(ctx, store, &models.ActionCall{Scope: f.scope, ApprovalID: card.ID}, withConversation); err != nil || created != "" {
 		t.Fatalf("a pending card finished its draft: %q, %v", created, err)
 	}
-	if _, err := f.resolveWith(builderApprovalHost{calls: new(int)}, card, ApprovalDecisionApprove, loopApprover, ""); err != nil {
+	if _, err := f.resolveWith(builderApprovalHost{calls: new(int)}, card, models.ApprovalDecisionApprove, loopApprover, ""); err != nil {
 		t.Fatal(err)
 	}
 	at := f.now.Add(2 * time.Second)
-	claimed, err := store.ClaimNextAction(ctx, ActionClaim{Scope: f.scope, WorkerID: "worker", Now: at, LeaseDuration: time.Minute, OwnActionID: card.ActionCallID})
+	claimed, err := store.ClaimNextAction(ctx, models.ActionClaim{Scope: f.scope, WorkerID: "worker", Now: at, LeaseDuration: time.Minute, OwnActionID: card.ActionCallID})
 	if err != nil || claimed == nil {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
@@ -90,12 +92,12 @@ func seedAgentBuilderDrafts(t *testing.T, store KernelStore) agentBuilderDraftSe
 	if err != nil || created != made.ID {
 		t.Fatalf("created from = %q, %v; want %s", created, err, made.ID)
 	}
-	succeeded := cloneActionCall(claimed)
-	succeeded.Status, succeeded.CompletedAt = ActionCallStatusSucceeded, &at
+	succeeded := models.CloneActionCall(claimed)
+	succeeded.Status, succeeded.CompletedAt = models.ActionCallStatusSucceeded, &at
 	succeeded.LeaseOwner, succeeded.LeaseExpiresAt = "", nil
 	succeeded.UpdatedAt = at
 	succeeded.Revision++
-	if _, err := store.PersistActionExecution(ctx, ActionExecutionRecord{
+	if _, err := store.PersistActionExecution(ctx, models.ActionExecutionRecord{
 		Call: succeeded, ExpectedCallRevision: claimed.Revision, ExpectedRunRevision: run.Revision, WorkerID: "worker", Now: at,
 		Event: f.event("created", "action.succeeded"), CreatedFromBuilderConversationID: created,
 	}); err != nil {
@@ -107,32 +109,32 @@ func seedAgentBuilderDrafts(t *testing.T, store KernelStore) agentBuilderDraftSe
 // countingDraftReader records which conversations a drafts list read.
 type countingDraftReader struct {
 	*ConversationService
-	store         KernelStore
+	store         models.KernelStore
 	conversations int
 	statusReads   []string
 }
 
-func (r *countingDraftReader) ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error) {
+func (r *countingDraftReader) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
 	r.conversations++
 	return r.ConversationService.ListConversations(ctx, filter)
 }
 
-func (r *countingDraftReader) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+func (r *countingDraftReader) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	return r.store.ListAgentRuns(ctx, filter)
 }
 
-func (r *countingDraftReader) ListApprovals(ctx context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error) {
+func (r *countingDraftReader) ListApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
 	r.statusReads = append(r.statusReads, filter.ConversationID)
 	return r.store.ListApprovals(ctx, filter)
 }
 
-func assertAgentBuilderDrafts(t *testing.T, store KernelStore, seed agentBuilderDraftSeed) {
+func assertAgentBuilderDrafts(t *testing.T, store models.KernelStore, seed agentBuilderDraftSeed) {
 	t.Helper()
 	list := func(requester string, filter AgentBuilderDraftFilter, want ...string) {
 		t.Helper()
-		reader := &countingDraftReader{ConversationService: NewConversationService(store.(ConversationStore)), store: store}
+		reader := &countingDraftReader{ConversationService: NewConversationService(store.(models.ConversationStore)), store: store}
 		filter.Scope = seed.scope
-		filter.Requester = ConversationParticipant{Type: ConversationParticipantUser, ID: requester}
+		filter.Requester = models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: requester}
 		drafts, err := ListAgentBuilderDrafts(context.Background(), reader, filter)
 		if err != nil {
 			t.Fatal(err)
@@ -157,7 +159,7 @@ func assertAgentBuilderDrafts(t *testing.T, store KernelStore, seed agentBuilder
 }
 
 func TestAgentBuilderDraftsAreSelectedByTheStore(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		assertAgentBuilderDrafts(t, store, seedAgentBuilderDrafts(t, store))
 	})
 }

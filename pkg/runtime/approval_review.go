@@ -3,6 +3,8 @@ package runtime
 import (
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 )
 
 const (
@@ -28,7 +30,7 @@ func invalidApprovalReviewContext(message string) error {
 	return &approvalReviewValidationError{cause: errors.New(message)}
 }
 
-func validateApprovalReviewContext(review *ApprovalReviewContext) error {
+func validateApprovalReviewContext(review *activity.ApprovalReviewContext) error {
 	if review == nil {
 		return nil
 	}
@@ -59,17 +61,17 @@ func validateApprovalReviewContext(review *ApprovalReviewContext) error {
 	return nil
 }
 
-func cloneApprovalReviewContext(review *ApprovalReviewContext) *ApprovalReviewContext {
+func cloneApprovalReviewContext(review *activity.ApprovalReviewContext) *activity.ApprovalReviewContext {
 	if review == nil {
 		return nil
 	}
 	cloned := *review
 	cloned.Consequences = append([]string(nil), review.Consequences...)
-	cloned.Facts = append([]ApprovalReviewFact(nil), review.Facts...)
+	cloned.Facts = append([]activity.ApprovalReviewFact(nil), review.Facts...)
 	return &cloned
 }
 
-func approvalReviewContextMap(review *ApprovalReviewContext) map[string]interface{} {
+func approvalReviewContextMap(review *activity.ApprovalReviewContext) map[string]interface{} {
 	if review == nil {
 		return nil
 	}
@@ -133,7 +135,7 @@ func withDescription(schema map[string]interface{}, description string) map[stri
 // sees "Click 'Search'" rather than a generic summary. It reads only the
 // secret-safe preview arguments; the target is the action's URL argument or
 // its external operation resource.
-func intentApprovalReviewContext(preview map[string]interface{}, operation *ExternalOperationIdentity) *ApprovalReviewContext {
+func intentApprovalReviewContext(preview map[string]interface{}, operation *activity.ExternalOperationIdentity) *activity.ApprovalReviewContext {
 	arguments, _ := preview["arguments"].(map[string]interface{})
 	intent, _ := arguments["intent"].(string)
 	intent = strings.Join(strings.Fields(intent), " ")
@@ -143,7 +145,7 @@ func intentApprovalReviewContext(preview map[string]interface{}, operation *Exte
 	if runes := []rune(intent); len(runes) > 280 {
 		intent = strings.TrimSpace(string(runes[:280])) + "…"
 	}
-	review := &ApprovalReviewContext{Summary: intent}
+	review := &activity.ApprovalReviewContext{Summary: intent}
 	if target, _ := arguments["url"].(string); strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "http://") {
 		review.Target = target
 	} else if operation != nil {
@@ -163,7 +165,7 @@ func reviewedActionReviewContextJSONSchema() map[string]interface{} {
 
 // validateReviewedActionReviewContext checks the review envelope of a
 // reviewed governed call: present, valid, and carrying its exact content.
-func validateReviewedActionReviewContext(review *ApprovalReviewContext) error {
+func validateReviewedActionReviewContext(review *activity.ApprovalReviewContext) error {
 	if review == nil {
 		return invalidApprovalReviewContext("reviewContext is required")
 	}

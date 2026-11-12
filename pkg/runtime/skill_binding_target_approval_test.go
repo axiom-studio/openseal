@@ -15,14 +15,14 @@ import (
 
 // modePolicy is the kernel default policy evaluated as if the chat were in
 // mode, the way a host that falls through to it decides openseal.* writes.
-func modePolicy(mode ConversationApprovalMode) ActionPolicyEvaluator {
+func modePolicy(mode models.ConversationApprovalMode) ActionPolicyEvaluator {
 	base := NewDefaultActionPolicy()
 	return ActionPolicyEvaluatorFunc(func(ctx context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
 		input.ApprovalMode = mode
 		decision, err := base.EvaluateAction(ctx, input)
 		if err == nil && decision.Disposition == ActionDispositionRequireApproval {
-			decision.ApprovalTimeout = ApprovalTimeoutApprove
-			decision.ApprovalDestinations = []ApprovalDestination{{EndpointID: "slack-approvals"}}
+			decision.ApprovalTimeout = models.ApprovalTimeoutApprove
+			decision.ApprovalDestinations = []models.ApprovalDestination{{EndpointID: "slack-approvals"}}
 		}
 		return decision, err
 	})
@@ -31,7 +31,7 @@ func modePolicy(mode ConversationApprovalMode) ActionPolicyEvaluator {
 // targetedSkillCoordinator is Finn's claimed chat Run in the skills target
 // fixture, with researcher and Finn already connected to Reddit, and a
 // coordinator deciding with policy.
-func targetedSkillCoordinator(t *testing.T, policy ActionPolicyEvaluator) (*skillbindingtest.TargetFixture, *AgentRun, *ActionCoordinator) {
+func targetedSkillCoordinator(t *testing.T, policy ActionPolicyEvaluator) (*skillbindingtest.TargetFixture, *models.AgentRun, *ActionCoordinator) {
 	t.Helper()
 	f := skillbindingtest.NewTargetFixture(t)
 	for _, deploymentID := range []string{"researcher", "finn"} {
@@ -44,7 +44,7 @@ func targetedSkillCoordinator(t *testing.T, policy ActionPolicyEvaluator) (*skil
 		}
 	}
 	run := f.ChatRun(t, "finn")
-	claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, AgentRunClaim{
+	claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, models.AgentRunClaim{
 		Scope: f.Scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
@@ -53,17 +53,17 @@ func targetedSkillCoordinator(t *testing.T, policy ActionPolicyEvaluator) (*skil
 	return f, claimed, NewActionCoordinator(f.Store, f.Store, f.Catalog, policy, []ActionProposalValidator{f.Validator})
 }
 
-func targetedSkillRequest(f *skillbindingtest.TargetFixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) ProposeActionRequest {
+func targetedSkillRequest(f *skillbindingtest.TargetFixture, run *models.AgentRun, action string, arguments map[string]interface{}, toolCallID string) ProposeActionRequest {
 	return loopProposeRequest(ProposeActionRequest{
 		Scope: f.Scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
-		SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: action,
+		SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: action,
 		Arguments: arguments, Summary: "Give Researcher the Reddit reader",
 	}, toolCallID)
 }
 
 func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
 	disable := map[string]interface{}{"bindingId": "reddit", "expectedRevision": 1, skillbinding.SkillActionTargetAgentArgument: "researcher"}
-	for _, mode := range []ConversationApprovalMode{ConversationApprovalAuto, ConversationApprovalSkip, ConversationApprovalManual} {
+	for _, mode := range []models.ConversationApprovalMode{models.ConversationApprovalAuto, models.ConversationApprovalSkip, models.ConversationApprovalManual} {
 		for action, arguments := range map[string]map[string]interface{}{
 			skillbinding.SkillActionUpsertBinding: skillbindingtest.ReaderUpsertArguments("researcher"), skillbinding.SkillActionDisableBinding: disable,
 		} {
@@ -73,13 +73,13 @@ func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
 				t.Fatalf("%s %s: %v", mode, action, err)
 			}
 			approval := result.Approval
-			if approval == nil || result.Call.Status != ActionCallStatusWaitingApproval {
+			if approval == nil || result.Call.Status != models.ActionCallStatusWaitingApproval {
 				t.Fatalf("%s %s ran with no card: %#v", mode, action, result)
 			}
-			if len(approval.EligibleApprovers) != 1 || approval.EligibleApprovers[0] != (ApprovalPrincipal{Type: "user", ID: "7"}) {
+			if len(approval.EligibleApprovers) != 1 || approval.EligibleApprovers[0] != (models.ApprovalPrincipal{Type: "user", ID: "7"}) {
 				t.Fatalf("%s %s approvers = %#v, want the asking person", mode, action, approval.EligibleApprovers)
 			}
-			if approval.TimeoutDecision != ApprovalTimeoutExpire || len(approval.Destinations) != 0 {
+			if approval.TimeoutDecision != models.ApprovalTimeoutExpire || len(approval.Destinations) != 0 {
 				t.Fatalf("%s %s card timeout %q destinations %#v", mode, action, approval.TimeoutDecision, approval.Destinations)
 			}
 			if !isTargetedSkillBindingApproval(approval) || !approvedOnlyByPerson(approval) || isAgentBuilderApproval(approval) {
@@ -92,7 +92,7 @@ func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
 	}
 
 	// The builder's own Skills keep the chat's approval mode.
-	f, run, coordinator := targetedSkillCoordinator(t, modePolicy(ConversationApprovalAuto))
+	f, run, coordinator := targetedSkillCoordinator(t, modePolicy(models.ConversationApprovalAuto))
 	own, err := coordinator.Propose(f.Ctx, targetedSkillRequest(f, run, skillbinding.SkillActionUpsertBinding, skillbindingtest.ReaderUpsertArguments(""), "own"))
 	if err != nil || own.Approval != nil {
 		t.Fatalf("untargeted upsert in auto mode = %#v, %v", own, err)
@@ -108,7 +108,7 @@ func TestTargetedSkillBindingChangeCannotBeAllowedByPolicy(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "always requires explicit review") {
 		t.Fatalf("an allowed targeted upsert was not refused: %v", err)
 	}
-	calls, err := f.Store.ListActionCalls(f.Ctx, ActionFilter{Scope: f.Scope, RunID: run.ID})
+	calls, err := f.Store.ListActionCalls(f.Ctx, models.ActionFilter{Scope: f.Scope, RunID: run.ID})
 	if err != nil || len(calls) != 0 {
 		t.Fatalf("refused proposal recorded calls %#v, %v", calls, err)
 	}
@@ -119,49 +119,49 @@ type approvalHostCounting struct {
 	ordinary, builder *int
 }
 
-func (h approvalHostCounting) AuthorizeApproval(ctx context.Context, principal ApprovalPrincipal, approval *ApprovalCheckpoint) error {
+func (h approvalHostCounting) AuthorizeApproval(ctx context.Context, principal models.ApprovalPrincipal, approval *models.ApprovalCheckpoint) error {
 	*h.ordinary++
 	return EligibleApprovalAuthorizer{}.AuthorizeApproval(ctx, principal, approval)
 }
 
-func (h approvalHostCounting) AuthorizeAgentBuilderApproval(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error {
+func (h approvalHostCounting) AuthorizeAgentBuilderApproval(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error {
 	*h.builder++
 	return errors.New("a skills card is not an agent-builder card")
 }
 
 func targetedSkillCard(operation string) map[string]interface{} {
 	return map[string]interface{}{
-		"skillId": SkillManagementSkillID, "action": operation, "resourceType": "skill_binding", "operation": operation,
+		"skillId": models.SkillManagementSkillID, "action": operation, "resourceType": "skill_binding", "operation": operation,
 		"targetAgent": map[string]interface{}{"id": "researcher", "displayName": "Researcher"},
 	}
 }
 
 func TestTargetedSkillBindingApprovalOnlyThroughHostRoute(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		for _, operation := range []string{skillbinding.SkillActionUpsertBinding, skillbinding.SkillActionDisableBinding} {
 			card := targetedSkillCard(operation)
 			for resolver, authorizer := range map[string]ApprovalAuthorizer{
 				"eligible": EligibleApprovalAuthorizer{}, "allow all": allowAllApprovals, "nil": nil,
 			} {
-				f, approval := cardApproval(t, store, operation+"-"+resolver, card, ApprovalTimeoutExpire)
-				if _, err := f.resolveWith(authorizer, approval, ApprovalDecisionApprove, loopApprover, ""); err == nil {
+				f, approval := cardApproval(t, store, operation+"-"+resolver, card, models.ApprovalTimeoutExpire)
+				if _, err := f.resolveWith(authorizer, approval, models.ApprovalDecisionApprove, loopApprover, ""); err == nil {
 					t.Fatalf("%s approved a targeted %s card", resolver, operation)
 				}
 				requireStillPending(t, f, approval)
 			}
 
-			f, moded := cardApproval(t, store, operation+"-mode", card, ApprovalTimeoutExpire)
-			for _, mode := range []ConversationApprovalMode{ConversationApprovalAuto, ConversationApprovalSkip} {
+			f, moded := cardApproval(t, store, operation+"-mode", card, models.ApprovalTimeoutExpire)
+			for _, mode := range []models.ConversationApprovalMode{models.ConversationApprovalAuto, models.ConversationApprovalSkip} {
 				if _, err := NewApprovalCoordinator(f.store, f.store, nil).ResolveByApprovalMode(f.ctx, f.scope, moded.ID, moded.Revision, mode, "sweep"); !errors.Is(err, ErrAgentBuilderApprovalForbidden) {
 					t.Fatalf("approval mode %s approve of a targeted %s card = %v", mode, operation, err)
 				}
 			}
 			requireStillPending(t, f, moded)
 
-			f, timed := cardApproval(t, store, operation+"-timeout", card, ApprovalTimeoutApprove)
+			f, timed := cardApproval(t, store, operation+"-timeout", card, models.ApprovalTimeoutApprove)
 			timer := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return timed.ExpiresAt.Add(time.Second) }))
 			result, err := timer.ResolveTimeout(f.ctx, f.scope, timed.ID, timed.Revision, timed.ID)
-			if err != nil || result.Approval.Status != ApprovalStatusExpired || result.Call.Status != ActionCallStatusDenied {
+			if err != nil || result.Approval.Status != models.ApprovalStatusExpired || result.Call.Status != models.ActionCallStatusDenied {
 				t.Fatalf("timeout of a targeted %s card = %#v, %v", operation, result, err)
 			}
 
@@ -169,12 +169,12 @@ func TestTargetedSkillBindingApprovalOnlyThroughHostRoute(t *testing.T) {
 			// with AuthorizeApproval (their right on the target Agent).
 			ordinary, builder := 0, 0
 			host := approvalHostCounting{ordinary: &ordinary, builder: &builder}
-			f, approval := cardApproval(t, store, operation+"-host", card, ApprovalTimeoutExpire, loopApprover, ApprovalPrincipal{Type: "role", ID: "operator"})
-			if _, err := f.resolveWith(host, approval, ApprovalDecisionApprove, ApprovalPrincipal{Type: "role", ID: "operator"}, ""); !errors.Is(err, ErrAgentBuilderApprovalForbidden) {
+			f, approval := cardApproval(t, store, operation+"-host", card, models.ApprovalTimeoutExpire, loopApprover, models.ApprovalPrincipal{Type: "role", ID: "operator"})
+			if _, err := f.resolveWith(host, approval, models.ApprovalDecisionApprove, models.ApprovalPrincipal{Type: "role", ID: "operator"}, ""); !errors.Is(err, ErrAgentBuilderApprovalForbidden) {
 				t.Fatalf("role approve of a targeted %s card = %v", operation, err)
 			}
-			result, err = f.resolveWith(host, approval, ApprovalDecisionApprove, loopApprover, "")
-			if err != nil || result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady {
+			result, err = f.resolveWith(host, approval, models.ApprovalDecisionApprove, loopApprover, "")
+			if err != nil || result.Approval.Status != models.ApprovalStatusApproved || result.Call.Status != models.ActionCallStatusReady {
 				t.Fatalf("host approve of a targeted %s card = %#v, %v", operation, result, err)
 			}
 			if ordinary != 1 || builder != 0 {
@@ -182,16 +182,16 @@ func TestTargetedSkillBindingApprovalOnlyThroughHostRoute(t *testing.T) {
 			}
 
 			// Reject stays allowed everywhere.
-			f, rejected := cardApproval(t, store, operation+"-reject", card, ApprovalTimeoutExpire)
-			if result, err := f.resolveWith(EligibleApprovalAuthorizer{}, rejected, ApprovalDecisionReject, loopApprover, "not now"); err != nil || result.Approval.Status != ApprovalStatusRejected {
+			f, rejected := cardApproval(t, store, operation+"-reject", card, models.ApprovalTimeoutExpire)
+			if result, err := f.resolveWith(EligibleApprovalAuthorizer{}, rejected, models.ApprovalDecisionReject, loopApprover, "not now"); err != nil || result.Approval.Status != models.ApprovalStatusRejected {
 				t.Fatalf("reject of a targeted %s card = %#v, %v", operation, result, err)
 			}
 		}
 
 		// The chat's own skill change keeps every ordinary path.
-		own := map[string]interface{}{"skillId": SkillManagementSkillID, "action": skillbinding.SkillActionUpsertBinding, "resourceType": "skill_binding", "operation": skillbinding.SkillActionUpsertBinding}
-		f, approval := cardApproval(t, store, "own-mode", own, ApprovalTimeoutExpire)
-		if result, err := NewApprovalCoordinator(f.store, f.store, nil).ResolveByApprovalMode(f.ctx, f.scope, approval.ID, approval.Revision, ConversationApprovalAuto, "sweep"); err != nil || result.Approval.Status != ApprovalStatusApproved {
+		own := map[string]interface{}{"skillId": models.SkillManagementSkillID, "action": skillbinding.SkillActionUpsertBinding, "resourceType": "skill_binding", "operation": skillbinding.SkillActionUpsertBinding}
+		f, approval := cardApproval(t, store, "own-mode", own, models.ApprovalTimeoutExpire)
+		if result, err := NewApprovalCoordinator(f.store, f.store, nil).ResolveByApprovalMode(f.ctx, f.scope, approval.ID, approval.Revision, models.ConversationApprovalAuto, "sweep"); err != nil || result.Approval.Status != models.ApprovalStatusApproved {
 			t.Fatalf("approval-mode approve of an own skills card = %#v, %v", result, err)
 		}
 	})

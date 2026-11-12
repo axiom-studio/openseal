@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestActionClaimPersistsRunningRecoveryProvenance(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
 		now := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
 		_, proposal := createRunnableAction(t, store, now)
-		first, err := store.ClaimNextAction(t.Context(), ActionClaim{
+		first, err := store.ClaimNextAction(t.Context(), models.ActionClaim{
 			Scope: proposal.Call.Scope, WorkerID: "agent-worker", Now: now.Add(2 * time.Second), LeaseDuration: time.Minute, OwnActionID: proposal.Call.ID,
 		})
 		if err != nil || first == nil || first.RecoveredRunning || first.Attempt != 1 || first.MaxAttempts != 1 {
@@ -22,7 +23,7 @@ func TestActionClaimPersistsRunningRecoveryProvenance(t *testing.T) {
 		// Recover even when the transport retry budget is one: recovery must
 		// record ambiguity instead of treating this claim as permission to retry.
 		recoveryTime := first.LeaseExpiresAt.Add(time.Millisecond)
-		recovered, err := store.ClaimNextAction(t.Context(), ActionClaim{
+		recovered, err := store.ClaimNextAction(t.Context(), models.ActionClaim{
 			Scope: first.Scope, WorkerID: "agent-worker", Now: recoveryTime, LeaseDuration: time.Minute, OwnActionID: first.ID,
 		})
 		if err != nil || recovered == nil || !recovered.RecoveredRunning || recovered.Attempt != 2 {
@@ -35,7 +36,7 @@ func TestActionClaimPersistsRunningRecoveryProvenance(t *testing.T) {
 		// A maintenance or pause race can defer the recovered claim before this
 		// worker dispatches. That does not prove the previous worker did not.
 		deferred := deferClaimedActionForRecoveryTest(t, store, recovered, recoveryTime.Add(time.Second))
-		again, err := store.ClaimNextAction(t.Context(), ActionClaim{
+		again, err := store.ClaimNextAction(t.Context(), models.ActionClaim{
 			Scope: first.Scope, WorkerID: "agent-worker", Now: deferred.AvailableAt, LeaseDuration: time.Minute, OwnActionID: first.ID,
 		})
 		if err != nil || again == nil || !again.RecoveredRunning || again.Attempt != 3 {
@@ -45,10 +46,10 @@ func TestActionClaimPersistsRunningRecoveryProvenance(t *testing.T) {
 }
 
 func TestActionReadyDeferralIsNotRunningRecovery(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
 		now := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
 		_, proposal := createRunnableAction(t, store, now)
-		claimed, err := store.ClaimNextAction(t.Context(), ActionClaim{
+		claimed, err := store.ClaimNextAction(t.Context(), models.ActionClaim{
 			Scope: proposal.Call.Scope, WorkerID: "agent-worker", Now: now.Add(2 * time.Second), LeaseDuration: time.Minute, OwnActionID: proposal.Call.ID,
 		})
 		if err != nil || claimed == nil {
@@ -58,7 +59,7 @@ func TestActionReadyDeferralIsNotRunningRecovery(t *testing.T) {
 			// Mirror the Ready transition used when a worker sees a maintenance
 			// or pause race before dispatch. Multiple claims alone are harmless.
 			deferred := deferClaimedActionForRecoveryTest(t, store, claimed, now.Add(time.Duration(3+index)*time.Second))
-			claimed, err = store.ClaimNextAction(t.Context(), ActionClaim{
+			claimed, err = store.ClaimNextAction(t.Context(), models.ActionClaim{
 				Scope: claimed.Scope, WorkerID: "agent-worker", Now: deferred.AvailableAt, LeaseDuration: time.Minute, OwnActionID: claimed.ID,
 			})
 			if err != nil || claimed == nil || claimed.RecoveredRunning || claimed.Attempt != index+2 {
@@ -77,14 +78,14 @@ func TestActionRunningRecoveryProvenanceSurvivesSQLiteRestart(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	now := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
 	_, proposal := createRunnableAction(t, store, now)
-	first, err := store.ClaimNextAction(t.Context(), ActionClaim{
+	first, err := store.ClaimNextAction(t.Context(), models.ActionClaim{
 		Scope: proposal.Call.Scope, WorkerID: "agent-worker", Now: now.Add(2 * time.Second), LeaseDuration: time.Minute, OwnActionID: proposal.Call.ID,
 	})
 	if err != nil || first == nil {
 		t.Fatalf("fresh claim = %#v, %v", first, err)
 	}
 	recoveryTime := first.LeaseExpiresAt.Add(time.Millisecond)
-	recovered, err := store.ClaimNextAction(t.Context(), ActionClaim{
+	recovered, err := store.ClaimNextAction(t.Context(), models.ActionClaim{
 		Scope: first.Scope, WorkerID: "agent-worker", Now: recoveryTime, LeaseDuration: time.Minute, OwnActionID: first.ID,
 	})
 	if err != nil || recovered == nil || !recovered.RecoveredRunning {
@@ -103,7 +104,7 @@ func TestActionRunningRecoveryProvenanceSurvivesSQLiteRestart(t *testing.T) {
 		t.Fatalf("restart lost recovery provenance = %#v, %v", stored, err)
 	}
 	deferred := deferClaimedActionForRecoveryTest(t, reopened, stored, recoveryTime.Add(time.Second))
-	again, err := reopened.ClaimNextAction(t.Context(), ActionClaim{
+	again, err := reopened.ClaimNextAction(t.Context(), models.ActionClaim{
 		Scope: first.Scope, WorkerID: "agent-worker", Now: deferred.AvailableAt, LeaseDuration: time.Minute, OwnActionID: first.ID,
 	})
 	if err != nil || again == nil || !again.RecoveredRunning {
@@ -111,16 +112,16 @@ func TestActionRunningRecoveryProvenanceSurvivesSQLiteRestart(t *testing.T) {
 	}
 }
 
-func deferClaimedActionForRecoveryTest(t *testing.T, store KernelStore, claimed *ActionCall, now time.Time) *ActionCall {
+func deferClaimedActionForRecoveryTest(t *testing.T, store models.KernelStore, claimed *models.ActionCall, now time.Time) *models.ActionCall {
 	t.Helper()
 	parent := getActionLifecycleRun(t, store, claimed)
-	deferred := cloneActionCall(claimed)
-	deferred.Status = ActionCallStatusReady
+	deferred := models.CloneActionCall(claimed)
+	deferred.Status = models.ActionCallStatusReady
 	deferred.LeaseOwner, deferred.LeaseExpiresAt = "", nil
 	deferred.AvailableAt = now
 	deferred.UpdatedAt = now
 	deferred.Revision++
-	result, err := store.PersistActionExecution(t.Context(), ActionExecutionRecord{
+	result, err := store.PersistActionExecution(t.Context(), models.ActionExecutionRecord{
 		Call: deferred, ExpectedCallRevision: claimed.Revision, ExpectedRunRevision: parent.Revision,
 		WorkerID: claimed.LeaseOwner, Now: now,
 		Event: actionLifecycleEvent(deferred, fmt.Sprintf("deferred-%d", deferred.Revision), "action.deferred", now),

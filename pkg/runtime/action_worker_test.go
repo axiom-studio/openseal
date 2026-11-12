@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -19,12 +20,12 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 	catalog := &toolTransportActionCatalog{ActionExecutionCatalog: baseCatalog, endpoint: "release_deploy"}
 	signer := testCredentialLeaseSigner{key: []byte("lease-signing-key")}
 	issuerCalls := 0
-	worker := NewActionWorkerWithCredentialLeaseIssuer(store, catalog, ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request ActionCredentialLeaseIssueRequest) (*SignedActionCredentialLease, error) {
+	worker := NewActionWorkerWithCredentialLeaseIssuer(store, catalog, ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
 		issuerCalls++
 		if request.Call == nil || request.Run == nil || request.Call.ID != proposal.Call.ID || request.Run.ID != proposal.Call.RunID || request.Run.AssignedAgentID == "" || request.References["token"] != proposal.Call.CredentialRefs["token"] || request.Transport != "release_deploy" {
 			t.Fatalf("credential lease issue request = %#v", request)
 		}
-		lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+		lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 			TenantID: request.Call.Scope.ID, Call: request.Call, Run: request.Run, CredentialFields: map[string][]string{"token": {"value"}}, Transport: request.Transport,
 			Issuer: "control-plane", Audience: "execution-host", IssuedAt: now.Add(2 * time.Second), ExpiresAt: now.Add(30 * time.Second), Nonce: "nonce-worker-0000000001",
 		})
@@ -46,7 +47,7 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if issuerCalls != 1 || result.Call.Status != ActionCallStatusSucceeded {
+	if issuerCalls != 1 || result.Call.Status != models.ActionCallStatusSucceeded {
 		t.Fatalf("opaque credential execution = calls %d result %#v", issuerCalls, result)
 	}
 }
@@ -86,7 +87,7 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Call.Status != ActionCallStatusFailed || first.Run != nil || first.Call.FailurePhase != ActionFailureAfterDispatch ||
+	if first.Call.Status != models.ActionCallStatusFailed || first.Run != nil || first.Call.FailurePhase != models.ActionFailureAfterDispatch ||
 		!strings.Contains(first.Call.Error, "[REDACTED]") || strings.Contains(first.Call.Error, "raw-secret-value") {
 		t.Fatalf("failure result mismatch: %#v", first)
 	}
@@ -101,17 +102,17 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 
 // createRunnableAction proposes release.deploy as a ready loop call of
 // step-1 for a Run that agent-worker holds for a minute.
-func createRunnableAction(t *testing.T, store KernelStore, now time.Time) (*skill.Catalog, *ActionProposalResult) {
+func createRunnableAction(t *testing.T, store models.KernelStore, now time.Time) (*skill.Catalog, *models.ActionProposalResult) {
 	t.Helper()
 	catalog, scope := governedActionCatalog(t)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(context.Background(), AgentRunClaim{Scope: scope, WorkerID: "agent-worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(context.Background(), models.AgentRunClaim{Scope: scope, WorkerID: "agent-worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
