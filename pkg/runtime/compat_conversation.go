@@ -11,228 +11,228 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
-const ConversationApprovalModeChangedEvent = conversation.ConversationApprovalModeChangedEvent
+const ConversationApprovalModeChangedEvent = runtimeconversation.ConversationApprovalModeChangedEvent
 
-type SetConversationApprovalModeRequest = conversation.SetConversationApprovalModeRequest
+type SetConversationApprovalModeRequest = runtimeconversation.SetConversationApprovalModeRequest
 
-type SetConversationApprovalModeResult = conversation.SetConversationApprovalModeResult
+type SetConversationApprovalModeResult = runtimeconversation.SetConversationApprovalModeResult
 
-type ConversationApprovalModeService = conversation.ConversationApprovalModeService
+type ConversationApprovalModeService = runtimeconversation.ConversationApprovalModeService
 
 // NewConversationApprovalModeService forwards to conversation.NewConversationApprovalModeService.
-func NewConversationApprovalModeService(store models.ConversationApprovalModeKernelStore, opts ...models.ServiceOption) *conversation.ConversationApprovalModeService {
-	return conversation.NewConversationApprovalModeService(store, opts...)
+func NewConversationApprovalModeService(store models.ConversationApprovalModeKernelStore, opts ...models.ServiceOption) *runtimeconversation.ConversationApprovalModeService {
+	return runtimeconversation.NewConversationApprovalModeService(store, opts...)
 }
 
-type ConversationArchiveSource = conversation.ConversationArchiveSource
+type ConversationArchiveSource = runtimeconversation.ConversationArchiveSource
 
-type ConversationArchiveMessage = conversation.ConversationArchiveMessage
+type ConversationArchiveMessage = runtimeconversation.ConversationArchiveMessage
 
-type ImportConversationArchiveRequest = conversation.ImportConversationArchiveRequest
+type ImportConversationArchiveRequest = runtimeconversation.ImportConversationArchiveRequest
 
-type ConversationArchiveImportResult = conversation.ConversationArchiveImportResult
+type ConversationArchiveImportResult = runtimeconversation.ConversationArchiveImportResult
 
-type ConversationChangeRequest = conversation.ConversationChangeRequest
+type ConversationChangeRequest = runtimeconversation.ConversationChangeRequest
 
-type ConversationChangeSet = conversation.ConversationChangeSet
+type ConversationChangeSet = runtimeconversation.ConversationChangeSet
 
-type ConversationChangeService = conversation.ConversationChangeService
+type ConversationChangeService = runtimeconversation.ConversationChangeService
 
 // NewConversationChangeService forwards to conversation.NewConversationChangeService.
-func NewConversationChangeService(conversationStore models.ConversationStore, portfolio models.PortfolioStore, opts ...models.ServiceOption) (*conversation.ConversationChangeService, error) {
-	return conversation.NewConversationChangeService(conversationStore, portfolio, opts...)
+func NewConversationChangeService(conversationStore models.ConversationStore, portfolio models.PortfolioStore, opts ...models.ServiceOption) (*runtimeconversation.ConversationChangeService, error) {
+	return runtimeconversation.NewConversationChangeService(conversationStore, portfolio, opts...)
 }
 
-type ConversationCredentialRequest = conversation.ConversationCredentialRequest
+type ConversationCredentialRequest = runtimeconversation.ConversationCredentialRequest
 
-type SkillSetupRequestReader = conversation.SkillSetupRequestReader
+type SkillSetupRequestReader = runtimeconversation.SkillSetupRequestReader
 
-type ConversationSkillSetupRequest = conversation.ConversationSkillSetupRequest
+type ConversationSkillSetupRequest = runtimeconversation.ConversationSkillSetupRequest
 
-type ConversationRunbookStatus = conversation.ConversationRunbookStatus
+type ConversationRunbookStatus = runtimeconversation.ConversationRunbookStatus
 
-const ConversationRunbookActive = conversation.ConversationRunbookActive
+const ConversationRunbookActive = runtimeconversation.ConversationRunbookActive
 
-const ConversationRunbookPaused = conversation.ConversationRunbookPaused
+const ConversationRunbookPaused = runtimeconversation.ConversationRunbookPaused
 
-const ConversationRunbookStopped = conversation.ConversationRunbookStopped
+const ConversationRunbookStopped = runtimeconversation.ConversationRunbookStopped
 
-type ConversationRunbook = conversation.ConversationRunbook
+type ConversationRunbook = runtimeconversation.ConversationRunbook
 
-type ConversationRunbookTrigger = conversation.ConversationRunbookTrigger
+type ConversationRunbookTrigger = runtimeconversation.ConversationRunbookTrigger
 
-type ConversationRunbookScript = conversation.ConversationRunbookScript
+type ConversationRunbookScript = runtimeconversation.ConversationRunbookScript
 
-type ConversationRunbookRun = conversation.ConversationRunbookRun
+type ConversationRunbookRun = runtimeconversation.ConversationRunbookRun
 
-var ErrConversationCoordinationUnavailable = conversation.ErrConversationCoordinationUnavailable
+var ErrConversationCoordinationUnavailable = runtimeconversation.ErrConversationCoordinationUnavailable
 
-var ErrNoConversationParticipants = conversation.ErrNoConversationParticipants
+var ErrNoConversationParticipants = runtimeconversation.ErrNoConversationParticipants
 
-type ConversationParticipantBinding = conversation.ConversationParticipantBinding
+type ConversationParticipantBinding = runtimeconversation.ConversationParticipantBinding
 
-type ConversationParticipantQuery = conversation.ConversationParticipantQuery
+type ConversationParticipantQuery = runtimeconversation.ConversationParticipantQuery
 
-type ConversationParticipantSource = conversation.ConversationParticipantSource
+type ConversationParticipantSource = runtimeconversation.ConversationParticipantSource
 
-type ConversationParticipantSourceFunc = conversation.ConversationParticipantSourceFunc
+type ConversationParticipantSourceFunc = runtimeconversation.ConversationParticipantSourceFunc
 
-type ConversationRoutingRequest = conversation.ConversationRoutingRequest
+type ConversationRoutingRequest = runtimeconversation.ConversationRoutingRequest
 
-type ConversationCoordinatorConfig = conversation.ConversationCoordinatorConfig
+type ConversationCoordinatorConfig = runtimeconversation.ConversationCoordinatorConfig
 
 // DefaultConversationCoordinatorConfig forwards to conversation.DefaultConversationCoordinatorConfig.
-func DefaultConversationCoordinatorConfig() conversation.ConversationCoordinatorConfig {
-	return conversation.DefaultConversationCoordinatorConfig()
+func DefaultConversationCoordinatorConfig() runtimeconversation.ConversationCoordinatorConfig {
+	return runtimeconversation.DefaultConversationCoordinatorConfig()
 }
 
-type ConversationCoordinator = conversation.ConversationCoordinator
+type ConversationCoordinator = runtimeconversation.ConversationCoordinator
 
 // NewConversationCoordinator forwards to conversation.NewConversationCoordinator.
-func NewConversationCoordinator(conversations *conversation.ConversationService, participants conversation.ConversationParticipantSource, router conversation.ConversationRouter, config conversation.ConversationCoordinatorConfig) (*conversation.ConversationCoordinator, error) {
-	return conversation.NewConversationCoordinator(conversations, participants, router, config)
+func NewConversationCoordinator(conversations *runtimeconversation.ConversationService, participants runtimeconversation.ConversationParticipantSource, router runtimeconversation.ConversationRouter, config runtimeconversation.ConversationCoordinatorConfig) (*runtimeconversation.ConversationCoordinator, error) {
+	return runtimeconversation.NewConversationCoordinator(conversations, participants, router, config)
 }
 
-const MaximumExternalConversationContextMessages = conversation.MaximumExternalConversationContextMessages
+const MaximumExternalConversationContextMessages = runtimeconversation.MaximumExternalConversationContextMessages
 
-const ExternalConversationContextComplete = conversation.ExternalConversationContextComplete
+const ExternalConversationContextComplete = runtimeconversation.ExternalConversationContextComplete
 
-const ExternalConversationContextPartial = conversation.ExternalConversationContextPartial
+const ExternalConversationContextPartial = runtimeconversation.ExternalConversationContextPartial
 
-const ExternalConversationContextUnavailable = conversation.ExternalConversationContextUnavailable
+const ExternalConversationContextUnavailable = runtimeconversation.ExternalConversationContextUnavailable
 
-type ExternalConversationContextState = conversation.ExternalConversationContextState
+type ExternalConversationContextState = runtimeconversation.ExternalConversationContextState
 
 // ExternalConversationContextAvailability forwards to conversation.ExternalConversationContextAvailability.
-func ExternalConversationContextAvailability(message *models.ChannelMessage, endpointID string) *conversation.ExternalConversationContextState {
-	return conversation.ExternalConversationContextAvailability(message, endpointID)
+func ExternalConversationContextAvailability(message *models.ChannelMessage, endpointID string) *runtimeconversation.ExternalConversationContextState {
+	return runtimeconversation.ExternalConversationContextAvailability(message, endpointID)
 }
 
-type ConversationHistoryReadStore = conversation.ConversationHistoryReadStore
+type ConversationHistoryReadStore = runtimeconversation.ConversationHistoryReadStore
 
-type ConversationHistoryReadRequest = conversation.ConversationHistoryReadRequest
+type ConversationHistoryReadRequest = runtimeconversation.ConversationHistoryReadRequest
 
-type ConversationHistoryExcerpt = conversation.ConversationHistoryExcerpt
+type ConversationHistoryExcerpt = runtimeconversation.ConversationHistoryExcerpt
 
-type ConversationHistoryReadResult = conversation.ConversationHistoryReadResult
+type ConversationHistoryReadResult = runtimeconversation.ConversationHistoryReadResult
 
 // ReadConversationHistory forwards to conversation.ReadConversationHistory.
-func ReadConversationHistory(ctx context.Context, store conversation.ConversationHistoryReadStore, scope models.Scope, owner models.ObjectiveOwner, conversationID string, viewer models.ConversationViewer, request conversation.ConversationHistoryReadRequest, trustedThreadRoot ...string) (*conversation.ConversationHistoryReadResult, error) {
-	return conversation.ReadConversationHistory(ctx, store, scope, owner, conversationID, viewer, request, trustedThreadRoot...)
+func ReadConversationHistory(ctx context.Context, store runtimeconversation.ConversationHistoryReadStore, scope models.Scope, owner models.ObjectiveOwner, conversationID string, viewer models.ConversationViewer, request runtimeconversation.ConversationHistoryReadRequest, trustedThreadRoot ...string) (*runtimeconversation.ConversationHistoryReadResult, error) {
+	return runtimeconversation.ReadConversationHistory(ctx, store, scope, owner, conversationID, viewer, request, trustedThreadRoot...)
 }
 
-type MessageReactionProjector = conversation.MessageReactionProjector
+type MessageReactionProjector = runtimeconversation.MessageReactionProjector
 
-type MessageReactionRequest = conversation.MessageReactionRequest
+type MessageReactionRequest = runtimeconversation.MessageReactionRequest
 
-type MessageReactionResult = conversation.MessageReactionResult
+type MessageReactionResult = runtimeconversation.MessageReactionResult
 
-type TurnReaction = conversation.TurnReaction
+type TurnReaction = runtimeconversation.TurnReaction
 
-const MaximumTurnReactions = conversation.MaximumTurnReactions
+const MaximumTurnReactions = runtimeconversation.MaximumTurnReactions
 
-const ConversationReactInstruction = conversation.ConversationReactInstruction
+const ConversationReactInstruction = runtimeconversation.ConversationReactInstruction
 
-type ConversationRouter = conversation.ConversationRouter
+type ConversationRouter = runtimeconversation.ConversationRouter
 
-type ConversationRouterFunc = conversation.ConversationRouterFunc
+type ConversationRouterFunc = runtimeconversation.ConversationRouterFunc
 
-type ConversationRouteRequest = conversation.ConversationRouteRequest
+type ConversationRouteRequest = runtimeconversation.ConversationRouteRequest
 
-type RouteMember = conversation.RouteMember
+type RouteMember = runtimeconversation.RouteMember
 
-type ConversationRouteDecision = conversation.ConversationRouteDecision
+type ConversationRouteDecision = runtimeconversation.ConversationRouteDecision
 
-type ConversationPlace = conversation.ConversationPlace
+type ConversationPlace = runtimeconversation.ConversationPlace
 
-const MaximumConversationPlaces = conversation.MaximumConversationPlaces
+const MaximumConversationPlaces = runtimeconversation.MaximumConversationPlaces
 
-type CreateConversationRequest = conversation.CreateConversationRequest
+type CreateConversationRequest = runtimeconversation.CreateConversationRequest
 
-type UpdateConversationRequest = conversation.UpdateConversationRequest
+type UpdateConversationRequest = runtimeconversation.UpdateConversationRequest
 
-type PostChannelMessageRequest = conversation.PostChannelMessageRequest
+type PostChannelMessageRequest = runtimeconversation.PostChannelMessageRequest
 
-type CommitConversationRoutingRequest = conversation.CommitConversationRoutingRequest
+type CommitConversationRoutingRequest = runtimeconversation.CommitConversationRoutingRequest
 
-type AdvanceConversationCursorRequest = conversation.AdvanceConversationCursorRequest
+type AdvanceConversationCursorRequest = runtimeconversation.AdvanceConversationCursorRequest
 
-type SetConversationPresenceRequest = conversation.SetConversationPresenceRequest
+type SetConversationPresenceRequest = runtimeconversation.SetConversationPresenceRequest
 
-type ConversationService = conversation.ConversationService
+type ConversationService = runtimeconversation.ConversationService
 
 // NewConversationService forwards to conversation.NewConversationService.
-func NewConversationService(store models.ConversationStore, opts ...models.ServiceOption) *conversation.ConversationService {
-	return conversation.NewConversationService(store, opts...)
+func NewConversationService(store models.ConversationStore, opts ...models.ServiceOption) *runtimeconversation.ConversationService {
+	return runtimeconversation.NewConversationService(store, opts...)
 }
 
-const ConversationChannelRules = conversation.ConversationChannelRules
+const ConversationChannelRules = runtimeconversation.ConversationChannelRules
 
-const ConversationAttachmentRules = conversation.ConversationAttachmentRules
+const ConversationAttachmentRules = runtimeconversation.ConversationAttachmentRules
 
-const ConversationExternalSourceRules = conversation.ConversationExternalSourceRules
+const ConversationExternalSourceRules = runtimeconversation.ConversationExternalSourceRules
 
 // ConversationRunAgentID forwards to conversation.ConversationRunAgentID.
-func ConversationRunAgentID(arg0 *models.Conversation, run *models.AgentRun) string {
-	return conversation.ConversationRunAgentID(arg0, run)
+func ConversationRunAgentID(conversation *models.Conversation, run *models.AgentRun) string {
+	return runtimeconversation.ConversationRunAgentID(conversation, run)
 }
 
 // ResolveTeamHandoffRequest forwards to conversation.ResolveTeamHandoffRequest.
 func ResolveTeamHandoffRequest(ctx context.Context, reader models.TeamHandoffMessageReader, run *models.AgentRun, handoff *models.ChannelMessage) (*models.ChannelMessage, error) {
-	return conversation.ResolveTeamHandoffRequest(ctx, reader, run, handoff)
+	return runtimeconversation.ResolveTeamHandoffRequest(ctx, reader, run, handoff)
 }
 
-var ErrEmbedOriginDenied = conversation.ErrEmbedOriginDenied
+var ErrEmbedOriginDenied = runtimeconversation.ErrEmbedOriginDenied
 
-var ErrEmbedAuthentication = conversation.ErrEmbedAuthentication
+var ErrEmbedAuthentication = runtimeconversation.ErrEmbedAuthentication
 
-type CreateEmbedInstallationRequest = conversation.CreateEmbedInstallationRequest
+type CreateEmbedInstallationRequest = runtimeconversation.CreateEmbedInstallationRequest
 
-type UpdateEmbedInstallationRequest = conversation.UpdateEmbedInstallationRequest
+type UpdateEmbedInstallationRequest = runtimeconversation.UpdateEmbedInstallationRequest
 
-type OpenEmbedSessionRequest = conversation.OpenEmbedSessionRequest
+type OpenEmbedSessionRequest = runtimeconversation.OpenEmbedSessionRequest
 
-type OpenEmbedSessionResult = conversation.OpenEmbedSessionResult
+type OpenEmbedSessionResult = runtimeconversation.OpenEmbedSessionResult
 
-type EmbedSessionService = conversation.EmbedSessionService
+type EmbedSessionService = runtimeconversation.EmbedSessionService
 
 // NewEmbedSessionService forwards to conversation.NewEmbedSessionService.
-func NewEmbedSessionService(store models.EmbedStore, conversations models.ConversationStore, opts ...models.ServiceOption) (*conversation.EmbedSessionService, error) {
-	return conversation.NewEmbedSessionService(store, conversations, opts...)
+func NewEmbedSessionService(store models.EmbedStore, conversations models.ConversationStore, opts ...models.ServiceOption) (*runtimeconversation.EmbedSessionService, error) {
+	return runtimeconversation.NewEmbedSessionService(store, conversations, opts...)
 }
 
-const RunFailureKindExecution = conversation.RunFailureKindExecution
+const RunFailureKindExecution = runtimeconversation.RunFailureKindExecution
 
-const RunFailureKindWorkspace = conversation.RunFailureKindWorkspace
+const RunFailureKindWorkspace = runtimeconversation.RunFailureKindWorkspace
 
-const RunFailureKindRoutineScript = conversation.RunFailureKindRoutineScript
+const RunFailureKindRoutineScript = runtimeconversation.RunFailureKindRoutineScript
 
-const RunFailureKindTaskCompletion = conversation.RunFailureKindTaskCompletion
+const RunFailureKindTaskCompletion = runtimeconversation.RunFailureKindTaskCompletion
 
-const RunFailureKindAgentBehaviorFixed = conversation.RunFailureKindAgentBehaviorFixed
+const RunFailureKindAgentBehaviorFixed = runtimeconversation.RunFailureKindAgentBehaviorFixed
 
-const RunFailureKindBudget = conversation.RunFailureKindBudget
+const RunFailureKindBudget = runtimeconversation.RunFailureKindBudget
 
-const RunFailureKindCredits = conversation.RunFailureKindCredits
+const RunFailureKindCredits = runtimeconversation.RunFailureKindCredits
 
 // LoopGovernedToolNames forwards to conversation.LoopGovernedToolNames.
 func LoopGovernedToolNames(actions []capability.ModelAction) map[string]string {
-	return conversation.LoopGovernedToolNames(actions)
+	return runtimeconversation.LoopGovernedToolNames(actions)
 }
 
 // LoopGovernedAction forwards to conversation.LoopGovernedAction.
 func LoopGovernedAction(actions []capability.ModelAction, toolName string) (capability.ModelAction, bool) {
-	return conversation.LoopGovernedAction(actions, toolName)
+	return runtimeconversation.LoopGovernedAction(actions, toolName)
 }
 
-type RecordSurfaceInteractionRequest = conversation.RecordSurfaceInteractionRequest
+type RecordSurfaceInteractionRequest = runtimeconversation.RecordSurfaceInteractionRequest
 
 // TerminalFailureReply forwards to conversation.TerminalFailureReply.
 func TerminalFailureReply(code string) string {
-	return conversation.TerminalFailureReply(code)
+	return runtimeconversation.TerminalFailureReply(code)
 }
 
-type TurnRunnerResolver = conversation.TurnRunnerResolver
+type TurnRunnerResolver = runtimeconversation.TurnRunnerResolver
