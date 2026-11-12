@@ -167,7 +167,7 @@ func (s *PostgresStore) GetRunTerminalReport(ctx context.Context, scope models.S
 	return report, err
 }
 
-func scanPostgresRunTerminalReport(scanner interface{ Scan(...interface{}) error }) (*models.RunTerminalReport, error) {
+func scanPostgresRunTerminalReport(scanner sqlstore.RowScanner) (*models.RunTerminalReport, error) {
 	var report models.RunTerminalReport
 	var payload sql.NullString
 	var expires, delivered sql.NullTime

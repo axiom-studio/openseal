@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/lib/pq"
 )
 
@@ -42,7 +43,7 @@ func (s *PostgresStore) lockPostgresSessionRunTx(ctx context.Context, tx *sql.Tx
 	return run, nil
 }
 
-func (s *PostgresStore) getPostgresAgentSessionTx(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, sessionID string, lock bool) (*models.AgentSession, error) {
+func (s *PostgresStore) getPostgresAgentSessionTx(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, sessionID string, lock bool) (*models.AgentSession, error) {
 	query := `SELECT payload FROM ` + s.table("agent_sessions") + ` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`
 	if lock {
 		query += ` FOR UPDATE`
@@ -130,7 +131,7 @@ func decodePostgresSessionEntries(rows *sql.Rows) ([]*models.SessionEntry, error
 	return entries, rows.Err()
 }
 
-func (s *PostgresStore) queryPostgresSessionEntries(ctx context.Context, queryer postgresDependencyQueryer, query string, args ...interface{}) ([]*models.SessionEntry, error) {
+func (s *PostgresStore) queryPostgresSessionEntries(ctx context.Context, queryer sqlstore.Reader, query string, args ...interface{}) ([]*models.SessionEntry, error) {
 	rows, err := queryer.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -138,7 +139,7 @@ func (s *PostgresStore) queryPostgresSessionEntries(ctx context.Context, queryer
 	return decodePostgresSessionEntries(rows)
 }
 
-func (s *PostgresStore) getPostgresSessionEntryTx(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, entryID string, lock bool) (*models.SessionEntry, error) {
+func (s *PostgresStore) getPostgresSessionEntryTx(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, entryID string, lock bool) (*models.SessionEntry, error) {
 	query := `SELECT payload FROM ` + s.table("agent_session_entries") + ` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`
 	if lock {
 		query += ` FOR UPDATE`

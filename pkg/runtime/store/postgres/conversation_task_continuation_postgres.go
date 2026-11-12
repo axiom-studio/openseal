@@ -196,7 +196,7 @@ func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req models.
 	return &models.ConversationTaskResult{Task: models.CloneConversationTask(task), WorkRun: models.CloneAgentRun(updated), SourceRun: models.CloneAgentRun(updated), AcknowledgmentMessageID: ack.Message.ID}, nil
 }
 
-func (s *PostgresStore) getPostgresConversationTaskByWorkRun(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, runID string) (*models.ConversationTask, error) {
+func (s *PostgresStore) getPostgresConversationTaskByWorkRun(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, runID string) (*models.ConversationTask, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM `+s.table("conversation_tasks")+` WHERE scope_kind=$1 AND scope_id=$2 AND work_run_id=$3`, scope.Kind, scope.ID, runID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {

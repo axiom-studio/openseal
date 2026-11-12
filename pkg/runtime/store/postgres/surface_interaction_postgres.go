@@ -154,7 +154,7 @@ func (s *PostgresStore) ListLatestSurfaceInteractions(ctx context.Context, filte
 
 // getPostgresSurfaceInteraction reads one interaction of a conversation; where
 // filters after the leading $1..$3 scope and conversation parameters.
-func (s *PostgresStore) getPostgresSurfaceInteraction(ctx context.Context, queryer postgresConversationQueryer, where string, args ...interface{}) (*models.SurfaceInteraction, error) {
+func (s *PostgresStore) getPostgresSurfaceInteraction(ctx context.Context, queryer sqlstore.Reader, where string, args ...interface{}) (*models.SurfaceInteraction, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM `+s.table("surface_interactions")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND conversation_id = $3 AND `+where+` ORDER BY sequence LIMIT 1`, args...).Scan(&payload)

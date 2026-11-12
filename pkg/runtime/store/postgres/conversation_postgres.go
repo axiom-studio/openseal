@@ -822,11 +822,6 @@ func (s *PostgresStore) ListConversationPresence(ctx context.Context, scope mode
 	return result, rows.Err()
 }
 
-type postgresConversationQueryer interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-}
-
 func postgresConversationAdvisoryLock(ctx context.Context, tx *sql.Tx, scope models.Scope, key string) error {
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:conversation:"+scope.Key()+":"+key)
 	return err
@@ -837,7 +832,7 @@ func postgresUniqueViolation(err error) bool {
 	return errors.As(err, &pqErr) && pqErr.Code == "23505"
 }
 
-func (s *PostgresStore) getPostgresConversation(ctx context.Context, queryer postgresConversationQueryer, scope models.Scope, id string, lock bool) (*models.Conversation, error) {
+func (s *PostgresStore) getPostgresConversation(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, id string, lock bool) (*models.Conversation, error) {
 	query := `SELECT payload FROM ` + s.table("conversations") + ` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`
 	if lock {
 		query += ` FOR UPDATE`
@@ -853,7 +848,7 @@ func (s *PostgresStore) getPostgresConversation(ctx context.Context, queryer pos
 	return sqlstore.DecodeConversation(payload)
 }
 
-func (s *PostgresStore) getPostgresConversationByKey(ctx context.Context, queryer postgresConversationQueryer, scope models.Scope, key string, lock bool) (*models.Conversation, error) {
+func (s *PostgresStore) getPostgresConversationByKey(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, key string, lock bool) (*models.Conversation, error) {
 	query := `SELECT payload FROM ` + s.table("conversations") + ` WHERE scope_kind=$1 AND scope_id=$2 AND idempotency_key=$3`
 	if lock {
 		query += ` FOR UPDATE`
@@ -899,7 +894,7 @@ func (s *PostgresStore) insertPostgresChannelMessageTx(ctx context.Context, tx *
 	return err
 }
 
-func (s *PostgresStore) getPostgresChannelMessage(ctx context.Context, queryer postgresConversationQueryer, scope models.Scope, conversationID, id string, lock bool) (*models.ChannelMessage, error) {
+func (s *PostgresStore) getPostgresChannelMessage(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID, id string, lock bool) (*models.ChannelMessage, error) {
 	query := `SELECT payload FROM ` + s.table("channel_messages") + ` WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND id=$4`
 	if lock {
 		query += ` FOR UPDATE`
@@ -915,7 +910,7 @@ func (s *PostgresStore) getPostgresChannelMessage(ctx context.Context, queryer p
 	return sqlstore.DecodeChannelMessage(payload)
 }
 
-func (s *PostgresStore) getPostgresChannelMessageByKey(ctx context.Context, queryer postgresConversationQueryer, scope models.Scope, conversationID, key string, lock bool) (*models.ChannelMessage, error) {
+func (s *PostgresStore) getPostgresChannelMessageByKey(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID, key string, lock bool) (*models.ChannelMessage, error) {
 	query := `SELECT payload FROM ` + s.table("channel_messages") + ` WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND idempotency_key=$4`
 	if lock {
 		query += ` FOR UPDATE`
@@ -946,7 +941,7 @@ func (s *PostgresStore) insertPostgresParticipationRoundTx(ctx context.Context, 
 	return err
 }
 
-func (s *PostgresStore) getPostgresParticipationRoundByKey(ctx context.Context, queryer postgresConversationQueryer, scope models.Scope, conversationID, key string, lock bool) (*models.ParticipationRound, error) {
+func (s *PostgresStore) getPostgresParticipationRoundByKey(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID, key string, lock bool) (*models.ParticipationRound, error) {
 	query := `SELECT payload FROM ` + s.table("participation_rounds") + ` WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND idempotency_key=$4`
 	if lock {
 		query += ` FOR UPDATE`
@@ -962,7 +957,7 @@ func (s *PostgresStore) getPostgresParticipationRoundByKey(ctx context.Context, 
 	return sqlstore.DecodeParticipationRound(payload)
 }
 
-func (s *PostgresStore) getPostgresParticipationRound(ctx context.Context, queryer postgresConversationQueryer, scope models.Scope, conversationID, id string, lock bool) (*models.ParticipationRound, error) {
+func (s *PostgresStore) getPostgresParticipationRound(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID, id string, lock bool) (*models.ParticipationRound, error) {
 	query := `SELECT payload FROM ` + s.table("participation_rounds") + ` WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND id=$4`
 	if lock {
 		query += ` FOR UPDATE`
@@ -978,7 +973,7 @@ func (s *PostgresStore) getPostgresParticipationRound(ctx context.Context, query
 	return sqlstore.DecodeParticipationRound(payload)
 }
 
-func (s *PostgresStore) loadPostgresParticipationRoundResult(ctx context.Context, queryer postgresConversationQueryer, round *models.ParticipationRound, lock bool) (*models.ParticipationRoundResult, error) {
+func (s *PostgresStore) loadPostgresParticipationRoundResult(ctx context.Context, queryer sqlstore.Reader, round *models.ParticipationRound, lock bool) (*models.ParticipationRoundResult, error) {
 	conversation, err := s.getPostgresConversation(ctx, queryer, round.Scope, round.ConversationID, lock)
 	if err != nil {
 		return nil, err
@@ -996,7 +991,7 @@ func (s *PostgresStore) loadPostgresParticipationRoundResult(ctx context.Context
 	return &models.ParticipationRoundResult{Conversation: conversation, Round: round, Messages: messages}, err
 }
 
-func (s *PostgresStore) getPostgresConversationCursor(ctx context.Context, queryer postgresConversationQueryer, scope models.Scope, conversationID string, participant models.ConversationParticipant, lock bool) (*models.ConversationCursor, error) {
+func (s *PostgresStore) getPostgresConversationCursor(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID string, participant models.ConversationParticipant, lock bool) (*models.ConversationCursor, error) {
 	query := `SELECT payload FROM ` + s.table("conversation_cursors") + ` WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND participant_type=$4 AND participant_id=$5`
 	if lock {
 		query += ` FOR UPDATE`
@@ -1012,7 +1007,7 @@ func (s *PostgresStore) getPostgresConversationCursor(ctx context.Context, query
 	return sqlstore.DecodeConversationCursor(payload)
 }
 
-func (s *PostgresStore) getPostgresConversationPresence(ctx context.Context, queryer postgresConversationQueryer, scope models.Scope, conversationID string, participant models.ConversationParticipant, lock bool) (*models.ConversationPresence, error) {
+func (s *PostgresStore) getPostgresConversationPresence(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID string, participant models.ConversationParticipant, lock bool) (*models.ConversationPresence, error) {
 	query := `SELECT payload FROM ` + s.table("conversation_presence") + ` WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND participant_type=$4 AND participant_id=$5`
 	if lock {
 		query += ` FOR UPDATE`

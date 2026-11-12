@@ -397,7 +397,7 @@ func rollbackSQLiteConn(conn *sql.Conn, committed *bool) {
 	_ = conn.Close()
 }
 
-func insertSQLiteAgentRequest(ctx context.Context, exec sqliteExecer, request *models.AgentRequest) error {
+func insertSQLiteAgentRequest(ctx context.Context, exec sqlstore.Execer, request *models.AgentRequest) error {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return err

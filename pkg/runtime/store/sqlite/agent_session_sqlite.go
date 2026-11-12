@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // SQLite backend of AgentSessionStore (run-loop SPEC §2.1, section 01 §2.2).
@@ -116,12 +117,7 @@ func sqliteSessionTime(t time.Time) string {
 // ---------------------------------------------------------------------------
 // Rows
 
-type sqliteSessionQueryer interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-}
-
-func getSQLiteAgentSession(ctx context.Context, q sqliteSessionQueryer, scope models.Scope, sessionID string) (*models.AgentSession, error) {
+func getSQLiteAgentSession(ctx context.Context, q sqlstore.Reader, scope models.Scope, sessionID string) (*models.AgentSession, error) {
 	var payload string
 	err := q.QueryRowContext(ctx, `SELECT payload FROM agent_sessions WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		scope.Kind, scope.ID, sessionID).Scan(&payload)
@@ -191,7 +187,7 @@ func decodeSQLiteSessionEntry(payload string) (*models.SessionEntry, error) {
 	return &entry, nil
 }
 
-func getSQLiteSessionEntry(ctx context.Context, q sqliteSessionQueryer, scope models.Scope, entryID string) (*models.SessionEntry, error) {
+func getSQLiteSessionEntry(ctx context.Context, q sqlstore.Reader, scope models.Scope, entryID string) (*models.SessionEntry, error) {
 	var payload string
 	err := q.QueryRowContext(ctx, `SELECT payload FROM agent_session_entries WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		scope.Kind, scope.ID, entryID).Scan(&payload)
@@ -204,7 +200,7 @@ func getSQLiteSessionEntry(ctx context.Context, q sqliteSessionQueryer, scope mo
 	return decodeSQLiteSessionEntry(payload)
 }
 
-func querySQLiteSessionEntries(ctx context.Context, q sqliteSessionQueryer, query string, args ...interface{}) ([]*models.SessionEntry, error) {
+func querySQLiteSessionEntries(ctx context.Context, q sqlstore.Reader, query string, args ...interface{}) ([]*models.SessionEntry, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -227,7 +223,7 @@ func querySQLiteSessionEntries(ctx context.Context, q sqliteSessionQueryer, quer
 
 // latestSQLiteSessionEntry is the highest-sequence entry of one type in a
 // session at or below bound, or nil.
-func latestSQLiteSessionEntry(ctx context.Context, q sqliteSessionQueryer, session *models.AgentSession, kind models.SessionEntryType, bound int64) (*models.SessionEntry, error) {
+func latestSQLiteSessionEntry(ctx context.Context, q sqlstore.Reader, session *models.AgentSession, kind models.SessionEntryType, bound int64) (*models.SessionEntry, error) {
 	entries, err := querySQLiteSessionEntries(ctx, q, `SELECT payload FROM agent_session_entries
 		WHERE scope_kind = ? AND scope_id = ? AND session_id = ? AND type = ? AND sequence <= ?
 		ORDER BY sequence DESC LIMIT 1`, session.Scope.Kind, session.Scope.ID, session.ID, kind, bound)
@@ -538,7 +534,7 @@ func createSQLiteRunAgentSessionCore(ctx context.Context, conn *sql.Conn, req mo
 // sqliteForkModel is the model of the latest model_change entry on the
 // parent's chain up to the fork point, or the parent's own model when the
 // chain has none in bounds.
-func sqliteForkModel(ctx context.Context, q sqliteSessionQueryer, parent *models.AgentSession, forkSequence int64) (string, string, error) {
+func sqliteForkModel(ctx context.Context, q sqlstore.Reader, parent *models.AgentSession, forkSequence int64) (string, string, error) {
 	session, bound := parent, forkSequence
 	for depth := 0; depth <= models.MaxAgentSessionDepth; depth++ {
 		change, err := latestSQLiteSessionEntry(ctx, q, session, models.SessionEntryModelChange, bound)
@@ -608,7 +604,7 @@ func (s *SQLiteStore) LoadAgentSessionPath(ctx context.Context, scope models.Sco
 // modified, or not yet stored, copy of the row), with extra entries appended
 // to the leaf's stored segment. It loads only the entries from the start point
 // of the latest compaction onward.
-func loadSQLiteSessionPath(ctx context.Context, q sqliteSessionQueryer, leaf *models.AgentSession, extra []*models.SessionEntry) (*models.AgentSessionPath, error) {
+func loadSQLiteSessionPath(ctx context.Context, q sqlstore.Reader, leaf *models.AgentSession, extra []*models.SessionEntry) (*models.AgentSessionPath, error) {
 	chain := []*models.AgentSession{leaf}
 	for current := leaf; current.ParentSessionID != ""; {
 		if len(chain) > models.MaxAgentSessionDepth {
@@ -927,7 +923,7 @@ func sqliteAppendReplay(ctx context.Context, conn *sql.Conn, req models.AppendAg
 	return result, true, nil
 }
 
-func sqliteSessionSourceKeyExists(ctx context.Context, q sqliteSessionQueryer, scope models.Scope, sessionID, sourceKey string) (bool, error) {
+func sqliteSessionSourceKeyExists(ctx context.Context, q sqlstore.Reader, scope models.Scope, sessionID, sourceKey string) (bool, error) {
 	var one int
 	err := q.QueryRowContext(ctx, `SELECT 1 FROM agent_session_entries
 		WHERE scope_kind = ? AND scope_id = ? AND session_id = ? AND source_key = ?`,
@@ -938,7 +934,7 @@ func sqliteSessionSourceKeyExists(ctx context.Context, q sqliteSessionQueryer, s
 	return err == nil, err
 }
 
-func sqliteSessionEntryExists(ctx context.Context, q sqliteSessionQueryer, scope models.Scope, entryID string) (bool, error) {
+func sqliteSessionEntryExists(ctx context.Context, q sqlstore.Reader, scope models.Scope, entryID string) (bool, error) {
 	var one int
 	err := q.QueryRowContext(ctx, `SELECT 1 FROM agent_session_entries WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		scope.Kind, scope.ID, entryID).Scan(&one)

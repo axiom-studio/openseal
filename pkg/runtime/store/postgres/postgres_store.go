@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	_ "github.com/lib/pq"
 )
 
@@ -495,11 +496,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	return nil
 }
 
-type postgresMigrationQuerier interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-}
-
-func (s *PostgresStore) postgresMigrationApplied(ctx context.Context, query postgresMigrationQuerier, version int64) (bool, error) {
+func (s *PostgresStore) postgresMigrationApplied(ctx context.Context, query sqlstore.RowQuerier, version int64) (bool, error) {
 	var applied bool
 	err := query.QueryRowContext(ctx, `SELECT EXISTS (
 		SELECT 1 FROM `+s.table("schema_migrations")+` WHERE version = $1
@@ -519,7 +516,7 @@ func (s *PostgresStore) postgresMigrationApplied(ctx context.Context, query post
 // references) with kernel Projects; 20 and 22 (event source checkpoints,
 // subscriptions and health) with the Runbook event router. Older databases
 // may retain them; fresh databases omit them.
-func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query postgresMigrationQuerier) (bool, int64, error) {
+func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query sqlstore.RowQuerier) (bool, int64, error) {
 	var relation sql.NullString
 	if err := query.QueryRowContext(ctx, `SELECT to_regclass($1)`, s.schema+".schema_migrations").Scan(&relation); err != nil {
 		return false, 0, err

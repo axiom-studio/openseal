@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -86,11 +87,14 @@ func migrateSkillCatalog(db *sql.DB) error {
 	return tx.Commit()
 }
 
-type sqliteQueryer interface {
+// tableInfoQueryer is how sqliteTableColumns reads PRAGMA table_info: the
+// open-time migrations that call it run on a *sql.DB or *sql.Tx without a
+// context.
+type tableInfoQueryer interface {
 	Query(string, ...interface{}) (*sql.Rows, error)
 }
 
-func sqliteTableColumns(queryer sqliteQueryer, table string) (map[string]bool, error) {
+func sqliteTableColumns(queryer tableInfoQueryer, table string) (map[string]bool, error) {
 	rows, err := queryer.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return nil, err
@@ -359,15 +363,7 @@ func (s *SQLiteStore) SkillBindingRevisionFloor(ctx context.Context, scope skill
 	return sqliteSkillBindingRevisionFloor(ctx, s.db, scope, deploymentID, bindingID)
 }
 
-type sqliteRowQuerier interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-}
-
-type sqliteExecer interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-}
-
-func sqliteSkillBindingRevisionFloor(ctx context.Context, query sqliteRowQuerier, scope skill.ScopeReference, deploymentID, bindingID string) (int64, error) {
+func sqliteSkillBindingRevisionFloor(ctx context.Context, query sqlstore.RowQuerier, scope skill.ScopeReference, deploymentID, bindingID string) (int64, error) {
 	var floor int64
 	err := query.QueryRowContext(ctx, `SELECT revision FROM skill_binding_tombstones WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=?`,
 		scope.Kind, scope.ID, deploymentID, bindingID).Scan(&floor)
@@ -379,7 +375,7 @@ func sqliteSkillBindingRevisionFloor(ctx context.Context, query sqliteRowQuerier
 
 // sqliteRecordSkillBindingTombstone raises a deleted binding ID's revision
 // floor. The floor never decreases.
-func sqliteRecordSkillBindingTombstone(ctx context.Context, exec sqliteExecer, scope skill.ScopeReference, deploymentID, bindingID string, revision int64) error {
+func sqliteRecordSkillBindingTombstone(ctx context.Context, exec sqlstore.Execer, scope skill.ScopeReference, deploymentID, bindingID string, revision int64) error {
 	_, err := exec.ExecContext(ctx, `INSERT INTO skill_binding_tombstones(scope_kind, scope_id, deployment_id, id, revision, deleted_at) VALUES(?, ?, ?, ?, ?, ?)
 		ON CONFLICT(scope_kind, scope_id, deployment_id, id) DO UPDATE SET revision=MAX(revision, excluded.revision), deleted_at=excluded.deleted_at`,
 		scope.Kind, scope.ID, deploymentID, bindingID, revision, time.Now().UTC().Format(time.RFC3339Nano))

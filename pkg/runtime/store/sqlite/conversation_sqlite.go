@@ -828,12 +828,7 @@ func (s *SQLiteStore) ListConversationPresence(ctx context.Context, scope models
 	return result, rows.Err()
 }
 
-type sqliteConversationQueryer interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-}
-
-func getSQLiteConversation(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, id string) (*models.Conversation, error) {
+func getSQLiteConversation(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, id string) (*models.Conversation, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversations WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -845,7 +840,7 @@ func getSQLiteConversation(ctx context.Context, queryer sqliteConversationQuerye
 	return sqlstore.DecodeConversation(payload)
 }
 
-func getSQLiteConversationByKey(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, key string) (*models.Conversation, error) {
+func getSQLiteConversationByKey(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, key string) (*models.Conversation, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversations WHERE scope_kind = ? AND scope_id = ? AND idempotency_key = ?`, scope.Kind, scope.ID, key).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -886,7 +881,7 @@ func insertSQLiteChannelMessage(ctx context.Context, conn *sql.Conn, message *mo
 	return err
 }
 
-func getSQLiteChannelMessage(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID, id string) (*models.ChannelMessage, error) {
+func getSQLiteChannelMessage(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID, id string) (*models.ChannelMessage, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM channel_messages WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND id = ?`,
 		scope.Kind, scope.ID, conversationID, id).Scan(&payload)
@@ -899,7 +894,7 @@ func getSQLiteChannelMessage(ctx context.Context, queryer sqliteConversationQuer
 	return sqlstore.DecodeChannelMessage(payload)
 }
 
-func getSQLiteChannelMessageByKey(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID, key string) (*models.ChannelMessage, error) {
+func getSQLiteChannelMessageByKey(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID, key string) (*models.ChannelMessage, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM channel_messages WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND idempotency_key = ?`,
 		scope.Kind, scope.ID, conversationID, key).Scan(&payload)
@@ -927,7 +922,7 @@ func insertSQLiteParticipationRound(ctx context.Context, conn *sql.Conn, round *
 	return err
 }
 
-func getSQLiteParticipationRoundByKey(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID, key string) (*models.ParticipationRound, error) {
+func getSQLiteParticipationRoundByKey(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID, key string) (*models.ParticipationRound, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM participation_rounds WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND idempotency_key = ?`,
 		scope.Kind, scope.ID, conversationID, key).Scan(&payload)
@@ -940,7 +935,7 @@ func getSQLiteParticipationRoundByKey(ctx context.Context, queryer sqliteConvers
 	return sqlstore.DecodeParticipationRound(payload)
 }
 
-func getSQLiteParticipationRound(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID, id string) (*models.ParticipationRound, error) {
+func getSQLiteParticipationRound(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID, id string) (*models.ParticipationRound, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM participation_rounds WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND id = ?`,
 		scope.Kind, scope.ID, conversationID, id).Scan(&payload)
@@ -953,7 +948,7 @@ func getSQLiteParticipationRound(ctx context.Context, queryer sqliteConversation
 	return sqlstore.DecodeParticipationRound(payload)
 }
 
-func loadSQLiteParticipationRoundResult(ctx context.Context, queryer sqliteConversationQueryer, round *models.ParticipationRound) (*models.ParticipationRoundResult, error) {
+func loadSQLiteParticipationRoundResult(ctx context.Context, queryer sqlstore.Reader, round *models.ParticipationRound) (*models.ParticipationRoundResult, error) {
 	conversation, err := getSQLiteConversation(ctx, queryer, round.Scope, round.ConversationID)
 	if err != nil {
 		return nil, err
@@ -979,7 +974,7 @@ func loadSQLiteParticipationRoundResult(ctx context.Context, queryer sqliteConve
 	return &models.ParticipationRoundResult{Conversation: conversation, Round: round, Messages: messages}, rows.Err()
 }
 
-func getSQLiteConversationCursor(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
+func getSQLiteConversationCursor(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversation_cursors WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND participant_type = ? AND participant_id = ?`,
 		scope.Kind, scope.ID, conversationID, participant.Type, participant.ID).Scan(&payload)
@@ -992,7 +987,7 @@ func getSQLiteConversationCursor(ctx context.Context, queryer sqliteConversation
 	return sqlstore.DecodeConversationCursor(payload)
 }
 
-func getSQLiteConversationPresence(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationPresence, error) {
+func getSQLiteConversationPresence(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationPresence, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversation_presence WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND participant_type = ? AND participant_id = ?`,
 		scope.Kind, scope.ID, conversationID, participant.Type, participant.ID).Scan(&payload)

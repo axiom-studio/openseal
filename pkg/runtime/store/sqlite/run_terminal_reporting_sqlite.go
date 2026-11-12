@@ -251,7 +251,7 @@ func (s *SQLiteStore) GetRunTerminalReport(ctx context.Context, scope models.Sco
 	return report, err
 }
 
-func scanSQLiteRunTerminalReport(scanner interface{ Scan(...interface{}) error }) (*models.RunTerminalReport, error) {
+func scanSQLiteRunTerminalReport(scanner sqlstore.RowScanner) (*models.RunTerminalReport, error) {
 	var report models.RunTerminalReport
 	var payload sql.NullString
 	var available int64

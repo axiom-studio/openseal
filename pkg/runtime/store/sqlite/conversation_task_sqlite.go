@@ -253,7 +253,7 @@ func (s *SQLiteStore) ListConversationTasks(ctx context.Context, filter models.C
 	return sqlstore.ScanConversationTaskResults(rows)
 }
 
-func getSQLiteConversationTask(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, id, sourceRunID, taskKey string) (*models.ConversationTask, error) {
+func getSQLiteConversationTask(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, id, sourceRunID, taskKey string) (*models.ConversationTask, error) {
 	query := `SELECT payload FROM conversation_tasks WHERE scope_kind = ? AND scope_id = ?`
 	args := []interface{}{scope.Kind, scope.ID}
 	if id != "" {
@@ -274,7 +274,7 @@ func getSQLiteConversationTask(ctx context.Context, queryer sqliteDependencyQuer
 	return sqlstore.DecodeConversationTask(payload)
 }
 
-func sqliteConversationTaskResult(ctx context.Context, queryer sqliteDependencyQueryer, task *models.ConversationTask) (*models.ConversationTaskResult, error) {
+func sqliteConversationTaskResult(ctx context.Context, queryer sqlstore.Reader, task *models.ConversationTask) (*models.ConversationTaskResult, error) {
 	work, err := getSQLiteAgentRun(ctx, queryer, task.Scope, task.WorkRunID)
 	if err != nil {
 		return nil, err
@@ -295,7 +295,7 @@ func normalizeSQLiteConversationTaskConflict(err error) error {
 
 // insertSQLiteConversationTask stores task beside the status of its work Run,
 // which the row indexes. A task is active until that Run is terminal.
-func insertSQLiteConversationTask(ctx context.Context, exec sqliteExecer, task *models.ConversationTask, workStatus models.AgentRunStatus) error {
+func insertSQLiteConversationTask(ctx context.Context, exec sqlstore.Execer, task *models.ConversationTask, workStatus models.AgentRunStatus) error {
 	payload, err := json.Marshal(task)
 	if err != nil {
 		return err

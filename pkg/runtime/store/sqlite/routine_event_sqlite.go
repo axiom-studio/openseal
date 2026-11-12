@@ -40,12 +40,6 @@ func sqliteStringArgs(values []string) []interface{} {
 	return args
 }
 
-type sqliteRoutineQuerier interface {
-	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
-	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
-	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
-}
-
 // withSQLiteWrite runs fn in a BEGIN IMMEDIATE transaction, so a read that
 // decides a write cannot race another writer.
 func (s *SQLiteStore) withSQLiteWrite(ctx context.Context, fn func(conn *sql.Conn) error) error {
@@ -267,7 +261,7 @@ func (s *SQLiteStore) ListRoutineEventWork(ctx context.Context, scope models.Sco
 
 const sqliteRoutineBatchColumns = `scope_kind, scope_id, id, activation_id, event_ids, dropped, test, COALESCE(run_id, ''), created_at, started_at`
 
-func scanSQLiteRoutineEventBatch(row interface{ Scan(...interface{}) error }) (*models.RoutineEventBatch, error) {
+func scanSQLiteRoutineEventBatch(row sqlstore.RowScanner) (*models.RoutineEventBatch, error) {
 	var batch models.RoutineEventBatch
 	var eventIDs, createdAt string
 	var startedAt sql.NullString
@@ -288,7 +282,7 @@ func scanSQLiteRoutineEventBatch(row interface{ Scan(...interface{}) error }) (*
 	return &batch, nil
 }
 
-func sqliteOpenRoutineEventBatch(ctx context.Context, query sqliteRoutineQuerier, scope models.Scope, activationID string) (*models.RoutineEventBatch, error) {
+func sqliteOpenRoutineEventBatch(ctx context.Context, query sqlstore.ReadWriter, scope models.Scope, activationID string) (*models.RoutineEventBatch, error) {
 	batch, err := scanSQLiteRoutineEventBatch(query.QueryRowContext(ctx, `SELECT `+sqliteRoutineBatchColumns+` FROM routine_event_batches
 		WHERE scope_kind = ? AND scope_id = ? AND activation_id = ? AND started_at IS NULL`, scope.Kind, scope.ID, activationID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -671,7 +665,7 @@ func (s *SQLiteStore) PruneRoutineEvents(ctx context.Context, before time.Time, 
 
 const sqliteHookColumns = `id, scope_kind, scope_id, activation_id, revision, path_token_enabled, created_at, rotated_at`
 
-func scanSQLiteHook(row interface{ Scan(...interface{}) error }) (*models.Hook, error) {
+func scanSQLiteHook(row sqlstore.RowScanner) (*models.Hook, error) {
 	var hook models.Hook
 	var createdAt, rotatedAt string
 	if err := row.Scan(&hook.ID, &hook.Scope.Kind, &hook.Scope.ID, &hook.ActivationID, &hook.Revision, &hook.PathTokenEnabled, &createdAt, &rotatedAt); err != nil {

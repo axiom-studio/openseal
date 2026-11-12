@@ -895,7 +895,7 @@ func (s *SQLiteStore) SaveExternalConversationReplyProgress(ctx context.Context,
 	return tx.Commit()
 }
 
-func insertSQLiteExternalConversationEndpoint(ctx context.Context, exec sqliteExecer, endpoint *models.ExternalConversationEndpoint) error {
+func insertSQLiteExternalConversationEndpoint(ctx context.Context, exec sqlstore.Execer, endpoint *models.ExternalConversationEndpoint) error {
 	payload, err := json.Marshal(endpoint)
 	if err != nil {
 		return err
@@ -909,7 +909,7 @@ func insertSQLiteExternalConversationEndpoint(ctx context.Context, exec sqliteEx
 	return err
 }
 
-func insertSQLiteExternalConversationDelivery(ctx context.Context, exec sqliteExecer, delivery *models.ExternalConversationDelivery) error {
+func insertSQLiteExternalConversationDelivery(ctx context.Context, exec sqlstore.Execer, delivery *models.ExternalConversationDelivery) error {
 	payload, err := json.Marshal(delivery)
 	if err != nil {
 		return err

@@ -58,7 +58,7 @@ func (s *SQLiteStore) CreateArtifactVersion(ctx context.Context, artifact *model
 
 // insertSQLiteArtifactVersion stores artifact only while the artifact's latest
 // stored version is expectedLatestVersion (0 when none is stored).
-func insertSQLiteArtifactVersion(ctx context.Context, exec sqliteExecer, artifact *models.Artifact, expectedLatestVersion int64) error {
+func insertSQLiteArtifactVersion(ctx context.Context, exec sqlstore.Execer, artifact *models.Artifact, expectedLatestVersion int64) error {
 	payload, err := json.Marshal(artifact)
 	if err != nil {
 		return err

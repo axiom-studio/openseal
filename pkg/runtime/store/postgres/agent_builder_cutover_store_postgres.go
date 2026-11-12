@@ -12,7 +12,7 @@ import (
 
 var _ models.AgentBuilderCutoverStore = (*PostgresStore)(nil)
 
-func (s *PostgresStore) agentBuilderCutoverTablePresent(ctx context.Context, query postgresMigrationQuerier) (bool, error) {
+func (s *PostgresStore) agentBuilderCutoverTablePresent(ctx context.Context, query sqlstore.RowQuerier) (bool, error) {
 	var relation sql.NullString
 	if err := query.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, s.schema+"."+sqlstore.AgentBuilderCutoverTable).Scan(&relation); err != nil {
 		return false, err

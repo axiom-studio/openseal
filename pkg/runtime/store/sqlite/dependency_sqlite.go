@@ -299,12 +299,7 @@ func (s *SQLiteStore) resolveSQLiteDependencyConn(ctx context.Context, conn *sql
 	return result, nil
 }
 
-type sqliteDependencyQueryer interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-}
-
-func getSQLiteDependencyGroup(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, groupID, idempotencyKey string) (*models.RunDependencyGroup, error) {
+func getSQLiteDependencyGroup(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, groupID, idempotencyKey string) (*models.RunDependencyGroup, error) {
 	query := `SELECT payload FROM run_dependency_groups WHERE scope_kind = ? AND scope_id = ?`
 	args := []interface{}{scope.Kind, scope.ID}
 	if strings.TrimSpace(groupID) != "" {
@@ -325,7 +320,7 @@ func getSQLiteDependencyGroup(ctx context.Context, queryer sqliteDependencyQuery
 	return sqlstore.DecodeRunDependencyGroup(payload)
 }
 
-func listSQLiteDependencies(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
+func listSQLiteDependencies(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
 	rows, err := queryer.QueryContext(ctx, `SELECT payload FROM run_dependencies
 		WHERE scope_kind = ? AND scope_id = ? AND group_id = ? ORDER BY id`, scope.Kind, scope.ID, groupID)
 	if err != nil {
@@ -347,7 +342,7 @@ func listSQLiteDependencies(ctx context.Context, queryer sqliteDependencyQueryer
 	return result, rows.Err()
 }
 
-func getSQLiteAgentRun(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, runID string) (*models.AgentRun, error) {
+func getSQLiteAgentRun(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, runID string) (*models.AgentRun, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		scope.Kind, scope.ID, runID).Scan(&payload)

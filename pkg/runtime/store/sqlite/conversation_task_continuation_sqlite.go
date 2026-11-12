@@ -172,7 +172,7 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req models.Co
 	return &models.ConversationTaskResult{Task: models.CloneConversationTask(task), WorkRun: models.CloneAgentRun(updated), SourceRun: models.CloneAgentRun(updated), AcknowledgmentMessageID: ack.Message.ID}, nil
 }
 
-func getSQLiteConversationTaskByWorkRun(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, runID string) (*models.ConversationTask, error) {
+func getSQLiteConversationTaskByWorkRun(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, runID string) (*models.ConversationTask, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversation_tasks WHERE scope_kind=? AND scope_id=? AND work_run_id=?`, scope.Kind, scope.ID, runID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {

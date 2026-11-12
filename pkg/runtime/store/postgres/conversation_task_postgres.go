@@ -268,7 +268,7 @@ func (s *PostgresStore) ListConversationTasks(ctx context.Context, filter models
 	return sqlstore.ScanConversationTaskResults(rows)
 }
 
-func (s *PostgresStore) getPostgresConversationTask(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, id, sourceRunID, taskKey string, lock bool) (*models.ConversationTask, error) {
+func (s *PostgresStore) getPostgresConversationTask(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, id, sourceRunID, taskKey string, lock bool) (*models.ConversationTask, error) {
 	query := `SELECT payload FROM ` + s.table("conversation_tasks") + ` WHERE scope_kind = $1 AND scope_id = $2`
 	args := []interface{}{scope.Kind, scope.ID}
 	if id != "" {
@@ -292,7 +292,7 @@ func (s *PostgresStore) getPostgresConversationTask(ctx context.Context, queryer
 	return sqlstore.DecodeConversationTask(payload)
 }
 
-func (s *PostgresStore) postgresConversationTaskResult(ctx context.Context, queryer postgresDependencyQueryer, task *models.ConversationTask) (*models.ConversationTaskResult, error) {
+func (s *PostgresStore) postgresConversationTaskResult(ctx context.Context, queryer sqlstore.Reader, task *models.ConversationTask) (*models.ConversationTaskResult, error) {
 	work, err := s.getPostgresAgentRunTx(ctx, queryer, task.Scope, task.WorkRunID, false)
 	if err != nil {
 		return nil, err

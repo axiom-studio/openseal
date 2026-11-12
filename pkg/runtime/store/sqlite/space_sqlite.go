@@ -130,12 +130,7 @@ func backfillSpacesSQLite(tx *sql.Tx, now time.Time) error {
 	return nil
 }
 
-type sqliteSpaceExecer interface {
-	sqliteConversationQueryer
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-}
-
-func scanSQLiteSpace(row interface{ Scan(...interface{}) error }) (*models.Space, error) {
+func scanSQLiteSpace(row sqlstore.RowScanner) (*models.Space, error) {
 	var space models.Space
 	if err := row.Scan(&space.ID, &space.Scope.Kind, &space.Scope.ID, &space.Name, &space.Look, &space.Position,
 		&space.IsDefault, &space.Access, &space.OwnerID, &space.CreatedAt, &space.UpdatedAt); err != nil {
@@ -145,7 +140,7 @@ func scanSQLiteSpace(row interface{ Scan(...interface{}) error }) (*models.Space
 	return &space, nil
 }
 
-func getSQLiteSpace(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, spaceID string) (*models.Space, error) {
+func getSQLiteSpace(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, spaceID string) (*models.Space, error) {
 	space, err := scanSQLiteSpace(queryer.QueryRowContext(ctx, `SELECT `+sqlstore.SpaceColumns+` FROM spaces
 		WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, spaceID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -154,7 +149,7 @@ func getSQLiteSpace(ctx context.Context, queryer sqliteConversationQueryer, scop
 	return space, err
 }
 
-func listSQLiteSpaces(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope) ([]*models.Space, error) {
+func listSQLiteSpaces(ctx context.Context, queryer sqlstore.Reader, scope models.Scope) ([]*models.Space, error) {
 	rows, err := queryer.QueryContext(ctx, `SELECT `+sqlstore.SpaceColumns+` FROM spaces
 		WHERE scope_kind = ? AND scope_id = ? ORDER BY position, created_at, id`, scope.Kind, scope.ID)
 	if err != nil {
@@ -173,7 +168,7 @@ func listSQLiteSpaces(ctx context.Context, queryer sqliteConversationQueryer, sc
 }
 
 // sqliteDefaultSpace returns the owner's default space, or ErrNoDefaultSpace.
-func sqliteDefaultSpace(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, ownerID string) (*models.Space, error) {
+func sqliteDefaultSpace(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, ownerID string) (*models.Space, error) {
 	space, err := scanSQLiteSpace(queryer.QueryRowContext(ctx, `SELECT `+sqlstore.SpaceColumns+` FROM spaces
 		WHERE scope_kind = ? AND scope_id = ? AND owner_id = ? AND is_default = 1`, scope.Kind, scope.ID, ownerID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -321,7 +316,7 @@ func (s *SQLiteStore) DeleteSpace(ctx context.Context, scope models.Scope, space
 	})
 }
 
-func scanSQLiteSpaceMember(row interface{ Scan(...interface{}) error }) (*models.SpaceMember, error) {
+func scanSQLiteSpaceMember(row sqlstore.RowScanner) (*models.SpaceMember, error) {
 	var member models.SpaceMember
 	if err := row.Scan(&member.SpaceID, &member.Type, &member.ID, &member.Position, &member.AddedAt); err != nil {
 		return nil, err
@@ -409,7 +404,7 @@ func (s *SQLiteStore) DeleteSpaceMember(ctx context.Context, scope models.Scope,
 	return deleteSQLiteSpaceMember(ctx, s.db, scope, spaceID, memberType, memberID)
 }
 
-func deleteSQLiteSpaceMember(ctx context.Context, db sqliteSpaceExecer, scope models.Scope, spaceID string, memberType models.SpaceMemberType, memberID string) error {
+func deleteSQLiteSpaceMember(ctx context.Context, db sqlstore.ReadWriter, scope models.Scope, spaceID string, memberType models.SpaceMemberType, memberID string) error {
 	_, err := db.ExecContext(ctx, `DELETE FROM space_members
 		WHERE scope_kind = ? AND scope_id = ? AND space_id = ? AND member_type = ? AND member_id = ?`,
 		scope.Kind, scope.ID, spaceID, memberType, memberID)
@@ -635,7 +630,7 @@ func (s *SQLiteStore) ListSpacePeople(ctx context.Context, scope models.Scope, s
 	return listSQLiteSpacePeople(ctx, s.db, scope, spaceID)
 }
 
-func listSQLiteSpacePeople(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, spaceID string) ([]*models.SpacePerson, error) {
+func listSQLiteSpacePeople(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, spaceID string) ([]*models.SpacePerson, error) {
 	rows, err := queryer.QueryContext(ctx, `SELECT `+sqlstore.SpacePersonColumns+` FROM space_people
 		WHERE scope_kind = ? AND scope_id = ? AND space_id = ? ORDER BY added_at, user_id`, scope.Kind, scope.ID, spaceID)
 	if err != nil {

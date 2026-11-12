@@ -123,7 +123,7 @@ func (s *SQLiteStore) ListLatestSurfaceInteractions(ctx context.Context, filter 
 
 // getSQLiteSurfaceInteraction reads one interaction of a conversation; where
 // filters after the leading scope and conversation parameters.
-func getSQLiteSurfaceInteraction(ctx context.Context, queryer sqliteConversationQueryer, where string, args ...interface{}) (*models.SurfaceInteraction, error) {
+func getSQLiteSurfaceInteraction(ctx context.Context, queryer sqlstore.Reader, where string, args ...interface{}) (*models.SurfaceInteraction, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM surface_interactions
 		WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND `+where+` ORDER BY sequence LIMIT 1`, args...).Scan(&payload)

@@ -8,7 +8,7 @@ const SpaceMemberColumns = `space_id, member_type, member_id, position, added_at
 
 const SpacePersonColumns = `space_id, user_id, added_by, added_at`
 
-func ScanSpacePerson(row interface{ Scan(...interface{}) error }) (*models.SpacePerson, error) {
+func ScanSpacePerson(row RowScanner) (*models.SpacePerson, error) {
 	var person models.SpacePerson
 	if err := row.Scan(&person.SpaceID, &person.UserID, &person.AddedBy, &person.AddedAt); err != nil {
 		return nil, err

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -30,15 +31,11 @@ func (s *PostgresStore) migrateSkillBindingTombstones(ctx context.Context, tx *s
 	return err
 }
 
-type postgresExecer interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-}
-
 func (s *PostgresStore) SkillBindingRevisionFloor(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string) (int64, error) {
 	return s.skillBindingRevisionFloor(ctx, s.db, scope, deploymentID, bindingID, false)
 }
 
-func (s *PostgresStore) skillBindingRevisionFloor(ctx context.Context, query postgresMigrationQuerier, scope skill.ScopeReference, deploymentID, bindingID string, lock bool) (int64, error) {
+func (s *PostgresStore) skillBindingRevisionFloor(ctx context.Context, query sqlstore.RowQuerier, scope skill.ScopeReference, deploymentID, bindingID string, lock bool) (int64, error) {
 	statement := `SELECT revision FROM ` + s.table("skill_binding_tombstones") + ` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4`
 	if lock {
 		statement += ` FOR UPDATE`
@@ -53,7 +50,7 @@ func (s *PostgresStore) skillBindingRevisionFloor(ctx context.Context, query pos
 
 // recordSkillBindingTombstone raises a deleted binding ID's revision floor.
 // The floor never decreases.
-func (s *PostgresStore) recordSkillBindingTombstone(ctx context.Context, exec postgresExecer, scope skill.ScopeReference, deploymentID, bindingID string, revision int64) error {
+func (s *PostgresStore) recordSkillBindingTombstone(ctx context.Context, exec sqlstore.Execer, scope skill.ScopeReference, deploymentID, bindingID string, revision int64) error {
 	_, err := exec.ExecContext(ctx, `INSERT INTO `+s.table("skill_binding_tombstones")+` (scope_kind, scope_id, deployment_id, id, revision, deleted_at)
 		VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
 		ON CONFLICT (scope_kind, scope_id, deployment_id, id) DO UPDATE

@@ -7,7 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func ListCompletedMaintenanceWaiters(ctx context.Context, q MaintenanceDB, runs, gates string, scope models.Scope, limit int, postgres bool) ([]*models.AgentRun, error) {
+func ListCompletedMaintenanceWaiters(ctx context.Context, q ReadWriter, runs, gates string, scope models.Scope, limit int, postgres bool) ([]*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

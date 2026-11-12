@@ -76,7 +76,7 @@ func ReadSkillRuntimeMaintenance(ctx context.Context, q RowQuerier, table string
 	return &g, nil
 }
 
-func WriteSkillRuntimeMaintenance(ctx context.Context, q MaintenanceDB, table string, g *models.SkillRuntimeMaintenance, postgres bool) error {
+func WriteSkillRuntimeMaintenance(ctx context.Context, q ReadWriter, table string, g *models.SkillRuntimeMaintenance, postgres bool) error {
 	payload, err := json.Marshal(g)
 	if err != nil {
 		return err
@@ -89,7 +89,7 @@ func WriteSkillRuntimeMaintenance(ctx context.Context, q MaintenanceDB, table st
 	return err
 }
 
-func ValidateMaintenanceBindingSnapshot(ctx context.Context, q MaintenanceDB, table string, r models.SkillRuntimeMaintenanceRequest, postgres bool) error {
+func ValidateMaintenanceBindingSnapshot(ctx context.Context, q ReadWriter, table string, r models.SkillRuntimeMaintenanceRequest, postgres bool) error {
 	expected := make(map[string]int64, len(r.ExpectedBindings))
 	for _, b := range r.ExpectedBindings {
 		expected[b.DeploymentID+"\x00"+b.BindingID] = b.Revision
@@ -137,7 +137,7 @@ func ValidateMaintenanceBindingSnapshot(ctx context.Context, q MaintenanceDB, ta
 	return nil
 }
 
-func ListActiveSkillRuntimeMaintenances(ctx context.Context, q MaintenanceDB, table string, scope models.Scope, postgres bool) ([]*models.SkillRuntimeMaintenance, error) {
+func ListActiveSkillRuntimeMaintenances(ctx context.Context, q ReadWriter, table string, scope models.Scope, postgres bool) ([]*models.SkillRuntimeMaintenance, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func ListActiveSkillRuntimeMaintenances(ctx context.Context, q MaintenanceDB, ta
 	return result, rows.Err()
 }
 
-func ListMaintenanceBindings(ctx context.Context, q MaintenanceDB, table string, scope models.Scope, skillID, afterDeploymentID, afterBindingID string, limit int, postgres bool) ([]*skill.Binding, error) {
+func ListMaintenanceBindings(ctx context.Context, q ReadWriter, table string, scope models.Scope, skillID, afterDeploymentID, afterBindingID string, limit int, postgres bool) ([]*skill.Binding, error) {
 	if err := models.ValidateMaintenanceBindingPage(scope, skillID, afterDeploymentID, afterBindingID, limit); err != nil {
 		return nil, err
 	}

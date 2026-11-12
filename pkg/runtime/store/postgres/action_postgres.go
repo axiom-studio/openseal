@@ -666,11 +666,7 @@ func (s *PostgresStore) PersistActionExecution(ctx context.Context, execution mo
 	return &models.ActionExecutionResult{Call: models.CloneActionCall(execution.Call), Run: models.CloneAgentRun(execution.Run), Event: event}, nil
 }
 
-type postgresQueryRower interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-}
-
-func (s *PostgresStore) getActionByID(ctx context.Context, queryer postgresQueryRower, scope models.Scope, id string, lock bool) (*models.ActionCall, error) {
+func (s *PostgresStore) getActionByID(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, id string, lock bool) (*models.ActionCall, error) {
 	query := `SELECT payload FROM ` + s.table("action_calls") + ` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`
 	if lock {
 		query += ` FOR UPDATE`
@@ -695,7 +691,7 @@ func (s *PostgresStore) GetActionCallByIdempotencyKey(ctx context.Context, scope
 	return s.getActionByIdempotency(ctx, s.db, scope, runID, key)
 }
 
-func (s *PostgresStore) getActionByIdempotency(ctx context.Context, queryer postgresQueryRower, scope models.Scope, runID, key string) (*models.ActionCall, error) {
+func (s *PostgresStore) getActionByIdempotency(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, runID, key string) (*models.ActionCall, error) {
 	var payload string
 	if err := queryer.QueryRowContext(ctx, `SELECT payload FROM `+s.table("action_calls")+` WHERE scope_kind=$1 AND scope_id=$2 AND run_id=$3 AND idempotency_key=$4`, scope.Kind, scope.ID, runID, key).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -706,7 +702,7 @@ func (s *PostgresStore) getActionByIdempotency(ctx context.Context, queryer post
 	return sqlstore.DecodeActionCall(payload)
 }
 
-func (s *PostgresStore) getActionByExternalOperation(ctx context.Context, queryer postgresQueryRower, scope models.Scope, digest string, lock bool) (*models.ActionCall, error) {
+func (s *PostgresStore) getActionByExternalOperation(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, digest string, lock bool) (*models.ActionCall, error) {
 	query := `SELECT payload FROM ` + s.table("action_calls") + `
 		WHERE scope_kind=$1 AND scope_id=$2 AND external_operation_digest=$3
 		AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`
@@ -723,7 +719,7 @@ func (s *PostgresStore) getActionByExternalOperation(ctx context.Context, querye
 	return sqlstore.DecodeActionCall(payload)
 }
 
-func (s *PostgresStore) getApprovalByID(ctx context.Context, queryer postgresQueryRower, scope models.Scope, id string, lock bool) (*models.ApprovalCheckpoint, error) {
+func (s *PostgresStore) getApprovalByID(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, id string, lock bool) (*models.ApprovalCheckpoint, error) {
 	query := `SELECT payload FROM ` + s.table("approval_checkpoints") + ` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`
 	if lock {
 		query += ` FOR UPDATE`

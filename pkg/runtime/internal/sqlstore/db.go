@@ -5,38 +5,49 @@ import (
 	"database/sql"
 )
 
-// ExecQuerier is the part of *sql.DB, *sql.Tx and *sql.Conn the shared
-// migrations use, so each store runs them on its own transaction.
-type ExecQuerier interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-}
+// These interfaces name the parts of *sql.DB, *sql.Tx and *sql.Conn a
+// function uses, so each store runs it on its pool, its transaction or a
+// pinned connection.
 
+// RowScanner is a *sql.Row or *sql.Rows positioned on a row.
 type RowScanner interface {
 	Scan(...interface{}) error
-}
-
-type Execer interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 }
 
 type Querier interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 }
 
-type ExecRowQuerier interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-}
-
 type RowQuerier interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
-var _ RowQuerier = (*sql.Conn)(nil)
-
-type MaintenanceDB interface {
-	RowQuerier
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
+type Execer interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 }
+
+// Reader reads one row or a set of rows.
+type Reader interface {
+	RowQuerier
+	Querier
+}
+
+// ExecQuerier is what the shared migrations use, so each store runs them on
+// its own transaction.
+type ExecQuerier interface {
+	Execer
+	Querier
+}
+
+type ExecRowQuerier interface {
+	Execer
+	RowQuerier
+}
+
+// ReadWriter reads and writes rows.
+type ReadWriter interface {
+	Reader
+	Execer
+}
+
+var _ RowQuerier = (*sql.Conn)(nil)

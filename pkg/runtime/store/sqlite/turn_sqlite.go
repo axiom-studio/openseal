@@ -357,7 +357,7 @@ func (s *SQLiteStore) ClaimAgentTurn(ctx context.Context, scope models.Scope, tu
 	return turn, nil
 }
 
-func insertSQLiteAgentTurn(ctx context.Context, exec sqliteExecer, turn *models.AgentTurn) error {
+func insertSQLiteAgentTurn(ctx context.Context, exec sqlstore.Execer, turn *models.AgentTurn) error {
 	payload, err := json.Marshal(turn)
 	if err != nil {
 		return err

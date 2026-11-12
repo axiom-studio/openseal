@@ -307,12 +307,7 @@ func (s *PostgresStore) resolvePostgresDependencyTx(ctx context.Context, tx *sql
 	return result, nil
 }
 
-type postgresDependencyQueryer interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-}
-
-func (s *PostgresStore) getPostgresDependencyGroup(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, groupID, idempotencyKey string, lock bool) (*models.RunDependencyGroup, error) {
+func (s *PostgresStore) getPostgresDependencyGroup(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, groupID, idempotencyKey string, lock bool) (*models.RunDependencyGroup, error) {
 	query := `SELECT payload FROM ` + s.table("run_dependency_groups") + ` WHERE scope_kind = $1 AND scope_id = $2`
 	args := []interface{}{scope.Kind, scope.ID}
 	if strings.TrimSpace(groupID) != "" {
@@ -336,7 +331,7 @@ func (s *PostgresStore) getPostgresDependencyGroup(ctx context.Context, queryer 
 	return sqlstore.DecodeRunDependencyGroup(payload)
 }
 
-func (s *PostgresStore) listPostgresDependencies(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, groupID string, lock bool) ([]*models.RunDependency, error) {
+func (s *PostgresStore) listPostgresDependencies(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, groupID string, lock bool) ([]*models.RunDependency, error) {
 	query := `SELECT payload FROM ` + s.table("run_dependencies") + ` WHERE scope_kind = $1 AND scope_id = $2 AND group_id = $3 ORDER BY id`
 	if lock {
 		query += ` FOR UPDATE`
@@ -361,7 +356,7 @@ func (s *PostgresStore) listPostgresDependencies(ctx context.Context, queryer po
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) getPostgresAgentRunTx(ctx context.Context, queryer postgresDependencyQueryer, scope models.Scope, runID string, lock bool) (*models.AgentRun, error) {
+func (s *PostgresStore) getPostgresAgentRunTx(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, runID string, lock bool) (*models.AgentRun, error) {
 	query := `SELECT payload FROM ` + s.table("agent_runs") + ` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`
 	if lock {
 		query += ` FOR UPDATE`

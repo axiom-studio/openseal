@@ -795,11 +795,7 @@ func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution mode
 	return &models.ActionExecutionResult{Call: models.CloneActionCall(execution.Call), Run: models.CloneAgentRun(execution.Run), Event: event}, nil
 }
 
-type queryRower interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-}
-
-func getActionCallFrom(ctx context.Context, queryer queryRower, scope models.Scope, predicate string, args ...interface{}) (*models.ActionCall, error) {
+func getActionCallFrom(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, predicate string, args ...interface{}) (*models.ActionCall, error) {
 	queryArgs := []interface{}{scope.Kind, scope.ID}
 	queryArgs = append(queryArgs, args...)
 	var payload string
@@ -813,7 +809,7 @@ func getActionCallFrom(ctx context.Context, queryer queryRower, scope models.Sco
 	return sqlstore.DecodeActionCall(payload)
 }
 
-func getApprovalFrom(ctx context.Context, queryer queryRower, scope models.Scope, predicate string, args ...interface{}) (*models.ApprovalCheckpoint, error) {
+func getApprovalFrom(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, predicate string, args ...interface{}) (*models.ApprovalCheckpoint, error) {
 	queryArgs := []interface{}{scope.Kind, scope.ID}
 	queryArgs = append(queryArgs, args...)
 	var payload string
@@ -827,7 +823,7 @@ func getApprovalFrom(ctx context.Context, queryer queryRower, scope models.Scope
 	return sqlstore.DecodeApproval(payload)
 }
 
-func insertSQLiteActionCall(ctx context.Context, exec sqliteExecer, call *models.ActionCall) error {
+func insertSQLiteActionCall(ctx context.Context, exec sqlstore.Execer, call *models.ActionCall) error {
 	payload, err := json.Marshal(call)
 	if err != nil {
 		return err
@@ -842,7 +838,7 @@ func insertSQLiteActionCall(ctx context.Context, exec sqliteExecer, call *models
 	return err
 }
 
-func insertSQLiteApprovalCheckpoint(ctx context.Context, exec sqliteExecer, approval *models.ApprovalCheckpoint) error {
+func insertSQLiteApprovalCheckpoint(ctx context.Context, exec sqlstore.Execer, approval *models.ApprovalCheckpoint) error {
 	payload, err := json.Marshal(approval)
 	if err != nil {
 		return err

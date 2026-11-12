@@ -165,7 +165,7 @@ func (s *SQLiteStore) CreateTeamDefinition(ctx context.Context, definition *kern
 	return createTeamDefinitionSQLite(ctx, s.db, definition)
 }
 
-func createTeamDefinitionSQLite(ctx context.Context, db sqliteSpaceExecer, definition *kernelteam.Definition) error {
+func createTeamDefinitionSQLite(ctx context.Context, db sqlstore.ReadWriter, definition *kernelteam.Definition) error {
 	payload, err := json.Marshal(definition)
 	if err != nil {
 		return err

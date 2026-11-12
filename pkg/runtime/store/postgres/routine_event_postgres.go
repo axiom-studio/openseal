@@ -238,14 +238,9 @@ func (s *PostgresStore) ListRoutineEventWork(ctx context.Context, scope models.S
 	return ids, rows.Err()
 }
 
-type postgresRoutineQuerier interface {
-	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
-	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
-}
-
 const postgresRoutineBatchColumns = `scope_kind, scope_id, id, activation_id, event_ids::text, dropped, test, COALESCE(run_id, ''), created_at, started_at`
 
-func scanPostgresRoutineEventBatch(row interface{ Scan(...interface{}) error }) (*models.RoutineEventBatch, error) {
+func scanPostgresRoutineEventBatch(row sqlstore.RowScanner) (*models.RoutineEventBatch, error) {
 	var batch models.RoutineEventBatch
 	var eventIDs string
 	var startedAt sql.NullTime
@@ -263,7 +258,7 @@ func scanPostgresRoutineEventBatch(row interface{ Scan(...interface{}) error }) 
 	return &batch, nil
 }
 
-func (s *PostgresStore) openRoutineEventBatch(ctx context.Context, query postgresRoutineQuerier, scope models.Scope, activationID string) (*models.RoutineEventBatch, error) {
+func (s *PostgresStore) openRoutineEventBatch(ctx context.Context, query sqlstore.Reader, scope models.Scope, activationID string) (*models.RoutineEventBatch, error) {
 	batch, err := scanPostgresRoutineEventBatch(query.QueryRowContext(ctx, `SELECT `+postgresRoutineBatchColumns+` FROM `+s.table("routine_event_batches")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND activation_id = $3 AND started_at IS NULL`, scope.Kind, scope.ID, activationID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -624,7 +619,7 @@ func (s *PostgresStore) PruneRoutineEvents(ctx context.Context, before time.Time
 
 const postgresHookColumns = `id, scope_kind, scope_id, activation_id, revision, path_token_enabled, created_at, rotated_at`
 
-func scanPostgresHook(row interface{ Scan(...interface{}) error }) (*models.Hook, error) {
+func scanPostgresHook(row sqlstore.RowScanner) (*models.Hook, error) {
 	var hook models.Hook
 	if err := row.Scan(&hook.ID, &hook.Scope.Kind, &hook.Scope.ID, &hook.ActivationID, &hook.Revision, &hook.PathTokenEnabled, &hook.CreatedAt, &hook.RotatedAt); err != nil {
 		return nil, err
