@@ -6,6 +6,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration/collaborationtest"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -57,9 +58,9 @@ func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t
 
 func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "conversation-projection"}
-	store := &agentRequestInboxTeamStore{
+	store := &collaborationtest.TeamStore{
 		Store: newTestKernelStore(t),
-		deployment: &kernelteam.Deployment{
+		Deployment: &kernelteam.Deployment{
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
 			Roster: []kernelteam.RosterAssignment{
@@ -67,7 +68,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 				{ID: "specialist", AgentDeploymentID: "specialist-agent"},
 			},
 		},
-		definition: &kernelteam.Definition{
+		Definition: &kernelteam.Definition{
 			ID: "release-team", Version: "1",
 			Delegation: kernelteam.DelegationPolicy{
 				MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,

@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration/collaborationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -122,10 +123,10 @@ func onlyRunWithSource(t *testing.T, store *sqlite.Store, scope Scope, parentID 
 	return found
 }
 
-func reconcileDecisionRun(t *testing.T) (*agentRequestInboxTeamStore, *collaboration.AgentRequestInboxReconciler, *AgentRequest, *AgentRun) {
+func reconcileDecisionRun(t *testing.T) (*collaborationtest.TeamStore, *collaboration.AgentRequestInboxReconciler, *AgentRequest, *AgentRun) {
 	t.Helper()
-	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
-	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
+	store := &collaborationtest.TeamStore{Store: newTestKernelStore(t)}
+	source, request := collaborationtest.CreateInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := collaboration.NewAgentRequestInboxReconciler(store)
 	if err != nil {
 		t.Fatal(err)
@@ -215,9 +216,9 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 
 func TestReviewToolResolvesCompletionReview(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "inbox"}
-	store := &agentRequestInboxTeamStore{
+	store := &collaborationtest.TeamStore{
 		Store: newTestKernelStore(t),
-		deployment: &kernelteam.Deployment{
+		Deployment: &kernelteam.Deployment{
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
 			Roster: []kernelteam.RosterAssignment{
@@ -226,7 +227,7 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 				{ID: "specialist", AgentDeploymentID: "specialist-agent"},
 			},
 		},
-		definition: &kernelteam.Definition{
+		Definition: &kernelteam.Definition{
 			ID: "release-team", Version: "1",
 			Delegation: kernelteam.DelegationPolicy{
 				MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,

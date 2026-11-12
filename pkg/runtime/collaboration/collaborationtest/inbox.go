@@ -1,7 +1,7 @@
-// The AgentRequest inbox fixtures runtime's own tests share with the
-// collaboration tests' copy in agent_request_inbox_fixture_test.go.
-
-package runtime
+// Package collaborationtest holds AgentRequest inbox fixtures shared by the
+// collaboration tests and the tests of packages above it: a Team catalog over
+// a SQLite store and one pending AgentRequest. It uses only exported API.
+package collaborationtest
 
 import (
 	"context"
@@ -15,27 +15,32 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-type agentRequestInboxTeamStore struct {
+// TeamStore serves one Team deployment and its definition next to a kernel
+// store; GetTeamDeployment and GetTeamDefinition report not found for any
+// other id.
+type TeamStore struct {
 	*sqlite.Store
-	deployment *kernelteam.Deployment
-	definition *kernelteam.Definition
+	Deployment *kernelteam.Deployment
+	Definition *kernelteam.Definition
 }
 
-func (s *agentRequestInboxTeamStore) GetTeamDeployment(_ context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
-	if s.deployment == nil || s.deployment.Scope != scope || s.deployment.ID != id {
+func (s *TeamStore) GetTeamDeployment(_ context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
+	if s.Deployment == nil || s.Deployment.Scope != scope || s.Deployment.ID != id {
 		return nil, kernelteam.ErrDeploymentNotFound
 	}
-	return s.deployment, nil
+	return s.Deployment, nil
 }
 
-func (s *agentRequestInboxTeamStore) GetTeamDefinition(_ context.Context, id, version string) (*kernelteam.Definition, error) {
-	if s.definition == nil || s.definition.ID != id || s.definition.Version != version {
+func (s *TeamStore) GetTeamDefinition(_ context.Context, id, version string) (*kernelteam.Definition, error) {
+	if s.Definition == nil || s.Definition.ID != id || s.Definition.Version != version {
 		return nil, kernelteam.ErrDefinitionNotFound
 	}
-	return s.definition, nil
+	return s.Definition, nil
 }
 
-func createInboxRequest(t *testing.T, store models.AgentRequestInboxStore, policy models.AgentRequestAcceptancePolicy, recipient models.CollaborationParty) (*models.AgentRun, *models.AgentRequest) {
+// CreateInboxRequest creates a source Run for agent "requester" and one
+// pending AgentRequest from it to recipient under policy.
+func CreateInboxRequest(t *testing.T, store models.AgentRequestInboxStore, policy models.AgentRequestAcceptancePolicy, recipient models.CollaborationParty) (*models.AgentRun, *models.AgentRequest) {
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "inbox"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{

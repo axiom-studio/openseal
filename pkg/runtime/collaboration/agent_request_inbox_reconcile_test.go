@@ -1,7 +1,9 @@
 package collaboration_test
 
 import (
+	"database/sql"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -9,15 +11,17 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration/collaborationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
-	source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
+	store := &collaborationtest.TeamStore{Store: conversationtest.NewStore(t)}
+	source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := runtimecollaboration.NewAgentRequestInboxReconciler(store)
 	if err != nil {
 		t.Fatal(err)
@@ -56,8 +60,8 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 
 func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *testing.T) {
 	kernel, db := newInboxSQLiteStore(t)
-	store := &agentRequestInboxTeamStore{Store: kernel}
-	source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
+	store := &collaborationtest.TeamStore{Store: kernel}
+	source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := runtimecollaboration.NewAgentRequestInboxReconciler(store)
 	if err != nil {
 		t.Fatal(err)
@@ -95,8 +99,8 @@ func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *te
 }
 
 func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
-	source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
+	store := &collaborationtest.TeamStore{Store: conversationtest.NewStore(t)}
+	source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := runtimecollaboration.NewAgentRequestInboxReconciler(store)
 	if err != nil {
 		t.Fatal(err)
@@ -156,8 +160,8 @@ func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t
 }
 
 func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnded(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
-	source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
+	store := &collaborationtest.TeamStore{Store: conversationtest.NewStore(t)}
+	source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := runtimecollaboration.NewAgentRequestInboxReconciler(store)
 	if err != nil {
 		t.Fatal(err)
@@ -214,8 +218,8 @@ func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnde
 }
 
 func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
-	source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
+	store := &collaborationtest.TeamStore{Store: conversationtest.NewStore(t)}
+	source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	otherSource, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: request.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"},
 		AssignedAgentID: "other", Goal: "Unrelated work", Source: models.RunSourceManual,
@@ -266,7 +270,7 @@ func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing
 }
 
 func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
+	store := &collaborationtest.TeamStore{Store: conversationtest.NewStore(t)}
 	scope := models.Scope{Kind: "tenant", ID: "paginated-inbox"}
 	portfolio := portfolio.NewPortfolioService(store)
 	collaboration := runtimecollaboration.NewCollaborationService(store)
@@ -310,8 +314,8 @@ func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
 }
 
 func TestAgentRequestInboxRecoversPreauthorizedDelegationWithoutReview(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
-	source, request := createInboxRequest(t, store, models.AgentRequestAcceptancePreauthorized, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
+	store := &collaborationtest.TeamStore{Store: conversationtest.NewStore(t)}
+	source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptancePreauthorized, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := runtimecollaboration.NewAgentRequestInboxReconciler(store)
 	if err != nil {
 		t.Fatal(err)
@@ -337,9 +341,9 @@ func TestAgentRequestInboxUsesDeterministicTeamMemberAndAcceptancePolicy(t *test
 	for _, requireAcceptance := range []bool{false, true} {
 		t.Run(fmt.Sprintf("review-%t", requireAcceptance), func(t *testing.T) {
 			scope := models.Scope{Kind: "tenant", ID: "inbox"}
-			store := &agentRequestInboxTeamStore{
+			store := &collaborationtest.TeamStore{
 				Store: conversationtest.NewStore(t),
-				deployment: &kernelteam.Deployment{
+				Deployment: &kernelteam.Deployment{
 					ID: "marketing", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 					DefinitionID: "marketing", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
 					Roster: []kernelteam.RosterAssignment{
@@ -347,12 +351,12 @@ func TestAgentRequestInboxUsesDeterministicTeamMemberAndAcceptancePolicy(t *test
 						{ID: "a", AgentDeploymentID: "a-agent"},
 					},
 				},
-				definition: &kernelteam.Definition{
+				Definition: &kernelteam.Definition{
 					ID: "marketing", Version: "1",
 					Delegation: kernelteam.DelegationPolicy{RequireAcceptance: requireAcceptance},
 				},
 			}
-			source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "marketing"})
+			source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "marketing"})
 			reconciler, err := runtimecollaboration.NewAgentRequestInboxReconciler(store)
 			if err != nil {
 				t.Fatal(err)
@@ -379,4 +383,17 @@ func TestAgentRequestInboxUsesDeterministicTeamMemberAndAcceptancePolicy(t *test
 			}
 		})
 	}
+}
+
+// newInboxSQLiteStore opens a SQLite store on a fresh file and the test's
+// own connection to that file, both closed when the test ends.
+func newInboxSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	store, err := sqlite.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store, conversationtest.OpenSQLiteDB(t, path)
 }
