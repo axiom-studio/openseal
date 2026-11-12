@@ -20,7 +20,7 @@ import (
 // workspace_run_command and then reports. Two kernel guards keep it to the
 // approved script:
 //
-//  1. Pin: the claim pins the approved version (loopRoutineScript.Pins). The
+//  1. Pin: the claim pins the approved version (PreparedRoutineScript.Pins). The
 //     host tool dispatcher attaches it as expectedDigest to each run_command
 //     that invokes the script, so an edited script never runs, and stores
 //     what each pinned command did on its tool entry (ToolEntry.PinnedRun).
@@ -41,19 +41,19 @@ const RunFailureCodeRoutineScript = "routine_script_failed"
 // routineScriptRunCommandTool is the loop tool name of workspace.run_command.
 var routineScriptRunCommandTool = modelstep.HostToolName(workspace.OperationRunCommand)
 
-// loopRoutineScript is a claim's routine script: the approved script and the
+// PreparedRoutineScript is a claim's routine script: the approved script and the
 // pins every run_command of the claim carries.
-type loopRoutineScript struct {
+type PreparedRoutineScript struct {
 	Script *models.RoutineScript
 	Pins   []workspace.CommandPin
 }
 
-// prepareLoopRoutineScript reads the pinned script of run once per claim.
+// PrepareRoutineScript reads the pinned script of run once per claim.
 // It is nil, nil for a Run that is no script routine. A script routine runs
 // only where workspace_run_command is offered (hostTools of the claim's chat
 // workspace); otherwise, or when the pinned script is invalid, the claim
 // cannot run.
-func prepareLoopRoutineScript(run *models.AgentRun, hostTools []modelstep.HostToolSpec) (*loopRoutineScript, error) {
+func PrepareRoutineScript(run *models.AgentRun, hostTools []modelstep.HostToolSpec) (*PreparedRoutineScript, error) {
 	if run == nil || run.Context == nil {
 		return nil, nil
 	}
@@ -69,11 +69,11 @@ func prepareLoopRoutineScript(run *models.AgentRun, hostTools []modelstep.HostTo
 		return nil, errors.New("a routine script runs only in its chat's sandbox")
 	}
 	pin := workspace.CommandPin{Path: script.Path, Digest: script.Digest, FilesVersion: script.FilesVersion, Command: script.Command, TimeoutSeconds: script.TimeoutSeconds}
-	return &loopRoutineScript{Script: script, Pins: []workspace.CommandPin{pin}}, nil
+	return &PreparedRoutineScript{Script: script, Pins: []workspace.CommandPin{pin}}, nil
 }
 
 // CommandPins are the pins of the claim's run_command calls (HostToolCall.CommandPins).
-func (s *loopRoutineScript) CommandPins() []workspace.CommandPin {
+func (s *PreparedRoutineScript) CommandPins() []workspace.CommandPin {
 	if s == nil {
 		return nil
 	}
@@ -83,7 +83,7 @@ func (s *loopRoutineScript) CommandPins() []workspace.CommandPin {
 // Section is the routine_script kernel system section. A routine's session
 // is its own (a fresh run session), so the script's facts are stable for the
 // session and belong in the section.
-func (s *loopRoutineScript) Section() models.ModelStepSystemSection {
+func (s *PreparedRoutineScript) Section() models.ModelStepSystemSection {
 	return models.ModelStepSystemSection{
 		ID:    modelstep.LoopSectionRoutineScript,
 		Title: modelstep.LoopKernelSectionTitles[modelstep.LoopSectionRoutineScript],
@@ -98,7 +98,7 @@ func routineScriptSectionText(script *models.RoutineScript) string {
 // CompletionFailure is why the Run cannot complete with the run_command tool
 // entries among entries (any order), or "" when the approved command ran
 // cleanly at the approved version.
-func (s *loopRoutineScript) CompletionFailure(entries []*models.SessionEntry) string {
+func (s *PreparedRoutineScript) CompletionFailure(entries []*models.SessionEntry) string {
 	pin := s.Pins[0]
 	script := s.Script
 	var last *routineScriptAttempt
@@ -154,7 +154,7 @@ func (s *loopRoutineScript) CompletionFailure(entries []*models.SessionEntry) st
 // running in explain mode), appends failureExplanationNote, and the Run
 // fails after the tool-free explanation step. The full message, with the
 // output tail's line breaks, is StepError's source too, bounded like it.
-func (s *loopRoutineScript) FinalFailure(run *models.AgentRun, entries []*models.SessionEntry) *models.RunFailureExplanation {
+func (s *PreparedRoutineScript) FinalFailure(run *models.AgentRun, entries []*models.SessionEntry) *models.RunFailureExplanation {
 	if s == nil {
 		return nil
 	}

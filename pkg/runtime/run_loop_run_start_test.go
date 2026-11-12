@@ -85,7 +85,7 @@ func TestRunStartNoteIdempotent(t *testing.T) {
 	step := &AgentTurn{ID: "step-9", Scope: g.run.Scope, RunID: g.run.ID, Sequence: 9}
 	prepare := func(run *AgentRun, path *AgentSessionPath) []*SessionEntry {
 		t.Helper()
-		out, err := newRunStartPreparer(newTestKernelStore(t), actions).BeforeStep(context.Background(),
+		out, err := NewRunStartPreparer(newTestKernelStore(t), actions).BeforeStep(context.Background(),
 			agentrun.StepInput{Run: run, Step: step, Session: session, Path: path}, agentrun.SteeringPlan{})
 		if err != nil {
 			t.Fatalf("before step: %v", err)

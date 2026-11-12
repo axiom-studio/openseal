@@ -413,12 +413,12 @@ func TestRunLoopParkConflictReplansAndTransitionsOnce(t *testing.T) {
 // parks or settles: the moment a message can land between the approval
 // request and the park.
 type afterInlineTools struct {
-	*claimToolExecutor
+	*ClaimToolExecutor
 	after func()
 }
 
 func (x afterInlineTools) ExecuteStepTools(ctx context.Context, in agentrun.StepToolsInput) (agentrun.StepToolsOutcome, error) {
-	out, err := x.claimToolExecutor.ExecuteStepTools(ctx, in)
+	out, err := x.ClaimToolExecutor.ExecuteStepTools(ctx, in)
 	if x.after != nil {
 		x.after()
 	}
@@ -440,7 +440,7 @@ func TestRunLoopParkReplanSupersededByMessage(t *testing.T) {
 		conversation, run := f.startChat("close issue 8")
 		posted := false
 		exit, done := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) {
-			b.Tools = afterInlineTools{claimToolExecutor: b.Tools.(*claimToolExecutor), after: func() {
+			b.Tools = afterInlineTools{ClaimToolExecutor: b.Tools.(*ClaimToolExecutor), after: func() {
 				if !posted {
 					posted = true
 					f.clock.Advance(time.Second) // the message is newer than the approval request

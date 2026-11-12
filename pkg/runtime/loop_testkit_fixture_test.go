@@ -707,7 +707,7 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*agentrun.
 	if err != nil {
 		f.t.Fatalf("resolve control authority: %v", err)
 	}
-	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
+	preparer := NewCatalogModelStepPreparer(CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 		HostTools:         modelstep.HostToolSpecs(authority),
 		Capabilities:      loopFixtureCapabilities,
@@ -728,7 +728,7 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*agentrun.
 			Budget: modelstep.NewRunActivityCompactionBudget(f.store, NewRunActivityService(f.store, f.store), f.clock.Now),
 			Now:    f.clock.Now,
 		},
-		Preparers: []agentrun.StepPreparer{newRunStartPreparer(sessions, f.store)},
+		Preparers: []agentrun.StepPreparer{NewRunStartPreparer(sessions, f.store)},
 		Tools:     f.dispatcher.ForClaim(LoopToolClaim{Workspace: authority, CapabilityConfig: loopFixtureCapabilities}),
 	}
 	return binding, nil

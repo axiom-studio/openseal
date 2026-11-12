@@ -84,7 +84,7 @@ type LoopToolClaim struct {
 
 // ForClaim returns the LoopToolExecutor of one claim (TurnRunnerBinding.Tools).
 func (d *StepToolDispatcher) ForClaim(claim LoopToolClaim) agentrun.LoopToolExecutor {
-	return &claimToolExecutor{cfg: d.cfg, claim: claim, hostTools: modelstep.HostToolSpecs(claim.Workspace)}
+	return &ClaimToolExecutor{cfg: d.cfg, claim: claim, hostTools: modelstep.HostToolSpecs(claim.Workspace)}
 }
 
 // LoopCapabilityCatalog is the authorized catalog of a claim: the binding's
@@ -102,17 +102,17 @@ func LoopCapabilityCatalog(run *models.AgentRun, binding *agentrun.TurnRunnerBin
 	return catalog
 }
 
-// claimToolExecutor is the LoopToolExecutor of one claim.
-type claimToolExecutor struct {
+// ClaimToolExecutor is the LoopToolExecutor of one claim.
+type ClaimToolExecutor struct {
 	cfg       StepToolDispatcherConfig
 	claim     LoopToolClaim
 	hostTools []modelstep.HostToolSpec
 }
 
-func (x *claimToolExecutor) now() time.Time { return x.cfg.Now().UTC() }
+func (x *ClaimToolExecutor) now() time.Time { return x.cfg.Now().UTC() }
 
-// controlExecutor runs the claim's control calls.
-func (x *claimToolExecutor) controlExecutor() *control.ControlExecutor { return x.cfg.Control }
+// ControlExecutor runs the claim's control calls.
+func (x *ClaimToolExecutor) ControlExecutor() *control.ControlExecutor { return x.cfg.Control }
 
 // ---------------------------------------------------------------------------
 // Routing
@@ -152,7 +152,7 @@ func (t resolvedLoopTool) concurrent() bool {
 
 // resolveLoopTool routes a call by name: control tools, then capability
 // tools, then host tools, then the binding's governed actions.
-func (x *claimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding, name string, arguments json.RawMessage, directive *agentrun.ToolCallDirective) (resolvedLoopTool, error) {
+func (x *ClaimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding, name string, arguments json.RawMessage, directive *agentrun.ToolCallDirective) (resolvedLoopTool, error) {
 	args := decodeLoopToolArguments(arguments)
 	switch {
 	case control.IsControlTool(name):
@@ -303,7 +303,7 @@ func bindingToolPlanner(binding *agentrun.TurnRunnerBinding) (toolEntryPlanner, 
 	return planner, nil
 }
 
-func (x *claimToolExecutor) planToolEntries(binding *agentrun.TurnRunnerBinding, assistant *models.SessionEntry) ([]*models.SessionEntry, error) {
+func (x *ClaimToolExecutor) planToolEntries(binding *agentrun.TurnRunnerBinding, assistant *models.SessionEntry) ([]*models.SessionEntry, error) {
 	if assistant == nil || assistant.Type != models.SessionEntryAssistant || assistant.Assistant == nil {
 		return nil, errors.New("plan tool entries needs an assistant entry")
 	}
@@ -327,7 +327,7 @@ func (x *claimToolExecutor) planToolEntries(binding *agentrun.TurnRunnerBinding,
 	return entries, nil
 }
 
-func (x *claimToolExecutor) planToolCallEntries(binding *agentrun.TurnRunnerBinding, run *models.AgentRun, step *models.AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
+func (x *ClaimToolExecutor) planToolCallEntries(binding *agentrun.TurnRunnerBinding, run *models.AgentRun, step *models.AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
 	if run == nil || step == nil || sessionID == "" {
 		return nil, errors.New("plan tool call entries needs the Run, its step and its session")
 	}
@@ -356,7 +356,7 @@ func (x *claimToolExecutor) planToolCallEntries(binding *agentrun.TurnRunnerBind
 
 // planEntry stamps one pending entry, or ends it error/refused when its
 // arguments cannot be used.
-func (x *claimToolExecutor) planEntry(binding *agentrun.TurnRunnerBinding, entry *models.SessionEntry, directive *agentrun.ToolCallDirective) error {
+func (x *ClaimToolExecutor) planEntry(binding *agentrun.TurnRunnerBinding, entry *models.SessionEntry, directive *agentrun.ToolCallDirective) error {
 	tool := entry.Tool
 	if len(tool.Arguments) > models.MaxToolArgumentsBytes {
 		tool.ArgumentsError = fmt.Sprintf("The tool arguments are %d bytes; the limit is %d.", len(tool.Arguments), models.MaxToolArgumentsBytes)
@@ -383,7 +383,7 @@ func (x *claimToolExecutor) planEntry(binding *agentrun.TurnRunnerBinding, entry
 
 // stepToolRun holds the entries of one step while the executor works on them.
 type stepToolRun struct {
-	x       *claimToolExecutor
+	x       *ClaimToolExecutor
 	in      agentrun.StepToolsInput
 	binding *agentrun.TurnRunnerBinding
 	// step produced the entries; current is the claim's running step (the
@@ -422,7 +422,7 @@ type stepToolRun struct {
 	viewErr  error
 }
 
-func (x *claimToolExecutor) newStepToolRun(in agentrun.StepToolsInput, step *models.AgentTurn, entries []*models.SessionEntry) (*stepToolRun, error) {
+func (x *ClaimToolExecutor) newStepToolRun(in agentrun.StepToolsInput, step *models.AgentTurn, entries []*models.SessionEntry) (*stepToolRun, error) {
 	if in.Run == nil || in.Binding == nil {
 		return nil, errors.New("step tools need the Run and its binding")
 	}

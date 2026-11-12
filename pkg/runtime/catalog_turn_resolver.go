@@ -362,7 +362,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		chat = r.workspace(ctx)
 	}
 	hostTools := modelstep.HostToolSpecs(chat)
-	script, err := prepareLoopRoutineScript(r.run, hostTools)
+	script, err := PrepareRoutineScript(r.run, hostTools)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +383,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 	binding.Session = session
 	binding.Prompt = prompt
 	instructions := hostedAgentInstructions(r.definition)
-	preparerConfig := catalogModelStepPreparerConfig{
+	preparerConfig := CatalogModelStepPreparerConfig{
 		AgentInstructions: instructions, SkillPrompts: prompts, HostTools: hostTools,
 		ModelCredential: deploymentModelCredential(r.deployment),
 		Capabilities:    r.config.Capabilities,
@@ -399,7 +399,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 			ModelCredential: preparerConfig.ModelCredential, Model: binding.Model,
 		})
 	}
-	preparer := newCatalogModelStepPreparer(preparerConfig)
+	preparer := NewCatalogModelStepPreparer(preparerConfig)
 	producer, err := modelstep.NewModelStepProducer(r.config.Host, preparer, r.config.Store)
 	if err != nil {
 		return nil, err
@@ -412,7 +412,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		Budget: modelstep.NewRunActivityCompactionBudget(r.config.Store, NewRunActivityService(r.config.Store, r.config.Store, models.WithClock(r.config.Now)), r.config.Now),
 		Now:    r.config.Now,
 	}
-	binding.Preparers = []agentrun.StepPreparer{newRunStartPreparer(r.config.Store, r.config.Store)}
+	binding.Preparers = []agentrun.StepPreparer{NewRunStartPreparer(r.config.Store, r.config.Store)}
 	binding.Tools = r.config.Tools.ForClaim(LoopToolClaim{
 		Workspace: chat, SkillPrompts: prompts, CapabilityConfig: r.config.Capabilities, CommandPins: script.CommandPins(),
 	})

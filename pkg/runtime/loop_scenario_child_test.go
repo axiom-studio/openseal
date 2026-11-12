@@ -326,7 +326,7 @@ func (c *childFixture) bindingFor(run *AgentRun) *agentrun.TurnRunnerBinding {
 		c.authority(run, &control)
 	}
 	host := fakeStepHost{scriptedModel: c.model, fakeHostTools: c.tools}
-	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
+	preparer := NewCatalogModelStepPreparer(CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 	})
 	producer, err := modelstep.NewModelStepProducer(host, preparer, c.store)
@@ -338,7 +338,7 @@ func (c *childFixture) bindingFor(run *AgentRun) *agentrun.TurnRunnerBinding {
 		DefinitionID: loopFixtureDefinition, DefinitionVersion: "1",
 		ModelProvider: string(kitModelProvider), Model: kitModelName,
 		Producer: producer, Host: host, Authority: control,
-		Preparers: []agentrun.StepPreparer{newRunStartPreparer(c.store.(AgentSessionStore), c.store)},
+		Preparers: []agentrun.StepPreparer{NewRunStartPreparer(c.store.(AgentSessionStore), c.store)},
 		Tools:     c.dispatcher.ForClaim(LoopToolClaim{}),
 	}
 	_, decision := run.Context[agentrun.AgentRequestInboxContextKey]

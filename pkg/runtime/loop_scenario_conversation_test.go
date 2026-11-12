@@ -556,7 +556,7 @@ func convMemberAgentBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerB
 	if err != nil {
 		f.t.Fatalf("resolve member authority: %v", err)
 	}
-	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
+	preparer := NewCatalogModelStepPreparer(CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 	})
 	host := fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}
@@ -570,7 +570,7 @@ func convMemberAgentBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerB
 		ModelProvider: string(kitModelProvider), Model: kitModelName,
 		ModelActions: append([]capability.ModelAction(nil), f.offered...),
 		Producer:     producer, Session: session, Host: host, Authority: control,
-		Preparers: []agentrun.StepPreparer{newRunStartPreparer(sessions, f.store)},
+		Preparers: []agentrun.StepPreparer{NewRunStartPreparer(sessions, f.store)},
 		Tools:     f.dispatcher.ForClaim(LoopToolClaim{}),
 	}
 	return binding

@@ -38,7 +38,7 @@ func prepareTestActions() []capability.ModelAction {
 
 type prepareFixture struct {
 	t        *testing.T
-	preparer *catalogModelStepPreparer
+	preparer *CatalogModelStepPreparer
 	binding  *agentrun.TurnRunnerBinding
 	run      *AgentRun
 	render   *modelsteptest.RenderFixture
@@ -46,7 +46,7 @@ type prepareFixture struct {
 
 func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepareFixture {
 	registry, _ := fakeLoopControls()
-	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
+	preparer := NewCatalogModelStepPreparer(CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are Finn.", "Purpose: help the team."},
 		SkillPrompts: []HostedSkillPrompt{
 			{SkillID: modelstep.PinnedCapabilitySkillID, Version: "1", Reference: "openseal.builtin@1", Name: "Built-in", Instructions: "Use the built-in tools."},

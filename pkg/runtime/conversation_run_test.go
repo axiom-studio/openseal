@@ -281,7 +281,7 @@ func (r *chatRunResolver) ResolveTurnRunner(_ context.Context, run *AgentRun) (*
 		DeploymentID: run.AssignedAgentID, DefinitionID: "agent-definition", DefinitionVersion: "7",
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model",
 		ModelActions: append([]capability.ModelAction(nil), r.actions...),
-		Producer:     r.producer, Preparers: []agentrun.StepPreparer{newRunStartPreparer(r.store, r.store)},
+		Producer:     r.producer, Preparers: []agentrun.StepPreparer{NewRunStartPreparer(r.store, r.store)},
 		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
 	}, nil
 }

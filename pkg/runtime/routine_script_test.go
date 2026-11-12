@@ -188,9 +188,9 @@ func TestRoutineScriptPinIsAttachedToCommandsThatRunIt(t *testing.T) {
 
 // loopRoutineScriptFixture is the claim state of routineScriptRun on its
 // chat's workspace.
-func loopRoutineScriptFixture(t *testing.T) *loopRoutineScript {
+func loopRoutineScriptFixture(t *testing.T) *PreparedRoutineScript {
 	t.Helper()
-	routine, err := prepareLoopRoutineScript(routineScriptRun(), modelstep.HostToolSpecs(workspace.ChatAuthority("chat")))
+	routine, err := PrepareRoutineScript(routineScriptRun(), modelstep.HostToolSpecs(workspace.ChatAuthority("chat")))
 	if err != nil || routine == nil {
 		t.Fatalf("prepare = %#v, %v", routine, err)
 	}
@@ -200,7 +200,7 @@ func loopRoutineScriptFixture(t *testing.T) *loopRoutineScript {
 // loopRunCommandEntry runs command through the host tool dispatcher with the
 // claim's pins, the host replying reply (nil: transport failure), and
 // returns the terminal tool entry the loop records from the outcome.
-func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int64, arguments map[string]interface{}, reply map[string]interface{}) *SessionEntry {
+func loopRunCommandEntry(t *testing.T, routine *PreparedRoutineScript, sequence int64, arguments map[string]interface{}, reply map[string]interface{}) *SessionEntry {
 	t.Helper()
 	answer := modelsteptest.HostReplyError(errors.New("connection reset"))
 	if reply != nil {
@@ -240,15 +240,15 @@ func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int6
 
 func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 	tools := modelstep.HostToolSpecs(workspace.ChatAuthority("chat"))
-	if routine, err := prepareLoopRoutineScript(&AgentRun{ID: "chat-run", Context: map[string]interface{}{}}, tools); routine != nil || err != nil {
+	if routine, err := PrepareRoutineScript(&AgentRun{ID: "chat-run", Context: map[string]interface{}{}}, tools); routine != nil || err != nil {
 		t.Fatalf("plain Run = %#v, %v", routine, err)
 	}
-	if routine, err := prepareLoopRoutineScript(nil, tools); routine != nil || err != nil {
+	if routine, err := PrepareRoutineScript(nil, tools); routine != nil || err != nil {
 		t.Fatalf("nil Run = %#v, %v", routine, err)
 	}
 	invalid := routineScriptRun()
 	invalid.Context[routine.RoutineScriptContextKey] = map[string]interface{}{"path": "scripts/weekly.py", "command": "rm -rf /"}
-	if _, err := prepareLoopRoutineScript(invalid, tools); err == nil || !strings.Contains(err.Error(), "invalid") {
+	if _, err := PrepareRoutineScript(invalid, tools); err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("invalid script err = %v", err)
 	}
 	var withoutCommand []modelstep.HostToolSpec
@@ -258,7 +258,7 @@ func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 		}
 	}
 	for _, offered := range [][]modelstep.HostToolSpec{nil, withoutCommand} {
-		if _, err := prepareLoopRoutineScript(routineScriptRun(), offered); err == nil || !strings.Contains(err.Error(), "sandbox") {
+		if _, err := PrepareRoutineScript(routineScriptRun(), offered); err == nil || !strings.Contains(err.Error(), "sandbox") {
 			t.Fatalf("no run_command err = %v", err)
 		}
 	}
@@ -272,7 +272,7 @@ func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 	if routine.Pins[0].Digest != want.Digest {
 		t.Fatal("CommandPins shares the claim's pins")
 	}
-	var nilRoutine *loopRoutineScript
+	var nilRoutine *PreparedRoutineScript
 	if nilRoutine.CommandPins() != nil || nilRoutine.FinalFailure(routineScriptRun(), nil) != nil {
 		t.Fatal("a non-routine claim pins or fails")
 	}

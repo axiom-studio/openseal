@@ -36,20 +36,20 @@ func RateLimitedSourceKey(runID, actionCallID string) string {
 	return "rate-limited-source:" + runID + ":" + actionCallID
 }
 
-// runStartPreparer is the StepPreparer the RunLoop runs first. Actions may be
+// RunStartPreparer is the StepPreparer the RunLoop runs first. Actions may be
 // nil (no governed tools); then it produces no notes.
-type runStartPreparer struct {
+type RunStartPreparer struct {
 	sessions models.AgentSessionStore
 	actions  models.ActionStore
 }
 
-func newRunStartPreparer(sessions models.AgentSessionStore, actions models.ActionStore) *runStartPreparer {
-	return &runStartPreparer{sessions: sessions, actions: actions}
+func NewRunStartPreparer(sessions models.AgentSessionStore, actions models.ActionStore) *RunStartPreparer {
+	return &RunStartPreparer{sessions: sessions, actions: actions}
 }
 
-var _ agentrun.StepPreparer = (*runStartPreparer)(nil)
+var _ agentrun.StepPreparer = (*RunStartPreparer)(nil)
 
-func (p *runStartPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput, _ agentrun.SteeringPlan) (*agentrun.StepContextAppend, error) {
+func (p *RunStartPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput, _ agentrun.SteeringPlan) (*agentrun.StepContextAppend, error) {
 	run, session, step := in.Run, in.Session, in.Step
 	if p == nil || run == nil || session == nil || step == nil {
 		return nil, nil
@@ -86,7 +86,7 @@ func (p *runStartPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput
 
 // holds reports whether the session already has the entry: on the loaded
 // path, or (compacted away or not loaded) in the store.
-func (p *runStartPreparer) holds(ctx context.Context, scope models.Scope, path *models.AgentSessionPath, entryID string) (bool, error) {
+func (p *RunStartPreparer) holds(ctx context.Context, scope models.Scope, path *models.AgentSessionPath, entryID string) (bool, error) {
 	if path != nil {
 		for _, entry := range path.Entries {
 			if entry != nil && entry.ID == entryID {

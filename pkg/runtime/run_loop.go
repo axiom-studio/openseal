@@ -142,8 +142,8 @@ func NewRunLoop(store models.KernelStore, actions *action.ActionCoordinator, log
 
 func (l *RunLoop) now() time.Time { return l.config.Now().UTC() }
 
-// setActionCoordinator opens each step's nested-action window on actions.
-func (l *RunLoop) setActionCoordinator(actions *action.ActionCoordinator) { l.actions = actions }
+// SetActionCoordinator opens each step's nested-action window on actions.
+func (l *RunLoop) SetActionCoordinator(actions *action.ActionCoordinator) { l.actions = actions }
 
 type RunLoopClaim struct {
 	Run      *models.AgentRun // claimed, status running, LeaseOwner == WorkerID

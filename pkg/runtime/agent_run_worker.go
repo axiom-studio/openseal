@@ -129,7 +129,7 @@ type AgentRunWorkerPool struct {
 // command's governed calls) on the pool's ActionCoordinator.
 func (p *AgentRunWorkerPool) SetActionCoordinator(actions *action.ActionCoordinator) {
 	p.actions = actions
-	p.loop.setActionCoordinator(actions)
+	p.loop.SetActionCoordinator(actions)
 }
 
 func (p *AgentRunWorkerPool) SetRunTerminalFinalizer(finalizer agentrun.RunTerminalFinalizer) {
@@ -414,8 +414,8 @@ func workerPlanToolEntries(store PortfolioStore) StepToolEntryPlanner {
 func workerPlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (runtimecontrol.ControlResult, error) {
 	var control *runtimecontrol.ControlExecutor
 	if cc.Binding != nil {
-		if tools, ok := cc.Binding.Tools.(*claimToolExecutor); ok {
-			control = tools.controlExecutor()
+		if tools, ok := cc.Binding.Tools.(*ClaimToolExecutor); ok {
+			control = tools.ControlExecutor()
 		}
 	}
 	if control == nil {

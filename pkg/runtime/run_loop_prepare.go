@@ -17,7 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
-// catalogModelStepPreparer builds the model request of one step of a catalog
+// CatalogModelStepPreparer builds the model request of one step of a catalog
 // Agent Run (SPEC §5.1, §6). Everything it sends is a function of the claim's
 // binding, its configuration and the session path, so two steps over the same
 // path send byte-identical System and Tools, and a load only appends tools.
@@ -41,7 +41,7 @@ const loopSectionCapabilities = "capabilities"
 
 const loopSectionCapabilitiesTitle = "Capabilities"
 
-type catalogModelStepPreparerConfig struct {
+type CatalogModelStepPreparerConfig struct {
 	// AgentInstructions is the definition's persona and soul
 	// (hostedAgentInstructions); the binding's Prompt.AgentInstructions follow.
 	AgentInstructions []string
@@ -62,16 +62,16 @@ type catalogModelStepPreparerConfig struct {
 	Render modelstep.SessionRenderOptions
 }
 
-type catalogModelStepPreparer struct {
-	config   catalogModelStepPreparerConfig
+type CatalogModelStepPreparer struct {
+	config   CatalogModelStepPreparerConfig
 	controls control.Registry // loopControlRegistry; tests substitute their own
 }
 
-var _ agentrun.ModelStepPreparer = (*catalogModelStepPreparer)(nil)
+var _ agentrun.ModelStepPreparer = (*CatalogModelStepPreparer)(nil)
 
-func newCatalogModelStepPreparer(config catalogModelStepPreparerConfig) *catalogModelStepPreparer {
+func NewCatalogModelStepPreparer(config CatalogModelStepPreparerConfig) *CatalogModelStepPreparer {
 	config.Render.ImageInput = config.ImageInput
-	return &catalogModelStepPreparer{config: config, controls: loopControlRegistry()}
+	return &CatalogModelStepPreparer{config: config, controls: loopControlRegistry()}
 }
 
 // loopControlRegistry is every control tool a Run loop runs: the built-in
@@ -82,14 +82,14 @@ func loopControlRegistry() control.Registry {
 
 // ModelCredential is a copy of the model credential the prepared steps send
 // (nil: the host's default).
-func (p *catalogModelStepPreparer) ModelCredential() *capability.CredentialReference {
+func (p *CatalogModelStepPreparer) ModelCredential() *capability.CredentialReference {
 	return modelstep.CloneHostedCredentialReference(p.config.ModelCredential)
 }
 
 // CapabilitySet is the visible capability set of the step: the binding's
 // authorized catalog with the loads on the session path. The tool executor
 // builds the same set to run load_capabilities and search_capabilities.
-func (p *catalogModelStepPreparer) CapabilitySet(in agentrun.StepInput) *modelstep.CapabilitySet {
+func (p *CatalogModelStepPreparer) CapabilitySet(in agentrun.StepInput) *modelstep.CapabilitySet {
 	catalog := modelstep.CapabilityCatalog{SkillPrompts: p.config.SkillPrompts, HostTools: p.config.HostTools}
 	if in.Run != nil {
 		catalog.Scope = in.Run.Scope
@@ -105,7 +105,7 @@ func (p *catalogModelStepPreparer) CapabilitySet(in agentrun.StepInput) *modelst
 	return modelstep.NewPathCapabilitySet(catalog, in.Path, p.config.Capabilities)
 }
 
-func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agentrun.StepInput) (models.ModelStepRequest, error) {
+func (p *CatalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agentrun.StepInput) (models.ModelStepRequest, error) {
 	if in.Run == nil || in.Step == nil || in.Binding == nil {
 		return models.ModelStepRequest{}, errors.New("prepare model step: run, step and binding are required")
 	}
@@ -161,7 +161,7 @@ func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agen
 // tools in HostToolSpecs order), then core (governed actions of the pinned
 // set, sorted by tool name). The loaded group comes from the session path
 // (applySurfaces): each tool exactly as its load froze it.
-func (p *catalogModelStepPreparer) tools(binding *agentrun.TurnRunnerBinding, set *modelstep.CapabilitySet) []models.ModelStepTool {
+func (p *CatalogModelStepPreparer) tools(binding *agentrun.TurnRunnerBinding, set *modelstep.CapabilitySet) []models.ModelStepTool {
 	var harness, core []models.ModelStepTool
 	for _, spec := range p.controls.Specs(binding.Authority) {
 		harness = append(harness, spec.ModelStepTool())
@@ -222,7 +222,7 @@ func governedModelStepTool(action capability.ModelAction, name string, group mod
 // system is SPEC §6: persona then the binding's instructions; the Skill
 // prompts visible from the start; the kernel sections in their fixed order,
 // the static loading instructions, then the binding's sections.
-func (p *catalogModelStepPreparer) system(binding *agentrun.TurnRunnerBinding, set *modelstep.CapabilitySet, tools []models.ModelStepTool) models.ModelStepSystem {
+func (p *CatalogModelStepPreparer) system(binding *agentrun.TurnRunnerBinding, set *modelstep.CapabilitySet, tools []models.ModelStepTool) models.ModelStepSystem {
 	var system models.ModelStepSystem
 	for _, text := range append(append([]string(nil), p.config.AgentInstructions...), binding.Prompt.AgentInstructions...) {
 		if text = strings.TrimSpace(text); text != "" {
@@ -278,7 +278,7 @@ func (p *catalogModelStepPreparer) system(binding *agentrun.TurnRunnerBinding, s
 
 // boundSkill reports whether the claim has a bound Skill beyond the
 // always-present built-in one.
-func (p *catalogModelStepPreparer) boundSkill(binding *agentrun.TurnRunnerBinding) bool {
+func (p *CatalogModelStepPreparer) boundSkill(binding *agentrun.TurnRunnerBinding) bool {
 	if !binding.Authority.OffersCapabilities() {
 		return false
 	}
@@ -295,7 +295,7 @@ func (p *catalogModelStepPreparer) boundSkill(binding *agentrun.TurnRunnerBindin
 	return false
 }
 
-func (p *catalogModelStepPreparer) stream(ctx context.Context, binding *agentrun.TurnRunnerBinding, tools []models.ModelStepTool) models.ModelStepStream {
+func (p *CatalogModelStepPreparer) stream(ctx context.Context, binding *agentrun.TurnRunnerBinding, tools []models.ModelStepTool) models.ModelStepStream {
 	stream := models.ModelStepStream{
 		AnswerPreview:        models.HasTurnAnswerPreview(ctx),
 		ExternalChannelReply: binding.Authority.ExternalChannelReply,
@@ -347,7 +347,7 @@ func ControlModelStepTools(a agentrun.ControlAuthority) []models.ModelStepTool {
 // operations the control tools accept, surfaced tools that are no longer in
 // the catalog, the guidance that depends on the catalog, and the
 // conversation's approval mode.
-func (p *catalogModelStepPreparer) CapabilityListing(in agentrun.StepInput) modelstep.CapabilityListing {
+func (p *CatalogModelStepPreparer) CapabilityListing(in agentrun.StepInput) modelstep.CapabilityListing {
 	listing := modelstep.CapabilityListing{Mode: modelstep.CapabilityNoteModeNone}
 	binding := in.Binding
 	if binding == nil {
