@@ -2,18 +2,21 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestCallbackRegistryPinsExactAdapterAndLifecycle(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	definition, binding := registerCallbackFixture(t, ctx, catalog)
 	clock := time.Date(2026, 7, 30, 1, 2, 3, 0, time.UTC)
@@ -85,7 +88,7 @@ func TestCallbackRegistryPinsExactAdapterAndLifecycle(t *testing.T) {
 
 func TestCallbackRegistryRejectsUndeclaredEvent(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	definition, binding := registerCallbackFixture(t, ctx, catalog)
 	_, err := NewCallbackRegistry(store, catalog).Create(ctx, CreateCallbackRegistrationRequest{
@@ -135,4 +138,49 @@ func registerCallbackFixture(t *testing.T, ctx context.Context, catalog *skill.C
 		t.Fatal(err)
 	}
 	return definition, binding
+}
+
+// The store helpers below copy runtime's newTestKernelStore,
+// newTestSQLiteStore and countRows, so the callback tests do not depend on
+// runtime's test helpers and can live with the callback code.
+
+// newCallbackTestStore returns an empty in-memory kernel store that is closed
+// when the test ends.
+func newCallbackTestStore(t testing.TB) *sqlite.Store {
+	t.Helper()
+	store, err := sqlite.NewInMemorySQLiteStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
+// newCallbackTestSQLiteStore opens a SQLite store on a fresh file and the
+// test's own connection to that file, both closed when the test ends.
+func newCallbackTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	store, err := sqlite.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return store, db
+}
+
+// countCallbackRows counts the rows of table through the test's own
+// connection.
+func countCallbackRows(t testing.TB, db *sql.DB, table string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT count(*) FROM `+table).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
 }

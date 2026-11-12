@@ -28,7 +28,7 @@ func (h *callbackHostStub) NormalizeCallback(_ context.Context, request Callback
 
 func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 
@@ -68,7 +68,7 @@ func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testi
 
 func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -113,7 +113,7 @@ func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) 
 
 func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -171,7 +171,7 @@ func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.
 
 func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -204,7 +204,7 @@ func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 
 func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T) {
 	ctx := context.Background()
-	store, db := newTestSQLiteStore(t)
+	store, db := newCallbackTestSQLiteStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -218,7 +218,7 @@ func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T)
 	_, err := service.Receive(ctx, CallbackPublicRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte("forged"),
 	}, &callbackHostStub{err: verificationErr})
-	if receipts := countRows(t, db, "callback_events"); !errors.Is(err, verificationErr) || consumed != 0 || receipts != 0 {
+	if receipts := countCallbackRows(t, db, "callback_events"); !errors.Is(err, verificationErr) || consumed != 0 || receipts != 0 {
 		t.Fatalf("verification failure = %v, consumed %d, receipts %d", err, consumed, receipts)
 	}
 }
