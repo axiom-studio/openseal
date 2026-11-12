@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -138,6 +139,37 @@ func settleFixtureStep(t *testing.T, store interface{}, scope Scope, runID, work
 }
 
 const taskStartFixtureCallID = "call-start-task"
+
+// settledTaskSourceFixture is settledWorkerTaskFixture's chat and source Run
+// with the start_task step settled by hand (settleTaskSource) instead of by
+// the worker: the Run is running, leased by "worker", its step completed and
+// applied, and the tool entry pending.
+func settledTaskSourceFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
+	t.Helper()
+	scope := Scope{Kind: "tenant", ID: "worker-task"}
+	conversations := NewConversationService(store)
+	seedTestSpace(t, store, scope)
+	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := postConversationRunTestMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion,
+		"Review the release in the background", "task-user-message")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
+	if err != nil || scheduled == nil || scheduled.Run == nil {
+		t.Fatalf("schedule foreground: %#v %v", scheduled, err)
+	}
+	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
+		Scope: scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
+		t.Fatalf("claim foreground: %#v %v", claimed, err)
+	}
+	settled := settleTaskSource(t, store, scope, claimed.ID, "worker", taskProposalFixture())
+	return settled.Run, settled.Turn, conversation, message
+}
 
 type taskStartFixtureStore interface {
 	AgentSessionStore

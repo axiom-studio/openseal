@@ -170,7 +170,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
 		Arguments: arguments,
 		Summary:   "Ask for Reddit setup",
-		Origin:    ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: loopIdempotencyKey(step.ID, "call-setup", nil), CausationID: step.ID,
+		Origin:    ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: "loop:" + step.ID + ":call-setup", CausationID: step.ID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -617,7 +617,7 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 		if err != nil {
 			t.Fatal(err)
 		}
-		listed, err := dispatcher.listSkillSetupRequests(t.Context(), run, run.AssignedAgentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID})
+		listed, err := f.dispatch(t, dispatcher, run, SkillActionListSetupRequests, "list-setup", map[string]interface{}{})
 		if err != nil || listed == nil {
 			t.Fatalf("proven task cannot list its setup: %#v %v", listed, err)
 		}
@@ -630,19 +630,29 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 		if err := store.CreateAgentRun(t.Context(), forged); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := dispatcher.listSkillSetupRequests(t.Context(), forged, forged.AssignedAgentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: forged.AssignedAgentID}); err == nil {
+		if _, err := f.dispatch(t, dispatcher, forged, SkillActionListSetupRequests, "list-copied", map[string]interface{}{}); err == nil {
 			t.Fatal("copied conversation context granted task setup access")
 		}
-		if _, err := dispatcher.requestSkillSetup(t.Context(), ActionDispatchInput{
-			Call: &ActionCall{ID: "model-invented-action", Scope: run.Scope, RunID: run.ID}, Arguments: maps.Clone(f.call.Arguments),
-		}, run, run.AssignedAgentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}); err == nil {
-			t.Fatal("unpersisted action was allowed to create a task setup request")
+		// A refused interaction request is a result, not a dispatch error.
+		if result, err := f.dispatch(t, dispatcher, run, SkillActionRequestSetup, "model-invented-action", maps.Clone(f.call.Arguments)); err == nil && result["refused"] == nil {
+			t.Fatalf("unpersisted action was allowed to create a task setup request: %#v", result)
 		}
 		persisted, err := store.ListSkillSetupRequests(t.Context(), run.Scope, run.AssignedAgentID, f.request.ConversationID)
 		if err != nil || len(persisted) != 1 || persisted[0].ID != f.request.ID {
 			t.Fatalf("forged action changed setup requests: %#v %v", persisted, err)
 		}
 	})
+}
+
+// dispatch runs one SkillManagement action of run as a call of that run.
+func (f *skillSetupTaskWaitFixture) dispatch(t *testing.T, dispatcher *SkillBindingActionDispatcher, run *AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
+	t.Helper()
+	bound, err := f.catalog.Resolve(t.Context(), skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, run.AssignedAgentID, SkillManagementSkillID, SkillManagementSkillVersion, action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dispatcher.DispatchAction(t.Context(), ActionDispatchInput{Run: run, Bound: bound, Arguments: arguments,
+		Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID}})
 }
 
 // Override only reads to exercise persisted-proof validation without relying on

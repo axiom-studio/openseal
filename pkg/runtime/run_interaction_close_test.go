@@ -87,8 +87,21 @@ func TestCompletedRunKeepsSetupFormsButClosesCredentialRequests(t *testing.T) {
 // A Run that failed after its setup form went up leaves the form open too.
 func testFinishedRunKeepsSetupForms(t *testing.T, status AgentRunStatus) {
 	ctx, store, _, _, scope := credentialRequestDispatchFixture(t)
-	run := &AgentRun{ID: "run-done", Scope: scope, Status: status}
 	now := time.Now().UTC()
+	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
+		AssignedAgentID: "agent", Goal: "Reply in the chat", Source: RunSourceChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := cloneAgentRun(created)
+	run.Status = status
+	run.Revision++
+	if _, err := store.UpdateAgentRunWithEvent(ctx, run, created.Revision, &ActivityEvent{
+		ID: "run-finished", Scope: scope, EventType: "run.updated", Severity: ActivitySeverityInfo, AgentID: "agent", RunID: run.ID,
+		Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: "Run finished", Visibility: ActivityVisibilityScope, CreatedAt: now,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 	credential := &CredentialRequest{ID: "credential-1", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID, ActionCallID: "c1",
 		Kind: CredentialRequestKindPaymentCard, Reason: "Add your card", Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveCredentialRequest(ctx, credential, 0); err != nil {
@@ -103,7 +116,7 @@ func testFinishedRunKeepsSetupForms(t *testing.T, status AgentRunStatus) {
 	calls := interactionCallsStore{store, []*ActionCall{
 		interactionCall(scope, run.ID, "c1", SkillActionRequestCredential, "credentialRequest", "credential-1"),
 		interactionCall(scope, run.ID, "c2", SkillActionRequestSetup, "setupRequest", "setup-2")}}
-	if err := closeTerminalRunInteractionRequests(ctx, calls, run); err != nil {
+	if err := NewRunCommandService(calls).CascadeTerminalRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.GetCredentialRequest(ctx, scope, "credential-1"); got.Status != CredentialRequestStatusDismissed {

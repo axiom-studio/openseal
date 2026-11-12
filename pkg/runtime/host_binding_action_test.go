@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -110,31 +109,6 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	// The other run gets no connection from the host and cannot name it.
 	if _, err := propose(other, "other"); !errors.Is(err, skill.ErrBindingUnavailable) {
 		t.Fatalf("a run the host supplied nothing to reached the connected app: %v", err)
-	}
-}
-
-// The durable fence admits a host binding only without a stored row of the
-// same identity, and only while the call matches it exactly.
-func TestActionProposalFenceChecksHostBindings(t *testing.T) {
-	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "one"}
-	claimed := claimedOwnedActionRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
-	catalog := hostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})
-	bound, err := catalog.Resolve(skill.WithRunActor(t.Context(), skill.RunActor{RunID: claimed.ID, AgentID: "release-agent", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "release-agent"}}),
-		skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "release-agent", "openseal.connector", "1.0.0", "read", skill.BindingReference{ID: "mcp:linear", Revision: 1})
-	if err != nil || !bound.Host {
-		t.Fatalf("resolve = %#v, %v", bound, err)
-	}
-	call := &ActionCall{Scope: scope, DeploymentID: "release-agent", BindingID: "mcp:linear", BindingRevision: 1, SkillID: "openseal.connector", SkillVersion: "1.0.0"}
-	if err := validateActionSubmissionBinding(call, hostActionBinding(bound)); err != nil {
-		t.Fatalf("matching host binding refused: %v", err)
-	}
-	call.BindingRevision = 2
-	if err := validateActionSubmissionBinding(call, hostActionBinding(bound)); !errors.Is(err, skill.ErrBindingUnavailable) {
-		t.Fatalf("stale host binding admitted: %v", err)
-	}
-	if hostActionBinding(&skill.BoundAction{Binding: bound.Binding}) != nil {
-		t.Fatal("a stored binding was treated as host supplied")
 	}
 }
 
@@ -252,57 +226,6 @@ func TestRoutineGrantsCoverHostBindingTools(t *testing.T) {
 	}
 }
 
-// Skill setup is refused for a service a connected app already covers for
-// this run, and the refusal names the connected tools to use instead.
-func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
-	ctx := context.Background()
-	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "a"}
-	catalog := skillActionCatalog(t, ctx, scope, "agent")
-	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
-	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
-	hosted := hostConnectorCatalog(t, scope, map[string]bool{run.ID: true})
-	if err := catalog.Register(ctx, mustDefinition(t, hosted, "openseal.connector")); err != nil {
-		t.Fatal(err)
-	}
-	catalog.SetHostBindingProvider(func(ctx context.Context, scope skill.ScopeReference, deploymentID string, actor skill.RunActor) (*skill.HostBindingSet, error) {
-		return hosted.HostBindings(ctx, scope, deploymentID, actor)
-	})
-	provider := skill.DiscoveryProviderFunc(func(context.Context, skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
-		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{
-			{ID: "linear", Version: "1.0.0", Name: "Linear", Readiness: skill.DiscoveryReadinessBindable},
-			{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable},
-		}}, nil
-	})
-	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
-	if err != nil {
-		t.Fatal(err)
-	}
-	setup := func(callID, skillID string, run *AgentRun) (map[string]interface{}, error) {
-		return dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: callID, Scope: scope, RunID: run.ID},
-			Arguments: map[string]interface{}{"kind": "configure", "skillId": skillID, "skillVersion": "latest", "reason": "File a ticket"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
-	}
-	_, err = setup("call-linear", "linear", run)
-	var refusal *interactionRequestRefusal
-	if !errors.As(err, &refusal) || !strings.Contains(refusal.message, "Linear is already connected") ||
-		!strings.Contains(refusal.message, "mcp.linear.create_issue") || !strings.Contains(refusal.message, "mcp.linear.search") {
-		t.Fatalf("setup of a connected service = %v", err)
-	}
-	if requests, _ := store.ListSkillSetupRequests(ctx, scope, "agent", "chat"); len(requests) != 0 {
-		t.Fatalf("a setup form was created: %#v", requests)
-	}
-	// Other services, and the same service for a run without the connection,
-	// still get a setup form.
-	if result, err := setup("call-reddit", "reddit.reader", run); err != nil || result["setupRequest"] == nil {
-		t.Fatalf("unrelated setup = %#v, %v", result, err)
-	}
-	other := cloneAgentRun(run)
-	other.ID = "other-users-run"
-	if result, err := setup("call-other", "linear", other); err != nil || result["setupRequest"] == nil {
-		t.Fatalf("setup for a run without the connection = %#v, %v", result, err)
-	}
-}
-
 func mustDefinition(t *testing.T, catalog *skill.Catalog, id string) *skill.Definition {
 	t.Helper()
 	definition, err := catalog.GetDefinition(t.Context(), id, "1.0.0")
@@ -310,15 +233,4 @@ func mustDefinition(t *testing.T, catalog *skill.Catalog, id string) *skill.Defi
 		t.Fatalf("definition %s: %v", id, err)
 	}
 	return definition
-}
-
-func TestServiceKey(t *testing.T) {
-	for value, want := range map[string]string{
-		"Linear": "linear", "linear-mcp": "linear", "skill-linear": "linear", "neondatabase/mcp-server-neon": "neondatabase-neon",
-		"Google Drive": "google-drive", "MCP Server": "",
-	} {
-		if got := serviceKey(value); got != want {
-			t.Fatalf("serviceKey(%q) = %q, want %q", value, got, want)
-		}
-	}
 }

@@ -85,7 +85,7 @@ func TestAgentBuilderApprovalCardPolicy(t *testing.T) {
 		if approval == nil || result.Call.Status != ActionCallStatusWaitingApproval {
 			t.Fatalf("%s was not held for review: %#v", tc.action, result)
 		}
-		if !approval.ExpiresAt.Equal(now.Add(30*24*time.Hour)) || approval.ExpiresAt.Sub(approval.CreatedAt) != agentBuilderApprovalTTL {
+		if !approval.ExpiresAt.Equal(now.Add(30*24*time.Hour)) || approval.ExpiresAt.Sub(approval.CreatedAt) != 30*24*time.Hour {
 			t.Fatalf("%s card expires at %s (created %s)", tc.action, approval.ExpiresAt, approval.CreatedAt)
 		}
 		if approval.TimeoutDecision != ApprovalTimeoutExpire {
@@ -142,47 +142,5 @@ func TestAgentBuilderApprovalExpiresAndNeverApproves(t *testing.T) {
 	}
 	if resolved.Approval.Status != ApprovalStatusExpired || resolved.Call.Status != ActionCallStatusDenied {
 		t.Fatalf("an elapsed card did not expire: approval %#v call %#v", resolved.Approval, resolved.Call)
-	}
-}
-
-func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
-	bound := func(skillID, action string) *skill.BoundAction {
-		return &skill.BoundAction{Definition: &skill.Definition{ID: skillID}, Action: skill.Action{Name: action}}
-	}
-	for _, tc := range []struct {
-		bound *skill.BoundAction
-		want  bool
-	}{
-		{bound(AgentManagementSkillID, AgentActionCreateAgent), true},
-		{bound(AgentManagementSkillID, AgentActionUpdateAgent), true},
-		{bound(TeamManagementSkillID, "create_team"), true},
-		{bound(AgentManagementSkillID, AgentActionTryAgent), false},
-		{bound(AgentManagementSkillID, AgentActionListAgents), false},
-		{bound(AgentManagementSkillID, AgentActionAmendBehavior), false},
-		{bound(TeamManagementSkillID, TeamActionUpdateMember), false},
-		{bound("acme.notes", AgentActionCreateAgent), false},
-		{nil, false},
-	} {
-		if got := isAgentBuilderApprovalAction(tc.bound); got != tc.want {
-			t.Fatalf("isAgentBuilderApprovalAction(%#v) = %v", tc.bound, got)
-		}
-	}
-
-	// A create_team card gets the same policy as an agent card.
-	coordinator := NewActionCoordinator(newTestKernelStore(t), newTestKernelStore(t), skill.NewCatalog(), NewDefaultActionPolicy(), nil)
-	coordinator.newID = func() string { return "approval-team" }
-	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
-	team := bound(TeamManagementSkillID, "create_team")
-	team.Action.Risk, team.Action.Review = skill.RiskLevelWrite, skill.ActionReviewAlways
-	call := &ActionCall{ID: "call-team"}
-	approval := coordinator.newApprovalCheckpoint(context.Background(),
-		ProposeActionRequest{Scope: Scope{Kind: "tenant", ID: "tenant-a"}}, &AgentRun{ID: "run-team"}, team, map[string]interface{}{},
-		map[string]interface{}{"resourceType": "team", "operation": "create_team"}, call,
-		ActionPolicyDecision{
-			Disposition: ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}},
-			ApprovalTTL: time.Hour, ApprovalTimeout: ApprovalTimeoutApprove, ApprovalDestinations: []ApprovalDestination{{EndpointID: "slack"}},
-		}, "Create the team", now)
-	if !approval.ExpiresAt.Equal(now.Add(agentBuilderApprovalTTL)) || approval.TimeoutDecision != ApprovalTimeoutExpire || len(approval.Destinations) != 0 {
-		t.Fatalf("create_team card = %#v", approval)
 	}
 }

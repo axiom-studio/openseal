@@ -3,6 +3,7 @@ package runtime
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -100,9 +101,11 @@ func TestAcceptedRunExecutionResolverKeepsOriginalDefinitionAndChecksLiveGrants(
 	if err != nil || binding.DefinitionVersion != "1" || len(binding.ModelActions) != 1 {
 		t.Fatalf("accepted method followed current deployment behavior: %#v %v", binding, err)
 	}
+	// The producer and the binding's runbook reference both come from the
+	// accepted definition: version 1 of the method, not the current 2.
 	producer, ok := binding.Producer.(*RunbookStepProducer)
-	if !ok || producer.definition != original.Runbook {
-		t.Fatalf("resolver did not recover exact accepted implementation: %#v", binding.Producer)
+	if !ok || !slices.Contains(binding.InputContextRefs, "runbook:"+original.Runbook.ID+"@"+original.Runbook.Version) || slices.Contains(binding.InputContextRefs, "runbook:"+latest.Runbook.ID+"@"+latest.Runbook.Version) {
+		t.Fatalf("resolver did not recover exact accepted implementation: %#v %v", binding.Producer, binding.InputContextRefs)
 	}
 	out, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step", Sequence: 1}, Binding: binding, Path: &AgentSessionPath{}})
 	if err != nil || out.Park == nil || out.Park.Status != AgentRunStatusSleeping || len(out.ToolCalls) != 0 {

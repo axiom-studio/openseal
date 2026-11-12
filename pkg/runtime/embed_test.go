@@ -88,7 +88,14 @@ func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testin
 		t.Fatalf("session context = %#v", context)
 	}
 	authority := context["authority"].(map[string]interface{})
-	if !embedAuthorityAllows(authority, "crm", "lookup", skill.RiskLevelRead) || embedAuthorityAllows(authority, "crm", "delete", skill.RiskLevelRead) {
+	// The action authority gate reads the session authority from the Run.
+	allows := func(action string) bool {
+		run := &AgentRun{Context: map[string]interface{}{RunContextSessionKey: map[string]interface{}{"authority": authority}}}
+		bound := &skill.BoundAction{Binding: &skill.Binding{ID: "crm"}, Action: skill.Action{Name: action, Risk: skill.RiskLevelRead}}
+		_, err := EmbedSessionActionAuthorityValidator{}.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: bound})
+		return err == nil
+	}
+	if !allows("lookup") || allows("delete") {
 		t.Fatalf("session authority = %#v", authority)
 	}
 }

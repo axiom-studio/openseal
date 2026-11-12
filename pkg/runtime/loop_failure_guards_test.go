@@ -85,7 +85,7 @@ func TestErrorStreakFailsRun(t *testing.T) {
 		t.Fatalf("eighth all-error step: failure=%+v err=%v", failure, err)
 	}
 	if failure.Kind != RunFailureKindRepeatLimit || failure.Code != RunFailureCodeErrorStreak ||
-		failure.Message != runFailureMessageErrorStreak || !failure.Explainable {
+		failure.Message != "The agent's tool calls kept failing without making progress, so the run was stopped." || !failure.Explainable {
 		t.Fatalf("failure = %+v", failure)
 	}
 

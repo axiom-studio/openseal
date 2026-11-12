@@ -201,7 +201,7 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 
 func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
 	store := newTestKernelStore(t)
-	source, turn, conversation, message := settledWorkerTaskFixture(t, store)
+	source, turn, conversation, message := settledTaskSourceFixture(t, store)
 	admitted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +227,8 @@ func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(time.Second)
-	for i := 0; i <= conversationRunProjectionLimit; i++ {
+	// One more private root than the change projection's limit of 100 Runs.
+	for i := 0; i <= 100; i++ {
 		id := fmt.Sprintf("private-root-%03d", i)
 		status := AgentRunStatusCompleted
 		if i == 0 {

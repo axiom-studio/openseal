@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // A chat message that answers a pending approval replaces it (the approval
@@ -55,8 +57,8 @@ func TestLoopMessageDuringParkedApprovalSupersedesIt(t *testing.T) {
 			got.SupersededByMessageID != message.ID {
 			t.Fatalf("approval = %#v", got)
 		}
-		if outcome := approvalOutcome(got.Status); outcome != "Replaced by your message" {
-			t.Fatalf("approval outcome = %q", outcome)
+		if title := PresentApproval(got).Title; !strings.HasPrefix(title, "Replaced by your message: ") {
+			t.Fatalf("approval outcome = %q", title)
 		}
 		if current, err := f.raw.GetActionCall(f.ctx, f.scope, call.ID); err != nil || current.Status != ActionCallStatusDenied {
 			t.Fatalf("call = %#v, %v", current, err)
@@ -118,7 +120,7 @@ func TestLoopApprovalSupersedeIsIdempotent(t *testing.T) {
 		if resolved.Status != ApprovalStatusSuperseded || resolved.Revision != approval.Revision+1 || resolved.SupersededByMessageID != first.ID {
 			t.Fatalf("approval resolved more than once: %#v", resolved)
 		}
-		replay, err := f.scheduler.approvals.ResolveSupersededByMessage(f.ctx, f.scope, resolved.ID, approval.Revision, second.ID)
+		replay, err := schedulerApprovals(f).ResolveSupersededByMessage(f.ctx, f.scope, resolved.ID, approval.Revision, second.ID)
 		if err != nil || replay.Resolved {
 			t.Fatalf("replayed supersede = %#v, %v", replay, err)
 		}
@@ -163,7 +165,7 @@ func TestLoopApprovalDecidedConcurrentlyWithMessage(t *testing.T) {
 		message := f.post(conversation.ID, loopFixtureUser, "is it done?")
 		f.decide(run.ID, ApprovalDecisionApprove, "")
 		// The kernel's supersede of the observed revision loses cleanly.
-		if _, err := f.scheduler.approvals.ResolveSupersededByMessage(f.ctx, f.scope, approval.ID, approval.Revision, message.ID); !errors.Is(err, ErrApprovalResolved) {
+		if _, err := schedulerApprovals(f).ResolveSupersededByMessage(f.ctx, f.scope, approval.ID, approval.Revision, message.ID); !errors.Is(err, ErrApprovalResolved) {
 			t.Fatalf("late supersede error = %v", err)
 		}
 		if _, _, err := f.scheduler.ScheduleMessage(f.ctx, f.scope, conversation.ID, message.ID); err != nil {
@@ -208,4 +210,10 @@ func TestLoopDeclinedApprovalCompletesCalmly(t *testing.T) {
 			t.Fatal("a declined call was dispatched")
 		}
 	})
+}
+
+// schedulerApprovals is the approval coordinator the fixture's scheduler
+// builds: the chat store with no authorizer, on the fixture clock.
+func schedulerApprovals(f *loopFixture) *ApprovalCoordinator {
+	return NewApprovalCoordinator(f.chats, f.chats, nil, models.WithClock(f.clock.Now))
 }

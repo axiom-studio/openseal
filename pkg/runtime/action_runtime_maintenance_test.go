@@ -334,7 +334,7 @@ func newActionRuntimeMaintenanceFixture(t *testing.T, kernel KernelStore) *actio
 		}
 	}
 	fixture.now = time.Now().UTC().Round(0)
-	binding := cloneUpgradeBinding(fixture.binding)
+	binding := cloneTestBinding(fixture.binding)
 	binding.SourceIdentity = "native::release"
 	binding.Revision++
 	binding.UpdatedAt = fixture.now
@@ -361,7 +361,7 @@ func newActionRuntimeMaintenanceTenantFixture(t *testing.T, original *actionBind
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "maintenance-isolation-" + uuid.NewString()}
 	catalog := skill.NewCatalogWithStore(original.store)
-	binding := cloneUpgradeBinding(original.binding)
+	binding := cloneTestBinding(original.binding)
 	binding.Scope, binding.Revision = skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, 1
 	if err := catalog.Bind(t.Context(), binding); err != nil {
 		t.Fatal(err)
@@ -421,7 +421,7 @@ func actionRuntimeMaintenanceBinding(t *testing.T, fixture *actionBindingFenceFi
 			t.Fatal(err)
 		}
 	}
-	binding := cloneUpgradeBinding(fixture.binding)
+	binding := cloneTestBinding(fixture.binding)
 	binding.ID, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision = id, skillID, version, source, 1
 	if err := fixture.catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
