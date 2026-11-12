@@ -76,6 +76,12 @@ func TestInMemorySQLiteStoresAreIsolated(t *testing.T) {
 	if _, err := second.db.ExecContext(ctx, `CREATE TABLE probe (id INTEGER)`); err != nil {
 		t.Fatalf("second store sees the first store's table: %v", err)
 	}
+	// A store opened after the others were written to must still start from
+	// the migrated template alone.
+	third := newTestKernelStore(t)
+	if _, err := third.db.ExecContext(ctx, `CREATE TABLE probe (id INTEGER)`); err != nil {
+		t.Fatalf("a later store sees an earlier store's table: %v", err)
+	}
 }
 
 func TestInMemorySQLiteStoreSurvivesIdleConnectionsClosing(t *testing.T) {
