@@ -1,6 +1,5 @@
 // Package runtimetest provides kernel stores for the tests of packages built
-// on runtime. Tests inside package runtime use their own newTestKernelStore,
-// since importing this package from there would be a cycle.
+// on the runtime packages.
 package runtimetest
 
 import (

@@ -171,7 +171,7 @@ func TestModelStepRequestValidateRejectsUnpairedToolCall(t *testing.T) {
 }
 
 func TestModelStepRequestValidateRejectsNonTerminalToolEntry(t *testing.T) {
-	for _, state := range OpenToolEntryStates {
+	for _, state := range models.OpenToolEntryStateValues() {
 		req := validModelStepRequest()
 		req.Entries[2] = toolView("e3", 3, "c1", state)
 		expectModelStepInvalid(t, req, "only finished tool entries are sent")

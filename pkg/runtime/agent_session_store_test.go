@@ -491,7 +491,7 @@ func TestTransitionToolEntry(t *testing.T) {
 		entry.Tool.CompletedAt == nil || entry.Tool.OriginRef != "command:x" || entry.Tool.Wait != nil {
 		t.Fatalf("completed entry = %+v, %v", entry, err)
 	}
-	open, err := store.ListAgentSessionEntries(context.Background(), models.SessionEntryFilter{Scope: testSessionScope, RunID: "r1", States: OpenToolEntryStates})
+	open, err := store.ListAgentSessionEntries(context.Background(), models.SessionEntryFilter{Scope: testSessionScope, RunID: "r1", States: models.OpenToolEntryStateValues()})
 	if err != nil || len(open) != 0 {
 		t.Fatalf("open entries after completion = %d, %v", len(open), err)
 	}

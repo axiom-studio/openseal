@@ -284,7 +284,7 @@ func assertTerminalCloseToolEntries(t *testing.T, sessions models.AgentSessionSt
 	if entry.State != models.ToolEntryCompleted || entry.Revision != 1 || entry.Tool.Result.Content[0].Text != "done" {
 		t.Fatalf("a finished entry was rewritten: %#v", entry)
 	}
-	left, err := sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: scope, RunID: entry.RunID, States: OpenToolEntryStates})
+	left, err := sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: scope, RunID: entry.RunID, States: models.OpenToolEntryStateValues()})
 	if err != nil {
 		t.Fatal(err)
 	}

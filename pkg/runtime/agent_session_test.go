@@ -20,7 +20,7 @@ func TestValidToolEntryTransitionTable(t *testing.T) {
 		models.ToolEntryRunning: {models.ToolEntryPending: true, models.ToolEntryAwaitingApproval: true, models.ToolEntryAwaitingChild: true,
 			models.ToolEntryAwaitingEvent: true, models.ToolEntryCompleted: true, models.ToolEntryError: true, models.ToolEntryInterrupted: true},
 	}
-	states := append([]models.ToolEntryState{"", "bogus"}, ToolEntryStates...)
+	states := append([]models.ToolEntryState{"", "bogus"}, models.ToolEntryStateValues()...)
 	for _, from := range states {
 		for _, to := range states {
 			want := allowed[from][to]
@@ -29,7 +29,7 @@ func TestValidToolEntryTransitionTable(t *testing.T) {
 			}
 		}
 	}
-	for _, state := range ToolEntryStates {
+	for _, state := range models.ToolEntryStateValues() {
 		if state.Terminal() == state.Open() {
 			t.Errorf("%s: Terminal and Open must differ", state)
 		}
@@ -51,7 +51,7 @@ func TestSessionEntryFilterNormalizeAndMatch(t *testing.T) {
 	if _, err := models.NormalizeSessionEntryFilter(models.SessionEntryFilter{Scope: testSessionScope, RunID: "r", AfterSequence: 2}); !errors.Is(err, models.ErrInvalidSessionEntry) {
 		t.Fatalf("afterSequence without session: %v", err)
 	}
-	filter, err := models.NormalizeSessionEntryFilter(models.SessionEntryFilter{Scope: testSessionScope, RunID: "r1", States: OpenToolEntryStates, Limit: 5000})
+	filter, err := models.NormalizeSessionEntryFilter(models.SessionEntryFilter{Scope: testSessionScope, RunID: "r1", States: models.OpenToolEntryStateValues(), Limit: 5000})
 	if err != nil || filter.Limit != models.MaxSessionEntryListLimit {
 		t.Fatalf("filter %+v err %v", filter, err)
 	}
