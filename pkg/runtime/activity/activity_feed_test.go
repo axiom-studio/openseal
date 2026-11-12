@@ -1,4 +1,4 @@
-package runtime
+package activity
 
 import (
 	"context"
@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 	stores := []struct {
 		name  string
-		store KernelStore
+		store models.KernelStore
 		close func()
 	}{}
 	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "activity.db"))
@@ -21,7 +22,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 	}
 	stores = append(stores, struct {
 		name  string
-		store KernelStore
+		store models.KernelStore
 		close func()
 	}{name: "sqlite", store: sqlite, close: func() { _ = sqlite.Close() }})
 
@@ -29,9 +30,9 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			defer fixture.close()
 			ctx := context.Background()
-			scope := Scope{Kind: "tenant", ID: "one"}
+			scope := models.Scope{Kind: "tenant", ID: "one"}
 			now := time.Date(2026, 7, 10, 7, 0, 0, 0, time.UTC)
-			for _, run := range []*AgentRun{
+			for _, run := range []*models.AgentRun{
 				activityFeedRun("run-one", scope, "agent-one", now),
 				activityFeedRun("run-two", scope, "agent-one", now),
 				activityFeedRun("run-other", scope, "agent-two", now),
@@ -41,11 +42,11 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 				}
 			}
 			service := NewRunActivityService(fixture.store, fixture.store)
-			for _, event := range []*ActivityEvent{
-				{ID: "event-a", Scope: scope, RunID: "run-one", AgentID: "agent-one", EventType: "run.claimed", Summary: "Claimed", Actor: ActivityActor{Type: "worker", ID: "one"}, Visibility: ActivityVisibilityScope, CreatedAt: now, Payload: map[string]interface{}{"evidence": "artifact://one"}},
-				{ID: "event-b", Scope: scope, RunID: "run-two", AgentID: "agent-one", EventType: "action.succeeded", Summary: "Published", Actor: ActivityActor{Type: "agent", ID: "agent-one"}, Visibility: ActivityVisibilityTeam, CreatedAt: now, CorrelationID: "correlation", UsageDelta: &BudgetUsage{Turns: 1, InputTokens: 120, OutputTokens: 30, CostMicros: 125_000, DurationMS: 500}},
-				{ID: "event-c", Scope: scope, RunID: "run-other", AgentID: "agent-two", EventType: "run.completed", Summary: "Other", Actor: ActivityActor{Type: "agent", ID: "agent-two"}, Visibility: ActivityVisibilityScope, CreatedAt: now.Add(time.Second)},
-				{ID: "event-private", Scope: scope, RunID: "run-one", AgentID: "agent-one", EventType: "turn.reasoned", Summary: "Private", Actor: ActivityActor{Type: "agent", ID: "agent-one"}, Visibility: ActivityVisibilityPrivate, CreatedAt: now.Add(2 * time.Second)},
+			for _, event := range []*models.ActivityEvent{
+				{ID: "event-a", Scope: scope, RunID: "run-one", AgentID: "agent-one", EventType: "run.claimed", Summary: "Claimed", Actor: models.ActivityActor{Type: "worker", ID: "one"}, Visibility: models.ActivityVisibilityScope, CreatedAt: now, Payload: map[string]interface{}{"evidence": "artifact://one"}},
+				{ID: "event-b", Scope: scope, RunID: "run-two", AgentID: "agent-one", EventType: "action.succeeded", Summary: "Published", Actor: models.ActivityActor{Type: "agent", ID: "agent-one"}, Visibility: models.ActivityVisibilityTeam, CreatedAt: now, CorrelationID: "correlation", UsageDelta: &models.BudgetUsage{Turns: 1, InputTokens: 120, OutputTokens: 30, CostMicros: 125_000, DurationMS: 500}},
+				{ID: "event-c", Scope: scope, RunID: "run-other", AgentID: "agent-two", EventType: "run.completed", Summary: "Other", Actor: models.ActivityActor{Type: "agent", ID: "agent-two"}, Visibility: models.ActivityVisibilityScope, CreatedAt: now.Add(time.Second)},
+				{ID: "event-private", Scope: scope, RunID: "run-one", AgentID: "agent-one", EventType: "turn.reasoned", Summary: "Private", Actor: models.ActivityActor{Type: "agent", ID: "agent-one"}, Visibility: models.ActivityVisibilityPrivate, CreatedAt: now.Add(2 * time.Second)},
 			} {
 				if _, err := service.AppendActivity(ctx, event); err != nil {
 					t.Fatal(err)
@@ -54,7 +55,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 
 			page, err := service.ListActivityFeed(ctx, ActivityFeedRequest{
 				Scope: scope, AgentID: "agent-one", Limit: 1,
-				Visibilities: []ActivityVisibility{ActivityVisibilityScope, ActivityVisibilityTeam},
+				Visibilities: []models.ActivityVisibility{models.ActivityVisibilityScope, models.ActivityVisibilityTeam},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -67,7 +68,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 			}
 			next, err := service.ListActivityFeed(ctx, ActivityFeedRequest{
 				Scope: scope, AgentID: "agent-one", Cursor: page.NextCursor, Limit: 1, IncludeDetails: true,
-				Visibilities: []ActivityVisibility{ActivityVisibilityScope, ActivityVisibilityTeam},
+				Visibilities: []models.ActivityVisibility{models.ActivityVisibilityScope, models.ActivityVisibilityTeam},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -80,9 +81,9 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 }
 
 func TestActivityFeedRequiresSelectorAndRejectsInvalidCursor(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := newActivityTestStore(t)
 	service := NewRunActivityService(store, store)
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	if _, err := service.ListActivityFeed(context.Background(), ActivityFeedRequest{Scope: scope}); err == nil {
 		t.Fatal("selector-free activity feed was accepted")
 	}
@@ -95,34 +96,47 @@ func TestActivityFeedRequiresSelectorAndRejectsInvalidCursor(t *testing.T) {
 }
 
 func TestExistingRunActivityStreamKeepsSequenceCursor(t *testing.T) {
-	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "one"}
+	store := newActivityTestStore(t)
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
 	if err := store.CreateAgentRun(context.Background(), activityFeedRun("run", scope, "agent", now)); err != nil {
 		t.Fatal(err)
 	}
 	service := NewRunActivityService(store, store)
 	for _, id := range []string{"first", "second"} {
-		if _, err := service.AppendActivity(context.Background(), &ActivityEvent{
+		if _, err := service.AppendActivity(context.Background(), &models.ActivityEvent{
 			ID: id, Scope: scope, RunID: "run", AgentID: "agent", EventType: "run.updated", Summary: id,
-			Actor: ActivityActor{Type: "agent", ID: "agent"}, CreatedAt: now,
+			Actor: models.ActivityActor{Type: "agent", ID: "agent"}, CreatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	events, err := service.ListActivity(context.Background(), ActivityFilter{Scope: scope, RunID: "run", AfterSequence: 1})
+	events, err := service.ListActivity(context.Background(), models.ActivityFilter{Scope: scope, RunID: "run", AfterSequence: 1})
 	if err != nil || len(events) != 1 || events[0].ID != "second" || events[0].Sequence != 2 {
 		t.Fatalf("legacy activity stream = %#v, %v", events, err)
 	}
-	if _, err := service.ListActivity(context.Background(), ActivityFilter{Scope: scope}); err == nil || err.Error() != "run id is required" {
+	if _, err := service.ListActivity(context.Background(), models.ActivityFilter{Scope: scope}); err == nil || err.Error() != "run id is required" {
 		t.Fatal("run stream accepted missing run id")
 	}
 }
 
-func activityFeedRun(id string, scope Scope, agentID string, now time.Time) *AgentRun {
-	return &AgentRun{
-		ID: id, RootRunID: id, Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID},
-		AssignedAgentID: agentID, Goal: "work", Source: RunSourceManual, Status: AgentRunStatusQueued,
+func activityFeedRun(id string, scope models.Scope, agentID string, now time.Time) *models.AgentRun {
+	return &models.AgentRun{
+		ID: id, RootRunID: id, Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: agentID},
+		AssignedAgentID: agentID, Goal: "work", Source: models.RunSourceManual, Status: models.AgentRunStatusQueued,
 		AvailableAt: now, QueueEnteredAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+}
+
+// newActivityTestStore returns an empty in-memory kernel store that is closed
+// when the test ends. It copies runtime's newTestKernelStore so this file does
+// not depend on runtime's test helpers and can live with the activity code.
+func newActivityTestStore(t testing.TB) *sqlite.Store {
+	t.Helper()
+	store, err := sqlite.NewInMemorySQLiteStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
 }

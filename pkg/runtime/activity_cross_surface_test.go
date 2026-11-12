@@ -54,7 +54,7 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			if err != nil {
 				t.Fatal(err)
 			}
-			run := activityFeedRun("run-launch", scope, "agent-marketing", now)
+			run := crossSurfaceRun("run-launch", scope, "agent-marketing", now)
 			run.Kind = RunKindConversation
 			run.Owner = conversation.Owner
 			run.ObjectiveID = objective.ID
@@ -122,5 +122,16 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 				t.Fatalf("canonical summary projection leaked detail or lost bounded facts: %#v", *canonical)
 			}
 		})
+	}
+}
+
+// crossSurfaceRun is the queued Run the projection is recorded against. It
+// copies activityFeedRun, which moves with the activity feed tests into the
+// activity package, where this file cannot reach it.
+func crossSurfaceRun(id string, scope Scope, agentID string, now time.Time) *AgentRun {
+	return &AgentRun{
+		ID: id, RootRunID: id, Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID},
+		AssignedAgentID: agentID, Goal: "work", Source: RunSourceManual, Status: AgentRunStatusQueued,
+		AvailableAt: now, QueueEnteredAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 }

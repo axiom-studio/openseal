@@ -1,4 +1,4 @@
-package runtime
+package activity
 
 // ApprovalReviewContext is the operator-facing explanation of an action's
 // effect. The model supplies the semantic facts it already knows; the kernel

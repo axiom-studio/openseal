@@ -1,4 +1,4 @@
-package runtime
+package activity
 
 import (
 	"context"
@@ -13,15 +13,15 @@ import (
 
 type RunTransitionRequest struct {
 	ExpectedRevision          int64
-	Status                    AgentRunStatus
+	Status                    models.AgentRunStatus
 	Summary                   string
-	Actor                     ActivityActor
-	Severity                  ActivitySeverity
-	Visibility                ActivityVisibility
+	Actor                     models.ActivityActor
+	Severity                  models.ActivitySeverity
+	Visibility                models.ActivityVisibility
 	Payload                   map[string]interface{}
 	Plan                      map[string]interface{}
 	Checkpoint                map[string]interface{}
-	WakeCondition             *WakeCondition
+	WakeCondition             *models.WakeCondition
 	AvailableAt               *time.Time // delays a queued Run's next claim
 	Output                    map[string]interface{}
 	Error                     string
@@ -33,13 +33,13 @@ type RunTransitionRequest struct {
 	WakeSignalID              string
 	EventType                 string
 	OccurredAt                *time.Time
-	Intervention              *AgentRunIntervention
-	HumanInterventions        []HumanInterventionRequest
-	BudgetUsageDelta          *BudgetUsage
-	ActivityUsageDelta        *BudgetUsage
-	BudgetAdmission           *BudgetAdmission
-	BudgetReservation         *BudgetReservation
-	ReplaceBudgetReservation  *BudgetReservation
+	Intervention              *models.AgentRunIntervention
+	HumanInterventions        []models.HumanInterventionRequest
+	BudgetUsageDelta          *models.BudgetUsage
+	ActivityUsageDelta        *models.BudgetUsage
+	BudgetAdmission           *models.BudgetAdmission
+	BudgetReservation         *models.BudgetReservation
+	ReplaceBudgetReservation  *models.BudgetReservation
 	SettleBudgetReservationID string
 	// RequireInterventionCount, when non-nil, fails the transition with
 	// ErrSteeringArrived unless len(PendingInterventions) equals it. The
@@ -47,20 +47,20 @@ type RunTransitionRequest struct {
 	// the Run's revision.
 	RequireInterventionCount *int
 	// FailureExplanation replaces AgentRun.FailureExplanation when non-nil.
-	FailureExplanation *RunFailureExplanation
+	FailureExplanation *models.RunFailureExplanation
 }
 
 type RunActivityService struct {
-	portfolio PortfolioStore
-	activity  RunActivityStore
+	portfolio models.PortfolioStore
+	activity  models.RunActivityStore
 	now       func() time.Time
 }
 
-func NewRunActivityService(portfolio PortfolioStore, activity RunActivityStore, opts ...models.ServiceOption) *RunActivityService {
+func NewRunActivityService(portfolio models.PortfolioStore, activity models.RunActivityStore, opts ...models.ServiceOption) *RunActivityService {
 	return &RunActivityService{portfolio: portfolio, activity: activity, now: models.ClockFrom(opts)}
 }
 
-func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, runID string, req RunTransitionRequest) (*AgentRun, *ActivityEvent, error) {
+func (s *RunActivityService) TransitionRun(ctx context.Context, scope models.Scope, runID string, req RunTransitionRequest) (*models.AgentRun, *models.ActivityEvent, error) {
 	if s == nil || s.portfolio == nil || s.activity == nil {
 		return nil, nil, errors.New("run activity service is not configured")
 	}
@@ -72,28 +72,28 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		return nil, nil, err
 	}
 	if run == nil {
-		return nil, nil, ErrRunNotFound
+		return nil, nil, models.ErrRunNotFound
 	}
 	if req.ExpectedRevision != run.Revision {
-		return nil, nil, ErrRevisionConflict
+		return nil, nil, models.ErrRevisionConflict
 	}
-	var leaseGuard *AgentRunLeaseGuard
+	var leaseGuard *models.AgentRunLeaseGuard
 	if req.LeaseOwner != "" {
 		now := s.now()
 		if run.LeaseOwner != req.LeaseOwner || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
-			return nil, nil, ErrLeaseLost
+			return nil, nil, models.ErrLeaseLost
 		}
-		leaseGuard = &AgentRunLeaseGuard{WorkerID: req.LeaseOwner, Now: now}
+		leaseGuard = &models.AgentRunLeaseGuard{WorkerID: req.LeaseOwner, Now: now}
 	}
 	if req.RequireInterventionCount != nil && len(run.PendingInterventions) != *req.RequireInterventionCount {
-		return nil, nil, ErrSteeringArrived
+		return nil, nil, models.ErrSteeringArrived
 	}
-	if !canTransitionAgentRun(run.Status, req.Status) && !(req.Intervention != nil && run.Status == req.Status && !isTerminalAgentRunStatus(run.Status)) {
-		return nil, nil, fmt.Errorf("%w: %s -> %s", ErrInvalidRunTransition, run.Status, req.Status)
+	if !models.CanTransitionAgentRun(run.Status, req.Status) && !(req.Intervention != nil && run.Status == req.Status && !models.IsTerminalAgentRunStatus(run.Status)) {
+		return nil, nil, fmt.Errorf("%w: %s -> %s", models.ErrInvalidRunTransition, run.Status, req.Status)
 	}
 	previousStatus := run.Status
-	if isWaitingRunStatus(req.Status) && req.WakeCondition == nil {
-		return nil, nil, fmt.Errorf("%w: %s requires a wake condition", ErrInvalidRunTransition, req.Status)
+	if models.IsWaitingRunStatus(req.Status) && req.WakeCondition == nil {
+		return nil, nil, fmt.Errorf("%w: %s requires a wake condition", models.ErrInvalidRunTransition, req.Status)
 	}
 	now := s.now()
 	if req.OccurredAt != nil {
@@ -110,11 +110,11 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.Checkpoint = req.Checkpoint
 	}
 	run.WakeCondition = req.WakeCondition
-	if req.Status == AgentRunStatusPaused && previousStatus != AgentRunStatusPaused {
+	if req.Status == models.AgentRunStatusPaused && previousStatus != models.AgentRunStatusPaused {
 		run.PausedFrom = previousStatus
 		run.PausedWakeCondition = previousWakeCondition
 		run.WakeCondition = nil
-	} else if previousStatus == AgentRunStatusPaused && req.Status != AgentRunStatusPaused {
+	} else if previousStatus == models.AgentRunStatusPaused && req.Status != models.AgentRunStatusPaused {
 		run.PausedFrom = ""
 		run.PausedWakeCondition = nil
 	}
@@ -122,7 +122,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.PendingInterventions = append(run.PendingInterventions, *req.Intervention)
 	}
 	if req.HumanInterventions != nil {
-		run.HumanInterventions = append([]HumanInterventionRequest(nil), req.HumanInterventions...)
+		run.HumanInterventions = append([]models.HumanInterventionRequest(nil), req.HumanInterventions...)
 	}
 	if req.Output != nil {
 		run.Output = req.Output
@@ -132,13 +132,13 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		explanation := *req.FailureExplanation
 		run.FailureExplanation = &explanation
 	}
-	run.CreditError = terminalCreditError(run.Status, run.FailureExplanation)
+	run.CreditError = models.TerminalCreditError(run.Status, run.FailureExplanation)
 	if req.WakeSignalID != "" {
 		run.LastWakeSignalID = req.WakeSignalID
 	}
 	if req.AppliedTurn > 0 {
 		if req.AppliedTurn != run.LastAppliedTurn+1 {
-			return nil, nil, fmt.Errorf("%w: applied turn %d after %d", ErrRevisionConflict, req.AppliedTurn, run.LastAppliedTurn)
+			return nil, nil, fmt.Errorf("%w: applied turn %d after %d", models.ErrRevisionConflict, req.AppliedTurn, run.LastAppliedTurn)
 		}
 		run.LastAppliedTurn = req.AppliedTurn
 	}
@@ -150,24 +150,24 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 			return nil, nil, err
 		}
 		if run.BudgetReservations == nil {
-			run.BudgetReservations = make(map[string]BudgetReservation)
+			run.BudgetReservations = make(map[string]models.BudgetReservation)
 		}
 		if _, exists := run.BudgetReservations[req.BudgetReservation.ID]; exists {
 			return nil, nil, errors.New("budget reservation already exists")
 		}
 		run.BudgetReservations[req.BudgetReservation.ID] = *req.BudgetReservation
-		effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+		effective, err := models.EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
 		if err != nil {
 			return nil, nil, err
 		}
-		exceeded, _, err := BudgetWouldExceed(*run.Budget, effective)
+		exceeded, _, err := models.BudgetWouldExceed(*run.Budget, effective)
 		if err != nil {
 			return nil, nil, err
 		}
 		if exceeded {
-			return nil, nil, ErrBudgetExhausted
+			return nil, nil, models.ErrBudgetExhausted
 		}
-		state, _, err := EvaluateBudget(*run.Budget, effective)
+		state, _, err := models.EvaluateBudget(*run.Budget, effective)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -188,18 +188,18 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 			return nil, nil, errors.New("budget reservation does not exist")
 		}
 		run.BudgetReservations[req.ReplaceBudgetReservation.ID] = *req.ReplaceBudgetReservation
-		effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+		effective, err := models.EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
 		if err != nil {
 			return nil, nil, err
 		}
-		exceeded, _, err := BudgetWouldExceed(*run.Budget, effective)
+		exceeded, _, err := models.BudgetWouldExceed(*run.Budget, effective)
 		if err != nil {
 			return nil, nil, err
 		}
 		if exceeded {
-			return nil, nil, ErrBudgetExhausted
+			return nil, nil, models.ErrBudgetExhausted
 		}
-		state, _, err := EvaluateBudget(*run.Budget, effective)
+		state, _, err := models.EvaluateBudget(*run.Budget, effective)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -220,11 +220,11 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		if err != nil {
 			return nil, nil, err
 		}
-		effective, err := EffectiveBudgetUsage(usage, run.BudgetReservations)
+		effective, err := models.EffectiveBudgetUsage(usage, run.BudgetReservations)
 		if err != nil {
 			return nil, nil, err
 		}
-		state, _, err := EvaluateBudget(*run.Budget, effective)
+		state, _, err := models.EvaluateBudget(*run.Budget, effective)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -241,20 +241,20 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		}
 		admission := *req.BudgetAdmission
 		run.BudgetAdmission = &admission
-		run.BudgetState = BudgetStateExhausted
+		run.BudgetState = models.BudgetStateExhausted
 	}
-	if run.StartedAt == nil && (req.Status == AgentRunStatusPlanning || req.Status == AgentRunStatusRunning) {
+	if run.StartedAt == nil && (req.Status == models.AgentRunStatusPlanning || req.Status == models.AgentRunStatusRunning) {
 		run.StartedAt = &now
 	}
-	if isTerminalAgentRunStatus(req.Status) {
+	if models.IsTerminalAgentRunStatus(req.Status) {
 		run.CompletedAt = &now
 		run.WakeCondition = nil
 	}
-	if isWaitingRunStatus(req.Status) || isTerminalAgentRunStatus(req.Status) || req.Status == AgentRunStatusQueued || req.Status == AgentRunStatusPaused {
+	if models.IsWaitingRunStatus(req.Status) || models.IsTerminalAgentRunStatus(req.Status) || req.Status == models.AgentRunStatusQueued || req.Status == models.AgentRunStatusPaused {
 		run.LeaseOwner = ""
 		run.LeaseExpiresAt = nil
 	}
-	if req.Status == AgentRunStatusQueued {
+	if req.Status == models.AgentRunStatusQueued {
 		run.AvailableAt = now
 		if req.AvailableAt != nil && req.AvailableAt.After(now) {
 			run.AvailableAt = *req.AvailableAt
@@ -263,23 +263,23 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	}
 	severity := req.Severity
 	if severity == "" {
-		severity = ActivitySeverityInfo
+		severity = models.ActivitySeverityInfo
 	}
 	visibility := req.Visibility
 	if visibility == "" {
-		visibility = ActivityVisibilityScope
+		visibility = models.ActivityVisibilityScope
 	}
 	eventType := req.EventType
 	if eventType == "" {
 		eventType = "run.transitioned"
 	}
-	event := &ActivityEvent{
+	event := &models.ActivityEvent{
 		ID: uuid.NewString(), Scope: scope, EventType: eventType, Severity: severity,
-		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TeamID: teamIDForRun(run),
+		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TeamID: models.TeamIDForRun(run),
 		ParentRunID: run.ParentRunID, Actor: req.Actor, Summary: req.Summary,
 		Payload: req.Payload, Visibility: visibility, CorrelationID: req.CorrelationID,
 		CausationID: req.CausationID, CreatedAt: now,
-		TurnID: req.TurnID, UsageDelta: cloneBudgetUsage(req.ActivityUsageDelta),
+		TurnID: req.TurnID, UsageDelta: models.CloneBudgetUsage(req.ActivityUsageDelta),
 	}
 	if strings.TrimSpace(event.Summary) == "" {
 		event.Summary = fmt.Sprintf("Run moved from %s to %s", previousStatus, req.Status)
@@ -294,7 +294,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	return run, persisted, nil
 }
 
-func (s *RunActivityService) AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error) {
+func (s *RunActivityService) AppendActivity(ctx context.Context, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if s == nil || s.activity == nil {
 		return nil, errors.New("run activity service is not configured")
 	}
@@ -308,10 +308,10 @@ func (s *RunActivityService) AppendActivity(ctx context.Context, event *Activity
 		event.CreatedAt = s.now()
 	}
 	if event.Severity == "" {
-		event.Severity = ActivitySeverityInfo
+		event.Severity = models.ActivitySeverityInfo
 	}
 	if event.Visibility == "" {
-		event.Visibility = ActivityVisibilityScope
+		event.Visibility = models.ActivityVisibilityScope
 	}
 	if err := event.Validate(); err != nil {
 		return nil, err
@@ -319,7 +319,7 @@ func (s *RunActivityService) AppendActivity(ctx context.Context, event *Activity
 	return s.activity.AppendActivity(ctx, event)
 }
 
-func (s *RunActivityService) ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error) {
+func (s *RunActivityService) ListActivity(ctx context.Context, filter models.ActivityFilter) ([]*models.ActivityEvent, error) {
 	if s == nil || s.activity == nil {
 		return nil, errors.New("run activity service is not configured")
 	}
