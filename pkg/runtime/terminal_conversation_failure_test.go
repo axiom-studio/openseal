@@ -10,65 +10,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/google/uuid"
 )
-
-func terminalFailureConversationFixture(t *testing.T, store terminalReportingContractStore, at time.Time, private bool) (*AgentRun, *Conversation, *ChannelMessage) {
-	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "failure-" + uuid.NewString()}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
-	service := runtimeconversation.NewConversationService(store)
-	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	audience := ConversationAudience{Kind: ConversationAudienceChannel}
-	if private {
-		audience = ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantAgent, ID: owner.ID}}}
-	}
-	posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion,
-		Content: "Check my recent emails", Audience: audience, StartThread: true, ResponseMode: "spoken",
-		RequiresResponse: true, IdempotencyKey: uuid.NewString(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
-	created, err := commands.CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
-		Goal: "Check the recent email request", ConcurrencyKey: conversation.ID + ":thread:" + posted.Message.ID,
-		Context:        map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: posted.Message.ID, "threadRootMessageId": posted.Message.ID},
-		IdempotencyKey: uuid.NewString(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return created.Run, posted.Conversation, posted.Message
-}
-
-// failTerminalConversation fails run with code, which must already be a
-// classified reply code (TerminalFailureReply's vocabulary), as the loop
-// records it.
-func failTerminalConversation(t *testing.T, store terminalReportingContractStore, run *AgentRun, at time.Time, code string) *AgentRun {
-	t.Helper()
-	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return at }))
-	running, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning})
-	if err != nil {
-		t.Fatal(err)
-	}
-	failed, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed,
-		Error:              "private-provider-diagnostic token=NEVER-PUBLISH",
-		FailureExplanation: &RunFailureExplanation{Kind: "execution", Code: code, Message: "The requested work did not complete."},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return failed
-}
 
 func assertTerminalConversationFailure(t *testing.T, store terminalReportingContractStore, run *AgentRun, trigger *ChannelMessage, code string) *ChannelMessage {
 	t.Helper()
@@ -90,8 +34,8 @@ func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *te
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		run, _, trigger := terminalFailureConversationFixture(t, store, now, true)
-		run = failTerminalConversation(t, store, run, now, "cap_lookup_not_available")
+		run, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, true)
+		run = conversationruntest.FailTerminalConversation(t, store, run, now, "cap_lookup_not_available")
 		intent, err := store.GetRunTerminalReport(t.Context(), run.Scope, run.ID, run.Status)
 		if err != nil || intent.Run == nil || intent.TerminalRevision != run.Revision || intent.Run.Revision != run.Revision {
 			t.Fatalf("failed commit did not capture an immutable reply intent: %#v %v", intent, err)
@@ -130,8 +74,8 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		first, _, trigger := terminalFailureConversationFixture(t, store, now, false)
-		first = failTerminalConversation(t, store, first, now, "provider_rate_limited")
+		first, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
+		first = conversationruntest.FailTerminalConversation(t, store, first, now, "provider_rate_limited")
 		claims, err := store.ClaimRunTerminalReports(t.Context(), RunTerminalReportingClaim{WorkerID: "old-delivery", Now: now, LeaseDuration: time.Minute, Limit: 1})
 		if err != nil || len(claims) != 1 {
 			t.Fatalf("first attempt claim: %#v %v", claims, err)
@@ -141,7 +85,7 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 		if err != nil || retry.Run.ID != first.ID {
 			t.Fatalf("explicit safe retry stopped working: %#v %v", retry, err)
 		}
-		second := failTerminalConversation(t, store, retry.Run, now.Add(2*time.Second), "tool_call_cardinality")
+		second := conversationruntest.FailTerminalConversation(t, store, retry.Run, now.Add(2*time.Second), "tool_call_cardinality")
 		latest, err := store.GetRunTerminalReport(t.Context(), second.Scope, second.ID, second.Status)
 		if err != nil || latest.TerminalRevision != second.Revision || latest.LeaseOwner != "" {
 			t.Fatalf("new attempt replaced old lease or missing latest receipt: %#v %v", latest, err)
@@ -171,8 +115,8 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 
 func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t *testing.T) {
 	store := newTestKernelStore(t)
-	run, conversation, trigger := terminalFailureConversationFixture(t, store, runStoreContractEpoch, false)
-	run = failTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
+	run, conversation, trigger := conversationruntest.TerminalFailureConversation(t, store, runStoreContractEpoch, false)
+	run = conversationruntest.FailTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	for _, mutate := range []func(*AgentRun){
 		func(r *AgentRun) { r.Owner.ID = "other-agent" },
 		func(r *AgentRun) { r.AssignedAgentID = "other-agent" },
@@ -233,7 +177,7 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 			// PostgreSQL stores timestamps at microsecond precision. Use the same
 			// explicit transition and worker clock across all store contracts.
 			now := time.Now().UTC().Truncate(time.Microsecond)
-			failed := failTerminalConversation(t, store, scheduled.Run, now, "provider_invalid_response")
+			failed := conversationruntest.FailTerminalConversation(t, store, scheduled.Run, now, "provider_invalid_response")
 			if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 				t.Fatalf("failure reporter disagreed with canonical scheduler (thread=%t): %d %v", startsThread, count, err)
 			}
@@ -244,8 +188,8 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 
 func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *testing.T) {
 	store := newTestKernelStore(t)
-	run, conversation, _ := terminalFailureConversationFixture(t, store, runStoreContractEpoch, false)
-	run = failTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
+	run, conversation, _ := conversationruntest.TerminalFailureConversation(t, store, runStoreContractEpoch, false)
+	run = conversationruntest.FailTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -275,8 +219,8 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		run, _, trigger := terminalFailureConversationFixture(t, store, now, false)
-		run = failTerminalConversation(t, store, run, now, "workspace_credits_exhausted")
+		run, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
+		run = conversationruntest.FailTerminalConversation(t, store, run, now, "workspace_credits_exhausted")
 		if run.CreditError == nil || run.CreditError.Code != RunCreditErrorWorkspaceCreditsExhausted {
 			t.Fatalf("credit stop is not typed on the Run: %#v", run.CreditError)
 		}
@@ -290,7 +234,7 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 		if err != nil || retry.Run.CreditError != nil || retry.Run.Status != AgentRunStatusQueued {
 			t.Fatalf("retry after adding credits kept the credit stop: %#v %v", retry, err)
 		}
-		other := failTerminalConversation(t, store, retry.Run, now.Add(time.Second), "provider_rate_limited")
+		other := conversationruntest.FailTerminalConversation(t, store, retry.Run, now.Add(time.Second), "provider_rate_limited")
 		if other.CreditError != nil {
 			t.Fatalf("a different failure carried a credit error: %#v", other.CreditError)
 		}
@@ -299,8 +243,8 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 
 func TestFailedConversationReplySkipsServiceWakeWithoutRetry(t *testing.T) {
 	store := newTestKernelStore(t)
-	run, conversation, _ := terminalFailureConversationFixture(t, store, runStoreContractEpoch, false)
-	run = failTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
+	run, conversation, _ := conversationruntest.TerminalFailureConversation(t, store, runStoreContractEpoch, false)
+	run = conversationruntest.FailTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)

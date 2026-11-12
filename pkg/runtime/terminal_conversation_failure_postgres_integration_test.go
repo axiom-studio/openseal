@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -63,14 +64,14 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 func TestTerminalFailurePostgres59RollbackRejectsMultipleAttemptReceipts(t *testing.T) {
 	store, _ := terminalFailureMigrationPostgres(t)
 	now := runStoreContractEpoch
-	first, _, _ := terminalFailureConversationFixture(t, store, now, false)
-	first = failTerminalConversation(t, store, first, now, "provider_rate_limited")
+	first, _, _ := conversationruntest.TerminalFailureConversation(t, store, now, false)
+	first = conversationruntest.FailTerminalConversation(t, store, first, now, "provider_rate_limited")
 	commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	retry, err := commands.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := failTerminalConversation(t, store, retry.Run, now.Add(2*time.Second), "provider_unavailable")
+	second := conversationruntest.FailTerminalConversation(t, store, retry.Run, now.Add(2*time.Second), "provider_unavailable")
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err == nil || !strings.Contains(err.Error(), "multiple attempt receipts") {
 		t.Fatalf("rollback silently discarded an immutable attempt: %v", err)
 	}
@@ -86,8 +87,8 @@ func TestTerminalFailurePostgres59RollbackRejectsMultipleAttemptReceipts(t *test
 func TestTerminalFailurePostgres59RollbackRequiresNewFailureDelivery(t *testing.T) {
 	store, _ := terminalFailureMigrationPostgres(t)
 	now := runStoreContractEpoch
-	run, _, _ := terminalFailureConversationFixture(t, store, now, false)
-	run = failTerminalConversation(t, store, run, now, "provider_rate_limited")
+	run, _, _ := conversationruntest.TerminalFailureConversation(t, store, now, false)
+	run = conversationruntest.FailTerminalConversation(t, store, run, now, "provider_rate_limited")
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err == nil || !strings.Contains(err.Error(), "before new conversation failure replies are delivered") {
 		t.Fatalf("rollback abandoned an unsupported pending failure reply: %v", err)
 	}

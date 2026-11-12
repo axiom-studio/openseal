@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/google/uuid"
 )
 
@@ -18,8 +19,8 @@ func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testi
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
-		first, _, trigger := terminalFailureConversationFixture(t, store, now, false)
-		first = failTerminalConversation(t, store, first, now, "provider_rate_limited")
+		first, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
+		first = conversationruntest.FailTerminalConversation(t, store, first, now, "provider_rate_limited")
 		for _, acknowledged := range []bool{false, true} {
 			if acknowledged {
 				if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
@@ -55,8 +56,8 @@ func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testi
 func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := runStoreContractEpoch
-	run, conversation, trigger := terminalFailureConversationFixture(t, store, now, false)
-	run = failTerminalConversation(t, store, run, now, "provider_rate_limited")
+	run, conversation, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
+	run = conversationruntest.FailTerminalConversation(t, store, run, now, "provider_rate_limited")
 	if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, run); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	run := failTerminalConversation(t, store, created.Run, now, "provider_unavailable")
+	run := conversationruntest.FailTerminalConversation(t, store, created.Run, now, "provider_unavailable")
 	if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 		t.Fatalf("failure delivery before acknowledgment: %d %v", count, err)
 	}
