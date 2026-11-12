@@ -24,3 +24,8 @@ func TestPostgresSpaceAccess(t *testing.T) {
 	store, _ := openTestPostgresStore(t, "openseal_space_access_")
 	exerciseSpaceAccess(t, store)
 }
+
+func TestPostgresSetSpaceOwnerKeepsDefaults(t *testing.T) {
+	store, _ := openTestPostgresStore(t, "openseal_space_owner_change_")
+	exerciseSetSpaceOwnerDefaults(t, store)
+}

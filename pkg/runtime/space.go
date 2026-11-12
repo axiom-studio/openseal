@@ -446,8 +446,8 @@ func (s *SpaceService) SetSpaceAccess(ctx context.Context, scope Scope, spaceID 
 }
 
 // SetSpaceOwner hands the space to another owner; the host must have verified
-// they belong to the scope. Each of the two owners then has the oldest space
-// they own as their default space.
+// they belong to the scope. A new owner who has a default space keeps it;
+// an owner of the two left without one gets one as models.SpaceStore says.
 func (s *SpaceService) SetSpaceOwner(ctx context.Context, scope Scope, spaceID, ownerID string) (*Space, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err

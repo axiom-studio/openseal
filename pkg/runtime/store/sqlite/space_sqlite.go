@@ -484,26 +484,18 @@ func (s *Store) SetSpaceOwner(ctx context.Context, scope models.Scope, spaceID, 
 	return space, err
 }
 
-// setSQLiteSpaceOwner hands the space to ownerID. Both owners give up their
-// default, the space changes hands, and each owner's oldest space becomes
-// their default again.
+// setSQLiteSpaceOwner hands the space to ownerID. The space stops being a
+// default, so a new owner who has a default keeps it; an owner of the two
+// left without one gets one by sqlstore.MarkOwnerDefaultSpaces.
 func setSQLiteSpaceOwner(ctx context.Context, conn *sql.Conn, current *models.Space, ownerID string, now time.Time) error {
 	scope := current.Scope
-	for _, step := range []struct {
-		statement string
-		args      []interface{}
-	}{
-		{`UPDATE spaces SET is_default = 0 WHERE scope_kind = ? AND scope_id = ? AND owner_id IN (?, ?) AND is_default = 1`,
-			[]interface{}{scope.Kind, scope.ID, current.OwnerID, ownerID}},
-		{`UPDATE spaces SET owner_id = ?, updated_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
-			[]interface{}{ownerID, now, scope.Kind, scope.ID, current.ID}},
-		{sqlstore.MarkOwnerDefaultSpaces("spaces", "1") + ` AND s.scope_kind = ? AND s.scope_id = ?`, []interface{}{scope.Kind, scope.ID}},
-	} {
-		if _, err := conn.ExecContext(ctx, step.statement, step.args...); err != nil {
-			return err
-		}
+	if _, err := conn.ExecContext(ctx, `UPDATE spaces SET is_default = 0, owner_id = ?, updated_at = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ?`, ownerID, now, scope.Kind, scope.ID, current.ID); err != nil {
+		return err
 	}
-	return nil
+	_, err := conn.ExecContext(ctx, sqlstore.MarkOwnerDefaultSpaces("spaces", "1")+` AND s.scope_kind = ? AND s.scope_id = ?
+		AND s.owner_id IN (?, ?)`, scope.Kind, scope.ID, current.OwnerID, ownerID)
+	return err
 }
 
 func (s *Store) SetSpaceAccessState(ctx context.Context, scope models.Scope, spaceID string, state models.SpaceAccessState, now time.Time) (*models.Space, error) {
@@ -513,14 +505,15 @@ func (s *Store) SetSpaceAccessState(ctx context.Context, scope models.Scope, spa
 		if err != nil {
 			return err
 		}
+		// The access comes first: the owners' defaults are picked by it.
+		if _, err := conn.ExecContext(ctx, `UPDATE spaces SET access = ?, updated_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+			state.Access, now, scope.Kind, scope.ID, spaceID); err != nil {
+			return err
+		}
 		if state.OwnerID != "" && state.OwnerID != current.OwnerID {
 			if err := setSQLiteSpaceOwner(ctx, conn, current, state.OwnerID, now); err != nil {
 				return err
 			}
-		}
-		if _, err := conn.ExecContext(ctx, `UPDATE spaces SET access = ?, updated_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
-			state.Access, now, scope.Kind, scope.ID, spaceID); err != nil {
-			return err
 		}
 		existing, err := listSQLiteSpacePeople(ctx, conn, scope, spaceID)
 		if err != nil {

@@ -472,20 +472,17 @@ func (s *Store) SetSpaceOwner(ctx context.Context, scope models.Scope, spaceID, 
 	return space, tx.Commit()
 }
 
-// setPostgresSpaceOwnerTx hands the space to ownerID. Both owners give up
-// their default, the space changes hands, and each owner's oldest space
-// becomes their default again.
+// setPostgresSpaceOwnerTx hands the space to ownerID. The space stops being
+// a default, so a new owner who has a default keeps it; an owner of the two
+// left without one gets one by sqlstore.MarkOwnerDefaultSpaces.
 func (s *Store) setPostgresSpaceOwnerTx(ctx context.Context, tx *sql.Tx, space *models.Space, ownerID string, now time.Time) error {
 	spaces, scope := s.table("spaces"), space.Scope
-	if _, err := tx.ExecContext(ctx, `UPDATE `+spaces+` SET is_default = FALSE
-		WHERE scope_kind = $1 AND scope_id = $2 AND owner_id IN ($3, $4) AND is_default`, scope.Kind, scope.ID, space.OwnerID, ownerID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE `+spaces+` SET owner_id = $1, updated_at = $2
+	if _, err := tx.ExecContext(ctx, `UPDATE `+spaces+` SET is_default = FALSE, owner_id = $1, updated_at = $2
 		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5`, ownerID, now, scope.Kind, scope.ID, space.ID); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, sqlstore.MarkOwnerDefaultSpaces(spaces, "TRUE")+` AND s.scope_kind = $1 AND s.scope_id = $2`, scope.Kind, scope.ID)
+	_, err := tx.ExecContext(ctx, sqlstore.MarkOwnerDefaultSpaces(spaces, "TRUE")+` AND s.scope_kind = $1 AND s.scope_id = $2
+		AND s.owner_id IN ($3, $4)`, scope.Kind, scope.ID, space.OwnerID, ownerID)
 	return err
 }
 
@@ -502,14 +499,15 @@ func (s *Store) SetSpaceAccessState(ctx context.Context, scope models.Scope, spa
 	if err != nil {
 		return nil, err
 	}
+	// The access comes first: the owners' defaults are picked by it.
+	if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("spaces")+` SET access = $1, updated_at = $2
+		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5`, state.Access, now, scope.Kind, scope.ID, spaceID); err != nil {
+		return nil, err
+	}
 	if state.OwnerID != "" && state.OwnerID != space.OwnerID {
 		if err := s.setPostgresSpaceOwnerTx(ctx, tx, space, state.OwnerID, now); err != nil {
 			return nil, err
 		}
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("spaces")+` SET access = $1, updated_at = $2
-		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5`, state.Access, now, scope.Kind, scope.ID, spaceID); err != nil {
-		return nil, err
 	}
 	people := s.table("space_people")
 	keep := make([]string, 0, len(state.People))

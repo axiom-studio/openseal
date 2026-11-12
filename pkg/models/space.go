@@ -188,9 +188,10 @@ type SpaceStore interface {
 	// ListScopeSpaceMembers returns every space membership of the scope.
 	ListScopeSpaceMembers(ctx context.Context, scope Scope) ([]*SpaceMember, error)
 	SetSpaceAccess(ctx context.Context, scope Scope, spaceID string, access SpaceAccess, now time.Time) (*Space, error)
-	// SetSpaceOwner hands the space to ownerID. In the same transaction the
-	// default space of the owner it left and of the owner it joined becomes
-	// the oldest space each of them owns.
+	// SetSpaceOwner hands the space to ownerID. The space stops being a
+	// default and a new owner who has a default keeps it; in the same
+	// transaction an owner of the two left without one gets their oldest
+	// space not shared with everyone (else their oldest) as default.
 	SetSpaceOwner(ctx context.Context, scope Scope, spaceID, ownerID string, now time.Time) (*Space, error)
 	// SetSpaceAccessState writes the space's whole access in one
 	// transaction. An owner change is SetSpaceOwner's, defaults included.

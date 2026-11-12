@@ -422,41 +422,92 @@ func assertSQLiteOwnerDefaults(t *testing.T, db *sql.DB, wantRows int, wantDefau
 	}
 }
 
-// A space that changes hands leaves each owner with the oldest space they own
-// as their default: the legacy scope-wide default becomes its real owner's.
-func TestSetSpaceOwnerGivesEachOwnerTheirOldestSpaceAsDefault(t *testing.T) {
-	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "owner-change.db"))
+// Handing a space over never takes the new owner's default away: the space
+// stops being a default unless its new owner has none, the former owner gets
+// a default back, and an automatic pick skips a space shared with everyone.
+func TestSQLiteSetSpaceOwnerKeepsDefaults(t *testing.T) {
+	t.Parallel()
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "owner-change.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = sqlite.Close() })
-	for name, store := range map[string]SpaceStore{"sqlite": sqlite} {
-		t.Run(name, func(t *testing.T) {
-			ctx, scope := context.Background(), Scope{Kind: "tenant", ID: "owner-change"}
-			spaces := NewSpaceService(store)
-			clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
-			spaces.now = func() time.Time { clock = clock.Add(time.Minute); return clock }
-			shared, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Shared", Look: DefaultSpaceLook, OwnerID: "nobody"})
-			if err != nil {
+	t.Cleanup(func() { _ = store.Close() })
+	exerciseSetSpaceOwnerDefaults(t, store)
+}
+
+func exerciseSetSpaceOwnerDefaults(t *testing.T, store SpaceStore) {
+	t.Helper()
+	ctx, scope := context.Background(), Scope{Kind: "tenant", ID: "owner-change-" + strings.ReplaceAll(t.Name(), "/", "-")}
+	spaces := NewSpaceService(store)
+	clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+	spaces.now = func() time.Time { clock = clock.Add(time.Minute); return clock }
+	create := func(name, owner string, access SpaceAccess) *Space {
+		t.Helper()
+		space, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: name, Look: DefaultSpaceLook, OwnerID: owner})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if access != SpaceAccessOwner {
+			if space, err = spaces.SetSpaceAccess(ctx, scope, space.ID, access); err != nil {
 				t.Fatal(err)
 			}
-			mine, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Mine", Look: DefaultSpaceLook, OwnerID: "7"})
-			if err != nil || !mine.IsDefault {
-				t.Fatalf("first space of 7 = %+v, %v; want their default", mine, err)
+		}
+		return space
+	}
+	defaultOf := func(owner, want string) {
+		t.Helper()
+		space, err := spaces.DefaultSpace(ctx, scope, owner)
+		if want == "" {
+			if !errors.Is(err, ErrNoDefaultSpace) {
+				t.Fatalf("default of %q = %+v, %v; want none", owner, space, err)
 			}
-			moved, err := spaces.SetSpaceOwner(ctx, scope, shared.ID, "7")
-			if err != nil || moved.OwnerID != "7" || !moved.IsDefault {
-				t.Fatalf("handed space = %+v, %v; want owned by 7 and their default, being older", moved, err)
-			}
-			if later, err := spaces.GetSpace(ctx, scope, mine.ID); err != nil || later.IsDefault {
-				t.Fatalf("7's newer space = %+v, %v; want no longer the default", later, err)
-			}
-			if _, err := spaces.DefaultSpace(ctx, scope, "nobody"); !errors.Is(err, ErrNoDefaultSpace) {
-				t.Fatalf("former owner's default = %v; want none", err)
-			}
-			if _, err := spaces.SetSpaceOwner(ctx, scope, "missing", "7"); !errors.Is(err, ErrSpaceNotFound) {
-				t.Fatalf("missing space = %v; want not found", err)
-			}
-		})
+			return
+		}
+		if err != nil || space.ID != want {
+			t.Fatalf("default of %q = %+v, %v; want %s", owner, space, err, want)
+		}
+	}
+	hand := func(space *Space, owner string, wantDefault bool) {
+		t.Helper()
+		moved, err := spaces.SetSpaceOwner(ctx, scope, space.ID, owner)
+		if err != nil || moved.OwnerID != owner || moved.IsDefault != wantDefault {
+			t.Fatalf("handed %s = %+v, %v; want owned by %s, default %v", space.Name, moved, err, owner, wantDefault)
+		}
+	}
+
+	// The org-wide space is the tenant's oldest and its former owner's default.
+	shared := create("Shared", "nobody", SpaceAccessEveryone)
+	other := create("Other", "nobody", SpaceAccessOwner)
+	mine := create("Mine", "7", SpaceAccessOwner)
+	defaultOf("nobody", shared.ID)
+	hand(shared, "7", false)
+	defaultOf("7", mine.ID)
+	defaultOf("nobody", other.ID)
+
+	// Someone with no space gets the handed space as their default; the
+	// former owner, left with none, has no default.
+	hand(other, "9", true)
+	defaultOf("9", other.ID)
+	defaultOf("nobody", "")
+
+	// Losing a default re-marks the oldest space not shared with everyone,
+	// and only an owner of nothing else gets an everyone space.
+	first := create("First", "5", SpaceAccessOwner)
+	open := create("Open", "5", SpaceAccessEveryone)
+	private := create("Private", "5", SpaceAccessOwner)
+	defaultOf("5", first.ID)
+	hand(first, "9", false)
+	defaultOf("5", private.ID)
+	defaultOf("9", other.ID)
+	hand(private, "6", true)
+	defaultOf("5", open.ID)
+
+	// Handing over a space with a new access re-marks by that access.
+	if moved, err := spaces.SetSpaceAccessState(ctx, SetSpaceAccessStateRequest{Scope: scope, SpaceID: open.ID, OwnerID: "4", Access: SpaceAccessEveryone}); err != nil || !moved.IsDefault {
+		t.Fatalf("open to an owner of nothing = %+v, %v; want their default", moved, err)
+	}
+	defaultOf("5", "")
+	if _, err := spaces.SetSpaceOwner(ctx, scope, "missing", "7"); !errors.Is(err, ErrSpaceNotFound) {
+		t.Fatalf("missing space = %v; want not found", err)
 	}
 }
