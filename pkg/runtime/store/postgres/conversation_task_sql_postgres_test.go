@@ -9,9 +9,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-// Postgres store test: it checks the store's own migration ledger, so it moves
-// to the Postgres store package with the store.
-
 func TestConversationTaskSQLPostgresMigrationRollbackAndReapply(t *testing.T) {
 	store, schema := openTestPostgresStore(t, "openseal_task_sql_")
 	current, version, err := store.postgresSchemaCurrent(t.Context(), store.db)

@@ -11,9 +11,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-// Postgres store test: it checks the store's own migration ledger, so it moves
-// to the Postgres store package with the store.
-
 // Migration 79 drops the event source tables. A fresh database never has
 // them; a database at 78 loses them with their rows, and the retired ledger
 // rows 20 and 22 it keeps do not make the schema look incomplete.

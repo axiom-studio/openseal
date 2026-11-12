@@ -13,13 +13,6 @@ import (
 // produces (a record left by a crashed worker, a tampered row) or that only
 // need records to read back. Each replaces the row with the same key through
 // the store's own row insert, so triggers still project it.
-//
-// Every helper here reaches into the store (its connection, its row inserts),
-// so this file moves to the SQLite store package with the store's own tests.
-// Runtime tests stop using it: they seed through the public store API, or a
-// fake at the feature's interface, and keep raw SQL on a connection they own
-// (newTestSQLiteStore with the helpers in raw_sql_test.go). A test that needs
-// a state only these fixtures produce is a store test and moves with them.
 
 func putStoredRun(t testing.TB, store *SQLiteStore, run *models.AgentRun) {
 	t.Helper()
@@ -125,8 +118,7 @@ func putStoredAgentRequest(t testing.TB, store *SQLiteStore, request *models.Age
 	}
 }
 
-// execStoreSQL runs a statement against the store's database. It keeps its
-// own body (execSQL's twin) so the put* fixtures depend on nothing else.
+// execStoreSQL runs a statement against the store's database.
 func execStoreSQL(t testing.TB, store *SQLiteStore, query string, args ...any) {
 	t.Helper()
 	if _, err := store.db.ExecContext(context.Background(), query, args...); err != nil {

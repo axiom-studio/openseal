@@ -10,9 +10,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-// SQLite store benchmark: it reads the store's due predicate, so it moves to
-// the SQLite store package with the store.
-
 func BenchmarkConversationTaskContinuationDueSQLite(b *testing.B) {
 	storetest.BenchmarkConversationTaskDue(b, func(b *testing.B) (storetest.ConversationTaskDueStore, storetest.ConversationTaskDueExplain) {
 		store, err := NewSQLiteStore(filepath.Join(b.TempDir(), "continuation-due.db"))

@@ -10,9 +10,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-// SQLite store tests: the store's own migrations on open, so they move to
-// the SQLite store package with the store. They keep the integration tag of
-// the Postgres file they came from.
+// These tests run under the integration tag, like the Postgres migration
+// tests they mirror.
 
 // The SQLite store drops the same tables on open and never creates them.
 func TestSQLiteStoreDropsEventSources(t *testing.T) {

@@ -12,9 +12,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-// Postgres store benchmark: it reads the store's due predicate, so it moves
-// to the Postgres store package with the store.
-
 func BenchmarkConversationTaskContinuationDuePostgres(b *testing.B) {
 	dsn := os.Getenv("OPENSEAL_TASK_BENCH_POSTGRES_DSN")
 	if dsn == "" {
