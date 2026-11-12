@@ -19,8 +19,8 @@ import (
 func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	store, pgSchema := openTestPostgresStore(t, "openseal_channel_atomic_")
-	_, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
+	store, pgSchema := openPostgresTestStore(t, "openseal_channel_atomic_")
+	_, catalog, scope, adapter := slackConversationCatalog(t, ctx)
 	endpoints := externalconversation.NewExternalConversationEndpointService(store, catalog)
 	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"}, DeploymentID: "slack-agent",

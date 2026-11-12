@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -28,7 +29,7 @@ type channelActionFixture struct {
 	db          *sql.DB
 	agents      *kernelagent.Registry
 	endpoints   *externalconversation.ExternalConversationEndpointService
-	resolver    *switchableConversationAdapterResolver
+	resolver    *switchableAdapterResolver
 	catalog     *skill.Catalog
 	scope       models.Scope
 	endpoint    *models.ExternalConversationEndpoint
@@ -46,9 +47,9 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	db := openTestSQLiteDB(t, path)
-	_, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
-	resolver := &switchableConversationAdapterResolver{ExternalConversationAdapterResolver: catalog}
+	db := conversationtest.OpenSQLiteDB(t, path)
+	_, catalog, scope, adapter := slackConversationCatalog(t, ctx)
+	resolver := &switchableAdapterResolver{ExternalConversationAdapterResolver: catalog}
 	endpoints := externalconversation.NewExternalConversationEndpointService(store, resolver)
 	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
