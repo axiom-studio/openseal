@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -31,11 +33,26 @@ func TestCollaborationChildAnswersInTheSameChat(t *testing.T) {
 		if child.Context[conversationRunContextTriggerID] != "ask" || child.Context["threadRootMessageId"] != "root" {
 			t.Fatalf("%s child context = %#v", kind, child.Context)
 		}
-		if assignment := conversationRunAssignment(child); assignment == nil || assignment.From != "marlow" || assignment.Work != "Suggest one launch step" {
-			t.Fatalf("%s assignment = %#v", kind, assignment)
+		// The chat tells the teammate who handed the work over and what it is.
+		want := fmt.Sprintf("Work handed to you by marlow (%s): Suggest one launch step", child.Source)
+		if child.Source != collaborationChildSource[kind] {
+			t.Fatalf("%s child source = %q", kind, child.Source)
+		}
+		if note := handOffRespondTo(source, child); !strings.Contains(note, want) {
+			t.Fatalf("%s respond-to note = %q; want %q", kind, note, want)
 		}
 	}
-	if conversationRunAssignment(source) != nil {
-		t.Fatal("a chat message is not handed-over work")
+	if note := handOffRespondTo(source, source); strings.Contains(note, "Work handed to you") {
+		t.Fatalf("a chat message is not handed-over work: %q", note)
 	}
+}
+
+var collaborationChildSource = map[AgentRequestKind]RunSource{AgentRequestKindRequest: RunSourceRequest, AgentRequestKindHandoff: RunSourceHandoff}
+
+// handOffRespondTo is the respond-to section of run's chat context note,
+// answering the chat message that started source.
+func handOffRespondTo(source, run *AgentRun) string {
+	trigger := &ChannelMessage{ID: "ask", ConversationID: "chat", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "ana"}}
+	conversation := &Conversation{ID: "chat", Scope: source.Scope, Owner: source.Owner}
+	return runContextRespondTo(conversationContextInput{Run: run, Conversation: conversation, Trigger: trigger})
 }
