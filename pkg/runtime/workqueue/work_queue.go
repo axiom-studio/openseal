@@ -1,4 +1,4 @@
-package runtime
+package workqueue
 
 import (
 	"container/heap"
@@ -23,7 +23,7 @@ import (
 // serially. It reports WorkSignalConnected once it is consuming, with Rebuild
 // set when the queue's schedule was lost and must be rebuilt from the store.
 type WorkQueue interface {
-	PublishWork(ctx context.Context, items []WorkItem) error
+	PublishWork(ctx context.Context, items []models.WorkItem) error
 	ConsumeWork(ctx context.Context, handle func(WorkSignal)) error
 }
 
@@ -31,7 +31,7 @@ type WorkQueue interface {
 // listing every scope. Queue-driven supervisors use it to admit a scope the
 // first time it has work.
 type WorkScopeChecker interface {
-	WorkerScopeActive(ctx context.Context, scope Scope) (bool, error)
+	WorkerScopeActive(ctx context.Context, scope models.Scope) (bool, error)
 }
 
 // workPublisher coalesces scheduled items in process and publishes them in
@@ -40,7 +40,7 @@ type workPublisher struct {
 	queue  WorkQueue
 	logger *zap.SugaredLogger
 	mu     sync.Mutex
-	items  map[workItemKey]time.Time
+	items  map[models.WorkItemKey]time.Time
 	ready  chan struct{}
 }
 
@@ -48,14 +48,14 @@ func newWorkPublisher(queue WorkQueue, logger *zap.SugaredLogger) *workPublisher
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	return &workPublisher{queue: queue, logger: logger, items: make(map[workItemKey]time.Time), ready: make(chan struct{}, 1)}
+	return &workPublisher{queue: queue, logger: logger, items: make(map[models.WorkItemKey]time.Time), ready: make(chan struct{}, 1)}
 }
 
-func (p *workPublisher) schedule(item WorkItem) {
+func (p *workPublisher) schedule(item models.WorkItem) {
 	if p == nil || item.Family == "" || item.Scope.Validate() != nil {
 		return
 	}
-	key := workItemKey{Family: item.Family, Scope: item.Scope}
+	key := models.WorkItemKey{Family: item.Family, Scope: item.Scope}
 	p.mu.Lock()
 	if current, ok := p.items[key]; !ok || item.DueAt.Before(current) {
 		p.items[key] = item.DueAt
@@ -67,12 +67,12 @@ func (p *workPublisher) schedule(item WorkItem) {
 	}
 }
 
-func (p *workPublisher) take() []WorkItem {
+func (p *workPublisher) take() []models.WorkItem {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	items := make([]WorkItem, 0, len(p.items))
+	items := make([]models.WorkItem, 0, len(p.items))
 	for key, due := range p.items {
-		items = append(items, WorkItem{Family: key.Family, Scope: key.Scope, DueAt: due})
+		items = append(items, models.WorkItem{Family: key.Family, Scope: key.Scope, DueAt: due})
 	}
 	clear(p.items)
 	return items
@@ -110,7 +110,7 @@ func (p *workPublisher) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(workerPollDelay(100*time.Millisecond, failures, "work-publisher")):
+		case <-time.After(WorkerPollDelay(100*time.Millisecond, failures, "work-publisher")):
 		}
 	}
 }
@@ -120,22 +120,22 @@ func (p *workPublisher) run(ctx context.Context) {
 type MemoryWorkQueue struct {
 	mu      sync.Mutex
 	due     workDueHeap
-	index   map[workItemKey]*workDueEntry
+	index   map[models.WorkItemKey]*workDueEntry
 	changed chan struct{}
 	now     func() time.Time
 }
 
 func NewMemoryWorkQueue(opts ...models.ServiceOption) *MemoryWorkQueue {
-	return &MemoryWorkQueue{index: make(map[workItemKey]*workDueEntry), changed: make(chan struct{}, 1), now: models.ClockFrom(opts)}
+	return &MemoryWorkQueue{index: make(map[models.WorkItemKey]*workDueEntry), changed: make(chan struct{}, 1), now: models.ClockFrom(opts)}
 }
 
-func (q *MemoryWorkQueue) PublishWork(_ context.Context, items []WorkItem) error {
+func (q *MemoryWorkQueue) PublishWork(_ context.Context, items []models.WorkItem) error {
 	q.mu.Lock()
 	for _, item := range items {
 		if item.Family == "" || item.Scope.Validate() != nil {
 			continue
 		}
-		key := workItemKey{Family: item.Family, Scope: item.Scope}
+		key := models.WorkItemKey{Family: item.Family, Scope: item.Scope}
 		if entry, ok := q.index[key]; ok {
 			if item.DueAt.Before(entry.due) {
 				entry.due = item.DueAt
@@ -167,7 +167,7 @@ func (q *MemoryWorkQueue) ConsumeWork(ctx context.Context, handle func(WorkSigna
 		var wait <-chan time.Time
 		var timer *time.Timer
 		q.mu.Lock()
-		var ready []workItemKey
+		var ready []models.WorkItemKey
 		for q.due.Len() > 0 && !q.due[0].due.After(now) {
 			entry := heap.Pop(&q.due).(*workDueEntry)
 			delete(q.index, entry.key)
@@ -200,7 +200,7 @@ func (q *MemoryWorkQueue) ConsumeWork(ctx context.Context, handle func(WorkSigna
 }
 
 type workDueEntry struct {
-	key   workItemKey
+	key   models.WorkItemKey
 	due   time.Time
 	index int
 }
@@ -225,15 +225,15 @@ func (h *workDueHeap) Pop() any {
 	return entry
 }
 
-// workScopeGate admits a queued scope to worker supervision. It prefers a
+// WorkScopeGate admits a queued scope to worker supervision. It prefers a
 // point lookup and caches answers, so admitting a scope never lists every
 // scope; sources without a point lookup fall back to a throttled listing.
-type workScopeGate struct {
+type WorkScopeGate struct {
 	source  WorkerScopeSource
 	checker WorkScopeChecker
-	known   *knownWorkerScopes
+	known   *KnownWorkerScopes
 	mu      sync.Mutex
-	cache   map[Scope]workScopeAnswer
+	cache   map[models.Scope]workScopeAnswer
 	now     func() time.Time
 }
 
@@ -248,25 +248,25 @@ const (
 	workScopeCacheLimit  = 65536
 )
 
-func newWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *workScopeGate {
-	gate := &workScopeGate{source: source, cache: make(map[Scope]workScopeAnswer), now: time.Now}
+func NewWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *WorkScopeGate {
+	gate := &WorkScopeGate{source: source, cache: make(map[models.Scope]workScopeAnswer), now: time.Now}
 	gate.checker, _ = source.(WorkScopeChecker)
 	if gate.checker == nil {
-		gate.known = newKnownWorkerScopes(source, refresh)
+		gate.known = NewKnownWorkerScopes(source, refresh)
 	}
 	return gate
 }
 
-// filter keeps the scopes that may run workers. Lookup failures drop the
+// Filter keeps the scopes that may run workers. Lookup failures drop the
 // scope for this pass; its work stays durable and is retried when the
 // scope is next scheduled.
-func (g *workScopeGate) filter(ctx context.Context, scopes []Scope) ([]Scope, error) {
+func (g *WorkScopeGate) Filter(ctx context.Context, scopes []models.Scope) ([]models.Scope, error) {
 	if g.checker == nil {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		return g.known.filter(ctx, g.now(), scopes)
 	}
-	result := make([]Scope, 0, len(scopes))
+	result := make([]models.Scope, 0, len(scopes))
 	var errs []error
 	for _, scope := range scopes {
 		active, err := g.active(ctx, scope)
@@ -281,7 +281,7 @@ func (g *workScopeGate) filter(ctx context.Context, scopes []Scope) ([]Scope, er
 	return result, errors.Join(errs...)
 }
 
-func (g *workScopeGate) active(ctx context.Context, scope Scope) (bool, error) {
+func (g *WorkScopeGate) active(ctx context.Context, scope models.Scope) (bool, error) {
 	now := g.now()
 	g.mu.Lock()
 	answer, ok := g.cache[scope]
@@ -306,37 +306,37 @@ func (g *workScopeGate) active(ctx context.Context, scope Scope) (bool, error) {
 	return active, nil
 }
 
-// poolActivity tracks whether a scope pool is doing anything, so a
+// PoolActivity tracks whether a scope pool is doing anything, so a
 // queue-driven supervisor can retire pools of idle scopes. A retired scope
 // costs nothing until the queue delivers its next item.
-type poolActivity struct {
+type PoolActivity struct {
 	busy atomic.Int32
 	last atomic.Int64
 }
 
-func (a *poolActivity) touch() { a.last.Store(time.Now().UnixNano()) }
+func (a *PoolActivity) Touch() { a.last.Store(time.Now().UnixNano()) }
 
-func (a *poolActivity) begin() {
+func (a *PoolActivity) Begin() {
 	a.busy.Add(1)
-	a.touch()
+	a.Touch()
 }
 
-func (a *poolActivity) end() {
-	a.touch()
+func (a *PoolActivity) End() {
+	a.Touch()
 	a.busy.Add(-1)
 }
 
-// idleFor returns how long the pool has done nothing, or zero while busy.
-func (a *poolActivity) idleFor(now time.Time) time.Duration {
+// IdleFor returns how long the pool has done nothing, or zero while busy.
+func (a *PoolActivity) IdleFor(now time.Time) time.Duration {
 	if a.busy.Load() > 0 {
 		return 0
 	}
 	return max(now.Sub(time.Unix(0, a.last.Load())), 0)
 }
 
-// poolRetireAfter is how long a queue-driven scope pool stays idle before its
+// PoolRetireAfter is how long a queue-driven scope pool stays idle before its
 // supervisor stops it. Its next deadline is already in the queue.
-const poolRetireAfter = time.Minute
+const PoolRetireAfter = time.Minute
 
 // BindQueue makes status schedule loop passes into queue. Call before the
 // loops start. The returned function publishes scheduled passes until its

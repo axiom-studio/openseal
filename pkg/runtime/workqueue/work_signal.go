@@ -1,4 +1,4 @@
-package runtime
+package workqueue
 
 import (
 	"context"
@@ -28,8 +28,8 @@ const (
 // claims, leases and fairness are always decided by the store.
 type WorkSignal struct {
 	Kind    WorkSignalKind
-	Family  WorkFamily
-	Scope   Scope
+	Family  models.WorkFamily
+	Scope   models.Scope
 	Rebuild bool
 }
 
@@ -68,9 +68,9 @@ func (s *WorkSignalStatus) bindPublisher(publisher *workPublisher) {
 	s.publisher = publisher
 }
 
-// queueBound reports whether a work queue drives this status, so loops wait
+// QueueBound reports whether a work queue drives this status, so loops wait
 // for it at startup instead of listing every scope.
-func (s *WorkSignalStatus) queueBound() bool {
+func (s *WorkSignalStatus) QueueBound() bool {
 	if s == nil {
 		return false
 	}
@@ -79,24 +79,24 @@ func (s *WorkSignalStatus) queueBound() bool {
 	return s.publisher != nil
 }
 
-// schedule asks the queue for a pass of family in scope at due. A nil due
+// Schedule asks the queue for a pass of family in scope at due. A nil due
 // schedules nothing: the scope has no time-based work.
-func (s *WorkSignalStatus) schedule(family WorkFamily, scope Scope, due *time.Time) {
+func (s *WorkSignalStatus) Schedule(family models.WorkFamily, scope models.Scope, due *time.Time) {
 	if s == nil || due == nil {
 		return
 	}
 	s.mu.Lock()
 	publisher := s.publisher
 	s.mu.Unlock()
-	publisher.schedule(WorkItem{Family: family, Scope: scope, DueAt: due.UTC()})
+	publisher.schedule(models.WorkItem{Family: family, Scope: scope, DueAt: due.UTC()})
 }
 
-// scheduleIn schedules a pass after delay, for spacing and backoff.
-func (s *WorkSignalStatus) scheduleIn(family WorkFamily, scope Scope, delay time.Duration) {
+// ScheduleIn schedules a pass after delay, for spacing and backoff.
+func (s *WorkSignalStatus) ScheduleIn(family models.WorkFamily, scope models.Scope, delay time.Duration) {
 	if s == nil {
 		return
 	}
-	s.schedule(family, scope, new(s.now().Add(delay)))
+	s.Schedule(family, scope, new(s.now().Add(delay)))
 }
 
 // Healthy reports whether loops may rely on signals instead of polling.
@@ -151,9 +151,9 @@ func (s *WorkSignalStatus) setHealthyLocked(healthy bool) {
 	s.changed = make(chan struct{})
 }
 
-// watch returns the current health and a channel closed on its next change.
+// Watch returns the current health and a channel closed on its next change.
 // A nil status is permanently unhealthy and never changes.
-func (s *WorkSignalStatus) watch() (bool, <-chan struct{}) {
+func (s *WorkSignalStatus) Watch() (bool, <-chan struct{}) {
 	if s == nil {
 		return false, nil
 	}
@@ -162,20 +162,20 @@ func (s *WorkSignalStatus) watch() (bool, <-chan struct{}) {
 	return s.health.Healthy, s.changed
 }
 
-// idleWait is how long an idle polling loop sleeps before its next probe.
-type idleWait struct {
+// IdleWait is how long an idle polling loop sleeps before its next probe.
+type IdleWait struct {
 	delay   time.Duration
 	forever bool
 }
 
-func pollWait(delay time.Duration) idleWait { return idleWait{delay: delay} }
+func PollWait(delay time.Duration) IdleWait { return IdleWait{delay: delay} }
 
-// waitForever sleeps until a wake: the next pass is scheduled in the queue.
-func waitForever() idleWait { return idleWait{forever: true} }
+// WaitForever sleeps until a wake: the next pass is scheduled in the queue.
+func WaitForever() IdleWait { return IdleWait{forever: true} }
 
-// waitIdle returns false only when ctx ends. A closed health channel ends the
+// WaitIdle returns false only when ctx ends. A closed health channel ends the
 // wait so the loop re-evaluates whether it may still rely on the queue.
-func waitIdle(ctx context.Context, wake, health <-chan struct{}, wait idleWait) bool {
+func WaitIdle(ctx context.Context, wake, health <-chan struct{}, wait IdleWait) bool {
 	var timeout <-chan time.Time
 	if !wait.forever {
 		timer := time.NewTimer(wait.delay)
@@ -192,7 +192,7 @@ func waitIdle(ctx context.Context, wake, health <-chan struct{}, wait idleWait) 
 	return true
 }
 
-func earliestDeadline(values ...*time.Time) *time.Time {
+func EarliestDeadline(values ...*time.Time) *time.Time {
 	var result *time.Time
 	for _, value := range values {
 		if value != nil && (result == nil || value.Before(*result)) {
@@ -203,28 +203,28 @@ func earliestDeadline(values ...*time.Time) *time.Time {
 	return result
 }
 
-// scopeWakeQueue multiplexes queue-driven reconciliation over many scopes in
+// ScopeWakeQueue multiplexes queue-driven reconciliation over many scopes in
 // one loop. A scope idle for the spacing interval runs at once; a scope that
 // ran within it is deferred to the end of the interval, so a busy scope never
 // runs more often than the fixed tick it replaces.
-type scopeWakeQueue struct {
+type ScopeWakeQueue struct {
 	mu       sync.Mutex
-	dirty    map[Scope]struct{}
-	lastRun  map[Scope]time.Time
-	failures map[Scope]int
+	dirty    map[models.Scope]struct{}
+	lastRun  map[models.Scope]time.Time
+	failures map[models.Scope]int
 	signal   chan struct{}
 }
 
-// signals receives once after one or more wakeScope calls.
-func (q *scopeWakeQueue) signals() <-chan struct{} { return q.signal }
+// Signals receives once after one or more WakeScope calls.
+func (q *ScopeWakeQueue) Signals() <-chan struct{} { return q.signal }
 
-func newScopeWakeQueue() *scopeWakeQueue {
-	return &scopeWakeQueue{dirty: make(map[Scope]struct{}), lastRun: make(map[Scope]time.Time), failures: make(map[Scope]int), signal: make(chan struct{}, 1)}
+func NewScopeWakeQueue() *ScopeWakeQueue {
+	return &ScopeWakeQueue{dirty: make(map[models.Scope]struct{}), lastRun: make(map[models.Scope]time.Time), failures: make(map[models.Scope]int), signal: make(chan struct{}, 1)}
 }
 
-// outcome returns when a failed scope should be retried, with exponential
+// Outcome returns when a failed scope should be retried, with exponential
 // backoff from base, or nil once the scope succeeds.
-func (q *scopeWakeQueue) outcome(scope Scope, err error, base time.Duration, now time.Time) *time.Time {
+func (q *ScopeWakeQueue) Outcome(scope models.Scope, err error, base time.Duration, now time.Time) *time.Time {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if err == nil {
@@ -232,10 +232,10 @@ func (q *scopeWakeQueue) outcome(scope Scope, err error, base time.Duration, now
 		return nil
 	}
 	q.failures[scope]++
-	return new(now.Add(workerPollDelay(base, q.failures[scope]-1, scope.Kind+":"+scope.ID)))
+	return new(now.Add(WorkerPollDelay(base, q.failures[scope]-1, scope.Kind+":"+scope.ID)))
 }
 
-func (q *scopeWakeQueue) wakeScope(scope Scope) {
+func (q *ScopeWakeQueue) WakeScope(scope models.Scope) {
 	if scope.Validate() != nil {
 		return
 	}
@@ -248,8 +248,8 @@ func (q *scopeWakeQueue) wakeScope(scope Scope) {
 	}
 }
 
-// ran records a full pass over scopes.
-func (q *scopeWakeQueue) ran(scopes []Scope, now time.Time) {
+// Ran records a full pass over scopes.
+func (q *ScopeWakeQueue) Ran(scopes []models.Scope, now time.Time) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, scope := range scopes {
@@ -257,16 +257,16 @@ func (q *scopeWakeQueue) ran(scopes []Scope, now time.Time) {
 	}
 }
 
-// take drains signalled scopes. A scope that ran within spacing is returned
+// Take drains signalled scopes. A scope that ran within spacing is returned
 // in deferred with the time its next pass may start.
-func (q *scopeWakeQueue) take(now time.Time, spacing time.Duration) (ready []Scope, deferred map[Scope]time.Time) {
+func (q *ScopeWakeQueue) Take(now time.Time, spacing time.Duration) (ready []models.Scope, deferred map[models.Scope]time.Time) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	ready = make([]Scope, 0, len(q.dirty))
+	ready = make([]models.Scope, 0, len(q.dirty))
 	for scope := range q.dirty {
 		if last, ran := q.lastRun[scope]; ran && spacing > 0 && now.Sub(last) < spacing {
 			if deferred == nil {
-				deferred = make(map[Scope]time.Time)
+				deferred = make(map[models.Scope]time.Time)
 			}
 			deferred[scope] = last.Add(spacing)
 			continue
@@ -293,26 +293,26 @@ func (q *scopeWakeQueue) take(now time.Time, spacing time.Duration) (ready []Sco
 	return ready, deferred
 }
 
-// knownWorkerScopes filters signalled scopes to the scope source's inventory
+// KnownWorkerScopes filters signalled scopes to the scope source's inventory
 // for sources without a point lookup. An unknown scope refreshes the
 // inventory at most once per refresh interval.
-type knownWorkerScopes struct {
+type KnownWorkerScopes struct {
 	source         WorkerScopeSource
 	refresh        time.Duration
-	known          map[Scope]struct{}
-	unknownChecked map[Scope]time.Time
+	known          map[models.Scope]struct{}
+	unknownChecked map[models.Scope]time.Time
 }
 
-func newKnownWorkerScopes(source WorkerScopeSource, refresh time.Duration) *knownWorkerScopes {
-	return &knownWorkerScopes{source: source, refresh: refresh, known: make(map[Scope]struct{}), unknownChecked: make(map[Scope]time.Time)}
+func NewKnownWorkerScopes(source WorkerScopeSource, refresh time.Duration) *KnownWorkerScopes {
+	return &KnownWorkerScopes{source: source, refresh: refresh, known: make(map[models.Scope]struct{}), unknownChecked: make(map[models.Scope]time.Time)}
 }
 
-func (k *knownWorkerScopes) list(ctx context.Context) ([]Scope, error) {
+func (k *KnownWorkerScopes) List(ctx context.Context) ([]models.Scope, error) {
 	scopes, err := k.source.ListWorkerScopes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	scopes = normalizedConversationRunScopes(scopes)
+	scopes = NormalizeScopes(scopes)
 	clear(k.known)
 	for _, scope := range scopes {
 		k.known[scope] = struct{}{}
@@ -320,14 +320,14 @@ func (k *knownWorkerScopes) list(ctx context.Context) ([]Scope, error) {
 	return scopes, nil
 }
 
-func (k *knownWorkerScopes) filter(ctx context.Context, now time.Time, scopes []Scope) ([]Scope, error) {
+func (k *KnownWorkerScopes) filter(ctx context.Context, now time.Time, scopes []models.Scope) ([]models.Scope, error) {
 	refreshed := false
-	result := make([]Scope, 0, len(scopes))
+	result := make([]models.Scope, 0, len(scopes))
 	for _, scope := range scopes {
 		if _, ok := k.known[scope]; !ok && !refreshed {
 			if checked, seen := k.unknownChecked[scope]; !seen || now.Sub(checked) >= k.refresh {
 				k.unknownChecked[scope] = now
-				if _, err := k.list(ctx); err != nil {
+				if _, err := k.List(ctx); err != nil {
 					return result, err
 				}
 				refreshed = true
@@ -341,9 +341,11 @@ func (k *knownWorkerScopes) filter(ctx context.Context, now time.Time, scopes []
 	return result, nil
 }
 
-func normalizedConversationRunScopes(scopes []Scope) []Scope {
-	seen := make(map[Scope]struct{}, len(scopes))
-	result := make([]Scope, 0, len(scopes))
+// NormalizeScopes drops invalid and duplicate scopes and sorts the rest by
+// kind and ID.
+func NormalizeScopes(scopes []models.Scope) []models.Scope {
+	seen := make(map[models.Scope]struct{}, len(scopes))
+	result := make([]models.Scope, 0, len(scopes))
 	for _, scope := range scopes {
 		if scope.Validate() != nil {
 			continue

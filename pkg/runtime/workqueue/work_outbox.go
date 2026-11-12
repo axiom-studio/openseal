@@ -1,7 +1,9 @@
-package runtime
+package workqueue
 
 import (
 	"context"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // WorkOutboxStore is a store whose committed work changes are recorded in a
@@ -13,10 +15,10 @@ type WorkOutboxStore interface {
 	// RelayWorkOutbox removes up to limit outbox rows, from every process,
 	// and hands them to publish in the same transaction: rows are only
 	// removed once publish succeeds. It returns how many rows it removed.
-	RelayWorkOutbox(ctx context.Context, limit int, publish func(context.Context, []WorkItem) error) (int, error)
+	RelayWorkOutbox(ctx context.Context, limit int, publish func(context.Context, []models.WorkItem) error) (int, error)
 	// ListPendingWork returns one item per family and scope with durable
 	// work that may need a pass, at its earliest deadline. Recent marks a
 	// rebuild after the queue lost its schedule: it adds scopes with recent
 	// conversation activity, which the claimable tables do not cover.
-	ListPendingWork(ctx context.Context, rebuild bool) ([]WorkItem, error)
+	ListPendingWork(ctx context.Context, rebuild bool) ([]models.WorkItem, error)
 }

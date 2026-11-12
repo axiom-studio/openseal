@@ -1,4 +1,4 @@
-package runtime
+package workqueue
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +19,7 @@ type scopePool interface {
 	IdleFor(time.Time) time.Duration
 }
 
-// scopePools keeps one pool per scope that has work.
+// ScopePools keeps one pool per scope that has work.
 //
 // While the work queue is healthy a scope gets a pool the first time the
 // queue delivers work for it, after a point check that the scope may run
@@ -29,20 +30,20 @@ type scopePool interface {
 // Without a healthy queue every listed scope keeps a polling pool, refreshed
 // each reconcile interval. A source failure leaves existing pools running so
 // a transient control-plane read cannot interrupt already leased work.
-type scopePools[P scopePool] struct {
+type ScopePools[P scopePool] struct {
 	name      string
 	source    WorkerScopeSource
-	gate      *workScopeGate
+	gate      *WorkScopeGate
 	interval  time.Duration
 	retire    time.Duration
-	dueFamily WorkFamily
+	dueFamily models.WorkFamily
 	logger    *zap.SugaredLogger
-	create    func(Scope) (P, error)
+	create    func(models.Scope) (P, error)
 
 	mu       sync.RWMutex
-	pools    map[Scope]P
+	pools    map[models.Scope]P
 	signals  *WorkSignalStatus
-	pending  map[Scope]struct{}
+	pending  map[models.Scope]struct{}
 	requests chan struct{}
 	cancel   context.CancelFunc
 	ctx      context.Context
@@ -50,15 +51,15 @@ type scopePools[P scopePool] struct {
 }
 
 // retire is how long a queue-driven pool stays idle before it stops;
-// supervisors pass poolRetireAfter.
-func newScopePools[P scopePool](name string, source WorkerScopeSource, interval, retire time.Duration, dueFamily WorkFamily, logger *zap.SugaredLogger, create func(Scope) (P, error)) *scopePools[P] {
-	return &scopePools[P]{
-		name: name, source: source, gate: newWorkScopeGate(source, interval), interval: interval, retire: retire, dueFamily: dueFamily,
-		logger: logger, create: create, pools: make(map[Scope]P), pending: make(map[Scope]struct{}), requests: make(chan struct{}, 1),
+// supervisors pass PoolRetireAfter.
+func NewScopePools[P scopePool](name string, source WorkerScopeSource, interval, retire time.Duration, dueFamily models.WorkFamily, logger *zap.SugaredLogger, create func(models.Scope) (P, error)) *ScopePools[P] {
+	return &ScopePools[P]{
+		name: name, source: source, gate: NewWorkScopeGate(source, interval), interval: interval, retire: retire, dueFamily: dueFamily,
+		logger: logger, create: create, pools: make(map[models.Scope]P), pending: make(map[models.Scope]struct{}), requests: make(chan struct{}, 1),
 	}
 }
 
-func (s *scopePools[P]) start(parent context.Context) {
+func (s *ScopePools[P]) Start(parent context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cancel != nil {
@@ -72,7 +73,7 @@ func (s *scopePools[P]) start(parent context.Context) {
 	go s.run(s.ctx)
 }
 
-func (s *scopePools[P]) stop() {
+func (s *ScopePools[P]) Stop() {
 	s.mu.Lock()
 	cancel := s.cancel
 	s.cancel = nil
@@ -93,7 +94,7 @@ func (s *scopePools[P]) stop() {
 	}
 }
 
-func (s *scopePools[P]) each(fn func(P)) {
+func (s *ScopePools[P]) Each(fn func(P)) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, pool := range s.pools {
@@ -101,12 +102,12 @@ func (s *scopePools[P]) each(fn func(P)) {
 	}
 }
 
-func (s *scopePools[P]) wake() { s.each(func(pool P) { pool.Wake() }) }
+func (s *ScopePools[P]) Wake() { s.Each(func(pool P) { pool.Wake() }) }
 
-// wakeScope wakes the scope's pool, or asks for one while the queue is
+// WakeScope wakes the scope's pool, or asks for one while the queue is
 // healthy. The read lock orders the wake before any retirement check, so a
 // woken pool is never retired by a concurrent pass.
-func (s *scopePools[P]) wakeScope(scope Scope) {
+func (s *ScopePools[P]) WakeScope(scope models.Scope) {
 	s.mu.RLock()
 	pool, ok := s.pools[scope]
 	signals := s.signals
@@ -121,17 +122,17 @@ func (s *scopePools[P]) wakeScope(scope Scope) {
 	s.mu.Lock()
 	s.pending[scope] = struct{}{}
 	s.mu.Unlock()
-	s.request()
+	s.Request()
 }
 
-func (s *scopePools[P]) request() {
+func (s *ScopePools[P]) Request() {
 	select {
 	case s.requests <- struct{}{}:
 	default:
 	}
 }
 
-func (s *scopePools[P]) setSignals(status *WorkSignalStatus) {
+func (s *ScopePools[P]) SetSignals(status *WorkSignalStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.signals = status
@@ -140,32 +141,32 @@ func (s *scopePools[P]) setSignals(status *WorkSignalStatus) {
 	}
 }
 
-func (s *scopePools[P]) count() int {
+func (s *ScopePools[P]) Count() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.pools)
 }
 
-func (s *scopePools[P]) currentSignals() *WorkSignalStatus {
+func (s *ScopePools[P]) currentSignals() *WorkSignalStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.signals
 }
 
-func (s *scopePools[P]) run(ctx context.Context) {
+func (s *ScopePools[P]) run(ctx context.Context) {
 	defer s.wg.Done()
 	signals := s.currentSignals()
 	// With a queue bound, wait for it rather than listing every scope at
 	// startup; listing starts only if the queue is still unhealthy at the
 	// first tick.
-	if !signals.queueBound() {
+	if !signals.QueueBound() {
 		s.reconcile(ctx)
 	}
 	ticker := time.NewTicker(min(s.interval, s.retire/2))
 	defer ticker.Stop()
 	lastReconcile := time.Now()
 	for {
-		healthy, healthChanged := signals.watch()
+		healthy, healthChanged := signals.Watch()
 		select {
 		case <-ctx.Done():
 			return
@@ -194,9 +195,9 @@ func (s *scopePools[P]) run(ctx context.Context) {
 }
 
 // admit starts pools for scopes the queue delivered work for.
-func (s *scopePools[P]) admit(ctx context.Context, signals *WorkSignalStatus) {
+func (s *ScopePools[P]) admit(ctx context.Context, signals *WorkSignalStatus) {
 	s.mu.Lock()
-	scopes := make([]Scope, 0, len(s.pending))
+	scopes := make([]models.Scope, 0, len(s.pending))
 	for scope := range s.pending {
 		if _, running := s.pools[scope]; !running {
 			scopes = append(scopes, scope)
@@ -207,17 +208,17 @@ func (s *scopePools[P]) admit(ctx context.Context, signals *WorkSignalStatus) {
 	if len(scopes) == 0 {
 		return
 	}
-	allowed, err := s.gate.filter(ctx, scopes)
+	allowed, err := s.gate.Filter(ctx, scopes)
 	if err != nil && ctx.Err() == nil {
 		s.logger.Warnw("worker scope admission failed", "workers", s.name, "error", err)
 		// The scopes' work is durable; ask the queue to deliver it again.
-		admitted := make(map[Scope]struct{}, len(allowed))
+		admitted := make(map[models.Scope]struct{}, len(allowed))
 		for _, scope := range allowed {
 			admitted[scope] = struct{}{}
 		}
 		for _, scope := range scopes {
 			if _, ok := admitted[scope]; !ok {
-				signals.scheduleIn(s.dueFamily, scope, s.interval)
+				signals.ScheduleIn(s.dueFamily, scope, s.interval)
 			}
 		}
 	}
@@ -228,7 +229,7 @@ func (s *scopePools[P]) admit(ctx context.Context, signals *WorkSignalStatus) {
 
 // startPool starts a scope pool. Queue admissions log quietly: scopes come
 // and go with their work.
-func (s *scopePools[P]) startPool(ctx context.Context, scope Scope, quiet bool) {
+func (s *ScopePools[P]) startPool(ctx context.Context, scope models.Scope, quiet bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, running := s.pools[scope]; running || ctx.Err() != nil {
@@ -251,7 +252,7 @@ func (s *scopePools[P]) startPool(ctx context.Context, scope Scope, quiet bool) 
 
 // retireIdle stops pools that have been idle long enough. Their next
 // deadlines are in the queue, which brings them back when due.
-func (s *scopePools[P]) retireIdle(now time.Time) {
+func (s *ScopePools[P]) retireIdle(now time.Time) {
 	s.mu.Lock()
 	retired := make([]P, 0)
 	for scope, pool := range s.pools {
@@ -267,7 +268,7 @@ func (s *scopePools[P]) retireIdle(now time.Time) {
 }
 
 // reconcile matches pools to the listed scopes while polling.
-func (s *scopePools[P]) reconcile(ctx context.Context) {
+func (s *ScopePools[P]) reconcile(ctx context.Context) {
 	scopes, err := s.source.ListWorkerScopes(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -275,7 +276,7 @@ func (s *scopePools[P]) reconcile(ctx context.Context) {
 		}
 		return
 	}
-	desired := make(map[Scope]struct{}, len(scopes))
+	desired := make(map[models.Scope]struct{}, len(scopes))
 	for _, scope := range scopes {
 		if err := scope.Validate(); err != nil {
 			s.logger.Warnw("ignoring invalid worker scope", "workers", s.name, "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
@@ -283,7 +284,7 @@ func (s *scopePools[P]) reconcile(ctx context.Context) {
 		}
 		desired[scope] = struct{}{}
 	}
-	ordered := make([]Scope, 0, len(desired))
+	ordered := make([]models.Scope, 0, len(desired))
 	for scope := range desired {
 		ordered = append(ordered, scope)
 	}

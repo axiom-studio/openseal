@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
@@ -92,7 +93,7 @@ func TestActionWorkerSupervisorStartStopIsIdempotent(t *testing.T) {
 	supervisor, err := NewActionWorkerSupervisor(
 		newTestKernelStore(t), skill.NewCatalog(), nil,
 		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
-		WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "tenant", ID: "1"}}, nil }),
+		workqueue.WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "tenant", ID: "1"}}, nil }),
 		zap.NewNop().Sugar(), DynamicActionWorkerConfig{ReconcileInterval: 5 * time.Millisecond},
 	)
 	if err != nil {

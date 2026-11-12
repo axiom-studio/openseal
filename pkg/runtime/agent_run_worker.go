@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -103,18 +104,18 @@ type AgentRunWorkerPool struct {
 	resolver             TurnRunnerResolver
 	logger               *zap.SugaredLogger
 	wake                 chan struct{}
-	maintenanceWake      *workerPollSignal
+	maintenanceWake      *workqueue.WorkerPollSignal
 	poolID               string
 	cancel               context.CancelFunc
 	wg                   sync.WaitGroup
 	startOnce            sync.Once
 	stopOnce             sync.Once
-	limiter              atomic.Pointer[WorkerLimiter]
-	signals              atomic.Pointer[WorkSignalStatus]
+	limiter              atomic.Pointer[workqueue.WorkerLimiter]
+	signals              atomic.Pointer[workqueue.WorkSignalStatus]
 	// deadlines lets a queue-driven pool schedule its next due Run or lease
 	// expiry instead of polling. Stores without it always poll.
 	deadlines AgentRunDeadlineStore
-	usage     poolActivity
+	usage     workqueue.PoolActivity
 	now       func() time.Time
 }
 
@@ -129,20 +130,20 @@ func (p *AgentRunWorkerPool) SetRunTerminalFinalizer(finalizer RunTerminalFinali
 	p.runFinalizer = finalizer
 }
 
-func (p *AgentRunWorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
+func (p *AgentRunWorkerPool) SetWorkerLimiter(limiter *workqueue.WorkerLimiter) {
 	p.limiter.Store(limiter)
 }
 
 // SetWorkSignals lets the pool schedule its next durable deadline into the
 // work queue and sleep until woken while status is healthy. Without it the
 // pool polls.
-func (p *AgentRunWorkerPool) SetWorkSignals(status *WorkSignalStatus) {
+func (p *AgentRunWorkerPool) SetWorkSignals(status *workqueue.WorkSignalStatus) {
 	p.signals.Store(status)
 }
 
 // IdleFor reports how long the pool has neither run nor been woken.
 func (p *AgentRunWorkerPool) IdleFor(now time.Time) time.Duration {
-	return p.usage.idleFor(now)
+	return p.usage.IdleFor(now)
 }
 
 func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
@@ -173,11 +174,11 @@ func newAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 		config: config, scheduler: NewAgentRunScheduler(store, opts...), portfolio: store, loop: loop,
 		wakeService: NewAgentRunWakeService(store, store, opts...), activity: NewRunActivityService(store, store, opts...),
 		runCommands: NewRunCommandService(store, opts...), now: clock,
-		resolver: resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: newWorkerPollSignal(),
+		resolver: resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: workqueue.NewWorkerPollSignal(),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
 	}
 	pool.deadlines, _ = store.(AgentRunDeadlineStore)
-	pool.usage.touch()
+	pool.usage.Touch()
 	if forkStore, ok := store.(RunForkStore); ok {
 		pool.forks = NewRunForkCoordinator(forkStore, opts...)
 		if _, indexed := forkStore.(RunDependencyReconciliationStore); indexed {
@@ -223,8 +224,8 @@ func (p *AgentRunWorkerPool) Stop() {
 }
 
 func (p *AgentRunWorkerPool) Wake() {
-	p.usage.touch()
-	p.maintenanceWake.notify()
+	p.usage.Touch()
+	p.maintenanceWake.Notify()
 	p.requestClaim()
 }
 
@@ -249,10 +250,10 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			return
 		case <-p.wake:
 		}
-		p.usage.begin()
-		release, acquireErr := p.limiter.Load().acquire(ctx)
+		p.usage.Begin()
+		release, acquireErr := p.limiter.Load().Acquire(ctx)
 		if acquireErr != nil {
-			p.usage.end()
+			p.usage.End()
 			return
 		}
 		run, err := p.scheduler.ClaimNext(ctx, AgentRunClaimRequest{
@@ -268,7 +269,7 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			p.logger.Errorw("failed to claim agent run", "workerId", workerID, "error", err)
 			if signals := p.signals.Load(); signals.Healthy() {
 				// No poll follows a failed claim while queue-driven.
-				signals.scheduleIn(WorkFamilyRunDue, p.config.Scope, workerPollDelay(p.config.PollInterval, 1, workerID))
+				signals.ScheduleIn(WorkFamilyRunDue, p.config.Scope, workqueue.WorkerPollDelay(p.config.PollInterval, 1, workerID))
 			}
 		}
 		if run != nil {
@@ -277,10 +278,10 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			// without making every idle worker poll durable storage independently.
 			p.requestClaim()
 			p.executeClaim(ctx, workerID, run)
-			p.maintenanceWake.notify()
+			p.maintenanceWake.Notify()
 		}
 		release()
-		p.usage.end()
+		p.usage.End()
 	}
 }
 
@@ -518,13 +519,13 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 	for {
 		// Capture before reconciliation so a committed enqueue during the scan
 		// remains visible when this loop subsequently waits.
-		_, observedWake := p.maintenanceWake.snapshot()
+		_, observedWake := p.maintenanceWake.Snapshot()
 		signals := p.signals.Load()
-		healthy, healthChanged := signals.watch()
-		p.usage.begin()
-		release, acquireErr := p.limiter.Load().acquire(ctx)
+		healthy, healthChanged := signals.Watch()
+		p.usage.Begin()
+		release, acquireErr := p.limiter.Load().Acquire(ctx)
 		if acquireErr != nil {
-			p.usage.end()
+			p.usage.End()
 			return
 		}
 		result, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, p.now())
@@ -543,13 +544,13 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 			forkDue, forkFailed := p.reconcileForkChildren(ctx)
 			finalizerDue := p.reconcileTerminalRunFinalizers(ctx)
 			release()
-			maintenanceDue = earliestDeadline(inboxDue, forkDue, finalizerDue)
+			maintenanceDue = workqueue.EarliestDeadline(inboxDue, forkDue, finalizerDue)
 			maintenanceFailed = inboxFailed || forkFailed
 		}
-		p.usage.end()
-		var wait idleWait
+		p.usage.End()
+		var wait workqueue.IdleWait
 		if !healthy || p.deadlines == nil || err != nil {
-			delay := workerPollDelay(p.config.PollInterval, consecutiveFailures, seed)
+			delay := workqueue.WorkerPollDelay(p.config.PollInterval, consecutiveFailures, seed)
 			if err == nil && result != nil && result.NextWakeAt != nil {
 				if due := time.Until(*result.NextWakeAt); due < delay {
 					delay = max(due, 0)
@@ -561,19 +562,19 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 				observedWake = nil
 				if healthy {
 					// A retired pool would miss its local retry; keep it queued.
-					signals.scheduleIn(WorkFamilyRunDue, p.config.Scope, delay)
+					signals.ScheduleIn(WorkFamilyRunDue, p.config.Scope, delay)
 				}
 			}
-			wait = pollWait(delay)
+			wait = workqueue.PollWait(delay)
 		} else {
 			// Queue-driven: schedule the earliest durable deadline and sleep
 			// until woken. Claim and maintenance state only changes through
 			// committed writes, which the outbox publishes, or through time,
 			// which these deadlines cover.
 			now := p.now()
-			p.usage.begin()
+			p.usage.Begin()
 			deadline, deadlineErr := p.deadlines.NextAgentRunDeadline(ctx, p.config.Scope, p.config.Kind, p.config.AssignedAgentID, now.UTC())
-			p.usage.end()
+			p.usage.End()
 			var next *time.Time
 			if deadlineErr != nil {
 				if ctx.Err() != nil {
@@ -581,21 +582,21 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 				}
 				deadlineFailures++
 				p.logger.Warnw("agent run deadline lookup failed", "scopeKind", p.config.Scope.Kind, "scopeId", p.config.Scope.ID, "error", deadlineErr)
-				next = new(now.Add(workerPollDelay(p.config.PollInterval, deadlineFailures, seed)))
+				next = new(now.Add(workqueue.WorkerPollDelay(p.config.PollInterval, deadlineFailures, seed)))
 			} else {
 				deadlineFailures = 0
-				next = earliestDeadline(deadline, result.NextWakeAt, maintenanceDue)
+				next = workqueue.EarliestDeadline(deadline, result.NextWakeAt, maintenanceDue)
 			}
 			if maintenanceFailed {
 				maintenanceFailures++
-				next = earliestDeadline(next, new(now.Add(workerPollDelay(p.config.PollInterval, maintenanceFailures, seed))))
+				next = workqueue.EarliestDeadline(next, new(now.Add(workqueue.WorkerPollDelay(p.config.PollInterval, maintenanceFailures, seed))))
 			} else {
 				maintenanceFailures = 0
 			}
-			signals.schedule(WorkFamilyRunDue, p.config.Scope, next)
-			wait = waitForever()
+			signals.Schedule(WorkFamilyRunDue, p.config.Scope, next)
+			wait = workqueue.WaitForever()
 		}
-		if !waitIdle(ctx, observedWake, healthChanged, wait) {
+		if !workqueue.WaitIdle(ctx, observedWake, healthChanged, wait) {
 			return
 		}
 	}

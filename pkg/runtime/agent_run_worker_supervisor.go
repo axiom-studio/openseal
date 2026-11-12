@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 )
 
@@ -74,18 +75,18 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 }
 
 // AgentRunWorkerSupervisor runs an isolated, kind-aware Run pool per scope
-// with Run work. See scopePools for when a scope has a pool.
+// with Run work. See workqueue.ScopePools for when a scope has a pool.
 type AgentRunWorkerSupervisor struct {
 	store    KernelStore
 	resolver TurnRunnerResolver
 	config   DynamicAgentRunWorkerConfig
 	logger   *zap.SugaredLogger
-	pools    *scopePools[*AgentRunWorkerPool]
+	pools    *workqueue.ScopePools[*AgentRunWorkerPool]
 
 	mu                sync.RWMutex
 	actions           *ActionCoordinator
 	runFinalizer      RunTerminalFinalizer
-	limiter           *WorkerLimiter
+	limiter           *workqueue.WorkerLimiter
 	executionPreparer AcceptedRunExecutionPreparer
 }
 
@@ -93,7 +94,7 @@ func (s *AgentRunWorkerSupervisor) SetRunTerminalFinalizer(finalizer RunTerminal
 	s.mu.Lock()
 	s.runFinalizer = finalizer
 	s.mu.Unlock()
-	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetRunTerminalFinalizer(finalizer) })
+	s.pools.Each(func(pool *AgentRunWorkerPool) { pool.SetRunTerminalFinalizer(finalizer) })
 }
 
 // SetActionCoordinator supplies the shared governed action lifecycle to every
@@ -102,20 +103,20 @@ func (s *AgentRunWorkerSupervisor) SetActionCoordinator(actions *ActionCoordinat
 	s.mu.Lock()
 	s.actions = actions
 	s.mu.Unlock()
-	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetActionCoordinator(actions) })
+	s.pools.Each(func(pool *AgentRunWorkerPool) { pool.SetActionCoordinator(actions) })
 }
 
-func (s *AgentRunWorkerSupervisor) SetWorkerLimiter(limiter *WorkerLimiter) {
+func (s *AgentRunWorkerSupervisor) SetWorkerLimiter(limiter *workqueue.WorkerLimiter) {
 	s.mu.Lock()
 	s.limiter = limiter
 	s.mu.Unlock()
-	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetWorkerLimiter(limiter) })
+	s.pools.Each(func(pool *AgentRunWorkerPool) { pool.SetWorkerLimiter(limiter) })
 }
 
 func NewAgentRunWorkerSupervisor(
 	store KernelStore,
 	resolver TurnRunnerResolver,
-	source WorkerScopeSource,
+	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicAgentRunWorkerConfig,
 ) (*AgentRunWorkerSupervisor, error) {
@@ -129,7 +130,7 @@ func NewAgentRunWorkerSupervisor(
 		logger = zap.NewNop().Sugar()
 	}
 	supervisor := &AgentRunWorkerSupervisor{store: store, resolver: resolver, config: config, logger: logger}
-	supervisor.pools = newScopePools("run:"+string(config.Kind), source, config.ReconcileInterval, poolRetireAfter, WorkFamilyRunDue, logger, supervisor.newPool)
+	supervisor.pools = workqueue.NewScopePools("run:"+string(config.Kind), source, config.ReconcileInterval, workqueue.PoolRetireAfter, WorkFamilyRunDue, logger, supervisor.newPool)
 	return supervisor, nil
 }
 
@@ -157,27 +158,27 @@ func (s *AgentRunWorkerSupervisor) newPool(scope Scope) (*AgentRunWorkerPool, er
 	return pool, nil
 }
 
-func (s *AgentRunWorkerSupervisor) Start(parent context.Context) { s.pools.start(parent) }
+func (s *AgentRunWorkerSupervisor) Start(parent context.Context) { s.pools.Start(parent) }
 
-func (s *AgentRunWorkerSupervisor) Stop() { s.pools.stop() }
+func (s *AgentRunWorkerSupervisor) Stop() { s.pools.Stop() }
 
-func (s *AgentRunWorkerSupervisor) Wake() { s.pools.wake() }
+func (s *AgentRunWorkerSupervisor) Wake() { s.pools.Wake() }
 
-func (s *AgentRunWorkerSupervisor) WakeScope(scope Scope) { s.pools.wakeScope(scope) }
+func (s *AgentRunWorkerSupervisor) WakeScope(scope Scope) { s.pools.WakeScope(scope) }
 
 // RefreshScopes lists worker scopes now while polling.
-func (s *AgentRunWorkerSupervisor) RefreshScopes() { s.pools.request() }
+func (s *AgentRunWorkerSupervisor) RefreshScopes() { s.pools.Request() }
 
 // SetWorkSignals binds the work queue status. Call before Start.
-func (s *AgentRunWorkerSupervisor) SetWorkSignals(status *WorkSignalStatus) {
-	s.pools.setSignals(status)
+func (s *AgentRunWorkerSupervisor) SetWorkSignals(status *workqueue.WorkSignalStatus) {
+	s.pools.SetSignals(status)
 }
 
-func (s *AgentRunWorkerSupervisor) ScopeCount() int { return s.pools.count() }
+func (s *AgentRunWorkerSupervisor) ScopeCount() int { return s.pools.Count() }
 
 func (s *AgentRunWorkerSupervisor) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
 	s.mu.Lock()
 	s.executionPreparer = preparer
 	s.mu.Unlock()
-	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetAcceptedRunExecutionPreparer(preparer) })
+	s.pools.Each(func(pool *AgentRunWorkerPool) { pool.SetAcceptedRunExecutionPreparer(preparer) })
 }

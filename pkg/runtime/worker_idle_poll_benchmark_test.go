@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -57,7 +58,7 @@ func BenchmarkActionWorkerIdleClaims(b *testing.B) {
 										b.Error(err)
 										return
 									}
-									if !waitForWorkerPoll(ctx, nil, workerPollDelay(interval, 0, workerID)) {
+									if !workqueue.WaitForWorkerPoll(ctx, nil, workqueue.WorkerPollDelay(interval, 0, workerID)) {
 										return
 									}
 								}
