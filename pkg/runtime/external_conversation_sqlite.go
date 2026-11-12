@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -947,32 +946,6 @@ func nullableSQLiteTime(value time.Time) interface{} {
 
 func sqliteUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique")
-}
-
-func normalizeExternalConversationPage(limit, offset int) (int, int) {
-	if limit <= 0 || limit > 500 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return limit, offset
-}
-
-func validExternalConversationInboxSave(current, next *models.ExternalConversationInboxItem, expectedRevision int64, leaseOwner string) bool {
-	return current != nil && next != nil && current.Revision == expectedRevision && next.Revision == expectedRevision+1 &&
-		current.Status == models.ExternalConversationInboxLeased && current.LeaseOwner == strings.TrimSpace(leaseOwner) &&
-		!next.UpdatedAt.Before(current.UpdatedAt) && !next.UpdatedAt.After(current.LeaseExpiresAt) &&
-		current.EndpointID == next.EndpointID && current.EndpointRevision == next.EndpointRevision &&
-		current.Adapter == next.Adapter && models.SameExternalConversationInboxIntent(current, next) &&
-		current.CreatedAt.Equal(next.CreatedAt)
-}
-
-func validExternalConversationDeliverySave(current, next *models.ExternalConversationDelivery, expectedRevision int64, leaseOwner string) bool {
-	return current != nil && next != nil && current.Revision == expectedRevision && next.Revision == expectedRevision+1 &&
-		current.Status == models.ExternalConversationDeliveryLeased && current.LeaseOwner == strings.TrimSpace(leaseOwner) &&
-		!next.UpdatedAt.Before(current.UpdatedAt) && !next.UpdatedAt.After(current.LeaseExpiresAt) &&
-		models.SameExternalConversationDeliveryIntent(current, next) && current.CreatedAt.Equal(next.CreatedAt)
 }
 
 func (s *SQLiteStore) SaveExternalConversationReplyProgress(ctx context.Context, scope Scope, id string, expectedRevision int64, progress ExternalConversationReplyProgress) error {

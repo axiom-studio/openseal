@@ -69,3 +69,16 @@ func RunSkillActor(run *AgentRun) skill.RunActor {
 func SkillUmbrella(owner ObjectiveOwner) skill.Umbrella {
 	return skill.Umbrella{Kind: skill.UmbrellaKind(owner.Type), ID: owner.ID}
 }
+
+func NormalizeRunSkillDependencyError(err error) error {
+	if err != nil && strings.Contains(err.Error(), ErrSkillRuntimeMaintenance.Error()) {
+		return ErrSkillRuntimeMaintenance
+	}
+	if err != nil && strings.Contains(err.Error(), ErrRunSkillDependencyUnavailable.Error()) {
+		return ErrRunSkillDependencyUnavailable
+	}
+	if err != nil && strings.Contains(err.Error(), ErrAcceptedRunExecution.Error()) {
+		return ErrAcceptedRunExecution
+	}
+	return err
+}

@@ -297,3 +297,10 @@ func CloneCallbackRegistration(value *CallbackRegistration) *CallbackRegistratio
 	_ = json.Unmarshal(encoded, &result)
 	return &result
 }
+
+func NormalizeStoredCallbackReceipt(value *CallbackEventReceipt) *CallbackEventReceipt {
+	if value != nil && value.AvailableAt.IsZero() {
+		value.AvailableAt = value.CreatedAt
+	}
+	return value
+}

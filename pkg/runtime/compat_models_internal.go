@@ -8,6 +8,7 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"time"
 
@@ -631,4 +632,74 @@ func failedConversationReportCandidate(run *AgentRun) bool {
 
 func terminalAgentTurnStatus(status AgentTurnStatus) bool {
 	return models.IsTerminalAgentTurnStatus(status)
+}
+
+// matchActionCredentialLeaseUmbrella forwards to models.CheckActionCredentialLeaseUmbrella.
+func matchActionCredentialLeaseUmbrella(lease models.ActionCredentialLease, run *models.AgentRun, binding *skill.Binding) error {
+	return models.CheckActionCredentialLeaseUmbrella(lease, run, binding)
+}
+
+// digestActionCredentialFieldSelection forwards to models.ActionCredentialFieldSelectionDigest.
+func digestActionCredentialFieldSelection(fields map[string][]string) (string, error) {
+	return models.ActionCredentialFieldSelectionDigest(fields)
+}
+
+// actionCredentialLeaseNonceDigest forwards to models.ActionCredentialLeaseNonceDigest.
+func actionCredentialLeaseNonceDigest(lease models.ActionCredentialLease) [sha256.Size]byte {
+	return models.ActionCredentialLeaseNonceDigest(lease)
+}
+
+// matchCurrentActionCredentialBinding forwards to models.CheckCurrentActionCredentialBinding.
+func matchCurrentActionCredentialBinding(lease models.ActionCredentialLease, call *models.ActionCall, binding *skill.Binding) error {
+	return models.CheckCurrentActionCredentialBinding(lease, call, binding)
+}
+
+// externalOperationClaimDigest forwards to models.ExternalOperationClaimDigest.
+func externalOperationClaimDigest(call *models.ActionCall) string {
+	return models.ExternalOperationClaimDigest(call)
+}
+
+// validateObjectiveActivity forwards to models.ValidateObjectiveActivity.
+func validateObjectiveActivity(objective *models.Objective, event *models.ActivityEvent) error {
+	return models.ValidateObjectiveActivity(objective, event)
+}
+
+// reconcileAgentRunbookActivations forwards to models.ReconcileAgentRunbookActivations.
+func reconcileAgentRunbookActivations(current []*models.RunbookActivation, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, updatedAt time.Time) ([]*models.RunbookActivation, error) {
+	return models.ReconcileAgentRunbookActivations(current, definition, deployment, updatedAt)
+}
+
+// normalizeStoredCallbackReceipt forwards to models.NormalizeStoredCallbackReceipt.
+func normalizeStoredCallbackReceipt(value *models.CallbackEventReceipt) *models.CallbackEventReceipt {
+	return models.NormalizeStoredCallbackReceipt(value)
+}
+
+// normalizeExternalConversationPage forwards to models.NormalizeExternalConversationPage.
+func normalizeExternalConversationPage(limit, offset int) (int, int) {
+	return models.NormalizeExternalConversationPage(limit, offset)
+}
+
+// validExternalConversationInboxSave forwards to models.IsValidExternalConversationInboxSave.
+func validExternalConversationInboxSave(current, next *models.ExternalConversationInboxItem, expectedRevision int64, leaseOwner string) bool {
+	return models.IsValidExternalConversationInboxSave(current, next, expectedRevision, leaseOwner)
+}
+
+// validExternalConversationDeliverySave forwards to models.IsValidExternalConversationDeliverySave.
+func validExternalConversationDeliverySave(current, next *models.ExternalConversationDelivery, expectedRevision int64, leaseOwner string) bool {
+	return models.IsValidExternalConversationDeliverySave(current, next, expectedRevision, leaseOwner)
+}
+
+// summarizeAgentRunOwners forwards to models.SummarizeAgentRunOwners.
+func summarizeAgentRunOwners(runs []*models.AgentRun, owners []models.ObjectiveOwner) []models.AgentRunOwnerSummary {
+	return models.SummarizeAgentRunOwners(runs, owners)
+}
+
+// pageObjectives forwards to models.PageObjectives.
+func pageObjectives(values []*models.Objective, offset, limit int) []*models.Objective {
+	return models.PageObjectives(values, offset, limit)
+}
+
+// normalizeRunSkillDependencyError forwards to models.NormalizeRunSkillDependencyError.
+func normalizeRunSkillDependencyError(err error) error {
+	return models.NormalizeRunSkillDependencyError(err)
 }

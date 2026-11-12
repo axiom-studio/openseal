@@ -842,13 +842,6 @@ func decodeApproval(payload string) (*ApprovalCheckpoint, error) {
 	return &approval, nil
 }
 
-func externalOperationClaimDigest(call *models.ActionCall) string {
-	if call == nil || call.DuplicateOfActionCallID != "" || !models.ExternalOperationProtects(call.Status) {
-		return ""
-	}
-	return call.ExternalOperationDigest
-}
-
 func insertSQLiteActionCall(ctx context.Context, exec sqliteExecer, call *ActionCall) error {
 	payload, err := json.Marshal(call)
 	if err != nil {

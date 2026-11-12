@@ -813,3 +813,29 @@ func CloneExternalConversationDelivery(value *ExternalConversationDelivery) *Ext
 	}
 	return &copy
 }
+
+func NormalizeExternalConversationPage(limit, offset int) (int, int) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+func IsValidExternalConversationInboxSave(current, next *ExternalConversationInboxItem, expectedRevision int64, leaseOwner string) bool {
+	return current != nil && next != nil && current.Revision == expectedRevision && next.Revision == expectedRevision+1 &&
+		current.Status == ExternalConversationInboxLeased && current.LeaseOwner == strings.TrimSpace(leaseOwner) &&
+		!next.UpdatedAt.Before(current.UpdatedAt) && !next.UpdatedAt.After(current.LeaseExpiresAt) &&
+		current.EndpointID == next.EndpointID && current.EndpointRevision == next.EndpointRevision &&
+		current.Adapter == next.Adapter && SameExternalConversationInboxIntent(current, next) &&
+		current.CreatedAt.Equal(next.CreatedAt)
+}
+
+func IsValidExternalConversationDeliverySave(current, next *ExternalConversationDelivery, expectedRevision int64, leaseOwner string) bool {
+	return current != nil && next != nil && current.Revision == expectedRevision && next.Revision == expectedRevision+1 &&
+		current.Status == ExternalConversationDeliveryLeased && current.LeaseOwner == strings.TrimSpace(leaseOwner) &&
+		!next.UpdatedAt.Before(current.UpdatedAt) && !next.UpdatedAt.After(current.LeaseExpiresAt) &&
+		SameExternalConversationDeliveryIntent(current, next) && current.CreatedAt.Equal(next.CreatedAt)
+}

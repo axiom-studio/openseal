@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -278,4 +279,124 @@ func validCredentialField(value string) bool {
 		}
 	}
 	return true
+}
+
+var (
+	ErrActionCredentialLeaseReplay = errors.New("action credential lease was already consumed")
+)
+
+// MatchActionCredentialLease rechecks a signed lease against current durable
+// state and the host's exact field allowlist. It is suitable for an
+// ActionCredentialLeaseRedeemer implementation inside its atomic boundary.
+func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string, credentialFields map[string][]string) error {
+	if err := lease.Validate(); err != nil {
+		return err
+	}
+	if err := CheckActionCredentialLeaseCore(lease, call, run, transport); err != nil {
+		return err
+	}
+	expectedFields, err := ActionCredentialFieldReferences(call.CredentialRefs, credentialFields)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(lease.Credentials, expectedFields) {
+		return ErrActionCredentialLeaseMismatch
+	}
+	return nil
+}
+
+// matchActionCredentialLeaseUmbrella requires the redeemed binding, stored
+// or supplied by the host, to belong to the run's umbrella: the Agent of a
+// 1:1 run or the Team of a Team run. A run delegated to another Agent has no
+// umbrella and redeems nothing.
+func CheckActionCredentialLeaseUmbrella(lease ActionCredentialLease, run *AgentRun, binding *skill.Binding) error {
+	actor := RunSkillActor(run)
+	if binding == nil || !actor.Valid() || binding.DeploymentID != lease.BindingOwnerID || binding.DeploymentID != actor.Umbrella.ID {
+		return ErrActionCredentialLeaseMismatch
+	}
+	return nil
+}
+
+func ActionCredentialFieldSelectionDigest(fields map[string][]string) (string, error) {
+	type fieldSelection struct {
+		Name   string   `json:"name"`
+		Fields []string `json:"fields"`
+	}
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	selections := make([]fieldSelection, 0, len(names))
+	for _, name := range names {
+		selected := append([]string(nil), fields[name]...)
+		sort.Strings(selected)
+		selections = append(selections, fieldSelection{Name: name, Fields: selected})
+	}
+	payload, err := json.Marshal(selections)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func ActionCredentialLeaseNonceDigest(lease ActionCredentialLease) [sha256.Size]byte {
+	return sha256.Sum256([]byte(lease.Issuer + "\x00" + lease.Audience + "\x00" + lease.Nonce))
+}
+
+func CheckCurrentActionCredentialBinding(lease ActionCredentialLease, call *ActionCall, binding *skill.Binding) error {
+	if call == nil || binding == nil || binding.Disabled ||
+		binding.Scope.Kind != lease.Scope.Kind || binding.Scope.ID != lease.Scope.ID ||
+		binding.DeploymentID != lease.BindingOwnerID || binding.ID != lease.BindingID || binding.Revision != lease.BindingRevision ||
+		binding.SkillID != lease.SkillID || binding.SkillVersion != lease.SkillVersion ||
+		!stringSliceContains(binding.AllowedActions, lease.Action) ||
+		riskLevelRank(call.Risk) < 0 || riskLevelRank(binding.MaximumRisk) < riskLevelRank(call.Risk) ||
+		!credentialReferencesContainExact(binding.Credentials, call.CredentialRefs) {
+		return ErrActionCredentialLeaseMismatch
+	}
+	return nil
+}
+
+// credentialReferencesContainExact permits a binding to carry credentials for
+// other actions or adapters while requiring every credential selected by the
+// durable ActionCall to match exactly. The trusted host independently derives
+// the selected names from the immutable action contract and MatchActionCredentialLease
+// rejects any extra or missing ActionCall credential.
+func credentialReferencesContainExact(available, selected map[string]skill.CredentialReference) bool {
+	if len(selected) == 0 || len(available) < len(selected) {
+		return false
+	}
+	for name, reference := range selected {
+		if available[name] != reference {
+			return false
+		}
+	}
+	return true
+}
+
+func stringSliceContains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func riskLevelRank(value skill.RiskLevel) int {
+	switch value {
+	case skill.RiskLevelRead:
+		return 0
+	case skill.RiskLevelWrite:
+		return 1
+	case skill.RiskLevelExternal:
+		return 2
+	case skill.RiskLevelProduction:
+		return 3
+	case skill.RiskLevelDestructive:
+		return 4
+	default:
+		return -1
+	}
 }

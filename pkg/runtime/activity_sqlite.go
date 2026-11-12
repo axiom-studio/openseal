@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func (s *SQLiteStore) CreateObjectiveWithEvent(ctx context.Context, objective *Objective, event *ActivityEvent) (*ActivityEvent, error) {
@@ -57,19 +55,6 @@ func (s *SQLiteStore) UpdateObjectiveWithEvent(ctx context.Context, objective *O
 		}
 		return nil
 	})
-}
-
-func validateObjectiveActivity(objective *models.Objective, event *models.ActivityEvent) error {
-	if err := objective.Validate(); err != nil {
-		return err
-	}
-	if err := event.Validate(); err != nil {
-		return err
-	}
-	if objective.Scope != event.Scope || objective.ID != event.ObjectiveID || event.RunID != "" {
-		return models.ErrInvalidScope
-	}
-	return nil
 }
 
 func (s *SQLiteStore) CreateAgentRunWithEvent(ctx context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error) {

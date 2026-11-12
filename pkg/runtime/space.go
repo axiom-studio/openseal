@@ -17,9 +17,6 @@ import (
 // creates in a scope is that owner's default space: it cannot be deleted and
 // receives the conversations of the other spaces the owner deletes.
 var (
-	// ErrNoDefaultSpace reports that the owner has no default space in the
-	// scope: they have not created a space there yet.
-	ErrNoDefaultSpace = errors.New("this owner has no default space")
 	// ErrTeamAgentOutsideSpace refuses a Team roster Agent that is not in
 	// every space the Team is in.
 	ErrTeamAgentOutsideSpace = errors.New("a team's agents must be in its space")

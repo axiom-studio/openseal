@@ -726,3 +726,48 @@ func CloneAgentRun(in *AgentRun) *AgentRun {
 	out.Kind = NormalizeRunKind(out.Kind)
 	return &out
 }
+
+func SummarizeAgentRunOwners(runs []*AgentRun, owners []ObjectiveOwner) []AgentRunOwnerSummary {
+	requested := make(map[string]ObjectiveOwner, len(owners))
+	for _, owner := range owners {
+		requested[string(owner.Type)+"\x1f"+owner.ID] = owner
+	}
+	summaries := make(map[string]AgentRunOwnerSummary, len(owners))
+	for _, run := range runs {
+		key := string(run.Owner.Type) + "\x1f" + run.Owner.ID
+		owner, ok := requested[key]
+		if !ok {
+			continue
+		}
+		summary := summaries[key]
+		summary.Owner = owner
+		summary.RunCount++
+		if summary.LastRunAt == nil || run.CreatedAt.After(*summary.LastRunAt) {
+			at := run.CreatedAt
+			summary.LastRunAt = &at
+			summary.LastStatus = run.Status
+		}
+		summaries[key] = summary
+	}
+	result := make([]AgentRunOwnerSummary, 0, len(summaries))
+	for _, owner := range owners {
+		if summary, ok := summaries[string(owner.Type)+"\x1f"+owner.ID]; ok {
+			result = append(result, summary)
+		}
+	}
+	return result
+}
+
+func PageObjectives(values []*Objective, offset, limit int) []*Objective {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(values) {
+		return []*Objective{}
+	}
+	values = values[offset:]
+	if limit > 0 && limit < len(values) {
+		values = values[:limit]
+	}
+	return values
+}

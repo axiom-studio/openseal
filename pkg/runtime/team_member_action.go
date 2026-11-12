@@ -21,10 +21,6 @@ const (
 	TeamActionUpdateProfile    = "update_profile"
 	TeamActionCreateTeam       = "create_team"
 	TeamManagementEndpoint     = "kernel://teams"
-
-	// TeamMemberAmendmentField is the amendment policy field that lets an
-	// Agent change a member's purpose or channel participation.
-	TeamMemberAmendmentField = "members"
 )
 
 // IsSupportedTeamManagementSkillVersion reports a version of openseal.teams

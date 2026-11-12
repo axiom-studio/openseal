@@ -23,3 +23,10 @@ type ExternalOperationConflictError struct {
 func (e *ExternalOperationConflictError) Error() string { return ErrExternalOperationClaimed.Error() }
 
 func (e *ExternalOperationConflictError) Unwrap() error { return ErrExternalOperationClaimed }
+
+func ExternalOperationClaimDigest(call *ActionCall) string {
+	if call == nil || call.DuplicateOfActionCallID != "" || !ExternalOperationProtects(call.Status) {
+		return ""
+	}
+	return call.ExternalOperationDigest
+}

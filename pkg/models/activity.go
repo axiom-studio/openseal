@@ -160,3 +160,16 @@ func CloneActivityEvent(in *ActivityEvent) *ActivityEvent {
 	_ = json.Unmarshal(data, &out)
 	return &out
 }
+
+func ValidateObjectiveActivity(objective *Objective, event *ActivityEvent) error {
+	if err := objective.Validate(); err != nil {
+		return err
+	}
+	if err := event.Validate(); err != nil {
+		return err
+	}
+	if objective.Scope != event.Scope || objective.ID != event.ObjectiveID || event.RunID != "" {
+		return ErrInvalidScope
+	}
+	return nil
+}

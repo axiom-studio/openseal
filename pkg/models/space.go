@@ -274,3 +274,9 @@ func ApplySpacePatch(space *Space, patch SpacePatch, now time.Time) {
 	}
 	space.UpdatedAt = now
 }
+
+var (
+	// ErrNoDefaultSpace reports that the owner has no default space in the
+	// scope: they have not created a space there yet.
+	ErrNoDefaultSpace = errors.New("this owner has no default space")
+)

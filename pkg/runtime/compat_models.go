@@ -378,3 +378,14 @@ func ValidateSkillRuntimeMaintenanceContext(ctx context.Context, gate *SkillRunt
 func AddSkillRuntimeMaintenanceBindingDigest(h hash.Hash, b SkillRuntimeMaintenanceBindingRevision) error {
 	return models.AddSkillRuntimeMaintenanceBindingDigest(h, b)
 }
+
+var ErrActionCredentialLeaseReplay = models.ErrActionCredentialLeaseReplay
+
+// MatchActionCredentialLease forwards to models.MatchActionCredentialLease.
+func MatchActionCredentialLease(lease models.ActionCredentialLease, call *models.ActionCall, run *models.AgentRun, transport string, credentialFields map[string][]string) error {
+	return models.MatchActionCredentialLease(lease, call, run, transport, credentialFields)
+}
+
+var ErrNoDefaultSpace = models.ErrNoDefaultSpace
+
+const TeamMemberAmendmentField = models.TeamMemberAmendmentField
