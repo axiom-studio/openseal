@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -30,7 +31,7 @@ func TestPostgresSkillSetupLifecycleAndMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	request := setupRequestFixture()
+	request := skillbindingtest.SkillSetupRequest()
 	if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}

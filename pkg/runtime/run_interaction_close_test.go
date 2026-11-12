@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -38,7 +39,7 @@ func interactionCall(scope Scope, runID, id, action, key, requestID string) *Act
 // pending, and the card stayed in the chat. Ending a Run closes the in-chat
 // requests it left open.
 func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
-	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
+	ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
 		"kind": "payment_card", "reason": "Add your card so I can pay 319.00 INR on amazon.in"})
 	run := f.run
@@ -88,7 +89,7 @@ func TestCompletedRunKeepsSetupFormsButClosesCredentialRequests(t *testing.T) {
 
 // A Run that failed after its setup form went up leaves the form open too.
 func testFinishedRunKeepsSetupForms(t *testing.T, status AgentRunStatus) {
-	ctx, store, _, _, scope := credentialRequestDispatchFixture(t)
+	ctx, store, _, _, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 	now := time.Now().UTC()
 	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 		AssignedAgentID: "agent", Goal: "Reply in the chat", Source: RunSourceChat})

@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -63,27 +64,6 @@ func TestCredentialRequestStoresScopeCASAndTerminalState(t *testing.T) {
 	}
 }
 
-func credentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *skillbinding.SkillBindingActionDispatcher, Scope) {
-	t.Helper()
-	ctx := context.Background()
-	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "a"}
-	catalog := skillActionCatalog(t, ctx, scope, "agent")
-	if err := catalog.Bind(ctx, &skill.Binding{ID: "interaction-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent",
-		SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, AllowedActions: []string{agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestCredential}, MaximumRisk: skill.RiskLevelRead}); err != nil {
-		t.Fatal(err)
-	}
-	// The bundled live browser is never in the installable catalog.
-	provider := skill.DiscoveryProviderFunc(func(context.Context, skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
-		return &skill.DiscoveryPage{}, nil
-	})
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ctx, store, catalog, dispatcher, scope
-}
-
 func proposeInteraction(t *testing.T, ctx context.Context, store *sqlite.Store, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) *AgentRun {
 	t.Helper()
 	f, _ := proposeInteractionCall(t, ctx, store, catalog, scope, action, arguments)
@@ -124,7 +104,7 @@ func assertRunNotParkedByCall(t *testing.T, f *loopProposalFixture) *AgentRun {
 }
 
 func TestRequestCredentialParksRunUntilTheUserSavesIt(t *testing.T) {
-	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
+	ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
 		"kind": "website_login", "website": "https://www.amazon.in/", "reason": "Add your amazon.in login so I can finish the order"})
 	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
@@ -162,7 +142,7 @@ func TestFailedInteractionRequestsAreExplainedInsteadOfFailingTheRun(t *testing.
 		"credential with a page URL": {agentrun.SkillActionRequestCredential, map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in/ap/signin?x=1", "reason": "Add your amazon.in login"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
+			ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 			f, call := proposeInteractionCall(t, ctx, store, catalog, scope, tc.action, tc.arguments)
 			executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 			refused, _ := executed.Call.Output["refused"].(map[string]interface{})
@@ -198,7 +178,7 @@ func mustConversationChanges(t *testing.T, ctx context.Context, store *sqlite.St
 // A member asking in a Team chat saves the request to the Team, stamped with
 // the member that asked; the member's own umbrella never sees it.
 func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
-	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
+	ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 	crew := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
 	deploymentScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	// The store records one definition activation per deployment revision.

@@ -7,6 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -24,9 +25,9 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			store := newTestKernelStore(t)
+			store := skillbindingtest.NewStore(t)
 			scope := models.Scope{Kind: "tenant", ID: "a"}
-			catalog := skillActionCatalog(t, ctx, scope, "agent")
+			catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent")
 			provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 				return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessUnavailable, Compatibility: tc.checks}}}, nil
 			})
@@ -34,7 +35,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+			run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 			run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 			before, _ := catalog.ListBindings(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "agent")
 			if tc.allowed {

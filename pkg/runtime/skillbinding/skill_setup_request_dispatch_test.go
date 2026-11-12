@@ -10,15 +10,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := skillbindingtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
-	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
+	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
 	provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		if r.Scope.ID != "a" || r.DeploymentID != "agent" {
 			t.Fatal("authority not derived from run")
@@ -29,7 +30,7 @@ func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Read the community", "requiredActions": []interface{}{"read"}}
 	input := agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}
@@ -65,10 +66,10 @@ func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing
 
 func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := skillbindingtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
-	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
+	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
 	provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		if r.Scope.ID != "a" || r.DeploymentID != "agent" {
 			t.Fatal("authority not derived from run")
@@ -79,7 +80,7 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Read the community", "requiredActions": []interface{}{"read"}}
 	input := agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}
@@ -115,9 +116,9 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 
 func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := skillbindingtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
-	catalog := skillActionCatalog(t, ctx, scope, "agent")
+	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent")
 	discoveries := 0
 	provider := skill.DiscoveryProviderFunc(func(context.Context, skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		discoveries++
@@ -127,7 +128,7 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "connect"}
 	now := time.Now().UTC()
@@ -155,10 +156,10 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 
 func TestSkillSetupResolvesAnOmittedSourceFromTheCatalog(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := skillbindingtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
-	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
+	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
 	sources := []string{"https://github.com/axiom-studio/skills::skill-mcp"}
 	provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		items := []skill.DiscoveryCandidate{}
@@ -171,7 +172,7 @@ func TestSkillSetupResolvesAnOmittedSourceFromTheCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	// The shape DeepSeek sent: no sourceIdentity.
 	args := map[string]interface{}{"kind": "configure", "skillId": "skill-mcp", "skillVersion": "latest", "reason": "Connect Supabase's MCP server"}

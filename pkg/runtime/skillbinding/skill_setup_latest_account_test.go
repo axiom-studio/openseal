@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -33,8 +34,8 @@ type latestSetupTestFixture struct {
 
 func newLatestSetupTestFixture(t *testing.T, source string) *latestSetupTestFixture {
 	t.Helper()
-	f := &latestSetupTestFixture{ctx: context.Background(), scope: models.Scope{Kind: "tenant", ID: "a"}, store: newTestKernelStore(t), source: source}
-	f.catalog = skillActionCatalog(t, f.ctx, f.scope, "agent")
+	f := &latestSetupTestFixture{ctx: context.Background(), scope: models.Scope{Kind: "tenant", ID: "a"}, store: skillbindingtest.NewStore(t), source: source}
+	f.catalog = skillbindingtest.SkillActionCatalog(t, f.ctx, f.scope, "agent")
 	f.locations = []latestSetupTestLocation{{scope: skill.ScopeReference{Kind: "tenant", ID: "a"}, deploymentID: "agent"}}
 	if source != "" {
 		f.registerDefinition(t, "reddit.reader", "1.0.0", source)
@@ -52,7 +53,7 @@ func newLatestSetupTestFixture(t *testing.T, source string) *latestSetupTestFixt
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.run = createClaimedSkillActionRun(t, f.ctx, f.store, f.scope, "agent", "worker")
+	f.run = skillbindingtest.ClaimedSkillActionRun(t, f.ctx, f.store, f.scope, "agent", "worker")
 	f.run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	return f
 }
@@ -67,7 +68,7 @@ func latestSetupTestCandidate(version, source string) skill.DiscoveryCandidate {
 
 func (f *latestSetupTestFixture) registerDefinition(t *testing.T, id, version, source string) {
 	t.Helper()
-	definition := redditSkillDefinition()
+	definition := skillbindingtest.RedditSkillDefinition()
 	definition.ID, definition.Version = id, version
 	if source != "" {
 		definition.Source = &skill.SourceProvenance{Identity: source, Format: "openclaw.skill.v1", Publisher: "fixture"}

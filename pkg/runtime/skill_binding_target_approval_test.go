@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -30,31 +31,31 @@ func modePolicy(mode ConversationApprovalMode) ActionPolicyEvaluator {
 // targetedSkillCoordinator is Finn's claimed chat Run in the skills target
 // fixture, with researcher and Finn already connected to Reddit, and a
 // coordinator deciding with policy.
-func targetedSkillCoordinator(t *testing.T, policy ActionPolicyEvaluator) (*skillTargetFixture, *AgentRun, *ActionCoordinator) {
+func targetedSkillCoordinator(t *testing.T, policy ActionPolicyEvaluator) (*skillbindingtest.TargetFixture, *AgentRun, *ActionCoordinator) {
 	t.Helper()
-	f := newSkillTargetFixture(t)
+	f := skillbindingtest.NewTargetFixture(t)
 	for _, deploymentID := range []string{"researcher", "finn"} {
-		if _, err := f.catalog.UpsertBinding(f.ctx, skill.UpsertBindingRequest{Binding: &skill.Binding{
-			ID: "reddit", Scope: f.skillScope, DeploymentID: deploymentID, SkillID: "reddit.reader", SkillVersion: "1.0.0",
+		if _, err := f.Catalog.UpsertBinding(f.Ctx, skill.UpsertBindingRequest{Binding: &skill.Binding{
+			ID: "reddit", Scope: f.SkillScope, DeploymentID: deploymentID, SkillID: "reddit.reader", SkillVersion: "1.0.0",
 			AllowedActions: []string{}, MaximumRisk: skill.RiskLevelRead,
 			Credentials: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "credential://tenant-a/reddit-" + deploymentID}},
 		}, Actor: skill.BindingActor{Type: "user", ID: "operator"}, Reason: "Connect Reddit"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	run := f.chatRun(t, "finn")
-	claimed, err := f.store.ClaimNextAgentRun(f.ctx, AgentRunClaim{
-		Scope: f.scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
+	run := f.ChatRun(t, "finn")
+	claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, AgentRunClaim{
+		Scope: f.Scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	return f, claimed, NewActionCoordinator(f.store, f.store, f.catalog, policy, []ActionProposalValidator{f.validator})
+	return f, claimed, NewActionCoordinator(f.Store, f.Store, f.Catalog, policy, []ActionProposalValidator{f.Validator})
 }
 
-func targetedSkillRequest(f *skillTargetFixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) ProposeActionRequest {
+func targetedSkillRequest(f *skillbindingtest.TargetFixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) ProposeActionRequest {
 	return loopProposeRequest(ProposeActionRequest{
-		Scope: f.scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
+		Scope: f.Scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
 		SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: action,
 		Arguments: arguments, Summary: "Give Researcher the Reddit reader",
 	}, toolCallID)
@@ -64,10 +65,10 @@ func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
 	disable := map[string]interface{}{"bindingId": "reddit", "expectedRevision": 1, skillbinding.SkillActionTargetAgentArgument: "researcher"}
 	for _, mode := range []ConversationApprovalMode{ConversationApprovalAuto, ConversationApprovalSkip, ConversationApprovalManual} {
 		for action, arguments := range map[string]map[string]interface{}{
-			skillbinding.SkillActionUpsertBinding: readerUpsertArguments("researcher"), skillbinding.SkillActionDisableBinding: disable,
+			skillbinding.SkillActionUpsertBinding: skillbindingtest.ReaderUpsertArguments("researcher"), skillbinding.SkillActionDisableBinding: disable,
 		} {
 			f, run, coordinator := targetedSkillCoordinator(t, modePolicy(mode))
-			result, err := coordinator.Propose(f.ctx, targetedSkillRequest(f, run, action, arguments, action))
+			result, err := coordinator.Propose(f.Ctx, targetedSkillRequest(f, run, action, arguments, action))
 			if err != nil {
 				t.Fatalf("%s %s: %v", mode, action, err)
 			}
@@ -84,7 +85,7 @@ func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
 			if !isTargetedSkillBindingApproval(approval) || !approvedOnlyByPerson(approval) || isAgentBuilderApproval(approval) {
 				t.Fatalf("%s %s card is not a targeted skills card: %#v", mode, action, approval.ProposedAction)
 			}
-			if binding, _ := f.catalog.GetBinding(f.ctx, f.skillScope, "researcher", "reddit"); binding == nil || binding.Revision != 1 || binding.Disabled {
+			if binding, _ := f.Catalog.GetBinding(f.Ctx, f.SkillScope, "researcher", "reddit"); binding == nil || binding.Revision != 1 || binding.Disabled {
 				t.Fatalf("%s %s changed the target before review: %#v", mode, action, binding)
 			}
 		}
@@ -92,7 +93,7 @@ func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
 
 	// The builder's own Skills keep the chat's approval mode.
 	f, run, coordinator := targetedSkillCoordinator(t, modePolicy(ConversationApprovalAuto))
-	own, err := coordinator.Propose(f.ctx, targetedSkillRequest(f, run, skillbinding.SkillActionUpsertBinding, readerUpsertArguments(""), "own"))
+	own, err := coordinator.Propose(f.Ctx, targetedSkillRequest(f, run, skillbinding.SkillActionUpsertBinding, skillbindingtest.ReaderUpsertArguments(""), "own"))
 	if err != nil || own.Approval != nil {
 		t.Fatalf("untargeted upsert in auto mode = %#v, %v", own, err)
 	}
@@ -103,11 +104,11 @@ func TestTargetedSkillBindingChangeCannotBeAllowedByPolicy(t *testing.T) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "host allows everything"}, nil
 	})
 	f, run, coordinator := targetedSkillCoordinator(t, allow)
-	_, err := coordinator.Propose(f.ctx, targetedSkillRequest(f, run, skillbinding.SkillActionUpsertBinding, readerUpsertArguments("researcher"), "allowed"))
+	_, err := coordinator.Propose(f.Ctx, targetedSkillRequest(f, run, skillbinding.SkillActionUpsertBinding, skillbindingtest.ReaderUpsertArguments("researcher"), "allowed"))
 	if err == nil || !strings.Contains(err.Error(), "always requires explicit review") {
 		t.Fatalf("an allowed targeted upsert was not refused: %v", err)
 	}
-	calls, err := f.store.ListActionCalls(f.ctx, ActionFilter{Scope: f.scope, RunID: run.ID})
+	calls, err := f.Store.ListActionCalls(f.Ctx, ActionFilter{Scope: f.Scope, RunID: run.ID})
 	if err != nil || len(calls) != 0 {
 		t.Fatalf("refused proposal recorded calls %#v, %v", calls, err)
 	}

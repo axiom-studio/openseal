@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -16,13 +17,13 @@ import (
 // this run, and the refusal names the connected tools to use instead.
 func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := skillbindingtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
-	catalog := skillActionCatalog(t, ctx, scope, "agent")
-	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent")
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
-	hosted := hostConnectorCatalog(t, scope, map[string]bool{run.ID: true})
-	if err := catalog.Register(ctx, mustDefinition(t, hosted, "openseal.connector")); err != nil {
+	hosted := skillbindingtest.HostConnectorCatalog(t, scope, map[string]bool{run.ID: true})
+	if err := catalog.Register(ctx, skillbindingtest.MustDefinition(t, hosted, "openseal.connector")); err != nil {
 		t.Fatal(err)
 	}
 	catalog.SetHostBindingProvider(func(ctx context.Context, scope skill.ScopeReference, deploymentID string, actor skill.RunActor) (*skill.HostBindingSet, error) {

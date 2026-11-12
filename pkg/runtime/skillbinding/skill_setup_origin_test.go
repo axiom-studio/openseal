@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -14,22 +15,42 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+// newOriginTestStore opens a SQLite store on a fresh file and the test's own
+// connection to that file, both closed when the test ends. It is a copy of
+// runtime's newTestSQLiteStore; change both.
+func newOriginTestStore(t *testing.T) (*sqlite.Store, *sql.DB) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	store, err := sqlite.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return store, db
+}
+
 // skillSetupTaskFixture also returns the test's own connection to the
 // store's file, for the rows the tests tamper with.
 func skillSetupTaskFixture(t *testing.T) (*skillbinding.SkillBindingActionDispatcher, *sqlite.Store, *sql.DB, *models.ConversationTaskResult) {
 	t.Helper()
-	store, db := newTestSQLiteStore(t)
+	store, db := newOriginTestStore(t)
 	start := skillSetupTaskStart(t, store)
 	result, err := runtime.NewConversationTaskService(store).Start(t.Context(), start)
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog := skillActionCatalog(t, t.Context(), start.Scope, "agent")
+	catalog := skillbindingtest.SkillActionCatalog(t, t.Context(), start.Scope, "agent")
 	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reader", Readiness: skill.DiscoveryReadinessBindable}}}, nil
 	}))

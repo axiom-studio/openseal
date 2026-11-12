@@ -9,14 +9,11 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func setupRequestFixture() *SkillSetupRequest {
-	now := time.Now().UTC()
-	return &SkillSetupRequest{ID: "request-1", Scope: Scope{Kind: "tenant", ID: "a"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: "configure", SkillID: "reddit.reader", SkillVersion: "1.0.0", SkillName: "Reddit", Reason: "Read the requested community", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
-}
 func TestSkillSetupStoresScopeCASAndTerminalState(t *testing.T) {
 	ctx := context.Background()
 	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "setup.db"))
@@ -26,7 +23,7 @@ func TestSkillSetupStoresScopeCASAndTerminalState(t *testing.T) {
 	defer sqlite.Close()
 	for name, store := range map[string]SkillSetupRequestStore{"sqlite": sqlite} {
 		t.Run(name, func(t *testing.T) {
-			r := setupRequestFixture()
+			r := skillbindingtest.SkillSetupRequest()
 			if err := store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
 				t.Fatal(err)
 			}
@@ -72,7 +69,7 @@ func TestSkillSetupSurvivesSQLiteReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := setupRequestFixture()
+	r := skillbindingtest.SkillSetupRequest()
 	if err := store.SaveSkillSetupRequest(context.Background(), r, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +89,7 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "a"}
-	catalog := skillActionCatalog(t, ctx, scope, "agent")
+	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent")
 	if err := catalog.Bind(ctx, &skill.Binding{ID: "setup-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, AllowedActions: []string{agentrun.SkillActionRequestSetup, skillbinding.SkillActionListSetupRequests}, MaximumRisk: skill.RiskLevelRead}); err != nil {
 		t.Fatal(err)
 	}

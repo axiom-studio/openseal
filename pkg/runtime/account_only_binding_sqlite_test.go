@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -15,7 +16,7 @@ func TestSQLiteAccountOnlyBindingPersistsWithoutExecutionAuthority(t *testing.T)
 	}
 	defer store.Close()
 	catalog := skill.NewCatalogWithStore(store)
-	def := redditSkillDefinition()
+	def := skillbindingtest.RedditSkillDefinition()
 	if err := catalog.Register(t.Context(), def); err != nil {
 		t.Fatal(err)
 	}

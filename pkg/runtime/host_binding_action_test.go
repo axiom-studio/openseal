@@ -9,51 +9,11 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
-
-// hostConnectorCatalog registers a connector Skill whose bindings the host
-// supplies per run, as connected apps are: only runs in allowed get the
-// linear binding.
-func hostConnectorCatalog(t *testing.T, scope Scope, allowed map[string]bool) *skill.Catalog {
-	t.Helper()
-	input := map[string]interface{}{
-		"type": "object", "additionalProperties": false,
-		"properties": map[string]interface{}{
-			"tool": map[string]interface{}{"type": "string"}, "hash": map[string]interface{}{"type": "string"},
-			"arguments": map[string]interface{}{"type": "object"},
-		},
-		"required": []interface{}{"tool", "hash", "arguments"},
-	}
-	catalog := skill.NewCatalog()
-	if err := catalog.Register(t.Context(), &skill.Definition{
-		ID: "openseal.connector", Version: "1.0.0", Name: "Connector", Transport: skill.TransportReference{Kind: "local", Endpoint: "internal://connector"},
-		BindingTools: &skill.BindingToolsSpec{ModelPrefix: "mcp", ReadAction: "read", WriteAction: "call", InputArgument: "arguments", FixedArguments: []string{"tool", "hash"}},
-		Actions: map[string]skill.Action{
-			"read": {Name: "read", Description: "Call a read-only tool", InputSchema: input, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported},
-			"call": {Name: "call", Description: "Call a tool", InputSchema: input, Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationForbidden},
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	schema := map[string]interface{}{"type": "object", "properties": map[string]interface{}{"title": map[string]interface{}{"type": "string"}}}
-	catalog.SetHostBindingProvider(func(_ context.Context, skillScope skill.ScopeReference, deploymentID string, actor skill.RunActor) (*skill.HostBindingSet, error) {
-		if skillScope.ID != scope.ID || !allowed[actor.RunID] {
-			return nil, nil
-		}
-		return &skill.HostBindingSet{Fingerprint: "linear@1", Services: map[string][]string{"mcp:linear": {"linear", "Linear"}}, Bindings: []*skill.Binding{{
-			ID: "mcp:linear", Revision: 1, Scope: skillScope, DeploymentID: deploymentID, SkillID: "openseal.connector", SkillVersion: "1.0.0",
-			AllowedActions: []string{"read", "call"}, MaximumRisk: skill.RiskLevelWrite, Slug: "linear",
-			Tools: []skill.BindingTool{
-				{Name: "create_issue", Description: "Create a Linear issue", Effect: skill.BindingToolEffectWrite, InputSchema: schema, Arguments: map[string]interface{}{"tool": "create_issue", "hash": "linear-create_issue"}},
-				{Name: "search", Description: "Search Linear issues", Effect: skill.BindingToolEffectRead, InputSchema: schema, Arguments: map[string]interface{}{"tool": "search", "hash": "linear-search"}},
-			},
-		}}}, nil
-	})
-	return catalog
-}
 
 // durableCatalog makes the coordinator fence proposals as a store-backed
 // catalog does.
@@ -69,7 +29,7 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	claimed := claimedOwnedActionRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
 	// Another run in the workspace, e.g. another user's chat.
 	other := claimedOwnedActionRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
-	catalog := hostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})
+	catalog := skillbindingtest.HostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})
 	allow := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only"}, nil
 	})
@@ -173,7 +133,7 @@ func TestSQLiteCredentialRedemptionOfHostBindings(t *testing.T) {
 func TestRoutineGrantsCoverHostBindingTools(t *testing.T) {
 	f := routineGrantFixture(t)
 	allowed := map[string]bool{f.run.ID: true}
-	hosted := hostConnectorCatalog(t, f.run.Scope, allowed)
+	hosted := skillbindingtest.HostConnectorCatalog(t, f.run.Scope, allowed)
 	provider := func(ctx context.Context, scope skill.ScopeReference, deploymentID string, actor skill.RunActor) (*skill.HostBindingSet, error) {
 		set, err := hosted.HostBindings(ctx, scope, deploymentID, actor)
 		return set, err
@@ -225,13 +185,4 @@ func TestRoutineGrantsCoverHostBindingTools(t *testing.T) {
 	if _, err := proposeCreateIssue(later, "disconnected"); !errors.Is(err, skill.ErrBindingUnavailable) {
 		t.Fatalf("a run without the connection used it: %v", err)
 	}
-}
-
-func mustDefinition(t *testing.T, catalog *skill.Catalog, id string) *skill.Definition {
-	t.Helper()
-	definition, err := catalog.GetDefinition(t.Context(), id, "1.0.0")
-	if err != nil || definition == nil {
-		t.Fatalf("definition %s: %v", id, err)
-	}
-	return definition
 }

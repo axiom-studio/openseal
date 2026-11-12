@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -22,7 +23,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
-	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
+	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
 	policy := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{
 			Disposition: ActionDispositionRequireApproval, Reason: "Skill access requires review",
@@ -34,7 +35,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		t.Fatal(err)
 	}
 	coordinator := NewActionCoordinator(store, store, catalog, policy, []ActionProposalValidator{validator})
-	f := newLoopProposalFixture(t, store, createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-upsert"), "worker-upsert", time.Now().UTC())
+	f := newLoopProposalFixture(t, store, skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-upsert"), "worker-upsert", time.Now().UTC())
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	// A person connects the account; the model may only change the rest.
 	if _, err := catalog.UpsertBinding(ctx, skill.UpsertBindingRequest{Binding: &skill.Binding{
@@ -138,7 +139,7 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
-	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
+	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
 	var received skill.DiscoveryRequest
 	provider := skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		received = request
@@ -169,7 +170,7 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 		t.Fatal(err)
 	}
 	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
-	f := newLoopProposalFixture(t, store, createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-discover"), "worker-discover", time.Now().UTC())
+	f := newLoopProposalFixture(t, store, skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-discover"), "worker-discover", time.Now().UTC())
 	proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
 		DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: skillbinding.SkillActionDiscoverBinding,
 		Arguments: map[string]interface{}{
@@ -234,7 +235,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
-	catalog := skillActionCatalog(t, ctx, scope, "agent-a")
+	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent-a")
 	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, newTestKernelStore(t))
 	management := skillbinding.SkillManagementSkill()
 	bound, err := catalog.Resolve(ctx, skillScope, "agent-a", management.ID, management.Version, skillbinding.SkillActionUpsertBinding)
@@ -271,7 +272,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 		t.Fatal("unknown Skill reached approval")
 	}
 
-	sourced := redditSkillDefinition()
+	sourced := skillbindingtest.RedditSkillDefinition()
 	sourced.ID = "sourced.reader"
 	sourced.Source = &capability.SourceProvenance{Identity: "catalog://publisher/reddit@1.0.0", Format: "openclaw"}
 	if err := catalog.Register(ctx, sourced); err != nil {
@@ -428,48 +429,6 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	}
 }
 
-func skillActionCatalog(t *testing.T, ctx context.Context, scope Scope, deploymentID string) *skill.Catalog {
-	t.Helper()
-	catalog := skill.NewCatalog()
-	if err := catalog.Register(ctx, skillbinding.SkillManagementSkill()); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.Register(ctx, redditSkillDefinition()); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.Bind(ctx, &skill.Binding{
-		ID: "skills", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID,
-		SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
-		AllowedActions: []string{skillbinding.SkillActionDiscoverBinding, skillbinding.SkillActionUpsertBinding, skillbinding.SkillActionDisableBinding}, MaximumRisk: skill.RiskLevelWrite,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return catalog
-}
-
-func redditSkillDefinition() *skill.Definition {
-	return &skill.Definition{
-		ID: "reddit.reader", Version: "1.0.0", Name: "Reddit Reader", Description: "Read configured communities.",
-		Transport: skill.TransportReference{Kind: "http", Endpoint: "https://reddit.example"},
-		BindingConfigSchema: map[string]interface{}{
-			"type": "object", "additionalProperties": false,
-			"properties": map[string]interface{}{"subreddits": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}},
-		},
-		Prompt: &capability.PromptModule{
-			Instructions: "Use Reddit evidence.", UserInvocable: true,
-			Credentials: []skill.CredentialRequirement{{Name: "reddit", Kind: "reddit-oauth"}},
-		},
-		Actions: map[string]skill.Action{
-			"read": {
-				Name: "read", Description: "Read Reddit posts.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead,
-				Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
-				Credentials: []skill.CredentialRequirement{{Name: "reddit", Kind: "reddit-oauth"}},
-				InputSchema: map[string]interface{}{"type": "object"}, OutputSchema: map[string]interface{}{"type": "object"},
-			},
-		},
-	}
-}
-
 func slackConversationSkillDefinition() *skill.Definition {
 	return &skill.Definition{
 		ID: "slack", Version: "1.0.0", Name: "Slack",
@@ -498,22 +457,6 @@ func slackConversationSkillDefinition() *skill.Definition {
 			},
 		}},
 	}
-}
-
-func createClaimedSkillActionRun(t *testing.T, ctx context.Context, store *sqlite.Store, scope Scope, deploymentID, workerID string) *AgentRun {
-	t.Helper()
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, AssignedAgentID: deploymentID,
-		Goal: "Manage Skills", Source: RunSourceChat,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: workerID, Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || claimed == nil || claimed.ID != run.ID {
-		t.Fatalf("claim = %#v, %v", claimed, err)
-	}
-	return claimed
 }
 
 // approveParkedSkillAction parks f's Run on proposal's approval at step end,

@@ -9,12 +9,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestFindAppsListsCatalogAppsAndWhetherTheyAreConnected(t *testing.T) {
-	ctx, store, _, dispatcher, scope, connected := connectAppFixture(t)
-	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	ctx, store, _, dispatcher, scope, connected := skillbindingtest.ConnectAppFixture(t)
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	result, err := dispatcher.FindApps(ctx, agentrun.ActionDispatchInput{Arguments: map[string]interface{}{"query": "linear", "limit": 8}}, run, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +47,7 @@ func TestFindAppsListsCatalogAppsAndWhetherTheyAreConnected(t *testing.T) {
 }
 
 func TestFindAppsAlsoListsSkillsTheUserCanSetUp(t *testing.T) {
-	ctx, store, _, dispatcher, scope, _ := connectAppFixture(t)
+	ctx, store, _, dispatcher, scope, _ := skillbindingtest.ConnectAppFixture(t)
 	var queried skill.DiscoveryRequest
 	dispatcher.SetDiscovery(skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		queried = request
@@ -57,7 +58,7 @@ func TestFindAppsAlsoListsSkillsTheUserCanSetUp(t *testing.T) {
 				Compatibility: []skill.DiscoveryCompatibility{{Requirement: "network", Compatible: false, Evidence: "egress blocked"}}},
 		}}, nil
 	}))
-	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	result, err := dispatcher.FindApps(ctx, agentrun.ActionDispatchInput{Arguments: map[string]interface{}{"query": "gmail", "limit": 3}}, run, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +83,8 @@ func TestFindAppsAlsoListsSkillsTheUserCanSetUp(t *testing.T) {
 }
 
 func TestRequestConnectionByAddressAndRefusals(t *testing.T) {
-	ctx, store, _, dispatcher, scope, connected := connectAppFixture(t)
-	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	ctx, store, _, dispatcher, scope, connected := skillbindingtest.ConnectAppFixture(t)
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	result, err := dispatcher.RequestConnection(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "custom"}, Arguments: map[string]interface{}{"app": map[string]interface{}{"address": "https://MCP.Example.com/mcp"}}}, run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 	if err != nil {
@@ -131,12 +132,12 @@ func isInteractionRefusal(err error) bool {
 // An app is only ever connected and a Skill only ever set up: each action
 // refuses the other type and names the right one.
 func TestAppsAndSkillsCannotTakeEachOthersSetupPath(t *testing.T) {
-	ctx, store, _, dispatcher, scope, _ := connectAppFixture(t)
+	ctx, store, _, dispatcher, scope, _ := skillbindingtest.ConnectAppFixture(t)
 	dispatcher.SetDiscovery(skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "google-workspace", Version: "1.4.0", SourceIdentity: "axiomstudio/skill-google-workspace",
 			Name: "Google Workspace", Readiness: skill.DiscoveryReadinessNeedsInstallation}}}, nil
 	}))
-	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	var refusal *skillbinding.InteractionRequestRefusal
 
@@ -170,12 +171,12 @@ func TestAppsAndSkillsCannotTakeEachOthersSetupPath(t *testing.T) {
 // A per_person app is asked of the person in the run; a card is reused only
 // within its own run and for the same person.
 func TestRequestConnectionPerPersonModeAndNoCrossRunReuse(t *testing.T) {
-	ctx, store, catalog, dispatcher, scope, _ := connectAppFixture(t)
+	ctx, store, catalog, dispatcher, scope, _ := skillbindingtest.ConnectAppFixture(t)
 	catalog.SetHostBindingProvider(func(context.Context, skill.ScopeReference, string, skill.RunActor) (*skill.HostBindingSet, error) {
 		return &skill.HostBindingSet{Fingerprint: "personal", PersonalApps: map[string]string{"linear": "Linear"}}, nil
 	})
 	umbrella := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
-	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	run.ActingUser = "7"
 	first, err := dispatcher.RequestConnection(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "first"}, Arguments: map[string]interface{}{"app": "linear"}}, run, "agent", umbrella, umbrella)

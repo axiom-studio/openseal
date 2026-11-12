@@ -8,15 +8,16 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestSetupListReportsSavedBindingAccessWithoutCredentials(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
 		ctx := context.Background()
-		store := newTestKernelStore(t)
-		r := setupRequestFixture()
-		catalog := skillActionCatalog(t, ctx, r.Scope, r.DeploymentID)
+		store := skillbindingtest.NewStore(t)
+		r := skillbindingtest.SkillSetupRequest()
+		catalog := skillbindingtest.SkillActionCatalog(t, ctx, r.Scope, r.DeploymentID)
 		b := &skill.Binding{ID: "saved", Revision: 1, Scope: skill.ScopeReference{Kind: r.Scope.Kind, ID: r.Scope.ID}, DeploymentID: r.DeploymentID, SkillID: r.SkillID, SkillVersion: r.SkillVersion, AllowedActions: []string{"read"}, EnablePrompt: true, MaximumRisk: skill.RiskLevelRead, Credentials: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "credential://private-account"}}}
 		if err := catalog.Bind(ctx, b); err != nil {
 			t.Fatal(err)
@@ -64,7 +65,7 @@ func TestSetupListReportsSavedBindingAccessWithoutCredentials(t *testing.T) {
 		if strings.Contains(string(encoded), "private-account") || strings.Contains(string(encoded), "credentials") {
 			t.Fatalf("account details exposed: %s", encoded)
 		}
-		mismatched := setupRequestFixture()
+		mismatched := skillbindingtest.SkillSetupRequest()
 		mismatched.ID = "request-other-version"
 		mismatched.ActionCallID = "call-other-version"
 		mismatched.SkillVersion = "different"

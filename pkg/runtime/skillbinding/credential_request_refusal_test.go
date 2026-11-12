@@ -7,12 +7,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestRepeatedRefusedSetupIsNotRetriedInTheSameRun(t *testing.T) {
-	ctx, store, _, dispatcher, scope := credentialRequestDispatchFixture(t)
-	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	ctx, store, _, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
+	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 	args := map[string]interface{}{"kind": "configure", "skillId": "skill-live-browser", "skillVersion": "latest", "reason": "connect"}
 	refused := &models.ActionCall{ID: "refused", Scope: scope, RunID: run.ID, DeploymentID: "agent", SkillID: models.SkillManagementSkillID, Action: agentrun.SkillActionRequestSetup,

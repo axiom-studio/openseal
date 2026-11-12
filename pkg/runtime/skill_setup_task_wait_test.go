@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -116,7 +117,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if err != nil || run == nil || run.ID != task.WorkRun.ID {
 		t.Fatalf("claim setup task: %#v %v", run, err)
 	}
-	catalog := skillActionCatalog(t, t.Context(), task.Task.Scope, task.Task.TargetAgentID)
+	catalog := skillbindingtest.SkillActionCatalog(t, t.Context(), task.Task.Scope, task.Task.TargetAgentID)
 	targetVersion := "1.0.0"
 	if len(accountVersion) > 0 {
 		durable, ok := store.(skill.CatalogStore)
@@ -128,7 +129,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 			t.Fatal(err)
 		}
 		for _, version := range []string{"1.0.0", "2.0.0"} {
-			definition := redditSkillDefinition()
+			definition := skillbindingtest.RedditSkillDefinition()
 			definition.Version = version
 			definition.Source = &skill.SourceProvenance{Identity: sourceIdentity, Format: "openseal.dev/v1alpha1"}
 			if err := catalog.Register(t.Context(), definition); err != nil {
@@ -367,7 +368,7 @@ func TestSkillSetupTaskReconciliationRecoversResolutionBeforeWait(t *testing.T) 
 
 func (f *skillSetupTaskWaitFixture) upgrade(t *testing.T) {
 	t.Helper()
-	installed := redditSkillDefinition()
+	installed := skillbindingtest.RedditSkillDefinition()
 	installed.Version, installed.Name = "2.0.0", "Reddit Reader 2"
 	installed.Source = &skill.SourceProvenance{Identity: f.request.SourceIdentity, Format: "openseal.dev/v1alpha1"}
 	if err := f.catalog.Register(t.Context(), installed); err != nil {
