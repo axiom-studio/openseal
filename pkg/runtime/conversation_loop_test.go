@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"encoding/json"
@@ -9,8 +9,10 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -30,7 +32,7 @@ func TestChatRunAnswersFromSessionNotGoal(t *testing.T) {
 		producer := &chatLoopProducer{answers: []string{"Friday."}}
 		binding := f.bind(run, producer)
 		exit := f.drive(run, binding)
-		if exit.Reason != RunLoopExitFinal || exit.Run.Status != AgentRunStatusCompleted {
+		if exit.Reason != runtime.RunLoopExitFinal || exit.Run.Status != models.AgentRunStatusCompleted {
 			t.Fatalf("exit = %s, run %s", exit.Reason, exit.Run.Status)
 		}
 		if len(producer.paths) != 1 {
@@ -40,7 +42,7 @@ func TestChatRunAnswersFromSessionNotGoal(t *testing.T) {
 		chatLoopExpectShape(t, rendered, "user:"+earlier.ID, "user:"+trigger.ID, "note:run_context:"+run.ID)
 		for _, entry := range rendered {
 			text := chatLoopEntryText(entry)
-			if entry.User != nil && entry.User.Origin != UserEntryChannelMessage || strings.Contains(text, run.Goal) || strings.Contains(text, `"goal"`) {
+			if entry.User != nil && entry.User.Origin != models.UserEntryChannelMessage || strings.Contains(text, run.Goal) || strings.Contains(text, `"goal"`) {
 				t.Fatalf("goal JSON reached the step: %#v %q", entry, text)
 			}
 		}
@@ -49,15 +51,15 @@ func TestChatRunAnswersFromSessionNotGoal(t *testing.T) {
 		}
 		answers := f.agentMessages()
 		if len(answers) != 1 || answers[0].Content != "Friday." || answers[0].ReplyToMessageID != trigger.ID ||
-			answers[0].References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: run.ID}) {
+			answers[0].References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRun, ID: run.ID}) {
 			t.Fatalf("answers = %#v", answers)
 		}
 		session := f.run(run.ID).SessionID
-		if session != binding.Session.ID || session != conversationSessionID(run.Scope, run.ConcurrencyKey) {
+		if session != binding.Session.ID || session != models.ConversationSessionID(run.Scope, run.ConcurrencyKey) {
 			t.Fatalf("run session %q, binding %q", session, binding.Session.ID)
 		}
 		// The read receipt follows the committed watermark.
-		cursor, err := f.service.GetCursor(f.ctx, run.Scope, f.conversation.ID, ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"})
+		cursor, err := f.service.GetCursor(f.ctx, run.Scope, f.conversation.ID, models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent-1"})
 		if err != nil || cursor == nil || cursor.ReadSequence < trigger.Sequence {
 			t.Fatalf("agent cursor = %#v, %v (trigger %d)", cursor, err, trigger.Sequence)
 		}
@@ -74,7 +76,7 @@ func TestSecondMessageSeesFirstExchangeAsLogEntries(t *testing.T) {
 		run2 := f.startRun(second)
 		producer := &chatLoopProducer{answers: []string{"Added."}}
 		exit := f.drive(run2, f.bind(run2, producer))
-		if exit.Run.Status != AgentRunStatusCompleted || len(producer.paths) != 1 {
+		if exit.Run.Status != models.AgentRunStatusCompleted || len(producer.paths) != 1 {
 			t.Fatalf("exit = %#v, steps %d", exit, len(producer.paths))
 		}
 		rendered := producer.paths[0]
@@ -99,17 +101,17 @@ func TestFollowUpFromSamePersonAppendedAtNextStepOnce(t *testing.T) {
 
 		followUp := f.post("follow-up", "user-1", "Only the risks, please.")
 		current := f.run(run.ID)
-		updated := cloneAgentRun(current)
-		updated.PendingInterventions = append(updated.PendingInterventions, AgentRunIntervention{
-			ID: conversationFollowUpInterventionID(run.Scope, followUp.ID), Actor: ActivityActor{Type: "user", ID: "user-1"},
+		updated := models.CloneAgentRun(current)
+		updated.PendingInterventions = append(updated.PendingInterventions, models.AgentRunIntervention{
+			ID: models.ConversationFollowUpInterventionID(run.Scope, followUp.ID), Actor: models.ActivityActor{Type: "user", ID: "user-1"},
 			Instruction: followUp.Content, CreatedAt: f.now,
-			ConversationMessage: &ConversationMessageDelivery{ConversationID: f.conversation.ID, MessageID: followUp.ID, Sequence: followUp.Sequence, Sender: followUp.Sender},
+			ConversationMessage: &models.ConversationMessageDelivery{ConversationID: f.conversation.ID, MessageID: followUp.ID, Sequence: followUp.Sequence, Sender: followUp.Sender},
 		})
 		updated.Revision++
-		if _, err := f.store.UpdateAgentRunWithEvent(f.ctx, updated, current.Revision, &ActivityEvent{
-			ID: "follow-up-" + uuid.NewString()[:8], Scope: run.Scope, EventType: "run.updated", Severity: ActivitySeverityInfo,
-			RunID: run.ID, Actor: ActivityActor{Type: "worker", ID: chatLoopWorker}, Summary: "Follow-up delivered",
-			Visibility: ActivityVisibilityScope, CreatedAt: f.now,
+		if _, err := f.store.UpdateAgentRunWithEvent(f.ctx, updated, current.Revision, &models.ActivityEvent{
+			ID: "follow-up-" + uuid.NewString()[:8], Scope: run.Scope, EventType: "run.updated", Severity: models.ActivitySeverityInfo,
+			RunID: run.ID, Actor: models.ActivityActor{Type: "worker", ID: chatLoopWorker}, Summary: "Follow-up delivered",
+			Visibility: models.ActivityVisibilityScope, CreatedAt: f.now,
 		}, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -138,7 +140,7 @@ func TestOtherPersonsMessageStartsOwnRunAndInterleavesAfterApprovalPark(t *testi
 		f.prepare(runA, bindingA, 1)
 		// A's governed call is held for approval; A parks.
 		f.stepEntries(runA, bindingA.Session.ID, "a-step-1", 1,
-			ModelToolCall{ID: "send", Name: "billing__send_invoice", Arguments: json.RawMessage(`{"invoice":"7"}`)})
+			models.ModelToolCall{ID: "send", Name: "billing__send_invoice", Arguments: json.RawMessage(`{"invoice":"7"}`)})
 
 		triggerB := f.post("b", "user-2", "What is on my calendar?")
 		runB := f.startRun(triggerB)
@@ -170,8 +172,8 @@ func TestRunActionsPresentWithoutActiveWork(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 		definition := agentrun.RunManagementSkill()
 		pause := capability.ModelAction{
-			Name: "openseal_runs__pause", SkillID: RunManagementSkillID, Version: agentrun.RunManagementSkillVersion,
-			Action: RunActionPause, InputSchema: definition.Actions[RunActionPause].InputSchema,
+			Name: "openseal_runs__pause", SkillID: models.RunManagementSkillID, Version: agentrun.RunManagementSkillVersion,
+			Action: models.RunActionPause, InputSchema: definition.Actions[models.RunActionPause].InputSchema,
 		}
 		other := capability.ModelAction{Name: "reports__export", SkillID: "reports", Action: "export"}
 		quiet := f.post("quiet", "user-1", "Hello")
@@ -180,9 +182,9 @@ func TestRunActionsPresentWithoutActiveWork(t *testing.T) {
 		if len(binding.ModelActions) != 2 || binding.ModelActions[0].Name != pause.Name {
 			t.Fatalf("idle chat actions = %#v", binding.ModelActions)
 		}
-		refusal, err := binding.ToolCheck(f.ctx, agentrun.StepToolsInput{Run: idle, Binding: binding}, &SessionEntry{
-			Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: "call",
-			Tool: &ToolEntry{Name: pause.Name, Arguments: json.RawMessage(`{"runId":"nope"}`)},
+		refusal, err := binding.ToolCheck(f.ctx, agentrun.StepToolsInput{Run: idle, Binding: binding}, &models.SessionEntry{
+			Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: "call",
+			Tool: &models.ToolEntry{Name: pause.Name, Arguments: json.RawMessage(`{"runId":"nope"}`)},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -197,19 +199,19 @@ func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 		definition := agentrun.RunManagementSkill()
 		pause := capability.ModelAction{
-			Name: "openseal_runs__pause", SkillID: RunManagementSkillID, Version: agentrun.RunManagementSkillVersion,
-			Action: RunActionPause, InputSchema: definition.Actions[RunActionPause].InputSchema,
+			Name: "openseal_runs__pause", SkillID: models.RunManagementSkillID, Version: agentrun.RunManagementSkillVersion,
+			Action: models.RunActionPause, InputSchema: definition.Actions[models.RunActionPause].InputSchema,
 		}
 		resume := pause
-		resume.Name, resume.Action, resume.InputSchema = "openseal_runs__resume", RunActionResume, definition.Actions[RunActionResume].InputSchema
+		resume.Name, resume.Action, resume.InputSchema = "openseal_runs__resume", models.RunActionResume, definition.Actions[models.RunActionResume].InputSchema
 		other := capability.ModelAction{Name: "reports__export", SkillID: "reports", Action: "export"}
 
 		trigger := f.post("pause", "user-1", "Pause the export.")
 		run := f.startRun(trigger)
-		portfolio := NewPortfolioService(f.store, models.WithClock(func() time.Time { return f.now }))
-		work, err := portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
-			Scope: run.Scope, Kind: RunKindAgentWork, ParentRunID: run.ID, Owner: run.Owner, AssignedAgentID: "agent-1",
-			Goal: "Export the report", Source: RunSourceFork, IdempotencyKey: "work-" + run.ID,
+		portfolio := portfolio.NewPortfolioService(f.store, models.WithClock(func() time.Time { return f.now }))
+		work, err := portfolio.CreateAgentRun(f.ctx, models.CreateAgentRunRequest{
+			Scope: run.Scope, Kind: models.RunKindAgentWork, ParentRunID: run.ID, Owner: run.Owner, AssignedAgentID: "agent-1",
+			Goal: "Export the report", Source: models.RunSourceFork, IdempotencyKey: "work-" + run.ID,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -223,9 +225,9 @@ func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 		}
 		check := func(name, runID string) string {
 			t.Helper()
-			refusal, err := binding.ToolCheck(f.ctx, agentrun.StepToolsInput{Run: run, Binding: binding}, &SessionEntry{
-				Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: "call",
-				Tool: &ToolEntry{Name: name, Arguments: json.RawMessage(fmt.Sprintf(`{"runId":%q}`, runID))},
+			refusal, err := binding.ToolCheck(f.ctx, agentrun.StepToolsInput{Run: run, Binding: binding}, &models.SessionEntry{
+				Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: "call",
+				Tool: &models.ToolEntry{Name: name, Arguments: json.RawMessage(fmt.Sprintf(`{"runId":%q}`, runID))},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -261,19 +263,19 @@ func TestNoMessageAfterAGovernedToolSavesFiles(t *testing.T) {
 		binding := f.bind(run, &chatLoopProducer{})
 		f.prepare(run, binding, 1)
 		entries := f.stepEntries(run, binding.Session.ID, "step-1", 1,
-			ModelToolCall{ID: "a", Name: "reports__export", Arguments: json.RawMessage(`{"report":"a"}`)},
-			ModelToolCall{ID: "b", Name: "reports__export", Arguments: json.RawMessage(`{"report":"b"}`)})
+			models.ModelToolCall{ID: "a", Name: "reports__export", Arguments: json.RawMessage(`{"report":"a"}`)},
+			models.ModelToolCall{ID: "b", Name: "reports__export", Arguments: json.RawMessage(`{"report":"b"}`)})
 		for _, id := range []string{"a", "b"} {
 			actionID := "action-" + id
-			artifact := &Artifact{ID: "file-" + id, Version: 1, Scope: run.Scope, Name: id + ".pdf",
-				Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "agent-1"}, Owner: &run.Owner, RunID: run.ID, ActionID: actionID},
-				ContentRef: "object-store:" + id, Digest: "sha256:" + strings.Repeat("a", 64), SizeBytes: 10, Classification: ArtifactClassificationInternal}
+			artifact := &models.Artifact{ID: "file-" + id, Version: 1, Scope: run.Scope, Name: id + ".pdf",
+				Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "agent-1"}, Owner: &run.Owner, RunID: run.ID, ActionID: actionID},
+				ContentRef: "object-store:" + id, Digest: "sha256:" + strings.Repeat("a", 64), SizeBytes: 10, Classification: models.ArtifactClassificationInternal}
 			if err := f.store.CreateArtifactVersion(f.ctx, artifact, 0); err != nil {
 				t.Fatal(err)
 			}
-			f.actions.calls[actionID] = &ActionCall{ID: actionID, Scope: run.Scope, RunID: run.ID, Status: ActionCallStatusSucceeded,
+			f.actions.calls[actionID] = &models.ActionCall{ID: actionID, Scope: run.Scope, RunID: run.ID, Status: models.ActionCallStatusSucceeded,
 				Output: map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": artifact.ID, "version": 1}}}}
-			done := f.settle(run, entries[id], ToolEntryCompleted, actionID, &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{storetest.TextPart("saved")}})
+			done := f.settle(run, entries[id], models.ToolEntryCompleted, actionID, &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{storetest.TextPart("saved")}})
 			for range 2 { // the hook is replay-safe
 				if err := binding.AfterTool(f.ctx, agentrun.StepToolsInput{Run: f.run(run.ID), Binding: binding}, done); err != nil {
 					t.Fatal(err)
@@ -297,7 +299,7 @@ func TestParticipationStoppedBeforeFirstStepPostsNothing(t *testing.T) {
 		binding := f.bind(run, producer)
 		f.setParticipation(false)
 		exit := f.drive(run, binding)
-		if exit.Reason != RunLoopExitFinal || exit.Run.Status != AgentRunStatusCompleted || exit.Run.Output["participationSkipped"] != true {
+		if exit.Reason != runtime.RunLoopExitFinal || exit.Run.Status != models.AgentRunStatusCompleted || exit.Run.Output["participationSkipped"] != true {
 			t.Fatalf("exit = %s %s %#v", exit.Reason, exit.Run.Status, exit.Run.Output)
 		}
 		if len(producer.paths) != 0 {
@@ -319,31 +321,31 @@ func TestTeamReplacedApprovalEndsMemberSilently(t *testing.T) {
 				binding := f.bind(run, producer)
 				f.prepare(run, binding, 1)
 				entries := f.stepEntries(run, binding.Session.ID, "member-step-1", 1,
-					ModelToolCall{ID: "deploy", Name: "deploy__canary", Arguments: json.RawMessage(`{}`)})
+					models.ModelToolCall{ID: "deploy", Name: "deploy__canary", Arguments: json.RawMessage(`{}`)})
 				newer := f.post("newer", "user-1", "Actually, ask the other member.")
-				f.actions.calls["action-deploy"] = &ActionCall{ID: "action-deploy", Scope: run.Scope, RunID: run.ID, Status: ActionCallStatusDenied, ApprovalID: "approval-deploy"}
-				f.actions.approvals["approval-deploy"] = &ApprovalCheckpoint{ID: "approval-deploy", Scope: run.Scope, Status: ApprovalStatusSuperseded, SupersededByMessageID: newer.ID}
-				f.settle(run, entries["deploy"], ToolEntryError, "action-deploy", governedJSONResult(ToolResultSuperseded, map[string]interface{}{
-					"status": string(ToolResultSuperseded), "reason": action.ApprovalSupersededReason,
+				f.actions.calls["action-deploy"] = &models.ActionCall{ID: "action-deploy", Scope: run.Scope, RunID: run.ID, Status: models.ActionCallStatusDenied, ApprovalID: "approval-deploy"}
+				f.actions.approvals["approval-deploy"] = &models.ApprovalCheckpoint{ID: "approval-deploy", Scope: run.Scope, Status: models.ApprovalStatusSuperseded, SupersededByMessageID: newer.ID}
+				f.settle(run, entries["deploy"], models.ToolEntryError, "action-deploy", runtime.GovernedJSONResult(models.ToolResultSuperseded, map[string]interface{}{
+					"status": string(models.ToolResultSuperseded), "reason": action.ApprovalSupersededReason,
 				}))
 				if followUp {
 					current := f.run(run.ID)
-					updated := cloneAgentRun(current)
-					updated.PendingInterventions = append(updated.PendingInterventions, AgentRunIntervention{
-						ID: conversationFollowUpInterventionID(run.Scope, newer.ID), Actor: ActivityActor{Type: "user", ID: "user-1"},
+					updated := models.CloneAgentRun(current)
+					updated.PendingInterventions = append(updated.PendingInterventions, models.AgentRunIntervention{
+						ID: models.ConversationFollowUpInterventionID(run.Scope, newer.ID), Actor: models.ActivityActor{Type: "user", ID: "user-1"},
 						Instruction: newer.Content, CreatedAt: f.now,
-						ConversationMessage: &ConversationMessageDelivery{ConversationID: f.conversation.ID, MessageID: newer.ID, Sequence: newer.Sequence, Sender: newer.Sender},
+						ConversationMessage: &models.ConversationMessageDelivery{ConversationID: f.conversation.ID, MessageID: newer.ID, Sequence: newer.Sequence, Sender: newer.Sender},
 					})
 					updated.Revision++
-					if _, err := f.store.UpdateAgentRunWithEvent(f.ctx, updated, current.Revision, &ActivityEvent{
-						ID: "follow-up", Scope: run.Scope, EventType: "run.updated", Severity: ActivitySeverityInfo, RunID: run.ID,
-						Actor: ActivityActor{Type: "worker", ID: chatLoopWorker}, Summary: "Follow-up delivered", Visibility: ActivityVisibilityScope, CreatedAt: f.now,
+					if _, err := f.store.UpdateAgentRunWithEvent(f.ctx, updated, current.Revision, &models.ActivityEvent{
+						ID: "follow-up", Scope: run.Scope, EventType: "run.updated", Severity: models.ActivitySeverityInfo, RunID: run.ID,
+						Actor: models.ActivityActor{Type: "worker", ID: chatLoopWorker}, Summary: "Follow-up delivered", Visibility: models.ActivityVisibilityScope, CreatedAt: f.now,
 					}, nil); err != nil {
 						t.Fatal(err)
 					}
 				}
 				exit := f.drive(run, binding)
-				if exit.Run.Status != AgentRunStatusCompleted {
+				if exit.Run.Status != models.AgentRunStatusCompleted {
 					t.Fatalf("exit = %s %s", exit.Reason, exit.Run.Status)
 				}
 				if followUp {
@@ -390,7 +392,7 @@ func TestPromotedBeforeFirstStepRendersTriggerAndRunContext(t *testing.T) {
 					t.Fatal("the promoted Run made no model step")
 				}
 				child := f.run(run2.ID).SessionID
-				if child == lane || child != RunAgentSessionID(run2.Scope, run2.ID) {
+				if child == lane || child != models.RunAgentSessionID(run2.Scope, run2.ID) {
 					t.Fatalf("run session %q, lane %q", child, lane)
 				}
 				chatLoopExpectShape(t, producer.paths[0],
@@ -400,7 +402,7 @@ func TestPromotedBeforeFirstStepRendersTriggerAndRunContext(t *testing.T) {
 					t.Fatalf("run_context note %q %q", note.SessionID, chatLoopEntryText(note))
 				}
 				for _, entry := range f.path(lane) {
-					if entry.RunID == run2.ID && !(entry.Type == SessionEntryNote && entry.Note.Kind == NoteTaskPromoted) {
+					if entry.RunID == run2.ID && !(entry.Type == models.SessionEntryNote && entry.Note.Kind == models.NoteTaskPromoted) {
 						t.Fatalf("the promoted Run wrote to the lane: %#v", entry)
 					}
 				}
@@ -432,12 +434,12 @@ func TestPromotedBeforeFirstStepOnEmptyLaneSeedsTriggerAndRunContext(t *testing.
 					t.Fatal("the promoted Run made no model step")
 				}
 				child := f.run(run.ID).SessionID
-				if child != RunAgentSessionID(run.Scope, run.ID) {
+				if child != models.RunAgentSessionID(run.Scope, run.ID) {
 					t.Fatalf("run session %q", child)
 				}
 				path := producer.paths[0]
 				chatLoopExpectShape(t, path, "user:", "user:"+trigger.ID, "note:run_context:"+run.ID)
-				if seed := path[0]; seed.User.Origin != UserEntryGoal || !strings.Contains(chatLoopEntryText(seed), "<brief>") {
+				if seed := path[0]; seed.User.Origin != models.UserEntryGoal || !strings.Contains(chatLoopEntryText(seed), "<brief>") {
 					t.Fatalf("first entry is not the task brief: %#v", seed)
 				}
 				if note := path[2]; note.SessionID != child || !strings.Contains(chatLoopEntryText(note), trigger.ID) {
@@ -456,7 +458,7 @@ func TestRunPromotedMidFlightCountsAsStartedInChild(t *testing.T) {
 		f.prepare(run, binding, 1)
 		f.promote(run)
 		promoted := f.bind(f.run(run.ID), &chatLoopProducer{})
-		if promoted.Session.Kind != AgentSessionKindRun {
+		if promoted.Session.Kind != models.AgentSessionKindRun {
 			t.Fatalf("promoted session = %#v", promoted.Session)
 		}
 		// The chat preparer counts the Run as started in its child: with no
@@ -465,7 +467,7 @@ func TestRunPromotedMidFlightCountsAsStartedInChild(t *testing.T) {
 		if len(promoted.Preparers) != 2 {
 			t.Fatalf("preparers = %d, want the run-start and chat preparers", len(promoted.Preparers))
 		}
-		step := &AgentTurn{ID: run.ID + "-step-2", Sequence: 2}
+		step := &models.AgentTurn{ID: run.ID + "-step-2", Sequence: 2}
 		part, err := promoted.Preparers[1].BeforeStep(f.ctx, agentrun.StepInput{Run: f.run(run.ID), Session: promoted.Session, Binding: promoted, WorkerID: chatLoopWorker, Step: step}, agentrun.SteeringPlan{})
 		if err != nil || part != nil {
 			t.Fatalf("the promoted Run did not count as started: %#v, %v", part, err)

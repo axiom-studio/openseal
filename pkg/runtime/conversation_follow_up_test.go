@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -18,16 +20,16 @@ type conversationFollowUpFixture struct {
 	store        *sqlite.Store
 	service      *conversation.ConversationService
 	scheduler    *conversationrun.ConversationRunScheduler
-	conversation *Conversation
+	conversation *models.Conversation
 }
 
 func newConversationFollowUpFixture(t *testing.T) *conversationFollowUpFixture {
 	t.Helper()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	service := conversation.NewConversationService(store)
-	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "follow-ups"})
+	conversationtest.SeedSpace(t, store, models.Scope{Kind: "tenant", ID: "follow-ups"})
 	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
-		Scope: Scope{Kind: "tenant", ID: "follow-ups"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"},
+		Scope: models.Scope{Kind: "tenant", ID: "follow-ups"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-42"},
 		Title: "Shopping assistant", IdempotencyKey: "follow-up-channel",
 	})
 	if err != nil {
@@ -36,7 +38,7 @@ func newConversationFollowUpFixture(t *testing.T) *conversationFollowUpFixture {
 	return &conversationFollowUpFixture{store: store, service: service, scheduler: conversationruntest.NewScheduler(t, store), conversation: conversation}
 }
 
-func (f *conversationFollowUpFixture) post(t *testing.T, sender, content string) *ChannelMessage {
+func (f *conversationFollowUpFixture) post(t *testing.T, sender, content string) *models.ChannelMessage {
 	t.Helper()
 	current, err := f.service.GetConversation(t.Context(), f.conversation.Scope, f.conversation.ID)
 	if err != nil {
@@ -44,8 +46,8 @@ func (f *conversationFollowUpFixture) post(t *testing.T, sender, content string)
 	}
 	result, err := f.service.PostChannelMessage(t.Context(), conversation.PostChannelMessageRequest{
 		Scope: f.conversation.Scope, ConversationID: f.conversation.ID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: sender}, Intent: MessageIntentQuestion,
-		Content: content, RequiresResponse: true, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: sender}, Intent: models.MessageIntentQuestion,
+		Content: content, RequiresResponse: true, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		IdempotencyKey: "message:" + content,
 	})
 	if err != nil {
@@ -54,7 +56,7 @@ func (f *conversationFollowUpFixture) post(t *testing.T, sender, content string)
 	return result.Message
 }
 
-func (f *conversationFollowUpFixture) schedule(t *testing.T, message *ChannelMessage) *AgentRun {
+func (f *conversationFollowUpFixture) schedule(t *testing.T, message *models.ChannelMessage) *models.AgentRun {
 	t.Helper()
 	result, _, err := f.scheduler.ScheduleMessage(t.Context(), f.conversation.Scope, f.conversation.ID, message.ID)
 	if err != nil || result == nil || result.Run == nil {
@@ -63,7 +65,7 @@ func (f *conversationFollowUpFixture) schedule(t *testing.T, message *ChannelMes
 	return result.Run
 }
 
-func (f *conversationFollowUpFixture) run(t *testing.T, id string) *AgentRun {
+func (f *conversationFollowUpFixture) run(t *testing.T, id string) *models.AgentRun {
 	t.Helper()
 	run, err := f.store.GetAgentRun(t.Context(), f.conversation.Scope, id)
 	if err != nil || run == nil {
@@ -72,18 +74,18 @@ func (f *conversationFollowUpFixture) run(t *testing.T, id string) *AgentRun {
 	return run
 }
 
-func (f *conversationFollowUpFixture) conversationRuns(t *testing.T) []*AgentRun {
+func (f *conversationFollowUpFixture) conversationRuns(t *testing.T) []*models.AgentRun {
 	t.Helper()
-	runs, err := f.store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: f.conversation.Scope, Kind: RunKindConversation, Owner: &f.conversation.Owner})
+	runs, err := f.store.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: f.conversation.Scope, Kind: models.RunKindConversation, Owner: &f.conversation.Owner})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return runs
 }
 
-func (f *conversationFollowUpFixture) transition(t *testing.T, run *AgentRun, status AgentRunStatus, wake *WakeCondition) *AgentRun {
+func (f *conversationFollowUpFixture) transition(t *testing.T, run *models.AgentRun, status models.AgentRunStatus, wake *models.WakeCondition) *models.AgentRun {
 	t.Helper()
-	next, _, err := NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{
+	next, _, err := activity.NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), run.Scope, run.ID, activity.RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: status, WakeCondition: wake,
 	})
 	if err != nil {
@@ -101,7 +103,7 @@ func TestRapidConversationMessagesShareOneRunThatSeesAll(t *testing.T) {
 	second := f.post(t, "user", "It must have HDMI")
 	third := f.post(t, "user", "Use my card ending with 1001 to buy it")
 	run := f.schedule(t, first)
-	for _, message := range []*ChannelMessage{second, third} {
+	for _, message := range []*models.ChannelMessage{second, third} {
 		if delivered := f.schedule(t, message); delivered.ID != run.ID {
 			t.Fatalf("message %s started a parallel Run %s", message.ID, delivered.ID)
 		}
@@ -110,9 +112,9 @@ func TestRapidConversationMessagesShareOneRunThatSeesAll(t *testing.T) {
 		t.Fatalf("conversation Runs = %d, want 1", len(runs))
 	}
 	run = f.run(t, run.ID)
-	followUps := conversationRunFollowUps(run)
-	if run.Status != AgentRunStatusQueued || len(followUps) != 2 || followUps[0].MessageID != second.ID || followUps[1].MessageID != third.ID ||
-		run.PendingInterventions[0].Instruction != second.Content || run.PendingInterventions[1].Actor != (ActivityActor{Type: "user", ID: "user"}) {
+	followUps := models.ConversationRunFollowUps(run)
+	if run.Status != models.AgentRunStatusQueued || len(followUps) != 2 || followUps[0].MessageID != second.ID || followUps[1].MessageID != third.ID ||
+		run.PendingInterventions[0].Instruction != second.Content || run.PendingInterventions[1].Actor != (models.ActivityActor{Type: "user", ID: "user"}) {
 		t.Fatalf("follow-ups were not delivered in order: %#v", run)
 	}
 
@@ -126,10 +128,10 @@ func TestRapidConversationMessagesShareOneRunThatSeesAll(t *testing.T) {
 	}
 
 	// A terminal Run never absorbs: the next message starts a new Run.
-	run = f.transition(t, f.transition(t, f.run(t, run.ID), AgentRunStatusRunning, nil), AgentRunStatusCompleted, nil)
+	run = f.transition(t, f.transition(t, f.run(t, run.ID), models.AgentRunStatusRunning, nil), models.AgentRunStatusCompleted, nil)
 	fourth := f.post(t, "user", "Now track the delivery")
 	next := f.schedule(t, fourth)
-	if next.ID == run.ID || next.Context[conversationRunContextTriggerID] != fourth.ID || len(next.PendingInterventions) != 0 {
+	if next.ID == run.ID || next.Context[models.ConversationRunTriggerIDContextKey] != fourth.ID || len(next.PendingInterventions) != 0 {
 		t.Fatalf("terminal Run absorbed a new message: %#v", next)
 	}
 	if current := f.run(t, run.ID); len(current.PendingInterventions) != 2 {
@@ -143,21 +145,21 @@ func TestRapidConversationMessagesShareOneRunThatSeesAll(t *testing.T) {
 func TestConversationFollowUpDeliveryPreservesWaitingStates(t *testing.T) {
 	wakeAt := time.Now().Add(time.Hour).UTC()
 	for _, test := range []struct {
-		status AgentRunStatus
-		wake   *WakeCondition
-		want   AgentRunStatus
+		status models.AgentRunStatus
+		wake   *models.WakeCondition
+		want   models.AgentRunStatus
 	}{
-		{status: AgentRunStatusRunning, want: AgentRunStatusRunning},
-		{status: AgentRunStatusSleeping, wake: &WakeCondition{Type: "timer", WakeAt: &wakeAt}, want: AgentRunStatusQueued},
-		{status: AgentRunStatusWaitingForEvent, wake: &WakeCondition{Type: "human_intervention", Reference: "credential-request"}, want: AgentRunStatusWaitingForEvent},
-		{status: AgentRunStatusWaitingForApproval, wake: &WakeCondition{Type: "approval", Reference: "approval-1"}, want: AgentRunStatusWaitingForApproval},
-		{status: AgentRunStatusPaused, want: AgentRunStatusPaused},
+		{status: models.AgentRunStatusRunning, want: models.AgentRunStatusRunning},
+		{status: models.AgentRunStatusSleeping, wake: &models.WakeCondition{Type: "timer", WakeAt: &wakeAt}, want: models.AgentRunStatusQueued},
+		{status: models.AgentRunStatusWaitingForEvent, wake: &models.WakeCondition{Type: "human_intervention", Reference: "credential-request"}, want: models.AgentRunStatusWaitingForEvent},
+		{status: models.AgentRunStatusWaitingForApproval, wake: &models.WakeCondition{Type: "approval", Reference: "approval-1"}, want: models.AgentRunStatusWaitingForApproval},
+		{status: models.AgentRunStatusPaused, want: models.AgentRunStatusPaused},
 	} {
 		t.Run(string(test.status), func(t *testing.T) {
 			f := newConversationFollowUpFixture(t)
 			run := f.schedule(t, f.post(t, "user", "Buy the hub"))
-			run = f.transition(t, run, AgentRunStatusRunning, nil)
-			if test.status != AgentRunStatusRunning {
+			run = f.transition(t, run, models.AgentRunStatusRunning, nil)
+			if test.status != models.AgentRunStatusRunning {
 				run = f.transition(t, run, test.status, test.wake)
 			}
 			message := f.post(t, "user", "Actually use the other card")
@@ -168,7 +170,7 @@ func TestConversationFollowUpDeliveryPreservesWaitingStates(t *testing.T) {
 			if test.want == test.status && (test.wake == nil) != (delivered.WakeCondition == nil) {
 				t.Fatalf("wake condition changed: %#v", delivered.WakeCondition)
 			}
-			if test.want == AgentRunStatusQueued && delivered.WakeCondition != nil {
+			if test.want == models.AgentRunStatusQueued && delivered.WakeCondition != nil {
 				t.Fatalf("queued Run kept a stale timer: %#v", delivered.WakeCondition)
 			}
 			if len(f.conversationRuns(t)) != 1 {
@@ -181,37 +183,37 @@ func TestConversationFollowUpDeliveryPreservesWaitingStates(t *testing.T) {
 func TestConversationFollowUpSkipsRunExplainingItsFailure(t *testing.T) {
 	f := newConversationFollowUpFixture(t)
 	run := f.schedule(t, f.post(t, "user", "Buy the hub"))
-	run = f.transition(t, run, AgentRunStatusRunning, nil)
-	run, _, err := NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
-		FailureExplanation: &RunFailureExplanation{Kind: "execution", Code: "action_failed", Message: "checkout failed"},
+	run = f.transition(t, run, models.AgentRunStatusRunning, nil)
+	run, _, err := activity.NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), run.Scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning,
+		FailureExplanation: &models.RunFailureExplanation{Kind: "execution", Code: "action_failed", Message: "checkout failed"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	message := f.post(t, "user", "Try again with the other card")
 	next := f.schedule(t, message)
-	if next.ID == run.ID || next.Context[conversationRunContextTriggerID] != message.ID {
+	if next.ID == run.ID || next.Context[models.ConversationRunTriggerIDContextKey] != message.ID {
 		t.Fatalf("failing Run absorbed a new request: %#v", next)
 	}
 }
 
 func TestExternalInboxFollowUpItemDefersToTriggerItem(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "inbox"}
-	run := &AgentRun{Scope: scope, Context: map[string]interface{}{conversationRunContextConversationID: "chat", conversationRunContextTriggerID: "trigger"}}
-	run.PendingInterventions = []AgentRunIntervention{{
-		ID:                  conversationFollowUpInterventionID(scope, "follow-up"),
-		ConversationMessage: &ConversationMessageDelivery{ConversationID: "chat", MessageID: "follow-up"},
+	scope := models.Scope{Kind: "tenant", ID: "inbox"}
+	run := &models.AgentRun{Scope: scope, Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: "chat", models.ConversationRunTriggerIDContextKey: "trigger"}}
+	run.PendingInterventions = []models.AgentRunIntervention{{
+		ID:                  models.ConversationFollowUpInterventionID(scope, "follow-up"),
+		ConversationMessage: &models.ConversationMessageDelivery{ConversationID: "chat", MessageID: "follow-up"},
 	}, {
 		ID: "operator-guidance", Instruction: "Keep going",
 	}}
-	if conversationrun.ExternalInboxItemIsFollowUp(&ExternalConversationInboxItem{ChannelMessageID: "trigger"}, run) {
+	if conversationrun.ExternalInboxItemIsFollowUp(&models.ExternalConversationInboxItem{ChannelMessageID: "trigger"}, run) {
 		t.Fatal("trigger item treated as follow-up")
 	}
-	if !conversationrun.ExternalInboxItemIsFollowUp(&ExternalConversationInboxItem{ChannelMessageID: "follow-up"}, run) {
+	if !conversationrun.ExternalInboxItemIsFollowUp(&models.ExternalConversationInboxItem{ChannelMessageID: "follow-up"}, run) {
 		t.Fatal("follow-up item would duplicate the Run's reply")
 	}
-	if conversationrun.ExternalInboxItemIsFollowUp(&ExternalConversationInboxItem{ChannelMessageID: "unrelated"}, run) {
+	if conversationrun.ExternalInboxItemIsFollowUp(&models.ExternalConversationInboxItem{ChannelMessageID: "unrelated"}, run) {
 		t.Fatal("unrelated item treated as follow-up")
 	}
 }
@@ -229,7 +231,7 @@ func (f *chatLoopFixture) scheduler() *conversationrun.ConversationRunScheduler 
 	return scheduler
 }
 
-func (f *chatLoopFixture) schedule(message *ChannelMessage) *AgentRun {
+func (f *chatLoopFixture) schedule(message *models.ChannelMessage) *models.AgentRun {
 	f.t.Helper()
 	result, _, err := f.scheduler().ScheduleMessage(f.ctx, f.conversation.Scope, f.conversation.ID, message.ID)
 	if err != nil || result == nil || result.Run == nil {
@@ -240,19 +242,19 @@ func (f *chatLoopFixture) schedule(message *ChannelMessage) *AgentRun {
 
 // startMember creates and claims agentID's member Run answering trigger in a
 // Team chat, as the routing Run would (teamMemberRunRequest).
-func (f *chatLoopFixture) startMember(trigger *ChannelMessage, agentID string) *AgentRun {
+func (f *chatLoopFixture) startMember(trigger *models.ChannelMessage, agentID string) *models.AgentRun {
 	f.t.Helper()
 	request := conversation.ConversationAgentRunRequest(f.conversation, trigger)
 	request.AssignedAgentID = agentID
-	request.ConcurrencyKey = ConversationRunLane(f.conversation.ID, "", agentID)
-	request.SessionID = conversationSessionID(f.conversation.Scope, request.ConcurrencyKey)
+	request.ConcurrencyKey = models.ConversationRunLane(f.conversation.ID, "", agentID)
+	request.SessionID = models.ConversationSessionID(f.conversation.Scope, request.ConcurrencyKey)
 	request.IdempotencyKey = "member-" + agentID + "-" + trigger.ID
 	commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
 	result, err := commands.CreateAgentRun(f.ctx, request)
 	if err != nil {
 		f.t.Fatalf("create member run: %v", err)
 	}
-	claimed, err := f.store.ClaimNextAgentRun(f.ctx, AgentRunClaim{
+	claimed, err := f.store.ClaimNextAgentRun(f.ctx, models.AgentRunClaim{
 		Scope: f.conversation.Scope, WorkerID: chatLoopWorker, Now: f.now, LeaseDuration: time.Hour, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != result.Run.ID {
@@ -262,14 +264,14 @@ func (f *chatLoopFixture) startMember(trigger *ChannelMessage, agentID string) *
 }
 
 // bindMember is bind for agentID's member Run.
-func (f *chatLoopFixture) bindMember(run *AgentRun, agentID string, producer agentrun.StepProducer) *agentrun.TurnRunnerBinding {
+func (f *chatLoopFixture) bindMember(run *models.AgentRun, agentID string, producer agentrun.StepProducer) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
 	return f.bindAgent(run, agentID, producer)
 }
 
 func (f *chatLoopFixture) eventTypes(runID string) []string {
 	f.t.Helper()
-	events, err := f.store.ListActivity(f.ctx, ActivityFilter{Scope: f.conversation.Scope, RunID: runID, Limit: 500})
+	events, err := f.store.ListActivity(f.ctx, models.ActivityFilter{Scope: f.conversation.Scope, RunID: runID, Limit: 500})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -280,10 +282,10 @@ func (f *chatLoopFixture) eventTypes(runID string) []string {
 	return types
 }
 
-func countFollowUpEntries(entries []*SessionEntry, messageID string) int {
+func countFollowUpEntries(entries []*models.SessionEntry, messageID string) int {
 	count := 0
 	for _, entry := range entries {
-		if entry.Type == SessionEntryUser && entry.User != nil && entry.User.MessageID == messageID {
+		if entry.Type == models.SessionEntryUser && entry.User != nil && entry.User.MessageID == messageID {
 			count++
 		}
 	}
@@ -308,7 +310,7 @@ func TestFollowUpsDeliveredByTheSchedulerAppendToTheSessionOnce(t *testing.T) {
 
 		second := f.post("second", "user-1", "It must have HDMI")
 		third := f.post("third", "user-1", "Use the card ending 1001")
-		for _, message := range []*ChannelMessage{second, third} {
+		for _, message := range []*models.ChannelMessage{second, third} {
 			before := f.run(run.ID).Revision
 			if delivered := f.schedule(message); delivered.ID != run.ID || delivered.Revision <= before {
 				t.Fatalf("follow-up %s: run %s revision %d (was %d)", message.ID, delivered.ID, delivered.Revision, before)
@@ -337,7 +339,7 @@ func TestFollowUpFromAnotherPersonStartsItsOwnRun(t *testing.T) {
 		run := f.startRun(trigger)
 		other := f.post("other", "user-2", "What is on my calendar?")
 		started := f.schedule(other)
-		if started.ID == run.ID || started.Context[conversationRunContextTriggerID] != other.ID || len(f.run(run.ID).PendingInterventions) != 0 {
+		if started.ID == run.ID || started.Context[models.ConversationRunTriggerIDContextKey] != other.ID || len(f.run(run.ID).PendingInterventions) != 0 {
 			t.Fatalf("another person's message was absorbed: %#v", started)
 		}
 	})
@@ -366,7 +368,7 @@ func TestFollowUpDuringStepSupersedesItsAnswer(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 		trigger := f.post("first", "user-1", "Find a USB-C hub")
 		run := f.startRun(trigger)
-		var second *ChannelMessage
+		var second *models.ChannelMessage
 		producer := &followUpDuringStepProducer{
 			chatLoopProducer: chatLoopProducer{answers: []string{"Here is a hub without HDMI.", "Here is a hub with HDMI."}},
 			during: func() {
@@ -376,7 +378,7 @@ func TestFollowUpDuringStepSupersedesItsAnswer(t *testing.T) {
 		}
 		binding := f.bind(run, producer)
 		exit := f.drive(run, binding)
-		if exit.Run.Status != AgentRunStatusCompleted || len(producer.paths) != 2 {
+		if exit.Run.Status != models.AgentRunStatusCompleted || len(producer.paths) != 2 {
 			t.Fatalf("exit = %s %s after %d steps", exit.Reason, exit.Run.Status, len(producer.paths))
 		}
 		if countFollowUpEntries(producer.paths[1], second.ID) != 1 || countFollowUpEntries(producer.paths[0], second.ID) != 0 {
@@ -401,7 +403,7 @@ func TestTeamFollowUpAppendsToEveryMemberSession(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{team: true}, func(t *testing.T, f *chatLoopFixture) {
 		trigger := f.post("trigger", "user-1", "Plan the launch.")
 		members := []string{"agent-1", "agent-2"}
-		runs := map[string]*AgentRun{}
+		runs := map[string]*models.AgentRun{}
 		bindings := map[string]*agentrun.TurnRunnerBinding{}
 		revisions := map[string]int64{}
 		for _, agentID := range members {
@@ -433,7 +435,7 @@ func TestTeamFollowUpAppendsToEveryMemberSession(t *testing.T) {
 			}
 			expectNoGuidanceChanged(t, f, run.ID)
 		}
-		if runs, err := f.store.ListAgentRuns(f.ctx, AgentRunFilter{Scope: f.conversation.Scope, Kind: RunKindConversation, Owner: &f.conversation.Owner}); err != nil || len(runs) != len(members) {
+		if runs, err := f.store.ListAgentRuns(f.ctx, models.AgentRunFilter{Scope: f.conversation.Scope, Kind: models.RunKindConversation, Owner: &f.conversation.Owner}); err != nil || len(runs) != len(members) {
 			t.Fatalf("the follow-up started new work: %d runs, %v", len(runs), err)
 		}
 	})
@@ -441,8 +443,8 @@ func TestTeamFollowUpAppendsToEveryMemberSession(t *testing.T) {
 
 // runHasFollowUp reports whether messageID was delivered into run as a
 // follow-up.
-func runHasFollowUp(run *AgentRun, messageID string) bool {
-	return slices.ContainsFunc(models.ConversationRunFollowUps(run), func(delivery ConversationMessageDelivery) bool {
+func runHasFollowUp(run *models.AgentRun, messageID string) bool {
+	return slices.ContainsFunc(models.ConversationRunFollowUps(run), func(delivery models.ConversationMessageDelivery) bool {
 		return delivery.MessageID == messageID
 	})
 }

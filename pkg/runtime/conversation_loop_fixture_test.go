@@ -324,28 +324,6 @@ func (f *chatLoopFixture) drive(run *AgentRun, binding *agentrun.TurnRunnerBindi
 	return exit
 }
 
-// prepare runs the loop's phase 3 for run as the next step would.
-func (f *chatLoopFixture) prepare(run *AgentRun, binding *agentrun.TurnRunnerBinding, step int64) *stepContextResult {
-	f.t.Helper()
-	current, err := f.store.GetAgentRun(f.ctx, run.Scope, run.ID)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	session, err := f.store.GetAgentSession(f.ctx, run.Scope, binding.Session.ID)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	in := agentrun.StepInput{
-		Run: current, Session: session, Binding: binding, WorkerID: chatLoopWorker,
-		Step: &AgentTurn{ID: fmt.Sprintf("%s-step-%d", run.ID, step), Sequence: step},
-	}
-	result, err := appendStepContext(f.ctx, f.store, in, binding.Preparers, f.now)
-	if err != nil {
-		f.t.Fatalf("step context of %s: %v", run.ID, err)
-	}
-	return result
-}
-
 func (f *chatLoopFixture) path(sessionID string) []*SessionEntry {
 	f.t.Helper()
 	path, err := f.store.LoadAgentSessionPath(f.ctx, f.conversation.Scope, sessionID)

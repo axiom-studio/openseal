@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -340,5 +342,14 @@ func TestConversationStartsThreadMissingCyclicAndDeepAnchorsFailClosed(t *testin
 				t.Fatalf("host admission accepted malformed thread ancestry %s: %v", parentID, err)
 			}
 		}
+	})
+}
+
+// runHasFollowUp reports whether messageID was delivered into run as a
+// follow-up. It is a copy of the run loop's follow-up tests' helper; change
+// them together.
+func runHasFollowUp(run *models.AgentRun, messageID string) bool {
+	return slices.ContainsFunc(models.ConversationRunFollowUps(run), func(delivery models.ConversationMessageDelivery) bool {
+		return delivery.MessageID == messageID
 	})
 }
