@@ -478,7 +478,7 @@ func TestCompactionCutRespectsOpenToolEntries(t *testing.T) {
 	want := map[int]bool{0: true, 1: true, 2: false, 3: true, 4: false, 5: true, 6: true, 7: false, 8: false, 9: false, 10: false, 11: false}
 	for cut := 0; cut <= len(entries); cut++ {
 		if got := IsValidCompactionCutAt(entries, cut); got != want[cut] {
-			t.Errorf("validCompactionCutAt(cut=%d) = %v, want %v", cut, got, want[cut])
+			t.Errorf("IsValidCompactionCutAt(cut=%d) = %v, want %v", cut, got, want[cut])
 		}
 	}
 	if IsValidCompactionCutAt(entries, -1) || IsValidCompactionCutAt(entries, len(entries)+1) {

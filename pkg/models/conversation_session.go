@@ -112,7 +112,7 @@ type ChildSessionRequest struct {
 	AgentID        string // required: the child's acting Agent
 	ConversationID string // optional; the store copies the parent's when empty
 	ThreadRootID   string
-	Seed           *SessionEntry // optional first entry (childSessionSeed)
+	Seed           *SessionEntry // optional first entry (ChildSessionSeed)
 }
 
 // NewChildSession returns the createRunAgentSessionTx request of req. The

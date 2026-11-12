@@ -553,7 +553,7 @@ const (
 	// NoteCapabilities lists what the Agent can load and use: the catalog
 	// (or its directory), delegation targets, operations and the guidance
 	// that depends on them. Appended in full once per compaction window, then
-	// as deltas when the catalog changes (capability_note.go).
+	// as deltas when the catalog changes (pkg/runtime/capability_note.go).
 	NoteCapabilities NoteKind = "capabilities"
 )
 

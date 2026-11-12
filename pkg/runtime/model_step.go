@@ -16,7 +16,7 @@ import (
 // session path, the system spec and the final tool list; the step host returns
 // one assistant entry ready to append. The persisted payload types
 // (AssistantEntry, ContentPart, ModelToolCall, AssistantNative, ModelStepUsage,
-// ModelStopReason, ModelStepProvider) live in agent_session.go.
+// ModelStopReason, ModelStepProvider) live in pkg/models/agent_session.go.
 
 // v2: tools surfaced by a load carry ModelStepTool.Surface and the surfacing
 // tool entry lists them in SessionEntryView.Surfaces; ModelStepSystem no
