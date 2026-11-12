@@ -9,15 +9,16 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // RoutineBrief is what the user approves before a routine is created.
 type RoutineBrief struct {
-	Summary   string         `json:"summary"`
-	DeliverTo string         `json:"deliverTo,omitempty"`
-	Grants    []RoutineGrant `json:"grants"`
+	Summary   string                `json:"summary"`
+	DeliverTo string                `json:"deliverTo,omitempty"`
+	Grants    []models.RoutineGrant `json:"grants"`
 }
 
 // RoutineGrantCatalog resolves the Agent's bound actions when a brief is
@@ -44,18 +45,18 @@ func normalizeRoutineBrief(brief *RoutineBrief, allowEmptyLabels bool) (*Routine
 	if brief == nil {
 		return nil, errors.New("a routine needs a brief: a summary, where results go and what it may do without asking")
 	}
-	summary, err := routineBriefText(brief.Summary, maximumRoutineBriefSummary)
+	summary, err := models.RoutineBriefText(brief.Summary, maximumRoutineBriefSummary)
 	if err != nil {
 		return nil, err
 	}
 	if summary == "" {
 		return nil, errors.New("routine brief summary is required")
 	}
-	deliverTo, err := routineBriefText(brief.DeliverTo, maximumRoutineDeliverTo)
+	deliverTo, err := models.RoutineBriefText(brief.DeliverTo, maximumRoutineDeliverTo)
 	if err != nil {
 		return nil, err
 	}
-	grants, err := normalizeRoutineGrants(brief.Grants, allowEmptyLabels)
+	grants, err := models.NormalizeRoutineGrants(brief.Grants, allowEmptyLabels)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +72,7 @@ func normalizeRoutineBrief(brief *RoutineBrief, allowEmptyLabels bool) (*Routine
 // arguments, and each grant of an action that posts to a channel is pinned to
 // the destinations the user approved, which its label names. An earlier
 // contract that cannot carry a pin cannot grant those actions at all.
-func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, grants []RoutineGrant, eventRoutine bool) ([]RoutineGrant, error) {
+func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners models.RoutineOwnerAddressResolver, run *models.AgentRun, grants []models.RoutineGrant, eventRoutine bool) ([]models.RoutineGrant, error) {
 	if len(grants) == 0 {
 		return grants, nil
 	}
@@ -79,7 +80,7 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 		return nil, errors.New("routine grants cannot be checked on this host")
 	}
 	scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
-	actor := RunSkillActor(run)
+	actor := models.RunSkillActor(run)
 	bindings, err := catalog.ListBindings(ctx, scope, run.AssignedAgentID)
 	if err != nil {
 		return nil, err
@@ -123,7 +124,7 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 	// routed maps a binding-tools base action to an example tool to grant.
 	routed := map[string]string{}
 	for _, binding := range bindings {
-		if binding == nil || binding.Disabled || routineUngrantableSkill(binding.SkillID) {
+		if binding == nil || binding.Disabled || models.RoutineUngrantableSkill(binding.SkillID) {
 			continue
 		}
 		var definition *skill.Definition
@@ -140,7 +141,7 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 		}
 		spec := definition.BindingTools
 		for _, name := range binding.AllowedActions {
-			identity := routineGrantIdentity(binding.SkillID, name)
+			identity := models.RoutineGrantIdentity(binding.SkillID, name)
 			if spec.RoutesAction(name) {
 				if _, exists := routed[identity]; !exists {
 					routed[identity] = ""
@@ -157,14 +158,14 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 		for _, tool := range binding.Tools {
 			base := spec.Action(tool.Effect)
 			action, ok := definition.Actions[base]
-			if !ok || !containsString(binding.AllowedActions, base) {
+			if !ok || !models.MatchesStringFilter(binding.AllowedActions, base) {
 				continue
 			}
 			identity := skill.BindingToolModelName(definition, binding, tool.Name)
 			if _, exists := available[identity]; exists {
 				continue
 			}
-			if example := routineGrantIdentity(binding.SkillID, base); routed[example] == "" {
+			if example := models.RoutineGrantIdentity(binding.SkillID, base); routed[example] == "" {
 				routed[example] = identity
 			}
 			action.Description = tool.Description
@@ -172,7 +173,7 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 			available[identity] = boundAction{skillID: binding.SkillID, name: tool.Name, action: action, pin: tool.Arguments}
 		}
 	}
-	resolved := make([]RoutineGrant, 0, len(grants))
+	resolved := make([]models.RoutineGrant, 0, len(grants))
 	for _, grant := range grants {
 		bound, ok := available[grant.Action]
 		if !ok {
@@ -197,11 +198,11 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 				return nil, fmt.Errorf("routine grant %s does not send messages, so it cannot be limited to the owner", grant.Action)
 			}
 		}
-		posts := routineActionPostsToDestination(bound.action)
+		posts := models.RoutineActionPostsToDestination(bound.action)
 		if posts && len(grant.ToDestinations) == 0 {
 			return nil, fmt.Errorf("routine grant %s posts to a channel: set toDestinations to each channel its runs post to; results reach this chat without it", grant.Action)
 		}
-		if len(grant.ToDestinations) > 0 && len(routineActionDestinationKeys(bound.action.InputSchema)) == 0 {
+		if len(grant.ToDestinations) > 0 && len(models.RoutineActionDestinationKeys(bound.action.InputSchema)) == 0 {
 			return nil, fmt.Errorf("routine grant %s takes no channel, so it cannot be limited to destinations", grant.Action)
 		}
 		if eventRoutine && !routineSendGrantPinned(bound.action, grant) {
@@ -227,7 +228,7 @@ func routineGrantCatalogLabel(name string, action skill.Action) string {
 	if location := routineSentenceEnd.FindStringIndex(description); location != nil {
 		description = description[:location[0]]
 	}
-	if description != "" && utf8.RuneCountInString(description) <= maximumRoutineGrantLabel && !strings.ContainsAny(description, "<>`") {
+	if description != "" && utf8.RuneCountInString(description) <= models.MaximumRoutineGrantLabel && !strings.ContainsAny(description, "<>`") {
 		return description
 	}
 	words := strings.Fields(strings.NewReplacer("-", " ", "_", " ", ".", " ").Replace(name))
@@ -235,8 +236,8 @@ func routineGrantCatalogLabel(name string, action skill.Action) string {
 	if label == "" {
 		return "Use this action"
 	}
-	if utf8.RuneCountInString(label) > maximumRoutineGrantLabel {
-		label = string([]rune(label)[:maximumRoutineGrantLabel])
+	if utf8.RuneCountInString(label) > models.MaximumRoutineGrantLabel {
+		label = string([]rune(label)[:models.MaximumRoutineGrantLabel])
 	}
 	return strings.ToUpper(label[:1]) + label[1:]
 }
@@ -244,7 +245,7 @@ func routineGrantCatalogLabel(name string, action skill.Action) string {
 func routineActionHasRecipients(schema map[string]interface{}) bool {
 	properties, _ := schema["properties"].(map[string]interface{})
 	for name := range properties {
-		if routineRecipientKey(name) {
+		if models.IsRoutineRecipientKey(name) {
 			return true
 		}
 	}
@@ -261,12 +262,12 @@ var ErrRoutineEventSendGrantNotPinned = errors.New("An event routine can only se
 // external or destructive effect whose target the kernel cannot read from a
 // known recipient or destination argument (a raw message body, an unknown
 // key) is never pinned. Reads, and writes with no target argument, are.
-func routineSendGrantPinned(action skill.Action, grant RoutineGrant) bool {
+func routineSendGrantPinned(action skill.Action, grant models.RoutineGrant) bool {
 	if action.SideEffect == skill.SideEffectNone || action.SideEffect == skill.SideEffectRead {
 		return true
 	}
 	recipients := routineActionHasRecipients(action.InputSchema)
-	destinations := len(routineActionDestinationKeys(action.InputSchema)) > 0
+	destinations := len(models.RoutineActionDestinationKeys(action.InputSchema)) > 0
 	if recipients && !grant.ToOwnerOnly || destinations && len(grant.ToDestinations) == 0 {
 		return false
 	}
@@ -290,8 +291,8 @@ func routineGrantDestinationLabel(label string, destinations []string) (string, 
 		return label, nil
 	}
 	label = strings.TrimSpace(strings.TrimRight(label, ".")) + " (" + strings.Join(missing, ", ") + ")"
-	if utf8.RuneCountInString(label) > maximumRoutineGrantLabel {
-		return "", fmt.Errorf("label naming its destinations must be at most %d characters", maximumRoutineGrantLabel)
+	if utf8.RuneCountInString(label) > models.MaximumRoutineGrantLabel {
+		return "", fmt.Errorf("label naming its destinations must be at most %d characters", models.MaximumRoutineGrantLabel)
 	}
 	return label, nil
 }
@@ -299,12 +300,12 @@ func routineGrantDestinationLabel(label string, destinations []string) (string, 
 // RevokeRoutineGrantsRequest clears the actions a routine may perform
 // without asking. Only the user who asked for the routine may revoke.
 type RevokeRoutineGrantsRequest struct {
-	Requester ConversationParticipant `json:"-"`
+	Requester models.ConversationParticipant `json:"-"`
 }
 
 // RevokeGrants clears a scheduled task's approved grants. It is idempotent:
 // a routine without grants is returned unchanged.
-func (s *RunbookActivationService) RevokeGrants(ctx context.Context, scope Scope, id string, request RevokeRoutineGrantsRequest) (*RunbookActivation, error) {
+func (s *RunbookActivationService) RevokeGrants(ctx context.Context, scope models.Scope, id string, request RevokeRoutineGrantsRequest) (*models.RunbookActivation, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("Runbook activation store is not configured")
 	}
@@ -316,12 +317,12 @@ func (s *RunbookActivationService) RevokeGrants(ctx context.Context, scope Scope
 		return nil, err
 	}
 	if current == nil {
-		return nil, ErrRunbookActivationNotFound
+		return nil, models.ErrRunbookActivationNotFound
 	}
 	if current.Task == nil {
 		return nil, errors.New("only a routine created from a chat has approved actions")
 	}
-	owner, err := routineOwner(current)
+	owner, err := models.RoutineOwner(current)
 	if err != nil {
 		return nil, err
 	}
@@ -329,16 +330,16 @@ func (s *RunbookActivationService) RevokeGrants(ctx context.Context, scope Scope
 		return nil, ErrRoutineGrantsNotOwner
 	}
 	if len(current.Task.Grants) == 0 {
-		return cloneRunbookActivation(current), nil
+		return models.CloneRunbookActivation(current), nil
 	}
-	next := cloneRunbookActivation(current)
+	next := models.CloneRunbookActivation(current)
 	next.Task.Grants = nil
 	next.Revision++
 	next.UpdatedAt = s.now().UTC()
 	if err := s.store.UpdateRunbookActivation(ctx, next, current.Revision); err != nil {
 		return nil, err
 	}
-	return cloneRunbookActivation(next), nil
+	return models.CloneRunbookActivation(next), nil
 }
 
 // ErrRoutineGrantsNotOwner is returned when someone other than the user who
@@ -378,7 +379,7 @@ func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
 // resolveRoutineBriefArguments normalizes a proposed create_task brief and
 // fills grant labels from the catalog before the arguments are digested, so
 // the approved arguments carry exactly the brief the user sees.
-func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, arguments map[string]interface{}, eventRoutine bool) error {
+func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners models.RoutineOwnerAddressResolver, run *models.AgentRun, arguments map[string]interface{}, eventRoutine bool) error {
 	var parsed struct {
 		Brief *RoutineBrief `json:"brief"`
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
@@ -17,12 +18,12 @@ import (
 
 func TestRunbookProducerReportsDelegatedAgentFailureReason(t *testing.T) {
 	producer := &RunbookStepProducer{definition: &runbook.Definition{}}
-	run := &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "1"}, Output: map[string]interface{}{}}
+	run := &models.AgentRun{ID: "run-1", Scope: models.Scope{Kind: "tenant", ID: "1"}, Output: map[string]interface{}{}}
 	stepID := "perform-hourly"
 	requestID := collaboration.StableCollaborationID(run.Scope, runtimecontrol.DelegationIdempotencyKey(run.ID, stepID), "request")
 	run.Output["collaborationResults"] = map[string]interface{}{
 		requestID: map[string]interface{}{
-			"status": string(AgentRequestStatusFailed),
+			"status": string(models.AgentRequestStatusFailed),
 			"reason": "Model provider quota is exhausted; choose a credential with available quota.",
 		},
 	}
@@ -40,13 +41,13 @@ func TestRunbookProducerEmitsPinnedGovernedCallAndConsumesActionCall(t *testing.
 	}}
 	calls := modelsteptest.FixedActionCalls{}
 	producer := newTestRunbookProducer(t, definition, "manual", calls)
-	if producer.Kind() != StepProducerDeterministic {
+	if producer.Kind() != models.StepProducerDeterministic {
 		t.Fatalf("kind = %s", producer.Kind())
 	}
 	action := webFetchAction()
 	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{action}}
-	run := &AgentRun{ID: "run-1", Context: map[string]interface{}{"url": "https://example.test/health"}}
-	path := &AgentSessionPath{}
+	run := &models.AgentRun{ID: "run-1", Context: map[string]interface{}{"url": "https://example.test/health"}}
+	path := &models.AgentSessionPath{}
 	first := produceRunbook(t, producer, runbookInput(run, 1, binding, path))
 	if len(first.ToolCalls) != 1 {
 		t.Fatalf("first = %#v", first)
@@ -73,10 +74,10 @@ func TestRunbookProducerEmitsPinnedGovernedCallAndConsumesActionCall(t *testing.
 	}
 	// The loop applies the step, the inline executor records the call.
 	run.Checkpoint = first.KernelState
-	calls["call-1"] = &ActionCall{ID: "call-1", RunID: run.ID, SkillID: "web", SkillVersion: "1", Action: "fetch", ApprovalID: "approval-1", Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"content": "ok"}}
-	appendRunbookToolResult(path, run.ID, call.ID, ToolEntryCompleted, "call-1")
+	calls["call-1"] = &models.ActionCall{ID: "call-1", RunID: run.ID, SkillID: "web", SkillVersion: "1", Action: "fetch", ApprovalID: "approval-1", Status: models.ActionCallStatusSucceeded, Output: map[string]interface{}{"content": "ok"}}
+	appendRunbookToolResult(path, run.ID, call.ID, models.ToolEntryCompleted, "call-1")
 	second := produceRunbook(t, producer, runbookInput(run, 2, binding, path))
-	if second.Final == nil || second.Final.Status != AgentRunStatusCompleted || second.Final.Output["content"] != "ok" || len(second.ToolCalls) != 0 {
+	if second.Final == nil || second.Final.Status != models.AgentRunStatusCompleted || second.Final.Output["content"] != "ok" || len(second.ToolCalls) != 0 {
 		t.Fatalf("second=%#v", second)
 	}
 	state, err := decodeRunbookState(second.KernelState)
@@ -99,9 +100,9 @@ func TestRunbookProducerEmitsPinnedGovernedCallAndConsumesActionCall(t *testing.
 func TestRunbookProducerEmitsKernelForkCallAndRunsBoundedForEach(t *testing.T) {
 	definition := concurrentRunbookDefinition()
 	parallel := newTestRunbookProducer(t, definition, "manual", nil)
-	run := &AgentRun{ID: "parallel", Context: map[string]interface{}{"parallel": true}}
+	run := &models.AgentRun{ID: "parallel", Context: map[string]interface{}{"parallel": true}}
 	out := produceRunbook(t, parallel, runbookInput(run, 1, nil, nil))
-	if len(out.ToolCalls) != 1 || out.ToolCalls[0].Name != string(ControlToolRunbookFork) || out.ToolCalls[0].Directive == nil {
+	if len(out.ToolCalls) != 1 || out.ToolCalls[0].Name != string(models.ControlToolRunbookFork) || out.ToolCalls[0].Directive == nil {
 		t.Fatalf("parallel=%#v", out)
 	}
 	if string(out.ToolCalls[0].Arguments) != `{"step":"fork","visit":2}` || out.ToolCalls[0].ID != "runbook.2.fork" {
@@ -113,7 +114,7 @@ func TestRunbookProducerEmitsKernelForkCallAndRunsBoundedForEach(t *testing.T) {
 	}
 	// The settle rebuilds the spec from the applied engine state.
 	spec, err := parallel.forkSpec(out.KernelState, state, run.ID)
-	if err != nil || spec.ForkID != "fork" || spec.Policy.Mode != FanInModeAll || len(spec.Branches) != 2 || spec.SourceCheckpoint == nil || spec.ChildKind != "" {
+	if err != nil || spec.ForkID != "fork" || spec.Policy.Mode != models.FanInModeAll || len(spec.Branches) != 2 || spec.SourceCheckpoint == nil || spec.ChildKind != "" {
 		t.Fatalf("spec=%#v err=%v", spec, err)
 	}
 	if spec.Branches[0].Budget == nil || spec.Branches[0].Budget.MaxTurns != 2 || spec.Branches[1].Budget == nil || spec.Branches[1].Budget.MaxActions != 3 {
@@ -123,7 +124,7 @@ func TestRunbookProducerEmitsKernelForkCallAndRunsBoundedForEach(t *testing.T) {
 		if _, copied := branch.Checkpoint[runbookTraceCheckpointKey]; copied {
 			t.Fatalf("branch %d copied the parent trace", index)
 		}
-		child := produceRunbook(t, parallel, runbookInput(&AgentRun{ID: "child", Checkpoint: branch.Checkpoint}, 1, nil, nil))
+		child := produceRunbook(t, parallel, runbookInput(&models.AgentRun{ID: "child", Checkpoint: branch.Checkpoint}, 1, nil, nil))
 		if child.Final == nil || child.Final.Output["branchId"] != branch.ID || child.Final.Output["forkId"] != "fork" {
 			t.Fatalf("branch %d=%#v", index, child)
 		}
@@ -136,10 +137,10 @@ func TestRunbookProducerEmitsKernelForkCallAndRunsBoundedForEach(t *testing.T) {
 	groupID := agentrun.StableForkIdentifier(run.ID, "fork", "group")
 	run.Checkpoint = out.KernelState
 	run.Output = map[string]interface{}{"dependencyGroups": map[string]interface{}{groupID: map[string]interface{}{
-		"status": string(RunDependencyGroupSatisfied),
+		"status": string(models.RunDependencyGroupSatisfied),
 		"dependencies": map[string]interface{}{
-			"a": map[string]interface{}{"state": string(RunDependencyStateSatisfied), "result": map[string]interface{}{"checkpoint": map[string]interface{}{"state": map[string]interface{}{"a": true}}}},
-			"b": map[string]interface{}{"state": string(RunDependencyStateSatisfied), "result": map[string]interface{}{"checkpoint": map[string]interface{}{"state": map[string]interface{}{"b": true}}}},
+			"a": map[string]interface{}{"state": string(models.RunDependencyStateSatisfied), "result": map[string]interface{}{"checkpoint": map[string]interface{}{"state": map[string]interface{}{"a": true}}}},
+			"b": map[string]interface{}{"state": string(models.RunDependencyStateSatisfied), "result": map[string]interface{}{"checkpoint": map[string]interface{}{"state": map[string]interface{}{"b": true}}}},
 		},
 	}}}
 	joined := produceRunbook(t, parallel, runbookInput(run, 2, nil, nil))
@@ -147,7 +148,7 @@ func TestRunbookProducerEmitsKernelForkCallAndRunsBoundedForEach(t *testing.T) {
 		t.Fatalf("joined=%#v", joined)
 	}
 	loop := newTestRunbookProducer(t, definition, "manual", nil)
-	looped := produceRunbook(t, loop, runbookInput(&AgentRun{ID: "loop", Context: map[string]interface{}{"parallel": false, "items": []interface{}{"one", "two"}}}, 1, nil, nil))
+	looped := produceRunbook(t, loop, runbookInput(&models.AgentRun{ID: "loop", Context: map[string]interface{}{"parallel": false, "items": []interface{}{"one", "two"}}}, 1, nil, nil))
 	if looped.Final == nil || looped.Final.Output["state"].(map[string]interface{})["last"] != "two" {
 		t.Fatalf("loop=%#v", looped)
 	}
@@ -169,9 +170,9 @@ func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	control := &runtimecontrol.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration.NewCollaborationService(store)}
 	producer := newTestRunbookProducer(t, concurrentRunbookDefinition(), "manual", store)
 	cc := agentrun.ControlContext{
-		Run:     &AgentRun{ID: "run", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "fork", "pendingFork": "fork", "pendingCall": "runbook.2.fork"}}},
+		Run:     &models.AgentRun{ID: "run", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "fork", "pendingFork": "fork", "pendingCall": "runbook.2.fork"}}},
 		Binding: &agentrun.TurnRunnerBinding{Producer: producer}, Origin: runtimecontrol.ControlOriginKernel,
-		Entry:     &SessionEntry{ToolCallID: "runbook.9.fork"},
+		Entry:     &models.SessionEntry{ToolCallID: "runbook.9.fork"},
 		Arguments: &runbookKernelArgs{Step: "fork", Visit: 9},
 	}
 	pending := func(s runbookExecutionState) string { return s.PendingFork }
@@ -215,8 +216,8 @@ func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testi
 		{Name: "browser_screenshot", SkillID: "browser", Version: "1", Action: "screenshot"},
 		{Name: "browser_dump", SkillID: "browser", Version: "1", Action: "dump"},
 	}}
-	run := &AgentRun{ID: "run-shots", Context: map[string]interface{}{}}
-	path := &AgentSessionPath{}
+	run := &models.AgentRun{ID: "run-shots", Context: map[string]interface{}{}}
+	path := &models.AgentSessionPath{}
 	step := func(sequence int64) agentrun.StepOutput {
 		out := produceRunbook(t, producer, runbookInput(run, sequence, binding, path))
 		run.Checkpoint = out.KernelState
@@ -230,8 +231,8 @@ func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testi
 		},
 	}
 	shot := step(1)
-	calls["shot-call"] = &ActionCall{ID: "shot-call", RunID: run.ID, Status: ActionCallStatusSucceeded, Output: screenshot}
-	appendRunbookToolResult(path, run.ID, shot.ToolCalls[0].ID, ToolEntryCompleted, "shot-call")
+	calls["shot-call"] = &models.ActionCall{ID: "shot-call", RunID: run.ID, Status: models.ActionCallStatusSucceeded, Output: screenshot}
+	appendRunbookToolResult(path, run.ID, shot.ToolCalls[0].ID, models.ToolEntryCompleted, "shot-call")
 	dump := step(2)
 	if len(dump.ToolCalls) != 1 || dump.ToolCalls[0].Name != "browser_dump" {
 		t.Fatalf("dump=%#v", dump)
@@ -243,9 +244,9 @@ func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testi
 	for index := range rows {
 		rows[index] = map[string]interface{}{"index": index, "text": strings.Repeat("x", 100)}
 	}
-	calls["dump-call"] = &ActionCall{ID: "dump-call", RunID: run.ID, Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"rows": rows}}
-	appendRunbookToolResult(path, run.ID, dump.ToolCalls[0].ID, ToolEntryCompleted, "dump-call")
-	if done := step(3); done.Final == nil || done.Final.Status != AgentRunStatusCompleted {
+	calls["dump-call"] = &models.ActionCall{ID: "dump-call", RunID: run.ID, Status: models.ActionCallStatusSucceeded, Output: map[string]interface{}{"rows": rows}}
+	appendRunbookToolResult(path, run.ID, dump.ToolCalls[0].ID, models.ToolEntryCompleted, "dump-call")
+	if done := step(3); done.Final == nil || done.Final.Status != models.AgentRunStatusCompleted {
 		t.Fatalf("done=%#v", done)
 	}
 	encoded, err := json.Marshal(run.Checkpoint)

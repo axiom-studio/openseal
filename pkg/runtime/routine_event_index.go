@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // RoutineEventIndexRebuildInterval is how often the dispatcher loop rebuilds
@@ -13,7 +15,7 @@ import (
 const RoutineEventIndexRebuildInterval = 15 * time.Minute
 
 type routineEventIndexKey struct {
-	kind      RoutineEventKind
+	kind      models.RoutineEventKind
 	sourceRef string
 }
 
@@ -23,10 +25,10 @@ type routineEventScopeKeys map[routineEventIndexKey]struct{}
 // keys that have at least one active event routine. Readers load it through
 // an atomic pointer and never lock; writers build a new snapshot.
 type routineEventIndex struct {
-	scopes map[Scope]routineEventScopeKeys
+	scopes map[models.Scope]routineEventScopeKeys
 }
 
-func (i *routineEventIndex) has(scope Scope, kind RoutineEventKind, sourceRef string) bool {
+func (i *routineEventIndex) has(scope models.Scope, kind models.RoutineEventKind, sourceRef string) bool {
 	if i == nil {
 		return false
 	}
@@ -46,12 +48,12 @@ type routineEventIndexHolder struct {
 	write   sync.Mutex
 }
 
-func (h *routineEventIndexHolder) listening(scope Scope, kind RoutineEventKind, sourceRef string) bool {
+func (h *routineEventIndexHolder) listening(scope models.Scope, kind models.RoutineEventKind, sourceRef string) bool {
 	return h.current.Load().has(scope, kind, sourceRef)
 }
 
 // refreshScope replaces one scope's keys, copying only the outer map.
-func (h *routineEventIndexHolder) refreshScope(ctx context.Context, store RoutineEventStore, scope Scope) error {
+func (h *routineEventIndexHolder) refreshScope(ctx context.Context, store models.RoutineEventStore, scope models.Scope) error {
 	if err := scope.Validate(); err != nil {
 		return err
 	}
@@ -62,7 +64,7 @@ func (h *routineEventIndexHolder) refreshScope(ctx context.Context, store Routin
 		return err
 	}
 	previous := h.current.Load()
-	next := &routineEventIndex{scopes: make(map[Scope]routineEventScopeKeys, 1)}
+	next := &routineEventIndex{scopes: make(map[models.Scope]routineEventScopeKeys, 1)}
 	if previous != nil {
 		for existing, values := range previous.scopes {
 			if existing != scope {
@@ -83,13 +85,13 @@ func (h *routineEventIndexHolder) refreshScope(ctx context.Context, store Routin
 
 // rebuild reads every active event routine across scopes and replaces the
 // whole snapshot.
-func (h *routineEventIndexHolder) rebuild(ctx context.Context, store RoutineEventStore) error {
+func (h *routineEventIndexHolder) rebuild(ctx context.Context, store models.RoutineEventStore) error {
 	h.write.Lock()
 	defer h.write.Unlock()
-	next := &routineEventIndex{scopes: make(map[Scope]routineEventScopeKeys)}
+	next := &routineEventIndex{scopes: make(map[models.Scope]routineEventScopeKeys)}
 	after := ""
 	for {
-		page, cursor, err := store.ListRoutineEventSubscriptions(ctx, nil, after, routineEventSubscriptionPageLimit)
+		page, cursor, err := store.ListRoutineEventSubscriptions(ctx, nil, after, models.RoutineEventSubscriptionPageLimit)
 		if err != nil {
 			return err
 		}
@@ -112,7 +114,7 @@ func (h *routineEventIndexHolder) rebuild(ctx context.Context, store RoutineEven
 
 // routineActivationObserver is called after a committed activation write
 // with the activation before (nil on create) and after the write.
-type routineActivationObserver func(ctx context.Context, previous, next *RunbookActivation)
+type routineActivationObserver func(ctx context.Context, previous, next *models.RunbookActivation)
 
 // Activation services are built on demand from a store in many places, so
 // observers are registered per store instance rather than per service.
@@ -159,7 +161,7 @@ func registerRoutineActivationObserver(store interface{}, observer routineActiva
 
 // notifyRoutineActivationWrite runs the observers of a store after a
 // committed activation write.
-func notifyRoutineActivationWrite(ctx context.Context, store interface{}, previous, next *RunbookActivation) {
+func notifyRoutineActivationWrite(ctx context.Context, store interface{}, previous, next *models.RunbookActivation) {
 	key, ok := routineActivationObserverKey(store)
 	if !ok {
 		return

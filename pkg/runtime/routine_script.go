@@ -50,7 +50,7 @@ var ErrChatFileNotFound = errors.New("chat file not found")
 // reads that immutable snapshot. The chat is identified by its persisted
 // conversation and owner, never by model input.
 type ChatFileResolver interface {
-	ResolveChatFile(ctx context.Context, scope Scope, owner ObjectiveOwner, conversationID, path string, version int64) (*ChatFile, error)
+	ResolveChatFile(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID, path string, version int64) (*ChatFile, error)
 }
 
 // routineScriptProposal is what a model proposes: digest and filesVersion
@@ -67,7 +67,7 @@ type routineScriptProposal struct {
 // the chat's current files and writes the pinned script back into the
 // arguments, so the digested, approved arguments carry exactly the version
 // the brief shows. Any digest the model supplied is discarded.
-func pinRoutineScriptArguments(ctx context.Context, files ChatFileResolver, run *AgentRun, arguments map[string]interface{}) error {
+func pinRoutineScriptArguments(ctx context.Context, files ChatFileResolver, run *models.AgentRun, arguments map[string]interface{}) error {
 	raw, present := arguments["script"]
 	if !present || raw == nil {
 		delete(arguments, "script")
@@ -85,10 +85,10 @@ func pinRoutineScriptArguments(ctx context.Context, files ChatFileResolver, run 
 	if clean, err := chatpath.Clean(path); err == nil {
 		path = clean
 	}
-	if err := validateRoutineScriptPath(path); err != nil {
+	if err := models.ValidateRoutineScriptPath(path); err != nil {
 		return err
 	}
-	command, err := normalizeRoutineScriptCommand(proposal.Command, path)
+	command, err := models.NormalizeRoutineScriptCommand(proposal.Command, path)
 	if err != nil {
 		return err
 	}
@@ -96,12 +96,12 @@ func pinRoutineScriptArguments(ctx context.Context, files ChatFileResolver, run 
 	if timeout == 0 {
 		timeout = DefaultRoutineScriptSeconds
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	file, err := currentRoutineScriptFile(ctx, files, run.Scope, run.Owner, conversationID, path)
 	if err != nil {
 		return err
 	}
-	script := &RoutineScript{Path: path, Digest: file.Digest, FilesVersion: file.FilesVersion, Command: command, TimeoutSeconds: timeout}
+	script := &models.RoutineScript{Path: path, Digest: file.Digest, FilesVersion: file.FilesVersion, Command: command, TimeoutSeconds: timeout}
 	if err := script.Validate(); err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func pinRoutineScriptArguments(ctx context.Context, files ChatFileResolver, run 
 	return nil
 }
 
-func currentRoutineScriptFile(ctx context.Context, files ChatFileResolver, scope Scope, owner ObjectiveOwner, conversationID, path string) (*ChatFile, error) {
+func currentRoutineScriptFile(ctx context.Context, files ChatFileResolver, scope models.Scope, owner models.ObjectiveOwner, conversationID, path string) (*ChatFile, error) {
 	if files == nil {
 		return nil, errors.New("routines cannot run scripts on this host")
 	}
@@ -128,7 +128,7 @@ func currentRoutineScriptFile(ctx context.Context, files ChatFileResolver, scope
 
 // verifyRoutineScriptPin proves the pinned version exists in the chat's
 // immutable files snapshot it was pinned from.
-func verifyRoutineScriptPin(ctx context.Context, files ChatFileResolver, scope Scope, owner ObjectiveOwner, conversationID string, script *RoutineScript) error {
+func verifyRoutineScriptPin(ctx context.Context, files ChatFileResolver, scope models.Scope, owner models.ObjectiveOwner, conversationID string, script *models.RoutineScript) error {
 	if script == nil {
 		return nil
 	}
@@ -145,7 +145,7 @@ func verifyRoutineScriptPin(ctx context.Context, files ChatFileResolver, scope S
 	return nil
 }
 
-func routineScriptMap(script *RoutineScript) map[string]interface{} {
+func routineScriptMap(script *models.RoutineScript) map[string]interface{} {
 	if script == nil {
 		return nil
 	}
@@ -159,14 +159,14 @@ func routineScriptMap(script *RoutineScript) map[string]interface{} {
 	return values
 }
 
-func decodeRoutineScript(value interface{}) (*RoutineScript, error) {
+func decodeRoutineScript(value interface{}) (*models.RoutineScript, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
 	decoder.DisallowUnknownFields()
-	var script RoutineScript
+	var script models.RoutineScript
 	if err := decoder.Decode(&script); err != nil {
 		return nil, err
 	}
@@ -180,9 +180,9 @@ func decodeRoutineScript(value interface{}) (*RoutineScript, error) {
 // file's current one. Changed is true when the file now holds other content
 // (or is gone); the routine keeps running the pinned version either way.
 type RoutineScriptStatus struct {
-	ActivationID string         `json:"activationId"`
-	Revision     int64          `json:"revision"`
-	Pinned       *RoutineScript `json:"pinned"`
+	ActivationID string                `json:"activationId"`
+	Revision     int64                 `json:"revision"`
+	Pinned       *models.RoutineScript `json:"pinned"`
 	// CurrentDigest and CurrentFilesVersion describe the file now; both are
 	// empty when the file was deleted.
 	CurrentDigest       string `json:"currentDigest,omitempty"`
@@ -196,7 +196,7 @@ var ErrRoutineHasNoScript = errors.New("this routine does not run a script")
 
 // ResolveRoutineScriptStatus compares a script routine's pinned version with
 // its chat file now.
-func ResolveRoutineScriptStatus(ctx context.Context, files ChatFileResolver, activation *RunbookActivation) (*RoutineScriptStatus, error) {
+func ResolveRoutineScriptStatus(ctx context.Context, files ChatFileResolver, activation *models.RunbookActivation) (*RoutineScriptStatus, error) {
 	if activation == nil || activation.Task == nil || activation.Task.Script == nil {
 		return nil, ErrRoutineHasNoScript
 	}
@@ -204,7 +204,7 @@ func ResolveRoutineScriptStatus(ctx context.Context, files ChatFileResolver, act
 		return nil, errors.New("routines cannot run scripts on this host")
 	}
 	pinned := activation.Task.Script
-	status := &RoutineScriptStatus{ActivationID: activation.ID, Revision: activation.Revision, Pinned: cloneRoutineScript(pinned)}
+	status := &RoutineScriptStatus{ActivationID: activation.ID, Revision: activation.Revision, Pinned: models.CloneRoutineScript(pinned)}
 	file, err := files.ResolveChatFile(ctx, activation.Scope, activation.Owner, activation.Task.ConversationID, pinned.Path, 0)
 	switch {
 	case errors.Is(err, ErrChatFileNotFound) || err == nil && file == nil:
@@ -220,7 +220,7 @@ func ResolveRoutineScriptStatus(ctx context.Context, files ChatFileResolver, act
 
 // RoutineScriptStatus reports whether a script routine's chat file changed
 // since its script was approved.
-func (s *RunbookActivationService) RoutineScriptStatus(ctx context.Context, files ChatFileResolver, scope Scope, id string) (*RoutineScriptStatus, error) {
+func (s *RunbookActivationService) RoutineScriptStatus(ctx context.Context, files ChatFileResolver, scope models.Scope, id string) (*RoutineScriptStatus, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("Runbook activation store is not configured")
 	}
@@ -232,7 +232,7 @@ func (s *RunbookActivationService) RoutineScriptStatus(ctx context.Context, file
 		return nil, err
 	}
 	if activation == nil {
-		return nil, ErrRunbookActivationNotFound
+		return nil, models.ErrRunbookActivationNotFound
 	}
 	return ResolveRoutineScriptStatus(ctx, files, activation)
 }
@@ -241,34 +241,34 @@ func (s *RunbookActivationService) RoutineScriptStatus(ctx context.Context, file
 // Only the approved set_script action calls it; actionID makes its replay
 // idempotent. createdBy records the changing person on a routine that has
 // no creator yet.
-func (s *RunbookActivationService) RepinScript(ctx context.Context, scope Scope, id string, expectedRevision int64, script *RoutineScript, actionID, createdBy string) (*RunbookActivation, error) {
+func (s *RunbookActivationService) RepinScript(ctx context.Context, scope models.Scope, id string, expectedRevision int64, script *models.RoutineScript, actionID, createdBy string) (*models.RunbookActivation, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("Runbook activation store is not configured")
 	}
 	if expectedRevision < 1 {
-		return nil, ErrRunbookActivationRevision
+		return nil, models.ErrRunbookActivationRevision
 	}
 	current, err := s.store.GetRunbookActivation(ctx, scope, strings.TrimSpace(id))
 	if err != nil {
 		return nil, err
 	}
 	if current == nil {
-		return nil, ErrRunbookActivationNotFound
+		return nil, models.ErrRunbookActivationNotFound
 	}
 	if current.Task == nil || current.Task.Script == nil {
 		return nil, ErrRoutineHasNoScript
 	}
 	if current.Revision != expectedRevision {
-		return nil, ErrRunbookActivationRevision
+		return nil, models.ErrRunbookActivationRevision
 	}
-	if current.Status == RunbookActivationRetired {
+	if current.Status == models.RunbookActivationRetired {
 		return nil, errors.New("a cancelled routine's script cannot change")
 	}
 	if script == nil || script.Path != current.Task.Script.Path || script.Command != current.Task.Script.Command || script.TimeoutSeconds != current.Task.Script.TimeoutSeconds {
 		return nil, errors.New("only the routine's script version can change")
 	}
-	next := cloneRunbookActivation(current)
-	next.Task.Script = cloneRoutineScript(script)
+	next := models.CloneRunbookActivation(current)
+	next.Task.Script = models.CloneRoutineScript(script)
 	approved := s.now().UTC()
 	next.Task.Script.ApprovedAt = &approved
 	next.LifecycleActionID = actionID
@@ -283,7 +283,7 @@ func (s *RunbookActivationService) RepinScript(ctx context.Context, scope Scope,
 	if err := s.store.UpdateRunbookActivation(ctx, next, current.Revision); err != nil {
 		return nil, err
 	}
-	return cloneRunbookActivation(next), nil
+	return models.CloneRunbookActivation(next), nil
 }
 
 type scheduledTaskSetScriptArguments struct {
@@ -294,7 +294,7 @@ type scheduledTaskSetScriptArguments struct {
 }
 
 // ownedScriptRoutine loads a script routine the run's owner owns.
-func ownedScriptRoutine(ctx context.Context, store runbookActionStore, run *AgentRun, id string) (*RunbookActivation, error) {
+func ownedScriptRoutine(ctx context.Context, store runbookActionStore, run *models.AgentRun, id string) (*models.RunbookActivation, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, errors.New("changing a routine's script requires its activationId")
 	}
@@ -308,7 +308,7 @@ func ownedScriptRoutine(ctx context.Context, store runbookActionStore, run *Agen
 	if a.Task == nil || a.Task.Script == nil {
 		return nil, ErrRoutineHasNoScript
 	}
-	if a.Status == RunbookActivationRetired {
+	if a.Status == models.RunbookActivationRetired {
 		return nil, errors.New("a cancelled routine's script cannot change")
 	}
 	return a, nil
@@ -316,7 +316,7 @@ func ownedScriptRoutine(ctx context.Context, store runbookActionStore, run *Agen
 
 // pinRoutineScriptRepinArguments writes the routine's chat file's current
 // version into proposed set_script arguments, replacing any model value.
-func pinRoutineScriptRepinArguments(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *AgentRun, arguments map[string]interface{}) error {
+func pinRoutineScriptRepinArguments(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *models.AgentRun, arguments map[string]interface{}) error {
 	id, _ := arguments["activationId"].(string)
 	a, err := ownedScriptRoutine(ctx, store, run, id)
 	if err != nil {
@@ -335,7 +335,7 @@ func pinRoutineScriptRepinArguments(ctx context.Context, store runbookActionStor
 
 // resolveOwnedTaskScript returns the routine and the script version the
 // set_script arguments pin.
-func resolveOwnedTaskScript(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *AgentRun, arguments map[string]interface{}) (*scheduledTaskSetScriptArguments, *RunbookActivation, *RoutineScript, error) {
+func resolveOwnedTaskScript(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *models.AgentRun, arguments map[string]interface{}) (*scheduledTaskSetScriptArguments, *models.RunbookActivation, *models.RoutineScript, error) {
 	var args scheduledTaskSetScriptArguments
 	if err := decodeScheduledTaskArguments(arguments, &args); err != nil {
 		return nil, nil, nil, err
@@ -348,9 +348,9 @@ func resolveOwnedTaskScript(ctx context.Context, store runbookActionStore, files
 		return nil, nil, nil, err
 	}
 	if a.Revision != args.ExpectedRevision {
-		return nil, nil, nil, ErrRunbookActivationRevision
+		return nil, nil, nil, models.ErrRunbookActivationRevision
 	}
-	script := cloneRoutineScript(a.Task.Script)
+	script := models.CloneRoutineScript(a.Task.Script)
 	script.Digest, script.FilesVersion, script.ApprovedAt = args.Digest, args.FilesVersion, nil
 	if err := verifyRoutineScriptPin(ctx, files, a.Scope, a.Owner, a.Task.ConversationID, script); err != nil {
 		return nil, nil, nil, err
@@ -363,7 +363,7 @@ func resolveOwnedTaskScript(ctx context.Context, store runbookActionStore, files
 
 // routineScriptChangePreview is the brief the user approves again before a
 // routine runs a new version of its script.
-func routineScriptChangePreview(ctx context.Context, store runbookActionStore, a *RunbookActivation, script *RoutineScript) (map[string]interface{}, error) {
+func routineScriptChangePreview(ctx context.Context, store runbookActionStore, a *models.RunbookActivation, script *models.RoutineScript) (map[string]interface{}, error) {
 	preview := map[string]interface{}{
 		"resourceType": runbookActivationResourceType, "operation": action.RunbookActionSetScript, "activationId": a.ID,
 		"goal": a.Task.Goal, "conversationId": a.Task.ConversationID,

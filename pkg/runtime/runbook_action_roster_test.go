@@ -7,9 +7,11 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -17,14 +19,14 @@ import (
 // Runbook actions run as the acting Agent with its own or its Team's binding,
 // only while it is on its owner's current roster.
 func TestRunbookActionOwnerChecksTheCurrentRoster(t *testing.T) {
-	ctx, scope := context.Background(), Scope{Kind: "tenant", ID: "roster"}
+	ctx, scope := context.Background(), models.Scope{Kind: "tenant", ID: "roster"}
 	catalogScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	bound := func(deployment string) *skill.BoundAction {
 		return &skill.BoundAction{Binding: &skill.Binding{Scope: catalogScope, DeploymentID: deployment}}
 	}
 	team := chatRosterTeam(scope, "harp")
 	teams := chatRosterTeams{team: team}
-	member := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "harp"}
+	member := &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "harp"}
 	for _, deployment := range []string{"harp", "crew"} {
 		if err := runbookActionOwner(ctx, teams, member, bound(deployment)); err != nil {
 			t.Fatalf("member with %s binding = %v", deployment, err)
@@ -40,11 +42,11 @@ func TestRunbookActionOwnerChecksTheCurrentRoster(t *testing.T) {
 	if err := runbookActionOwner(ctx, teams, member, bound("harp")); err == nil {
 		t.Fatal("removed member accepted")
 	}
-	own := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "own"}, AssignedAgentID: "own"}
+	own := &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "own"}, AssignedAgentID: "own"}
 	if err := runbookActionOwner(ctx, nil, own, bound("own")); err != nil {
 		t.Fatalf("1:1 Agent = %v", err)
 	}
-	delegated := &AgentRun{Scope: scope, Owner: own.Owner, AssignedAgentID: "harp"}
+	delegated := &models.AgentRun{Scope: scope, Owner: own.Owner, AssignedAgentID: "harp"}
 	if err := runbookActionOwner(ctx, nil, delegated, bound("harp")); err == nil {
 		t.Fatal("Agent-owned Run assigned to another Agent accepted")
 	}
@@ -53,19 +55,19 @@ func TestRunbookActionOwnerChecksTheCurrentRoster(t *testing.T) {
 // A Team member creates a routine in its Team chat as in its own chat: the
 // Team owns it and the member runs it, only while the member is on the roster.
 func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
-	ctx, store, scope := t.Context(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "task-test"}
-	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
+	ctx, store, scope := t.Context(), newTestKernelStore(t), models.Scope{Kind: "tenant", ID: "task-test"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}
 	service := conversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	chat, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{Scope: scope, ConversationID: chat.ID, ExpectedRevision: chat.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion, Content: "Check the public forecast every thirty minutes", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "user-request"})
+	posted, err := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{Scope: scope, ConversationID: chat.ID, ExpectedRevision: chat.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user"}, Intent: models.MessageIntentQuestion, Content: "Check the public forecast every thirty minutes", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "user-request"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: "researcher", Goal: "Handle request", Source: RunSourceChat, Context: map[string]interface{}{conversationRunContextConversationID: chat.ID, conversationRunContextTriggerID: posted.Message.ID}})
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: "researcher", Goal: "Handle request", Source: models.RunSourceChat, Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: chat.ID, models.ConversationRunTriggerIDContextKey: posted.Message.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,11 +106,11 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	dispatcher.SetRoutineTeams(teams)
-	call := &ActionCall{ID: "create-routine", Scope: scope, RunID: run.ID, DeploymentID: "researcher", IdempotencyKey: "create-routine"}
+	call := &models.ActionCall{ID: "create-routine", Scope: scope, RunID: run.ID, DeploymentID: "researcher", IdempotencyKey: "create-routine"}
 	if _, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Run: run, Bound: bound, Call: call, Arguments: args}); err != nil {
 		t.Fatalf("member routine dispatch = %v", err)
 	}
-	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, Owner: &owner})
+	activations, err := store.ListRunbookActivations(ctx, models.RunbookActivationFilter{Scope: scope, Owner: &owner})
 	if err != nil || len(activations) != 1 || activations[0].AssignedAgentID != "researcher" || activations[0].Owner != owner {
 		t.Fatalf("Team routine = %#v, %v", activations, err)
 	}

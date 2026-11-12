@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"go.uber.org/zap"
@@ -17,7 +18,7 @@ import (
 
 // RoutineEventFileKeeper keeps a batch's events as one chat file in the routine's chat. Idempotent per batch.
 type RoutineEventFileKeeper interface {
-	KeepRoutineEvents(ctx context.Context, run *AgentRun, batchID string, data []byte) (path string, err error)
+	KeepRoutineEvents(ctx context.Context, run *models.AgentRun, batchID string, data []byte) (path string, err error)
 }
 
 const (
@@ -33,8 +34,8 @@ const (
 // routineEventSeedStore is what the event entry reads: the batch and its
 // routine. KernelStore satisfies it.
 type routineEventSeedStore interface {
-	GetRoutineEventBatch(ctx context.Context, scope Scope, batchID string) (*RoutineEventBatch, []*RoutineEventRecord, error)
-	GetRunbookActivation(ctx context.Context, scope Scope, id string) (*RunbookActivation, error)
+	GetRoutineEventBatch(ctx context.Context, scope models.Scope, batchID string) (*models.RoutineEventBatch, []*models.RoutineEventRecord, error)
+	GetRunbookActivation(ctx context.Context, scope models.Scope, id string) (*models.RunbookActivation, error)
 }
 
 // loopRunSessionSeedEntries are the first entries of a model Run's fresh run
@@ -43,8 +44,8 @@ type routineEventSeedStore interface {
 // get only the brief seed: a delegated, collaboration or forked child
 // inherits routineEventBatchId only to keep the manual approval mode, never
 // the events themselves.
-func loopRunSessionSeedEntries(ctx context.Context, store routineEventSeedStore, keeper RoutineEventFileKeeper, logger *zap.SugaredLogger, run *AgentRun) ([]*SessionEntry, error) {
-	var entries []*SessionEntry
+func loopRunSessionSeedEntries(ctx context.Context, store routineEventSeedStore, keeper RoutineEventFileKeeper, logger *zap.SugaredLogger, run *models.AgentRun) ([]*models.SessionEntry, error) {
+	var entries []*models.SessionEntry
 	seed, err := loopRunSessionSeed(run)
 	if err != nil {
 		return nil, err
@@ -52,7 +53,7 @@ func loopRunSessionSeedEntries(ctx context.Context, store routineEventSeedStore,
 	if seed != nil {
 		entries = append(entries, seed)
 	}
-	batchID, _ := run.Context[RoutineEventBatchContextKey].(string)
+	batchID, _ := run.Context[models.RoutineEventBatchContextKey].(string)
 	if strings.TrimSpace(batchID) == "" || !routineEventOccurrenceRoot(run) {
 		return entries, nil
 	}
@@ -65,8 +66,8 @@ func loopRunSessionSeedEntries(ctx context.Context, store routineEventSeedStore,
 
 // routineEventOccurrenceRoot reports whether the Run is the occurrence the
 // dispatcher started, not a child that inherited its batch ID.
-func routineEventOccurrenceRoot(run *AgentRun) bool {
-	return run.Source == RunSourceEvent && strings.TrimSpace(run.ParentRunID) == "" &&
+func routineEventOccurrenceRoot(run *models.AgentRun) bool {
+	return run.Source == models.RunSourceEvent && strings.TrimSpace(run.ParentRunID) == "" &&
 		(run.RootRunID == "" || run.RootRunID == run.ID)
 }
 
@@ -74,23 +75,23 @@ func routineEventOccurrenceRoot(run *AgentRun) bool {
 // of events (SPEC §6.2). Its text is fixed kernel wording with only
 // kernel-computed numbers and IDs; every event-derived string is in the JSON
 // part or the kept file, JSON-encoded.
-func routineEventSeedEntry(ctx context.Context, store routineEventSeedStore, keeper RoutineEventFileKeeper, logger *zap.SugaredLogger, run *AgentRun, batchID string) (*SessionEntry, error) {
+func routineEventSeedEntry(ctx context.Context, store routineEventSeedStore, keeper RoutineEventFileKeeper, logger *zap.SugaredLogger, run *models.AgentRun, batchID string) (*models.SessionEntry, error) {
 	if store == nil {
-		return nil, fmt.Errorf("%w: run %s has event batch %s but the binding has no store", ErrInvalidAgentRun, run.ID, batchID)
+		return nil, fmt.Errorf("%w: run %s has event batch %s but the binding has no store", models.ErrInvalidAgentRun, run.ID, batchID)
 	}
 	batch, records, err := store.GetRoutineEventBatch(ctx, run.Scope, batchID)
 	if err != nil {
 		return nil, fmt.Errorf("read event batch %s of run %s: %w", batchID, run.ID, err)
 	}
 	if batch == nil {
-		return nil, fmt.Errorf("%w: event batch %s of run %s", ErrRoutineEventBatchNotFound, batchID, run.ID)
+		return nil, fmt.Errorf("%w: event batch %s of run %s", models.ErrRoutineEventBatchNotFound, batchID, run.ID)
 	}
 	if activationID, _ := run.Context["runbookActivationId"].(string); batch.ActivationID != strings.TrimSpace(activationID) {
-		return nil, fmt.Errorf("%w: event batch %s belongs to routine %s, not to run %s", ErrRoutineEventBatchNotFound, batchID, batch.ActivationID, run.ID)
+		return nil, fmt.Errorf("%w: event batch %s belongs to routine %s, not to run %s", models.ErrRoutineEventBatchNotFound, batchID, batch.ActivationID, run.ID)
 	}
 	source := routineEventSeedSource{}
-	if kind, _ := run.Context[RoutineEventKindContextKey].(string); kind != "" {
-		source.Kind = RoutineEventKind(kind)
+	if kind, _ := run.Context[models.RoutineEventKindContextKey].(string); kind != "" {
+		source.Kind = models.RoutineEventKind(kind)
 	}
 	if activationID, _ := run.Context["runbookActivationId"].(string); strings.TrimSpace(activationID) != "" {
 		activation, err := store.GetRunbookActivation(ctx, run.Scope, strings.TrimSpace(activationID))
@@ -109,9 +110,9 @@ func routineEventSeedEntry(ctx context.Context, store routineEventSeedStore, kee
 	})
 
 	content := routineEventSeedContent{events: len(doc.events), test: batch.Test, dropped: batch.Dropped}
-	var dataPart ContentPart
+	var dataPart models.ContentPart
 	if doc.size() <= routineEventInlineMaxBytes {
-		dataPart = ContentPart{Type: ContentPartJSON, Value: doc.encode()}
+		dataPart = models.ContentPart{Type: models.ContentPartJSON, Value: doc.encode()}
 	} else {
 		kept := false
 		if keeper != nil {
@@ -130,24 +131,24 @@ func routineEventSeedEntry(ctx context.Context, store routineEventSeedStore, kee
 			default:
 				kept = true
 				content.keptPath = path
-				dataPart = ContentPart{Type: ContentPartFile, Path: path, MimeType: routineEventFileMimeType, SizeBytes: int64(len(data))}
+				dataPart = models.ContentPart{Type: models.ContentPartFile, Path: path, MimeType: routineEventFileMimeType, SizeBytes: int64(len(data))}
 			}
 		}
 		if !kept {
 			doc.reduce(routineEventInlineMaxBytes)
 			content.reduced = true
-			dataPart = ContentPart{Type: ContentPartJSON, Value: doc.encode()}
+			dataPart = models.ContentPart{Type: models.ContentPartJSON, Value: doc.encode()}
 		}
 	}
 
-	key := RoutineEventEntrySourceKey(run.ID)
-	return &SessionEntry{
-		ID: SessionEntryID(RunAgentSessionID(run.Scope, run.ID), key), RunID: run.ID,
-		Type: SessionEntryUser, SourceKey: key,
-		User: &UserEntry{
-			Origin: UserEntryGoal, GoalKind: "routine_event",
-			Author:  SessionAuthor{Type: "service", ID: "kernel"},
-			Content: []ContentPart{{Type: ContentPartText, Text: content.text()}, dataPart},
+	key := models.RoutineEventEntrySourceKey(run.ID)
+	return &models.SessionEntry{
+		ID: models.SessionEntryID(models.RunAgentSessionID(run.Scope, run.ID), key), RunID: run.ID,
+		Type: models.SessionEntryUser, SourceKey: key,
+		User: &models.UserEntry{
+			Origin: models.UserEntryGoal, GoalKind: "routine_event",
+			Author:  models.SessionAuthor{Type: "service", ID: "kernel"},
+			Content: []models.ContentPart{{Type: models.ContentPartText, Text: content.text()}, dataPart},
 		},
 	}, nil
 }
@@ -196,8 +197,8 @@ func routineEventCount(n int, one, many string) string {
 }
 
 type routineEventSeedSource struct {
-	Kind  RoutineEventKind `json:"kind"`
-	Label string           `json:"label"`
+	Kind  models.RoutineEventKind `json:"kind"`
+	Label string                  `json:"label"`
 }
 
 // routineEventSeedEvent is one event as the model sees it. encoding/json
@@ -223,8 +224,8 @@ type routineEventSeedDocument struct {
 var routineEventTruncatedPayload = json.RawMessage(`{"truncated":true}`)
 
 // missing is called for each batch event ID that has no record.
-func newRoutineEventSeedDocument(source routineEventSeedSource, batch *RoutineEventBatch, records []*RoutineEventRecord, missing func(eventID string)) *routineEventSeedDocument {
-	byID := make(map[string]*RoutineEventRecord, len(records))
+func newRoutineEventSeedDocument(source routineEventSeedSource, batch *models.RoutineEventBatch, records []*models.RoutineEventRecord, missing func(eventID string)) *routineEventSeedDocument {
+	byID := make(map[string]*models.RoutineEventRecord, len(records))
 	for _, record := range records {
 		if record != nil {
 			byID[record.Event.ID] = record
@@ -330,7 +331,7 @@ func (d *routineEventSeedDocument) reduce(limit int) {
 		for key, values := range d.events[i].Fields {
 			shortened := make([]string, len(values))
 			for j, value := range values {
-				shortened[j] = cutUTF8(value, routineEventReducedFieldBytes)
+				shortened[j] = models.TruncateUTF8(value, routineEventReducedFieldBytes)
 			}
 			cut[key] = shortened
 		}
@@ -428,7 +429,7 @@ func cutJSONEscaped(s string, budget int) string {
 // a control-tool child's brief (task, fork branch, decision, review,
 // delegation), otherwise the Run's goal as a routine brief. nil when the Run
 // has no goal.
-func loopRunSessionSeed(run *AgentRun) (*SessionEntry, error) {
+func loopRunSessionSeed(run *models.AgentRun) (*models.SessionEntry, error) {
 	if _, trial := run.Context[agentbuilder.AgentTrialContextKey]; trial {
 		return agentbuilder.AgentTrialSessionSeed(run)
 	}
@@ -439,5 +440,5 @@ func loopRunSessionSeed(run *AgentRun) (*SessionEntry, error) {
 	if strings.TrimSpace(run.Goal) == "" {
 		return nil, nil
 	}
-	return childSessionSeed(run.Scope, run.ID, "routine", run.Goal)
+	return models.ChildSessionSeed(run.Scope, run.ID, "routine", run.Goal)
 }

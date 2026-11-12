@@ -10,17 +10,19 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
-func activationGoal(a *RunbookActivation, o *Objective) string {
+func activationGoal(a *models.RunbookActivation, o *models.Objective) string {
 	if a.Task != nil {
 		if a.Task.AppID != "" {
 			return a.Task.Goal + "\n\nThis routine keeps app " + a.Task.AppID + " up to date: save its results with save_app_data for that appId so the app shows them."
@@ -34,7 +36,7 @@ func activationGoal(a *RunbookActivation, o *Objective) string {
 // chat it was made in. Retrying does not help; the routine must be paused.
 var ErrRoutineReportingUnavailable = errors.New("routine reporting chat is unavailable")
 
-func scheduledTaskConversation(ctx context.Context, store ConversationStore, scope Scope, owner ObjectiveOwner, task *ScheduledAgentTask) (*Conversation, error) {
+func scheduledTaskConversation(ctx context.Context, store models.ConversationStore, scope models.Scope, owner models.ObjectiveOwner, task *models.ScheduledAgentTask) (*models.Conversation, error) {
 	if err := task.Validate(); err != nil {
 		return nil, err
 	}
@@ -42,20 +44,20 @@ func scheduledTaskConversation(ctx context.Context, store ConversationStore, sco
 	if err != nil {
 		return nil, err
 	}
-	if c == nil || c.Scope != scope || c.Owner != owner || c.Status != ConversationStatusActive {
+	if c == nil || c.Scope != scope || c.Owner != owner || c.Status != models.ConversationStatusActive {
 		return nil, fmt.Errorf("%w: its chat is archived or gone", ErrRoutineReportingUnavailable)
 	}
 	m, err := store.GetChannelMessage(ctx, scope, c.ID, task.SourceMessageID)
 	if err != nil {
 		return nil, err
 	}
-	if m == nil || m.Scope != scope || m.ConversationID != c.ID || m.Sender.Type != ConversationParticipantUser || m.Audience.Kind != ConversationAudienceChannel {
+	if m == nil || m.Scope != scope || m.ConversationID != c.ID || m.Sender.Type != models.ConversationParticipantUser || m.Audience.Kind != models.ConversationAudienceChannel {
 		return nil, fmt.Errorf("%w: its request message is gone or not visible in the chat", ErrRoutineReportingUnavailable)
 	}
 	return c, nil
 }
 
-func validateScheduledTaskTarget(ctx context.Context, reader RunbookActivationReader, catalog RunbookDefinitionCatalog, a *RunbookActivation) error {
+func validateScheduledTaskTarget(ctx context.Context, reader models.RunbookActivationReader, catalog models.RunbookDefinitionCatalog, a *models.RunbookActivation) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
@@ -68,14 +70,14 @@ func validateScheduledTaskTarget(ctx context.Context, reader RunbookActivationRe
 	}
 	// A Team routine runs as the member that made it only while that member is
 	// on the roster; otherwise the scheduler pauses it.
-	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(reader), a.Scope, a.Owner, a.AssignedAgentID)
+	onRoster, err := models.AgentOnChatRoster(ctx, models.TeamRosterReaderOf(reader), a.Scope, a.Owner, a.AssignedAgentID)
 	if err != nil {
 		return err
 	}
 	if !onRoster {
 		return fmt.Errorf("%w: assigned Agent is not on the chat's roster", ErrRunbookActivationUnverified)
 	}
-	store, ok := reader.(ConversationStore)
+	store, ok := reader.(models.ConversationStore)
 	if !ok {
 		return fmt.Errorf("%w: reporting store unavailable", ErrRunbookActivationUnverified)
 	}
@@ -85,7 +87,7 @@ func validateScheduledTaskTarget(ctx context.Context, reader RunbookActivationRe
 	return nil
 }
 
-func prepareActivationReporting(ctx context.Context, store ConversationStore, a *RunbookActivation, runID string, values map[string]interface{}) (*Conversation, string, error) {
+func prepareActivationReporting(ctx context.Context, store models.ConversationStore, a *models.RunbookActivation, runID string, values map[string]interface{}) (*models.Conversation, string, error) {
 	if a.Task == nil {
 		return conversationrun.PrepareRunReporting(ctx, store, a.Scope, a.Owner, a.Trigger.Reporting, activationActingUser(a), runID, values)
 	}
@@ -96,11 +98,11 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 	if err != nil {
 		return nil, "", err
 	}
-	values[conversationRunContextConversationID] = c.ID
-	values[conversationRunContextTriggerID] = a.Task.SourceMessageID
-	values[runReportingContextRootRunID] = runID
-	values[runReportingContextMilestones] = []interface{}{string(runbook.ReportingCompleted), string(runbook.ReportingFailed)}
-	values[scheduledTaskContextKey] = true
+	values[models.ConversationRunConversationIDContextKey] = c.ID
+	values[models.ConversationRunTriggerIDContextKey] = a.Task.SourceMessageID
+	values[models.RunReportingRootRunIDContextKey] = runID
+	values[models.RunReportingMilestonesContextKey] = []interface{}{string(runbook.ReportingCompleted), string(runbook.ReportingFailed)}
+	values[models.ScheduledTaskContextKey] = true
 	if a.Task.Script != nil {
 		// The occurrence runs the version pinned when it started, even if the
 		// routine is approved for a newer one while it runs.
@@ -137,18 +139,18 @@ func scheduledTaskCreateAction() skill.Action {
 					"summary":   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineBriefSummary, "description": "One plain sentence: what the routine does and when."},
 					"deliverTo": map[string]interface{}{"type": "string", "maxLength": maximumRoutineDeliverTo, "description": "Where results go, in plain words, for example \"kev@example.com, from your Gmail\" or \"this chat\"."},
 					"grants": map[string]interface{}{
-						"type": "array", "maxItems": maximumRoutineGrants,
+						"type": "array", "maxItems": models.MaximumRoutineGrants,
 						"description": "The fewest actions each run must perform without asking. Use exact action names from your tools: skillId.action, or a connected tool's own name such as mcp.<connection>.<tool>, granting each connected tool separately. List what it reads (for example web search) and each sending action; for an email to the user set toOwnerOnly; for a post to another channel set toDestinations. Never grant a send to this chat: results are posted here automatically.",
 						"items": map[string]interface{}{
 							"type": "object", "additionalProperties": false, "required": []interface{}{"action"},
 							"properties": map[string]interface{}{
 								"action":        map[string]interface{}{"type": "string", "minLength": 3, "maxLength": 384, "description": "Exact action name: skillId.action, or a connected tool's own name, mcp.<connection>.<tool>."},
-								"label":         map[string]interface{}{"type": "string", "maxLength": maximumRoutineGrantLabel, "description": "Plain words for the user, for example \"Email you the summary\"."},
+								"label":         map[string]interface{}{"type": "string", "maxLength": models.MaximumRoutineGrantLabel, "description": "Plain words for the user, for example \"Email you the summary\"."},
 								"toOwnerOnly":   map[string]interface{}{"type": "boolean", "description": "For a sending action: only sends whose every recipient is the user's own address run without asking."},
-								"toolArguments": map[string]interface{}{"type": "object", "maxProperties": maximumRoutineGrantToolArguments, "description": "Filled in by the system for a connected tool; omit it."},
+								"toolArguments": map[string]interface{}{"type": "object", "maxProperties": models.MaximumRoutineGrantToolArguments, "description": "Filled in by the system for a connected tool; omit it."},
 								"toDestinations": map[string]interface{}{
-									"type": "array", "minItems": 1, "maxItems": maximumRoutineGrantDestinations,
-									"items":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineGrantDestinationBytes},
+									"type": "array", "minItems": 1, "maxItems": models.MaximumRoutineGrantDestinations,
+									"items":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": models.MaximumRoutineGrantDestinationBytes},
 									"description": "Required for an action that posts to a channel or conversation: each destination its runs post to, exactly as the runs will pass it as the action's channel argument (the channel ID, or its #name). Only posts to these run without asking.",
 								},
 							},
@@ -161,8 +163,8 @@ func scheduledTaskCreateAction() skill.Action {
 				"description": "Optional. A tested script from this chat's files that each run runs first with run_command, in this chat's sandbox.",
 				"properties": map[string]interface{}{
 					"path":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1024, "description": "The script's path in this chat's files, for example scripts/weekly_signups.py."},
-					"command":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineScriptCommand, "description": "Exactly how to run it: python3, node or bash, then the script's path, then any plain arguments without quotes or shell characters, for example python3 scripts/weekly_signups.py --days 7."},
-					"timeoutSeconds": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaximumRoutineScriptSeconds, "description": "Optional limit for one run of the script. Defaults to 300."},
+					"command":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": models.MaximumRoutineScriptCommand, "description": "Exactly how to run it: python3, node or bash, then the script's path, then any plain arguments without quotes or shell characters, for example python3 scripts/weekly_signups.py --days 7."},
+					"timeoutSeconds": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": models.MaximumRoutineScriptSeconds, "description": "Optional limit for one run of the script. Defaults to 300."},
 					"digest":         map[string]interface{}{"type": "string", "description": "Filled in by the system; omit it."},
 					"filesVersion":   map[string]interface{}{"type": "integer", "minimum": 1, "description": "Filled in by the system; omit it."},
 				},
@@ -199,28 +201,28 @@ func scheduledTaskTriggerSchema() map[string]interface{} {
 					"kind":   map[string]interface{}{"type": "string", "enum": kinds},
 					"source": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "description": "A source from event_sources. For a webhook use \"new\"."},
 					"filter": map[string]interface{}{
-						"type": "array", "maxItems": RoutineEventMaxConditions,
+						"type": "array", "maxItems": models.RoutineEventMaxConditions,
 						"items": map[string]interface{}{
 							"type": "object", "additionalProperties": false, "required": []interface{}{"field", "op"},
 							"properties": map[string]interface{}{
 								"field":  map[string]interface{}{"type": "string", "maxLength": 256},
 								"op":     map[string]interface{}{"type": "string", "enum": []interface{}{"equals", "contains", "one_of", "glob", "exists"}},
-								"value":  map[string]interface{}{"type": "string", "maxLength": RoutineEventConditionValueMax},
-								"values": map[string]interface{}{"type": "array", "maxItems": RoutineEventConditionMaxValues, "items": map[string]interface{}{"type": "string", "maxLength": RoutineEventConditionValueMax}},
+								"value":  map[string]interface{}{"type": "string", "maxLength": models.RoutineEventConditionValueMax},
+								"values": map[string]interface{}{"type": "array", "maxItems": models.RoutineEventConditionMaxValues, "items": map[string]interface{}{"type": "string", "maxLength": models.RoutineEventConditionValueMax}},
 								"not":    map[string]interface{}{"type": "boolean"},
-								"label":  map[string]interface{}{"type": "string", "maxLength": RoutineEventConditionLabelMax, "description": "Plain words for the person, e.g. \"#support\"."},
+								"label":  map[string]interface{}{"type": "string", "maxLength": models.RoutineEventConditionLabelMax, "description": "Plain words for the person, e.g. \"#support\"."},
 							},
 						},
 					},
 					"calendar": map[string]interface{}{
 						"type": "object", "additionalProperties": false, "required": []interface{}{"on"},
 						"properties": map[string]interface{}{
-							"on":      map[string]interface{}{"type": "string", "enum": []interface{}{RoutineCalendarStartsIn, RoutineCalendarCreated, RoutineCalendarUpdated, RoutineCalendarEnded}},
-							"minutes": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": RoutineCalendarMaxMinutesBefore},
+							"on":      map[string]interface{}{"type": "string", "enum": []interface{}{models.RoutineCalendarStartsIn, models.RoutineCalendarCreated, models.RoutineCalendarUpdated, models.RoutineCalendarEnded}},
+							"minutes": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": models.RoutineCalendarMaxMinutesBefore},
 						},
 					},
 					"includeBots":        map[string]interface{}{"type": "boolean"},
-					"maxPerHour":         map[string]interface{}{"type": "integer", "minimum": 1, "maximum": RoutineEventMaxPerHourLimit, "description": "Most runs per hour; extra events wait and run together. Default 20."},
+					"maxPerHour":         map[string]interface{}{"type": "integer", "minimum": 1, "maximum": models.RoutineEventMaxPerHourLimit, "description": "Most runs per hour; extra events wait and run together. Default 20."},
 					"maximumOccurrences": map[string]interface{}{"type": []interface{}{"integer", "null"}, "minimum": 1, "maximum": 1000000},
 				},
 			},
@@ -256,7 +258,7 @@ type scheduledTaskCreateArguments struct {
 	Trigger *scheduledTaskTriggerArguments `json:"trigger"`
 	AppID   string                         `json:"appId,omitempty"`
 	Brief   *RoutineBrief                  `json:"brief,omitempty"`
-	Script  *RoutineScript                 `json:"script,omitempty"`
+	Script  *models.RoutineScript          `json:"script,omitempty"`
 }
 
 type scheduledTaskTriggerArguments struct {
@@ -271,13 +273,13 @@ type scheduledTaskScheduleArguments struct {
 }
 
 type scheduledTaskEventArguments struct {
-	Kind               RoutineEventKind        `json:"kind"`
-	Source             string                  `json:"source"`
-	Filter             []RoutineEventCondition `json:"filter,omitempty"`
-	Calendar           *RoutineCalendarTiming  `json:"calendar,omitempty"`
-	IncludeBots        bool                    `json:"includeBots,omitempty"`
-	MaxPerHour         int                     `json:"maxPerHour,omitempty"`
-	MaximumOccurrences *int64                  `json:"maximumOccurrences,omitempty"`
+	Kind               models.RoutineEventKind        `json:"kind"`
+	Source             string                         `json:"source"`
+	Filter             []models.RoutineEventCondition `json:"filter,omitempty"`
+	Calendar           *models.RoutineCalendarTiming  `json:"calendar,omitempty"`
+	IncludeBots        bool                           `json:"includeBots,omitempty"`
+	MaxPerHour         int                            `json:"maxPerHour,omitempty"`
+	MaximumOccurrences *int64                         `json:"maximumOccurrences,omitempty"`
 }
 
 // scheduledTaskCreatesEventRoutine reports whether create_task arguments
@@ -289,10 +291,10 @@ func scheduledTaskCreatesEventRoutine(arguments map[string]interface{}) bool {
 }
 
 type scheduledTaskStatusArguments struct {
-	ActivationID     string                  `json:"activationId"`
-	ExpectedRevision int64                   `json:"expectedRevision"`
-	Status           RunbookActivationStatus `json:"status"`
-	Reason           string                  `json:"reason"`
+	ActivationID     string                         `json:"activationId"`
+	ExpectedRevision int64                          `json:"expectedRevision"`
+	Status           models.RunbookActivationStatus `json:"status"`
+	Reason           string                         `json:"reason"`
 }
 
 func decodeScheduledTaskArguments(arguments map[string]interface{}, target interface{}) error {
@@ -309,7 +311,7 @@ func decodeScheduledTaskArguments(arguments map[string]interface{}, target inter
 // routine's task with its schedule, or with Task.Event set for an event
 // routine (then the schedule is nil). activationID is the routine's ID when
 // it is known (dispatch); a webhook routine's hook is named after it.
-func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, files ChatFileResolver, events routineEventActions, run *AgentRun, activationID string, args map[string]interface{}) (*scheduledTaskCreateArguments, *ScheduledAgentTask, *runbook.Schedule, error) {
+func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, files ChatFileResolver, events routineEventActions, run *models.AgentRun, activationID string, args map[string]interface{}) (*scheduledTaskCreateArguments, *models.ScheduledAgentTask, *runbook.Schedule, error) {
 	var a scheduledTaskCreateArguments
 	if err := decodeScheduledTaskArguments(args, &a); err != nil {
 		return nil, nil, nil, err
@@ -324,12 +326,12 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 	if err := validation.ValidateNoSensitiveInput(a.Title); err != nil {
 		return nil, nil, nil, err
 	}
-	if run == nil || run.Kind != RunKindConversation || run.AssignedAgentID == "" {
+	if run == nil || run.Kind != models.RunKindConversation || run.AssignedAgentID == "" {
 		return nil, nil, nil, errors.New("scheduled task creation requires a chat whose roster includes this Agent")
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	messageID, _ := run.Context[conversationRunContextTriggerID].(string)
-	if isTeamMemberRun(run) {
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	messageID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
+	if models.IsTeamMemberRun(run) {
 		// A teammate's hand-off started this Run; the routine's source is the
 		// person's request that the hand-off answered.
 		trigger, err := store.GetChannelMessage(ctx, run.Scope, conversationID, messageID)
@@ -344,20 +346,20 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 			messageID = request.ID
 		}
 	}
-	task := &ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID, AppID: strings.TrimSpace(a.AppID), CreatedBy: run.ActingUser}
+	task := &models.ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID, AppID: strings.TrimSpace(a.AppID), CreatedBy: run.ActingUser}
 	// A routine always carries the brief the user approved.
 	brief, err := normalizeRoutineBrief(a.Brief, false)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	a.Brief, task.Grants = brief, cloneRoutineGrants(brief.Grants)
+	a.Brief, task.Grants = brief, models.CloneRoutineGrants(brief.Grants)
 	if a.Script != nil {
 		// The kernel pinned this version from the chat's files when the
 		// routine was proposed; it must still be that snapshot's file.
 		if err := verifyRoutineScriptPin(ctx, files, run.Scope, run.Owner, conversationID, a.Script); err != nil {
 			return nil, nil, nil, err
 		}
-		task.Script = cloneRoutineScript(a.Script)
+		task.Script = models.CloneRoutineScript(a.Script)
 	}
 	conversation, err := scheduledTaskConversation(ctx, store, run.Scope, run.Owner, task)
 	if err != nil {
@@ -399,7 +401,7 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 	}
 	return &a, task, schedule, nil
 }
-func resolveOwnedTaskStatus(ctx context.Context, store runbookActionStore, run *AgentRun, arguments map[string]interface{}) (*scheduledTaskStatusArguments, *RunbookActivation, error) {
+func resolveOwnedTaskStatus(ctx context.Context, store runbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (*scheduledTaskStatusArguments, *models.RunbookActivation, error) {
 	var args scheduledTaskStatusArguments
 	if err := decodeScheduledTaskArguments(arguments, &args); err != nil {
 		return nil, nil, err
@@ -407,7 +409,7 @@ func resolveOwnedTaskStatus(ctx context.Context, store runbookActionStore, run *
 	if strings.TrimSpace(args.Reason) == "" || args.ActivationID == "" || args.ExpectedRevision < 1 {
 		return nil, nil, errors.New("routine status change requires an ID, revision and reason")
 	}
-	if args.Status != RunbookActivationActive && args.Status != RunbookActivationPaused && args.Status != RunbookActivationRetired {
+	if args.Status != models.RunbookActivationActive && args.Status != models.RunbookActivationPaused && args.Status != models.RunbookActivationRetired {
 		return nil, nil, errors.New("unsupported routine status")
 	}
 	a, err := store.GetRunbookActivation(ctx, run.Scope, args.ActivationID)
@@ -418,12 +420,12 @@ func resolveOwnedTaskStatus(ctx context.Context, store runbookActionStore, run *
 		return nil, nil, errors.New("routine is not owned by this chat")
 	}
 	if a.Revision != args.ExpectedRevision {
-		return nil, nil, ErrRunbookActivationRevision
+		return nil, nil, models.ErrRunbookActivationRevision
 	}
-	if a.Status == RunbookActivationRetired && args.Status != RunbookActivationRetired {
+	if a.Status == models.RunbookActivationRetired && args.Status != models.RunbookActivationRetired {
 		return nil, nil, errors.New("cancelled routine cannot be resumed; replace its schedule")
 	}
-	if args.Status == RunbookActivationActive {
+	if args.Status == models.RunbookActivationActive {
 		if err := authorizeRoutineChange(a, run); err != nil {
 			return nil, nil, err
 		}
@@ -439,7 +441,7 @@ var ErrRoutineNotCreator = errors.New("Only the person who created this routine 
 // its script or resume it: its occurrences act for that person. A routine
 // with no recorded creator becomes the routine of whoever changes it next
 // (routineChangeCreator stamps them).
-func authorizeRoutineChange(a *RunbookActivation, run *AgentRun) error {
+func authorizeRoutineChange(a *models.RunbookActivation, run *models.AgentRun) error {
 	if a == nil || a.Task == nil || a.Task.CreatedBy == "" || run != nil && a.Task.CreatedBy == run.ActingUser {
 		return nil
 	}
@@ -448,7 +450,7 @@ func authorizeRoutineChange(a *RunbookActivation, run *AgentRun) error {
 
 // routineChangeCreator is the creator an authorized change records: the
 // changing run's person when the routine has none yet, else "".
-func routineChangeCreator(a *RunbookActivation, run *AgentRun) string {
+func routineChangeCreator(a *models.RunbookActivation, run *models.AgentRun) string {
 	if a == nil || a.Task == nil || a.Task.CreatedBy != "" || run == nil {
 		return ""
 	}
@@ -532,7 +534,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		if args.Offset < 0 {
 			return nil, errors.New("invalid routine offset")
 		}
-		values, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: run.Scope, Owner: &run.Owner, Limit: 50, Offset: args.Offset})
+		values, err := store.ListRunbookActivations(ctx, models.RunbookActivationFilter{Scope: run.Scope, Owner: &run.Owner, Limit: 50, Offset: args.Offset})
 		if err != nil {
 			return nil, err
 		}
@@ -561,7 +563,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			approved := time.Now().UTC()
 			task.Script.ApprovedAt = &approved
 		}
-		objective, err := NewPortfolioService(store).CreateObjectiveIdempotent(ctx, CreateObjectiveRequest{Scope: run.Scope, Owner: run.Owner, Title: args.Title, Goal: task.Goal, Status: ObjectiveStatusActive, IdempotencyKey: input.Call.IdempotencyKey, ExecutionPolicy: &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1}, Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}, Visibility: ActivityVisibilityScope})
+		objective, err := portfolio.NewPortfolioService(store).CreateObjectiveIdempotent(ctx, portfolio.CreateObjectiveRequest{Scope: run.Scope, Owner: run.Owner, Title: args.Title, Goal: task.Goal, Status: models.ObjectiveStatusActive, IdempotencyKey: input.Call.IdempotencyKey, ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1}, Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}, Visibility: models.ActivityVisibilityScope})
 		if err != nil {
 			return nil, err
 		}
@@ -571,7 +573,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			if task.Event.Webhook != nil {
 				// The hook exists before the activation commits; one whose
 				// activation never commits is removed by PruneHooks.
-				if _, err := store.CreateHook(ctx, &Hook{ID: task.Event.Webhook.HookID, Scope: run.Scope, ActivationID: activationID}); err != nil {
+				if _, err := store.CreateHook(ctx, &models.Hook{ID: task.Event.Webhook.HookID, Scope: run.Scope, ActivationID: activationID}); err != nil {
 					return nil, err
 				}
 			}
@@ -603,7 +605,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			return nil, err
 		}
 		update := UpdateRunbookActivationRequest{ExpectedRevision: args.ExpectedRevision, Status: args.Status, ActionID: input.Call.ID}
-		if args.Status == RunbookActivationActive {
+		if args.Status == models.RunbookActivationActive {
 			update.CreatedBy = routineChangeCreator(owned, run)
 		}
 		activation, err := NewRunbookActivationService(store).WithRoutineEventSources(events.sources).Update(ctx, run.Scope, current.ID, update)
@@ -648,9 +650,9 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 
 // validateScheduledTaskApp proves the app exists, belongs to the routine's
 // owner and was made in the routine's conversation.
-func validateScheduledTaskApp(ctx context.Context, store runbookActionStore, run *AgentRun, task *ScheduledAgentTask) error {
+func validateScheduledTaskApp(ctx context.Context, store runbookActionStore, run *models.AgentRun, task *models.ScheduledAgentTask) error {
 	artifacts, ok := store.(interface {
-		GetArtifact(context.Context, Scope, string, int64) (*Artifact, error)
+		GetArtifact(context.Context, models.Scope, string, int64) (*models.Artifact, error)
 	})
 	if !ok {
 		return errors.New("apps are unavailable for routines on this host")

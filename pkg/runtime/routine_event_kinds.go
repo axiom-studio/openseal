@@ -1,11 +1,13 @@
 package runtime
 
+import "github.com/axiom-studio/openseal/pkg/models"
+
 // RoutineEventKinds lists every kind in a fixed order.
-var RoutineEventKinds = []RoutineEventKind{
-	RoutineEventSlackMessage,
-	RoutineEventTelegramMessage,
-	RoutineEventGitHub,
-	RoutineEventGmailMessage,
-	RoutineEventCalendar,
-	RoutineEventWebhook,
+var RoutineEventKinds = []models.RoutineEventKind{
+	models.RoutineEventSlackMessage,
+	models.RoutineEventTelegramMessage,
+	models.RoutineEventGitHub,
+	models.RoutineEventGmailMessage,
+	models.RoutineEventCalendar,
+	models.RoutineEventWebhook,
 }

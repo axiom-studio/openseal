@@ -16,79 +16,79 @@ import (
 )
 
 type RunbookExecutionAuditRun struct {
-	ID               string         `json:"id"`
-	ParentRunID      string         `json:"parentRunId,omitempty"`
-	RootRunID        string         `json:"rootRunId,omitempty"`
-	ObjectiveID      string         `json:"objectiveId,omitempty"`
-	AssignedAgentID  string         `json:"assignedAgentId,omitempty"`
-	ActivationID     string         `json:"activationId"`
-	Entrypoint       string         `json:"entrypoint,omitempty"`
-	Goal             string         `json:"goal"`
-	Source           RunSource      `json:"source"`
-	Status           AgentRunStatus `json:"status"`
-	Attempt          int            `json:"attempt"`
-	Error            string         `json:"error,omitempty"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	UpdatedAt        time.Time      `json:"updatedAt"`
-	StartedAt        *time.Time     `json:"startedAt,omitempty"`
-	CompletedAt      *time.Time     `json:"completedAt,omitempty"`
-	WakeCondition    *WakeCondition `json:"wakeCondition,omitempty"`
-	LastAppliedTurn  int64          `json:"lastAppliedTurn"`
-	BudgetUsage      BudgetUsage    `json:"budgetUsage,omitempty"`
-	BudgetState      BudgetState    `json:"budgetState,omitempty"`
-	PendingApprovals int            `json:"pendingApprovals,omitempty"`
-	PendingChildRuns int            `json:"pendingChildRuns,omitempty"`
+	ID               string                `json:"id"`
+	ParentRunID      string                `json:"parentRunId,omitempty"`
+	RootRunID        string                `json:"rootRunId,omitempty"`
+	ObjectiveID      string                `json:"objectiveId,omitempty"`
+	AssignedAgentID  string                `json:"assignedAgentId,omitempty"`
+	ActivationID     string                `json:"activationId"`
+	Entrypoint       string                `json:"entrypoint,omitempty"`
+	Goal             string                `json:"goal"`
+	Source           models.RunSource      `json:"source"`
+	Status           models.AgentRunStatus `json:"status"`
+	Attempt          int                   `json:"attempt"`
+	Error            string                `json:"error,omitempty"`
+	CreatedAt        time.Time             `json:"createdAt"`
+	UpdatedAt        time.Time             `json:"updatedAt"`
+	StartedAt        *time.Time            `json:"startedAt,omitempty"`
+	CompletedAt      *time.Time            `json:"completedAt,omitempty"`
+	WakeCondition    *models.WakeCondition `json:"wakeCondition,omitempty"`
+	LastAppliedTurn  int64                 `json:"lastAppliedTurn"`
+	BudgetUsage      models.BudgetUsage    `json:"budgetUsage,omitempty"`
+	BudgetState      models.BudgetState    `json:"budgetState,omitempty"`
+	PendingApprovals int                   `json:"pendingApprovals,omitempty"`
+	PendingChildRuns int                   `json:"pendingChildRuns,omitempty"`
 }
 
 type RunbookTurnAudit struct {
-	ID            string          `json:"id"`
-	Sequence      int64           `json:"sequence"`
-	Status        AgentTurnStatus `json:"status"`
-	OutputSummary string          `json:"outputSummary,omitempty"`
-	Error         string          `json:"error,omitempty"`
-	Usage         TurnUsage       `json:"usage,omitempty"`
-	CreatedAt     time.Time       `json:"createdAt"`
-	StartedAt     time.Time       `json:"startedAt"`
-	CompletedAt   *time.Time      `json:"completedAt,omitempty"`
+	ID            string                 `json:"id"`
+	Sequence      int64                  `json:"sequence"`
+	Status        models.AgentTurnStatus `json:"status"`
+	OutputSummary string                 `json:"outputSummary,omitempty"`
+	Error         string                 `json:"error,omitempty"`
+	Usage         models.TurnUsage       `json:"usage,omitempty"`
+	CreatedAt     time.Time              `json:"createdAt"`
+	StartedAt     time.Time              `json:"startedAt"`
+	CompletedAt   *time.Time             `json:"completedAt,omitempty"`
 }
 
 type RunbookActionAudit struct {
-	ID           string                 `json:"id"`
-	TurnID       string                 `json:"turnId,omitempty"`
-	SkillID      string                 `json:"skillId"`
-	SkillVersion string                 `json:"skillVersion"`
-	Action       string                 `json:"action"`
-	Status       ActionCallStatus       `json:"status"`
-	Risk         string                 `json:"risk,omitempty"`
-	SideEffect   string                 `json:"sideEffect,omitempty"`
-	ApprovalID   string                 `json:"approvalId,omitempty"`
-	Attempt      int                    `json:"attempt"`
-	MaxAttempts  int                    `json:"maxAttempts"`
-	EvidenceRefs []string               `json:"evidenceRefs,omitempty"`
-	Arguments    map[string]interface{} `json:"arguments,omitempty"`
-	Result       map[string]interface{} `json:"result,omitempty"`
-	Error        string                 `json:"error,omitempty"`
-	CreatedAt    time.Time              `json:"createdAt"`
-	UpdatedAt    time.Time              `json:"updatedAt"`
-	StartedAt    *time.Time             `json:"startedAt,omitempty"`
-	CompletedAt  *time.Time             `json:"completedAt,omitempty"`
+	ID           string                  `json:"id"`
+	TurnID       string                  `json:"turnId,omitempty"`
+	SkillID      string                  `json:"skillId"`
+	SkillVersion string                  `json:"skillVersion"`
+	Action       string                  `json:"action"`
+	Status       models.ActionCallStatus `json:"status"`
+	Risk         string                  `json:"risk,omitempty"`
+	SideEffect   string                  `json:"sideEffect,omitempty"`
+	ApprovalID   string                  `json:"approvalId,omitempty"`
+	Attempt      int                     `json:"attempt"`
+	MaxAttempts  int                     `json:"maxAttempts"`
+	EvidenceRefs []string                `json:"evidenceRefs,omitempty"`
+	Arguments    map[string]interface{}  `json:"arguments,omitempty"`
+	Result       map[string]interface{}  `json:"result,omitempty"`
+	Error        string                  `json:"error,omitempty"`
+	CreatedAt    time.Time               `json:"createdAt"`
+	UpdatedAt    time.Time               `json:"updatedAt"`
+	StartedAt    *time.Time              `json:"startedAt,omitempty"`
+	CompletedAt  *time.Time              `json:"completedAt,omitempty"`
 }
 
 type RunbookApprovalAudit struct {
-	ID                string                 `json:"id"`
-	ActionCallID      string                 `json:"actionCallId"`
-	Status            ApprovalStatus         `json:"status"`
-	Summary           string                 `json:"summary"`
-	PolicyReason      string                 `json:"policyReason,omitempty"`
-	ProposedAction    map[string]interface{} `json:"proposedAction,omitempty"`
-	EligibleApprovers []ApprovalPrincipal    `json:"eligibleApprovers,omitempty"`
-	DecisionBy        *ApprovalPrincipal     `json:"decisionBy,omitempty"`
-	DecisionReason    string                 `json:"decisionReason,omitempty"`
-	ExpiresAt         time.Time              `json:"expiresAt"`
-	CreatedAt         time.Time              `json:"createdAt"`
-	UpdatedAt         time.Time              `json:"updatedAt"`
-	DecidedAt         *time.Time             `json:"decidedAt,omitempty"`
-	Deliveries        []RunbookDeliveryAudit `json:"deliveries,omitempty"`
+	ID                string                     `json:"id"`
+	ActionCallID      string                     `json:"actionCallId"`
+	Status            models.ApprovalStatus      `json:"status"`
+	Summary           string                     `json:"summary"`
+	PolicyReason      string                     `json:"policyReason,omitempty"`
+	ProposedAction    map[string]interface{}     `json:"proposedAction,omitempty"`
+	EligibleApprovers []models.ApprovalPrincipal `json:"eligibleApprovers,omitempty"`
+	DecisionBy        *models.ApprovalPrincipal  `json:"decisionBy,omitempty"`
+	DecisionReason    string                     `json:"decisionReason,omitempty"`
+	ExpiresAt         time.Time                  `json:"expiresAt"`
+	CreatedAt         time.Time                  `json:"createdAt"`
+	UpdatedAt         time.Time                  `json:"updatedAt"`
+	DecidedAt         *time.Time                 `json:"decidedAt,omitempty"`
+	Deliveries        []RunbookDeliveryAudit     `json:"deliveries,omitempty"`
 }
 
 // RunbookDeliveryAudit projects the provider-neutral request/update delivery
@@ -96,52 +96,52 @@ type RunbookApprovalAudit struct {
 // never provider credentials or message content duplicated from the canonical
 // conversation.
 type RunbookDeliveryAudit struct {
-	ID                string                                   `json:"id"`
-	Phase             string                                   `json:"phase"`
-	EndpointID        string                                   `json:"endpointId"`
-	EndpointName      string                                   `json:"endpointName,omitempty"`
-	Provider          string                                   `json:"provider,omitempty"`
-	Address           string                                   `json:"address,omitempty"`
-	IngressRoute      string                                   `json:"ingressRoute,omitempty"`
-	Adapter           ExternalConversationAdapterReference     `json:"adapter"`
-	Operation         capability.ConversationDeliveryOperation `json:"operation"`
-	Status            ExternalConversationDeliveryStatus       `json:"status"`
-	Attempt           int                                      `json:"attempt"`
-	MaximumAttempts   int                                      `json:"maximumAttempts"`
-	ProviderMessageID string                                   `json:"providerMessageId,omitempty"`
-	ErrorCode         string                                   `json:"errorCode,omitempty"`
-	Summary           string                                   `json:"summary,omitempty"`
-	CreatedAt         time.Time                                `json:"createdAt"`
-	UpdatedAt         time.Time                                `json:"updatedAt"`
-	DeliveredAt       time.Time                                `json:"deliveredAt,omitempty"`
+	ID                string                                      `json:"id"`
+	Phase             string                                      `json:"phase"`
+	EndpointID        string                                      `json:"endpointId"`
+	EndpointName      string                                      `json:"endpointName,omitempty"`
+	Provider          string                                      `json:"provider,omitempty"`
+	Address           string                                      `json:"address,omitempty"`
+	IngressRoute      string                                      `json:"ingressRoute,omitempty"`
+	Adapter           models.ExternalConversationAdapterReference `json:"adapter"`
+	Operation         capability.ConversationDeliveryOperation    `json:"operation"`
+	Status            models.ExternalConversationDeliveryStatus   `json:"status"`
+	Attempt           int                                         `json:"attempt"`
+	MaximumAttempts   int                                         `json:"maximumAttempts"`
+	ProviderMessageID string                                      `json:"providerMessageId,omitempty"`
+	ErrorCode         string                                      `json:"errorCode,omitempty"`
+	Summary           string                                      `json:"summary,omitempty"`
+	CreatedAt         time.Time                                   `json:"createdAt"`
+	UpdatedAt         time.Time                                   `json:"updatedAt"`
+	DeliveredAt       time.Time                                   `json:"deliveredAt,omitempty"`
 }
 
 type RunbookArtifactAudit struct {
-	ID             string                      `json:"id"`
-	Version        int64                       `json:"version"`
-	Name           string                      `json:"name"`
-	Type           string                      `json:"type,omitempty"`
-	MediaType      string                      `json:"mediaType,omitempty"`
-	Classification ArtifactClassification      `json:"classification"`
-	Availability   ArtifactContentAvailability `json:"availability,omitempty"`
-	Digest         string                      `json:"digest"`
-	SizeBytes      int64                       `json:"sizeBytes"`
-	TurnID         string                      `json:"turnId,omitempty"`
-	ActionID       string                      `json:"actionId,omitempty"`
-	CreatedAt      time.Time                   `json:"createdAt"`
+	ID             string                             `json:"id"`
+	Version        int64                              `json:"version"`
+	Name           string                             `json:"name"`
+	Type           string                             `json:"type,omitempty"`
+	MediaType      string                             `json:"mediaType,omitempty"`
+	Classification models.ArtifactClassification      `json:"classification"`
+	Availability   models.ArtifactContentAvailability `json:"availability,omitempty"`
+	Digest         string                             `json:"digest"`
+	SizeBytes      int64                              `json:"sizeBytes"`
+	TurnID         string                             `json:"turnId,omitempty"`
+	ActionID       string                             `json:"actionId,omitempty"`
+	CreatedAt      time.Time                          `json:"createdAt"`
 }
 
 type RunbookChildRunAudit struct {
-	ID              string         `json:"id"`
-	StepID          string         `json:"stepId,omitempty"`
-	AssignedAgentID string         `json:"assignedAgentId,omitempty"`
-	Goal            string         `json:"goal"`
-	Source          RunSource      `json:"source"`
-	Status          AgentRunStatus `json:"status"`
-	Error           string         `json:"error,omitempty"`
-	CreatedAt       time.Time      `json:"createdAt"`
-	StartedAt       *time.Time     `json:"startedAt,omitempty"`
-	CompletedAt     *time.Time     `json:"completedAt,omitempty"`
+	ID              string                `json:"id"`
+	StepID          string                `json:"stepId,omitempty"`
+	AssignedAgentID string                `json:"assignedAgentId,omitempty"`
+	Goal            string                `json:"goal"`
+	Source          models.RunSource      `json:"source"`
+	Status          models.AgentRunStatus `json:"status"`
+	Error           string                `json:"error,omitempty"`
+	CreatedAt       time.Time             `json:"createdAt"`
+	StartedAt       *time.Time            `json:"startedAt,omitempty"`
+	CompletedAt     *time.Time            `json:"completedAt,omitempty"`
 }
 
 type RunbookNodeExecutionAudit struct {
@@ -195,19 +195,19 @@ type RunbookExecutionAudit struct {
 type RunExecutionAudit = RunbookExecutionAudit
 
 type RunbookExecutionAuditService struct {
-	store   RunbookExecutionAuditStore
-	catalog RunbookDefinitionCatalog
+	store   models.RunbookExecutionAuditStore
+	catalog models.RunbookDefinitionCatalog
 }
 
-func NewRunbookExecutionAuditService(store RunbookExecutionAuditStore, catalog RunbookDefinitionCatalog) *RunbookExecutionAuditService {
+func NewRunbookExecutionAuditService(store models.RunbookExecutionAuditStore, catalog models.RunbookDefinitionCatalog) *RunbookExecutionAuditService {
 	return &RunbookExecutionAuditService{store: store, catalog: catalog}
 }
 
-func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope Scope, runID string) (*RunbookExecutionAudit, error) {
+func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope models.Scope, runID string) (*RunbookExecutionAudit, error) {
 	return s.get(ctx, scope, strings.TrimSpace(runID), make(map[string]struct{}), 0)
 }
 
-func (s *RunbookExecutionAuditService) get(ctx context.Context, scope Scope, runID string, ancestry map[string]struct{}, depth int) (*RunbookExecutionAudit, error) {
+func (s *RunbookExecutionAuditService) get(ctx context.Context, scope models.Scope, runID string, ancestry map[string]struct{}, depth int) (*RunbookExecutionAudit, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("Run execution audit is not configured")
 	}
@@ -224,7 +224,7 @@ func (s *RunbookExecutionAuditService) get(ctx context.Context, scope Scope, run
 		return nil, err
 	}
 	if run == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	activationID, _ := run.Context["runbookActivationId"].(string)
 	activationID = strings.TrimSpace(activationID)
@@ -283,12 +283,12 @@ func (s *RunbookExecutionAuditService) get(ctx context.Context, scope Scope, run
 	attachRunbookArtifacts(result, artifacts)
 	attachRunbookChildren(result, children, requests, run)
 	for _, approval := range approvals {
-		if approval.Status == ApprovalStatusPending {
+		if approval.Status == models.ApprovalStatusPending {
 			result.Run.PendingApprovals++
 		}
 	}
 	for _, child := range children {
-		if child != nil && !isTerminalAgentRunStatus(child.Status) {
+		if child != nil && !models.IsTerminalAgentRunStatus(child.Status) {
 			result.Run.PendingChildRuns++
 		}
 		if child != nil {
@@ -303,22 +303,22 @@ func (s *RunbookExecutionAuditService) get(ctx context.Context, scope Scope, run
 }
 
 type runbookDeliveryAuditStore interface {
-	ListExternalConversationDeliveries(context.Context, ExternalConversationDeliveryFilter) ([]*ExternalConversationDelivery, error)
-	GetExternalConversationEndpoint(context.Context, Scope, string) (*ExternalConversationEndpoint, error)
+	ListExternalConversationDeliveries(context.Context, models.ExternalConversationDeliveryFilter) ([]*models.ExternalConversationDelivery, error)
+	GetExternalConversationEndpoint(context.Context, models.Scope, string) (*models.ExternalConversationEndpoint, error)
 }
 
-func (s *RunbookExecutionAuditService) listApprovalDeliveries(ctx context.Context, scope Scope, approvals []*ApprovalCheckpoint) (map[string][]RunbookDeliveryAudit, error) {
+func (s *RunbookExecutionAuditService) listApprovalDeliveries(ctx context.Context, scope models.Scope, approvals []*models.ApprovalCheckpoint) (map[string][]RunbookDeliveryAudit, error) {
 	store, ok := s.store.(runbookDeliveryAuditStore)
 	if !ok || len(approvals) == 0 {
 		return nil, nil
 	}
-	endpoints := map[string]*ExternalConversationEndpoint{}
+	endpoints := map[string]*models.ExternalConversationEndpoint{}
 	result := map[string][]RunbookDeliveryAudit{}
 	for _, approval := range approvals {
 		if approval == nil {
 			continue
 		}
-		deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+		deliveries, err := store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{
 			Scope: scope, CorrelationKind: "approval", CorrelationID: approval.ID, Limit: 1000,
 		})
 		if err != nil {
@@ -348,7 +348,7 @@ func (s *RunbookExecutionAuditService) listApprovalDeliveries(ctx context.Contex
 	return result, nil
 }
 
-func projectRunbookAuditRun(run *AgentRun, activationID string) RunbookExecutionAuditRun {
+func projectRunbookAuditRun(run *models.AgentRun, activationID string) RunbookExecutionAuditRun {
 	return RunbookExecutionAuditRun{
 		ID: run.ID, ParentRunID: run.ParentRunID, RootRunID: run.RootRunID, ObjectiveID: run.ObjectiveID,
 		AssignedAgentID: run.AssignedAgentID, ActivationID: activationID, Entrypoint: run.Entrypoint,
@@ -420,12 +420,12 @@ func buildRunbookLineage(trace *RunbookExecutionTrace) []RunbookDataLineage {
 	return result
 }
 
-func (s *RunbookExecutionAuditService) listTurns(ctx context.Context, scope Scope, runID string) ([]*AgentTurn, error) {
+func (s *RunbookExecutionAuditService) listTurns(ctx context.Context, scope models.Scope, runID string) ([]*models.AgentTurn, error) {
 	const pageSize = 100
-	result := make([]*AgentTurn, 0)
+	result := make([]*models.AgentTurn, 0)
 	var after int64
 	for {
-		page, err := s.store.ListAgentTurns(ctx, AgentTurnFilter{Scope: scope, RunID: runID, AfterSequence: after, Limit: pageSize})
+		page, err := s.store.ListAgentTurns(ctx, models.AgentTurnFilter{Scope: scope, RunID: runID, AfterSequence: after, Limit: pageSize})
 		if err != nil {
 			return nil, err
 		}
@@ -437,11 +437,11 @@ func (s *RunbookExecutionAuditService) listTurns(ctx context.Context, scope Scop
 	}
 }
 
-func (s *RunbookExecutionAuditService) listActions(ctx context.Context, scope Scope, runID string) ([]*ActionCall, error) {
+func (s *RunbookExecutionAuditService) listActions(ctx context.Context, scope models.Scope, runID string) ([]*models.ActionCall, error) {
 	const pageSize = 100
-	result := make([]*ActionCall, 0)
+	result := make([]*models.ActionCall, 0)
 	for offset := 0; ; offset += pageSize {
-		page, err := s.store.ListActionCalls(ctx, ActionFilter{Scope: scope, RunID: runID, Limit: pageSize, Offset: offset})
+		page, err := s.store.ListActionCalls(ctx, models.ActionFilter{Scope: scope, RunID: runID, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return nil, err
 		}
@@ -452,11 +452,11 @@ func (s *RunbookExecutionAuditService) listActions(ctx context.Context, scope Sc
 	}
 }
 
-func (s *RunbookExecutionAuditService) listApprovals(ctx context.Context, scope Scope, runID string) ([]*ApprovalCheckpoint, error) {
+func (s *RunbookExecutionAuditService) listApprovals(ctx context.Context, scope models.Scope, runID string) ([]*models.ApprovalCheckpoint, error) {
 	const pageSize = 100
-	result := make([]*ApprovalCheckpoint, 0)
+	result := make([]*models.ApprovalCheckpoint, 0)
 	for offset := 0; ; offset += pageSize {
-		page, err := s.store.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: runID, Limit: pageSize, Offset: offset})
+		page, err := s.store.ListApprovals(ctx, models.ApprovalFilter{Scope: scope, RunID: runID, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return nil, err
 		}
@@ -467,11 +467,11 @@ func (s *RunbookExecutionAuditService) listApprovals(ctx context.Context, scope 
 	}
 }
 
-func (s *RunbookExecutionAuditService) listArtifacts(ctx context.Context, scope Scope, runID string) ([]*Artifact, error) {
+func (s *RunbookExecutionAuditService) listArtifacts(ctx context.Context, scope models.Scope, runID string) ([]*models.Artifact, error) {
 	const pageSize = 100
-	result := make([]*Artifact, 0)
+	result := make([]*models.Artifact, 0)
 	for offset := 0; ; offset += pageSize {
-		page, err := s.store.ListArtifacts(ctx, ArtifactFilter{Scope: scope, ProducerRunID: runID, Limit: pageSize, Offset: offset})
+		page, err := s.store.ListArtifacts(ctx, models.ArtifactFilter{Scope: scope, ProducerRunID: runID, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return nil, err
 		}
@@ -482,11 +482,11 @@ func (s *RunbookExecutionAuditService) listArtifacts(ctx context.Context, scope 
 	}
 }
 
-func (s *RunbookExecutionAuditService) listChildren(ctx context.Context, scope Scope, runID string) ([]*AgentRun, error) {
+func (s *RunbookExecutionAuditService) listChildren(ctx context.Context, scope models.Scope, runID string) ([]*models.AgentRun, error) {
 	const pageSize = 100
-	result := make([]*AgentRun, 0)
+	result := make([]*models.AgentRun, 0)
 	for offset := 0; ; offset += pageSize {
-		page, err := s.store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, ParentRunID: runID, Limit: pageSize, Offset: offset})
+		page, err := s.store.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, ParentRunID: runID, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return nil, err
 		}
@@ -497,11 +497,11 @@ func (s *RunbookExecutionAuditService) listChildren(ctx context.Context, scope S
 	}
 }
 
-func (s *RunbookExecutionAuditService) listRequests(ctx context.Context, scope Scope, runID string) ([]*AgentRequest, error) {
+func (s *RunbookExecutionAuditService) listRequests(ctx context.Context, scope models.Scope, runID string) ([]*models.AgentRequest, error) {
 	const pageSize = 100
-	result := make([]*AgentRequest, 0)
+	result := make([]*models.AgentRequest, 0)
 	for offset := 0; ; offset += pageSize {
-		page, err := s.store.ListAgentRequests(ctx, AgentRequestFilter{Scope: scope, SourceRunID: runID, Limit: pageSize, Offset: offset})
+		page, err := s.store.ListAgentRequests(ctx, models.AgentRequestFilter{Scope: scope, SourceRunID: runID, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return nil, err
 		}
@@ -512,7 +512,7 @@ func (s *RunbookExecutionAuditService) listRequests(ctx context.Context, scope S
 	}
 }
 
-func attachRunbookTurns(result *RunbookExecutionAudit, turns []*AgentTurn) {
+func attachRunbookTurns(result *RunbookExecutionAudit, turns []*models.AgentTurn) {
 	for _, turn := range turns {
 		if turn == nil {
 			continue
@@ -537,7 +537,7 @@ func attachRunbookTurns(result *RunbookExecutionAudit, turns []*AgentTurn) {
 	}
 }
 
-func attachRunbookActions(result *RunbookExecutionAudit, actions []*ActionCall, approvals []*ApprovalCheckpoint) {
+func attachRunbookActions(result *RunbookExecutionAudit, actions []*models.ActionCall, approvals []*models.ApprovalCheckpoint) {
 	visitByTurn, visitByAction := runbookAuditVisitIndexes(result)
 	for _, call := range actions {
 		if call == nil {
@@ -586,7 +586,7 @@ func attachRunbookApprovalDeliveries(result *RunbookExecutionAudit, deliveries m
 	}
 }
 
-func attachRunbookArtifacts(result *RunbookExecutionAudit, artifacts []*Artifact) {
+func attachRunbookArtifacts(result *RunbookExecutionAudit, artifacts []*models.Artifact) {
 	visitByTurn, visitByAction := runbookAuditVisitIndexes(result)
 	for _, artifact := range artifacts {
 		if artifact == nil {
@@ -606,7 +606,7 @@ func attachRunbookArtifacts(result *RunbookExecutionAudit, artifacts []*Artifact
 	}
 }
 
-func attachRunbookChildren(result *RunbookExecutionAudit, children []*AgentRun, requests []*AgentRequest, parent *AgentRun) {
+func attachRunbookChildren(result *RunbookExecutionAudit, children []*models.AgentRun, requests []*models.AgentRequest, parent *models.AgentRun) {
 	stepByChild := map[string]string{}
 	for _, child := range children {
 		if child == nil {
@@ -618,7 +618,7 @@ func attachRunbookChildren(result *RunbookExecutionAudit, children []*AgentRun, 
 			}
 		}
 	}
-	requestByID := make(map[string]*AgentRequest, len(requests))
+	requestByID := make(map[string]*models.AgentRequest, len(requests))
 	for _, request := range requests {
 		if request != nil {
 			requestByID[request.ID] = request
@@ -706,7 +706,7 @@ func runbookAuditVisitForChild(result *RunbookExecutionAudit, stepID string, cre
 	return selected, found
 }
 
-func projectRunbookActionAudit(call *ActionCall) RunbookActionAudit {
+func projectRunbookActionAudit(call *models.ActionCall) RunbookActionAudit {
 	arguments, _ := action.SanitizePersistedApprovalValue(call.Arguments).(map[string]interface{})
 	result, _ := action.SanitizePersistedApprovalValue(call.Output).(map[string]interface{})
 	return RunbookActionAudit{
@@ -718,18 +718,18 @@ func projectRunbookActionAudit(call *ActionCall) RunbookActionAudit {
 	}
 }
 
-func projectRunbookApprovalAudit(approval *ApprovalCheckpoint) RunbookApprovalAudit {
+func projectRunbookApprovalAudit(approval *models.ApprovalCheckpoint) RunbookApprovalAudit {
 	proposedAction, _ := action.SanitizePersistedApprovalValue(approval.ProposedAction).(map[string]interface{})
 	return RunbookApprovalAudit{
 		ID: approval.ID, ActionCallID: approval.ActionCallID, Status: approval.Status, Summary: approval.Summary,
 		PolicyReason: approval.PolicyReason, ProposedAction: proposedAction,
-		EligibleApprovers: append([]ApprovalPrincipal(nil), approval.EligibleApprovers...),
+		EligibleApprovers: append([]models.ApprovalPrincipal(nil), approval.EligibleApprovers...),
 		DecisionBy:        approval.DecisionBy, DecisionReason: approval.DecisionReason, ExpiresAt: approval.ExpiresAt,
 		CreatedAt: approval.CreatedAt, UpdatedAt: approval.UpdatedAt, DecidedAt: approval.DecidedAt,
 	}
 }
 
-func projectRunbookArtifactAudit(artifact *Artifact) RunbookArtifactAudit {
+func projectRunbookArtifactAudit(artifact *models.Artifact) RunbookArtifactAudit {
 	return RunbookArtifactAudit{
 		ID: artifact.ID, Version: artifact.Version, Name: artifact.Name, Type: artifact.Type, MediaType: artifact.MediaType,
 		Classification: artifact.Classification, Availability: artifact.ContentAvailability, Digest: artifact.Digest,
@@ -737,7 +737,7 @@ func projectRunbookArtifactAudit(artifact *Artifact) RunbookArtifactAudit {
 	}
 }
 
-func projectRunbookChildAudit(child *AgentRun, stepID string) RunbookChildRunAudit {
+func projectRunbookChildAudit(child *models.AgentRun, stepID string) RunbookChildRunAudit {
 	return RunbookChildRunAudit{
 		ID: child.ID, StepID: stepID, AssignedAgentID: child.AssignedAgentID, Goal: child.Goal, Source: child.Source,
 		Status: child.Status, Error: child.Error, CreatedAt: child.CreatedAt, StartedAt: child.StartedAt, CompletedAt: child.CompletedAt,

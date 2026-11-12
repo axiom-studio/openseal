@@ -27,7 +27,7 @@ func TestRoutineEventDispatcherOneActiveRun(t *testing.T) {
 		t.Fatalf("runs = %d", len(runs))
 	}
 	run := runs[0]
-	if run.Source != RunSourceEvent || run.ActingUser != "user-1" || run.Entrypoint != "" || run.Plan != nil {
+	if run.Source != models.RunSourceEvent || run.ActingUser != "user-1" || run.Entrypoint != "" || run.Plan != nil {
 		t.Fatalf("run source=%q actingUser=%q entrypoint=%q plan=%#v", run.Source, run.ActingUser, run.Entrypoint, run.Plan)
 	}
 	for _, key := range []string{"runbookDefinitionId", "runbookDefinitionVersion", "scheduledFor", "payload"} {
@@ -35,12 +35,12 @@ func TestRoutineEventDispatcherOneActiveRun(t *testing.T) {
 			t.Fatalf("event run context has %q: %#v", key, run.Context)
 		}
 	}
-	if run.Context["runbookActivationId"] != activation.ID || run.Context[RoutineEventKindContextKey] != string(RoutineEventGmailMessage) ||
-		run.Context[RoutineEventHeaderContextKey] != "3 new emails" || run.Context[conversationRunContextConversationID] != h.conversation {
+	if run.Context["runbookActivationId"] != activation.ID || run.Context[models.RoutineEventKindContextKey] != string(models.RoutineEventGmailMessage) ||
+		run.Context[models.RoutineEventHeaderContextKey] != "3 new emails" || run.Context[models.ConversationRunConversationIDContextKey] != h.conversation {
 		t.Fatalf("event run context = %#v", run.Context)
 	}
-	if count := fmt.Sprint(run.Context[RoutineEventCountContextKey]); count != "3" {
-		t.Fatalf("event count = %#v", run.Context[RoutineEventCountContextKey])
+	if count := fmt.Sprint(run.Context[models.RoutineEventCountContextKey]); count != "3" {
+		t.Fatalf("event count = %#v", run.Context[models.RoutineEventCountContextKey])
 	}
 	batch, _ := h.batchOf(run)
 	if strings.Join(batch.EventIDs, ",") != strings.Join(first, ",") || batch.RunID != run.ID || batch.StartedAt == nil {
@@ -70,7 +70,7 @@ func TestRoutineEventDispatcherOneActiveRun(t *testing.T) {
 
 func TestRoutineEventDispatcherRateLimit(t *testing.T) {
 	h := newRoutineEventHarness(t)
-	activation := h.routine("limited", func(trigger *RoutineEventTrigger) { trigger.MaxPerHour = 2 })
+	activation := h.routine("limited", func(trigger *models.RoutineEventTrigger) { trigger.MaxPerHour = 2 })
 	seen := map[string]bool{}
 	starts := []time.Time{}
 	// 50 events arrive over 100 minutes; each pass finishes the runs first.
@@ -124,7 +124,7 @@ func TestRoutineEventDispatcherBatchReplay(t *testing.T) {
 	activation := h.routine("replay", nil)
 	h.offer(activation, 2)
 	// The process claimed a batch and stopped before starting it.
-	claimed, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, RoutineEventMaxBatchEvents, h.now)
+	claimed, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, models.RoutineEventMaxBatchEvents, h.now)
 	if err != nil || claimed == nil {
 		t.Fatalf("claim=%#v err=%v", claimed, err)
 	}
@@ -143,7 +143,7 @@ func TestRoutineEventDispatcherBatchReplay(t *testing.T) {
 
 	// The process created the Run and stopped before marking the batch.
 	h.finishRuns()
-	open, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, RoutineEventMaxBatchEvents, h.now)
+	open, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, models.RoutineEventMaxBatchEvents, h.now)
 	if err != nil || open == nil {
 		t.Fatalf("claim=%#v err=%v", open, err)
 	}
@@ -151,8 +151,8 @@ func TestRoutineEventDispatcherBatchReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := startActivationOccurrence(h.ctx, h.store, h.store, h.get(activation), objective, RunSourceEvent, routineEventIdempotencyKey(open.ID),
-		map[string]interface{}{RoutineEventBatchContextKey: open.ID}, ActivityActor{Type: "service", ID: "test"}, ActivityVisibilityScope, nil)
+	created, err := startActivationOccurrence(h.ctx, h.store, h.store, h.get(activation), objective, models.RunSourceEvent, routineEventIdempotencyKey(open.ID),
+		map[string]interface{}{models.RoutineEventBatchContextKey: open.ID}, models.ActivityActor{Type: "service", ID: "test"}, models.ActivityVisibilityScope, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,16 +171,16 @@ func TestRoutineEventDispatcherBatchReplay(t *testing.T) {
 
 func TestRoutineEventMaximumOccurrencesRetires(t *testing.T) {
 	h := newRoutineEventHarness(t)
-	activation := h.routine("twice", func(trigger *RoutineEventTrigger) { trigger.MaximumOccurrences = 2 })
+	activation := h.routine("twice", func(trigger *models.RoutineEventTrigger) { trigger.MaximumOccurrences = 2 })
 	for i := 0; i < 2; i++ {
 		h.offer(activation, 2)
 		h.pass()
 		h.finishRuns()
 	}
-	if h.get(activation).Status != RunbookActivationRetired {
+	if h.get(activation).Status != models.RunbookActivationRetired {
 		t.Fatal("routine is not retired after its last occurrence")
 	}
-	if h.matcher.Listening(h.scope, RoutineEventGmailMessage, activation.Task.Event.SourceRef) {
+	if h.matcher.Listening(h.scope, models.RoutineEventGmailMessage, activation.Task.Event.SourceRef) {
 		t.Fatal("retired routine is still listening")
 	}
 	event := h.event(activation, "gmail:late")
@@ -194,12 +194,12 @@ func TestRoutineEventMaximumOccurrencesRetires(t *testing.T) {
 
 	// Events that waited when the last occurrence started are dropped.
 	h2 := newRoutineEventHarness(t)
-	once := h2.routine("once", func(trigger *RoutineEventTrigger) { trigger.MaximumOccurrences = 1 })
+	once := h2.routine("once", func(trigger *models.RoutineEventTrigger) { trigger.MaximumOccurrences = 1 })
 	h2.offer(once, 2)
 	h2.pass()
 	// The routine no longer listens; a lagging peer may still have stored events.
 	for i := 0; i < 2; i++ {
-		if _, err := h2.store.InsertRoutineEvent(h2.ctx, &RoutineEventRecord{Scope: h2.scope, ActivationID: once.ID, Event: *h2.event(once, "gmail:lagging-"+string(rune('a'+i))), State: RoutineEventPending}); err != nil {
+		if _, err := h2.store.InsertRoutineEvent(h2.ctx, &models.RoutineEventRecord{Scope: h2.scope, ActivationID: once.ID, Event: *h2.event(once, "gmail:lagging-"+string(rune('a'+i))), State: models.RoutineEventPending}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -217,7 +217,7 @@ func TestRoutineEventPausedDrops(t *testing.T) {
 	h, db := newRoutineEventRowsHarness(t)
 	activation := h.routine("pause-me", nil)
 	h.offer(activation, 3)
-	h.setStatus(activation, RunbookActivationPaused)
+	h.setStatus(activation, models.RunbookActivationPaused)
 	if offer, err := h.matcher.OfferRoutineEvent(h.ctx, h.event(activation, "gmail:after-pause")); err != nil || offer.Matched != 0 {
 		t.Fatalf("offer after pause=%#v err=%v", offer, err)
 	}
@@ -229,7 +229,7 @@ func TestRoutineEventPausedDrops(t *testing.T) {
 		t.Fatalf("pending = %d", count)
 	}
 	for _, record := range listRoutineEventRows(t, db, h.scope) {
-		if record.ActivationID == activation.ID && (record.State != RoutineEventDropped || record.DroppedReason != RoutineEventDroppedPaused || record.KeepsData) {
+		if record.ActivationID == activation.ID && (record.State != models.RoutineEventDropped || record.DroppedReason != models.RoutineEventDroppedPaused || record.KeepsData) {
 			t.Fatalf("record %s = %#v", record.EventID, record)
 		}
 	}
@@ -252,7 +252,7 @@ func TestRoutineTestEventsNeverMixWithReal(t *testing.T) {
 		t.Fatalf("runs = %d", len(runs))
 	}
 	testBatch, testRecords := h.batchOf(runs[0])
-	if !testBatch.Test || runs[0].Context[RoutineEventTestContextKey] != true || runs[0].Context[RoutineEventHeaderContextKey] != "2 test events" {
+	if !testBatch.Test || runs[0].Context[models.RoutineEventTestContextKey] != true || runs[0].Context[models.RoutineEventHeaderContextKey] != "2 test events" {
 		t.Fatalf("first batch = %#v context %#v", testBatch, runs[0].Context)
 	}
 	for _, record := range testRecords {
@@ -261,7 +261,7 @@ func TestRoutineTestEventsNeverMixWithReal(t *testing.T) {
 		}
 	}
 	realBatch, realRecords := h.batchOf(runs[1])
-	if realBatch.Test || runs[1].Context[RoutineEventTestContextKey] != nil || strings.Join(realBatch.EventIDs, ",") != strings.Join(real, ",") {
+	if realBatch.Test || runs[1].Context[models.RoutineEventTestContextKey] != nil || strings.Join(realBatch.EventIDs, ",") != strings.Join(real, ",") {
 		t.Fatalf("second batch = %#v", realBatch)
 	}
 	for _, record := range realRecords {
@@ -271,7 +271,7 @@ func TestRoutineTestEventsNeverMixWithReal(t *testing.T) {
 	}
 	// A real batch at its hourly limit still lets test events through.
 	h2 := newRoutineEventHarness(t)
-	limited := h2.routine("limited", func(trigger *RoutineEventTrigger) { trigger.MaxPerHour = 1 })
+	limited := h2.routine("limited", func(trigger *models.RoutineEventTrigger) { trigger.MaxPerHour = 1 })
 	h2.offer(limited, 1)
 	h2.pass()
 	h2.finishRuns()
@@ -289,16 +289,16 @@ func TestRoutineEventPauseWithOpenBatchThenResume(t *testing.T) {
 	h := newRoutineEventHarness(t)
 	activation := h.routine("resume", nil)
 	h.offer(activation, 2)
-	open, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, RoutineEventMaxBatchEvents, h.now)
+	open, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, models.RoutineEventMaxBatchEvents, h.now)
 	if err != nil || open == nil {
 		t.Fatalf("claim=%#v err=%v", open, err)
 	}
-	h.setStatus(activation, RunbookActivationPaused)
+	h.setStatus(activation, models.RunbookActivationPaused)
 	h.pass()
 	if current, err := h.store.GetOpenRoutineEventBatch(h.ctx, h.scope, activation.ID); err != nil || current != nil {
 		t.Fatalf("open batch after pause=%#v err=%v", current, err)
 	}
-	h.setStatus(activation, RunbookActivationActive)
+	h.setStatus(activation, models.RunbookActivationActive)
 	fresh := h.offer(activation, 1)
 	h.pass()
 	runs := h.eventRuns(activation)
@@ -309,14 +309,14 @@ func TestRoutineEventPauseWithOpenBatchThenResume(t *testing.T) {
 	if batch.ID == open.ID || strings.Join(batch.EventIDs, ",") != strings.Join(fresh, ",") {
 		t.Fatalf("batch after resume = %#v", batch)
 	}
-	if runs[0].Context[RoutineEventHeaderContextKey] != "Email "+fresh[0] {
-		t.Fatalf("single event header = %#v", runs[0].Context[RoutineEventHeaderContextKey])
+	if runs[0].Context[models.RoutineEventHeaderContextKey] != "Email "+fresh[0] {
+		t.Fatalf("single event header = %#v", runs[0].Context[models.RoutineEventHeaderContextKey])
 	}
 }
 
 func TestRoutineEventOccurrenceCountSurvivesCrash(t *testing.T) {
 	h := newRoutineEventHarness(t)
-	activation := h.routine("count", func(trigger *RoutineEventTrigger) { trigger.MaximumOccurrences = 2 })
+	activation := h.routine("count", func(trigger *models.RoutineEventTrigger) { trigger.MaximumOccurrences = 2 })
 	h.offer(activation, 1)
 	h.pass()
 	h.finishRuns()
@@ -325,7 +325,7 @@ func TestRoutineEventOccurrenceCountSurvivesCrash(t *testing.T) {
 	h.dispatcher = restarted
 	h.offer(activation, 1)
 	// It creates the Run and stops before marking the batch.
-	open, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, RoutineEventMaxBatchEvents, h.now)
+	open, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, models.RoutineEventMaxBatchEvents, h.now)
 	if err != nil || open == nil {
 		t.Fatalf("claim=%#v err=%v", open, err)
 	}
@@ -333,12 +333,12 @@ func TestRoutineEventOccurrenceCountSurvivesCrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := startActivationOccurrence(h.ctx, h.store, h.store, h.get(activation), objective, RunSourceEvent, routineEventIdempotencyKey(open.ID),
-		map[string]interface{}{RoutineEventBatchContextKey: open.ID}, ActivityActor{Type: "service", ID: "test"}, ActivityVisibilityScope, nil); err != nil {
+	if _, err := startActivationOccurrence(h.ctx, h.store, h.store, h.get(activation), objective, models.RunSourceEvent, routineEventIdempotencyKey(open.ID),
+		map[string]interface{}{models.RoutineEventBatchContextKey: open.ID}, models.ActivityActor{Type: "service", ID: "test"}, models.ActivityVisibilityScope, nil); err != nil {
 		t.Fatal(err)
 	}
 	h.pass()
-	if h.get(activation).Status != RunbookActivationRetired {
+	if h.get(activation).Status != models.RunbookActivationRetired {
 		t.Fatal("routine is not retired after the replayed second occurrence")
 	}
 	count, _, err := h.store.CountRoutineEventBatchesSince(h.ctx, h.scope, activation.ID, time.Time{}, false)
@@ -353,39 +353,39 @@ func TestRoutineEventOccurrenceCountSurvivesCrash(t *testing.T) {
 }
 
 func TestRoutineEventBatchHeader(t *testing.T) {
-	records := func(summaries ...string) ([]string, []*RoutineEventRecord) {
+	records := func(summaries ...string) ([]string, []*models.RoutineEventRecord) {
 		ids := make([]string, 0, len(summaries))
-		values := make([]*RoutineEventRecord, 0, len(summaries))
+		values := make([]*models.RoutineEventRecord, 0, len(summaries))
 		for i, summary := range summaries {
 			id := string(rune('a' + i))
 			ids = append(ids, id)
-			values = append(values, &RoutineEventRecord{Event: RoutineEvent{ID: id, Summary: summary}})
+			values = append(values, &models.RoutineEventRecord{Event: models.RoutineEvent{ID: id, Summary: summary}})
 		}
 		return ids, values
 	}
 	ids, values := records("New email from Ana Ruiz: Invoice #4411")
-	if got := routineEventBatchHeader(RoutineEventGmailMessage, &RoutineEventBatch{EventIDs: ids}, values); got != "New email from Ana Ruiz: Invoice #4411" {
+	if got := routineEventBatchHeader(models.RoutineEventGmailMessage, &models.RoutineEventBatch{EventIDs: ids}, values); got != "New email from Ana Ruiz: Invoice #4411" {
 		t.Fatalf("one event header = %q", got)
 	}
 	ids, values = records("a", "b", "c", "d")
-	for kind, want := range map[RoutineEventKind]string{
-		RoutineEventGmailMessage: "4 new emails", RoutineEventSlackMessage: "4 new messages", RoutineEventTelegramMessage: "4 new messages",
-		RoutineEventGitHub: "4 new events", RoutineEventCalendar: "4 new events", RoutineEventWebhook: "4 new events",
+	for kind, want := range map[models.RoutineEventKind]string{
+		models.RoutineEventGmailMessage: "4 new emails", models.RoutineEventSlackMessage: "4 new messages", models.RoutineEventTelegramMessage: "4 new messages",
+		models.RoutineEventGitHub: "4 new events", models.RoutineEventCalendar: "4 new events", models.RoutineEventWebhook: "4 new events",
 	} {
-		if got := routineEventBatchHeader(kind, &RoutineEventBatch{EventIDs: ids}, values); got != want {
+		if got := routineEventBatchHeader(kind, &models.RoutineEventBatch{EventIDs: ids}, values); got != want {
 			t.Fatalf("%s header = %q, want %q", kind, got, want)
 		}
 	}
 	ids, values = records("Test event")
-	if got := routineEventBatchHeader(RoutineEventWebhook, &RoutineEventBatch{EventIDs: ids, Test: true}, values); got != "Test event" {
+	if got := routineEventBatchHeader(models.RoutineEventWebhook, &models.RoutineEventBatch{EventIDs: ids, Test: true}, values); got != "Test event" {
 		t.Fatalf("one test header = %q", got)
 	}
 	ids, values = records("Test event", "Test event")
-	if got := routineEventBatchHeader(RoutineEventWebhook, &RoutineEventBatch{EventIDs: ids, Test: true}, values); got != "2 test events" {
+	if got := routineEventBatchHeader(models.RoutineEventWebhook, &models.RoutineEventBatch{EventIDs: ids, Test: true}, values); got != "2 test events" {
 		t.Fatalf("two test header = %q", got)
 	}
 	ids, values = records(strings.Repeat("é", 150))
-	got := routineEventBatchHeader(RoutineEventWebhook, &RoutineEventBatch{EventIDs: ids}, values)
+	got := routineEventBatchHeader(models.RoutineEventWebhook, &models.RoutineEventBatch{EventIDs: ids}, values)
 	if len(got) > RoutineEventHeaderMaxBytes || !strings.HasPrefix(strings.Repeat("é", 150), got) || len(got) != 200 {
 		t.Fatalf("long header has %d bytes: %q", len(got), got)
 	}
@@ -414,7 +414,7 @@ func TestRoutineEventArchivedChatPausesOnlyThatRoutine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	archived := ConversationStatusArchived
+	archived := models.ConversationStatusArchived
 	if _, err := conversations.UpdateConversation(h.ctx, conversation.UpdateConversationRequest{
 		Scope: h.scope, ConversationID: chat.ID, ExpectedRevision: chat.Revision, Status: &archived,
 	}); err != nil {
@@ -427,7 +427,7 @@ func TestRoutineEventArchivedChatPausesOnlyThatRoutine(t *testing.T) {
 	if len(h.eventRuns(healthy)) != 1 || len(h.eventRuns(broken)) != 0 {
 		t.Fatalf("healthy runs = %d, broken runs = %d", len(h.eventRuns(healthy)), len(h.eventRuns(broken)))
 	}
-	if current := h.get(broken); current.Status != RunbookActivationPaused || current.PausedReason != RoutinePausedUnverified {
+	if current := h.get(broken); current.Status != models.RunbookActivationPaused || current.PausedReason != models.RoutinePausedUnverified {
 		t.Fatalf("broken routine status=%q reason=%q", current.Status, current.PausedReason)
 	}
 	if count, _ := h.store.CountPendingRoutineEvents(h.ctx, h.scope, broken.ID); count != 0 {
@@ -459,14 +459,14 @@ func TestRoutineEventStartFailureStaysLocal(t *testing.T) {
 	if result.Started != 1 || result.Failed != 1 || len(h.eventRuns(healthy)) != 1 {
 		t.Fatalf("pass = %#v, healthy runs = %d", result, len(h.eventRuns(healthy)))
 	}
-	if current := h.get(broken); current.Status != RunbookActivationActive {
+	if current := h.get(broken); current.Status != models.RunbookActivationActive {
 		t.Fatalf("broken routine status = %q", current.Status)
 	}
 }
 
 type failingRoutineExecutionPreparer struct{ activationID string }
 
-func (p failingRoutineExecutionPreparer) PrepareAcceptedRunExecution(_ context.Context, request *CreateAgentRunRequest) error {
+func (p failingRoutineExecutionPreparer) PrepareAcceptedRunExecution(_ context.Context, request *models.CreateAgentRunRequest) error {
 	if request.Context["runbookActivationId"] == p.activationID {
 		return errors.New("execution preparation failed")
 	}
@@ -474,17 +474,17 @@ func (p failingRoutineExecutionPreparer) PrepareAcceptedRunExecution(_ context.C
 }
 
 // pauseRun sets a Run to paused, as budget exhaustion or recovery does.
-func (h *routineEventHarness) pauseRun(run *AgentRun) {
+func (h *routineEventHarness) pauseRun(run *models.AgentRun) {
 	h.t.Helper()
 	current, err := h.store.GetAgentRun(h.ctx, h.scope, run.ID)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	updated := cloneAgentRun(current)
-	updated.Status, updated.Revision, updated.UpdatedAt = AgentRunStatusPaused, current.Revision+1, h.now
-	event := &ActivityEvent{
-		ID: "pause-" + run.ID, Scope: h.scope, EventType: "run.status_changed", Severity: ActivitySeverityInfo, AgentID: run.AssignedAgentID, RunID: run.ID,
-		Actor: ActivityActor{Type: "worker", ID: "test"}, Summary: "Paused", Visibility: ActivityVisibilityScope, CreatedAt: h.now,
+	updated := models.CloneAgentRun(current)
+	updated.Status, updated.Revision, updated.UpdatedAt = models.AgentRunStatusPaused, current.Revision+1, h.now
+	event := &models.ActivityEvent{
+		ID: "pause-" + run.ID, Scope: h.scope, EventType: "run.status_changed", Severity: models.ActivitySeverityInfo, AgentID: run.AssignedAgentID, RunID: run.ID,
+		Actor: models.ActivityActor{Type: "worker", ID: "test"}, Summary: "Paused", Visibility: models.ActivityVisibilityScope, CreatedAt: h.now,
 	}
 	if _, err := h.store.UpdateAgentRunWithEvent(h.ctx, updated, current.Revision, event, nil); err != nil {
 		h.t.Fatal(err)
@@ -493,23 +493,23 @@ func (h *routineEventHarness) pauseRun(run *AgentRun) {
 
 func TestRoutineEventCallableOnlyWhenExhausted(t *testing.T) {
 	h := newRoutineEventHarness(t)
-	once := h.routine("once-callable", func(trigger *RoutineEventTrigger) { trigger.MaximumOccurrences = 1 })
+	once := h.routine("once-callable", func(trigger *models.RoutineEventTrigger) { trigger.MaximumOccurrences = 1 })
 	h.offer(once, 1)
 	h.pass()
 	exhausted := h.get(once)
-	if exhausted.Status != RunbookActivationRetired || !exhausted.Exhausted || !exhausted.Callable() {
+	if exhausted.Status != models.RunbookActivationRetired || !exhausted.Exhausted || !exhausted.Callable() {
 		t.Fatalf("exhausted routine: status=%s exhausted=%v callable=%v", exhausted.Status, exhausted.Exhausted, exhausted.Callable())
 	}
 	// A routine the person cancelled is not callable, even with a ceiling.
-	for _, mutate := range []func(*RoutineEventTrigger){nil, func(trigger *RoutineEventTrigger) { trigger.MaximumOccurrences = 5 }} {
-		cancelled := h.setStatus(h.routine(fmt.Sprintf("cancelled-%v", mutate != nil), mutate), RunbookActivationRetired)
+	for _, mutate := range []func(*models.RoutineEventTrigger){nil, func(trigger *models.RoutineEventTrigger) { trigger.MaximumOccurrences = 5 }} {
+		cancelled := h.setStatus(h.routine(fmt.Sprintf("cancelled-%v", mutate != nil), mutate), models.RunbookActivationRetired)
 		if cancelled.Exhausted || cancelled.Callable() {
 			t.Fatalf("cancelled routine is callable: %#v", cancelled)
 		}
 	}
 	active := h.routine("not-exhausted", nil)
 	if _, err := NewRunbookActivationService(h.store).Update(h.ctx, h.scope, active.ID, UpdateRunbookActivationRequest{
-		ExpectedRevision: active.Revision, Status: RunbookActivationPaused, Exhausted: true,
+		ExpectedRevision: active.Revision, Status: models.RunbookActivationPaused, Exhausted: true,
 	}); err == nil {
 		t.Fatal("a paused routine was marked exhausted")
 	}
@@ -535,7 +535,7 @@ func TestRoutineEventPausedRunBackpressures(t *testing.T) {
 func TestRoutineEventTenantCapRotatesRoutines(t *testing.T) {
 	h := newRoutineEventHarness(t)
 	h.dispatcher.TenantRunCap = 2
-	routines := make([]*RunbookActivation, 0, 4)
+	routines := make([]*models.RunbookActivation, 0, 4)
 	for i := 0; i < 4; i++ {
 		activation := h.routine(fmt.Sprintf("rot%02d", i), nil)
 		h.offer(activation, 1)
@@ -544,7 +544,7 @@ func TestRoutineEventTenantCapRotatesRoutines(t *testing.T) {
 	if result := h.pass(); result.Started != 2 {
 		t.Fatalf("first pass = %#v", result)
 	}
-	first := []*RunbookActivation{}
+	first := []*models.RunbookActivation{}
 	for _, activation := range routines {
 		if len(h.eventRuns(activation)) == 1 {
 			first = append(first, activation)
@@ -591,11 +591,11 @@ func TestPauseRoutineLeavesCloseOutToDispatcher(t *testing.T) {
 	activation := h.routine("paused-by-sync", nil)
 	h.offer(activation, 2)
 	// The dispatcher has claimed the batch and is creating its Run.
-	batch, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, RoutineEventMaxBatchEvents, h.now)
+	batch, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, models.RoutineEventMaxBatchEvents, h.now)
 	if err != nil || batch == nil {
 		t.Fatalf("claim = %#v, %v", batch, err)
 	}
-	paused, err := h.dispatcher.PauseRoutine(h.ctx, h.scope, activation.ID, RoutinePausedNeedsSignIn)
+	paused, err := h.dispatcher.PauseRoutine(h.ctx, h.scope, activation.ID, models.RoutinePausedNeedsSignIn)
 	if err != nil || !paused {
 		t.Fatalf("pause = %v, %v", paused, err)
 	}
@@ -616,7 +616,7 @@ type passCountingStore struct {
 	passes atomic.Int64
 }
 
-func (s *passCountingStore) ListRoutineEventWorkScopes(ctx context.Context) ([]Scope, error) {
+func (s *passCountingStore) ListRoutineEventWorkScopes(ctx context.Context) ([]models.Scope, error) {
 	s.passes.Add(1)
 	return s.Store.ListRoutineEventWorkScopes(ctx)
 }

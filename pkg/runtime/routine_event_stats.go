@@ -3,6 +3,8 @@ package runtime
 import (
 	"sync/atomic"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // routineEventStatsCounters are the matcher's and dispatcher's counters. Every
@@ -23,31 +25,31 @@ const (
 )
 
 // routineEventKindSlot maps a kind to its counter slot; -1 for unknown kinds.
-func routineEventKindSlot(kind RoutineEventKind) int {
+func routineEventKindSlot(kind models.RoutineEventKind) int {
 	switch kind {
-	case RoutineEventSlackMessage:
+	case models.RoutineEventSlackMessage:
 		return 0
-	case RoutineEventTelegramMessage:
+	case models.RoutineEventTelegramMessage:
 		return 1
-	case RoutineEventGitHub:
+	case models.RoutineEventGitHub:
 		return 2
-	case RoutineEventGmailMessage:
+	case models.RoutineEventGmailMessage:
 		return 3
-	case RoutineEventCalendar:
+	case models.RoutineEventCalendar:
 		return 4
-	case RoutineEventWebhook:
+	case models.RoutineEventWebhook:
 		return 5
 	}
 	return -1
 }
 
-func (c *routineEventStatsCounters) countIn(kind RoutineEventKind) {
+func (c *routineEventStatsCounters) countIn(kind models.RoutineEventKind) {
 	if slot := routineEventKindSlot(kind); slot >= 0 {
 		c.in[slot].Add(1)
 	}
 }
 
-func (c *routineEventStatsCounters) countMatched(kind RoutineEventKind, matched, dropped int) {
+func (c *routineEventStatsCounters) countMatched(kind models.RoutineEventKind, matched, dropped int) {
 	slot := routineEventKindSlot(kind)
 	if slot < 0 {
 		return
@@ -86,9 +88,9 @@ func (c *routineEventStatsCounters) countRunStarted(test bool) {
 // a Prometheus histogram expects.
 func (c *routineEventStatsCounters) snapshot() RoutineEventStats {
 	stats := RoutineEventStats{
-		In:                  make(map[RoutineEventKind]uint64, routineEventKindCount),
-		Matched:             make(map[RoutineEventKind]uint64, routineEventKindCount),
-		Dropped:             make(map[RoutineEventKind]uint64, routineEventKindCount),
+		In:                  make(map[models.RoutineEventKind]uint64, routineEventKindCount),
+		Matched:             make(map[models.RoutineEventKind]uint64, routineEventKindCount),
+		Dropped:             make(map[models.RoutineEventKind]uint64, routineEventKindCount),
 		RunsStarted:         c.runsStarted.Load(),
 		TestRunsStarted:     c.testRunsStarted.Load(),
 		QueueDepth:          int(c.queueDepth.Load()),
@@ -123,16 +125,16 @@ type RoutineEventBatchView struct {
 
 // RoutineEventView is one event of a RoutineEventBatchView.
 type RoutineEventView struct {
-	ID         string              `json:"id"`
-	Kind       RoutineEventKind    `json:"kind"`
-	OccurredAt time.Time           `json:"occurredAt"`
-	Summary    string              `json:"summary"`
-	Fields     map[string][]string `json:"fields"`
+	ID         string                  `json:"id"`
+	Kind       models.RoutineEventKind `json:"kind"`
+	OccurredAt time.Time               `json:"occurredAt"`
+	Summary    string                  `json:"summary"`
+	Fields     map[string][]string     `json:"fields"`
 }
 
 // NewRoutineEventBatchView builds the view of a batch from the records
 // GetRoutineEventBatch returns, in the batch's event order.
-func NewRoutineEventBatchView(batch *RoutineEventBatch, records []*RoutineEventRecord) *RoutineEventBatchView {
+func NewRoutineEventBatchView(batch *models.RoutineEventBatch, records []*models.RoutineEventRecord) *RoutineEventBatchView {
 	if batch == nil {
 		return nil
 	}
@@ -140,7 +142,7 @@ func NewRoutineEventBatchView(batch *RoutineEventBatch, records []*RoutineEventR
 		BatchID: batch.ID, ActivationID: batch.ActivationID, RunID: batch.RunID, Test: batch.Test, Dropped: batch.Dropped,
 		Events: make([]RoutineEventView, 0, len(batch.EventIDs)),
 	}
-	byID := make(map[string]*RoutineEventRecord, len(records))
+	byID := make(map[string]*models.RoutineEventRecord, len(records))
 	for _, record := range records {
 		if record != nil {
 			byID[record.Event.ID] = record

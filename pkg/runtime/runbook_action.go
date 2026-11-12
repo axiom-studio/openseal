@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -31,7 +32,7 @@ const (
 // the model cannot manufacture a definition, execution policy, or authority.
 func RunbookManagementSkill() *skill.Definition {
 	return &skill.Definition{
-		ID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
+		ID: models.RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
 		Name: "Routines", Description: "Create routines that run on a schedule or when something happens, list them, start them now, pause, resume or cancel them. Work uses the current Agent's tools and reports back to the chat it was created in.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: RunbookManagementEndpoint},
 		Actions: map[string]skill.Action{
@@ -120,8 +121,8 @@ type runbookReplaceScheduleArguments struct {
 }
 
 type runbookActionStore interface {
-	KernelStore
-	ConversationStore
+	models.KernelStore
+	models.ConversationStore
 }
 
 // RunbookActionValidator resolves an omitted activation from the current
@@ -131,7 +132,7 @@ type RunbookActionValidator struct {
 	store          runbookActionStore
 	routineTeams   collaboration.RoutineTeamCatalog
 	grantCatalog   RoutineGrantCatalog
-	ownerAddresses RoutineOwnerAddressResolver
+	ownerAddresses models.RoutineOwnerAddressResolver
 	chatFiles      ChatFileResolver
 	events         routineEventActions
 }
@@ -162,7 +163,7 @@ func (v *RunbookActionValidator) SetRoutineGrantCatalog(catalog RoutineGrantCata
 }
 
 // SetRoutineOwnerAddresses lets routine briefs offer owner-only sends.
-func (v *RunbookActionValidator) SetRoutineOwnerAddresses(resolver RoutineOwnerAddressResolver) {
+func (v *RunbookActionValidator) SetRoutineOwnerAddresses(resolver models.RoutineOwnerAddressResolver) {
 	if v != nil {
 		v.ownerAddresses = resolver
 	}
@@ -218,11 +219,11 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 	if err != nil {
 		return nil, true, err
 	}
-	statuses := []RunbookActivationStatus{RunbookActivationActive, RunbookActivationRetired}
+	statuses := []models.RunbookActivationStatus{models.RunbookActivationActive, models.RunbookActivationRetired}
 	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
-		statuses = []RunbookActivationStatus{RunbookActivationRetired}
+		statuses = []models.RunbookActivationStatus{models.RunbookActivationRetired}
 	}
-	filter := RunbookActivationFilter{Scope: input.Run.Scope, Owner: &input.Run.Owner, ObjectiveID: objectiveID, Statuses: statuses, Limit: 100}
+	filter := models.RunbookActivationFilter{Scope: input.Run.Scope, Owner: &input.Run.Owner, ObjectiveID: objectiveID, Statuses: statuses, Limit: 100}
 	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
 		filter.TriggerKinds = []runbook.TriggerKind{runbook.TriggerSchedule}
 	}
@@ -231,9 +232,9 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 		return nil, true, err
 	}
 	if input.Bound.Action.Name == RunbookActionStart {
-		activations = slices.DeleteFunc(activations, func(activation *RunbookActivation) bool { return !activation.Callable() })
-		active := slices.DeleteFunc(slices.Clone(activations), func(activation *RunbookActivation) bool {
-			return activation.Status != RunbookActivationActive
+		activations = slices.DeleteFunc(activations, func(activation *models.RunbookActivation) bool { return !activation.Callable() })
+		active := slices.DeleteFunc(slices.Clone(activations), func(activation *models.RunbookActivation) bool {
+			return activation.Status != models.RunbookActivationActive
 		})
 		if len(active) > 0 {
 			activations = active
@@ -307,7 +308,7 @@ type RunbookActionDispatcher struct {
 	store             runbookActionStore
 	fallback          agentrun.ActionDispatcher
 	routineTeams      collaboration.RoutineTeamCatalog
-	executionPreparer AcceptedRunExecutionPreparer
+	executionPreparer models.AcceptedRunExecutionPreparer
 	chatFiles         ChatFileResolver
 	events            routineEventActions
 }
@@ -327,7 +328,7 @@ func (d *RunbookActionDispatcher) SetChatFiles(files ChatFileResolver) {
 	}
 }
 
-func (d *RunbookActionDispatcher) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+func (d *RunbookActionDispatcher) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
 	if d != nil {
 		d.executionPreparer = preparer
 	}
@@ -374,7 +375,7 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input agen
 		// Once that successor is retired it has its own ID, so a later generation
 		// remains independently replaceable.
 		idempotencyKey := "conversation-runbook-replace-schedule:" + source.ID
-		activationID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(source.Scope.Kind+"\x00"+source.Scope.ID+"\x00runbook-activation\x00"+hashString(idempotencyKey))).String()
+		activationID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(source.Scope.Kind+"\x00"+source.Scope.ID+"\x00runbook-activation\x00"+models.SHA256DigestString(idempotencyKey))).String()
 		existing, err := d.store.GetRunbookActivation(ctx, source.Scope, activationID)
 		if err != nil {
 			return nil, err
@@ -383,7 +384,7 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input agen
 			Scope: source.Scope, Owner: source.Owner, ObjectiveID: source.ObjectiveID, AssignedAgentID: source.AssignedAgentID,
 			DefinitionID: source.DefinitionID, DefinitionVersion: source.DefinitionVersion, TriggerID: source.TriggerID,
 			Task: source.Task, Trigger: trigger, Input: source.Input, Policy: source.Policy, Budget: source.Budget,
-			MaximumConcurrent: source.MaximumConcurrent, Status: RunbookActivationActive,
+			MaximumConcurrent: source.MaximumConcurrent, Status: models.RunbookActivationActive,
 			IdempotencyKey: idempotencyKey,
 		})
 		if err != nil {
@@ -399,13 +400,13 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input agen
 	if err != nil {
 		return nil, err
 	}
-	visibility := ActivityVisibilityPrivate
-	if input.Run.Owner.Type == OwnerTypeTeam {
-		visibility = ActivityVisibilityTeam
+	visibility := models.ActivityVisibilityPrivate
+	if input.Run.Owner.Type == models.OwnerTypeTeam {
+		visibility = models.ActivityVisibilityTeam
 	}
 	result, err := StartRunbookActivationWithExecutionPreparer(ctx, d.store, input.Run.Scope, activation.ID, StartRunbookActivationRequest{
 		IdempotencyKey: "conversation-runbook-start:" + input.Call.ID,
-		Actor:          ActivityActor{Type: "agent", ID: input.Run.AssignedAgentID},
+		Actor:          models.ActivityActor{Type: "agent", ID: input.Run.AssignedAgentID},
 		Visibility:     visibility,
 	}, d.executionPreparer)
 	if err != nil {
@@ -417,7 +418,7 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input agen
 	}, nil
 }
 
-func resolveRunbookScheduleReplacement(ctx context.Context, store runbookActionStore, run *AgentRun, arguments map[string]interface{}) (runbookReplaceScheduleArguments, *RunbookActivation, *Objective, *runbook.Schedule, error) {
+func resolveRunbookScheduleReplacement(ctx context.Context, store runbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookReplaceScheduleArguments, *models.RunbookActivation, *models.Objective, *runbook.Schedule, error) {
 	var args runbookReplaceScheduleArguments
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
@@ -440,7 +441,7 @@ func resolveRunbookScheduleReplacement(ctx context.Context, store runbookActionS
 		return args, nil, nil, nil, err
 	}
 	if activation == nil {
-		return args, nil, nil, nil, ErrRunbookActivationNotFound
+		return args, nil, nil, nil, models.ErrRunbookActivationNotFound
 	}
 	if activation.Owner != run.Owner {
 		return args, nil, nil, nil, errors.New("Runbook activation is not owned by the conversation Agent or Team")
@@ -448,7 +449,7 @@ func resolveRunbookScheduleReplacement(ctx context.Context, store runbookActionS
 	if activation.Task != nil && activation.Task.Event != nil {
 		return args, nil, nil, nil, errors.New("replace_schedule only changes scheduled routines; this routine starts on an event")
 	}
-	if activation.Status != RunbookActivationRetired || activation.Trigger.Kind != runbook.TriggerSchedule || activation.Trigger.Schedule == nil {
+	if activation.Status != models.RunbookActivationRetired || activation.Trigger.Kind != runbook.TriggerSchedule || activation.Trigger.Schedule == nil {
 		return args, nil, nil, nil, errors.New("Runbook schedule replacement requires a retired scheduled activation")
 	}
 	objective, err := store.GetObjective(ctx, run.Scope, activation.ObjectiveID)
@@ -456,9 +457,9 @@ func resolveRunbookScheduleReplacement(ctx context.Context, store runbookActionS
 		return args, nil, nil, nil, err
 	}
 	if objective == nil {
-		return args, nil, nil, nil, ErrObjectiveNotFound
+		return args, nil, nil, nil, models.ErrObjectiveNotFound
 	}
-	if objective.Owner != run.Owner || objective.Status != ObjectiveStatusActive {
+	if objective.Owner != run.Owner || objective.Status != models.ObjectiveStatusActive {
 		return args, nil, nil, nil, errors.New("Runbook schedule replacement requires its active owning Objective")
 	}
 	schedule := *activation.Trigger.Schedule
@@ -480,9 +481,9 @@ func resolveRunbookScheduleReplacement(ctx context.Context, store runbookActionS
 	return args, activation, objective, &schedule, nil
 }
 
-func selectLatestRunbookLineage(activations []*RunbookActivation) (*RunbookActivation, error) {
+func selectLatestRunbookLineage(activations []*models.RunbookActivation) (*models.RunbookActivation, error) {
 	if len(activations) == 0 {
-		return nil, ErrRunbookActivationNotFound
+		return nil, models.ErrRunbookActivationNotFound
 	}
 	definitionID, triggerID := activations[0].DefinitionID, activations[0].TriggerID
 	selected := activations[0]
@@ -497,7 +498,7 @@ func selectLatestRunbookLineage(activations []*RunbookActivation) (*RunbookActiv
 	return selected, nil
 }
 
-func resolveRunbookStart(ctx context.Context, store runbookActionStore, run *AgentRun, arguments map[string]interface{}) (runbookStartArguments, *RunbookActivation, *Objective, error) {
+func resolveRunbookStart(ctx context.Context, store runbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookStartArguments, *models.RunbookActivation, *models.Objective, error) {
 	var args runbookStartArguments
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
@@ -517,7 +518,7 @@ func resolveRunbookStart(ctx context.Context, store runbookActionStore, run *Age
 		return args, nil, nil, err
 	}
 	if activation == nil {
-		return args, nil, nil, ErrRunbookActivationNotFound
+		return args, nil, nil, models.ErrRunbookActivationNotFound
 	}
 	if activation.Owner != run.Owner {
 		return args, nil, nil, errors.New("Runbook activation is not owned by the conversation Agent or Team")
@@ -530,16 +531,16 @@ func resolveRunbookStart(ctx context.Context, store runbookActionStore, run *Age
 		return args, nil, nil, err
 	}
 	if objective == nil {
-		return args, nil, nil, ErrObjectiveNotFound
+		return args, nil, nil, models.ErrObjectiveNotFound
 	}
-	if objective.Owner != run.Owner || objective.Status != ObjectiveStatusActive {
+	if objective.Owner != run.Owner || objective.Status != models.ObjectiveStatusActive {
 		return args, nil, nil, errors.New("Runbook start requires its active owning Objective")
 	}
 	return args, activation, objective, nil
 }
 
 func isRunbookAction(bound *skill.BoundAction) bool {
-	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
+	return bound != nil && bound.Definition != nil && bound.Definition.ID == models.RunbookManagementSkillID &&
 		bound.Definition.Version == RunbookManagementSkillVersion &&
 		slices.Contains(runbookManagementActions, bound.Action.Name)
 }

@@ -8,22 +8,24 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type routineEventSeedFakeStore struct {
-	batch      *RoutineEventBatch
-	records    []*RoutineEventRecord
-	activation *RunbookActivation
+	batch      *models.RoutineEventBatch
+	records    []*models.RoutineEventRecord
+	activation *models.RunbookActivation
 }
 
-func (s *routineEventSeedFakeStore) GetRoutineEventBatch(_ context.Context, _ Scope, batchID string) (*RoutineEventBatch, []*RoutineEventRecord, error) {
+func (s *routineEventSeedFakeStore) GetRoutineEventBatch(_ context.Context, _ models.Scope, batchID string) (*models.RoutineEventBatch, []*models.RoutineEventRecord, error) {
 	if s.batch == nil || s.batch.ID != batchID {
 		return nil, nil, nil
 	}
 	return s.batch, s.records, nil
 }
 
-func (s *routineEventSeedFakeStore) GetRunbookActivation(_ context.Context, _ Scope, id string) (*RunbookActivation, error) {
+func (s *routineEventSeedFakeStore) GetRunbookActivation(_ context.Context, _ models.Scope, id string) (*models.RunbookActivation, error) {
 	if s.activation == nil || s.activation.ID != id {
 		return nil, nil
 	}
@@ -37,7 +39,7 @@ type routineEventSeedKeeper struct {
 	err     error
 }
 
-func (k *routineEventSeedKeeper) KeepRoutineEvents(_ context.Context, _ *AgentRun, batchID string, data []byte) (string, error) {
+func (k *routineEventSeedKeeper) KeepRoutineEvents(_ context.Context, _ *models.AgentRun, batchID string, data []byte) (string, error) {
 	k.calls++
 	k.batchID = batchID
 	k.data = append([]byte(nil), data...)
@@ -47,27 +49,27 @@ func (k *routineEventSeedKeeper) KeepRoutineEvents(_ context.Context, _ *AgentRu
 	return "routine-events/" + batchID + ".json", nil
 }
 
-var routineEventSeedScope = Scope{Kind: "tenant", ID: "seed"}
+var routineEventSeedScope = models.Scope{Kind: "tenant", ID: "seed"}
 
 func routineSlackTestRef() string {
-	return RoutineConversationSourceRef("dep-1", "bind-1", "slack", "T01")
+	return models.RoutineConversationSourceRef("dep-1", "bind-1", "slack", "T01")
 }
 
 // routineEventSeedFixture is a Slack routine occurrence with n events whose
 // payloads are payloadBytes long.
-func routineEventSeedFixture(n, payloadBytes int) (*AgentRun, *routineEventSeedFakeStore) {
-	batch := &RoutineEventBatch{Scope: routineEventSeedScope, ID: "reb-0f8c", ActivationID: "act-1"}
+func routineEventSeedFixture(n, payloadBytes int) (*models.AgentRun, *routineEventSeedFakeStore) {
+	batch := &models.RoutineEventBatch{Scope: routineEventSeedScope, ID: "reb-0f8c", ActivationID: "act-1"}
 	store := &routineEventSeedFakeStore{
 		batch: batch,
-		activation: &RunbookActivation{ID: "act-1", Task: &ScheduledAgentTask{Event: &RoutineEventTrigger{
-			Kind: RoutineEventSlackMessage, SourceRef: routineSlackTestRef(), SourceLabel: "Acme Slack", MaxPerHour: 20,
+		activation: &models.RunbookActivation{ID: "act-1", Task: &models.ScheduledAgentTask{Event: &models.RoutineEventTrigger{
+			Kind: models.RoutineEventSlackMessage, SourceRef: routineSlackTestRef(), SourceLabel: "Acme Slack", MaxPerHour: 20,
 		}}},
 	}
 	base := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
 	for i := 0; i < n; i++ {
 		id := fmt.Sprintf("C01:%04d", i)
-		event := RoutineEvent{
-			Scope: routineEventSeedScope, ID: id, Kind: RoutineEventSlackMessage, SourceRef: routineSlackTestRef(),
+		event := models.RoutineEvent{
+			Scope: routineEventSeedScope, ID: id, Kind: models.RoutineEventSlackMessage, SourceRef: routineSlackTestRef(),
 			OccurredAt: base.Add(time.Duration(i) * time.Second), Subject: "C01",
 			Summary: fmt.Sprintf("Ana in #support: message %d", i),
 			Fields:  map[string][]string{"channel": {"C01"}, "author": {"U0" + fmt.Sprint(i)}},
@@ -76,15 +78,15 @@ func routineEventSeedFixture(n, payloadBytes int) (*AgentRun, *routineEventSeedF
 			event.Payload = json.RawMessage(`{"text":"` + strings.Repeat("x", payloadBytes) + `"}`)
 		}
 		batch.EventIDs = append(batch.EventIDs, id)
-		store.records = append(store.records, &RoutineEventRecord{Scope: routineEventSeedScope, ActivationID: "act-1", Event: event, State: RoutineEventBatched, BatchID: batch.ID})
+		store.records = append(store.records, &models.RoutineEventRecord{Scope: routineEventSeedScope, ActivationID: "act-1", Event: event, State: models.RoutineEventBatched, BatchID: batch.ID})
 	}
-	run := &AgentRun{
-		Scope: routineEventSeedScope, ID: "run-occ-1", RootRunID: "run-occ-1", Source: RunSourceEvent, Goal: "Answer support questions in #support.",
+	run := &models.AgentRun{
+		Scope: routineEventSeedScope, ID: "run-occ-1", RootRunID: "run-occ-1", Source: models.RunSourceEvent, Goal: "Answer support questions in #support.",
 		Context: map[string]interface{}{
-			"runbookActivationId":       "act-1",
-			RoutineEventBatchContextKey: batch.ID,
-			RoutineEventCountContextKey: n,
-			RoutineEventKindContextKey:  string(RoutineEventSlackMessage),
+			"runbookActivationId":              "act-1",
+			models.RoutineEventBatchContextKey: batch.ID,
+			models.RoutineEventCountContextKey: n,
+			models.RoutineEventKindContextKey:  string(models.RoutineEventSlackMessage),
 		},
 	}
 	return run, store
@@ -94,7 +96,7 @@ const routineEventSeedIntro = ". They are in the JSON below (or the file named b
 
 const routineEventSeedSilent = "\nIf nothing here needs the person's attention and you changed nothing, finish with silent set to true and an empty answer."
 
-func routineEventSeedEntriesFor(t *testing.T, run *AgentRun, store routineEventSeedStore, keeper RoutineEventFileKeeper) []*SessionEntry {
+func routineEventSeedEntriesFor(t *testing.T, run *models.AgentRun, store routineEventSeedStore, keeper RoutineEventFileKeeper) []*models.SessionEntry {
 	t.Helper()
 	entries, err := loopRunSessionSeedEntries(t.Context(), store, keeper, nil, run)
 	if err != nil {
@@ -108,24 +110,24 @@ func routineEventSeedEntriesFor(t *testing.T, run *AgentRun, store routineEventS
 	return entries
 }
 
-func routineEventSeedEventEntry(t *testing.T, entries []*SessionEntry) *SessionEntry {
+func routineEventSeedEventEntry(t *testing.T, entries []*models.SessionEntry) *models.SessionEntry {
 	t.Helper()
 	if len(entries) != 2 {
 		t.Fatalf("want brief and event entries, got %d", len(entries))
 	}
 	brief, event := entries[0], entries[1]
-	if brief.SourceKey != GoalSourceKey("run-occ-1") || brief.User.GoalKind != "routine" {
+	if brief.SourceKey != models.GoalSourceKey("run-occ-1") || brief.User.GoalKind != "routine" {
 		t.Fatalf("first entry is not the brief: %+v", brief)
 	}
-	key := RoutineEventEntrySourceKey("run-occ-1")
-	if event.SourceKey != key || event.ID != SessionEntryID(RunAgentSessionID(routineEventSeedScope, "run-occ-1"), key) {
+	key := models.RoutineEventEntrySourceKey("run-occ-1")
+	if event.SourceKey != key || event.ID != models.SessionEntryID(models.RunAgentSessionID(routineEventSeedScope, "run-occ-1"), key) {
 		t.Fatalf("event entry key: %+v", event)
 	}
-	if event.Type != SessionEntryUser || event.User.Origin != UserEntryGoal || event.User.GoalKind != "routine_event" ||
-		event.User.Author != (SessionAuthor{Type: "service", ID: "kernel"}) {
+	if event.Type != models.SessionEntryUser || event.User.Origin != models.UserEntryGoal || event.User.GoalKind != "routine_event" ||
+		event.User.Author != (models.SessionAuthor{Type: "service", ID: "kernel"}) {
 		t.Fatalf("event entry shape: %+v", event.User)
 	}
-	if len(event.User.Content) != 2 || event.User.Content[0].Type != ContentPartText {
+	if len(event.User.Content) != 2 || event.User.Content[0].Type != models.ContentPartText {
 		t.Fatalf("event entry content: %+v", event.User.Content)
 	}
 	return event
@@ -165,11 +167,11 @@ func TestRoutineEventSeedEntries(t *testing.T) {
 			t.Fatalf("text:\n%s\nwant:\n%s", got, want)
 		}
 		part := event.User.Content[1]
-		if part.Type != ContentPartJSON || keeper.calls != 0 {
+		if part.Type != models.ContentPartJSON || keeper.calls != 0 {
 			t.Fatalf("want inline json and no keeper call, got %s, %d calls", part.Type, keeper.calls)
 		}
 		doc := decodeRoutineEventSeed(t, part.Value)
-		if doc.Source.Kind != string(RoutineEventSlackMessage) || doc.Source.Label != "Acme Slack" || len(doc.Events) != 3 {
+		if doc.Source.Kind != string(models.RoutineEventSlackMessage) || doc.Source.Label != "Acme Slack" || len(doc.Events) != 3 {
 			t.Fatalf("doc: %+v", doc)
 		}
 		first := doc.Events[0]
@@ -196,7 +198,7 @@ func TestRoutineEventSeedEntries(t *testing.T) {
 			t.Fatalf("keeper: %d calls, batch %q", keeper.calls, keeper.batchID)
 		}
 		part := event.User.Content[1]
-		if part.Type != ContentPartFile || part.Path != "routine-events/reb-0f8c.json" || part.MimeType != "application/json" ||
+		if part.Type != models.ContentPartFile || part.Path != "routine-events/reb-0f8c.json" || part.MimeType != "application/json" ||
 			part.SizeBytes != int64(len(keeper.data)) || len(keeper.data) <= 64<<10 {
 			t.Fatalf("file part: %+v (kept %d bytes)", part, len(keeper.data))
 		}
@@ -215,7 +217,7 @@ func TestRoutineEventSeedEntries(t *testing.T) {
 		keeper := &routineEventSeedKeeper{err: errors.New("chat files are down")}
 		event := routineEventSeedEventEntry(t, routineEventSeedEntriesFor(t, run, store, keeper))
 		part := event.User.Content[1]
-		if keeper.calls != 1 || part.Type != ContentPartJSON || len(part.Value) > 64<<10 {
+		if keeper.calls != 1 || part.Type != models.ContentPartJSON || len(part.Value) > 64<<10 {
 			t.Fatalf("want reduced inline json, got %s of %d bytes", part.Type, len(part.Value))
 		}
 		if !strings.Contains(event.User.Content[0].Text, "\nSome event content was shortened to fit.") {
@@ -280,8 +282,8 @@ func TestRoutineEventSeedEntries(t *testing.T) {
 
 	t.Run("missing batch", func(t *testing.T) {
 		run, store := routineEventSeedFixture(1, 0)
-		run.Context[RoutineEventBatchContextKey] = "reb-gone"
-		if _, err := loopRunSessionSeedEntries(t.Context(), store, nil, nil, run); !errors.Is(err, ErrRoutineEventBatchNotFound) {
+		run.Context[models.RoutineEventBatchContextKey] = "reb-gone"
+		if _, err := loopRunSessionSeedEntries(t.Context(), store, nil, nil, run); !errors.Is(err, models.ErrRoutineEventBatchNotFound) {
 			t.Fatalf("want ErrRoutineEventBatchNotFound, got %v", err)
 		}
 	})
@@ -348,7 +350,7 @@ func TestRoutineEventSeedNilKeeper50SlackEvents(t *testing.T) {
 	run, store := routineEventSeedFixture(50, 4<<10)
 	event := routineEventSeedEventEntry(t, routineEventSeedEntriesFor(t, run, store, nil))
 	part := event.User.Content[1]
-	if part.Type != ContentPartJSON || len(part.Value) > 64<<10 {
+	if part.Type != models.ContentPartJSON || len(part.Value) > 64<<10 {
 		t.Fatalf("want inline json of at most 64 KiB, got %s of %d bytes", part.Type, len(part.Value))
 	}
 	doc := decodeRoutineEventSeed(t, part.Value)
@@ -366,7 +368,7 @@ func TestRoutineEventSeedNilKeeper50SlackEvents(t *testing.T) {
 }
 
 func TestRoutineEventSeedReductionAlwaysFits(t *testing.T) {
-	doc := &routineEventSeedDocument{source: mustMarshalRoutineEventSeed(routineEventSeedSource{Kind: RoutineEventWebhook, Label: strings.Repeat("<", 160)})}
+	doc := &routineEventSeedDocument{source: mustMarshalRoutineEventSeed(routineEventSeedSource{Kind: models.RoutineEventWebhook, Label: strings.Repeat("<", 160)})}
 	for i := 0; i < 50; i++ {
 		event := routineEventSeedEvent{
 			ID: "hs:" + strings.Repeat("&", 250) + fmt.Sprintf("%03d", i), OccurredAt: time.Now().UTC(), Subject: strings.Repeat("s", 256),
@@ -405,7 +407,7 @@ func TestRoutineEventSeedEscapedIDsAndSummariesFitEntry(t *testing.T) {
 	}
 	event := routineEventSeedEventEntry(t, routineEventSeedEntriesFor(t, run, store, nil))
 	part := event.User.Content[1]
-	if part.Type != ContentPartJSON || len(part.Value) > routineEventInlineMaxBytes {
+	if part.Type != models.ContentPartJSON || len(part.Value) > routineEventInlineMaxBytes {
 		t.Fatalf("want inline json of at most 64 KiB, got %s of %d bytes", part.Type, len(part.Value))
 	}
 	if doc := decodeRoutineEventSeed(t, part.Value); len(doc.Events) != 50 {
@@ -429,11 +431,15 @@ func TestRoutineEventSeedSkipsMissingRecord(t *testing.T) {
 // forked child inherits routineEventBatchId for the manual approval mode
 // only; its fresh session never gets the events or the silent instruction.
 func TestRoutineEventSeedOnlyForOccurrenceRoot(t *testing.T) {
-	for name, mutate := range map[string]func(*AgentRun){
-		"fork child":          func(run *AgentRun) { run.ID, run.ParentRunID, run.Source = "run-child", "run-occ-1", RunSourceFork },
-		"collaboration child": func(run *AgentRun) { run.ID, run.ParentRunID, run.Source = "run-child", "run-occ-1", RunSourceRequest },
-		"delegated child":     func(run *AgentRun) { run.ID, run.ParentRunID = "run-child", "run-occ-1" },
-		"manual run":          func(run *AgentRun) { run.Source = RunSourceManual },
+	for name, mutate := range map[string]func(*models.AgentRun){
+		"fork child": func(run *models.AgentRun) {
+			run.ID, run.ParentRunID, run.Source = "run-child", "run-occ-1", models.RunSourceFork
+		},
+		"collaboration child": func(run *models.AgentRun) {
+			run.ID, run.ParentRunID, run.Source = "run-child", "run-occ-1", models.RunSourceRequest
+		},
+		"delegated child": func(run *models.AgentRun) { run.ID, run.ParentRunID = "run-child", "run-occ-1" },
+		"manual run":      func(run *models.AgentRun) { run.Source = models.RunSourceManual },
 	} {
 		t.Run(name, func(t *testing.T) {
 			run, store := routineEventSeedFixture(2, 0)
@@ -452,7 +458,7 @@ func TestRoutineEventSeedOnlyForOccurrenceRoot(t *testing.T) {
 	t.Run("batch of another routine", func(t *testing.T) {
 		run, store := routineEventSeedFixture(2, 0)
 		run.Context["runbookActivationId"] = "act-other"
-		if _, err := loopRunSessionSeedEntries(t.Context(), store, nil, nil, run); !errors.Is(err, ErrRoutineEventBatchNotFound) {
+		if _, err := loopRunSessionSeedEntries(t.Context(), store, nil, nil, run); !errors.Is(err, models.ErrRoutineEventBatchNotFound) {
 			t.Fatalf("want ErrRoutineEventBatchNotFound, got %v", err)
 		}
 	})

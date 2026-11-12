@@ -39,11 +39,11 @@ var (
 // named channel's endpoint or the registration is gone), needs_sign_in for a
 // Gmail or Calendar routine without its creator's Google sign-in.
 type RoutineSourceUnavailableError struct {
-	Reason RoutinePausedReason
+	Reason models.RoutinePausedReason
 }
 
 func (e *RoutineSourceUnavailableError) Error() string {
-	if e.Reason == RoutinePausedNeedsSignIn {
+	if e.Reason == models.RoutinePausedNeedsSignIn {
 		return "the routine cannot be resumed (needs_sign_in): the Google sign-in of the person who created it is missing; they need to sign in to Google again first"
 	}
 	return "the routine cannot be resumed (source_removed): its connection, channel or repository is no longer set up for this Agent or Team"
@@ -58,15 +58,15 @@ func (e *RoutineSourceUnavailableError) Is(target error) bool {
 // each named channel) and GitHub, and the creator's own Google sign-in in
 // the host's catalog for Gmail and Calendar. Webhook routines have no
 // outside source. resumedBy stands in for a routine with no creator yet.
-func checkRoutineResumeSource(ctx context.Context, store interface{}, google RoutineEventSourceCatalog, activation *RunbookActivation, resumedBy string) error {
-	subscription, ok := routineEventSubscriptionOf(activation)
+func checkRoutineResumeSource(ctx context.Context, store interface{}, google RoutineEventSourceCatalog, activation *models.RunbookActivation, resumedBy string) error {
+	subscription, ok := models.RoutineEventSubscriptionOf(activation)
 	if !ok {
 		return nil
 	}
 	switch subscription.Kind {
-	case RoutineEventWebhook:
+	case models.RoutineEventWebhook:
 		return nil
-	case RoutineEventGmailMessage, RoutineEventCalendar:
+	case models.RoutineEventGmailMessage, models.RoutineEventCalendar:
 		user := subscription.CreatedBy
 		if user == "" {
 			user = strings.TrimSpace(resumedBy)
@@ -78,7 +78,7 @@ func checkRoutineResumeSource(ctx context.Context, store interface{}, google Rou
 		if !slices.ContainsFunc(views, func(view *RoutineEventSourceView) bool {
 			return view.Available && view.Kind == subscription.Kind && view.Source == subscription.SourceRef
 		}) {
-			return &RoutineSourceUnavailableError{Reason: RoutinePausedNeedsSignIn}
+			return &RoutineSourceUnavailableError{Reason: models.RoutinePausedNeedsSignIn}
 		}
 		return nil
 	}
@@ -87,7 +87,7 @@ func checkRoutineResumeSource(ctx context.Context, store interface{}, google Rou
 		return err
 	}
 	if !exists {
-		return &RoutineSourceUnavailableError{Reason: RoutinePausedSourceRemoved}
+		return &RoutineSourceUnavailableError{Reason: models.RoutinePausedSourceRemoved}
 	}
 	return nil
 }
@@ -119,19 +119,19 @@ func newRoutineEventActions(offerer externalconversation.RoutineEventOfferer, so
 	return routineEventActions{offerer: offerer, sources: sources, hooksAvailable: hooksAvailable}
 }
 
-func routineEventSourceKindOfProvider(provider string) (RoutineEventKind, bool) {
+func routineEventSourceKindOfProvider(provider string) (models.RoutineEventKind, bool) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "slack":
-		return RoutineEventSlackMessage, true
+		return models.RoutineEventSlackMessage, true
 	case "telegram":
-		return RoutineEventTelegramMessage, true
+		return models.RoutineEventTelegramMessage, true
 	}
 	return "", false
 }
 
-func routineConversationSourceLabel(kind RoutineEventKind, name, installationID string) string {
+func routineConversationSourceLabel(kind models.RoutineEventKind, name, installationID string) string {
 	provider := "Slack"
-	if kind == RoutineEventTelegramMessage {
+	if kind == models.RoutineEventTelegramMessage {
 		provider = "Telegram"
 	}
 	name = strings.Join(strings.Fields(name), " ")
@@ -139,14 +139,14 @@ func routineConversationSourceLabel(kind RoutineEventKind, name, installationID 
 	case name == "":
 		name = provider + " " + installationID
 	case !strings.Contains(strings.ToLower(name), strings.ToLower(provider)):
-		if kind == RoutineEventTelegramMessage {
+		if kind == models.RoutineEventTelegramMessage {
 			name += " on Telegram"
 		} else {
 			name += " Slack"
 		}
 	}
-	if len(name) > RoutineEventSourceLabelMax {
-		name = models.TruncateUTF8(name, RoutineEventSourceLabelMax)
+	if len(name) > models.RoutineEventSourceLabelMax {
+		name = models.TruncateUTF8(name, models.RoutineEventSourceLabelMax)
 	}
 	return name
 }
@@ -155,10 +155,10 @@ func routineConversationSourceLabel(kind RoutineEventKind, name, installationID 
 // connections: one entry per connection SourceRef, from its active gateways
 // with an installation and its active endpoints, each with the channel
 // conversations of its active endpoints.
-func routineConversationSources(ctx context.Context, store interface{}, scope Scope, owner ObjectiveOwner) ([]*RoutineEventSourceView, error) {
+func routineConversationSources(ctx context.Context, store interface{}, scope models.Scope, owner models.ObjectiveOwner) ([]*RoutineEventSourceView, error) {
 	views := map[string]*RoutineEventSourceView{}
 	order := []string{}
-	add := func(kind RoutineEventKind, sourceRef, label string) *RoutineEventSourceView {
+	add := func(kind models.RoutineEventKind, sourceRef, label string) *RoutineEventSourceView {
 		if view := views[sourceRef]; view != nil {
 			if view.Label == "" {
 				view.Label = label
@@ -166,16 +166,16 @@ func routineConversationSources(ctx context.Context, store interface{}, scope Sc
 			return view
 		}
 		view := &RoutineEventSourceView{RoutineEventSourceOption: RoutineEventSourceOption{
-			Kind: kind, Source: sourceRef, Label: label, Available: true, Fields: RoutineEventFilterFields(kind),
+			Kind: kind, Source: sourceRef, Label: label, Available: true, Fields: models.RoutineEventFilterFields(kind),
 		}}
 		views[sourceRef] = view
 		order = append(order, sourceRef)
 		return view
 	}
-	if gateways, ok := store.(ExternalConversationGatewayStore); ok {
+	if gateways, ok := store.(models.ExternalConversationGatewayStore); ok {
 		for offset := 0; ; offset += routineEventSourcePageSize {
-			page, err := gateways.ListExternalConversationGateways(ctx, ExternalConversationGatewayFilter{
-				Scope: scope, Owner: &owner, Statuses: []ExternalConversationGatewayStatus{ExternalConversationGatewayActive},
+			page, err := gateways.ListExternalConversationGateways(ctx, models.ExternalConversationGatewayFilter{
+				Scope: scope, Owner: &owner, Statuses: []models.ExternalConversationGatewayStatus{models.ExternalConversationGatewayActive},
 				Limit: routineEventSourcePageSize, Offset: offset,
 			})
 			if err != nil {
@@ -184,10 +184,10 @@ func routineConversationSources(ctx context.Context, store interface{}, scope Sc
 			for _, entry := range page {
 				gateway := entry.Gateway
 				kind, known := routineEventSourceKindOfProvider(gateway.Provider)
-				if !known || entry.Status != ExternalConversationGatewayActive || gateway.Owner != owner || gateway.InstallationID == "" {
+				if !known || entry.Status != models.ExternalConversationGatewayActive || gateway.Owner != owner || gateway.InstallationID == "" {
 					continue
 				}
-				sourceRef := RoutineConversationSourceRef(gateway.DeploymentID, gateway.Adapter.BindingID, gateway.Adapter.AdapterID, gateway.InstallationID)
+				sourceRef := models.RoutineConversationSourceRef(gateway.DeploymentID, gateway.Adapter.BindingID, gateway.Adapter.AdapterID, gateway.InstallationID)
 				add(kind, sourceRef, routineConversationSourceLabel(kind, entry.Name, gateway.InstallationID))
 			}
 			if len(page) < routineEventSourcePageSize {
@@ -195,10 +195,10 @@ func routineConversationSources(ctx context.Context, store interface{}, scope Sc
 			}
 		}
 	}
-	if endpoints, ok := store.(ExternalConversationEndpointStore); ok {
+	if endpoints, ok := store.(models.ExternalConversationEndpointStore); ok {
 		for offset := 0; ; offset += routineEventSourcePageSize {
-			page, err := endpoints.ListExternalConversationEndpoints(ctx, ExternalConversationEndpointFilter{
-				Scope: scope, Owner: &owner, Statuses: []ExternalConversationEndpointStatus{ExternalConversationEndpointActive},
+			page, err := endpoints.ListExternalConversationEndpoints(ctx, models.ExternalConversationEndpointFilter{
+				Scope: scope, Owner: &owner, Statuses: []models.ExternalConversationEndpointStatus{models.ExternalConversationEndpointActive},
 				Limit: routineEventSourcePageSize, Offset: offset,
 			})
 			if err != nil {
@@ -206,10 +206,10 @@ func routineConversationSources(ctx context.Context, store interface{}, scope Sc
 			}
 			for _, endpoint := range page {
 				kind, known := routineEventSourceKindOfProvider(endpoint.Provider)
-				if !known || endpoint.Status != ExternalConversationEndpointActive || endpoint.Owner != owner || endpoint.InstallationID == "" {
+				if !known || endpoint.Status != models.ExternalConversationEndpointActive || endpoint.Owner != owner || endpoint.InstallationID == "" {
 					continue
 				}
-				sourceRef := RoutineConversationSourceRef(endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID, endpoint.InstallationID)
+				sourceRef := models.RoutineConversationSourceRef(endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID, endpoint.InstallationID)
 				view := add(kind, sourceRef, "")
 				// Direct conversations never feed routines (E14).
 				address := strings.TrimSpace(endpoint.Address)
@@ -240,8 +240,8 @@ func routineConversationSources(ctx context.Context, store interface{}, scope Sc
 // routineCallbackRegistrationEventTypes returns the event types a GitHub
 // registration of the umbrella feeds to routines, without "github.", or nil
 // when it feeds none.
-func routineCallbackRegistrationEventTypes(registration *CallbackRegistration, owner ObjectiveOwner) []string {
-	if registration == nil || registration.Status != CallbackRegistrationActive || !strings.EqualFold(registration.Provider, "github") ||
+func routineCallbackRegistrationEventTypes(registration *models.CallbackRegistration, owner models.ObjectiveOwner) []string {
+	if registration == nil || registration.Status != models.CallbackRegistrationActive || !strings.EqualFold(registration.Provider, "github") ||
 		registration.DeploymentID != owner.ID || registration.Owner != owner {
 		return nil
 	}
@@ -264,15 +264,15 @@ func routineCallbackRegistrationEventTypes(registration *CallbackRegistration, o
 
 // routineCallbackSources lists the umbrella's GitHub callback registrations
 // that have a routines subscription.
-func routineCallbackSources(ctx context.Context, store interface{}, scope Scope, owner ObjectiveOwner) ([]*RoutineEventSourceView, error) {
-	callbacks, ok := store.(CallbackRegistrationStore)
+func routineCallbackSources(ctx context.Context, store interface{}, scope models.Scope, owner models.ObjectiveOwner) ([]*RoutineEventSourceView, error) {
+	callbacks, ok := store.(models.CallbackRegistrationStore)
 	if !ok {
 		return nil, nil
 	}
 	result := []*RoutineEventSourceView{}
 	for offset := 0; ; offset += routineEventSourcePageSize {
-		page, err := callbacks.ListCallbackRegistrations(ctx, CallbackRegistrationFilter{
-			Scope: scope, DeploymentID: owner.ID, Statuses: []CallbackRegistrationStatus{CallbackRegistrationActive},
+		page, err := callbacks.ListCallbackRegistrations(ctx, models.CallbackRegistrationFilter{
+			Scope: scope, DeploymentID: owner.ID, Statuses: []models.CallbackRegistrationStatus{models.CallbackRegistrationActive},
 			Limit: routineEventSourcePageSize, Offset: offset,
 		})
 		if err != nil {
@@ -288,8 +288,8 @@ func routineCallbackSources(ctx context.Context, store interface{}, scope Scope,
 				label += " (GitHub)"
 			}
 			result = append(result, &RoutineEventSourceView{RoutineEventSourceOption: RoutineEventSourceOption{
-				Kind: RoutineEventGitHub, Source: RoutineCallbackSourceRef(registration.ID), Label: models.TruncateUTF8(label, RoutineEventSourceLabelMax),
-				Available: true, Fields: RoutineEventFilterFields(RoutineEventGitHub), EventTypes: types,
+				Kind: models.RoutineEventGitHub, Source: models.RoutineCallbackSourceRef(registration.ID), Label: models.TruncateUTF8(label, models.RoutineEventSourceLabelMax),
+				Available: true, Fields: models.RoutineEventFilterFields(models.RoutineEventGitHub), EventTypes: types,
 			}})
 		}
 		if len(page) < routineEventSourcePageSize {
@@ -302,7 +302,7 @@ func routineCallbackSources(ctx context.Context, store interface{}, scope Scope,
 // routineGoogleSources lists the host's Google sources of actingUser. Only
 // the person's own sign-in counts (E10): any option for another person is
 // dropped.
-func routineGoogleSources(ctx context.Context, catalog RoutineEventSourceCatalog, scope Scope, owner ObjectiveOwner, actingUser string) ([]*RoutineEventSourceView, error) {
+func routineGoogleSources(ctx context.Context, catalog RoutineEventSourceCatalog, scope models.Scope, owner models.ObjectiveOwner, actingUser string) ([]*RoutineEventSourceView, error) {
 	if catalog == nil || strings.TrimSpace(actingUser) == "" {
 		return nil, nil
 	}
@@ -312,39 +312,39 @@ func routineGoogleSources(ctx context.Context, catalog RoutineEventSourceCatalog
 	}
 	result := make([]*RoutineEventSourceView, 0, len(options))
 	for _, option := range options {
-		if option.Kind != RoutineEventGmailMessage && option.Kind != RoutineEventCalendar {
+		if option.Kind != models.RoutineEventGmailMessage && option.Kind != models.RoutineEventCalendar {
 			continue
 		}
 		if option.Available && !routineGoogleSourceOf(option.Source, actingUser) {
 			continue
 		}
-		option.Fields = RoutineEventFilterFields(option.Kind)
+		option.Fields = models.RoutineEventFilterFields(option.Kind)
 		result = append(result, &RoutineEventSourceView{RoutineEventSourceOption: option})
 	}
 	return result, nil
 }
 
 func routineGoogleSourceOf(sourceRef, userID string) bool {
-	return userID != "" && strings.HasPrefix(sourceRef, routineGoogleSourcePrefix+userID+":") && validateRoutineSourceRef(RoutineEventGmailMessage, sourceRef) == nil
+	return userID != "" && strings.HasPrefix(sourceRef, models.RoutineGoogleSourcePrefix+userID+":") && models.ValidateRoutineSourceRef(models.RoutineEventGmailMessage, sourceRef) == nil
 }
 
 func routineWebhookSource() *RoutineEventSourceView {
 	return &RoutineEventSourceView{RoutineEventSourceOption: RoutineEventSourceOption{
-		Kind: RoutineEventWebhook, Source: RoutineEventSourceNew, Label: "A new webhook address", Available: true,
-		Fields: RoutineEventFilterFields(RoutineEventWebhook),
+		Kind: models.RoutineEventWebhook, Source: RoutineEventSourceNew, Label: "A new webhook address", Available: true,
+		Fields: models.RoutineEventFilterFields(models.RoutineEventWebhook),
 	}}
 }
 
 // listRoutineEventSources is what event_sources returns and what create_task
 // resolves a source against: the umbrella's connections, GitHub
 // registrations, the person's own Google sign-in and a new webhook.
-func listRoutineEventSources(ctx context.Context, store interface{}, events routineEventActions, scope Scope, owner ObjectiveOwner, actingUser string, kind RoutineEventKind) ([]*RoutineEventSourceView, error) {
+func listRoutineEventSources(ctx context.Context, store interface{}, events routineEventActions, scope models.Scope, owner models.ObjectiveOwner, actingUser string, kind models.RoutineEventKind) ([]*RoutineEventSourceView, error) {
 	if kind != "" && !kind.Valid() {
 		return nil, fmt.Errorf("unknown event kind %q", kind)
 	}
-	want := func(candidate RoutineEventKind) bool { return kind == "" || kind == candidate }
+	want := func(candidate models.RoutineEventKind) bool { return kind == "" || kind == candidate }
 	result := []*RoutineEventSourceView{}
-	if want(RoutineEventSlackMessage) || want(RoutineEventTelegramMessage) {
+	if want(models.RoutineEventSlackMessage) || want(models.RoutineEventTelegramMessage) {
 		conversations, err := routineConversationSources(ctx, store, scope, owner)
 		if err != nil {
 			return nil, err
@@ -355,14 +355,14 @@ func listRoutineEventSources(ctx context.Context, store interface{}, events rout
 			}
 		}
 	}
-	if want(RoutineEventGitHub) {
+	if want(models.RoutineEventGitHub) {
 		callbacks, err := routineCallbackSources(ctx, store, scope, owner)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, callbacks...)
 	}
-	if want(RoutineEventGmailMessage) || want(RoutineEventCalendar) {
+	if want(models.RoutineEventGmailMessage) || want(models.RoutineEventCalendar) {
 		google, err := routineGoogleSources(ctx, events.sources, scope, owner, actingUser)
 		if err != nil {
 			return nil, err
@@ -373,15 +373,15 @@ func listRoutineEventSources(ctx context.Context, store interface{}, events rout
 			}
 		}
 	}
-	if want(RoutineEventWebhook) && events.hooksAvailable {
+	if want(models.RoutineEventWebhook) && events.hooksAvailable {
 		result = append(result, routineWebhookSource())
 	}
 	return result, nil
 }
 
-func dispatchRoutineEventSources(ctx context.Context, store runbookActionStore, events routineEventActions, run *AgentRun, arguments map[string]interface{}) (map[string]interface{}, error) {
+func dispatchRoutineEventSources(ctx context.Context, store runbookActionStore, events routineEventActions, run *models.AgentRun, arguments map[string]interface{}) (map[string]interface{}, error) {
 	var args struct {
-		Kind RoutineEventKind `json:"kind"`
+		Kind models.RoutineEventKind `json:"kind"`
 	}
 	if err := decodeScheduledTaskArguments(arguments, &args); err != nil {
 		return nil, err
@@ -405,13 +405,13 @@ func NewRoutineEventSourceChecker(store interface{}) RoutineEventSourceChecker {
 	return &routineEventSourceChecker{store: store}
 }
 
-func (c *routineEventSourceChecker) SourceExists(ctx context.Context, subscription RoutineEventSubscription) (bool, error) {
+func (c *routineEventSourceChecker) SourceExists(ctx context.Context, subscription models.RoutineEventSubscription) (bool, error) {
 	if c == nil || c.store == nil {
 		return false, errors.New("routine source checker is not configured")
 	}
 	scope, owner, kind, sourceRef := subscription.Scope, subscription.Owner, subscription.Kind, subscription.SourceRef
 	switch kind {
-	case RoutineEventSlackMessage, RoutineEventTelegramMessage:
+	case models.RoutineEventSlackMessage, models.RoutineEventTelegramMessage:
 		views, err := routineConversationSources(ctx, c.store, scope, owner)
 		if err != nil {
 			return false, err
@@ -430,9 +430,9 @@ func (c *routineEventSourceChecker) SourceExists(ctx context.Context, subscripti
 			}
 		}
 		return true, nil
-	case RoutineEventGitHub:
-		callbacks, ok := c.store.(CallbackRegistrationStore)
-		id, prefixed := strings.CutPrefix(sourceRef, routineCallbackSourcePrefix)
+	case models.RoutineEventGitHub:
+		callbacks, ok := c.store.(models.CallbackRegistrationStore)
+		id, prefixed := strings.CutPrefix(sourceRef, models.RoutineCallbackSourcePrefix)
 		if !ok || !prefixed {
 			return false, nil
 		}
@@ -449,7 +449,7 @@ func (c *routineEventSourceChecker) SourceExists(ctx context.Context, subscripti
 // routine's trigger. The source always comes from the same listing as
 // event_sources for this run's owner and person, never from the model's
 // string alone. activationID names the routine a webhook's hook belongs to.
-func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events routineEventActions, run *AgentRun, activationID string, args *scheduledTaskEventArguments) (*RoutineEventTrigger, error) {
+func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events routineEventActions, run *models.AgentRun, activationID string, args *scheduledTaskEventArguments) (*models.RoutineEventTrigger, error) {
 	if args == nil {
 		return nil, errors.New("trigger.event is required")
 	}
@@ -460,12 +460,12 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 		return nil, fmt.Errorf("unknown event kind %q", args.Kind)
 	}
 	source := strings.TrimSpace(args.Source)
-	trigger := &RoutineEventTrigger{
+	trigger := &models.RoutineEventTrigger{
 		Kind: args.Kind, Filter: cloneRoutineEventConditions(args.Filter), IncludeBots: args.IncludeBots,
 		MaxPerHour: args.MaxPerHour,
 	}
 	if trigger.MaxPerHour == 0 {
-		trigger.MaxPerHour = RoutineEventDefaultMaxPerHour
+		trigger.MaxPerHour = models.RoutineEventDefaultMaxPerHour
 	}
 	if args.MaximumOccurrences != nil {
 		if *args.MaximumOccurrences < 1 || *args.MaximumOccurrences > 1000000 {
@@ -478,15 +478,15 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 		trigger.Calendar = &calendar
 	}
 	var channels []RoutineEventSourceChannel
-	if args.Kind == RoutineEventWebhook {
+	if args.Kind == models.RoutineEventWebhook {
 		if source != RoutineEventSourceNew {
 			return nil, errors.New("a webhook routine's source must be \"new\"")
 		}
 		if !events.hooksAvailable {
 			return nil, ErrHooksUnavailable
 		}
-		hookID := HookID(run.Scope, activationID)
-		trigger.SourceRef, trigger.SourceLabel, trigger.Webhook = HookSourceRef(hookID), "Webhook", &RoutineWebhook{HookID: hookID}
+		hookID := models.HookID(run.Scope, activationID)
+		trigger.SourceRef, trigger.SourceLabel, trigger.Webhook = models.HookSourceRef(hookID), "Webhook", &models.RoutineWebhook{HookID: hookID}
 	} else {
 		sources, err := listRoutineEventSources(ctx, store, events, run.Scope, run.Owner, run.ActingUser, args.Kind)
 		if err != nil {
@@ -494,7 +494,7 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 		}
 		index := slices.IndexFunc(sources, func(view *RoutineEventSourceView) bool { return view.Source == source })
 		if index < 0 {
-			if args.Kind == RoutineEventGmailMessage || args.Kind == RoutineEventCalendar {
+			if args.Kind == models.RoutineEventGmailMessage || args.Kind == models.RoutineEventCalendar {
 				return nil, errors.New("Gmail and Calendar routines use only your own Google sign-in; use a source from event_sources")
 			}
 			return nil, fmt.Errorf("unknown event source %q; use a source from event_sources", source)
@@ -509,7 +509,7 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 			}
 			return nil, errors.New("this event source is not available")
 		}
-		if (args.Kind == RoutineEventGmailMessage || args.Kind == RoutineEventCalendar) && !routineGoogleSourceOf(option.Source, run.ActingUser) {
+		if (args.Kind == models.RoutineEventGmailMessage || args.Kind == models.RoutineEventCalendar) && !routineGoogleSourceOf(option.Source, run.ActingUser) {
 			return nil, errors.New("Gmail and Calendar routines use only your own Google sign-in")
 		}
 		trigger.SourceRef, trigger.SourceLabel, channels = option.Source, option.Label, option.Channels
@@ -517,7 +517,7 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 	if err := trigger.Validate(); err != nil {
 		return nil, err
 	}
-	if field := routineEventPlaceField(trigger.Kind); field != "" {
+	if field := models.RoutineEventPlaceField(trigger.Kind); field != "" {
 		if err := pinRoutineEventChannels(trigger, field, channels); err != nil {
 			return nil, err
 		}
@@ -529,7 +529,7 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 // routine names to be a conversation the umbrella has an active endpoint in
 // on that connection (E14), and labels unlabeled conditions with the
 // endpoint's name.
-func pinRoutineEventChannels(trigger *RoutineEventTrigger, field string, channels []RoutineEventSourceChannel) error {
+func pinRoutineEventChannels(trigger *models.RoutineEventTrigger, field string, channels []RoutineEventSourceChannel) error {
 	find := func(value string) *RoutineEventSourceChannel {
 		value = strings.TrimSpace(value)
 		for index := range channels {
@@ -541,11 +541,11 @@ func pinRoutineEventChannels(trigger *RoutineEventTrigger, field string, channel
 	}
 	for index := range trigger.Filter {
 		condition := &trigger.Filter[index]
-		if condition.Field != field || condition.Not || (condition.Op != RoutineFilterEquals && condition.Op != RoutineFilterOneOf) {
+		if condition.Field != field || condition.Not || (condition.Op != models.RoutineFilterEquals && condition.Op != models.RoutineFilterOneOf) {
 			continue
 		}
 		values := condition.Values
-		if condition.Op == RoutineFilterEquals {
+		if condition.Op == models.RoutineFilterEquals {
 			values = []string{condition.Value}
 		}
 		names := make([]string, 0, len(values))
@@ -557,17 +557,17 @@ func pinRoutineEventChannels(trigger *RoutineEventTrigger, field string, channel
 			names = append(names, channel.Name)
 		}
 		if strings.TrimSpace(condition.Label) == "" && !slices.Contains(names, "") {
-			condition.Label = models.TruncateUTF8(strings.Join(names, ", "), RoutineEventConditionLabelMax)
+			condition.Label = models.TruncateUTF8(strings.Join(names, ", "), models.RoutineEventConditionLabelMax)
 		}
 	}
 	return nil
 }
 
-func cloneRoutineEventConditions(values []RoutineEventCondition) []RoutineEventCondition {
+func cloneRoutineEventConditions(values []models.RoutineEventCondition) []models.RoutineEventCondition {
 	if values == nil {
 		return nil
 	}
-	result := make([]RoutineEventCondition, len(values))
+	result := make([]models.RoutineEventCondition, len(values))
 	for index, condition := range values {
 		condition.Values = append([]string(nil), condition.Values...)
 		if len(condition.Values) == 0 {
@@ -579,7 +579,7 @@ func cloneRoutineEventConditions(values []RoutineEventCondition) []RoutineEventC
 }
 
 // routineEventPreview is the event part of a routine's brief card.
-func routineEventPreview(trigger *RoutineEventTrigger) map[string]interface{} {
+func routineEventPreview(trigger *models.RoutineEventTrigger) map[string]interface{} {
 	if trigger == nil {
 		return nil
 	}
@@ -606,8 +606,8 @@ func routineEventPreview(trigger *RoutineEventTrigger) map[string]interface{} {
 	}
 	preview := map[string]interface{}{
 		"kind": string(trigger.Kind), "sourceLabel": trigger.SourceLabel,
-		"when": DescribeRoutineEventTrigger(trigger), "whoCanTrigger": DescribeRoutineEventTriggerAudience(trigger),
-		"filter": filter, "maxPerHour": trigger.MaxPerHour, "webhook": trigger.Kind == RoutineEventWebhook,
+		"when": models.DescribeRoutineEventTrigger(trigger), "whoCanTrigger": models.DescribeRoutineEventTriggerAudience(trigger),
+		"filter": filter, "maxPerHour": trigger.MaxPerHour, "webhook": trigger.Kind == models.RoutineEventWebhook,
 	}
 	if trigger.MaximumOccurrences > 0 {
 		preview["maximumOccurrences"] = trigger.MaximumOccurrences

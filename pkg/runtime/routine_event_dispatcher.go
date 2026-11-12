@@ -39,7 +39,7 @@ const (
 // conversation or callback source, and each channel or chat it names, still
 // exists. Nil skips the check.
 type RoutineEventSourceChecker interface {
-	SourceExists(ctx context.Context, subscription RoutineEventSubscription) (bool, error)
+	SourceExists(ctx context.Context, subscription models.RoutineEventSubscription) (bool, error)
 }
 
 // RoutineEventDispatchResult counts what one dispatcher pass did.
@@ -80,10 +80,10 @@ func (r *RoutineEventDispatchResult) add(other *RoutineEventDispatchResult) {
 // sweep leader), so its check-then-claim cannot race. It keeps no goroutine
 // or timer per routine.
 type RoutineEventDispatcher struct {
-	store             KernelStore
+	store             models.KernelStore
 	matcher           *RoutineEventMatcher
-	reportingStore    ConversationStore
-	executionPreparer AcceptedRunExecutionPreparer
+	reportingStore    models.ConversationStore
+	executionPreparer models.AcceptedRunExecutionPreparer
 	// TenantRunCap overrides RoutineEventTenantRunCap when positive.
 	TenantRunCap int
 	// SourceChecker checks conversation and callback sources hourly. Nil
@@ -96,7 +96,7 @@ type RoutineEventDispatcher struct {
 	// the next pass starts after it, so routines that sort late get the
 	// freed slots in turn.
 	cursorMu    sync.Mutex
-	workCursors map[Scope]string
+	workCursors map[models.Scope]string
 
 	lastRebuild     time.Time
 	lastSourceCheck time.Time
@@ -104,15 +104,15 @@ type RoutineEventDispatcher struct {
 }
 
 // NewRoutineEventDispatcher builds a dispatcher on the matcher's store.
-func NewRoutineEventDispatcher(store KernelStore, matcher *RoutineEventMatcher, opts ...models.ServiceOption) *RoutineEventDispatcher {
-	dispatcher := &RoutineEventDispatcher{store: store, matcher: matcher, now: models.ClockFrom(opts), minPassGap: routineEventMinPassGap, workCursors: map[Scope]string{}}
-	if reportingStore, ok := store.(ConversationStore); ok {
+func NewRoutineEventDispatcher(store models.KernelStore, matcher *RoutineEventMatcher, opts ...models.ServiceOption) *RoutineEventDispatcher {
+	dispatcher := &RoutineEventDispatcher{store: store, matcher: matcher, now: models.ClockFrom(opts), minPassGap: routineEventMinPassGap, workCursors: map[models.Scope]string{}}
+	if reportingStore, ok := store.(models.ConversationStore); ok {
 		dispatcher.reportingStore = reportingStore
 	}
 	return dispatcher
 }
 
-func (d *RoutineEventDispatcher) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+func (d *RoutineEventDispatcher) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
 	if d != nil {
 		d.executionPreparer = preparer
 	}
@@ -216,7 +216,7 @@ func (d *RoutineEventDispatcher) ReconcileAll(ctx context.Context, limitPerScope
 }
 
 // ReconcileScope runs one dispatch pass over one scope.
-func (d *RoutineEventDispatcher) ReconcileScope(ctx context.Context, scope Scope, limit int) (*RoutineEventDispatchResult, error) {
+func (d *RoutineEventDispatcher) ReconcileScope(ctx context.Context, scope models.Scope, limit int) (*RoutineEventDispatchResult, error) {
 	if d == nil || d.store == nil {
 		return nil, errors.New("routine event dispatcher is not configured")
 	}
@@ -229,12 +229,12 @@ type routineEventScopePass struct {
 	capped     bool
 }
 
-func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope Scope, limit int) (*RoutineEventDispatchResult, int, error) {
+func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope models.Scope, limit int) (*RoutineEventDispatchResult, int, error) {
 	result := &RoutineEventDispatchResult{}
 	if err := scope.Validate(); err != nil {
 		return result, 0, err
 	}
-	if limit <= 0 || limit > routineEventSubscriptionPageLimit {
+	if limit <= 0 || limit > models.RoutineEventSubscriptionPageLimit {
 		limit = routineEventDispatchWorkLimit
 	}
 	ids, err := d.routineEventWork(ctx, scope, limit)
@@ -281,7 +281,7 @@ func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope Scope
 
 // routineEventWork lists the scope's routines with waiting events, starting
 // after the scope's cursor and wrapping around to the start.
-func (d *RoutineEventDispatcher) routineEventWork(ctx context.Context, scope Scope, limit int) ([]string, error) {
+func (d *RoutineEventDispatcher) routineEventWork(ctx context.Context, scope models.Scope, limit int) ([]string, error) {
 	d.cursorMu.Lock()
 	after := d.workCursors[scope]
 	d.cursorMu.Unlock()
@@ -305,7 +305,7 @@ func (d *RoutineEventDispatcher) routineEventWork(ctx context.Context, scope Sco
 // advanceWorkCursor moves the scope's cursor past the last routine examined
 // when the pass left work unexamined (tenant cap or list limit); otherwise
 // every routine had its turn and the next pass starts from the beginning.
-func (d *RoutineEventDispatcher) advanceWorkCursor(scope Scope, examined string, unfinished bool) {
+func (d *RoutineEventDispatcher) advanceWorkCursor(scope models.Scope, examined string, unfinished bool) {
 	d.cursorMu.Lock()
 	defer d.cursorMu.Unlock()
 	switch {
@@ -313,20 +313,20 @@ func (d *RoutineEventDispatcher) advanceWorkCursor(scope Scope, examined string,
 		delete(d.workCursors, scope)
 	case examined != "":
 		if d.workCursors == nil {
-			d.workCursors = map[Scope]string{}
+			d.workCursors = map[models.Scope]string{}
 		}
 		d.workCursors[scope] = examined
 	}
 }
 
 // keepWorkCursors forgets the cursors of scopes that no longer have work.
-func (d *RoutineEventDispatcher) keepWorkCursors(scopes []Scope) {
+func (d *RoutineEventDispatcher) keepWorkCursors(scopes []models.Scope) {
 	d.cursorMu.Lock()
 	defer d.cursorMu.Unlock()
 	if len(d.workCursors) == 0 {
 		return
 	}
-	keep := make(map[Scope]bool, len(scopes))
+	keep := make(map[models.Scope]bool, len(scopes))
 	for _, scope := range scopes {
 		keep[scope] = true
 	}
@@ -341,20 +341,20 @@ func routineEventIdempotencyKey(batchID string) string {
 	return routineEventIdempotencyPrefix + batchID
 }
 
-func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope Scope, activationID string, pass *routineEventScopePass, result *RoutineEventDispatchResult) error {
+func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope models.Scope, activationID string, pass *routineEventScopePass, result *RoutineEventDispatchResult) error {
 	activation, err := d.store.GetRunbookActivation(ctx, scope, activationID)
 	if err != nil {
 		return err
 	}
 	if activation == nil || activation.Task == nil || activation.Task.Event == nil || activation.Trigger.Kind != runbook.TriggerEvent {
-		dropped, err := d.closeOut(ctx, scope, activationID, RoutineEventDroppedRetired)
+		dropped, err := d.closeOut(ctx, scope, activationID, models.RoutineEventDroppedRetired)
 		result.Dropped += dropped
 		return err
 	}
-	if activation.Status != RunbookActivationActive {
-		reason := RoutineEventDroppedPaused
-		if activation.Status == RunbookActivationRetired {
-			reason = RoutineEventDroppedRetired
+	if activation.Status != models.RunbookActivationActive {
+		reason := models.RoutineEventDroppedPaused
+		if activation.Status == models.RunbookActivationRetired {
+			reason = models.RoutineEventDroppedRetired
 		}
 		dropped, err := d.closeOut(ctx, scope, activation.ID, reason)
 		result.Dropped += dropped
@@ -378,7 +378,7 @@ func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope S
 				return err
 			}
 			result.Replayed++
-			if !isTerminalAgentRunStatus(existing.Status) {
+			if !models.IsTerminalAgentRunStatus(existing.Status) {
 				pass.activeRuns++
 			}
 			if !batch.Test {
@@ -418,7 +418,7 @@ func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope S
 		if limited {
 			// Only test events may start now. Claim only when some arrived
 			// recently, so a real batch is rarely formed just to wait.
-			tests, err := d.store.CountRoutineTestEventsSince(ctx, scope, activation.ID, now.Add(-RoutineEventActiveRunWindow))
+			tests, err := d.store.CountRoutineTestEventsSince(ctx, scope, activation.ID, now.Add(-models.RoutineEventActiveRunWindow))
 			if err != nil {
 				return err
 			}
@@ -427,7 +427,7 @@ func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope S
 				return nil
 			}
 		}
-		batch, err = d.store.ClaimRoutineEventBatch(ctx, scope, activation.ID, RoutineEventMaxBatchEvents, now)
+		batch, err = d.store.ClaimRoutineEventBatch(ctx, scope, activation.ID, models.RoutineEventMaxBatchEvents, now)
 		if err != nil {
 			return err
 		}
@@ -442,19 +442,19 @@ func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope S
 	return d.startBatch(ctx, activation, batch, pass, result)
 }
 
-func (d *RoutineEventDispatcher) startBatch(ctx context.Context, activation *RunbookActivation, batch *RoutineEventBatch, pass *routineEventScopePass, result *RoutineEventDispatchResult) error {
+func (d *RoutineEventDispatcher) startBatch(ctx context.Context, activation *models.RunbookActivation, batch *models.RoutineEventBatch, pass *routineEventScopePass, result *RoutineEventDispatchResult) error {
 	scope := activation.Scope
 	if err := verifyRunbookActivationExecution(ctx, d.store, scope, activation.ID); err != nil {
 		if !errors.Is(err, ErrRunbookActivationUnverified) {
 			return err
 		}
-		return d.pause(ctx, activation, RoutinePausedUnverified, result)
+		return d.pause(ctx, activation, models.RoutinePausedUnverified, result)
 	}
 	objective, err := d.store.GetObjective(ctx, scope, activation.ObjectiveID)
 	if err != nil {
 		return err
 	}
-	if objective == nil || objective.Owner != activation.Owner || objective.Status != ObjectiveStatusActive {
+	if objective == nil || objective.Owner != activation.Owner || objective.Status != models.ObjectiveStatusActive {
 		result.Waiting++
 		return nil
 	}
@@ -463,25 +463,25 @@ func (d *RoutineEventDispatcher) startBatch(ctx context.Context, activation *Run
 		return err
 	}
 	if stored == nil {
-		return ErrRoutineEventBatchNotFound
+		return models.ErrRoutineEventBatchNotFound
 	}
 	extra := map[string]interface{}{
-		RoutineEventBatchContextKey:  stored.ID,
-		RoutineEventCountContextKey:  len(stored.EventIDs),
-		RoutineEventKindContextKey:   string(activation.Task.Event.Kind),
-		RoutineEventHeaderContextKey: routineEventBatchHeader(activation.Task.Event.Kind, stored, records),
+		models.RoutineEventBatchContextKey:  stored.ID,
+		models.RoutineEventCountContextKey:  len(stored.EventIDs),
+		models.RoutineEventKindContextKey:   string(activation.Task.Event.Kind),
+		models.RoutineEventHeaderContextKey: routineEventBatchHeader(activation.Task.Event.Kind, stored, records),
 	}
 	if stored.Test {
-		extra[RoutineEventTestContextKey] = true
+		extra[models.RoutineEventTestContextKey] = true
 	}
-	created, err := startActivationOccurrence(ctx, d.store, d.reportingStore, activation, objective, RunSourceEvent,
-		routineEventIdempotencyKey(stored.ID), extra, ActivityActor{Type: "service", ID: "routine-event-dispatcher"},
+	created, err := startActivationOccurrence(ctx, d.store, d.reportingStore, activation, objective, models.RunSourceEvent,
+		routineEventIdempotencyKey(stored.ID), extra, models.ActivityActor{Type: "service", ID: "routine-event-dispatcher"},
 		runbookScheduleVisibility(activation), d.executionPreparer)
 	if errors.Is(err, ErrRoutineReportingUnavailable) {
 		// The routine's chat was archived or its request message is gone.
 		// Retrying cannot help: pause it so the person sees why, and close
 		// out its events.
-		return d.pause(ctx, activation, RoutinePausedUnverified, result)
+		return d.pause(ctx, activation, models.RoutinePausedUnverified, result)
 	}
 	if err != nil {
 		return fmt.Errorf("start routine %s for event batch %s: %w", activation.ID, stored.ID, err)
@@ -489,7 +489,7 @@ func (d *RoutineEventDispatcher) startBatch(ctx context.Context, activation *Run
 	if err := d.store.MarkRoutineEventBatchStarted(ctx, scope, stored.ID, created.Run.ID, d.now().UTC()); err != nil {
 		return err
 	}
-	if !isTerminalAgentRunStatus(created.Run.Status) {
+	if !models.IsTerminalAgentRunStatus(created.Run.Status) {
 		pass.activeRuns++
 	}
 	if created.Event == nil {
@@ -512,7 +512,7 @@ func (d *RoutineEventDispatcher) startBatch(ctx context.Context, activation *Run
 
 // exhausted reports whether the routine already started its maximum of real
 // batches. The count comes from durable batch rows, never the activation.
-func (d *RoutineEventDispatcher) exhausted(ctx context.Context, activation *RunbookActivation) (bool, error) {
+func (d *RoutineEventDispatcher) exhausted(ctx context.Context, activation *models.RunbookActivation) (bool, error) {
 	maximum := activation.Task.Event.MaximumOccurrences
 	if maximum <= 0 {
 		return false, nil
@@ -524,7 +524,7 @@ func (d *RoutineEventDispatcher) exhausted(ctx context.Context, activation *Runb
 	return int64(count) >= maximum, nil
 }
 
-func (d *RoutineEventDispatcher) retireWhenExhausted(ctx context.Context, activation *RunbookActivation, result *RoutineEventDispatchResult) error {
+func (d *RoutineEventDispatcher) retireWhenExhausted(ctx context.Context, activation *models.RunbookActivation, result *RoutineEventDispatchResult) error {
 	exhausted, err := d.exhausted(ctx, activation)
 	if err != nil || !exhausted {
 		return err
@@ -532,10 +532,10 @@ func (d *RoutineEventDispatcher) retireWhenExhausted(ctx context.Context, activa
 	return d.retire(ctx, activation, result)
 }
 
-func (d *RoutineEventDispatcher) hourlyLimitReached(ctx context.Context, activation *RunbookActivation, now time.Time) (bool, error) {
+func (d *RoutineEventDispatcher) hourlyLimitReached(ctx context.Context, activation *models.RunbookActivation, now time.Time) (bool, error) {
 	maximum := activation.Task.Event.MaxPerHour
 	if maximum <= 0 {
-		maximum = RoutineEventDefaultMaxPerHour
+		maximum = models.RoutineEventDefaultMaxPerHour
 	}
 	count, _, err := d.store.CountRoutineEventBatchesSince(ctx, activation.Scope, activation.ID, now.Add(-time.Hour), false)
 	if err != nil {
@@ -544,34 +544,34 @@ func (d *RoutineEventDispatcher) hourlyLimitReached(ctx context.Context, activat
 	return count >= maximum, nil
 }
 
-func (d *RoutineEventDispatcher) retire(ctx context.Context, activation *RunbookActivation, result *RoutineEventDispatchResult) error {
+func (d *RoutineEventDispatcher) retire(ctx context.Context, activation *models.RunbookActivation, result *RoutineEventDispatchResult) error {
 	_, err := NewRunbookActivationService(d.store, models.WithClock(d.now)).Update(ctx, activation.Scope, activation.ID, UpdateRunbookActivationRequest{
-		ExpectedRevision: activation.Revision, Status: RunbookActivationRetired, Exhausted: true,
+		ExpectedRevision: activation.Revision, Status: models.RunbookActivationRetired, Exhausted: true,
 	})
-	if errors.Is(err, ErrRunbookActivationRevision) {
+	if errors.Is(err, models.ErrRunbookActivationRevision) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
 	result.Retired++
-	dropped, err := d.closeOut(ctx, activation.Scope, activation.ID, RoutineEventDroppedExhausted)
+	dropped, err := d.closeOut(ctx, activation.Scope, activation.ID, models.RoutineEventDroppedExhausted)
 	result.Dropped += dropped
 	return err
 }
 
-func (d *RoutineEventDispatcher) pause(ctx context.Context, activation *RunbookActivation, reason RoutinePausedReason, result *RoutineEventDispatchResult) error {
+func (d *RoutineEventDispatcher) pause(ctx context.Context, activation *models.RunbookActivation, reason models.RoutinePausedReason, result *RoutineEventDispatchResult) error {
 	_, err := NewRunbookActivationService(d.store, models.WithClock(d.now)).Update(ctx, activation.Scope, activation.ID, UpdateRunbookActivationRequest{
-		ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: reason,
+		ExpectedRevision: activation.Revision, Status: models.RunbookActivationPaused, PausedReason: reason,
 	})
-	if errors.Is(err, ErrRunbookActivationRevision) {
+	if errors.Is(err, models.ErrRunbookActivationRevision) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
 	result.Paused++
-	dropped, err := d.closeOut(ctx, activation.Scope, activation.ID, RoutineEventDroppedPaused)
+	dropped, err := d.closeOut(ctx, activation.Scope, activation.ID, models.RoutineEventDroppedPaused)
 	result.Dropped += dropped
 	return err
 }
@@ -579,7 +579,7 @@ func (d *RoutineEventDispatcher) pause(ctx context.Context, activation *RunbookA
 // closeOut ends a routine's waiting work when it is paused, retired or used
 // up. An open batch whose Run already started is marked started first; the
 // rest is dropped, and the store deletes the open batch row.
-func (d *RoutineEventDispatcher) closeOut(ctx context.Context, scope Scope, activationID, reason string) (int, error) {
+func (d *RoutineEventDispatcher) closeOut(ctx context.Context, scope models.Scope, activationID, reason string) (int, error) {
 	open, err := d.store.GetOpenRoutineEventBatch(ctx, scope, activationID)
 	if err != nil {
 		return 0, err
@@ -605,11 +605,11 @@ func (d *RoutineEventDispatcher) CheckRoutineSources(ctx context.Context) (int, 
 	if d == nil || d.store == nil || d.SourceChecker == nil {
 		return 0, nil
 	}
-	kinds := []RoutineEventKind{RoutineEventSlackMessage, RoutineEventTelegramMessage, RoutineEventGitHub}
+	kinds := []models.RoutineEventKind{models.RoutineEventSlackMessage, models.RoutineEventTelegramMessage, models.RoutineEventGitHub}
 	paused := 0
 	after := ""
 	for {
-		page, cursor, err := d.store.ListRoutineEventSubscriptions(ctx, kinds, after, routineEventSubscriptionPageLimit)
+		page, cursor, err := d.store.ListRoutineEventSubscriptions(ctx, kinds, after, models.RoutineEventSubscriptionPageLimit)
 		if err != nil {
 			return paused, err
 		}
@@ -622,11 +622,11 @@ func (d *RoutineEventDispatcher) CheckRoutineSources(ctx context.Context) (int, 
 			if err != nil {
 				return paused, err
 			}
-			if activation == nil || activation.Status != RunbookActivationActive {
+			if activation == nil || activation.Status != models.RunbookActivationActive {
 				continue
 			}
 			result := &RoutineEventDispatchResult{}
-			if err := d.pause(ctx, activation, RoutinePausedSourceRemoved, result); err != nil {
+			if err := d.pause(ctx, activation, models.RoutinePausedSourceRemoved, result); err != nil {
 				return paused, err
 			}
 			paused += result.Paused
@@ -648,7 +648,7 @@ func (d *RoutineEventDispatcher) PruneRoutineEventData(ctx context.Context) (int
 	now := d.now().UTC()
 	removed := 0
 	for round := 0; round < routineEventPruneRounds; round++ {
-		count, err := d.store.PruneRoutineEvents(ctx, now.Add(-RoutineEventRetention), routineEventPruneBatch)
+		count, err := d.store.PruneRoutineEvents(ctx, now.Add(-models.RoutineEventRetention), routineEventPruneBatch)
 		removed += count
 		if err != nil {
 			return removed, err
@@ -663,7 +663,7 @@ func (d *RoutineEventDispatcher) PruneRoutineEventData(ctx context.Context) (int
 
 // routineEventBatchHeader is the "what started it" line: one event's
 // Summary, else a kernel-made count. It is cut to 200 bytes.
-func routineEventBatchHeader(kind RoutineEventKind, batch *RoutineEventBatch, records []*RoutineEventRecord) string {
+func routineEventBatchHeader(kind models.RoutineEventKind, batch *models.RoutineEventBatch, records []*models.RoutineEventRecord) string {
 	count := len(batch.EventIDs)
 	var header string
 	switch {
@@ -681,9 +681,9 @@ func routineEventBatchHeader(kind RoutineEventKind, batch *RoutineEventBatch, re
 	default:
 		noun := "events"
 		switch kind {
-		case RoutineEventGmailMessage:
+		case models.RoutineEventGmailMessage:
 			noun = "emails"
-		case RoutineEventSlackMessage, RoutineEventTelegramMessage:
+		case models.RoutineEventSlackMessage, models.RoutineEventTelegramMessage:
 			noun = "messages"
 		}
 		header = fmt.Sprintf("%d new %s", count, noun)
@@ -700,14 +700,14 @@ func routineEventBatchHeader(kind RoutineEventKind, batch *RoutineEventBatch, re
 // The dispatcher closes out the waiting events on its next pass, on its own
 // goroutine, so the close-out never deletes the batch of a Run it is
 // creating at that moment.
-func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope Scope, activationID string, reason RoutinePausedReason) (bool, error) {
+func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope models.Scope, activationID string, reason models.RoutinePausedReason) (bool, error) {
 	if d == nil || d.store == nil {
 		return false, errors.New("routine event dispatcher is not configured")
 	}
-	if !validRoutinePausedReason(reason) {
+	if !models.IsValidRoutinePausedReason(reason) {
 		return false, fmt.Errorf("unknown pause reason %q", reason)
 	}
-	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
+	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return false, err
 	}
 	activationID = strings.TrimSpace(activationID)
@@ -717,19 +717,19 @@ func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope Scope, 
 			return false, err
 		}
 		if activation == nil {
-			return false, ErrRunbookActivationNotFound
+			return false, models.ErrRunbookActivationNotFound
 		}
 		if activation.Task == nil || activation.Task.Event == nil {
 			return false, ErrRoutineNotEventRoutine
 		}
-		if activation.Status == RunbookActivationRetired ||
-			(activation.Status == RunbookActivationPaused && activation.PausedReason == reason) {
+		if activation.Status == models.RunbookActivationRetired ||
+			(activation.Status == models.RunbookActivationPaused && activation.PausedReason == reason) {
 			return false, nil
 		}
 		_, err = NewRunbookActivationService(d.store, models.WithClock(d.now)).Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{
-			ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: reason,
+			ExpectedRevision: activation.Revision, Status: models.RunbookActivationPaused, PausedReason: reason,
 		})
-		if errors.Is(err, ErrRunbookActivationRevision) {
+		if errors.Is(err, models.ErrRunbookActivationRevision) {
 			continue
 		}
 		if err != nil {
@@ -740,13 +740,13 @@ func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope Scope, 
 		}
 		return true, nil
 	}
-	return false, ErrRunbookActivationRevision
+	return false, models.ErrRunbookActivationRevision
 }
 
 // PauseRoutinesForSource pauses every active event routine of the scope that
 // listens to this kind and SourceRef, for example when a person's Google
 // sign-in is revoked. It returns how many it paused.
-func (d *RoutineEventDispatcher) PauseRoutinesForSource(ctx context.Context, scope Scope, kind RoutineEventKind, sourceRef string, reason RoutinePausedReason) (int, error) {
+func (d *RoutineEventDispatcher) PauseRoutinesForSource(ctx context.Context, scope models.Scope, kind models.RoutineEventKind, sourceRef string, reason models.RoutinePausedReason) (int, error) {
 	if d == nil || d.store == nil {
 		return 0, errors.New("routine event dispatcher is not configured")
 	}

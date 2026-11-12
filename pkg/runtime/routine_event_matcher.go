@@ -32,12 +32,12 @@ var (
 )
 
 type routineEventMatcherStore interface {
-	RoutineEventStore
-	GetRunbookActivation(context.Context, Scope, string) (*RunbookActivation, error)
+	models.RoutineEventStore
+	GetRunbookActivation(context.Context, models.Scope, string) (*models.RunbookActivation, error)
 }
 
 type routineCallbackRegistrationReader interface {
-	GetCallbackRegistration(ctx context.Context, scope Scope, id string) (*CallbackRegistration, error)
+	GetCallbackRegistration(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error)
 }
 
 // RoutineEventMatcher matches events to event routines and stores them for
@@ -68,7 +68,7 @@ func NewRoutineEventMatcher(store routineEventMatcherStore, opts ...models.Servi
 		panic("routine event matcher needs a comparable store (a pointer) so activation writes refresh its index")
 	}
 	matcher := &RoutineEventMatcher{store: store, nudge: make(chan struct{}, 1), now: models.ClockFrom(opts)}
-	matcher.index.current.Store(&routineEventIndex{scopes: map[Scope]routineEventScopeKeys{}})
+	matcher.index.current.Store(&routineEventIndex{scopes: map[models.Scope]routineEventScopeKeys{}})
 	matcher.unregister = registerRoutineActivationObserver(store, matcher.activationWritten)
 	return matcher
 }
@@ -91,13 +91,13 @@ func (m *RoutineEventMatcher) SetRoutineIndexPublisher(publisher RoutineIndexPub
 // Listening reports whether any active event routine of the scope listens to
 // this kind and SourceRef. It is a lookup in the in-memory index: no I/O and
 // no allocation.
-func (m *RoutineEventMatcher) Listening(scope Scope, kind RoutineEventKind, sourceRef string) bool {
+func (m *RoutineEventMatcher) Listening(scope models.Scope, kind models.RoutineEventKind, sourceRef string) bool {
 	return m != nil && m.index.listening(scope, kind, sourceRef)
 }
 
 // RefreshRoutineIndex rereads one scope's index keys from the store. Hosts
 // call it when another process signals that the scope's routines changed.
-func (m *RoutineEventMatcher) RefreshRoutineIndex(ctx context.Context, scope Scope) error {
+func (m *RoutineEventMatcher) RefreshRoutineIndex(ctx context.Context, scope models.Scope) error {
 	if m == nil || m.store == nil {
 		return errors.New("routine event matcher is not configured")
 	}
@@ -139,11 +139,11 @@ func (m *RoutineEventMatcher) wake() {
 
 // activationWritten keeps the index in step with a committed activation
 // write and tells other processes.
-func (m *RoutineEventMatcher) activationWritten(ctx context.Context, previous, next *RunbookActivation) {
+func (m *RoutineEventMatcher) activationWritten(ctx context.Context, previous, next *models.RunbookActivation) {
 	if !isRoutineEventActivation(previous) && !isRoutineEventActivation(next) {
 		return
 	}
-	scope := Scope{}
+	scope := models.Scope{}
 	if next != nil {
 		scope = next.Scope
 	} else {
@@ -156,13 +156,13 @@ func (m *RoutineEventMatcher) activationWritten(ctx context.Context, previous, n
 	}
 }
 
-func isRoutineEventActivation(activation *RunbookActivation) bool {
-	kind, _ := routineEventIndexOf(activation)
+func isRoutineEventActivation(activation *models.RunbookActivation) bool {
+	kind, _ := models.RoutineEventIndexOf(activation)
 	return kind != ""
 }
 
 // OfferRoutineEvent stores the event for every active routine it matches.
-func (m *RoutineEventMatcher) OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (externalconversation.RoutineEventOffer, error) {
+func (m *RoutineEventMatcher) OfferRoutineEvent(ctx context.Context, event *models.RoutineEvent) (externalconversation.RoutineEventOffer, error) {
 	if m == nil || event == nil {
 		return externalconversation.RoutineEventOffer{}, nil
 	}
@@ -180,7 +180,7 @@ func (m *RoutineEventMatcher) OfferRoutineEvent(ctx context.Context, event *Rout
 	return offer, err
 }
 
-func (m *RoutineEventMatcher) offer(ctx context.Context, event *RoutineEvent) (externalconversation.RoutineEventOffer, error) {
+func (m *RoutineEventMatcher) offer(ctx context.Context, event *models.RoutineEvent) (externalconversation.RoutineEventOffer, error) {
 	offer := externalconversation.RoutineEventOffer{}
 	if err := event.Validate(); err != nil {
 		return offer, err
@@ -195,7 +195,7 @@ func (m *RoutineEventMatcher) offer(ctx context.Context, event *RoutineEvent) (e
 	scopePending := -1
 	now := m.now().UTC()
 	for _, activation := range activations {
-		if activation == nil || activation.Status != RunbookActivationActive || activation.Task == nil || activation.Task.Event == nil {
+		if activation == nil || activation.Status != models.RunbookActivationActive || activation.Task == nil || activation.Task.Event == nil {
 			continue
 		}
 		owned, err := m.ownsSource(ctx, activation, event)
@@ -210,10 +210,10 @@ func (m *RoutineEventMatcher) offer(ctx context.Context, event *RoutineEvent) (e
 		if err != nil {
 			return offer, err
 		}
-		record := &RoutineEventRecord{Scope: event.Scope, ActivationID: activation.ID, Event: *event, State: RoutineEventPending, ReceivedAt: now}
+		record := &models.RoutineEventRecord{Scope: event.Scope, ActivationID: activation.ID, Event: *event, State: models.RoutineEventPending, ReceivedAt: now}
 		if full {
-			record.State, record.DroppedReason = RoutineEventDropped, RoutineEventDroppedOverflow
-			record.Event = RoutineEvent{ID: event.ID, OccurredAt: event.OccurredAt}
+			record.State, record.DroppedReason = models.RoutineEventDropped, models.RoutineEventDroppedOverflow
+			record.Event = models.RoutineEvent{ID: event.ID, OccurredAt: event.OccurredAt}
 		}
 		inserted, err := m.store.InsertRoutineEvent(ctx, record)
 		if err != nil {
@@ -236,7 +236,7 @@ func (m *RoutineEventMatcher) offer(ctx context.Context, event *RoutineEvent) (e
 
 // waitingIsFull applies the per-routine and per-scope caps on waiting
 // events. The scope count is read once per offer.
-func (m *RoutineEventMatcher) waitingIsFull(ctx context.Context, activation *RunbookActivation, scopePending *int) (bool, error) {
+func (m *RoutineEventMatcher) waitingIsFull(ctx context.Context, activation *models.RunbookActivation, scopePending *int) (bool, error) {
 	pending, err := m.store.CountPendingRoutineEvents(ctx, activation.Scope, activation.ID)
 	if err != nil {
 		return false, err
@@ -256,37 +256,37 @@ func (m *RoutineEventMatcher) waitingIsFull(ctx context.Context, activation *Run
 
 // ownsSource is the owner check of SPEC §1.3: the routine may only hear
 // sources its owner or creator holds.
-func (m *RoutineEventMatcher) ownsSource(ctx context.Context, activation *RunbookActivation, event *RoutineEvent) (bool, error) {
+func (m *RoutineEventMatcher) ownsSource(ctx context.Context, activation *models.RunbookActivation, event *models.RoutineEvent) (bool, error) {
 	trigger := activation.Task.Event
 	if activation.Scope != event.Scope || trigger.SourceRef != event.SourceRef {
 		return false, nil
 	}
 	switch trigger.Kind {
-	case RoutineEventSlackMessage, RoutineEventTelegramMessage:
+	case models.RoutineEventSlackMessage, models.RoutineEventTelegramMessage:
 		// The SourceRef hashes the deployment, binding, adapter and
 		// installation. create_task builds it only from the routine owner's
 		// own connection, and the hourly SourceChecker (given the owner)
 		// pauses the routine when that connection is gone, so an equal
 		// SourceRef is the owner check (SPEC §1.3, Review log).
 		return true, nil
-	case RoutineEventGitHub:
+	case models.RoutineEventGitHub:
 		reader, ok := m.store.(routineCallbackRegistrationReader)
 		if !ok {
 			return false, nil
 		}
-		registrationID := strings.TrimPrefix(trigger.SourceRef, routineCallbackSourcePrefix)
+		registrationID := strings.TrimPrefix(trigger.SourceRef, models.RoutineCallbackSourcePrefix)
 		registration, err := reader.GetCallbackRegistration(ctx, event.Scope, registrationID)
 		if err != nil {
 			return false, err
 		}
-		return registration != nil && registration.Scope == event.Scope && registration.Status == CallbackRegistrationActive &&
+		return registration != nil && registration.Scope == event.Scope && registration.Status == models.CallbackRegistrationActive &&
 			registration.DeploymentID == activation.Owner.ID, nil
-	case RoutineEventGmailMessage, RoutineEventCalendar:
-		rest := strings.TrimPrefix(trigger.SourceRef, routineGoogleSourcePrefix)
+	case models.RoutineEventGmailMessage, models.RoutineEventCalendar:
+		rest := strings.TrimPrefix(trigger.SourceRef, models.RoutineGoogleSourcePrefix)
 		userID, _, found := strings.Cut(rest, ":")
 		return found && userID != "" && userID == activation.Task.CreatedBy, nil
-	case RoutineEventWebhook:
-		if trigger.Webhook == nil || HookSourceRef(trigger.Webhook.HookID) != trigger.SourceRef {
+	case models.RoutineEventWebhook:
+		if trigger.Webhook == nil || models.HookSourceRef(trigger.Webhook.HookID) != trigger.SourceRef {
 			return false, nil
 		}
 		hook, err := m.store.GetHook(ctx, trigger.Webhook.HookID)
@@ -301,12 +301,12 @@ func (m *RoutineEventMatcher) ownsSource(ctx context.Context, activation *Runboo
 // OfferRoutineTestEvent stores one test event for one routine and returns
 // its event ID. Only the routine's creator may send it; the filter is skipped
 // for it.
-func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, externalconversation.RoutineEventOffer, error) {
+func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope models.Scope, activationID, testBy string, payload json.RawMessage) (string, externalconversation.RoutineEventOffer, error) {
 	offer := externalconversation.RoutineEventOffer{}
 	if m == nil || m.store == nil {
 		return "", offer, errors.New("routine event matcher is not configured")
 	}
-	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
+	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return "", offer, err
 	}
 	activation, err := m.store.GetRunbookActivation(ctx, scope, strings.TrimSpace(activationID))
@@ -314,12 +314,12 @@ func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope S
 		return "", offer, err
 	}
 	if activation == nil {
-		return "", offer, ErrRunbookActivationNotFound
+		return "", offer, models.ErrRunbookActivationNotFound
 	}
 	if activation.Task == nil || activation.Task.Event == nil || activation.Trigger.Kind != runbook.TriggerEvent {
 		return "", offer, ErrRoutineNotEventRoutine
 	}
-	if activation.Status != RunbookActivationActive {
+	if activation.Status != models.RunbookActivationActive {
 		return "", offer, ErrRunbookActivationInactive
 	}
 	testBy = strings.TrimSpace(testBy)
@@ -345,14 +345,14 @@ func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope S
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{"test":true}`)
 	}
-	event := RoutineEvent{
+	event := models.RoutineEvent{
 		Scope: scope, ID: "test:" + uuid.NewString(), Kind: activation.Task.Event.Kind, SourceRef: activation.Task.Event.SourceRef,
 		OccurredAt: now, Summary: "Test event", Payload: append(json.RawMessage(nil), payload...), Test: true, TestBy: testBy,
 	}
 	if err := event.Validate(); err != nil {
 		return "", offer, err
 	}
-	inserted, err := m.store.InsertRoutineEvent(ctx, &RoutineEventRecord{Scope: scope, ActivationID: activation.ID, Event: event, State: RoutineEventPending, ReceivedAt: now})
+	inserted, err := m.store.InsertRoutineEvent(ctx, &models.RoutineEventRecord{Scope: scope, ActivationID: activation.ID, Event: event, State: models.RoutineEventPending, ReceivedAt: now})
 	if err != nil {
 		return "", offer, err
 	}
