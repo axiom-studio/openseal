@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -17,7 +18,9 @@ type RoutineTeamCatalog interface {
 // routineTeamRoster reads Team deployments through a RoutineTeamCatalog.
 type routineTeamRoster struct{ teams RoutineTeamCatalog }
 
-func newRoutineTeamRoster(teams RoutineTeamCatalog) routineTeamRoster {
+// NewRoutineTeamRoster reads Team rosters for the chat roster checks of
+// routine and Team member actions.
+func NewRoutineTeamRoster(teams RoutineTeamCatalog) models.TeamRosterReader {
 	return routineTeamRoster{teams: teams}
 }
 

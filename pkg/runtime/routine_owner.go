@@ -15,7 +15,7 @@ func runbookActionOwner(ctx context.Context, teams RoutineTeamCatalog, run *Agen
 	}
 	var roster TeamRosterReader
 	if teams != nil {
-		roster = newRoutineTeamRoster(teams)
+		roster = NewRoutineTeamRoster(teams)
 	} else if run.Owner.Type == OwnerTypeTeam {
 		return errors.New("runbook action requires the current authorized Team roster")
 	}
