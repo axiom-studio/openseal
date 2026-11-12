@@ -15,31 +15,31 @@ import (
 
 // agentBuilderApprovalCoordinator wires the builder fixture to a kernel store
 // with a claimed Finn Run, so proposals take the real coordinator path.
-func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPolicyEvaluator, now time.Time) (*agentBuilderFixture, *sqlite.Store, *AgentRun, *runtimeaction.ActionCoordinator) {
+func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPolicyEvaluator, now time.Time) (*Fixture, *sqlite.Store, *AgentRun, *runtimeaction.ActionCoordinator) {
 	t.Helper()
 	ctx := context.Background()
-	fixture := newAgentBuilderFixture(t, true)
+	fixture := NewFixture(t, true)
 	store := newTestKernelStore(t)
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: fixture.scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
+		Scope: fixture.Scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
 		AssignedAgentID: "finn", Goal: "Build an inbox helper", Source: RunSourceChat,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
-		Scope: fixture.scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
+		Scope: fixture.Scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	coordinator := runtimeaction.NewActionCoordinator(store, store, fixture.catalog, policy, []runtimeaction.ActionProposalValidator{fixture.validator}, models.WithClock(func() time.Time { return now }))
+	coordinator := runtimeaction.NewActionCoordinator(store, store, fixture.Catalog, policy, []runtimeaction.ActionProposalValidator{fixture.Validator}, models.WithClock(func() time.Time { return now }))
 	return fixture, store, claimed, coordinator
 }
 
-func agentBuilderApprovalRequest(fixture *agentBuilderFixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) runtimeaction.ProposeActionRequest {
+func agentBuilderApprovalRequest(fixture *Fixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) runtimeaction.ProposeActionRequest {
 	return actiontest.LoopProposeRequest(runtimeaction.ProposeActionRequest{
-		Scope: fixture.scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
+		Scope: fixture.Scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: action,
 		Arguments: arguments, Summary: "Review the agent",
 	}, toolCallID)
@@ -69,8 +69,8 @@ func TestAgentBuilderApprovalCardPolicy(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	fixture, _, run, coordinator := agentBuilderApprovalCoordinator(t, generousBuilderPolicy(), now)
-	create := agentBuilderCreateArguments()
-	create["spaceId"] = fixture.salesID
+	create := CreateArguments()
+	create["spaceId"] = fixture.SalesID
 	cases := []struct {
 		action    string
 		arguments map[string]interface{}
@@ -108,13 +108,13 @@ func TestAgentBuilderApprovalCannotBeAllowedByPolicy(t *testing.T) {
 		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "host allows everything"}, nil
 	})
 	fixture, store, run, coordinator := agentBuilderApprovalCoordinator(t, allow, time.Now().UTC())
-	create := agentBuilderCreateArguments()
-	create["spaceId"] = fixture.salesID
+	create := CreateArguments()
+	create["spaceId"] = fixture.SalesID
 	_, err := coordinator.Propose(context.Background(), agentBuilderApprovalRequest(fixture, run, AgentActionCreateAgent, create, "allowed"))
 	if err == nil || !strings.Contains(err.Error(), "always requires explicit review") {
 		t.Fatalf("an allowed create_agent was not refused: %v", err)
 	}
-	calls, err := store.ListActionCalls(context.Background(), ActionFilter{Scope: fixture.scope, RunID: run.ID})
+	calls, err := store.ListActionCalls(context.Background(), ActionFilter{Scope: fixture.Scope, RunID: run.ID})
 	if err != nil || len(calls) != 0 {
 		t.Fatalf("refused proposal recorded calls %#v, %v", calls, err)
 	}
@@ -124,8 +124,8 @@ func TestAgentBuilderApprovalExpiresAndNeverApproves(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	fixture, store, run, coordinator := agentBuilderApprovalCoordinator(t, generousBuilderPolicy(), now)
-	create := agentBuilderCreateArguments()
-	create["spaceId"] = fixture.salesID
+	create := CreateArguments()
+	create["spaceId"] = fixture.SalesID
 	result, err := coordinator.Propose(ctx, agentBuilderApprovalRequest(fixture, run, AgentActionCreateAgent, create, "expire"))
 	if err != nil {
 		t.Fatal(err)
@@ -133,12 +133,12 @@ func TestAgentBuilderApprovalExpiresAndNeverApproves(t *testing.T) {
 	approval := result.Approval
 
 	early := runtimeaction.NewApprovalCoordinator(store, store, runtimeaction.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(-time.Minute) }))
-	if _, err := early.ResolveTimeout(ctx, fixture.scope, approval.ID, approval.Revision, approval.ID); err == nil {
+	if _, err := early.ResolveTimeout(ctx, fixture.Scope, approval.ID, approval.Revision, approval.ID); err == nil {
 		t.Fatal("a card was timed out before its 30 days elapsed")
 	}
 
 	late := runtimeaction.NewApprovalCoordinator(store, store, runtimeaction.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(time.Second) }))
-	resolved, err := late.ResolveTimeout(ctx, fixture.scope, approval.ID, approval.Revision, approval.ID)
+	resolved, err := late.ResolveTimeout(ctx, fixture.Scope, approval.ID, approval.Revision, approval.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

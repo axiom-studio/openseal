@@ -24,7 +24,7 @@ import (
 // teamCreateTestProvisioner creates Teams the way the Engine does: its
 // Agents must be in the space, then the registry create and the placement.
 type teamCreateTestProvisioner struct {
-	*agentBuilderTestProvisioner
+	*Provisioner
 	teams       *kernelteam.Registry
 	teamCreates int
 }
@@ -35,7 +35,7 @@ func (p *teamCreateTestProvisioner) CreateTeamDeploymentInSpace(ctx context.Cont
 	for _, assignment := range deployment.Roster {
 		agents = append(agents, assignment.AgentDeploymentID)
 	}
-	if err := p.spaces.CheckSpaceAgents(ctx, scope, spaceID, agents); err != nil {
+	if err := p.Spaces.CheckSpaceAgents(ctx, scope, spaceID, agents); err != nil {
 		return nil, nil, err
 	}
 	created, activation, err := p.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
@@ -43,14 +43,14 @@ func (p *teamCreateTestProvisioner) CreateTeamDeploymentInSpace(ctx context.Cont
 		return nil, nil, err
 	}
 	p.teamCreates++
-	if _, _, err := p.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: SpaceMemberTeam, MemberID: created.ID}); err != nil {
+	if _, _, err := p.Spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: SpaceMemberTeam, MemberID: created.ID}); err != nil {
 		return nil, nil, err
 	}
 	return created, activation, nil
 }
 
 type teamCreateFixture struct {
-	*agentBuilderDispatchFixture
+	*DispatchFixture
 	teamProvision *teamCreateTestProvisioner
 	teamValidator *TeamCreateActionValidator
 }
@@ -58,11 +58,11 @@ type teamCreateFixture struct {
 func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 	t.Helper()
 	ctx := context.Background()
-	base := newAgentBuilderDispatchFixture(t)
-	if err := base.catalog.Register(ctx, TeamManagementSkill()); err != nil {
+	base := NewDispatchFixture(t)
+	if err := base.Catalog.Register(ctx, TeamManagementSkill()); err != nil {
 		t.Fatal(err)
 	}
-	skillScope := skill.ScopeReference{Kind: base.scope.Kind, ID: base.scope.ID}
+	skillScope := skill.ScopeReference{Kind: base.Scope.Kind, ID: base.Scope.ID}
 	for _, binding := range []*skill.Binding{
 		{
 			ID: "bundled:teams", Revision: 1, Scope: skillScope, DeploymentID: "finn",
@@ -75,33 +75,33 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 			AllowedActions: []string{action.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
 		},
 	} {
-		if err := base.catalog.Bind(ctx, binding); err != nil {
+		if err := base.Catalog.Bind(ctx, binding); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, spaceID := range []string{base.homeID, base.salesID} {
+	for _, spaceID := range []string{base.HomeID, base.SalesID} {
 		for _, agentID := range []string{"researcher", "platform"} {
-			if _, _, err := base.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: base.scope, SpaceID: spaceID, Type: SpaceMemberAgent, MemberID: agentID}); err != nil {
+			if _, _, err := base.Spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: base.Scope, SpaceID: spaceID, Type: SpaceMemberAgent, MemberID: agentID}); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	provision := &teamCreateTestProvisioner{agentBuilderTestProvisioner: base.provision, teams: base.teams}
-	dispatcher, err := newTestAgentBuilderDispatcher(base.store, base.agents, base.teams, base.catalog, provision, base.recorder, nil)
+	provision := &teamCreateTestProvisioner{Provisioner: base.Provision, teams: base.Teams}
+	dispatcher, err := NewDispatcher(base.Store, base.Agents, base.Teams, base.Catalog, provision, base.Recorder, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	base.dispatcher = dispatcher
-	validator, err := NewTeamCreateActionValidator(base.agents, base.teams, base.spaces, base.store, base.store)
+	base.Dispatcher = dispatcher
+	validator, err := NewTeamCreateActionValidator(base.Agents, base.Teams, base.Spaces, base.Store, base.Store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &teamCreateFixture{agentBuilderDispatchFixture: base, teamProvision: provision, teamValidator: validator}
+	return &teamCreateFixture{DispatchFixture: base, teamProvision: provision, teamValidator: validator}
 }
 
 func (f *teamCreateFixture) teamBound(t *testing.T, deploymentID string) *skill.BoundAction {
 	t.Helper()
-	bound, err := f.catalog.Resolve(context.Background(), skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, deploymentID,
+	bound, err := f.Catalog.Resolve(context.Background(), skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}, deploymentID,
 		TeamManagementSkillID, action.TeamManagementSkillVersion, action.TeamActionCreateTeam)
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func (f *teamCreateFixture) proposeTeam(t *testing.T, arguments map[string]inter
 	t.Helper()
 	ctx := context.Background()
 	bound := f.teamBound(t, "finn")
-	input := agentrun.ActionProposalValidationInput{Run: f.run, Bound: bound, Arguments: arguments}
+	input := agentrun.ActionProposalValidationInput{Run: f.Run, Bound: bound, Arguments: arguments}
 	resolved, handled, err := f.teamValidator.ResolveActionProposalArguments(ctx, input)
 	if err != nil {
 		return nil, nil, err
@@ -122,7 +122,7 @@ func (f *teamCreateFixture) proposeTeam(t *testing.T, arguments map[string]inter
 	if handled {
 		input.Arguments = resolved
 	}
-	if err := f.catalog.ValidateInput(ctx, bound, input.Arguments); err != nil {
+	if err := f.Catalog.ValidateInput(ctx, bound, input.Arguments); err != nil {
 		return nil, input.Arguments, err
 	}
 	preview, err := f.teamValidator.ValidateActionProposal(ctx, input)
@@ -132,23 +132,23 @@ func (f *teamCreateFixture) proposeTeam(t *testing.T, arguments map[string]inter
 func (f *teamCreateFixture) executeTeam(t *testing.T, callID string, arguments map[string]interface{}, approver ApprovalPrincipal) (map[string]interface{}, error) {
 	t.Helper()
 	call := &ActionCall{
-		ID: callID, Scope: f.scope, RunID: f.run.ID, DeploymentID: "finn", SkillID: TeamManagementSkillID,
+		ID: callID, Scope: f.Scope, RunID: f.Run.ID, DeploymentID: "finn", SkillID: TeamManagementSkillID,
 		SkillVersion: action.TeamManagementSkillVersion, Action: action.TeamActionCreateTeam, Arguments: arguments,
 		ApprovalID: "approval-" + callID,
 	}
 	decider := approver
-	f.store.approvals[call.ApprovalID] = &ApprovalCheckpoint{
-		ID: call.ApprovalID, Scope: f.scope, RunID: f.run.ID, ActionCallID: callID,
+	f.Store.Approvals[call.ApprovalID] = &ApprovalCheckpoint{
+		ID: call.ApprovalID, Scope: f.Scope, RunID: f.Run.ID, ActionCallID: callID,
 		Status: ApprovalStatusApproved, DecisionBy: &decider,
 	}
-	return f.dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
-		Call: call, Run: f.run, Bound: f.teamBound(t, "finn"), Arguments: arguments,
+	return f.Dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
+		Call: call, Run: f.Run, Bound: f.teamBound(t, "finn"), Arguments: arguments,
 	})
 }
 
 func (f *teamCreateFixture) teamInSpace(t *testing.T, spaceID, teamID string) bool {
 	t.Helper()
-	members, err := f.spaces.ListSpaceMembers(context.Background(), f.scope, spaceID)
+	members, err := f.Spaces.ListSpaceMembers(context.Background(), f.Scope, spaceID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,11 +175,11 @@ func teamCreateArgumentsFor(spaceID string) map[string]interface{} {
 
 func TestTeamCreatePreview(t *testing.T) {
 	f := newTeamCreateFixture(t)
-	preview, _, err := f.proposeTeam(t, teamCreateArgumentsFor(f.salesID))
+	preview, _, err := f.proposeTeam(t, teamCreateArgumentsFor(f.SalesID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertAgentBuilderJSON(t, preview, fmt.Sprintf(`{
+	AssertJSON(t, preview, fmt.Sprintf(`{
 		"skillId": "openseal.teams", "skillVersion": "2.2.0", "action": "create_team", "risk": "write", "sideEffect": "write",
 		"resourceType": "team", "operation": "create_team",
 		"team": {"displayName": "Launch Crew", "purpose": "Ship product launches."},
@@ -190,7 +190,7 @@ func TestTeamCreatePreview(t *testing.T) {
 		],
 		"space": {"id": %q, "name": "Sales"},
 		"rationale": "The person wants a launch team."
-	}`, f.salesID))
+	}`, f.SalesID))
 	// The preview is what the D11 approval rule and the drafts rail key on.
 	if !models.IsAgentBuilderApproval(&ApprovalCheckpoint{ProposedAction: preview}) {
 		t.Fatal("create_team preview is not recognised as an agent-builder card")
@@ -203,7 +203,7 @@ func TestTeamCreateResolvesSpaceToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defaultSpace := f.homeID
+	defaultSpace := f.HomeID
 	if arguments["spaceId"] != defaultSpace {
 		t.Fatalf("spaceId = %#v, want %q", arguments["spaceId"], defaultSpace)
 	}
@@ -216,7 +216,7 @@ func TestTeamCreateRefusals(t *testing.T) {
 	f := newTeamCreateFixture(t)
 	ctx := context.Background()
 	with := func(key string, value interface{}) map[string]interface{} {
-		arguments := teamCreateArgumentsFor(f.salesID)
+		arguments := teamCreateArgumentsFor(f.SalesID)
 		arguments[key] = value
 		return arguments
 	}
@@ -245,7 +245,7 @@ func TestTeamCreateRefusals(t *testing.T) {
 	// The schema refuses duplicates; the validator refuses them on its own
 	// too, as it also runs at execution.
 	input := agentrun.ActionProposalValidationInput{
-		Run: f.run, Bound: f.teamBound(t, "finn"),
+		Run: f.Run, Bound: f.teamBound(t, "finn"),
 		Arguments: with("members", []interface{}{"researcher", " researcher"}),
 	}
 	if _, err := f.teamValidator.ValidateActionProposal(ctx, input); err == nil || !strings.Contains(err.Error(), "more than once") {
@@ -264,7 +264,7 @@ func TestTeamCreateRefusals(t *testing.T) {
 	}
 
 	// Only the Run's own Agent may create through its binding.
-	input.Arguments = teamCreateArgumentsFor(f.salesID)
+	input.Arguments = teamCreateArgumentsFor(f.SalesID)
 	input.Bound = f.teamBound(t, "researcher")
 	if _, err := f.teamValidator.ValidateActionProposal(ctx, input); err == nil || !strings.Contains(err.Error(), "not bound") {
 		t.Fatalf("foreign binding err = %v", err)
@@ -274,15 +274,15 @@ func TestTeamCreateRefusals(t *testing.T) {
 func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 	ctx := context.Background()
 	f := newTeamCreateFixture(t)
-	_, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(f.salesID))
+	_, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(f.SalesID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := f.executeTeam(t, "call-team", arguments, agentBuilderApprover)
+	output, err := f.executeTeam(t, "call-team", arguments, Approver)
 	if err != nil {
 		t.Fatal(err)
 	}
-	teamID := builtTeamDefinitionID(f.scope, "Launch Crew", "call-team")
+	teamID := builtTeamDefinitionID(f.Scope, "Launch Crew", "call-team")
 	if !strings.HasPrefix(teamID, "team-launch-crew-") || len(teamID) != len("team-launch-crew-")+8 {
 		t.Fatalf("team id = %q", teamID)
 	}
@@ -290,11 +290,11 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 		output["deploymentId"] != teamID || output["displayName"] != "Launch Crew" {
 		t.Fatalf("output = %#v", output)
 	}
-	if space := output["space"].(map[string]interface{}); space["id"] != f.salesID || space["name"] != "Sales" {
+	if space := output["space"].(map[string]interface{}); space["id"] != f.SalesID || space["name"] != "Sales" {
 		t.Fatalf("space = %#v", space)
 	}
 
-	definition, err := f.teams.GetDefinition(ctx, teamID, "1")
+	definition, err := f.Teams.GetDefinition(ctx, teamID, "1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 		t.Fatalf("definition = %#v", definition)
 	}
 
-	deployment, err := f.teams.GetDeployment(ctx, f.reference(), teamID)
+	deployment, err := f.Teams.GetDeployment(ctx, f.Reference(), teamID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,26 +316,26 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 		!reflect.DeepEqual(deployment.Roster, wantRoster) {
 		t.Fatalf("deployment = %#v", deployment)
 	}
-	if !f.teamInSpace(t, f.salesID, teamID) || f.teamInSpace(t, f.homeID, teamID) {
+	if !f.teamInSpace(t, f.SalesID, teamID) || f.teamInSpace(t, f.HomeID, teamID) {
 		t.Fatal("team is not only in the reviewed space")
 	}
 
 	// A replay of the same call converges on the same Team.
-	replay, err := f.executeTeam(t, "call-team", arguments, agentBuilderApprover)
+	replay, err := f.executeTeam(t, "call-team", arguments, Approver)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if replay["replayed"] != true || replay["deploymentId"] != teamID {
 		t.Fatalf("replay = %#v", replay)
 	}
-	versions, err := f.teams.ListDefinitionVersions(ctx, teamID)
+	versions, err := f.Teams.ListDefinitionVersions(ctx, teamID)
 	if err != nil || len(versions) != 1 {
 		t.Fatalf("definition versions = %d, %v", len(versions), err)
 	}
 	if f.teamProvision.teamCreates != 1 {
 		t.Fatalf("team creates = %d, want 1", f.teamProvision.teamCreates)
 	}
-	if !f.teamInSpace(t, f.salesID, teamID) {
+	if !f.teamInSpace(t, f.SalesID, teamID) {
 		t.Fatal("replay dropped the space membership")
 	}
 }
@@ -349,25 +349,25 @@ func TestTeamCreateWithoutPurposeUsesComposerDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.executeTeam(t, "call-plain", arguments, agentBuilderApprover); err != nil {
+	if _, err := f.executeTeam(t, "call-plain", arguments, Approver); err != nil {
 		t.Fatal(err)
 	}
-	teamID := builtTeamDefinitionID(f.scope, "Launch Crew", "call-plain")
-	definition, err := f.teams.GetDefinition(ctx, teamID, "1")
+	teamID := builtTeamDefinitionID(f.Scope, "Launch Crew", "call-plain")
+	definition, err := f.Teams.GetDefinition(ctx, teamID, "1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if definition.Purpose != "Launch Crew team" {
 		t.Fatalf("purpose = %q", definition.Purpose)
 	}
-	if !f.teamInSpace(t, f.homeID, teamID) || f.teamInSpace(t, f.salesID, teamID) {
+	if !f.teamInSpace(t, f.HomeID, teamID) || f.teamInSpace(t, f.SalesID, teamID) {
 		t.Fatal("team is not only in the person's default space")
 	}
 }
 
 func TestTeamCreateRefusesNonUserApprover(t *testing.T) {
 	f := newTeamCreateFixture(t)
-	_, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(f.salesID))
+	_, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(f.SalesID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,20 +383,20 @@ func TestTeamCreateRefusesNonUserApprover(t *testing.T) {
 func TestTeamCreateFailsWhenNameTakenWhileWaiting(t *testing.T) {
 	ctx := context.Background()
 	f := newTeamCreateFixture(t)
-	_, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(f.salesID))
+	_, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(f.SalesID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Another Team takes the name while the card waits.
-	first := teamCreateArgumentsFor(f.salesID)
+	first := teamCreateArgumentsFor(f.SalesID)
 	first["members"] = []interface{}{"platform", "researcher"}
-	if _, err := f.executeTeam(t, "call-first", first, agentBuilderApprover); err != nil {
+	if _, err := f.executeTeam(t, "call-first", first, Approver); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.executeTeam(t, "call-second", arguments, agentBuilderApprover); err == nil || !strings.Contains(err.Error(), "already used") {
+	if _, err := f.executeTeam(t, "call-second", arguments, Approver); err == nil || !strings.Contains(err.Error(), "already used") {
 		t.Fatalf("second create err = %v", err)
 	}
-	if _, err := f.teams.GetDefinition(ctx, builtTeamDefinitionID(f.scope, "Launch Crew", "call-second"), "1"); !errors.Is(err, kernelteam.ErrDefinitionNotFound) {
+	if _, err := f.Teams.GetDefinition(ctx, builtTeamDefinitionID(f.Scope, "Launch Crew", "call-second"), "1"); !errors.Is(err, kernelteam.ErrDefinitionNotFound) {
 		t.Fatalf("second definition err = %v", err)
 	}
 }
@@ -404,11 +404,11 @@ func TestTeamCreateFailsWhenNameTakenWhileWaiting(t *testing.T) {
 func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
 	ctx := context.Background()
 	f := newTeamCreateFixture(t)
-	ops, err := f.spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: f.scope, Name: "Ops", Look: DefaultSpaceLook, OwnerID: "operator"})
+	ops, err := f.Spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: f.Scope, Name: "Ops", Look: DefaultSpaceLook, OwnerID: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := f.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: f.scope, SpaceID: ops.ID, Type: SpaceMemberAgent, MemberID: "researcher"}); err != nil {
+	if _, _, err := f.Spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: f.Scope, SpaceID: ops.ID, Type: SpaceMemberAgent, MemberID: "researcher"}); err != nil {
 		t.Fatal(err)
 	}
 	// The card is refused before review, and so is a Team approved while
@@ -417,14 +417,14 @@ func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
 		!strings.Contains(err.Error(), `agent "platform" is not in space "Ops"`) {
 		t.Fatalf("propose err = %v", err)
 	}
-	_, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(f.salesID))
+	_, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(f.SalesID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.spaces.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: f.scope, SpaceID: f.salesID, Type: SpaceMemberAgent, MemberID: "platform"}); err != nil {
+	if err := f.Spaces.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: f.Scope, SpaceID: f.SalesID, Type: SpaceMemberAgent, MemberID: "platform"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.executeTeam(t, "call-outside", arguments, agentBuilderApprover); !errors.Is(err, ErrTeamAgentOutsideSpace) {
+	if _, err := f.executeTeam(t, "call-outside", arguments, Approver); !errors.Is(err, ErrTeamAgentOutsideSpace) {
 		t.Fatalf("execute err = %v", err)
 	}
 	if f.teamProvision.teamCreates != 0 {

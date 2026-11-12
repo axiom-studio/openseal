@@ -27,11 +27,11 @@ func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 
 	// The builder dispatcher takes the current create_team and passes a
 	// 2.0.0 binding's on to the next dispatcher.
-	f := newAgentBuilderDispatchFixture(t)
+	f := NewDispatchFixture(t)
 	fallback := runtimeaction.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"fallback": true}, nil
 	})
-	dispatcher, err := newTestAgentBuilderDispatcher(f.store, f.agents, f.teams, f.catalog, f.provision, nil, fallback)
+	dispatcher, err := NewDispatcher(f.Store, f.Agents, f.Teams, f.Catalog, f.Provision, nil, fallback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,17 +54,17 @@ func teamCreateGetsBuilderCard(t *testing.T, definition *skill.Definition) bool 
 	ctx := context.Background()
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	fixture, _, run, coordinator := agentBuilderApprovalCoordinator(t, generousBuilderPolicy(), now)
-	if err := fixture.catalog.Register(ctx, definition); err != nil {
+	if err := fixture.Catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.catalog.Bind(ctx, &skill.Binding{
-		ID: "bundled:teams", Revision: 1, Scope: skill.ScopeReference{Kind: fixture.scope.Kind, ID: fixture.scope.ID}, DeploymentID: "finn",
+	if err := fixture.Catalog.Bind(ctx, &skill.Binding{
+		ID: "bundled:teams", Revision: 1, Scope: skill.ScopeReference{Kind: fixture.Scope.Kind, ID: fixture.Scope.ID}, DeploymentID: "finn",
 		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{runtimeaction.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(runtimeaction.ProposeActionRequest{
-		Scope: fixture.scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
+		Scope: fixture.Scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: runtimeaction.TeamActionCreateTeam,
 		Arguments: teamCreateArgumentsFor(""), Summary: "Review the team",
 	}, "create-team"))

@@ -21,25 +21,25 @@ func TestAgentBuilderCardIsDecidedByTheRequester(t *testing.T) {
 		{"local-operator", []ApprovalPrincipal{{Type: "user", ID: "local-operator"}}},
 		{"", []ApprovalPrincipal{{Type: "user", ID: "operator"}}},
 	} {
-		fixture := newAgentBuilderFixture(t, true)
+		fixture := NewFixture(t, true)
 		store := newTestKernelStore(t)
 		if _, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-			Scope: fixture.scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
+			Scope: fixture.Scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
 			AssignedAgentID: "finn", ActingUser: tc.actingUser, Goal: "Build an inbox helper", Source: RunSourceChat,
 		}); err != nil {
 			t.Fatal(err)
 		}
 		run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
-			Scope: fixture.scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
+			Scope: fixture.Scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
 		})
 		if err != nil || run == nil {
 			t.Fatalf("claim = %#v, %v", run, err)
 		}
 		policy := action.NewDefaultActionPolicy()
 		policy.Approvers = []ApprovalPrincipal{{Type: "user", ID: "operator"}}
-		coordinator := action.NewActionCoordinator(store, store, fixture.catalog, policy, []action.ActionProposalValidator{fixture.validator})
-		create := agentBuilderCreateArguments()
-		create["spaceId"] = fixture.salesID
+		coordinator := action.NewActionCoordinator(store, store, fixture.Catalog, policy, []action.ActionProposalValidator{fixture.Validator})
+		create := CreateArguments()
+		create["spaceId"] = fixture.SalesID
 		result, err := coordinator.Propose(ctx, agentBuilderApprovalRequest(fixture, run, AgentActionCreateAgent, create, "requester-"+tc.actingUser))
 		if err != nil {
 			t.Fatal(err)
