@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -305,3 +306,5 @@ func selectTurnModelAction(actions []capability.ModelAction, request TurnAction)
 	}
 	return selected, nil
 }
+
+func portfolioKey(scope models.Scope, id string) string { return scope.Key() + ":" + id }
