@@ -338,3 +338,25 @@ func (k *knownWorkerScopes) filter(ctx context.Context, now time.Time, scopes []
 	}
 	return result, nil
 }
+
+func normalizedConversationRunScopes(scopes []Scope) []Scope {
+	seen := make(map[Scope]struct{}, len(scopes))
+	result := make([]Scope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.Validate() != nil {
+			continue
+		}
+		if _, exists := seen[scope]; exists {
+			continue
+		}
+		seen[scope] = struct{}{}
+		result = append(result, scope)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Kind != result[j].Kind {
+			return result[i].Kind < result[j].Kind
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result
+}

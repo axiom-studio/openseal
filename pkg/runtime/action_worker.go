@@ -15,12 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type ActionExecutionCatalog interface {
-	Resolve(context.Context, skill.ScopeReference, string, string, string, string, ...skill.BindingReference) (*skill.BoundAction, error)
-	ValidateInput(context.Context, *skill.BoundAction, map[string]interface{}) error
-	ValidateOutput(context.Context, *skill.BoundAction, map[string]interface{}) error
-}
-
 type CredentialResolver interface {
 	ResolveCredentials(context.Context, CredentialResolutionRequest) (map[string]string, error)
 }
@@ -105,26 +99,6 @@ type ActionCredentialLeaseIssueRequest struct {
 	Run        *AgentRun
 	References map[string]skill.CredentialReference
 	Transport  string
-}
-
-type ActionDispatchInput struct {
-	Call *ActionCall
-	// Run is the durable, kernel-owned execution context for the call. It is
-	// deliberately unavailable to model arguments. Dispatchers use it to keep
-	// authority ownership (for example, a Team Skill binding) separate from the
-	// roster Agent that supplies execution placement.
-	Run         *AgentRun
-	Bound       *skill.BoundAction
-	Arguments   map[string]interface{}
-	Credentials map[string]string
-	// CredentialLease and CredentialReferences are the remote-resolution path.
-	// They are mutually exclusive with plaintext Credentials.
-	CredentialLease      *SignedActionCredentialLease
-	CredentialReferences map[string]skill.CredentialReference
-}
-
-type ActionDispatcher interface {
-	DispatchAction(context.Context, ActionDispatchInput) (map[string]interface{}, error)
 }
 
 type ActionDispatcherFunc func(context.Context, ActionDispatchInput) (map[string]interface{}, error)
@@ -833,13 +807,23 @@ func sanitizeActionOutput(output map[string]interface{}, credentials map[string]
 	return sanitize(output).(map[string]interface{})
 }
 
-func cloneCredentialReferences(input map[string]skill.CredentialReference) map[string]skill.CredentialReference {
-	if input == nil {
-		return nil
+// An adapter's explicit top-level failure envelope is operational evidence,
+// unlike the status of a fetched resource or a nested document. Some process
+// Skills use success:false plus error instead of a transport error.
+func explicitActionResultFailure(output map[string]interface{}) error {
+	if succeeded, ok := output["success"].(bool); ok && !succeeded {
+		if message, ok := output["error"].(string); ok && strings.TrimSpace(message) != "" {
+			return errors.New(strings.TrimSpace(message))
+		}
+		return errors.New("The tool reported that its operation failed.")
 	}
-	result := make(map[string]skill.CredentialReference, len(input))
-	for name, reference := range input {
-		result[name] = reference
+	if len(output) == 1 {
+		if message, ok := output["error"].(string); ok && strings.TrimSpace(message) != "" {
+			return errors.New(strings.TrimSpace(message))
+		}
 	}
-	return result
+	if failed, ok := output["isError"].(bool); ok && failed {
+		return errors.New("The tool reported that its operation failed.")
+	}
+	return nil
 }

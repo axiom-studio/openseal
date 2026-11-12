@@ -105,31 +105,3 @@ func (c *RunForkCoordinator) SetAcceptedRunExecutionPreparer(preparer AcceptedRu
 		c.executionPreparer = preparer
 	}
 }
-
-func (s *CollaborationService) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
-	if s != nil {
-		s.executionPreparer = preparer
-	}
-}
-
-func (r *AgentRequestInboxReconciler) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
-	if r != nil {
-		r.collaboration.SetAcceptedRunExecutionPreparer(preparer)
-	}
-}
-
-func (p *AgentRunWorkerPool) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
-	if p != nil {
-		p.forks.SetAcceptedRunExecutionPreparer(preparer)
-		p.collaboration.SetAcceptedRunExecutionPreparer(preparer)
-		p.requestInbox.SetAcceptedRunExecutionPreparer(preparer)
-		p.conversationTasks.SetAcceptedRunExecutionPreparer(preparer)
-	}
-}
-
-func (s *AgentRunWorkerSupervisor) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
-	s.mu.Lock()
-	s.executionPreparer = preparer
-	s.mu.Unlock()
-	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetAcceptedRunExecutionPreparer(preparer) })
-}

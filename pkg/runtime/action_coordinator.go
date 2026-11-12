@@ -89,18 +89,6 @@ type ActionProposalArgumentResolver interface {
 	ResolveActionProposalArguments(context.Context, ActionProposalValidationInput) (map[string]interface{}, bool, error)
 }
 
-type ActionProposalValidationInput struct {
-	Run       *AgentRun
-	Bound     *skill.BoundAction
-	Arguments map[string]interface{}
-	// History reads this Run's governed action calls. nil means none.
-	History RunActionHistory
-	// IdempotencyKey is the proposed call's key, trimmed. A validator may
-	// derive the ID of what the call creates from it (create_task's
-	// activation), so the approval names that resource before it exists.
-	IdempotencyKey string
-}
-
 type ProposeActionRequest struct {
 	Scope Scope
 	RunID string
@@ -697,10 +685,6 @@ func hostActionBinding(bound *skill.BoundAction) *skill.Binding {
 func usesDurableActionBindings(catalog interface{}) bool {
 	configured, ok := catalog.(interface{ UsesDurableBindings() bool })
 	return ok && configured.UsesDurableBindings()
-}
-
-func actionBudgetReservationID(actionID string) string {
-	return "action:" + actionID
 }
 
 // persistedActionArguments strips values that must be supplied through the

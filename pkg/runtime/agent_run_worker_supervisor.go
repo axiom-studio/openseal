@@ -174,3 +174,10 @@ func (s *AgentRunWorkerSupervisor) SetWorkSignals(status *WorkSignalStatus) {
 }
 
 func (s *AgentRunWorkerSupervisor) ScopeCount() int { return s.pools.count() }
+
+func (s *AgentRunWorkerSupervisor) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+	s.mu.Lock()
+	s.executionPreparer = preparer
+	s.mu.Unlock()
+	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetAcceptedRunExecutionPreparer(preparer) })
+}

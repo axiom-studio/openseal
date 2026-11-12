@@ -14,14 +14,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-const (
-	TeamManagementSkillVersion = "2.2.0"
-	TeamActionUpdateMember     = "update_member"
-	TeamActionUpdateProfile    = "update_profile"
-	TeamActionCreateTeam       = "create_team"
-	TeamManagementEndpoint     = "kernel://teams"
-)
-
 // IsSupportedTeamManagementSkillVersion reports a version of openseal.teams
 // whose update_profile action the kernel still runs. Bindings of the versions
 // before update_member (2.1.0) and before create_team (2.0.0) keep matching

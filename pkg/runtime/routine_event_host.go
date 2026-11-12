@@ -2,30 +2,12 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"math"
 )
 
 // RoutineEventSourceCatalog lists host-owned sources (Google) for event_sources and create_task.
 type RoutineEventSourceCatalog interface {
 	ListRoutineEventSources(ctx context.Context, scope Scope, owner ObjectiveOwner, actingUser string) ([]RoutineEventSourceOption, error)
-}
-
-// RoutineEventOfferer is the matcher as seen by actions and ingress.
-type RoutineEventOfferer interface {
-	// Listening is an index lookup only: no I/O and no allocation. Producers call it before they build an event.
-	Listening(scope Scope, kind RoutineEventKind, sourceRef string) bool
-	OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (RoutineEventOffer, error)
-	// OfferRoutineTestEvent returns the stored test event's ID.
-	OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error)
-}
-
-// RoutineEventOffer counts what one offer did.
-type RoutineEventOffer struct {
-	Matched    int `json:"matched"`
-	Inserted   int `json:"inserted"`
-	Duplicates int `json:"duplicates"`
-	Dropped    int `json:"dropped"`
 }
 
 // Reasons a RoutineEventSourceOption is not available.

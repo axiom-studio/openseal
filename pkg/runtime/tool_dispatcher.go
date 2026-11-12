@@ -106,18 +106,3 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 	}
 	return d.invoker.InvokeTool(ctx, invocation)
 }
-
-func boundActionToolTransport(bound *skill.BoundAction) (string, error) {
-	if bound == nil || bound.Definition == nil {
-		return "", errors.New("bound action is required")
-	}
-	transport := bound.Definition.Transport
-	if bound.Action.Transport != nil {
-		transport = *bound.Action.Transport
-	}
-	endpoint := strings.TrimSpace(transport.Endpoint)
-	if transport.Kind != "tool" || endpoint == "" {
-		return "", fmt.Errorf("unsupported tool transport %q", transport.Kind)
-	}
-	return endpoint, nil
-}

@@ -353,14 +353,6 @@ func admitTurnReactions(in []TurnReaction) []TurnReaction {
 	return out
 }
 
-// SetReactionProjector mirrors reactions Agents add to external
-// conversations.
-func (r *ConversationRunTurnRunner) SetReactionProjector(projector MessageReactionProjector) {
-	if r != nil && r.conversations != nil {
-		r.conversations.SetReactionProjector(projector)
-	}
-}
-
 // reactionEcho reports whether content says nothing beyond the turn's
 // reactions: empty, or only the reacted emoji and whitespace.
 func reactionEcho(content string, reactions []TurnReaction) bool {

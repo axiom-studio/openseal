@@ -132,3 +132,5 @@ func (c *ActionCoordinator) RecordRefusedLoopCall(ctx context.Context, req Refus
 		Call: call, ExpectedRunRevision: req.Run.Revision, Lease: req.Lease, Event: event,
 	})
 }
+
+const RunFailureCodeRepeatLimit = "repeat_limit"

@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"maps"
 	"sort"
@@ -35,10 +33,6 @@ import (
 const loopSectionCapabilities = "capabilities"
 
 const loopSectionCapabilitiesTitle = "Capabilities"
-
-// governedToolPrefix starts every governed tool name, so actions never collide
-// with kernel or host tool names.
-const governedToolPrefix = "action_"
 
 type catalogModelStepPreparerConfig struct {
 	// AgentInstructions is the definition's persona and soul
@@ -275,13 +269,6 @@ func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *Capab
 	return system
 }
 
-// offersCapabilities is false for decision and review Runs: they are offered
-// only their own final tool, no capability, host or governed tool.
-func (a ControlAuthority) offersCapabilities() bool {
-	mode := a.finalMode()
-	return mode != FinalModeDecision && mode != FinalModeReview
-}
-
 // boundSkill reports whether the claim has a bound Skill beyond the
 // always-present built-in one.
 func (p *catalogModelStepPreparer) boundSkill(binding *TurnRunnerBinding) bool {
@@ -316,55 +303,6 @@ func (p *catalogModelStepPreparer) stream(ctx context.Context, binding *TurnRunn
 	return stream
 }
 
-// LoopGovernedToolNames maps each action name to its provider tool name:
-// "action_" plus the name with "." as "_". A name that does not fit the
-// provider pattern, or that would repeat an earlier action's tool name, gets
-// a bounded form with a hash of the action name. It depends only on the
-// actions and their order, so the tool executor resolves the same names.
-func LoopGovernedToolNames(actions []capability.ModelAction) map[string]string {
-	names := make(map[string]string, len(actions))
-	taken := map[string]bool{}
-	for _, action := range actions {
-		if _, done := names[action.Name]; done || action.Name == "" {
-			continue
-		}
-		name := governedToolPrefix + strings.ReplaceAll(action.Name, ".", "_")
-		if !validModelStepToolName(name) || taken[name] {
-			name = hashedGovernedToolName(action.Name)
-		}
-		names[action.Name] = name
-		taken[name] = true
-	}
-	return names
-}
-
-func hashedGovernedToolName(actionName string) string {
-	sum := sha256.Sum256([]byte(actionName))
-	var b strings.Builder
-	for _, r := range actionName {
-		if b.Len() >= 48 {
-			break
-		}
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	return governedToolPrefix + b.String() + "_" + hex.EncodeToString(sum[:4])
-}
-
-// LoopGovernedAction resolves a provider tool name back to its action.
-func LoopGovernedAction(actions []capability.ModelAction, toolName string) (capability.ModelAction, bool) {
-	names := LoopGovernedToolNames(actions)
-	for _, action := range actions {
-		if name, ok := names[action.Name]; ok && name == toolName {
-			return action, true
-		}
-	}
-	return capability.ModelAction{}, false
-}
-
 // loopCapabilityToolName is the toolName argument of ExecuteLoadCapabilities:
 // the provider tool name of a newly visible action or host tool, "" for
 // instructions and runbooks (run through run_operation).
@@ -379,4 +317,70 @@ func loopCapabilityToolName(actions []capability.ModelAction) func(id string) st
 		}
 		return ""
 	}
+}
+
+// ControlToolSpecs lists the control tools offered under a in the stable
+// advertised order (SPEC §5.1).
+func ControlToolSpecs(a ControlAuthority) []ControlToolSpec {
+	return loopControlRegistry().specs(a)
+}
+
+// ControlModelStepTools is ControlToolSpecs as harness tools of a model step.
+func ControlModelStepTools(a ControlAuthority) []ModelStepTool {
+	specs := ControlToolSpecs(a)
+	tools := make([]ModelStepTool, 0, len(specs))
+	for _, spec := range specs {
+		tools = append(tools, spec.ModelStepTool())
+	}
+	return tools
+}
+
+// CapabilityListing is the step's listing: the catalog (every ID, or the
+// directory past the catalog budget), the Agents and
+// operations the control tools accept, surfaced tools that are no longer in
+// the catalog, the guidance that depends on the catalog, and the
+// conversation's approval mode.
+func (p *catalogModelStepPreparer) CapabilityListing(in StepInput) capabilityListing {
+	listing := capabilityListing{Mode: capabilityNoteModeNone}
+	binding := in.Binding
+	if binding == nil {
+		return listing
+	}
+	authority := binding.Authority
+	if authority.offersCapabilities() {
+		set := p.CapabilitySet(in)
+		switch {
+		case !set.Offered():
+			// No catalog at all: nothing to list (mode none).
+		case set.Searching():
+			listing.Mode = capabilityNoteModeDirectory
+			listing.Items = append(listing.Items, set.directoryLines()...)
+		default:
+			listing.Mode = capabilityNoteModeList
+			listing.Items = append(listing.Items, set.catalogLines()...)
+		}
+		for _, load := range SurfacedOnPath(in.Path) {
+			for _, tool := range load.Tools {
+				if !set.known(tool.Capability) {
+					listing.Items = append(listing.Items, capabilityNoteItem{
+						Key: "unavailable:" + tool.Name, Section: capabilityNoteUnavailable, Text: "- " + tool.Name,
+					})
+				}
+			}
+		}
+	}
+	listing.Items = append(listing.Items, controlTargetItems(authority)...)
+	if authority.offersCapabilities() && authority.ApprovalMode != "" {
+		listing.Items = append(listing.Items, capabilityNoteItem{Key: capabilityNoteApprovalKey, Section: capabilityNoteGuidance, Text: approvalModeText(authority.ApprovalMode)})
+	}
+	if p.boundSkill(binding) {
+		listing.Items = append(listing.Items, capabilityNoteItem{Key: "guide:skill_access", Section: capabilityNoteGuidance, Text: loopSkillAccessText})
+	}
+	for _, action := range binding.ModelActions {
+		if authority.offersCapabilities() && (GovernedToolReviewed(action) || GovernedToolNeedsReviewSummary(action)) {
+			listing.Items = append(listing.Items, capabilityNoteItem{Key: "guide:review_summaries", Section: capabilityNoteGuidance, Text: loopReviewSummariesText})
+			break
+		}
+	}
+	return listing
 }

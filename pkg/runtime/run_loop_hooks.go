@@ -1,6 +1,10 @@
 package runtime
 
-import "context"
+import (
+	"context"
+
+	"github.com/axiom-studio/openseal/pkg/presentation"
+)
 
 // The seams the RunLoop calls. Each owning section implements one; the loop
 // owns only the order in which they run (SPEC §3.1).
@@ -149,3 +153,36 @@ type ToolCallCheck func(ctx context.Context, in StepToolsInput, entry *SessionEn
 // AfterToolEntryHook runs after a tool entry became terminal (conversation
 // artifact receipts).
 type AfterToolEntryHook func(ctx context.Context, in StepToolsInput, entry *SessionEntry) error
+
+const (
+	finalOutputSilentKey    = "silent"
+	finalOutputBroadcastKey = "broadcastToChannel"
+	finalOutputReactedKey   = "reacted"
+	finalOutputVisualKey    = "visual"
+)
+
+// Silent: a spoken reply that needs no response; nothing is posted.
+func (a FinalAnswer) Silent() bool {
+	silent, _ := a.Output[finalOutputSilentKey].(bool)
+	return silent
+}
+
+// ReactionsOnly: the Run's reactions are the reply; no message is posted.
+func (a FinalAnswer) ReactionsOnly() bool {
+	reacted, _ := a.Output[finalOutputReactedKey].(bool)
+	return reacted
+}
+
+// BroadcastToChannel: a thread reply that also goes to the main timeline.
+func (a FinalAnswer) BroadcastToChannel() bool {
+	broadcast, _ := a.Output[finalOutputBroadcastKey].(bool)
+	return broadcast
+}
+
+// Visual is the structurally valid visual of the answer, or nil. Delivery
+// runs the host checks and place stamping, stores it, and removes it from the
+// Run output.
+func (a FinalAnswer) Visual() *presentation.Visual {
+	visual, _ := a.Output[finalOutputVisualKey].(*presentation.Visual)
+	return visual
+}

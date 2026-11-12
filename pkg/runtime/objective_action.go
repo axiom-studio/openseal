@@ -374,3 +374,18 @@ func isObjectiveAction(bound *skill.BoundAction) bool {
 	}
 	return false
 }
+
+func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, run *AgentRun) (string, error) {
+	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	if strings.TrimSpace(conversationID) == "" {
+		return "", nil
+	}
+	conversation, err := store.GetConversation(ctx, run.Scope, conversationID)
+	if err != nil {
+		return "", err
+	}
+	if conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceObjective {
+		return conversation.Origin.ID, nil
+	}
+	return "", nil
+}

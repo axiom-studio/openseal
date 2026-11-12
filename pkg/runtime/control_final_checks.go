@@ -350,3 +350,10 @@ func negatedBefore(words []string, i int) bool {
 	}
 	return false
 }
+
+// loopActionCallPageSize pages a Run's failed action calls.
+const loopActionCallPageSize = 200
+
+type loopActionCallLister interface {
+	ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error)
+}

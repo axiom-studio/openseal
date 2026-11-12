@@ -534,21 +534,6 @@ func resolveRunbookStart(ctx context.Context, store runbookActionStore, run *Age
 	return args, activation, objective, nil
 }
 
-func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, run *AgentRun) (string, error) {
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	if strings.TrimSpace(conversationID) == "" {
-		return "", nil
-	}
-	conversation, err := store.GetConversation(ctx, run.Scope, conversationID)
-	if err != nil {
-		return "", err
-	}
-	if conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceObjective {
-		return conversation.Origin.ID, nil
-	}
-	return "", nil
-}
-
 func isRunbookAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
 		bound.Definition.Version == RunbookManagementSkillVersion &&

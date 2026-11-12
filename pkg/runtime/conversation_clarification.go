@@ -8,68 +8,6 @@ import (
 
 const conversationAnswerEvent = "run.conversation_answer_received"
 
-// Resolve the channel through kernel-owned lineage, never model-supplied context
-// on a delegated child. Restrict this handoff to the acting Agent's own work in
-// that chat.
-func conversationWorkOrigin(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun) (*AgentRun, *Conversation, *ChannelMessage, error) {
-	return conversationWorkOriginForState(ctx, runs, conversations, run, false)
-}
-
-// workOrigin is conversationWorkOrigin over the service's store.
-func (s *ConversationService) workOrigin(ctx context.Context, runs PortfolioStore, run *AgentRun) (*AgentRun, *Conversation, *ChannelMessage, error) {
-	return conversationWorkOrigin(ctx, runs, s.store, run)
-}
-
-// Accepted-answer receipts may outlive a completed or paused parent. Resolve
-// their immutable initiating identity without treating it as a fresh Run grant.
-func conversationWorkOriginForState(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun, includeInactiveParents bool) (*AgentRun, *Conversation, *ChannelMessage, error) {
-	if run != nil && run.ParentRunID == "" && run.Context[ConversationTaskContextKey] != nil {
-		return conversationTaskWorkOrigin(ctx, runs, conversations, run)
-	}
-	if run != nil && run.Kind == RunKindConversation && run.ParentRunID == "" {
-		return foregroundConversationWorkOrigin(ctx, runs, conversations, run)
-	}
-	if run == nil || run.Kind != RunKindAgentWork || run.ParentRunID == "" || strings.TrimSpace(run.AssignedAgentID) == "" {
-		return nil, nil, nil, nil
-	}
-	current := run
-	seen := map[string]bool{run.ID: true}
-	for depth := 0; depth < 64 && current.ParentRunID != ""; depth++ {
-		parent, err := runs.GetAgentRun(ctx, run.Scope, current.ParentRunID)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if parent == nil || seen[parent.ID] || parent.Owner != run.Owner || !includeInactiveParents && (isTerminalAgentRunStatus(parent.Status) || parent.Status == AgentRunStatusPaused) {
-			return nil, nil, nil, nil
-		}
-		seen[parent.ID] = true
-		current = parent
-		if current.Kind != RunKindConversation {
-			continue
-		}
-		id, _ := current.Context[conversationRunContextConversationID].(string)
-		triggerID, _ := current.Context[conversationRunContextTriggerID].(string)
-		if id == "" || triggerID == "" {
-			return nil, nil, nil, nil
-		}
-		conversation, err := conversations.GetConversation(ctx, run.Scope, id)
-		if errors.Is(err, ErrConversationNotFound) {
-			return nil, nil, nil, nil
-		}
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		agentID := ConversationRunAgentID(conversation, run)
-		if conversation == nil || conversation.Status != ConversationStatusActive || conversation.Owner != run.Owner ||
-			agentID == "" || ConversationRunAgentID(conversation, current) != agentID {
-			return nil, nil, nil, nil
-		}
-		trigger, err := conversations.GetChannelMessage(ctx, run.Scope, id, triggerID)
-		return current, conversation, trigger, err
-	}
-	return nil, nil, nil, nil
-}
-
 // clarificationQuestionKey is the idempotency key of the question a Run
 // waiting on an ask_user entry posted; its wake reference names the entry.
 func clarificationQuestionKey(run *AgentRun) string {

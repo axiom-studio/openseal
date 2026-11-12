@@ -57,26 +57,6 @@ func (operationHandler) Spec(a ControlAuthority) ControlToolSpec {
 	}
 }
 
-// operationDescriptionLine is one operation's line of the capabilities note.
-func operationDescriptionLine(op HostedRunbookOperation) string {
-	schema := []byte(`{"type":"object"}`)
-	if len(op.InputSchema) > 0 {
-		if encoded, err := json.Marshal(op.InputSchema); err == nil {
-			schema = encoded
-		}
-	}
-	name := strings.TrimSpace(op.Name)
-	if name == "" {
-		name = op.Entrypoint
-	}
-	text := strings.TrimRight(strings.TrimSpace(op.Description), ".")
-	line := "- " + op.Entrypoint + " — " + name
-	if text != "" {
-		line += ": " + text
-	}
-	return line + ". Input schema: " + string(schema)
-}
-
 func (operationHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	value, err := models.DecodeControlInto[operationArgs](raw)
 	if err != nil {
@@ -326,4 +306,21 @@ func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc Contr
 	}
 	result, err := x.complete(ctx, cc, controlJSONResult(status, value), nil)
 	return ControlResume{Resolved: true, Result: result}, err
+}
+
+func runbookInvocationIdentity(run *AgentRun) (string, string, string) {
+	if run == nil {
+		return "", "", ""
+	}
+	contextValues := run.Context
+	if triggerInput, ok := contextValues["triggerInput"].(map[string]interface{}); ok {
+		contextValues = triggerInput
+	}
+	definitionID, _ := contextValues["runbookDefinitionId"].(string)
+	definitionVersion, _ := contextValues["runbookDefinitionVersion"].(string)
+	entrypoint, _ := contextValues["runbookEntrypoint"].(string)
+	if strings.TrimSpace(entrypoint) == "" {
+		entrypoint = run.Entrypoint
+	}
+	return strings.TrimSpace(definitionID), strings.TrimSpace(definitionVersion), strings.TrimSpace(entrypoint)
 }

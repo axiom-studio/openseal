@@ -12,10 +12,6 @@ import (
 )
 
 const (
-	// RunContextSessionKey is reserved for a kernel-created durable session
-	// reference. Ordinary request handlers must reject caller-authored context
-	// keys with the _openseal prefix.
-	RunContextSessionKey            = "_opensealSession"
 	sessionContextIDKey             = "id"
 	sessionContextVerifiedClaimsKey = "verifiedClaims"
 )

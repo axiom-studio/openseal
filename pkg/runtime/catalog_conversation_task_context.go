@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // The conversation adapter lowers the Run kind for ordinary Agent cognition.
@@ -170,4 +173,16 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		return nil, err
 	}
 	return result, nil
+}
+
+// AgentTurnCatalog is the portable, product-neutral catalog required to bind
+// a durable Run to its immutable Agent definition and activated Skills.
+type AgentTurnCatalog interface {
+	GetAgentDeployment(context.Context, skill.ScopeReference, string) (*kernelagent.AgentDeployment, error)
+	ListAgentDeployments(context.Context, kernelagent.AgentDeploymentFilter) ([]*kernelagent.AgentDeployment, error)
+	GetAgentDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
+	ActivateSkills(context.Context, skill.ScopeReference, string, skill.HostCapabilityState) (*skill.ActivationSnapshot, error)
+	// ActionCallReader lets deterministic producers (capability invocation)
+	// read the authoritative ActionCall behind their tool entry.
+	ActionCallReader
 }

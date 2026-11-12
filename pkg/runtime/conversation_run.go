@@ -13,10 +13,6 @@ import (
 )
 
 const (
-	conversationRunContextTriggerSeq = "triggerSequence"
-)
-
-const (
 	governedActionProposalFailedStatus = "proposal_failed"
 )
 
@@ -175,20 +171,6 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	return result, result.Event == nil, nil
 }
 
-// conversationMessageInitiatingUser resolves only the canonical scoped human
-// identity. A host-owned voice-call start may name its authenticated initiator;
-// arbitrary service metadata and copied Run context never grant that authority.
-func conversationMessageInitiatingUser(conversation *Conversation, message *ChannelMessage) (ConversationParticipant, bool) {
-	if conversation == nil || message == nil || message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
-		return ConversationParticipant{}, false
-	}
-	actor := message.Sender
-	if voiceCallStartedMessage(message) && message.Initiator != nil {
-		actor = *message.Initiator
-	}
-	return actor, actor.Type == ConversationParticipantUser && actor.Validate() == nil
-}
-
 func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *Conversation, message *ChannelMessage) (CreateAgentRunRequest, error) {
 	request := conversationAgentRunRequest(conversation, message)
 	request.Budget = cloneBudgetPolicy(s.config.Budget)
@@ -206,44 +188,6 @@ func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Conte
 		request.Context[RunContextSessionKey] = session
 	}
 	return request, nil
-}
-
-func conversationAgentRunRequest(conversation *Conversation, message *ChannelMessage) CreateAgentRunRequest {
-	goal := teamRoutingRunGoal
-	assignedAgentID := ""
-	visibility := ActivityVisibilityTeam
-	if conversation.Owner.Type == OwnerTypeAgent {
-		goal = "Respond to an Agent channel message"
-		assignedAgentID = conversation.Owner.ID
-		visibility = ActivityVisibilityPrivate
-	}
-	request := CreateAgentRunRequest{
-		Scope: conversation.Scope, Kind: RunKindConversation, Owner: conversation.Owner,
-		AssignedAgentID: assignedAgentID, ActingUser: MessageActingUser(conversation, message),
-		ConcurrencyKey: ConversationRunLane(conversation.ID, "", assignedAgentID), Goal: goal, Source: RunSourceChat,
-		Context: map[string]interface{}{
-			conversationRunContextConversationID: conversation.ID,
-			conversationRunContextTriggerID:      message.ID,
-			conversationRunContextTriggerSeq:     message.Sequence,
-		},
-		IdempotencyKey: conversationRunIdempotencyKey(conversation.Scope, conversation.ID, message.ID),
-		Actor:          ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
-		Visibility:     visibility,
-	}
-	if root := externalConversationThreadRoot(conversation, message); root != "" {
-		request.Context["threadRootMessageId"] = root
-		request.ConcurrencyKey = ConversationRunLane(conversation.ID, root, assignedAgentID)
-	}
-	if message.ResponseMode != "" {
-		request.Context["responseMode"] = message.ResponseMode
-	}
-	if voiceCallStartedMessage(message) {
-		request.Context["voiceCallStarted"] = true
-	}
-	if assignedAgentID != "" {
-		request.SessionID = conversationSessionID(conversation.Scope, request.ConcurrencyKey)
-	}
-	return request
 }
 
 func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Scope) (*ConversationRunReconcileResult, error) {
@@ -556,10 +500,6 @@ func conversationMessageStartsRun(conversation *Conversation, message *ChannelMe
 	}
 }
 
-func conversationRunIdempotencyKey(scope Scope, conversationID, messageID string) string {
-	return "conversation-run:" + hashString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+messageID)
-}
-
 type ConversationRunTurnRunnerConfig struct {
 	RequireParticipationOptIn bool
 	MaximumRetries            int
@@ -600,18 +540,6 @@ type ConversationRunTurnRunnerConfig struct {
 	// searching again. Nil leaves them out.
 	Places func(ctx context.Context, run *AgentRun) []ConversationPlace
 }
-
-// ConversationPlace is a place find_place found in a chat, as the Agent
-// sees it in its turn context.
-type ConversationPlace struct {
-	Place string  `json:"place"`
-	Name  string  `json:"name"`
-	Lat   float64 `json:"lat"`
-	Lon   float64 `json:"lon"`
-}
-
-// MaximumConversationPlaces bounds the places a turn context lists.
-const MaximumConversationPlaces = 20
 
 func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerConfig, error) {
 	if c.InitialRetryDelay == 0 {
@@ -866,17 +794,6 @@ func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Con
 		return "", viewer, nil, fmt.Errorf("%w: thread does not match the canonical trigger", ErrInvalidAgentRun)
 	}
 	return participantID, viewer, trigger, nil
-}
-
-type agentConversationActiveRun struct {
-	ID                string         `json:"id"`
-	RootRunID         string         `json:"rootRunId"`
-	Entrypoint        string         `json:"entrypoint,omitempty"`
-	Status            AgentRunStatus `json:"status"`
-	Goal              string         `json:"goal"`
-	Source            RunSource      `json:"source"`
-	Revision          int64          `json:"revision"`
-	AvailableControls []string       `json:"availableControls,omitempty"`
 }
 
 func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, conversation *Conversation, triggers ...*ChannelMessage) ([]agentConversationActiveRun, error) {
@@ -1140,21 +1057,6 @@ func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx conte
 	return result, nil
 }
 
-// agentConversationAssignment is the work a teammate handed over in the chat.
-type agentConversationAssignment struct {
-	From string `json:"fromAgentId,omitempty"`
-	Kind string `json:"kind"`
-	Work string `json:"work"`
-}
-
-func conversationRunAssignment(run *AgentRun) *agentConversationAssignment {
-	if run == nil || run.Source != RunSourceRequest && run.Source != RunSourceHandoff && run.Source != RunSourceEscalation || strings.TrimSpace(run.Goal) == "" {
-		return nil
-	}
-	from, _ := run.Context[collaborationHandedOffByContextKey].(string)
-	return &agentConversationAssignment{From: from, Kind: string(run.Source), Work: run.Goal}
-}
-
 func permanentConversationRunError(err error) bool {
 	return errors.Is(err, ErrConversationNotFound) || errors.Is(err, ErrChannelMessageNotFound) ||
 		errors.Is(err, ErrNoConversationParticipants) || errors.Is(err, ErrConversationCoordinationUnavailable) ||
@@ -1224,4 +1126,12 @@ var errConversationParticipationStopped = errors.New("channel participation is d
 // reply.
 func participationStoppedOutput() map[string]interface{} {
 	return map[string]interface{}{"participationSkipped": true, "reply": "No further participation will start for this message because it is outside the channel’s current participation opt-in. Previously started actions may still finish."}
+}
+
+// SetReactionProjector mirrors reactions Agents add to external
+// conversations.
+func (r *ConversationRunTurnRunner) SetReactionProjector(projector MessageReactionProjector) {
+	if r != nil && r.conversations != nil {
+		r.conversations.SetReactionProjector(projector)
+	}
 }

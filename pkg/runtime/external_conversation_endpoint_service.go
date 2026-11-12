@@ -260,15 +260,6 @@ func validExternalConversationEndpointStatus(value ExternalConversationEndpointS
 	return value == ExternalConversationEndpointActive || value == ExternalConversationEndpointPaused || value == ExternalConversationEndpointRetired
 }
 
-func containsConversationEndpointMode(values []capability.ConversationEndpointMode, wanted capability.ConversationEndpointMode) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
-}
-
 func cloneExternalConversationDeliveryCorrelation(value *ExternalConversationDeliveryCorrelation) *ExternalConversationDeliveryCorrelation {
 	if value == nil {
 		return nil

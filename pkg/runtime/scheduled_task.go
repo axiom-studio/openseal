@@ -15,13 +15,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
-const (
-	RunbookActionCreateTask = "create_task"
-	RunbookActionList       = "list"
-	RunbookActionSetStatus  = "set_status"
-	RunbookActionSetScript  = "set_script"
-)
-
 func activationGoal(a *RunbookActivation, o *Objective) string {
 	if a.Task != nil {
 		if a.Task.AppID != "" {

@@ -29,12 +29,6 @@ func ConversationRunAgentID(conversation *Conversation, run *AgentRun) string {
 	return ""
 }
 
-// teamRosterReader returns store's Team deployment reader, or nil.
-func teamRosterReader(store any) TeamRosterReader {
-	teams, _ := store.(TeamRosterReader)
-	return teams
-}
-
 // teamMemberRunKey is the idempotency key the routing Run creates a member's
 // answer Run with, so the member Run's ID is derived from its routing Run.
 func teamMemberRunKey(routing *AgentRun, memberID string) string {

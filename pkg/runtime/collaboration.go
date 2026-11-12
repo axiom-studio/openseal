@@ -1477,9 +1477,6 @@ func (s *CollaborationService) verifyChatAssignment(ctx context.Context, source 
 	return nil
 }
 
-// collaborationHandedOffByContextKey records the teammate that handed work over in a chat.
-const collaborationHandedOffByContextKey = "handedOffBy"
-
 func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context, request *AgentRequest) ([]AgentRequestCandidate, error) {
 	if s.teams == nil {
 		return nil, fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)

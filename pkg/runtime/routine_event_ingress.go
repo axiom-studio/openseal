@@ -407,81 +407,19 @@ func routineEventPayload(value interface{}) json.RawMessage {
 	return data
 }
 
-// PauseRoutine pauses one event routine for a system reason (needs_sign_in,
-// source_removed, unverified). A routine that is retired, or already paused
-// for the same reason, is left as it is; it returns whether it paused.
-//
-// It runs on the caller's goroutine (for example Google sync), beside the
-// dispatcher loop, so it only changes the status and nudges the dispatcher.
-// The dispatcher closes out the waiting events on its next pass, on its own
-// goroutine, so the close-out never deletes the batch of a Run it is
-// creating at that moment.
-func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope Scope, activationID string, reason RoutinePausedReason) (bool, error) {
-	if d == nil || d.store == nil {
-		return false, errors.New("routine event dispatcher is not configured")
-	}
-	if !validRoutinePausedReason(reason) {
-		return false, fmt.Errorf("unknown pause reason %q", reason)
-	}
-	if err := validateRoutineEventScopeActivation(scope, activationID); err != nil {
-		return false, err
-	}
-	activationID = strings.TrimSpace(activationID)
-	for attempt := 0; attempt < 3; attempt++ {
-		activation, err := d.store.GetRunbookActivation(ctx, scope, activationID)
-		if err != nil {
-			return false, err
-		}
-		if activation == nil {
-			return false, ErrRunbookActivationNotFound
-		}
-		if activation.Task == nil || activation.Task.Event == nil {
-			return false, ErrRoutineNotEventRoutine
-		}
-		if activation.Status == RunbookActivationRetired ||
-			(activation.Status == RunbookActivationPaused && activation.PausedReason == reason) {
-			return false, nil
-		}
-		_, err = NewRunbookActivationService(d.store).Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{
-			ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: reason,
-		})
-		if errors.Is(err, ErrRunbookActivationRevision) {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
-		if d.matcher != nil {
-			d.matcher.wake()
-		}
-		return true, nil
-	}
-	return false, ErrRunbookActivationRevision
+// RoutineEventOfferer is the matcher as seen by actions and ingress.
+type RoutineEventOfferer interface {
+	// Listening is an index lookup only: no I/O and no allocation. Producers call it before they build an event.
+	Listening(scope Scope, kind RoutineEventKind, sourceRef string) bool
+	OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (RoutineEventOffer, error)
+	// OfferRoutineTestEvent returns the stored test event's ID.
+	OfferRoutineTestEvent(ctx context.Context, scope Scope, activationID, testBy string, payload json.RawMessage) (string, RoutineEventOffer, error)
 }
 
-// PauseRoutinesForSource pauses every active event routine of the scope that
-// listens to this kind and SourceRef, for example when a person's Google
-// sign-in is revoked. It returns how many it paused.
-func (d *RoutineEventDispatcher) PauseRoutinesForSource(ctx context.Context, scope Scope, kind RoutineEventKind, sourceRef string, reason RoutinePausedReason) (int, error) {
-	if d == nil || d.store == nil {
-		return 0, errors.New("routine event dispatcher is not configured")
-	}
-	activations, err := d.store.ListRoutineEventActivations(ctx, scope, kind, sourceRef)
-	if err != nil {
-		return 0, err
-	}
-	paused := 0
-	for _, activation := range activations {
-		if activation == nil {
-			continue
-		}
-		done, err := d.PauseRoutine(ctx, scope, activation.ID, reason)
-		if err != nil {
-			return paused, err
-		}
-		if done {
-			paused++
-		}
-	}
-	return paused, nil
+// RoutineEventOffer counts what one offer did.
+type RoutineEventOffer struct {
+	Matched    int `json:"matched"`
+	Inserted   int `json:"inserted"`
+	Duplicates int `json:"duplicates"`
+	Dropped    int `json:"dropped"`
 }

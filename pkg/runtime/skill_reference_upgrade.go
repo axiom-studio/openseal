@@ -871,3 +871,12 @@ func cloneUpgradeBinding(value *skill.Binding) *skill.Binding {
 	_ = json.Unmarshal(payload, &copy)
 	return &copy
 }
+
+func containsConversationEndpointMode(values []capability.ConversationEndpointMode, wanted capability.ConversationEndpointMode) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}

@@ -172,16 +172,6 @@ func (w *ApprovalNotificationWorker) agentApprovalConversation(ctx context.Conte
 	return existing, nil
 }
 
-func terminalApprovalActionStatus(status ActionCallStatus) bool {
-	switch status {
-	case ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied,
-		ActionCallStatusCanceled, ActionCallStatusCompensated, ActionCallStatusRefused:
-		return true
-	default:
-		return false
-	}
-}
-
 func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval *ApprovalCheckpoint, call *ActionCall, destination ApprovalDestination) error {
 	destination, endpoint, err := w.resolveApprovalDestination(ctx, approval, destination)
 	if err != nil {

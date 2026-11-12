@@ -11,11 +11,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// SkillActionRequestCredential asks the user, through a durable in-chat card,
-// to save a credential in the host's vault. It is not Skill setup: nothing
-// about a binding changes. The request never carries a secret value.
-const SkillActionRequestCredential = "request_credential"
-
 // CredentialRequestWakeType parks the requesting Run until the user saves the
 // credential or dismisses the request.
 const CredentialRequestWakeType = "credential_request"
@@ -217,4 +212,15 @@ func interactionRequestRefused(call *ActionCall) bool {
 	}
 	_, refused := call.Output["refused"].(map[string]interface{})
 	return refused
+}
+
+func cloneCredentialReferences(input map[string]skill.CredentialReference) map[string]skill.CredentialReference {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]skill.CredentialReference, len(input))
+	for name, reference := range input {
+		result[name] = reference
+	}
+	return result
 }

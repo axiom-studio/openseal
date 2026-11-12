@@ -383,3 +383,9 @@ func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, 
 	}
 	return count, nil
 }
+
+const FinalModeSpoken FinalAnswerMode = "spoken" // conversation responseMode == "spoken"
+
+const finalOutputSummaryKey = "summary"
+
+const finalOutputVisualRejectionKey = "visualRejection"

@@ -119,3 +119,48 @@ func independentTaskStartedByStep(ctx context.Context, store KernelStore, task *
 	}
 	return true, nil
 }
+
+// The immutable task ledger, never copied conversation context, establishes
+// setup access for an independent task whose foreground source has completed.
+func conversationTaskSetupOrigin(ctx context.Context, store ConversationTaskProofStore, run *AgentRun) (*ConversationTask, error) {
+	if run == nil {
+		return nil, ErrInvalidSkillSetup
+	}
+	task, err := store.FindConversationTaskByWorkRunID(ctx, run.Scope, run.ID)
+	if errors.Is(err, ErrConversationTaskNotFound) {
+		return nil, nil
+	}
+	if err != nil || task == nil {
+		return nil, err
+	}
+	if task.Mode != ConversationTaskModeIndependent || task.TargetAgentID == "" || task.TargetAgentID != run.AssignedAgentID {
+		return nil, ErrInvalidSkillSetup
+	}
+	valid, err := VerifyConversationTaskWorkRun(ctx, store, task, run)
+	if err != nil {
+		return nil, err
+	}
+	if !valid {
+		return nil, ErrInvalidSkillSetup
+	}
+	conversation, err := store.GetConversation(ctx, task.Scope, task.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	if conversation == nil || conversation.Status != ConversationStatusActive || conversation.Scope != task.Scope || conversation.Owner != task.Owner {
+		return nil, ErrInvalidSkillSetup
+	}
+	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(store), conversation.Scope, conversation.Owner, task.TargetAgentID)
+	if err != nil {
+		return nil, err
+	}
+	if !onRoster {
+		return nil, ErrInvalidSkillSetup
+	}
+	return task, nil
+}
+
+func taskSetupActionMatches(call *ActionCall, run *AgentRun, deploymentID string) bool {
+	return call != nil && run != nil && call.Scope == run.Scope && call.RunID == run.ID &&
+		call.DeploymentID == deploymentID && call.SkillID == SkillManagementSkillID && call.Action == SkillActionRequestSetup
+}

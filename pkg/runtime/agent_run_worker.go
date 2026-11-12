@@ -9,77 +9,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
-
-type TurnRunnerBinding struct {
-	ProgressAcknowledgementRenderer RunProgressAcknowledgementRenderer
-	DeploymentID                    string
-	// ActionDeploymentID is the resource whose Skill bindings authorized the
-	// projected actions. Team conversations keep the roster Agent as the Turn
-	// identity while resolving governed mutations against the owning Team.
-	ActionDeploymentID string
-	DefinitionID       string
-	DefinitionVersion  string
-	ModelProvider      string
-	Model              string
-	ModelActions       []capability.ModelAction
-	RunbookOperations  []HostedRunbookOperation
-	PreparedRuntimes   []PreparedSkillRuntime
-	InputContextRefs   []string
-	BudgetReservation  BudgetUsage
-	// ModelCredential is the deployment's model binding
-	// (deploymentModelCredential); kernel-issued model calls outside the
-	// step, such as the evidence grounding review, send it. nil on desktop.
-	ModelCredential *capability.CredentialReference
-
-	// RunLoop seams (SPEC §2.4).
-	Producer    StepProducer
-	Session     *AgentSession        // nil only for producers with no tool calls (routing)
-	Preparers   []StepPreparer       // run-start, then conversation
-	Tools       LoopToolExecutor     // disp-1
-	Compactor   StepCompactor        // G3
-	Final       FinalAnswerHandler   // CONV-08 for chats, runOutputFinalHandler otherwise
-	FinalOutput FinalOutputPublisher // nil = none
-	Host        StepHost
-	Authority   ControlAuthority   // section 04 §4, incl. the conversation flags of section 05 §7
-	Prompt      PromptContribution // kernel-authored system parts from the owning section
-	ToolCheck   ToolCallCheck      // optional (conversation CheckToolCall)
-	AfterTool   AfterToolEntryHook // optional (conversation artifact receipts)
-}
-
-// PreparedSkillRuntime binds one activation-time immutable runtime to the
-// exact Skill binding revision exposed during a Turn. It stays outside the
-// model action catalog and is attached only after a proposal selects that
-// authorized binding.
-type PreparedSkillRuntime struct {
-	DeploymentID    string
-	BindingID       string
-	BindingRevision int64
-	SkillID         string
-	SkillVersion    string
-	Runtime         skill.PreparedRuntime
-}
-
-type TurnRunnerResolver interface {
-	ResolveTurnRunner(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error)
-}
 
 type TurnRunnerResolverFunc func(context.Context, *AgentRun) (*TurnRunnerBinding, error)
 
 func (f TurnRunnerResolverFunc) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 	return f(ctx, run)
-}
-
-// ActionProposalObserver projects a committed governed ActionCall into other
-// durable kernel resources. Projection failures never roll back or redispatch
-// the authoritative action; observers must be idempotent and repairable from
-// the persisted proposal.
-type ActionProposalObserver interface {
-	ObserveActionProposal(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error
 }
 
 type ActionProposalObserverFunc func(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error
@@ -471,23 +408,6 @@ func workerPlainTextFinal(ctx context.Context, cc ControlContext, text string) (
 	return control.PlainTextFinal(ctx, cc, text)
 }
 
-func runbookInvocationIdentity(run *AgentRun) (string, string, string) {
-	if run == nil {
-		return "", "", ""
-	}
-	contextValues := run.Context
-	if triggerInput, ok := contextValues["triggerInput"].(map[string]interface{}); ok {
-		contextValues = triggerInput
-	}
-	definitionID, _ := contextValues["runbookDefinitionId"].(string)
-	definitionVersion, _ := contextValues["runbookDefinitionVersion"].(string)
-	entrypoint, _ := contextValues["runbookEntrypoint"].(string)
-	if strings.TrimSpace(entrypoint) == "" {
-		entrypoint = run.Entrypoint
-	}
-	return strings.TrimSpace(definitionID), strings.TrimSpace(definitionVersion), strings.TrimSpace(entrypoint)
-}
-
 func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run *AgentRun) {
 	if run == nil || !isTerminalAgentRunStatus(run.Status) {
 		return
@@ -515,30 +435,6 @@ func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run 
 	}
 }
 
-func delegatedRunbookOrigin(contextValues map[string]interface{}) map[string]interface{} {
-	if contextValues == nil {
-		return nil
-	}
-	definitionID, _ := contextValues["runbookDefinitionId"].(string)
-	definitionVersion, _ := contextValues["runbookDefinitionVersion"].(string)
-	if strings.TrimSpace(definitionID) == "" || strings.TrimSpace(definitionVersion) == "" {
-		return nil
-	}
-	origin := map[string]interface{}{
-		"runbookDefinitionId":      strings.TrimSpace(definitionID),
-		"runbookDefinitionVersion": strings.TrimSpace(definitionVersion),
-	}
-	if value, ok := contextValues["runbookEntrypoint"].(string); ok && strings.TrimSpace(value) != "" {
-		origin["runbookEntrypoint"] = strings.TrimSpace(value)
-	}
-	for _, key := range []string{"runbookActivationId", "runbookTriggerId"} {
-		if value, ok := contextValues[key].(string); ok && strings.TrimSpace(value) != "" {
-			origin[key] = strings.TrimSpace(value)
-		}
-	}
-	return origin
-}
-
 func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *AgentRun) {
 	if p.forks == nil || run == nil || run.ParentRunID == "" || run.Checkpoint["forkChild"] == nil {
 		return
@@ -549,76 +445,6 @@ func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *AgentRun
 	} else if result != nil && !result.Replayed && result.Evaluation.Wake {
 		p.Wake()
 	}
-}
-
-// preparedRuntimeForAction is the activation-time runtime prepared for the
-// selected action's exact binding, if any.
-func preparedRuntimeForAction(binding *TurnRunnerBinding, selected *capability.ModelAction) *skill.PreparedRuntime {
-	for runtimeIndex := range binding.PreparedRuntimes {
-		prepared := &binding.PreparedRuntimes[runtimeIndex]
-		if prepared.DeploymentID == selected.DeploymentID && prepared.BindingID == selected.BindingID && prepared.BindingRevision == selected.BindingRevision &&
-			prepared.SkillID == selected.SkillID && prepared.SkillVersion == selected.Version {
-			copy := prepared.Runtime
-			copy.Executables = append([]string(nil), prepared.Runtime.Executables...)
-			return &copy
-		}
-	}
-	return nil
-}
-
-func validatePreparedSkillRuntimes(binding *TurnRunnerBinding) error {
-	seen := make(map[string]bool, len(binding.PreparedRuntimes))
-	for index := range binding.PreparedRuntimes {
-		prepared := &binding.PreparedRuntimes[index]
-		if strings.TrimSpace(prepared.DeploymentID) == "" || strings.TrimSpace(prepared.BindingID) == "" || prepared.BindingRevision < 1 || strings.TrimSpace(prepared.SkillID) == "" || strings.TrimSpace(prepared.SkillVersion) == "" {
-			return errors.New("prepared Skill runtime binding identity is invalid")
-		}
-		if err := skill.ValidatePreparedRuntimeReference(&prepared.Runtime); err != nil {
-			return fmt.Errorf("prepared Skill runtime binding is invalid: %w", err)
-		}
-		key := fmt.Sprintf("%s:%s@%d:%s@%s", prepared.DeploymentID, prepared.BindingID, prepared.BindingRevision, prepared.SkillID, prepared.SkillVersion)
-		if seen[key] {
-			return errors.New("prepared Skill runtime binding is duplicated")
-		}
-		seen[key] = true
-		authorized := false
-		for actionIndex := range binding.ModelActions {
-			action := &binding.ModelActions[actionIndex]
-			if action.DeploymentID == prepared.DeploymentID && action.BindingID == prepared.BindingID && action.BindingRevision == prepared.BindingRevision && action.SkillID == prepared.SkillID && action.Version == prepared.SkillVersion {
-				authorized = true
-				break
-			}
-		}
-		if !authorized {
-			return errors.New("prepared Skill runtime is not bound to an authorized model action")
-		}
-	}
-	return nil
-}
-
-// selectTurnModelAction resolves a proposal exactly by name and, when the
-// proposal carries one, binding. A name exposed twice is refused even when the
-// proposal names a binding: a catalog with duplicate names is itself invalid.
-func selectTurnModelAction(actions []capability.ModelAction, request TurnAction) (*capability.ModelAction, error) {
-	var selected *capability.ModelAction
-	matches := 0
-	for index := range actions {
-		candidate := &actions[index]
-		if candidate.Name != request.Capability {
-			continue
-		}
-		if matches++; matches > 1 {
-			return nil, fmt.Errorf("requested capability %q is ambiguous: more than one binding exposes it", request.Capability)
-		}
-		if request.BindingID != "" && (candidate.BindingID != request.BindingID || candidate.BindingRevision != request.BindingRevision) {
-			continue
-		}
-		selected = candidate
-	}
-	if request.ExpectedSkillVersion != "" && (selected == nil || selected.Version != request.ExpectedSkillVersion) {
-		return nil, fmt.Errorf("%w: requested capability %q version %q is not authorized by the current binding", ErrRunSkillDependencyUnavailable, request.Capability, request.ExpectedSkillVersion)
-	}
-	return selected, nil
 }
 
 func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {
@@ -967,4 +793,13 @@ func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) (*time.T
 		p.resolveForkChild(ctx, run)
 	}
 	return nil, false
+}
+
+func (p *AgentRunWorkerPool) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+	if p != nil {
+		p.forks.SetAcceptedRunExecutionPreparer(preparer)
+		p.collaboration.SetAcceptedRunExecutionPreparer(preparer)
+		p.requestInbox.SetAcceptedRunExecutionPreparer(preparer)
+		p.conversationTasks.SetAcceptedRunExecutionPreparer(preparer)
+	}
 }

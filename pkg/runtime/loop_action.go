@@ -153,28 +153,6 @@ func loopIdempotencyKey(stepID, toolCallID string, directive *ToolCallDirective)
 	return "loop:" + stepID + ":" + toolCallID
 }
 
-// selectGovernedAction resolves a governed tool call to the binding's model
-// action with the exact-name selector (section 03 §3.1). nil means the
-// binding offers no such action. A name exposed twice and a directive whose
-// pinned Skill version the binding no longer authorizes
-// (ErrRunSkillDependencyUnavailable) are Go errors, as on the selector.
-func selectGovernedAction(binding *TurnRunnerBinding, name string, directive *ToolCallDirective) (*capability.ModelAction, error) {
-	if binding == nil {
-		return nil, nil
-	}
-	// The model calls the provider tool name the preparer offered
-	// (LoopGovernedToolNames); the selector matches action names.
-	if action, ok := LoopGovernedAction(binding.ModelActions, name); ok {
-		name = action.Name
-	}
-	request := TurnAction{Capability: name}
-	if directive != nil {
-		request.BindingID, request.BindingRevision = directive.BindingID, directive.BindingRevision
-		request.ExpectedSkillVersion = directive.ExpectedSkillVersion
-	}
-	return selectTurnModelAction(binding.ModelActions, request)
-}
-
 // governedDirective is the governance part of a producer directive.
 func governedDirective(directive *ToolCallDirective) *governedInputDirective {
 	if directive == nil {
@@ -580,4 +558,12 @@ func GovernedBudgetExhaustion(outcome GovernedToolOutcome) *BudgetExhaustion {
 		return nil
 	}
 	return &BudgetExhaustion{Summary: governedBudgetExhaustedReason, Dimensions: []string{"actions"}, ActionCallID: outcome.ActionCallID}
+}
+
+// ActionProposalObserver projects a committed governed ActionCall into other
+// durable kernel resources. Projection failures never roll back or redispatch
+// the authoritative action; observers must be idempotent and repairable from
+// the persisted proposal.
+type ActionProposalObserver interface {
+	ObserveActionProposal(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error
 }

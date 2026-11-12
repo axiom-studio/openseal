@@ -94,115 +94,12 @@ func (s ControlToolSpec) ModelStepTool() ModelStepTool {
 	}
 }
 
-type FinalAnswerMode string
-
-const (
-	FinalModeDefault  FinalAnswerMode = "default"
-	FinalModeSpoken   FinalAnswerMode = "spoken"   // conversation responseMode == "spoken"
-	FinalModeDecision FinalAnswerMode = "decision" // Run.Context[AgentRequestInboxContextKey]
-	FinalModeReview   FinalAnswerMode = "review"   // Run.Context[AgentRequestCompletionReviewContextKey]
-)
-
-// ControlAuthority is resolved once per claim (ResolveControlAuthority,
-// control_authority.go) and is constant for the claim, so the advertised tool
-// list is stable. It carries the conversation flags of section 05 §7.
-type ControlAuthority struct {
-	AgentID           string
-	FinalMode         FinalAnswerMode // "" = default
-	SkillPromptRefs   []string
-	VisualAllowed     bool
-	BroadcastAllowed  bool
-	ForkAllowed       bool
-	ForkTargets       []HostedAgentTarget // other Agents a branch may target; empty = self only
-	DelegateTargets   []HostedAgentTarget
-	Operations        []HostedRunbookOperation
-	TaskStart         *HostedConversationTaskContext // offered iff non-nil && CanStart && !VoiceCallStarted
-	TaskWork          bool                           // the Run is the work of a conversation task
-	CanReportProgress bool
-	CanReact          bool
-	CanAskUser        bool
-	CanWait           bool
-	// Conversation flags (section 05 §7).
-	ExternalChannelReply bool
-	VoiceCallStarted     bool
-	ApprovalMode         ConversationApprovalMode
-	// RoutineOccurrence marks a Run started by a routine (schedule or
-	// event), not a chat reply: it may finish silent when nothing needs the
-	// person and it changed nothing.
-	RoutineOccurrence bool
-}
-
-func (a ControlAuthority) finalMode() FinalAnswerMode {
-	if a.FinalMode == "" {
-		return FinalModeDefault
-	}
-	return a.FinalMode
-}
-
-// controlToolOffered is the authority rule for each tool. Decision and review
-// Runs are offered only their own final tool, whatever else is set.
-func controlToolOffered(name ControlToolName, a ControlAuthority) bool {
-	mode := a.finalMode()
-	if mode == FinalModeDecision {
-		return name == ControlToolRequestDecision
-	}
-	if mode == FinalModeReview {
-		return name == ControlToolCompletionReview
-	}
-	switch name {
-	case ControlToolFinalAnswer:
-		return true
-	case ControlToolRequestDecision, ControlToolCompletionReview:
-		return false
-	case ControlToolReportProgress:
-		return a.CanReportProgress
-	case ControlToolWait:
-		return a.CanWait
-	case ControlToolAskUser:
-		return a.CanAskUser
-	case ControlToolReact:
-		return a.CanReact
-	case ControlToolStartTask:
-		return a.TaskStart != nil && a.TaskStart.CanStart && !a.VoiceCallStarted
-	case ControlToolFork:
-		return a.ForkAllowed
-	case ControlToolRunOperation:
-		return len(a.Operations) > 0
-	case ControlToolDelegate, ControlToolDelegateReply:
-		return len(a.DelegateTargets) > 0
-	case ControlToolRunbookFork, ControlToolRunbookDelegate:
-		return false // kernel-only: runbook StepProducer calls carry a directive
-	}
-	return false
-}
-
-// ControlOrigin says who authored a control call: the model, or a
-// deterministic producer (runbook engine, section 04 §12) whose calls carry a
-// kernel directive and are preauthorized.
-type ControlOrigin string
+const ()
 
 const (
 	ControlOriginModel  ControlOrigin = "model"
 	ControlOriginKernel ControlOrigin = "kernel"
 )
-
-// ControlContext is built by the loop for each control call.
-type ControlContext struct {
-	Run       *AgentRun // re-read; Status running; LeaseOwner == WorkerID
-	WorkerID  string
-	Step      *AgentTurn // settle phase: the entry's producing step: completed && Sequence <= Run.LastAppliedTurn
-	Session   *AgentSession
-	Path      *AgentSessionPath // the step's session path (URL provenance, §11.4)
-	Binding   *TurnRunnerBinding
-	Assistant *SessionEntry // assistant entry holding the call
-	Entry     *SessionEntry // this call's tool entry
-	Authority ControlAuthority
-	Origin    ControlOrigin
-	// Arguments is the strictly decoded call input (rule 4), set by the
-	// dispatcher before a handler runs. Handlers type-assert it to the value
-	// their decode returned.
-	Arguments interface{}
-}
 
 // NewControlContext builds the context of one control tool entry of a step.
 func NewControlContext(in StepToolsInput, entry *SessionEntry) ControlContext {
@@ -223,17 +120,6 @@ func controlOriginOf(entry *SessionEntry) ControlOrigin {
 		return ControlOriginKernel
 	}
 	return ControlOriginModel
-}
-
-func (cc ControlContext) toolName() ControlToolName {
-	if cc.Entry == nil || cc.Entry.Tool == nil {
-		return ""
-	}
-	return ControlToolName(cc.Entry.Tool.Name)
-}
-
-func (cc ControlContext) lease(now time.Time) AgentRunLeaseGuard {
-	return AgentRunLeaseGuard{WorkerID: cc.WorkerID, Now: now}
 }
 
 // ControlEntryMeta is kernel-only metadata stored in ToolEntry.Control. It is
@@ -413,22 +299,6 @@ func (r controlRegistry) specs(a ControlAuthority) []ControlToolSpec {
 		specs = append(specs, spec)
 	}
 	return specs
-}
-
-// ControlToolSpecs lists the control tools offered under a in the stable
-// advertised order (SPEC §5.1).
-func ControlToolSpecs(a ControlAuthority) []ControlToolSpec {
-	return loopControlRegistry().specs(a)
-}
-
-// ControlModelStepTools is ControlToolSpecs as harness tools of a model step.
-func ControlModelStepTools(a ControlAuthority) []ModelStepTool {
-	specs := ControlToolSpecs(a)
-	tools := make([]ModelStepTool, 0, len(specs))
-	for _, spec := range specs {
-		tools = append(tools, spec.ModelStepTool())
-	}
-	return tools
 }
 
 // ControlExecutor executes control tool entries. Constructed once per worker

@@ -173,3 +173,24 @@ func producerToolResult(ctx context.Context, calls ActionCallReader, run *AgentR
 	}
 	return result, call, nil
 }
+
+func terminalApprovalActionStatus(status ActionCallStatus) bool {
+	switch status {
+	case ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied,
+		ActionCallStatusCanceled, ActionCallStatusCompensated, ActionCallStatusRefused:
+		return true
+	default:
+		return false
+	}
+}
+
+// LoopToolResult is the terminal result of one tool entry as a deterministic
+// producer reads it from the Run's session.
+type LoopToolResult struct {
+	ToolCallID   string
+	Name         string
+	State        ToolEntryState // completed | error | interrupted
+	Content      []ContentPart
+	ActionCallID string
+	Output       map[string]interface{} // governed action output (deterministic producers)
+}

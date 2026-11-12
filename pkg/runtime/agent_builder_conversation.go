@@ -10,10 +10,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
-// AgentBuilderDeploymentID is the builder Agent's deployment id. The cortex
-// default assistant deployment id must equal it.
-const AgentBuilderDeploymentID = "openseal-assistant"
-
 const (
 	agentBuilderConversationKeyPrefix = "agent-builder:"
 	agentBuilderPromptKeyPrefix       = "agent-builder-prompt:"
@@ -276,15 +272,6 @@ func agentBuilderRunDrafting(status AgentRunStatus) bool {
 	return false
 }
 
-// agentBuilderCreatesResource reports a card whose approval and success
-// produce the conversation's Agent or Team.
-func agentBuilderCreatesResource(approval *ApprovalCheckpoint) bool {
-	resourceType, _ := approval.ProposedAction["resourceType"].(string)
-	operation, _ := approval.ProposedAction["operation"].(string)
-	return resourceType == agentProfileResourceType && operation == AgentActionCreateAgent ||
-		resourceType == "team" && operation == agentBuilderTeamOperation
-}
-
 func agentBuilderCardDisplayName(approval *ApprovalCheckpoint) string {
 	if approval == nil {
 		return ""
@@ -316,32 +303,6 @@ func agentBuilderParameterName(ctx context.Context, reader AgentBuilderDraftRead
 		return "", err
 	}
 	return first[0].BuilderParameters.Name, nil
-}
-
-// createdAgentBuilderConversation is the conversation whose approved card
-// call, now succeeded, creates an Agent or Team; "" for any other call.
-func createdAgentBuilderConversation(ctx context.Context, store KernelStore, call *ActionCall, run *AgentRun) (string, error) {
-	if call.ApprovalID == "" {
-		return "", nil
-	}
-	approval, err := store.GetApproval(ctx, call.Scope, call.ApprovalID)
-	if err != nil && !errors.Is(err, ErrApprovalNotFound) {
-		return "", err
-	}
-	if approval == nil || approval.Status != ApprovalStatusApproved || !agentBuilderCreatesResource(approval) {
-		return "", nil
-	}
-	// The same conversation ListApprovals reports for the card: the Run's
-	// own, else its root Run's.
-	if id, _ := run.Context["conversationId"].(string); id != "" || run.RootRunID == run.ID {
-		return id, nil
-	}
-	root, err := store.GetAgentRun(ctx, run.Scope, run.RootRunID)
-	if err != nil || root == nil {
-		return "", err
-	}
-	id, _ := root.Context["conversationId"].(string)
-	return id, nil
 }
 
 // pendingAgentBuilderQuestion returns the newest question of the newest

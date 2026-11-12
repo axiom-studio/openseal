@@ -24,10 +24,6 @@ func ConversationTaskGoalSummary(goal string) string {
 	return goal
 }
 
-var (
-	ErrConversationTaskNotFound = errors.New("conversation task not found")
-)
-
 type StartConversationTaskRequest struct {
 	Scope                  Scope
 	SourceRunID            string
@@ -429,24 +425,4 @@ func (s *ConversationTaskService) Cancel(ctx context.Context, req CancelConversa
 	}
 	result.WorkRun = command.Run
 	return result, nil
-}
-
-// PersistedTaskOrigin resolves an exact independent work identity. Caller
-// context is only a hint; hosting applications must verify canonical source
-// conversation/message/actor and their existing authorization policy.
-func PersistedTaskOrigin(ctx context.Context, store ConversationTaskStore, scope Scope, workRunID string) (*ConversationTask, error) {
-	if store == nil {
-		return nil, ErrInvalidConversationTask
-	}
-	task, err := store.FindConversationTaskByWorkRunID(ctx, scope, workRunID)
-	if err != nil {
-		return nil, err
-	}
-	if task == nil {
-		return nil, ErrConversationTaskNotFound
-	}
-	if task.Scope != scope || task.WorkRunID != workRunID || task.Validate() != nil {
-		return nil, ErrInvalidConversationTask
-	}
-	return task, nil
 }

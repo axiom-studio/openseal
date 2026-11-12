@@ -407,12 +407,6 @@ func agentGrantsMaximumRisk(base capability.RiskLevel, grants []resolvedAgentSki
 	return ceiling
 }
 
-// agentDefinitionPolicyFixed reports a definition no Agent may amend, such as
-// the platform assistant: Agent proposals are off and no field is open.
-func agentDefinitionPolicyFixed(definition *kernelagent.AgentDefinition) bool {
-	return !definition.Amendments.AgentMayPropose && len(definition.Amendments.AllowedFields) == 0
-}
-
 // agentNameTakenError is ErrAgentNameTaken with the wanted name.
 type agentNameTakenError struct{ name string }
 
@@ -663,13 +657,6 @@ func decodeAgentBuilderArguments(arguments map[string]interface{}, target interf
 		return fmt.Errorf("invalid agent builder action: %w", err)
 	}
 	return nil
-}
-
-func agentBuilderTargetError(agentID string, err error) error {
-	if errors.Is(err, kernelagent.ErrDeploymentNotFound) {
-		return fmt.Errorf("agent %q does not exist; use list_agents for the exact agentId", strings.TrimSpace(agentID))
-	}
-	return err
 }
 
 func agentProfileFromDefinition(definition *kernelagent.AgentDefinition) agentProfileArguments {

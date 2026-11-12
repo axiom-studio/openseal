@@ -299,56 +299,6 @@ func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in 
 // ---------------------------------------------------------------------------
 // The catalog preparer's listing
 
-// CapabilityListing is the step's listing: the catalog (every ID, or the
-// directory past the catalog budget), the Agents and
-// operations the control tools accept, surfaced tools that are no longer in
-// the catalog, the guidance that depends on the catalog, and the
-// conversation's approval mode.
-func (p *catalogModelStepPreparer) CapabilityListing(in StepInput) capabilityListing {
-	listing := capabilityListing{Mode: capabilityNoteModeNone}
-	binding := in.Binding
-	if binding == nil {
-		return listing
-	}
-	authority := binding.Authority
-	if authority.offersCapabilities() {
-		set := p.CapabilitySet(in)
-		switch {
-		case !set.Offered():
-			// No catalog at all: nothing to list (mode none).
-		case set.Searching():
-			listing.Mode = capabilityNoteModeDirectory
-			listing.Items = append(listing.Items, set.directoryLines()...)
-		default:
-			listing.Mode = capabilityNoteModeList
-			listing.Items = append(listing.Items, set.catalogLines()...)
-		}
-		for _, load := range SurfacedOnPath(in.Path) {
-			for _, tool := range load.Tools {
-				if !set.known(tool.Capability) {
-					listing.Items = append(listing.Items, capabilityNoteItem{
-						Key: "unavailable:" + tool.Name, Section: capabilityNoteUnavailable, Text: "- " + tool.Name,
-					})
-				}
-			}
-		}
-	}
-	listing.Items = append(listing.Items, controlTargetItems(authority)...)
-	if authority.offersCapabilities() && authority.ApprovalMode != "" {
-		listing.Items = append(listing.Items, capabilityNoteItem{Key: capabilityNoteApprovalKey, Section: capabilityNoteGuidance, Text: approvalModeText(authority.ApprovalMode)})
-	}
-	if p.boundSkill(binding) {
-		listing.Items = append(listing.Items, capabilityNoteItem{Key: "guide:skill_access", Section: capabilityNoteGuidance, Text: loopSkillAccessText})
-	}
-	for _, action := range binding.ModelActions {
-		if authority.offersCapabilities() && (GovernedToolReviewed(action) || GovernedToolNeedsReviewSummary(action)) {
-			listing.Items = append(listing.Items, capabilityNoteItem{Key: "guide:review_summaries", Section: capabilityNoteGuidance, Text: loopReviewSummariesText})
-			break
-		}
-	}
-	return listing
-}
-
 // controlTargetItems are the Agents delegate and fork accept and the
 // operations run_operation starts. Their tools carry no list or enum, so a
 // new Agent or operation never changes a tool definition; each handler
@@ -384,4 +334,24 @@ func controlTargetItems(a ControlAuthority) []capabilityNoteItem {
 		}
 	}
 	return items
+}
+
+// operationDescriptionLine is one operation's line of the capabilities note.
+func operationDescriptionLine(op HostedRunbookOperation) string {
+	schema := []byte(`{"type":"object"}`)
+	if len(op.InputSchema) > 0 {
+		if encoded, err := json.Marshal(op.InputSchema); err == nil {
+			schema = encoded
+		}
+	}
+	name := strings.TrimSpace(op.Name)
+	if name == "" {
+		name = op.Entrypoint
+	}
+	text := strings.TrimRight(strings.TrimSpace(op.Description), ".")
+	line := "- " + op.Entrypoint + " — " + name
+	if text != "" {
+		line += ": " + text
+	}
+	return line + ". Input schema: " + string(schema)
 }

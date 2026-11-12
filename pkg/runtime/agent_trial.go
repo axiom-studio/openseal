@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 )
 
 // try_agent runs a drafted profile as a bounded child Run of the builder:
@@ -151,27 +149,6 @@ func agentTrialContextForRun(run *AgentRun) (*AgentTrialContext, bool, error) {
 	return &trial, true, nil
 }
 
-// agentTrial binds a trial child: the builder's deployment and definition
-// identity (the host's model grant checks it), the drafted persona as the
-// Agent instructions, the drafted model, and no actions, workspace tools or
-// control tools beyond the final answer.
-func (r *loopBindingResolution) agentTrial(ctx context.Context, trial *AgentTrialContext) (*TurnRunnerBinding, error) {
-	if r.run.Kind != RunKindAgentWork || r.run.ParentRunID == "" || r.run.ParentRunID != trial.ParentRunID {
-		return nil, errors.New("agent trial context does not belong to this Run")
-	}
-	profile := trial.Profile
-	r.definition = &kernelagent.AgentDefinition{
-		ID: r.definition.ID, Version: r.definition.Version,
-		DisplayName: profile.DisplayName, Purpose: profile.Purpose, SystemPrompt: profile.SystemPrompt,
-		Personality: profile.Personality, OperatingPrinciples: append([]string(nil), profile.OperatingPrinciples...),
-	}
-	r.trial = true
-	binding := r.identity(r.deployment.ID)
-	binding.Model, _ = r.run.Context[AgentTrialModelContextKey].(string)
-	binding.Model = strings.TrimSpace(binding.Model)
-	return r.model(ctx, binding, nil, PromptContribution{}, false)
-}
-
 // agentTrialSessionSeed seeds a trial child's run session with the test
 // message as it is, the way a person would send it.
 func agentTrialSessionSeed(run *AgentRun) (*SessionEntry, error) {
@@ -204,93 +181,6 @@ func agentTrialCallRunID(call *ActionCall) string {
 
 func agentTrialDeadline(child *AgentRun) time.Time {
 	return child.CreatedAt.UTC().Add(agentTrialTimeout)
-}
-
-// agentTrialWait is the agent_trial card of a succeeded try_agent call while
-// its child runs and its deadline has not passed. Past the deadline it
-// returns nil: the resume cancels the child and reports timed_out.
-func (p *governedParker) agentTrialWait(ctx context.Context, call *ActionCall) (*WakeCondition, string, error) {
-	if p.runs == nil {
-		return nil, "", nil
-	}
-	childID := agentTrialCallRunID(call)
-	if childID == "" {
-		return nil, "", nil
-	}
-	child, err := getAgentTrialChild(ctx, p.runs, call.Scope, childID)
-	if err != nil || child == nil || isTerminalAgentRunStatus(child.Status) {
-		return nil, "", err
-	}
-	deadline := agentTrialDeadline(child)
-	if !p.now().Before(deadline) {
-		return nil, "", nil
-	}
-	return &WakeCondition{Type: AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}, agentTrialWaitSummary, nil
-}
-
-// agentTrialOutput is the tool output of a settled try_agent call: the
-// receipt the finalizer delivered, else the child read directly (the
-// finalizer missed it). A child still running past its deadline is canceled
-// and reported timed_out.
-func (p *governedParker) agentTrialOutput(ctx context.Context, run *AgentRun, call *ActionCall, settled []AgentRunIntervention) (map[string]interface{}, error) {
-	childID := agentTrialCallRunID(call)
-	if childID == "" {
-		return nil, fmt.Errorf("try_agent call %s has no trial Run", call.ID)
-	}
-	if receipt := agentTrialReceiptFor(call.ID, childID, settled); receipt != nil {
-		return agentTrialToolOutput(*receipt), nil
-	}
-	if run != nil {
-		if receipt := agentTrialReceiptFor(call.ID, childID, run.PendingInterventions); receipt != nil {
-			return agentTrialToolOutput(*receipt), nil
-		}
-	}
-	if p.runs == nil {
-		return nil, errors.New("governed parker cannot read the trial Run")
-	}
-	child, err := getAgentTrialChild(ctx, p.runs, call.Scope, childID)
-	if err != nil {
-		return nil, err
-	}
-	if child == nil {
-		return agentTrialToolOutput(AgentTrialReceipt{RunID: childID, Status: AgentTrialStatusFailed, FailureMessage: "The trial Run is missing."}), nil
-	}
-	if !isTerminalAgentRunStatus(child.Status) {
-		ended, canceled, err := p.cancelAgentTrial(ctx, child)
-		if err != nil {
-			return nil, err
-		}
-		if canceled {
-			return agentTrialToolOutput(agentTrialTimedOut(child.ID)), nil
-		}
-		child = ended
-	}
-	return agentTrialToolOutput(agentTrialReceiptFromRun(child, p.now())), nil
-}
-
-// cancelAgentTrial cancels a trial child that outlived its deadline;
-// canceled reports that this call stopped it. A child that ended meanwhile
-// is returned as it ended.
-func (p *governedParker) cancelAgentTrial(ctx context.Context, child *AgentRun) (*AgentRun, bool, error) {
-	result, err := NewRunCommandService(p.runs).CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: child.Scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: AgentRunCommandCancel,
-		Actor:   ActivityActor{Type: "runtime", ID: "agent-trial"},
-		Summary: "Canceled: the trial did not answer in time", Visibility: ActivityVisibilityScope,
-	})
-	if err == nil && result != nil && result.Run != nil && result.Run.Status == AgentRunStatusCanceled {
-		return result.Run, true, nil
-	}
-	reloaded, getErr := getAgentTrialChild(ctx, p.runs, child.Scope, child.ID)
-	if getErr != nil {
-		return nil, false, errors.Join(err, getErr)
-	}
-	if reloaded != nil && isTerminalAgentRunStatus(reloaded.Status) {
-		return reloaded, false, nil
-	}
-	if err == nil {
-		err = fmt.Errorf("trial Run %s did not stop", child.ID)
-	}
-	return nil, false, err
 }
 
 func agentTrialTimedOut(childID string) AgentTrialReceipt {
@@ -361,4 +251,16 @@ func truncateAgentTrialText(text, runID string) string {
 	}
 	suffix := "…[truncated; full reply is in run " + runID + "]"
 	return cutUTF8(text, agentTrialReplyBytes-len(suffix)) + suffix
+}
+
+const finalOutputReportKey = "report"
+
+// forkChildAnswer is a child's final answer: its report, else its summary.
+func forkChildAnswer(child *AgentRun) string {
+	for _, key := range []string{finalOutputReportKey, finalOutputSummaryKey} {
+		if text, ok := child.Output[key].(string); ok && strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
 }

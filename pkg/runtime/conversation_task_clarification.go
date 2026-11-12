@@ -6,64 +6,6 @@ import (
 	"strings"
 )
 
-// Independent tasks keep their original conversation authority after the source
-// chat has ended. Only the canonical task ledger can establish that authority;
-// copied context fields on an unrelated root Run never grant conversation access.
-func conversationTaskWorkOrigin(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun) (*AgentRun, *Conversation, *ChannelMessage, error) {
-	if run == nil || run.Kind != RunKindAgentWork || (run.Owner.Type != OwnerTypeAgent && run.Owner.Type != OwnerTypeTeam) || run.ParentRunID != "" || conversations == nil {
-		return nil, nil, nil, nil
-	}
-	proof, ok := runs.(ConversationTaskProofStore)
-	if !ok {
-		return nil, nil, nil, nil
-	}
-	task, err := proof.FindConversationTaskByWorkRunID(ctx, run.Scope, run.ID)
-	if errors.Is(err, ErrConversationTaskNotFound) {
-		return nil, nil, nil, nil
-	}
-	if err != nil || task == nil {
-		return nil, nil, nil, err
-	}
-	if task.Mode != ConversationTaskModeIndependent || task.TargetAgentID == "" || task.TargetAgentID != strings.TrimSpace(run.AssignedAgentID) {
-		return nil, nil, nil, nil
-	}
-	valid, err := VerifyConversationTaskWorkRun(ctx, proof, task, run)
-	if err != nil || !valid {
-		return nil, nil, nil, err
-	}
-	source, err := runs.GetAgentRun(ctx, task.Scope, task.SourceRunID)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	conversation, err := conversations.GetConversation(ctx, task.Scope, task.ConversationID)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if conversation == nil || conversation.Status != ConversationStatusActive {
-		return nil, nil, nil, nil
-	}
-	trigger, err := conversations.GetChannelMessage(ctx, task.Scope, task.ConversationID, task.SourceMessageID)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	actor, valid := conversationMessageInitiatingUser(conversation, trigger)
-	if !valid || actor != task.AuthenticatedActor || !validConversationTaskAdmissionSource(source, conversation, trigger, task) {
-		return nil, nil, nil, nil
-	}
-	return source, conversation, trigger, nil
-}
-
-// Use only after conversationWorkOrigin has verified the canonical origin.
-func conversationClarificationReferences(run *AgentRun) []ConversationReference {
-	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
-	if run.Kind == RunKindAgentWork && run.ParentRunID == "" {
-		if taskID, ok := run.Context[ConversationTaskContextKey].(string); ok && taskID != "" {
-			references = append(references, ConversationReference{Kind: ConversationReferenceTask, ID: taskID})
-		}
-	}
-	return references
-}
-
 // An explicit reply to a root Run's question is a clarification attempt, including
 // when its actor, thread or current Run state prevents acceptance. Do not turn
 // such rejected answers into unrelated foreground work.

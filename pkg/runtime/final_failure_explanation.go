@@ -113,27 +113,6 @@ func failureExplanationNote(sessionID, runID, stepID string, f *RunFailureExplan
 	}
 }
 
-// An adapter's explicit top-level failure envelope is operational evidence,
-// unlike the status of a fetched resource or a nested document. Some process
-// Skills use success:false plus error instead of a transport error.
-func explicitActionResultFailure(output map[string]interface{}) error {
-	if succeeded, ok := output["success"].(bool); ok && !succeeded {
-		if message, ok := output["error"].(string); ok && strings.TrimSpace(message) != "" {
-			return errors.New(strings.TrimSpace(message))
-		}
-		return errors.New("The tool reported that its operation failed.")
-	}
-	if len(output) == 1 {
-		if message, ok := output["error"].(string); ok && strings.TrimSpace(message) != "" {
-			return errors.New(strings.TrimSpace(message))
-		}
-	}
-	if failed, ok := output["isError"].(bool); ok && failed {
-		return errors.New("The tool reported that its operation failed.")
-	}
-	return nil
-}
-
 // noModelTurnFailureCode names the host failures under which no model can
 // answer this turn: the Workspace has no credits, or the model provider or
 // its configuration is unavailable, or the context no longer fits. Every

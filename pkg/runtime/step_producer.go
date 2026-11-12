@@ -17,14 +17,6 @@ type StepProducer interface {
 	Produce(ctx context.Context, in StepInput) (StepOutput, error)
 }
 
-// StepBudgetPlanner is implemented by producers that know what a step will
-// cost before running it (the model producer). The loop adds the binding's
-// reservation and sets Turns to 1. Deterministic producers do not implement
-// it: their reservation is the floor with Turns 1.
-type StepBudgetPlanner interface {
-	PlanStepBudget(ctx context.Context, in StepInput) (BudgetUsage, error)
-}
-
 type StepMode string
 
 const (
@@ -92,17 +84,6 @@ type ToolCallDirective struct {
 	EvidenceRefs         []string                   `json:"evidenceRefs,omitempty"`
 }
 
-// LoopToolResult is the terminal result of one tool entry as a deterministic
-// producer reads it from the Run's session.
-type LoopToolResult struct {
-	ToolCallID   string
-	Name         string
-	State        ToolEntryState // completed | error | interrupted
-	Content      []ContentPart
-	ActionCallID string
-	Output       map[string]interface{} // governed action output (deterministic producers)
-}
-
 // LoopFinal ends the Run without (or after) the final-answer chain: a
 // deterministic producer's result or a preparer's EarlyFinal.
 type LoopFinal struct {
@@ -137,92 +118,6 @@ var ErrInvalidStepOutput = errors.New("invalid step output")
 
 func invalidStepOutput(format string, args ...interface{}) error {
 	return fmt.Errorf("%w: %s", ErrInvalidStepOutput, fmt.Sprintf(format, args...))
-}
-
-// validateStepOutput checks a producer's output against its kind.
-func validateStepOutput(kind StepProducerKind, out StepOutput) error {
-	if err := out.Usage.Validate(); err != nil {
-		return invalidStepOutput("%v", err)
-	}
-	switch kind {
-	case StepProducerModel:
-		if out.Assistant == nil {
-			return invalidStepOutput("model producer returned no assistant entry")
-		}
-		if len(out.ToolCalls) > 0 || out.Final != nil || out.Park != nil || out.KernelState != nil {
-			return invalidStepOutput("model producer returned deterministic output")
-		}
-		if err := checkProducedAssistant(out.Assistant); err != nil {
-			return invalidStepOutput("%v", err)
-		}
-	case StepProducerDeterministic:
-		if out.Assistant != nil {
-			return invalidStepOutput("deterministic producer returned an assistant entry")
-		}
-		set := 0
-		if len(out.ToolCalls) > 0 {
-			set++
-		}
-		if out.Final != nil {
-			set++
-		}
-		if out.Park != nil {
-			set++
-		}
-		if out.Failure != nil {
-			set++
-		}
-		if set != 1 {
-			return invalidStepOutput("deterministic producer must return exactly one of tool calls, final, park and failure (got %d)", set)
-		}
-		if err := validateLoopToolCalls(out.ToolCalls); err != nil {
-			return err
-		}
-		if out.Final != nil {
-			if err := out.Final.validate(); err != nil {
-				return err
-			}
-		}
-		if out.Park != nil {
-			if out.Park.Committed {
-				return invalidStepOutput("a producer park cannot be committed")
-			}
-			if err := out.Park.validate(); err != nil {
-				return err
-			}
-		}
-	default:
-		return invalidStepOutput("unknown producer kind %q", kind)
-	}
-	if out.Failure != nil {
-		if err := out.Failure.validate(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateLoopToolCalls(calls []LoopToolCall) error {
-	seen := make(map[string]bool, len(calls))
-	for i, call := range calls {
-		if strings.TrimSpace(call.ID) == "" {
-			return invalidStepOutput("tool call %d has no id", i)
-		}
-		if seen[call.ID] {
-			return invalidStepOutput("duplicate tool call id %q", call.ID)
-		}
-		seen[call.ID] = true
-		if strings.TrimSpace(call.Name) == "" {
-			return invalidStepOutput("tool call %q has no name", call.ID)
-		}
-		if err := validateToolArguments("tool call "+call.ID+" arguments", call.Arguments); err != nil {
-			return invalidStepOutput("%v", err)
-		}
-		if call.Directive != nil && call.Directive.BindingRevision < 0 {
-			return invalidStepOutput("tool call %q directive has a negative binding revision", call.ID)
-		}
-	}
-	return nil
 }
 
 func (f *LoopFinal) validate() error {

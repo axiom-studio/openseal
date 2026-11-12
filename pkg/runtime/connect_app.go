@@ -22,11 +22,6 @@ import (
 // or without connections.
 const SkillActionFindApps = "find_apps"
 
-// SkillActionRequestConnection asks the user, through a durable in-chat
-// card, to connect one catalog app (or an MCP server address). It pauses the
-// requesting Run until the connection is active or the card is dismissed.
-const SkillActionRequestConnection = "request_connection"
-
 // ConnectAppWakeType parks the requesting Run until the requested app is
 // connected for it or the card is dismissed.
 const ConnectAppWakeType = "connect_app"

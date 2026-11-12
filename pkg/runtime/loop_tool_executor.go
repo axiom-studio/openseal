@@ -452,13 +452,6 @@ func (x *claimToolExecutor) newStepToolRun(in StepToolsInput, step *AgentTurn, e
 	return r, nil
 }
 
-func stepIDOf(step *AgentTurn) string {
-	if step == nil {
-		return ""
-	}
-	return step.ID
-}
-
 func (r *stepToolRun) run() *AgentRun {
 	r.mu.Lock()
 	defer r.mu.Unlock()

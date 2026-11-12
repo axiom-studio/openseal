@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
 
@@ -501,4 +502,34 @@ func (d *drive) failWithoutStep(ctx context.Context, failure LoopFailure, cause 
 		return RunLoopExit{Run: d.run, Reason: RunLoopExitFailed, Err: errors.New("run failure did not end the run")}
 	}
 	return res.exit
+}
+
+func validatePreparedSkillRuntimes(binding *TurnRunnerBinding) error {
+	seen := make(map[string]bool, len(binding.PreparedRuntimes))
+	for index := range binding.PreparedRuntimes {
+		prepared := &binding.PreparedRuntimes[index]
+		if strings.TrimSpace(prepared.DeploymentID) == "" || strings.TrimSpace(prepared.BindingID) == "" || prepared.BindingRevision < 1 || strings.TrimSpace(prepared.SkillID) == "" || strings.TrimSpace(prepared.SkillVersion) == "" {
+			return errors.New("prepared Skill runtime binding identity is invalid")
+		}
+		if err := skill.ValidatePreparedRuntimeReference(&prepared.Runtime); err != nil {
+			return fmt.Errorf("prepared Skill runtime binding is invalid: %w", err)
+		}
+		key := fmt.Sprintf("%s:%s@%d:%s@%s", prepared.DeploymentID, prepared.BindingID, prepared.BindingRevision, prepared.SkillID, prepared.SkillVersion)
+		if seen[key] {
+			return errors.New("prepared Skill runtime binding is duplicated")
+		}
+		seen[key] = true
+		authorized := false
+		for actionIndex := range binding.ModelActions {
+			action := &binding.ModelActions[actionIndex]
+			if action.DeploymentID == prepared.DeploymentID && action.BindingID == prepared.BindingID && action.BindingRevision == prepared.BindingRevision && action.SkillID == prepared.SkillID && action.Version == prepared.SkillVersion {
+				authorized = true
+				break
+			}
+		}
+		if !authorized {
+			return errors.New("prepared Skill runtime is not bound to an authorized model action")
+		}
+	}
+	return nil
 }

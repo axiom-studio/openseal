@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -101,4 +102,18 @@ func (EligibleApprovalAuthorizer) AuthorizeApproval(_ context.Context, principal
 		}
 	}
 	return errors.New("principal is not eligible to resolve this approval")
+}
+
+// effectiveExternalOperationPolicy preserves the documented empty-policy
+// behavior only for genuinely external actions. Session-local and preparatory
+// actions cannot own a durable cross-Run external-operation identity, so an
+// omitted policy is forbidden for them.
+func effectiveExternalOperationPolicy(sideEffect capability.SideEffect, policy capability.ExternalOperationPolicy) capability.ExternalOperationPolicy {
+	if policy != "" {
+		return policy
+	}
+	if sideEffect == capability.SideEffectExternal {
+		return capability.ExternalOperationOptional
+	}
+	return capability.ExternalOperationForbidden
 }

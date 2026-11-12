@@ -474,16 +474,6 @@ func (x *ControlExecutor) forkResultValue(ctx context.Context, source *AgentRun,
 	}, nil
 }
 
-// forkChildAnswer is a child's final answer: its report, else its summary.
-func forkChildAnswer(child *AgentRun) string {
-	for _, key := range []string{finalOutputReportKey, finalOutputSummaryKey} {
-		if text, ok := child.Output[key].(string); ok && strings.TrimSpace(text) != "" {
-			return strings.TrimSpace(text)
-		}
-	}
-	return ""
-}
-
 // controlResultText is the message of an is_error control result.
 func controlResultText(result *ToolResult) string {
 	if result == nil {

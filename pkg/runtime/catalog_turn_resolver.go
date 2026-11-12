@@ -13,22 +13,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
-	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"go.uber.org/zap"
 )
-
-// AgentTurnCatalog is the portable, product-neutral catalog required to bind
-// a durable Run to its immutable Agent definition and activated Skills.
-type AgentTurnCatalog interface {
-	GetAgentDeployment(context.Context, skill.ScopeReference, string) (*kernelagent.AgentDeployment, error)
-	ListAgentDeployments(context.Context, kernelagent.AgentDeploymentFilter) ([]*kernelagent.AgentDeployment, error)
-	GetAgentDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
-	ActivateSkills(context.Context, skill.ScopeReference, string, skill.HostCapabilityState) (*skill.ActivationSnapshot, error)
-	// ActionCallReader lets deterministic producers (capability invocation)
-	// read the authoritative ActionCall behind their tool entry.
-	ActionCallReader
-}
 
 // LoopBindingConfig wires the kernel services every catalog loop binding uses.
 // One config serves every claim of a process; ResolveLoopBinding adds what
@@ -484,24 +471,6 @@ func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*Agen
 	return opened.Session, nil
 }
 
-// loopRunSessionSeed is the first entry of a model Run's fresh run session:
-// a control-tool child's brief (task, fork branch, decision, review,
-// delegation), otherwise the Run's goal as a routine brief. nil when the Run
-// has no goal.
-func loopRunSessionSeed(run *AgentRun) (*SessionEntry, error) {
-	if _, trial := run.Context[AgentTrialContextKey]; trial {
-		return agentTrialSessionSeed(run)
-	}
-	seed, err := controlChildSeed(run)
-	if err != nil || seed != nil {
-		return seed, err
-	}
-	if strings.TrimSpace(run.Goal) == "" {
-		return nil, nil
-	}
-	return childSessionSeed(run.Scope, run.ID, "routine", run.Goal)
-}
-
 // workspace is the claim's chat Workspace, nil outside a claim, without a
 // resolver or when the Run works in no chat. A resolver error runs the claim
 // without host tools.
@@ -635,67 +604,6 @@ func delegatedFromCurrentRunbook(run *AgentRun, definition *runbook.Definition) 
 	definitionID, _ := triggerInput["runbookDefinitionId"].(string)
 	definitionVersion, _ := triggerInput["runbookDefinitionVersion"].(string)
 	return strings.TrimSpace(definitionID) == definition.ID && strings.TrimSpace(definitionVersion) == definition.Version
-}
-
-func resolveHostedAgentTargets(
-	ctx context.Context,
-	catalog AgentTurnCatalog,
-	scope skill.ScopeReference,
-	run *AgentRun,
-	currentDeploymentID string,
-) ([]HostedAgentTarget, error) {
-	if run == nil || run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.Owner.ID) == "" {
-		return nil, nil
-	}
-	teamCatalog, ok := catalog.(TeamSkillAuthorityCatalog)
-	if !ok {
-		return nil, errors.New("Team delegation authority resolution is unavailable")
-	}
-	teamDeployment, err := teamCatalog.GetTeamDeployment(ctx, scope, run.Owner.ID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve Team delegation roster: %w", err)
-	}
-	if teamDeployment == nil || teamDeployment.Status != kernelteam.DeploymentActive {
-		return nil, errors.New("Team delegation roster is not active")
-	}
-	allowed := make(map[string]struct{}, len(teamDeployment.Roster))
-	for _, assignment := range teamDeployment.Roster {
-		if id := strings.TrimSpace(assignment.AgentDeploymentID); id != "" && id != currentDeploymentID {
-			allowed[id] = struct{}{}
-		}
-	}
-	if len(allowed) == 0 {
-		return nil, nil
-	}
-	deployments, err := catalog.ListAgentDeployments(ctx, kernelagent.AgentDeploymentFilter{Scope: scope})
-	if err != nil {
-		return nil, err
-	}
-	targets := make([]HostedAgentTarget, 0, len(deployments))
-	for _, candidate := range deployments {
-		if candidate == nil || candidate.ID == currentDeploymentID ||
-			candidate.RolloutStatus != kernelagent.RolloutActive || strings.TrimSpace(candidate.ActiveVersion) == "" {
-			continue
-		}
-		if _, authorized := allowed[candidate.ID]; !authorized {
-			continue
-		}
-		definition, err := catalog.GetAgentDefinition(ctx, candidate.DefinitionID, candidate.ActiveVersion)
-		if err != nil {
-			return nil, fmt.Errorf("resolve Agent %s definition: %w", candidate.ID, err)
-		}
-		if definition == nil {
-			return nil, fmt.Errorf("resolve Agent %s definition: definition is unavailable", candidate.ID)
-		}
-		targets = append(targets, HostedAgentTarget{
-			ID: strings.TrimSpace(candidate.ID), DisplayName: strings.TrimSpace(definition.DisplayName),
-			Purpose: strings.TrimSpace(definition.Purpose),
-		})
-	}
-	// A paused or removed member is simply not a delegation target, the same
-	// way it sits out Team routing; it must not stop the rest of the Team.
-	sort.Slice(targets, func(i, j int) bool { return targets[i].ID < targets[j].ID })
-	return targets, nil
 }
 
 func hostedAgentInstructions(definition *kernelagent.AgentDefinition) []string {
@@ -868,4 +776,25 @@ func kernelManagementBindingID(skillID, version string) string {
 	default:
 		return ""
 	}
+}
+
+// agentTrial binds a trial child: the builder's deployment and definition
+// identity (the host's model grant checks it), the drafted persona as the
+// Agent instructions, the drafted model, and no actions, workspace tools or
+// control tools beyond the final answer.
+func (r *loopBindingResolution) agentTrial(ctx context.Context, trial *AgentTrialContext) (*TurnRunnerBinding, error) {
+	if r.run.Kind != RunKindAgentWork || r.run.ParentRunID == "" || r.run.ParentRunID != trial.ParentRunID {
+		return nil, errors.New("agent trial context does not belong to this Run")
+	}
+	profile := trial.Profile
+	r.definition = &kernelagent.AgentDefinition{
+		ID: r.definition.ID, Version: r.definition.Version,
+		DisplayName: profile.DisplayName, Purpose: profile.Purpose, SystemPrompt: profile.SystemPrompt,
+		Personality: profile.Personality, OperatingPrinciples: append([]string(nil), profile.OperatingPrinciples...),
+	}
+	r.trial = true
+	binding := r.identity(r.deployment.ID)
+	binding.Model, _ = r.run.Context[AgentTrialModelContextKey].(string)
+	binding.Model = strings.TrimSpace(binding.Model)
+	return r.model(ctx, binding, nil, PromptContribution{}, false)
 }

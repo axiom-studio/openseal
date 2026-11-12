@@ -184,3 +184,6 @@ func wakeConditionMatches(condition *WakeCondition, signal WakeSignal) bool {
 	}
 	return true
 }
+
+// AgentTrialWakeType is the wake a parent waits on while its trial runs.
+const AgentTrialWakeType = "agent_trial"

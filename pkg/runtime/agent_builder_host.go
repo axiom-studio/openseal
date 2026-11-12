@@ -77,8 +77,6 @@ const (
 	AgentTrialModelContextKey = "_opensealAgentTrialModel"
 	// AgentTrialContextKey holds the AgentTrialContext of a try_agent child Run.
 	AgentTrialContextKey = "_opensealAgentTrial"
-	// AgentTrialWakeType is the wake a parent waits on while its trial runs.
-	AgentTrialWakeType = "agent_trial"
 )
 
 // AgentTrialContext is the drafted profile a try_agent child Run speaks as.

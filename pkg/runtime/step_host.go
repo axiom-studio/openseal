@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,15 +11,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
-
-// StepHost runs one model call or one host-native tool for the kernel loop.
-// Atlas implements it over HTTP (sentinel → atlas), the OSS daemon in
-// process. Neither call executes governed actions: those run inline in the
-// kernel.
-type StepHost interface {
-	ExecuteModelStep(ctx context.Context, req ModelStepRequest) (ModelStepResult, error)
-	ExecuteHostTool(ctx context.Context, req HostToolRequest) (HostToolResult, error)
-}
 
 // maxModelStepResultTextBytes caps the assistant text of one model step.
 const maxModelStepResultTextBytes = 256 << 10
@@ -190,28 +180,6 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-// HostedAgentTarget is one active, same-scope Agent deployment eligible for
-// bounded delegation. ID is the only durable identity; DisplayName and Purpose
-// are model-facing discovery labels and are never persisted as substitutes.
-type HostedAgentTarget struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName"`
-	Purpose     string `json:"purpose,omitempty"`
-}
-
-// HostedRunbookOperation is one immutable deterministic operation the current
-// cognitive Agent may invoke. It contains no graph internals or credentials;
-// the kernel resolves the exact active definition again at materialization.
-type HostedRunbookOperation struct {
-	DefinitionID      string                 `json:"-"`
-	DefinitionVersion string                 `json:"-"`
-	Entrypoint        string                 `json:"entrypoint"`
-	Name              string                 `json:"name"`
-	Description       string                 `json:"description"`
-	InputSchema       map[string]interface{} `json:"inputSchema"`
-	OutputSchema      map[string]interface{} `json:"outputSchema,omitempty"`
-}
-
 // HostedRunBudget is the capacity visible to one step of a bounded Run.
 // Policy distinguishes an unbounded zero from an exhausted zero; Remaining
 // has already accounted for committed usage, live reservations and durable
@@ -237,20 +205,6 @@ func remainingBudgetDimension(limit, used, allocated int64) int64 {
 		return 0
 	}
 	return remaining
-}
-
-// effectiveExternalOperationPolicy preserves the documented empty-policy
-// behavior only for genuinely external actions. Session-local and preparatory
-// actions cannot own a durable cross-Run external-operation identity, so an
-// omitted policy is forbidden for them.
-func effectiveExternalOperationPolicy(sideEffect capability.SideEffect, policy capability.ExternalOperationPolicy) capability.ExternalOperationPolicy {
-	if policy != "" {
-		return policy
-	}
-	if sideEffect == capability.SideEffectExternal {
-		return capability.ExternalOperationOptional
-	}
-	return capability.ExternalOperationForbidden
 }
 
 func resolveHostedAgentTarget(reference string, eligible []HostedAgentTarget) (string, error) {

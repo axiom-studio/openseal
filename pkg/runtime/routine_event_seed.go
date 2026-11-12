@@ -421,3 +421,21 @@ func cutJSONEscaped(s string, budget int) string {
 	}
 	return s
 }
+
+// loopRunSessionSeed is the first entry of a model Run's fresh run session:
+// a control-tool child's brief (task, fork branch, decision, review,
+// delegation), otherwise the Run's goal as a routine brief. nil when the Run
+// has no goal.
+func loopRunSessionSeed(run *AgentRun) (*SessionEntry, error) {
+	if _, trial := run.Context[AgentTrialContextKey]; trial {
+		return agentTrialSessionSeed(run)
+	}
+	seed, err := controlChildSeed(run)
+	if err != nil || seed != nil {
+		return seed, err
+	}
+	if strings.TrimSpace(run.Goal) == "" {
+		return nil, nil
+	}
+	return childSessionSeed(run.Scope, run.ID, "routine", run.Goal)
+}

@@ -4,16 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/axiom-studio/openseal/pkg/skill"
-	"golang.org/x/mod/semver"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
+	"golang.org/x/mod/semver"
 )
 
-const SkillActionRequestSetup = "request_setup"
 const SkillActionListSetupRequests = "list_setup_requests"
 
 type skillSetupArguments struct {

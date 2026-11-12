@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 // ControlAuthorityInput is what the loop binding knows about a claim when it
@@ -123,4 +126,65 @@ func controlFinalMode(run *AgentRun) FinalAnswerMode {
 		return FinalModeSpoken
 	}
 	return FinalModeDefault
+}
+
+func resolveHostedAgentTargets(
+	ctx context.Context,
+	catalog AgentTurnCatalog,
+	scope skill.ScopeReference,
+	run *AgentRun,
+	currentDeploymentID string,
+) ([]HostedAgentTarget, error) {
+	if run == nil || run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.Owner.ID) == "" {
+		return nil, nil
+	}
+	teamCatalog, ok := catalog.(TeamSkillAuthorityCatalog)
+	if !ok {
+		return nil, errors.New("Team delegation authority resolution is unavailable")
+	}
+	teamDeployment, err := teamCatalog.GetTeamDeployment(ctx, scope, run.Owner.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve Team delegation roster: %w", err)
+	}
+	if teamDeployment == nil || teamDeployment.Status != kernelteam.DeploymentActive {
+		return nil, errors.New("Team delegation roster is not active")
+	}
+	allowed := make(map[string]struct{}, len(teamDeployment.Roster))
+	for _, assignment := range teamDeployment.Roster {
+		if id := strings.TrimSpace(assignment.AgentDeploymentID); id != "" && id != currentDeploymentID {
+			allowed[id] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return nil, nil
+	}
+	deployments, err := catalog.ListAgentDeployments(ctx, kernelagent.AgentDeploymentFilter{Scope: scope})
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]HostedAgentTarget, 0, len(deployments))
+	for _, candidate := range deployments {
+		if candidate == nil || candidate.ID == currentDeploymentID ||
+			candidate.RolloutStatus != kernelagent.RolloutActive || strings.TrimSpace(candidate.ActiveVersion) == "" {
+			continue
+		}
+		if _, authorized := allowed[candidate.ID]; !authorized {
+			continue
+		}
+		definition, err := catalog.GetAgentDefinition(ctx, candidate.DefinitionID, candidate.ActiveVersion)
+		if err != nil {
+			return nil, fmt.Errorf("resolve Agent %s definition: %w", candidate.ID, err)
+		}
+		if definition == nil {
+			return nil, fmt.Errorf("resolve Agent %s definition: definition is unavailable", candidate.ID)
+		}
+		targets = append(targets, HostedAgentTarget{
+			ID: strings.TrimSpace(candidate.ID), DisplayName: strings.TrimSpace(definition.DisplayName),
+			Purpose: strings.TrimSpace(definition.Purpose),
+		})
+	}
+	// A paused or removed member is simply not a delegation target, the same
+	// way it sits out Team routing; it must not stop the rest of the Team.
+	sort.Slice(targets, func(i, j int) bool { return targets[i].ID < targets[j].ID })
+	return targets, nil
 }

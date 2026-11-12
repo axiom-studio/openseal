@@ -224,3 +224,9 @@ func (a *teamSkillAuthority) allowsRisk(risk capability.RiskLevel) bool {
 	}
 	return risk.RankUnknownHighest() <= maximum.RankUnknownHighest()
 }
+
+// teamRosterReader returns store's Team deployment reader, or nil.
+func teamRosterReader(store any) TeamRosterReader {
+	teams, _ := store.(TeamRosterReader)
+	return teams
+}

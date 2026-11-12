@@ -36,17 +36,6 @@ const ToolGuardImageProviderRejected = "image_provider_rejected"
 // imageProviderRejectedRefusalText is the exact model-facing refusal.
 const imageProviderRejectedRefusalText = "The image provider rejected this request; ask the user to change the image settings."
 
-// loopActionCallPageSize pages a Run's failed action calls.
-const loopActionCallPageSize = 200
-
-type loopSessionEntryLister interface {
-	ListAgentSessionEntries(ctx context.Context, filter SessionEntryFilter) ([]*SessionEntry, error)
-}
-
-type loopActionCallLister interface {
-	ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error)
-}
-
 // loopErrorStreak counts the trailing consecutive steps of entries (one Run's
 // tool and user entries in sequence order) whose tool results are all
 // is_error.

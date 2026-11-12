@@ -19,11 +19,6 @@ const (
 	agentBehaviorCandidateVersion = ".action."
 )
 
-// ErrAgentBehaviorFixed rejects a self-amendment by an Agent whose definition
-// does not allow Agent-proposed amendments, such as the platform assistant.
-// No correction can change that policy, so the attempt ends with a fixed reply.
-var ErrAgentBehaviorFixed = errors.New("agent definition policy does not allow Agent-proposed amendments")
-
 type agentBehaviorActionArguments struct {
 	ExpectedDeploymentRevision int64                              `json:"expectedDeploymentRevision"`
 	DisplayName                *string                            `json:"displayName,omitempty"`

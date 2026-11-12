@@ -184,11 +184,6 @@ func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, sc
 	return delivery.Delivery, nil
 }
 
-// ChannelReviewParticipantID sends review-request projections. Seal Chat shows
-// its own approval and setup cards and hides these messages; they never wake
-// the owning Agent.
-const ChannelReviewParticipantID = "openseal.channel-review"
-
 func (w *RunProgressAcknowledgementWorker) postReview(ctx context.Context, item *ExternalConversationInboxItem, references []ConversationReference, key, text string) (*ChannelMessage, error) {
 	for range 3 {
 		conversation, err := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)

@@ -16,15 +16,9 @@ import (
 )
 
 const (
-	// AgentRequestInboxContextKey is kernel-authored input for a bounded
-	// recipient decision Run. It is model-visible but never model-writable.
-	AgentRequestInboxContextKey = "agentRequestInbox"
 	// AgentRequestDecisionOutputKey is the only model output consumed as an
 	// AgentRequest lifecycle decision.
 	AgentRequestDecisionOutputKey = "agentRequestDecision"
-	// AgentRequestCompletionReviewContextKey is kernel-authored input for the
-	// requester-side independent review of completed delegated work.
-	AgentRequestCompletionReviewContextKey = "agentRequestCompletionReview"
 	// AgentRequestCompletionReviewOutputKey is the only model output consumed
 	// to resolve an independent completion-review checkpoint.
 	AgentRequestCompletionReviewOutputKey = "agentRequestCompletionReviewDecision"

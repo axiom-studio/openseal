@@ -16,9 +16,8 @@ import (
 // consumeSteering never turns that intervention into a user entry (SPEC §3.4).
 
 const (
-	conversationClarificationKeyPrefix = "conversation-clarification:"
-	askUserWaitReason                  = "question"
-	askUserParkSummary                 = "Asked a question"
+	askUserWaitReason  = "question"
+	askUserParkSummary = "Asked a question"
 )
 
 type askUserHandler struct{}
@@ -59,12 +58,6 @@ func (askUserHandler) Decode(raw json.RawMessage) (interface{}, error) {
 		return nil, err
 	}
 	return args, nil
-}
-
-// conversationClarificationKey is the idempotency key of the question message
-// an ask_user entry posts.
-func conversationClarificationKey(runID, entryID string) string {
-	return conversationClarificationKeyPrefix + runID + ":" + entryID
 }
 
 func askUserPark(entryID string) *LoopPark {
@@ -180,19 +173,6 @@ func askUserResultAnswer(entry *SessionEntry) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// conversationQuestionPostRequest is the one shape of a clarification question
-// message; the ask_user settle and the question reconciler post the same
-// request, so either replays the other.
-func conversationQuestionPostRequest(run *AgentRun, conversation *Conversation, trigger *ChannelMessage, args *askUserArgs, key string) PostChannelMessageRequest {
-	return PostChannelMessageRequest{
-		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: ConversationRunAgentID(conversation, run)},
-		Intent: MessageIntentQuestion, Content: args.Question, Question: args.ChannelQuestion(), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-		ReplyToMessageID: trigger.ID, RequiresResponse: true, References: conversationClarificationReferences(run),
-		IdempotencyKey: key,
-	}
 }
 
 // postAskUserQuestion posts the question idempotently. A conversation that

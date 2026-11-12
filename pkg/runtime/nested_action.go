@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 const (
@@ -263,4 +264,44 @@ func (c *ActionCoordinator) GetNested(ctx context.Context, scope Scope, runID, a
 		}
 	}
 	return result, nil
+}
+
+// preparedRuntimeForAction is the activation-time runtime prepared for the
+// selected action's exact binding, if any.
+func preparedRuntimeForAction(binding *TurnRunnerBinding, selected *capability.ModelAction) *skill.PreparedRuntime {
+	for runtimeIndex := range binding.PreparedRuntimes {
+		prepared := &binding.PreparedRuntimes[runtimeIndex]
+		if prepared.DeploymentID == selected.DeploymentID && prepared.BindingID == selected.BindingID && prepared.BindingRevision == selected.BindingRevision &&
+			prepared.SkillID == selected.SkillID && prepared.SkillVersion == selected.Version {
+			copy := prepared.Runtime
+			copy.Executables = append([]string(nil), prepared.Runtime.Executables...)
+			return &copy
+		}
+	}
+	return nil
+}
+
+// selectTurnModelAction resolves a proposal exactly by name and, when the
+// proposal carries one, binding. A name exposed twice is refused even when the
+// proposal names a binding: a catalog with duplicate names is itself invalid.
+func selectTurnModelAction(actions []capability.ModelAction, request TurnAction) (*capability.ModelAction, error) {
+	var selected *capability.ModelAction
+	matches := 0
+	for index := range actions {
+		candidate := &actions[index]
+		if candidate.Name != request.Capability {
+			continue
+		}
+		if matches++; matches > 1 {
+			return nil, fmt.Errorf("requested capability %q is ambiguous: more than one binding exposes it", request.Capability)
+		}
+		if request.BindingID != "" && (candidate.BindingID != request.BindingID || candidate.BindingRevision != request.BindingRevision) {
+			continue
+		}
+		selected = candidate
+	}
+	if request.ExpectedSkillVersion != "" && (selected == nil || selected.Version != request.ExpectedSkillVersion) {
+		return nil, fmt.Errorf("%w: requested capability %q version %q is not authorized by the current binding", ErrRunSkillDependencyUnavailable, request.Capability, request.ExpectedSkillVersion)
+	}
+	return selected, nil
 }

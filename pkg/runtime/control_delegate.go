@@ -664,3 +664,34 @@ func delegationAnswer(run *AgentRun, request *AgentRequest) string {
 	}
 	return strings.TrimSpace(request.CompletionSummary)
 }
+
+func delegatedRunbookOrigin(contextValues map[string]interface{}) map[string]interface{} {
+	if contextValues == nil {
+		return nil
+	}
+	definitionID, _ := contextValues["runbookDefinitionId"].(string)
+	definitionVersion, _ := contextValues["runbookDefinitionVersion"].(string)
+	if strings.TrimSpace(definitionID) == "" || strings.TrimSpace(definitionVersion) == "" {
+		return nil
+	}
+	origin := map[string]interface{}{
+		"runbookDefinitionId":      strings.TrimSpace(definitionID),
+		"runbookDefinitionVersion": strings.TrimSpace(definitionVersion),
+	}
+	if value, ok := contextValues["runbookEntrypoint"].(string); ok && strings.TrimSpace(value) != "" {
+		origin["runbookEntrypoint"] = strings.TrimSpace(value)
+	}
+	for _, key := range []string{"runbookActivationId", "runbookTriggerId"} {
+		if value, ok := contextValues[key].(string); ok && strings.TrimSpace(value) != "" {
+			origin[key] = strings.TrimSpace(value)
+		}
+	}
+	return origin
+}
+
+func stepIDOf(step *AgentTurn) string {
+	if step == nil {
+		return ""
+	}
+	return step.ID
+}

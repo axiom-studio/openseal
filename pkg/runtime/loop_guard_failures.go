@@ -8,7 +8,6 @@ const (
 	RunFailureKindRepeatLimit     = "repeat_limit"
 	RunFailureKindContextOverflow = "context_overflow"
 
-	RunFailureCodeRepeatLimit      = "repeat_limit"
 	RunFailureCodeErrorStreak      = "error_streak"
 	RunFailureCodeCompactionFailed = "compaction_failed"
 )
