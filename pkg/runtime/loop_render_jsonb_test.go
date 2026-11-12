@@ -90,7 +90,7 @@ func TestAStoredResultOverTheCapIsShortenedNotFatal(t *testing.T) {
 
 // A model step refused for its content is not reported as a misconfigured host.
 func TestAnInvalidStepRequestIsNotCalledAHostProblem(t *testing.T) {
-	err := fmt.Errorf("%w: %w", ErrTurnHostConfiguration, invalidModelStep("tool entry e1 result text and json are 70000 bytes (max 65536)"))
+	err := fmt.Errorf("%w: %w", ErrTurnHostConfiguration, fmt.Errorf("%w: tool entry e1 result text and json are 70000 bytes (max 65536)", ErrInvalidModelStepRequest))
 	if !errors.Is(err, ErrTurnHostConfiguration) || !errors.Is(err, ErrInvalidModelStepRequest) {
 		t.Fatal("the wrapped error lost a cause")
 	}

@@ -295,7 +295,8 @@ func TestRecordStepModelTruncates2000(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(recorded.OutputSummary) > maximumStepNarrationBytes || len(recorded.OutputSummary) < maximumStepNarrationBytes-3 ||
+		const narrationLimit = 2000 // the step narration bound
+		if len(recorded.OutputSummary) > narrationLimit || len(recorded.OutputSummary) < narrationLimit-3 ||
 			!utf8.ValidString(recorded.OutputSummary) || !strings.HasPrefix(narration, recorded.OutputSummary) {
 			t.Fatalf("narration was not cut on a rune boundary within 2000 bytes: %d bytes", len(recorded.OutputSummary))
 		}
