@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -24,14 +25,14 @@ import (
 // a history scan. After measurement they are completed to measure the empty
 // active page in the same conversation with the same retained history.
 func BenchmarkConversationTaskSQLiteActiveHistory(b *testing.B) {
-	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) (conversationTaskSQLTestStore, conversationTaskBenchmarkExplainPlans) {
+	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) (storetest.ConversationTaskStore, conversationTaskBenchmarkExplainPlans) {
 		path := filepath.Join(b.TempDir(), "tasks.db")
 		store, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			b.Fatal(err)
 		}
 		b.Cleanup(func() { _ = store.Close() })
-		db := openTestSQLiteDB(b, path)
+		db := conversationtest.OpenSQLiteDB(b, path)
 		return store, func(b *testing.B, filter models.ConversationTaskFilter, _ int) {
 			conversationTaskBenchmarkExplain(b, db, filter)
 			conversationActiveRunsBenchmarkExplain(b, db, filter)
@@ -44,7 +45,7 @@ func BenchmarkConversationTaskPostgresActiveHistory(b *testing.B) {
 	if dsn == "" {
 		b.Skip("set OPENSEAL_TASK_BENCH_POSTGRES_DSN to an isolated benchmark database")
 	}
-	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) (conversationTaskSQLTestStore, conversationTaskBenchmarkExplainPlans) {
+	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) (storetest.ConversationTaskStore, conversationTaskBenchmarkExplainPlans) {
 		db, err := sql.Open("postgres", dsn)
 		if err != nil {
 			b.Fatal(err)
@@ -77,7 +78,7 @@ func BenchmarkConversationTaskPostgresActiveHistory(b *testing.B) {
 // connection to the store's database.
 type conversationTaskBenchmarkExplainPlans func(b *testing.B, filter models.ConversationTaskFilter, history int)
 
-func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) (conversationTaskSQLTestStore, conversationTaskBenchmarkExplainPlans)) {
+func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) (storetest.ConversationTaskStore, conversationTaskBenchmarkExplainPlans)) {
 	for _, history := range []int{100, 10000} {
 		b.Run(fmt.Sprintf("completed_%d", history), func(b *testing.B) {
 			store, explain := open(b)
@@ -236,7 +237,7 @@ func conversationTaskBenchmarkExplain(t testing.TB, db *sql.DB, filter models.Co
 	}
 }
 
-func conversationTaskBenchmarkRecord(t testing.TB, store conversationTaskSQLTestStore, suffix string, at time.Time) models.ConversationTaskCreateRecord {
+func conversationTaskBenchmarkRecord(t testing.TB, store storetest.ConversationTaskStore, suffix string, at time.Time) models.ConversationTaskCreateRecord {
 	t.Helper()
 	now := at
 	expires := time.Now().UTC().Add(10 * time.Minute)

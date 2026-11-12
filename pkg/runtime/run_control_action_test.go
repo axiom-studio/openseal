@@ -7,12 +7,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestRunActionValidatorResolvesRevisionAndEnforcesConversationOwner(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "1"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}
 	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
@@ -46,7 +47,7 @@ func TestRunActionValidatorResolvesRevisionAndEnforcesConversationOwner(t *testi
 
 func TestRunActionDispatcherCancelsWaitingApprovalRun(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "1"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}
 	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{

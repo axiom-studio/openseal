@@ -4,11 +4,12 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 func TestConversationOperationFailedHasNoSavedOutput(t *testing.T) {
 	failed := &models.AgentRun{ID: "operation", Status: models.AgentRunStatusFailed, Output: map[string]interface{}{"summary": "partial draft"}}
-	if output, err := conversationOperationSavedOutput(t.Context(), newTestKernelStore(t), failed); err != nil || output != "" {
+	if output, err := conversationOperationSavedOutput(t.Context(), conversationtest.NewStore(t), failed); err != nil || output != "" {
 		t.Fatalf("failed operation output = %q, %v", output, err)
 	}
 }

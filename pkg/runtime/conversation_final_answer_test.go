@@ -60,7 +60,7 @@ type finalDeliveryFixture struct {
 	runner       *ConversationRunTurnRunner
 	actions      *fakeActionCalls
 	handler      *conversationFinalHandler
-	content      *answerVisualContent
+	content      *visualTestContent
 	now          time.Time
 	steps        int
 }
@@ -94,7 +94,7 @@ func newFinalDeliveryFixture(t *testing.T, base conversationtest.ThreadStartStor
 	if options.team {
 		owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-1"}
 	}
-	seedTestSpace(t, store.(models.SpaceStore), scope)
+	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Final answers", IdempotencyKey: "final-" + uuid.NewString()[:8],
 	})
@@ -137,11 +137,11 @@ func newFinalDeliveryFixture(t *testing.T, base conversationtest.ThreadStartStor
 	if err != nil {
 		t.Fatalf("open session: %v", err)
 	}
-	coordinator := conversationRunTestCoordinator
+	coordinator := newTestCoordinator
 	if options.coordinator != nil {
 		coordinator = options.coordinator
 	}
-	content := &answerVisualContent{}
+	content := &visualTestContent{}
 	runner, err := NewConversationRunTurnRunner(store, coordinator(t, service), ConversationRunTurnRunnerConfig{
 		AttachmentContent: content, RequireParticipationOptIn: options.participation, VisualChecks: options.visualChecks,
 	})

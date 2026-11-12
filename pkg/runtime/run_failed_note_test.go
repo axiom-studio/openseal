@@ -12,17 +12,18 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/google/uuid"
 )
 
 func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	ctx := t.Context()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	scope := models.Scope{Kind: "tenant", ID: "run-failed-" + uuid.NewString()[:8]}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
 	service := runtimeconversation.NewConversationService(store)
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)

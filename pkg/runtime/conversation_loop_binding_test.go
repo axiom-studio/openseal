@@ -11,17 +11,17 @@ import (
 )
 
 func TestConversationLoopBindingSetsSeams(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
+	forBindingStores(t, func(t *testing.T, f *bindingFixture) {
 		trigger := f.post("trigger", "user-1", "Hi")
 		run := f.startRun(trigger)
-		binding := f.bind(run, &chatLoopProducer{})
+		binding := f.bind(run, bindingProducer{}, runStartStandIn{})
 		if binding.Session == nil || binding.Session.Revision == 0 || binding.Session.Kind != models.AgentSessionKindConversation {
 			t.Fatalf("lane session not opened: %#v", binding.Session)
 		}
 		if _, ok := binding.Final.(conversationObservedFinal); !ok || binding.ToolCheck == nil || binding.AfterTool == nil || len(binding.Preparers) != 2 {
 			t.Fatalf("seams = final %T check %v after %v preparers %d", binding.Final, binding.ToolCheck != nil, binding.AfterTool != nil, len(binding.Preparers))
 		}
-		if reflect.TypeOf(binding.Preparers[0]) != reflect.TypeOf(newRunStartPreparer(nil, nil)) {
+		if reflect.TypeOf(binding.Preparers[0]) != reflect.TypeOf(runStartStandIn{}) {
 			t.Fatalf("the run-start preparer must stay first: %T", binding.Preparers[0])
 		}
 		authority := binding.Authority
@@ -33,7 +33,7 @@ func TestConversationLoopBindingSetsSeams(t *testing.T) {
 			t.Fatalf("prompt sections = %#v", binding.Prompt.Sections)
 		}
 		// A second claim binds the same session and byte-identical sections.
-		again := f.bind(run, &chatLoopProducer{})
+		again := f.bind(run, bindingProducer{}, runStartStandIn{})
 		a, _ := json.Marshal(binding.Prompt.Sections)
 		b, _ := json.Marshal(again.Prompt.Sections)
 		if again.Session.ID != binding.Session.ID || string(a) != string(b) {

@@ -15,10 +15,10 @@ import (
 
 func promotedContinuationAuthorityFixture(t *testing.T, id string) (*sqlite.Store, *models.ConversationTaskResult, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
-	store, db := newTestSQLiteStore(t)
-	run, conversation, message := continuationLifecycleFixture(t, store, id)
+	store, db := newFileSQLiteStore(t)
+	run, conversation, message := continuationFixture(t, store, id)
 	now := time.Now().UTC()
-	run = backdateContinuationLifecycleRun(t, store, db, run, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))
+	run = backdateContinuationRun(t, store, db, run, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))
 	result, err := store.PromoteConversationTask(t.Context(), models.ConversationTaskPromotionRequest{Scope: run.Scope, RunID: run.ID, Now: now})
 	if err != nil || result == nil {
 		t.Fatalf("promote continuation: %#v %v", result, err)
@@ -41,10 +41,10 @@ func finishContinuationAuthorityRun(t *testing.T, store *sqlite.Store, run *mode
 }
 
 func TestConversationTaskContinuationUsesTaskReserveAndLeavesForegroundSlot(t *testing.T) {
-	store, db := newTestSQLiteStore(t)
-	base, _, _ := continuationLifecycleFixture(t, store, "continuation-reserve")
+	store, db := newFileSQLiteStore(t)
+	base, _, _ := continuationFixture(t, store, "continuation-reserve")
 	now := time.Now().UTC()
-	base = backdateContinuationLifecycleRun(t, store, db, base, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))
+	base = backdateContinuationRun(t, store, db, base, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))
 	for i := range 4 {
 		run := models.CloneAgentRun(base)
 		if i > 0 {
@@ -114,7 +114,7 @@ func TestConversationTaskContinuationAdmitsOriginalDelegatedAuthorityOnly(t *tes
 	}
 	// The handoff moves the parent to its next revision, as a delegation
 	// does.
-	source := getStoredRun(t, store, parent.Scope, parent.ID)
+	source := storedRun(t, store, parent.Scope, parent.ID)
 	source.Revision++
 	if _, err := store.CreateAgentRequest(t.Context(), models.AgentRequestCreateRecord{Request: request, SourceRun: source, ExpectedSourceRevision: source.Revision - 1,
 		Event: &models.ActivityEvent{ID: "original-request-created", Scope: parent.Scope, RunID: parent.ID, EventType: "agent_request.created", Summary: "Hand off the specialist portion",

@@ -5,14 +5,15 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestLocalConversationThreadScopesFollowUpsAndPreservesIndependentWork(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	scope := models.Scope{Kind: "tenant", ID: "local-threads"}
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "local-threads",
 	})
@@ -42,7 +43,7 @@ func TestLocalConversationThreadScopesFollowUpsAndPreservesIndependentWork(t *te
 	}
 	rootOne := post("call-one", "", models.ConversationParticipantService)
 	rootTwo := post("call-two", "", models.ConversationParticipantService)
-	scheduler := mustConversationRunScheduler(t, store)
+	scheduler := newTestScheduler(t, store)
 	schedule := func(message *models.ChannelMessage) *models.AgentRun {
 		t.Helper()
 		result, _, err := scheduler.ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
