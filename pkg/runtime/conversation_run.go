@@ -28,7 +28,7 @@ type ConversationRunSchedulerConfig struct {
 	// embedding hosts retain their prior scheduling policy when false.
 	RequireParticipationOptIn bool
 	// Budget is host-owned and copied onto each newly scheduled Run.
-	Budget *BudgetPolicy
+	Budget *models.BudgetPolicy
 }
 
 func (c ConversationRunSchedulerConfig) normalize() (ConversationRunSchedulerConfig, error) {
@@ -39,13 +39,13 @@ func (c ConversationRunSchedulerConfig) normalize() (ConversationRunSchedulerCon
 		c.MessagePageSize = 100
 	}
 	if c.ConversationPageSize < 1 || c.ConversationPageSize > 1000 || c.MessagePageSize < 1 || c.MessagePageSize > 1000 {
-		return ConversationRunSchedulerConfig{}, fmt.Errorf("%w: conversation reconciliation page sizes must be between 1 and 1000", ErrInvalidConversation)
+		return ConversationRunSchedulerConfig{}, fmt.Errorf("%w: conversation reconciliation page sizes must be between 1 and 1000", models.ErrInvalidConversation)
 	}
 	if c.Budget != nil {
 		if err := c.Budget.Validate(); err != nil {
 			return ConversationRunSchedulerConfig{}, err
 		}
-		c.Budget = cloneBudgetPolicy(c.Budget)
+		c.Budget = models.CloneBudgetPolicy(c.Budget)
 	}
 	return c, nil
 }
@@ -71,19 +71,19 @@ type ConversationRunScheduler struct {
 	sessionContext ConversationSessionContextResolver
 	// conversationStore and runStore are the stores behind conversations
 	// and runs, for the reads the services do not offer.
-	conversationStore ConversationStore
-	runStore          RunCommandStore
+	conversationStore models.ConversationStore
+	runStore          models.RunCommandStore
 	// now is the clock the scheduler gives the services it builds later.
 	now func() time.Time
 }
 
 type ConversationSessionContextResolver interface {
-	ResolveConversationSessionContext(context.Context, Scope, string) (map[string]interface{}, error)
+	ResolveConversationSessionContext(context.Context, models.Scope, string) (map[string]interface{}, error)
 }
 
 func NewConversationRunScheduler(
-	conversationStore ConversationStore,
-	runStore RunCommandStore,
+	conversationStore models.ConversationStore,
+	runStore models.RunCommandStore,
 	config ConversationRunSchedulerConfig,
 	opts ...models.ServiceOption,
 ) (*ConversationRunScheduler, error) {
@@ -113,7 +113,7 @@ func (s *ConversationRunScheduler) SetSessionContextResolver(resolver Conversati
 
 func (s *ConversationRunScheduler) ScheduleMessage(
 	ctx context.Context,
-	scope Scope,
+	scope models.Scope,
 	conversationID string,
 	messageID string,
 ) (*agentrun.AgentRunCommandResult, bool, error) {
@@ -142,7 +142,7 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 	if current != nil {
 		// Existing imported runs retain their original receipt and execution key.
 		// Replaying an event must not recreate or cancel already accepted work.
-		if externalChannelContext(conversation) {
+		if models.IsExternalChannelConversation(conversation) {
 			return &agentrun.AgentRunCommandResult{Run: current}, true, nil
 		}
 		result, err := s.runs.CreateAgentRun(ctx, request)
@@ -160,8 +160,8 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 
 func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	ctx context.Context,
-	conversation *Conversation,
-	message *ChannelMessage,
+	conversation *models.Conversation,
+	message *models.ChannelMessage,
 ) (*agentrun.AgentRunCommandResult, bool, error) {
 	if resumed, handled, err := s.resumeConversationAnswer(ctx, conversation, message); err != nil || handled {
 		return resumed, resumed != nil && resumed.Event == nil, err
@@ -180,26 +180,26 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	return result, result.Event == nil, nil
 }
 
-func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *Conversation, message *ChannelMessage) (CreateAgentRunRequest, error) {
+func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (models.CreateAgentRunRequest, error) {
 	request := runtimeconversation.ConversationAgentRunRequest(conversation, message)
-	request.Budget = cloneBudgetPolicy(s.config.Budget)
+	request.Budget = models.CloneBudgetPolicy(s.config.Budget)
 	if s.sessionContext == nil {
 		return request, nil
 	}
 	session, err := s.sessionContext.ResolveConversationSessionContext(ctx, conversation.Scope, conversation.ID)
 	if err != nil {
-		return CreateAgentRunRequest{}, err
+		return models.CreateAgentRunRequest{}, err
 	}
 	if session != nil {
-		if err := ValidateCredentialFreeContext(session); err != nil {
-			return CreateAgentRunRequest{}, err
+		if err := models.ValidateCredentialFreeContext(session); err != nil {
+			return models.CreateAgentRunRequest{}, err
 		}
 		request.Context[agentrun.RunContextSessionKey] = session
 	}
 	return request, nil
 }
 
-func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Scope) (*ConversationRunReconcileResult, error) {
+func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope models.Scope) (*ConversationRunReconcileResult, error) {
 	if s == nil || s.conversations == nil || s.runs == nil {
 		return nil, errors.New("conversation run scheduler is not configured")
 	}
@@ -215,15 +215,15 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 	}
 
 	for offset := 0; ; offset += s.config.ConversationPageSize {
-		conversations, err := s.conversations.ListConversations(ctx, ConversationFilter{
-			Scope: scope, Statuses: []ConversationStatus{ConversationStatusActive},
+		conversations, err := s.conversations.ListConversations(ctx, models.ConversationFilter{
+			Scope: scope, Statuses: []models.ConversationStatus{models.ConversationStatusActive},
 			Limit: s.config.ConversationPageSize, Offset: offset,
 		})
 		if err != nil {
 			return result, err
 		}
 		for _, conversation := range conversations {
-			if conversation.Owner.Type != OwnerTypeTeam && conversation.Owner.Type != OwnerTypeAgent {
+			if conversation.Owner.Type != models.OwnerTypeTeam && conversation.Owner.Type != models.OwnerTypeAgent {
 				continue
 			}
 			result.Conversations++
@@ -248,11 +248,11 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 // canceling a Run/Approval/ActionCall and projecting that terminal fact back
 // into its command channel. The message key is Run-stable, so any replica can
 // recover it after a restart without duplicating user-visible results.
-func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context.Context, scope Scope, result *ConversationRunReconcileResult) error {
+func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context.Context, scope models.Scope, result *ConversationRunReconcileResult) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
-		runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{
-			Scope: scope, Kind: RunKindConversation, Statuses: []AgentRunStatus{AgentRunStatusCanceled}, Limit: pageSize, Offset: offset,
+		runs, err := s.runStore.ListAgentRuns(ctx, models.AgentRunFilter{
+			Scope: scope, Kind: models.RunKindConversation, Statuses: []models.AgentRunStatus{models.AgentRunStatusCanceled}, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
 			return err
@@ -261,16 +261,16 @@ func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context
 			if run == nil {
 				continue
 			}
-			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
-			if !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) {
+			conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+			triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
+			if !models.IsValidOpaqueIdentifier(conversationID, 128) || !models.IsValidOpaqueIdentifier(triggerID, 128) {
 				continue
 			}
 			conversation, err := s.conversations.GetConversation(ctx, scope, conversationID)
 			if err != nil {
 				return err
 			}
-			if conversation.Status != ConversationStatusActive || conversation.Owner != run.Owner {
+			if conversation.Status != models.ConversationStatusActive || conversation.Owner != run.Owner {
 				continue
 			}
 			trigger, err := s.conversations.GetChannelMessage(ctx, scope, conversationID, triggerID)
@@ -288,14 +288,14 @@ func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context
 				continue
 			}
 			content := "This request was canceled before completion."
-			references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
-			approvals, err := s.runStore.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: run.ID, Status: []ApprovalStatus{ApprovalStatusCanceled}, Limit: 1})
+			references := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}
+			approvals, err := s.runStore.ListApprovals(ctx, models.ApprovalFilter{Scope: scope, RunID: run.ID, Status: []models.ApprovalStatus{models.ApprovalStatusCanceled}, Limit: 1})
 			if err != nil {
 				return err
 			}
 			if len(approvals) == 1 {
 				content = "The proposed action was canceled before execution. No changes were applied."
-				references = append(references, ConversationReference{Kind: ConversationReferenceApproval, ID: approvals[0].ID})
+				references = append(references, models.ConversationReference{Kind: models.ConversationReferenceApproval, ID: approvals[0].ID})
 			}
 			current, err := s.conversations.GetConversation(ctx, scope, conversationID)
 			if err != nil {
@@ -303,12 +303,12 @@ func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context
 			}
 			posted, err := s.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversationID, ExpectedRevision: current.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"},
-				Intent: MessageIntentSystem, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+				Sender: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "openseal.conversation"},
+				Intent: models.MessageIntentSystem, Content: content, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 				ReplyToMessageID: triggerID, References: references, ResolvesMessageID: triggerID,
 				IdempotencyKey: "conversation-run-canceled-result:" + run.ID,
 			})
-			if errors.Is(err, ErrRevisionConflict) {
+			if errors.Is(err, models.ErrRevisionConflict) {
 				continue
 			}
 			if err != nil {
@@ -324,10 +324,10 @@ func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context
 	}
 }
 
-func (s *ConversationRunScheduler) conversationTriggerResolved(ctx context.Context, scope Scope, conversationID, triggerID string) (bool, error) {
+func (s *ConversationRunScheduler) conversationTriggerResolved(ctx context.Context, scope models.Scope, conversationID, triggerID string) (bool, error) {
 	const pageSize = 100
 	for after := int64(0); ; {
-		messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
+		messages, err := s.conversations.ListChannelMessages(ctx, models.ChannelMessageFilter{
 			Scope: scope, ConversationID: conversationID, AfterSequence: after, Limit: pageSize,
 		})
 		if err != nil {
@@ -347,10 +347,10 @@ func (s *ConversationRunScheduler) conversationTriggerResolved(ctx context.Conte
 
 func (s *ConversationRunScheduler) reconcileConversation(
 	ctx context.Context,
-	conversation *Conversation,
+	conversation *models.Conversation,
 	result *ConversationRunReconcileResult,
 ) error {
-	participant := ConversationParticipant{Type: ConversationParticipantService, ID: conversationRunSchedulerParticipant}
+	participant := models.ConversationParticipant{Type: models.ConversationParticipantService, ID: models.ConversationRunSchedulerParticipant}
 	var coordinated map[string]bool
 	for {
 		cursor, err := s.conversations.GetCursor(ctx, conversation.Scope, conversation.ID, participant)
@@ -368,7 +368,7 @@ func (s *ConversationRunScheduler) reconcileConversation(
 		if conversation.LastSequence <= afterSequence {
 			return nil
 		}
-		messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
+		messages, err := s.conversations.ListChannelMessages(ctx, models.ChannelMessageFilter{
 			Scope: conversation.Scope, ConversationID: conversation.ID,
 			AfterSequence: afterSequence, Limit: s.config.MessagePageSize,
 		})
@@ -412,11 +412,11 @@ func (s *ConversationRunScheduler) reconcileConversation(
 	}
 }
 
-func (s *ConversationRunScheduler) coordinatedTriggerIDs(ctx context.Context, conversation *Conversation) (map[string]bool, error) {
+func (s *ConversationRunScheduler) coordinatedTriggerIDs(ctx context.Context, conversation *models.Conversation) (map[string]bool, error) {
 	const pageSize = 100
 	result := make(map[string]bool)
 	for offset := 0; ; offset += pageSize {
-		rounds, err := s.conversations.ListParticipationRounds(ctx, ParticipationRoundFilter{
+		rounds, err := s.conversations.ListParticipationRounds(ctx, models.ParticipationRoundFilter{
 			Scope: conversation.Scope, ConversationID: conversation.ID, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
@@ -435,8 +435,8 @@ func (s *ConversationRunScheduler) coordinatedTriggerIDs(ctx context.Context, co
 
 func (s *ConversationRunScheduler) advanceSchedulerCursor(
 	ctx context.Context,
-	conversation *Conversation,
-	participant ConversationParticipant,
+	conversation *models.Conversation,
+	participant models.ConversationParticipant,
 	sequence int64,
 ) error {
 	for range 3 {
@@ -455,54 +455,54 @@ func (s *ConversationRunScheduler) advanceSchedulerCursor(
 			Scope: conversation.Scope, ConversationID: conversation.ID, Participant: participant,
 			ExpectedRevision: revision, DeliveredSequence: sequence, ReadSequence: sequence,
 		})
-		if !errors.Is(err, ErrConversationCursorConflict) {
+		if !errors.Is(err, models.ErrConversationCursorConflict) {
 			return err
 		}
 	}
-	return ErrConversationCursorConflict
+	return models.ErrConversationCursorConflict
 }
 
-func conversationMessageStartsRun(conversation *Conversation, message *ChannelMessage) bool {
-	if conversation == nil || message == nil || conversation.Status != ConversationStatusActive ||
-		(conversation.Owner.Type != OwnerTypeTeam && conversation.Owner.Type != OwnerTypeAgent) ||
+func conversationMessageStartsRun(conversation *models.Conversation, message *models.ChannelMessage) bool {
+	if conversation == nil || message == nil || conversation.Status != models.ConversationStatusActive ||
+		(conversation.Owner.Type != models.OwnerTypeTeam && conversation.Owner.Type != models.OwnerTypeAgent) ||
 		message.ConversationID != conversation.ID || message.Scope != conversation.Scope {
 		return false
 	}
-	if message.Historical || message.Intent == MessageIntentSystem || message.ParticipationRoundID != "" {
+	if message.Historical || message.Intent == models.MessageIntentSystem || message.ParticipationRoundID != "" {
 		return false
 	}
 	// Approval notifications are control-plane projections for a human reviewer,
 	// not new work for the owning Agent. Scheduling them would let an approval
 	// request recursively trigger another governed action and another approval.
-	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == "approval-coordinator" {
+	if message.Sender.Type == models.ConversationParticipantService && message.Sender.ID == "approval-coordinator" {
 		return false
 	}
 	// Connector review requests project a pending approval or setup request.
-	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == ChannelReviewParticipantID {
+	if message.Sender.Type == models.ConversationParticipantService && message.Sender.ID == ChannelReviewParticipantID {
 		return false
 	}
 	// Saved-artifact receipts project completed work; they are not new tasks.
-	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == runtimeconversation.ConversationArtifactReceiptService {
+	if message.Sender.Type == models.ConversationParticipantService && message.Sender.ID == runtimeconversation.ConversationArtifactReceiptService {
 		return false
 	}
 	// The owning Agent's reply is the projection of the current conversation
 	// Run, never a new wake. Other Agents may still hand work into this channel.
-	if conversation.Owner.Type == OwnerTypeAgent && message.Sender.Type == ConversationParticipantAgent &&
+	if conversation.Owner.Type == models.OwnerTypeAgent && message.Sender.Type == models.ConversationParticipantAgent &&
 		message.Sender.ID == conversation.Owner.ID {
 		return false
 	}
 	// In a Team channel a member's answer is a new wake only when it hands
 	// off: it @mentions a teammate. Anything else would route forever.
-	if conversation.Owner.Type == OwnerTypeTeam && message.Sender.Type == ConversationParticipantAgent {
+	if conversation.Owner.Type == models.OwnerTypeTeam && message.Sender.Type == models.ConversationParticipantAgent {
 		for _, mention := range message.Mentions {
-			if mention.Type == ConversationParticipantAgent && mention != message.Sender {
+			if mention.Type == models.ConversationParticipantAgent && mention != message.Sender {
 				return true
 			}
 		}
 		return false
 	}
 	switch message.Sender.Type {
-	case ConversationParticipantUser, ConversationParticipantAgent, ConversationParticipantService:
+	case models.ConversationParticipantUser, models.ConversationParticipantAgent, models.ConversationParticipantService:
 		return true
 	default:
 		return false
@@ -521,33 +521,33 @@ type ConversationRunTurnRunnerConfig struct {
 	// AttachmentContent supplies tenant-scoped bytes for user-attached text files
 	// and stores the visuals Agents attach to their answers. Attachment content
 	// is projected into the ephemeral model goal, never message state.
-	AttachmentContent ArtifactContentStore
+	AttachmentContent models.ArtifactContentStore
 	// VisualChecks supplies the binding, link, image and place checks for
 	// visuals Team members attach to their answers (places are then stamped
 	// with its PlaceProvenance). The run it gets is the Team's
 	// conversation Run with AssignedAgentID set to the answering member, so
 	// the checks know which Agent published. Nil rejects bound or linked
 	// visuals and visuals with images.
-	VisualChecks func(run *AgentRun) presentation.ValidateOptions
+	VisualChecks func(run *models.AgentRun) presentation.ValidateOptions
 	// HumanParticipants lists the people in a conversation. The card state
 	// note uses it to say how many of them voted in a poll ("4 of 5
 	// voted"); without it the note counts only the votes ("4 voted").
-	HumanParticipants func(ctx context.Context, conversation *Conversation) ([]ConversationParticipant, error)
+	HumanParticipants func(ctx context.Context, conversation *models.Conversation) ([]models.ConversationParticipant, error)
 	// ImageStyle returns the picture style saved by the person this chat
 	// turn answers (the sender of the run's trigger message, Context
 	// "triggerMessageId"; the chat's owner when no person started it), or ""
 	// when none is saved. A non-empty style reaches the Agent as imageStyle
 	// in its turn context. Nil leaves it out.
-	ImageStyle func(ctx context.Context, run *AgentRun) string
+	ImageStyle func(ctx context.Context, run *models.AgentRun) string
 	// WorkMachine says where this Run works on files and commands when the
 	// person chose a machine other than the chat's secure VM, such as their own
 	// computer: a sentence or two for the run_context note, "" for the VM.
-	WorkMachine func(ctx context.Context, run *AgentRun) string
+	WorkMachine func(ctx context.Context, run *models.AgentRun) string
 	// Places returns the places find_place already found in the run's chat,
 	// most recent first. They reach the Agent as places in its turn context
 	// (at most MaximumConversationPlaces) so it reuses their ids instead of
 	// searching again. Nil leaves them out.
-	Places func(ctx context.Context, run *AgentRun) []runtimeconversation.ConversationPlace
+	Places func(ctx context.Context, run *models.AgentRun) []runtimeconversation.ConversationPlace
 }
 
 func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerConfig, error) {
@@ -559,7 +559,7 @@ func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerC
 	}
 	if c.MaximumRetries < 0 || c.MaximumRetries > 100 || c.InitialRetryDelay <= 0 ||
 		c.MaximumRetryDelay < c.InitialRetryDelay || c.MaximumRetryDelay > time.Hour {
-		return ConversationRunTurnRunnerConfig{}, fmt.Errorf("%w: invalid conversation Run retry configuration", ErrInvalidConversation)
+		return ConversationRunTurnRunnerConfig{}, fmt.Errorf("%w: invalid conversation Run retry configuration", models.ErrInvalidConversation)
 	}
 	return c, nil
 }
@@ -571,27 +571,27 @@ func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerC
 // 1:1 chat.
 type ConversationRunTurnRunner struct {
 	conversations *runtimeconversation.ConversationService
-	portfolio     PortfolioStore
-	runbooks      RunbookActivationStore
-	artifacts     ArtifactStore
+	portfolio     models.PortfolioStore
+	runbooks      models.RunbookActivationStore
+	artifacts     models.ArtifactStore
 	coordinator   *runtimeconversation.ConversationCoordinator
 	config        ConversationRunTurnRunnerConfig
 	agentTurns    runtimeconversation.TurnRunnerResolver
 	runs          *agentrun.RunCommandService
 	// The stores of the conversation loop seams (ConversationLoopStores),
 	// taken from the conversation store when it provides them.
-	sessions AgentSessionStore
+	sessions models.AgentSessionStore
 	actions  conversationLoopActions
 	activity activityAppender
 	now      func() time.Time
 	// conversationStore is the store behind conversations; runStore the one
 	// behind runs (nil without runs).
-	conversationStore ConversationStore
-	runStore          RunCommandStore
+	conversationStore models.ConversationStore
+	runStore          models.RunCommandStore
 }
 
 func NewConversationRunTurnRunner(
-	conversationStore ConversationStore,
+	conversationStore models.ConversationStore,
 	coordinator *runtimeconversation.ConversationCoordinator,
 	config ConversationRunTurnRunnerConfig,
 	opts ...models.ServiceOption,
@@ -607,20 +607,20 @@ func NewConversationRunTurnRunner(
 		conversations: runtimeconversation.NewConversationService(conversationStore, opts...), conversationStore: conversationStore, coordinator: coordinator,
 		config: normalized, agentTurns: normalized.AgentTurns, now: models.ClockFrom(opts),
 	}
-	if runs, ok := conversationStore.(RunCommandStore); ok {
+	if runs, ok := conversationStore.(models.RunCommandStore); ok {
 		runner.runs = agentrun.NewRunCommandService(runs, opts...)
 		runner.runStore = runs
 	}
-	if portfolio, ok := conversationStore.(PortfolioStore); ok {
+	if portfolio, ok := conversationStore.(models.PortfolioStore); ok {
 		runner.portfolio = portfolio
 	}
-	if runbooks, ok := conversationStore.(RunbookActivationStore); ok {
+	if runbooks, ok := conversationStore.(models.RunbookActivationStore); ok {
 		runner.runbooks = runbooks
 	}
-	if artifacts, ok := conversationStore.(ArtifactStore); ok {
+	if artifacts, ok := conversationStore.(models.ArtifactStore); ok {
 		runner.artifacts = artifacts
 	}
-	if sessions, ok := conversationStore.(AgentSessionStore); ok {
+	if sessions, ok := conversationStore.(models.AgentSessionStore); ok {
 		runner.sessions = sessions
 	}
 	if actions, ok := conversationStore.(conversationLoopActions); ok {
@@ -634,7 +634,7 @@ func NewConversationRunTurnRunner(
 
 // conversationRunHasActingAgent reports whether a validated conversation Run
 // speaks as an Agent. Only a Team chat's routing Run has none.
-func conversationRunHasActingAgent(run *AgentRun) bool {
+func conversationRunHasActingAgent(run *models.AgentRun) bool {
 	return run != nil && strings.TrimSpace(run.AssignedAgentID) != ""
 }
 
@@ -642,40 +642,40 @@ func conversationRunHasActingAgent(run *AgentRun) bool {
 // in its chat: the owner of an Agent's chat, or a current, authorized member
 // of a Team's. Attribution is kernel-owned and rechecked before resolving an
 // Agent model.
-func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context, run *AgentRun) error {
+func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context, run *models.AgentRun) error {
 	participant := run.AssignedAgentID
-	if !validOpaqueIdentifier(participant, 256) || strings.TrimSpace(participant) != participant {
+	if !models.IsValidOpaqueIdentifier(participant, 256) || strings.TrimSpace(participant) != participant {
 		return errors.New("failed action is missing Agent attribution")
 	}
 	switch run.Owner.Type {
-	case OwnerTypeAgent:
+	case models.OwnerTypeAgent:
 		if participant != run.Owner.ID {
-			return ErrInvalidAgentRun
+			return models.ErrInvalidAgentRun
 		}
 		return nil
-	case OwnerTypeTeam:
+	case models.OwnerTypeTeam:
 	default:
-		return ErrInvalidAgentRun
+		return models.ErrInvalidAgentRun
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	conversation, err := r.conversations.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
 		return err
 	}
 	if conversation.Scope != run.Scope || conversation.Owner != run.Owner {
-		return ErrInvalidAgentRun
+		return models.ErrInvalidAgentRun
 	}
 	trigger, err := r.conversations.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
 	if err != nil {
 		return err
 	}
-	bindings, err := r.coordinator.ResolveParticipants(ctx, runtimeconversation.ConversationParticipantQuery{Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger)})
+	bindings, err := r.coordinator.ResolveParticipants(ctx, runtimeconversation.ConversationParticipantQuery{Conversation: models.CloneConversation(conversation), Trigger: models.CloneChannelMessage(trigger)})
 	if err != nil {
 		return err
 	}
 	for _, binding := range bindings {
-		if binding.Participant.Type == ConversationParticipantAgent && binding.Participant.ID == participant {
+		if binding.Participant.Type == models.ConversationParticipantAgent && binding.Participant.ID == participant {
 			return binding.Validate()
 		}
 	}
@@ -694,7 +694,7 @@ func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context
 //     conversation seams on top (bindConversationLoop);
 //  5. a Team channel's routing Run gets the routing producer: no session, no
 //     model, one step that starts the member Runs.
-func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 	if r == nil || r.coordinator == nil || r.conversations == nil {
 		return nil, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
@@ -713,7 +713,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	if !pinnedRunbook && !conversationRunHasActingAgent(run) && !runtimeconversation.RunExplainingFailure(run) {
 		return &agentrun.TurnRunnerBinding{
 			DefinitionID: "openseal.conversation-router", DefinitionVersion: "1", ModelProvider: "host", Model: "conversation-router",
-			InputContextRefs: []string{conversationRunContextConversationID, conversationRunContextTriggerID},
+			InputContextRefs: []string{models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey},
 			Producer:         teamRoutingStepProducer{runner: r},
 		}, nil
 	}
@@ -725,7 +725,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 			return nil, err
 		}
 	}
-	binding, err := r.agentTurns.ResolveTurnRunner(ctx, cloneAgentRun(run))
+	binding, err := r.agentTurns.ResolveTurnRunner(ctx, models.CloneAgentRun(run))
 	if err != nil {
 		return nil, err
 	}
@@ -748,10 +748,12 @@ type conversationOutputProducer struct {
 	output map[string]interface{}
 }
 
-func (conversationOutputProducer) Kind() StepProducerKind { return StepProducerDeterministic }
+func (conversationOutputProducer) Kind() models.StepProducerKind {
+	return models.StepProducerDeterministic
+}
 
 func (p conversationOutputProducer) Produce(context.Context, agentrun.StepInput) (agentrun.StepOutput, error) {
-	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Status: AgentRunStatusCompleted, Output: maps.Clone(p.output)}}, nil
+	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Status: models.AgentRunStatusCompleted, Output: maps.Clone(p.output)}}, nil
 }
 
 // teamRoutingStepProducer is a Team channel's routing Run (section 05 §2): one
@@ -762,63 +764,65 @@ type teamRoutingStepProducer struct {
 	runner *ConversationRunTurnRunner
 }
 
-func (teamRoutingStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }
+func (teamRoutingStepProducer) Kind() models.StepProducerKind {
+	return models.StepProducerDeterministic
+}
 
 func (p teamRoutingStepProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	run := in.Run
 	if err := p.runner.validateConversationRun(ctx, run); err != nil {
 		return agentrun.StepOutput{}, err
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	conversation, err := p.runner.conversations.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
 		return agentrun.StepOutput{}, err
 	}
 	if conversation.Owner != run.Owner {
-		return agentrun.StepOutput{}, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
+		return agentrun.StepOutput{}, fmt.Errorf("%w: conversation Run owner does not match its channel", models.ErrInvalidAgentRun)
 	}
 	output, err := p.runner.routeTeamMessage(ctx, run, conversation, triggerID)
 	if err != nil {
 		return agentrun.StepOutput{}, err
 	}
-	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Status: AgentRunStatusCompleted, Output: output}}, nil
+	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Status: models.AgentRunStatusCompleted, Output: output}}, nil
 }
 
-func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, run *AgentRun, conversation *Conversation, triggerID string) (string, ConversationViewer, *ChannelMessage, error) {
+func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, triggerID string) (string, models.ConversationViewer, *models.ChannelMessage, error) {
 	participantID := run.AssignedAgentID
 	if runtimeconversation.RunExplainingFailure(run) {
 		if err := r.conversationRosterMember(ctx, run); err != nil {
-			return "", ConversationViewer{}, nil, err
+			return "", models.ConversationViewer{}, nil, err
 		}
 	}
 	if participantID == "" {
-		return "", ConversationViewer{}, nil, fmt.Errorf("%w: conversation Run has no acting Agent", ErrInvalidAgentRun)
+		return "", models.ConversationViewer{}, nil, fmt.Errorf("%w: conversation Run has no acting Agent", models.ErrInvalidAgentRun)
 	}
-	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID}}
+	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: participantID}}
 	trigger, err := r.conversations.GetVisibleChannelMessage(ctx, run.Scope, conversation.ID, triggerID, viewer)
 	if err != nil {
 		return "", viewer, nil, err
 	}
-	if root, _ := run.Context["threadRootMessageId"].(string); root != "" && root != externalConversationThreadRoot(conversation, trigger) {
-		return "", viewer, nil, fmt.Errorf("%w: thread does not match the canonical trigger", ErrInvalidAgentRun)
+	if root, _ := run.Context["threadRootMessageId"].(string); root != "" && root != models.ExternalConversationThreadRoot(conversation, trigger) {
+		return "", viewer, nil, fmt.Errorf("%w: thread does not match the canonical trigger", models.ErrInvalidAgentRun)
 	}
 	return participantID, viewer, trigger, nil
 }
 
-func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, conversation *Conversation, triggers ...*ChannelMessage) ([]runtimeconversation.AgentConversationActiveRun, error) {
+func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, conversation *models.Conversation, triggers ...*models.ChannelMessage) ([]runtimeconversation.AgentConversationActiveRun, error) {
 	if r == nil || r.portfolio == nil || conversation == nil {
 		return nil, nil
 	}
-	var runs []*AgentRun
+	var runs []*models.AgentRun
 	var err error
 	indexed := false
-	if store, ok := r.portfolio.(ConversationActiveRunsReadStore); ok {
+	if store, ok := r.portfolio.(models.ConversationActiveRunsReadStore); ok {
 		runs, err = store.ListConversationActiveRuns(ctx, conversation.Scope, conversation.Owner, conversation.ID, 100)
 		indexed = true
 	} else {
-		runs, err = r.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-			Scope: conversation.Scope, Owner: &conversation.Owner, Order: AgentRunOrderCreatedDesc, Limit: 100,
+		runs, err = r.portfolio.ListAgentRuns(ctx, models.AgentRunFilter{
+			Scope: conversation.Scope, Owner: &conversation.Owner, Order: models.AgentRunOrderCreatedDesc, Limit: 100,
 		})
 	}
 	if err != nil {
@@ -827,10 +831,10 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 	relevantRoots := make(map[string]bool)
 	if !indexed {
 		for _, run := range runs {
-			if run == nil || run.Kind != RunKindConversation {
+			if run == nil || run.Kind != models.RunKindConversation {
 				continue
 			}
-			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+			conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 			if strings.TrimSpace(conversationID) == conversation.ID {
 				relevantRoots[run.ID] = true
 			}
@@ -838,7 +842,7 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 	}
 	active := make([]runtimeconversation.AgentConversationActiveRun, 0)
 	for _, run := range runs {
-		if run == nil || isTerminalAgentRunStatus(run.Status) || !indexed && !relevantRoots[run.RootRunID] || run.Kind == RunKindConversation {
+		if run == nil || models.IsTerminalAgentRunStatus(run.Status) || !indexed && !relevantRoots[run.RootRunID] || run.Kind == models.RunKindConversation {
 			continue
 		}
 		active = append(active, runtimeconversation.AgentConversationActiveRun{
@@ -851,21 +855,21 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 	}
 	trigger := triggers[0]
 	if trigger.Scope != conversation.Scope || trigger.ConversationID != conversation.ID {
-		return nil, ErrInvalidConversation
+		return nil, models.ErrInvalidConversation
 	}
 	actor := trigger.Sender
-	if voiceCallStartedMessage(trigger) && trigger.Initiator != nil {
+	if models.VoiceCallStartedMessage(trigger) && trigger.Initiator != nil {
 		actor = *trigger.Initiator
 	}
-	if actor.Type != ConversationParticipantUser || actor.Validate() != nil {
+	if actor.Type != models.ConversationParticipantUser || actor.Validate() != nil {
 		return active, nil
 	}
-	tasks, ok := r.portfolio.(ConversationTaskStore)
+	tasks, ok := r.portfolio.(models.ConversationTaskStore)
 	if !ok {
 		return active, nil
 	}
-	threadID := externalConversationThreadRoot(conversation, trigger)
-	results, err := tasks.ListConversationTasks(ctx, ConversationTaskFilter{
+	threadID := models.ExternalConversationThreadRoot(conversation, trigger)
+	results, err := tasks.ListConversationTasks(ctx, models.ConversationTaskFilter{
 		Scope: conversation.Scope, Owner: conversation.Owner, ConversationID: conversation.ID,
 		ThreadRootID: threadID, AuthenticatedActor: actor, ActiveOnly: true, Limit: 10,
 	})
@@ -883,11 +887,11 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 		task, work := result.Task, result.WorkRun
 		if task.Scope != conversation.Scope || task.Owner != conversation.Owner || task.ConversationID != conversation.ID ||
 			threadID != "" && task.ThreadRootID != threadID || task.AuthenticatedActor != actor ||
-			!ConversationTaskMatchesWorkRun(task, work) || isTerminalAgentRunStatus(work.Status) || seen[work.ID] {
+			!models.ConversationTaskMatchesWorkRun(task, work) || models.IsTerminalAgentRunStatus(work.Status) || seen[work.ID] {
 			continue
 		}
-		if task.Mode == ConversationTaskModeContinuation {
-			proof, ok := r.portfolio.(ConversationTaskProofStore)
+		if task.Mode == models.ConversationTaskModeContinuation {
+			proof, ok := r.portfolio.(models.ConversationTaskProofStore)
 			if !ok {
 				continue
 			}
@@ -910,15 +914,15 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 
 func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 	ctx context.Context,
-	run *AgentRun,
-	conversation *Conversation,
-	trigger *ChannelMessage,
+	run *models.AgentRun,
+	conversation *models.Conversation,
+	trigger *models.ChannelMessage,
 	content string,
-	references []ConversationReference,
+	references []models.ConversationReference,
 	broadcastToChannel bool,
-	guard *ReplyRunGuard,
-) (*ChannelMessage, bool, error) {
-	key := conversationRunResponseKey(run, trigger.ID)
+	guard *models.ReplyRunGuard,
+) (*models.ChannelMessage, bool, error) {
+	key := models.ConversationRunResponseKey(run, trigger.ID)
 	for range 3 {
 		current, err := r.conversations.GetConversation(ctx, run.Scope, conversation.ID)
 		if err != nil {
@@ -933,14 +937,14 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 		}
 		participantID := run.AssignedAgentID
 		if participantID == "" {
-			return nil, false, fmt.Errorf("%w: conversation Run has no acting Agent", ErrInvalidAgentRun)
+			return nil, false, fmt.Errorf("%w: conversation Run has no acting Agent", models.ErrInvalidAgentRun)
 		}
 		var routingReason string
-		var mentions []ConversationParticipant
-		if isTeamMemberRun(run) {
-			routingReason, _ = run.Context[routingReasonContextKey].(string)
+		var mentions []models.ConversationParticipant
+		if models.IsTeamMemberRun(run) {
+			routingReason, _ = run.Context[models.RoutingReasonContextKey].(string)
 			// One hop: an answer to a teammate's handoff never hands off again.
-			if trigger.Sender.Type != ConversationParticipantAgent {
+			if trigger.Sender.Type != models.ConversationParticipantAgent {
 				if mentions, err = r.handoffMentions(ctx, current, trigger, participantID, content); err != nil {
 					return nil, false, err
 				}
@@ -948,8 +952,8 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 		}
 		request := runtimeconversation.PostChannelMessageRequest{
 			Scope: run.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID},
-			Intent: MessageIntentAnswer, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: participantID},
+			Intent: models.MessageIntentAnswer, Content: content, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
 			ResponseMode:       trigger.ResponseMode,
 			BroadcastToChannel: broadcastToChannel,
@@ -963,18 +967,18 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 		if err == nil {
 			return result.Message, result.Replayed, nil
 		}
-		if errors.Is(err, ErrMessageConflict) {
+		if errors.Is(err, models.ErrMessageConflict) {
 			if saved, replayErr := r.conversations.ReplayLegacySpokenResponse(ctx, request); replayErr != nil {
 				return nil, false, replayErr
 			} else if saved != nil {
 				return saved, true, nil
 			}
 		}
-		if !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrMessageConflict) {
+		if !errors.Is(err, models.ErrRevisionConflict) && !errors.Is(err, models.ErrMessageConflict) {
 			return nil, false, err
 		}
 	}
-	return nil, false, ErrRevisionConflict
+	return nil, false, models.ErrRevisionConflict
 }
 
 func conversationResultMap(value interface{}) map[string]interface{} {
@@ -1010,29 +1014,29 @@ func conversationRetryError(cause error) error {
 	return errors.New(publicConversationRetryReason(cause))
 }
 
-func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context, run *AgentRun) error {
+func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context, run *models.AgentRun) error {
 	if run == nil {
-		return ErrInvalidAgentRun
+		return models.ErrInvalidAgentRun
 	}
-	if taskID, _ := run.Context[ConversationTaskContextKey].(string); taskID != "" {
+	if taskID, _ := run.Context[models.ConversationTaskContextKey].(string); taskID != "" {
 		task, err := canonicalConversationTaskContinuation(ctx, r.portfolio, run)
 		if err != nil {
 			return err
 		}
 		if task == nil {
-			return ErrInvalidConversationTask
+			return models.ErrInvalidConversationTask
 		}
 		// Reuse the ordinary envelope validation only after proving the new
 		// lane against the canonical Task ledger.
-		run = cloneAgentRun(run)
+		run = models.CloneAgentRun(run)
 		root, _ := run.Context["threadRootMessageId"].(string)
-		run.ConcurrencyKey = ConversationRunLane(task.ConversationID, root, run.AssignedAgentID)
+		run.ConcurrencyKey = models.ConversationRunLane(task.ConversationID, root, run.AssignedAgentID)
 	}
-	return validateConversationRun(run)
+	return models.ValidateConversationRun(run)
 }
 
-func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx context.Context, run *AgentRun, references []ConversationReference) ([]ConversationReference, error) {
-	result := append([]ConversationReference(nil), references...)
+func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx context.Context, run *models.AgentRun, references []models.ConversationReference) ([]models.ConversationReference, error) {
+	result := append([]models.ConversationReference(nil), references...)
 	if r.portfolio == nil {
 		return result, nil
 	}
@@ -1043,8 +1047,8 @@ func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx conte
 		return nil, err
 	}
 	if current == nil {
-		if taskID, _ := run.Context[ConversationTaskContextKey].(string); taskID != "" || strings.HasPrefix(run.ConcurrencyKey, "task:") {
-			return nil, ErrRunNotFound
+		if taskID, _ := run.Context[models.ConversationTaskContextKey].(string); taskID != "" || strings.HasPrefix(run.ConcurrencyKey, "task:") {
+			return nil, models.ErrRunNotFound
 		}
 		return result, nil
 	}
@@ -1052,7 +1056,7 @@ func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx conte
 	if err != nil || task == nil {
 		return result, err
 	}
-	for _, reference := range []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}, {Kind: ConversationReferenceTask, ID: task.ID}} {
+	for _, reference := range []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}, {Kind: models.ConversationReferenceTask, ID: task.ID}} {
 		found := false
 		for _, existing := range result {
 			if existing.Kind == reference.Kind && existing.ID == reference.ID {
@@ -1068,18 +1072,18 @@ func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx conte
 }
 
 func permanentConversationRunError(err error) bool {
-	return errors.Is(err, ErrConversationNotFound) || errors.Is(err, ErrChannelMessageNotFound) ||
+	return errors.Is(err, models.ErrConversationNotFound) || errors.Is(err, models.ErrChannelMessageNotFound) ||
 		errors.Is(err, runtimeconversation.ErrNoConversationParticipants) || errors.Is(err, runtimeconversation.ErrConversationCoordinationUnavailable) ||
-		errors.Is(err, ErrInvalidConversation) || errors.Is(err, ErrInvalidAgentRun) || errors.Is(err, ErrMessageConflict)
+		errors.Is(err, models.ErrInvalidConversation) || errors.Is(err, models.ErrInvalidAgentRun) || errors.Is(err, models.ErrMessageConflict)
 }
 
 func publicConversationRetryReason(err error) string {
 	switch {
-	case errors.Is(err, ErrRevisionConflict):
+	case errors.Is(err, models.ErrRevisionConflict):
 		return "conversation_changed"
-	case errors.Is(err, ErrConversationCursorConflict):
+	case errors.Is(err, models.ErrConversationCursorConflict):
 		return "cursor_changed"
-	case errors.Is(err, ErrConversationPresenceConflict):
+	case errors.Is(err, models.ErrConversationPresenceConflict):
 		return "presence_changed"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "participant_timeout"
@@ -1088,8 +1092,8 @@ func publicConversationRetryReason(err error) string {
 	}
 }
 
-func conversationParticipationAllows(conversation *Conversation, message *ChannelMessage) bool {
-	if conversation == nil || message == nil || conversation.Status != ConversationStatusActive {
+func conversationParticipationAllows(conversation *models.Conversation, message *models.ChannelMessage) bool {
+	if conversation == nil || message == nil || conversation.Status != models.ConversationStatusActive {
 		return false
 	}
 	// A builder conversation exists to be answered by its builder: starting
@@ -1102,25 +1106,25 @@ func conversationParticipationAllows(conversation *Conversation, message *Channe
 
 // isAgentBuilderConversation reports a chat with the builder Agent that
 // StartAgentBuilderConversation (or the cortex route) opened.
-func isAgentBuilderConversation(conversation *Conversation) bool {
-	return conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceAgentBuilder &&
-		conversation.Owner == ObjectiveOwner{Type: OwnerTypeAgent, ID: AgentBuilderDeploymentID}
+func isAgentBuilderConversation(conversation *models.Conversation) bool {
+	return conversation.Origin != nil && conversation.Origin.Kind == models.ConversationReferenceAgentBuilder &&
+		conversation.Owner == models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: AgentBuilderDeploymentID}
 }
 
 // Recheck the canonical channel at execution, not just scheduling. A queued Run
 // must not make model calls after opt-out or after a later activation boundary.
-func (r *ConversationRunTurnRunner) participationStopped(ctx context.Context, run *AgentRun) (bool, error) {
+func (r *ConversationRunTurnRunner) participationStopped(ctx context.Context, run *models.AgentRun) (bool, error) {
 	if !r.config.RequireParticipationOptIn {
 		return false, nil
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	conversation, err := r.conversations.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
 		return false, err
 	}
 	if conversation.Owner != run.Owner {
-		return false, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
+		return false, fmt.Errorf("%w: conversation Run owner does not match its channel", models.ErrInvalidAgentRun)
 	}
 	trigger, err := r.conversations.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
 	if err != nil {

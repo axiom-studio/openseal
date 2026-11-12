@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
@@ -32,11 +33,11 @@ const (
 // read newest first and the note is at most maximumCardStateLines lines. It
 // is best effort: a card that cannot be read is left out rather than failing
 // the turn.
-func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, conversation *Conversation, viewer ConversationViewer, participantID string, messages []*ChannelMessage) []string {
+func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, conversation *models.Conversation, viewer models.ConversationViewer, participantID string, messages []*models.ChannelMessage) []string {
 	if r == nil || r.conversations == nil || r.artifacts == nil || r.config.AttachmentContent == nil || conversation == nil {
 		return nil
 	}
-	ordered := make([]*ChannelMessage, 0, len(messages))
+	ordered := make([]*models.ChannelMessage, 0, len(messages))
 	for _, message := range messages {
 		if message != nil {
 			ordered = append(ordered, message)
@@ -45,12 +46,12 @@ func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, c
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Sequence > ordered[j].Sequence })
 	var since time.Time
 	for _, message := range ordered {
-		if message.Sender.Type == ConversationParticipantAgent && message.Sender.ID == participantID {
+		if message.Sender.Type == models.ConversationParticipantAgent && message.Sender.ID == participantID {
 			since = message.CreatedAt
 			break
 		}
 	}
-	names := map[ConversationParticipant]string{}
+	names := map[models.ConversationParticipant]string{}
 	for _, message := range ordered {
 		if _, known := names[message.Sender]; !known && message.SenderDisplayName != "" {
 			names[message.Sender] = message.SenderDisplayName
@@ -60,7 +61,7 @@ func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, c
 	seen := map[string]bool{}
 	for _, message := range ordered {
 		for _, reference := range message.References {
-			if reference.Kind != ConversationReferenceArtifact || reference.Version < 1 || seen[reference.ID] {
+			if reference.Kind != models.ConversationReferenceArtifact || reference.Version < 1 || seen[reference.ID] {
 				continue
 			}
 			if len(seen) == maximumCardStateCards || len(lines) == maximumCardStateLines {
@@ -81,8 +82,8 @@ func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, c
 // cardStateLines returns the state lines of one card whose non-waking
 // interactions changed at or after since. names maps participants to display
 // names.
-func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversation *Conversation, viewer ConversationViewer, reference ConversationReference, since time.Time, names map[ConversationParticipant]string) []string {
-	latest, err := r.conversations.ListLatestSurfaceInteractions(ctx, LatestSurfaceInteractionFilter{
+func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversation *models.Conversation, viewer models.ConversationViewer, reference models.ConversationReference, since time.Time, names map[models.ConversationParticipant]string) []string {
+	latest, err := r.conversations.ListLatestSurfaceInteractions(ctx, models.LatestSurfaceInteractionFilter{
 		Scope: conversation.Scope, ConversationID: conversation.ID, SurfaceID: reference.ID, AcrossActors: true, Viewer: &viewer,
 	})
 	if err != nil {
@@ -103,13 +104,13 @@ func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversa
 		return nil
 	}
 	var lines []string
-	var perActor []*SurfaceInteraction
+	var perActor []*models.SurfaceInteraction
 	perActorRead := false
 	// readPerActor reads each person's latest interaction per item, once.
-	readPerActor := func() []*SurfaceInteraction {
+	readPerActor := func() []*models.SurfaceInteraction {
 		if !perActorRead {
 			perActorRead = true
-			perActor, _ = r.conversations.ListLatestSurfaceInteractions(ctx, LatestSurfaceInteractionFilter{
+			perActor, _ = r.conversations.ListLatestSurfaceInteractions(ctx, models.LatestSurfaceInteractionFilter{
 				Scope: conversation.Scope, ConversationID: conversation.ID, SurfaceID: reference.ID, Viewer: &viewer,
 			})
 		}
@@ -155,14 +156,14 @@ func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversa
 // flashcardStateLines returns one line per person whose flashcard marks on
 // component changed at or after since, from each person's latest mark per
 // card. Lines name the person when more than one marked.
-func flashcardStateLines(component presentation.Component, latest []*SurfaceInteraction, since time.Time, names map[ConversationParticipant]string) []string {
-	marks := map[ConversationParticipant]map[string]string{}
-	var changed []ConversationParticipant
+func flashcardStateLines(component presentation.Component, latest []*models.SurfaceInteraction, since time.Time, names map[models.ConversationParticipant]string) []string {
+	marks := map[models.ConversationParticipant]map[string]string{}
+	var changed []models.ConversationParticipant
 	for _, interaction := range latest {
 		if interaction.ComponentID != component.ID || interaction.ActionID != presentation.FlashcardsMark || interaction.ItemKey == "" {
 			continue
 		}
-		actor := ConversationParticipant{Type: interaction.ActorType, ID: interaction.ActorID}
+		actor := models.ConversationParticipant{Type: interaction.ActorType, ID: interaction.ActorID}
 		if marks[actor] == nil {
 			marks[actor] = map[string]string{}
 		}
@@ -198,7 +199,7 @@ func flashcardStateLines(component presentation.Component, latest []*SurfaceInte
 }
 
 // pollStateLine tallies everyone's latest vote on a poll component.
-func (r *ConversationRunTurnRunner) pollStateLine(ctx context.Context, conversation *Conversation, component presentation.Component, latest []*SurfaceInteraction) (string, bool) {
+func (r *ConversationRunTurnRunner) pollStateLine(ctx context.Context, conversation *models.Conversation, component presentation.Component, latest []*models.SurfaceInteraction) (string, bool) {
 	votes := PollVotes(component.ID, latest)
 	var participants []string
 	if r.config.HumanParticipants != nil {
@@ -216,7 +217,7 @@ func (r *ConversationRunTurnRunner) pollStateLine(ctx context.Context, conversat
 }
 
 // PollVoterKey is the key PollVotes gives a person's vote.
-func PollVoterKey(participant ConversationParticipant) string {
+func PollVoterKey(participant models.ConversationParticipant) string {
 	return string(participant.Type) + ":" + participant.ID
 }
 
@@ -224,20 +225,20 @@ func PollVoterKey(participant ConversationParticipant) string {
 // by PollVoterKey, from ListLatestSurfaceInteractions without AcrossActors.
 // Hosts pass it, with the human participants' keys, to
 // presentation.PollOutcome and presentation.EveryoneVoted.
-func PollVotes(componentID string, latest []*SurfaceInteraction) map[string][]string {
+func PollVotes(componentID string, latest []*models.SurfaceInteraction) map[string][]string {
 	votes := map[string][]string{}
 	for _, interaction := range latest {
 		if interaction == nil || interaction.ComponentID != componentID || interaction.ActionID != presentation.PollVoteAction {
 			continue
 		}
 		if ids, ok := presentation.PollVote(interaction.Values); ok {
-			votes[PollVoterKey(ConversationParticipant{Type: interaction.ActorType, ID: interaction.ActorID})] = ids
+			votes[PollVoterKey(models.ConversationParticipant{Type: interaction.ActorType, ID: interaction.ActorID})] = ids
 		}
 	}
 	return votes
 }
 
-func containsParticipant(list []ConversationParticipant, participant ConversationParticipant) bool {
+func containsParticipant(list []models.ConversationParticipant, participant models.ConversationParticipant) bool {
 	for _, candidate := range list {
 		if candidate == participant {
 			return true
@@ -246,7 +247,7 @@ func containsParticipant(list []ConversationParticipant, participant Conversatio
 	return false
 }
 
-func (r *ConversationRunTurnRunner) loadCardSurface(ctx context.Context, scope Scope, reference ConversationReference) *presentation.Surface {
+func (r *ConversationRunTurnRunner) loadCardSurface(ctx context.Context, scope models.Scope, reference models.ConversationReference) *presentation.Surface {
 	artifact, err := r.artifacts.GetArtifact(ctx, scope, reference.ID, reference.Version)
 	if err != nil || artifact == nil || artifact.Type != presentation.ArtifactType {
 		return nil

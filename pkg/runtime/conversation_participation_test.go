@@ -3,20 +3,21 @@ package runtime
 import (
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 type participationTestStore interface {
-	ConversationStore
-	RunCommandStore
+	models.ConversationStore
+	models.RunCommandStore
 }
 
 func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 	store := newTestKernelStore(t)
 	service := conversation.NewConversationService(store)
-	scope := Scope{Kind: "local", ID: "default"}
+	scope := models.Scope{Kind: "local", ID: "default"}
 	seedTestSpace(t, store, scope)
-	channel, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, Title: "Research", IdempotencyKey: "archive"})
+	channel, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, Title: "Research", IdempotencyKey: "archive"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,8 +26,8 @@ func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trigger := postConversationRunTestMessage(t, service, channel, ConversationParticipantUser, MessageIntentQuestion, "Review evidence", "before-archive")
-	for _, status := range []ConversationStatus{ConversationStatusArchived, ConversationStatusActive} {
+	trigger := postConversationRunTestMessage(t, service, channel, models.ConversationParticipantUser, models.MessageIntentQuestion, "Review evidence", "before-archive")
+	for _, status := range []models.ConversationStatus{models.ConversationStatusArchived, models.ConversationStatusActive} {
 		channel, err = service.GetConversation(t.Context(), scope, channel.ID)
 		if err != nil {
 			t.Fatal(err)

@@ -7,15 +7,17 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 const maximumConversationFollowUpInstructionBytes = 16000
 
-func conversationRunHasFollowUp(run *AgentRun, messageID string) bool {
-	for _, delivery := range conversationRunFollowUps(run) {
+func conversationRunHasFollowUp(run *models.AgentRun, messageID string) bool {
+	for _, delivery := range models.ConversationRunFollowUps(run) {
 		if delivery.MessageID == messageID {
 			return true
 		}
@@ -26,11 +28,11 @@ func conversationRunHasFollowUp(run *AgentRun, messageID string) bool {
 // externalInboxItemIsFollowUp reports whether an inbox item's message was
 // delivered into another message's Run. That Run's own inbox item projects
 // its progress and reply; the follow-up item must not duplicate them.
-func externalInboxItemIsFollowUp(item *ExternalConversationInboxItem, run *AgentRun) bool {
+func externalInboxItemIsFollowUp(item *models.ExternalConversationInboxItem, run *models.AgentRun) bool {
 	if item == nil || run == nil {
 		return false
 	}
-	trigger, _ := run.Context[conversationRunContextTriggerID].(string)
+	trigger, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	return trigger != item.ChannelMessageID && conversationRunHasFollowUp(run, item.ChannelMessageID)
 }
 
@@ -43,12 +45,12 @@ func externalInboxItemIsFollowUp(item *ExternalConversationInboxItem, run *Agent
 // keep waiting and see the message when they resume. Terminal Runs, Runs
 // promoted to a background conversation task, Runs explaining their failure
 // (FailureExplanation set) and pinned Runbook Runs never absorb new messages.
-func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, conversation *Conversation, run *AgentRun) (bool, error) {
-	if run == nil || run.Kind != RunKindConversation || run.Scope != conversation.Scope || run.Owner != conversation.Owner ||
-		isTerminalAgentRunStatus(run.Status) || run.FailureExplanation != nil || (run.Plan != nil && run.Plan["runbook"] != nil) {
+func conversationFollowUpRunEligible(ctx context.Context, store models.PortfolioStore, conversation *models.Conversation, run *models.AgentRun) (bool, error) {
+	if run == nil || run.Kind != models.RunKindConversation || run.Scope != conversation.Scope || run.Owner != conversation.Owner ||
+		models.IsTerminalAgentRunStatus(run.Status) || run.FailureExplanation != nil || (run.Plan != nil && run.Plan["runbook"] != nil) {
 		return false, nil
 	}
-	if conversationID, _ := run.Context[conversationRunContextConversationID].(string); conversationID != conversation.ID {
+	if conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string); conversationID != conversation.ID {
 		return false, nil
 	}
 	task, err := canonicalConversationTaskContinuation(ctx, store, run)
@@ -66,11 +68,11 @@ func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, 
 // ingests the message into its session through catch-up (a user entry, once).
 // One Run handles the whole exchange instead of parallel Runs competing for
 // the lane. A nil result means no Run absorbed the message.
-func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
+func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
 	switch conversation.Owner.Type {
-	case OwnerTypeAgent:
+	case models.OwnerTypeAgent:
 		return s.deliverToConversationLane(ctx, conversation, message, runtimeconversation.ConversationAgentRunRequest(conversation, message).ConcurrencyKey)
-	case OwnerTypeTeam:
+	case models.OwnerTypeTeam:
 		return s.deliverToWorkingMembers(ctx, conversation, message)
 	}
 	return nil, nil
@@ -84,16 +86,16 @@ func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Co
 // message to its own session. An
 // addressed message is routed; a member it names who is working takes it as
 // a follow-up there (routeTeamMessage).
-func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
-	root := externalConversationThreadRoot(conversation, message)
-	if message.Sender.Type != ConversationParticipantUser || len(message.Mentions) > 0 || runtimeconversation.QuotedMessageID(message.Quote) != "" ||
-		(message.Audience.Kind != "" && message.Audience.Kind != ConversationAudienceChannel) ||
+func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
+	root := models.ExternalConversationThreadRoot(conversation, message)
+	if message.Sender.Type != models.ConversationParticipantUser || len(message.Mentions) > 0 || runtimeconversation.QuotedMessageID(message.Quote) != "" ||
+		(message.Audience.Kind != "" && message.Audience.Kind != models.ConversationAudienceChannel) ||
 		(message.ReplyToMessageID != "" && message.ReplyToMessageID != root) {
 		return nil, nil
 	}
-	runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation, ConversationID: conversation.ID,
-		Order: AgentRunOrderCreatedDesc, Limit: 50,
+	runs, err := s.runStore.ListAgentRuns(ctx, models.AgentRunFilter{
+		Scope: conversation.Scope, Owner: &conversation.Owner, Kind: models.RunKindConversation, ConversationID: conversation.ID,
+		Order: models.AgentRunOrderCreatedDesc, Limit: 50,
 	})
 	if err != nil {
 		return nil, err
@@ -101,10 +103,10 @@ func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, 
 	var first *agentrun.AgentRunCommandResult
 	lanes := map[string]bool{}
 	for _, run := range runs {
-		if !isTeamMemberRun(run) || isTerminalAgentRunStatus(run.Status) {
+		if !models.IsTeamMemberRun(run) || models.IsTerminalAgentRunStatus(run.Status) {
 			continue
 		}
-		lane := ConversationRunLane(conversation.ID, root, run.AssignedAgentID)
+		lane := models.ConversationRunLane(conversation.ID, root, run.AssignedAgentID)
 		if run.ConcurrencyKey != lane || lanes[lane] {
 			continue
 		}
@@ -123,19 +125,19 @@ func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, 
 // deliverToConversationLane is deliverToActiveConversationRun for one lane:
 // an Agent channel's, or a Team member's lane in a Team channel, so a member
 // already answering the same person takes the new message as a follow-up.
-func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context, conversation *Conversation, message *ChannelMessage, lane string) (*agentrun.AgentRunCommandResult, error) {
-	if message.Sender.Type != ConversationParticipantUser {
+func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, lane string) (*agentrun.AgentRunCommandResult, error) {
+	if message.Sender.Type != models.ConversationParticipantUser {
 		return nil, nil
 	}
 	actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, message)
 	if !valid {
 		return nil, nil
 	}
-	interventionID := conversationFollowUpInterventionID(conversation.Scope, message.ID)
+	interventionID := models.ConversationFollowUpInterventionID(conversation.Scope, message.ID)
 	for attempt := 0; attempt < 3; attempt++ {
-		runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{
-			Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation,
-			ConcurrencyKey: lane, Order: AgentRunOrderCreatedDesc, Limit: 50,
+		runs, err := s.runStore.ListAgentRuns(ctx, models.AgentRunFilter{
+			Scope: conversation.Scope, Owner: &conversation.Owner, Kind: models.RunKindConversation,
+			ConcurrencyKey: lane, Order: models.AgentRunOrderCreatedDesc, Limit: 50,
 		})
 		if err != nil {
 			return nil, err
@@ -155,7 +157,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 				}
 			}
 		}
-		var target *AgentRun
+		var target *models.AgentRun
 		for _, run := range runs {
 			eligible, err := conversationFollowUpRunEligible(ctx, s.runStore, conversation, run)
 			if err != nil {
@@ -164,12 +166,12 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 			if !eligible {
 				continue
 			}
-			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+			triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 			if triggerID == "" || triggerID == message.ID {
 				continue
 			}
 			trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
-			if errors.Is(err, ErrChannelMessageNotFound) {
+			if errors.Is(err, models.ErrChannelMessageNotFound) {
 				continue
 			}
 			if err != nil {
@@ -184,28 +186,28 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 			return nil, nil
 		}
 		status, wake := target.Status, target.WakeCondition
-		if status == AgentRunStatusSleeping {
+		if status == models.AgentRunStatusSleeping {
 			// A retry or schedule timer must not delay fresh human input.
-			status, wake = AgentRunStatusQueued, nil
+			status, wake = models.AgentRunStatusQueued, nil
 		}
-		run, event, err := s.runs.TransitionRun(ctx, conversation.Scope, target.ID, RunTransitionRequest{
+		run, event, err := s.runs.TransitionRun(ctx, conversation.Scope, target.ID, activity.RunTransitionRequest{
 			ExpectedRevision: target.Revision, Status: status, WakeCondition: wake,
 			Summary: "Received a new message for this request", EventType: "run.intervened",
-			Actor:         ActivityActor{Type: "user", ID: actor.ID},
-			CorrelationID: message.ID, Visibility: ActivityVisibilityPrivate,
+			Actor:         models.ActivityActor{Type: "user", ID: actor.ID},
+			CorrelationID: message.ID, Visibility: models.ActivityVisibilityPrivate,
 			Payload: map[string]interface{}{
 				"interventionId": interventionID, "conversationId": conversation.ID, "messageId": message.ID,
 			},
-			Intervention: &AgentRunIntervention{
-				ID: interventionID, Actor: ActivityActor{Type: "user", ID: actor.ID},
+			Intervention: &models.AgentRunIntervention{
+				ID: interventionID, Actor: models.ActivityActor{Type: "user", ID: actor.ID},
 				Instruction: conversationFollowUpInstruction(message), CreatedAt: message.CreatedAt,
-				ConversationMessage: &ConversationMessageDelivery{
+				ConversationMessage: &models.ConversationMessageDelivery{
 					ConversationID: conversation.ID, MessageID: message.ID, Sequence: message.Sequence,
-					ThreadRootMessageID: externalConversationThreadRoot(conversation, message), Sender: message.Sender,
+					ThreadRootMessageID: models.ExternalConversationThreadRoot(conversation, message), Sender: message.Sender,
 				},
 			},
 		})
-		if errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidRunTransition) {
+		if errors.Is(err, models.ErrRevisionConflict) || errors.Is(err, models.ErrInvalidRunTransition) {
 			continue
 		}
 		if err != nil {
@@ -222,17 +224,17 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 		}
 		return &agentrun.AgentRunCommandResult{Run: run, Event: event}, nil
 	}
-	return nil, ErrRevisionConflict
+	return nil, models.ErrRevisionConflict
 }
 
-func runOrEmpty(run *AgentRun) *AgentRun {
+func runOrEmpty(run *models.AgentRun) *models.AgentRun {
 	if run == nil {
-		return &AgentRun{}
+		return &models.AgentRun{}
 	}
 	return run
 }
 
-func conversationFollowUpInstruction(message *ChannelMessage) string {
+func conversationFollowUpInstruction(message *models.ChannelMessage) string {
 	content := strings.TrimSpace(message.Content)
 	if content == "" {
 		return "(The user sent a message without text; see its attachments.)"
@@ -251,23 +253,23 @@ func conversationFollowUpInstruction(message *ChannelMessage) string {
 // Agent, preferring the already loaded recent history, in channel order. It
 // serves only the old goal-building path in conversation_run.go and goes with
 // it; loop Runs read follow-ups from their session (catch-up).
-func (r *ConversationRunTurnRunner) conversationFollowUpMessages(ctx context.Context, run *AgentRun, conversation *Conversation, viewer ConversationViewer, recent []*ChannelMessage) ([]*ChannelMessage, error) {
-	deliveries := conversationRunFollowUps(run)
+func (r *ConversationRunTurnRunner) conversationFollowUpMessages(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, viewer models.ConversationViewer, recent []*models.ChannelMessage) ([]*models.ChannelMessage, error) {
+	deliveries := models.ConversationRunFollowUps(run)
 	if len(deliveries) == 0 {
 		return nil, nil
 	}
-	loaded := make(map[string]*ChannelMessage, len(recent))
+	loaded := make(map[string]*models.ChannelMessage, len(recent))
 	for _, message := range recent {
 		if message != nil {
 			loaded[message.ID] = message
 		}
 	}
-	result := make([]*ChannelMessage, 0, len(deliveries))
+	result := make([]*models.ChannelMessage, 0, len(deliveries))
 	for _, delivery := range deliveries {
 		message := loaded[delivery.MessageID]
 		if message == nil {
 			visible, err := r.conversations.GetVisibleChannelMessage(ctx, conversation.Scope, conversation.ID, delivery.MessageID, viewer)
-			if errors.Is(err, ErrChannelMessageNotFound) {
+			if errors.Is(err, models.ErrChannelMessageNotFound) {
 				continue
 			}
 			if err != nil {
@@ -291,7 +293,7 @@ func (r *ConversationRunTurnRunner) conversationFollowUpMessages(ctx context.Con
 // person pressed Accept or Decline) is kept: the message then reaches the Run
 // as an ordinary follow-up when it resumes. It returns the resolution, or nil
 // when nothing was superseded.
-func (s *ConversationRunScheduler) supersedeApprovalForMessage(ctx context.Context, run *AgentRun, message *ChannelMessage) (*ApprovalResolutionResult, error) {
+func (s *ConversationRunScheduler) supersedeApprovalForMessage(ctx context.Context, run *models.AgentRun, message *models.ChannelMessage) (*models.ApprovalResolutionResult, error) {
 	if run == nil || message == nil || !conversationRunHasFollowUp(run, message.ID) {
 		return nil, nil
 	}
@@ -300,33 +302,33 @@ func (s *ConversationRunScheduler) supersedeApprovalForMessage(ctx context.Conte
 
 // replaceApprovalWithMessage closes the Run's pending approval as replaced by
 // the message, whether or not the message was delivered to the Run.
-func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Context, run *AgentRun, message *ChannelMessage) (*ApprovalResolutionResult, error) {
-	if run == nil || message == nil || run.Status != AgentRunStatusWaitingForApproval || run.WakeCondition == nil ||
+func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Context, run *models.AgentRun, message *models.ChannelMessage) (*models.ApprovalResolutionResult, error) {
+	if run == nil || message == nil || run.Status != models.AgentRunStatusWaitingForApproval || run.WakeCondition == nil ||
 		run.WakeCondition.Type != "approval" || run.WakeCondition.Reference == "" {
 		return nil, nil
 	}
 	approval, err := s.runStore.GetApproval(ctx, run.Scope, run.WakeCondition.Reference)
-	if errors.Is(err, ErrApprovalNotFound) {
+	if errors.Is(err, models.ErrApprovalNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if approval == nil || approval.Status != ApprovalStatusPending || approval.RunID != run.ID || !approval.CreatedAt.Before(message.CreatedAt) {
+	if approval == nil || approval.Status != models.ApprovalStatusPending || approval.RunID != run.ID || !approval.CreatedAt.Before(message.CreatedAt) {
 		return nil, nil
 	}
 	call, err := s.runStore.GetActionCall(ctx, run.Scope, approval.ActionCallID)
-	if errors.Is(err, ErrActionNotFound) {
+	if errors.Is(err, models.ErrActionNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if call == nil || call.Status != ActionCallStatusWaitingApproval || call.ApprovalID != approval.ID {
+	if call == nil || call.Status != models.ActionCallStatusWaitingApproval || call.ApprovalID != approval.ID {
 		return nil, nil
 	}
 	result, err := s.approvals.ResolveSupersededByMessage(ctx, run.Scope, approval.ID, approval.Revision, message.ID)
-	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidRunTransition) || errors.Is(err, action.ErrApprovalExpired) {
+	if errors.Is(err, models.ErrApprovalResolved) || errors.Is(err, models.ErrRevisionConflict) || errors.Is(err, models.ErrInvalidRunTransition) || errors.Is(err, action.ErrApprovalExpired) {
 		return nil, nil
 	}
 	if err != nil || result == nil || !result.Resolved {
@@ -340,34 +342,34 @@ func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Contex
 // replaced by the message, like a 1:1 chat's. Those Runs then stop without a
 // reply (conversationLoop.replacedTeamApproval); the routed member answers
 // the message.
-func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Context, conversation *Conversation, message *ChannelMessage, root string, routed map[string]bool) error {
-	if conversation.Owner.Type != OwnerTypeTeam || message.Sender.Type != ConversationParticipantUser {
+func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, root string, routed map[string]bool) error {
+	if conversation.Owner.Type != models.OwnerTypeTeam || message.Sender.Type != models.ConversationParticipantUser {
 		return nil
 	}
 	actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, message)
 	if !valid {
 		return nil
 	}
-	runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation,
-		Statuses: []AgentRunStatus{AgentRunStatusWaitingForApproval}, Order: AgentRunOrderCreatedDesc, Limit: 50,
+	runs, err := s.runStore.ListAgentRuns(ctx, models.AgentRunFilter{
+		Scope: conversation.Scope, Owner: &conversation.Owner, Kind: models.RunKindConversation,
+		Statuses: []models.AgentRunStatus{models.AgentRunStatusWaitingForApproval}, Order: models.AgentRunOrderCreatedDesc, Limit: 50,
 	})
 	if err != nil {
 		return err
 	}
 	for _, run := range runs {
-		if !isTeamMemberRun(run) || routed[run.AssignedAgentID] || run.ConcurrencyKey != ConversationRunLane(conversation.ID, root, run.AssignedAgentID) {
+		if !models.IsTeamMemberRun(run) || routed[run.AssignedAgentID] || run.ConcurrencyKey != models.ConversationRunLane(conversation.ID, root, run.AssignedAgentID) {
 			continue
 		}
-		if conversationID, _ := run.Context[conversationRunContextConversationID].(string); conversationID != conversation.ID {
+		if conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string); conversationID != conversation.ID {
 			continue
 		}
-		triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+		triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 		if triggerID == "" || triggerID == message.ID {
 			continue
 		}
 		trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
-		if errors.Is(err, ErrChannelMessageNotFound) {
+		if errors.Is(err, models.ErrChannelMessageNotFound) {
 			continue
 		}
 		if err != nil {

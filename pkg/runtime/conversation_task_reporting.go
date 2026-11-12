@@ -5,30 +5,31 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // This is a reporting affordance only. The projector retrieves the canonical
 // ledger and source message before publishing any conversation task result.
-func conversationTaskTerminalReportingCandidate(run *AgentRun) bool {
-	return run != nil && isTerminalAgentRunStatus(run.Status) &&
-		(run.Kind == RunKindAgentWork || run.Kind == RunKindConversation && run.ParentRunID == "" && run.Context[ConversationTaskContextKey] != nil)
+func conversationTaskTerminalReportingCandidate(run *models.AgentRun) bool {
+	return run != nil && models.IsTerminalAgentRunStatus(run.Status) &&
+		(run.Kind == models.RunKindAgentWork || run.Kind == models.RunKindConversation && run.ParentRunID == "" && run.Context[models.ConversationTaskContextKey] != nil)
 }
 
 // FindConversationTaskResultMessage resolves the exact saved answer of a
 // continued conversation rather than requiring a second terminal message.
 // Independent tasks retain their original reporting key and Task reference.
-func FindConversationTaskResultMessage(ctx context.Context, store ConversationStore, task *ConversationTask, run *AgentRun) (*ChannelMessage, error) {
-	if store == nil || !ConversationTaskMatchesWorkRun(task, run) || !isTerminalAgentRunStatus(run.Status) {
-		return nil, ErrInvalidConversationTask
+func FindConversationTaskResultMessage(ctx context.Context, store models.ConversationStore, task *models.ConversationTask, run *models.AgentRun) (*models.ChannelMessage, error) {
+	if store == nil || !models.ConversationTaskMatchesWorkRun(task, run) || !models.IsTerminalAgentRunStatus(run.Status) {
+		return nil, models.ErrInvalidConversationTask
 	}
-	if task.Mode != ConversationTaskModeContinuation {
+	if task.Mode != models.ConversationTaskModeContinuation {
 		message, err := store.FindChannelMessageByIdempotencyKey(ctx, task.Scope, task.ConversationID, "run-reporting-terminal:"+run.ID+":"+string(run.Status))
 		if err != nil || message == nil {
 			return message, err
 		}
 		if !conversationTaskResultMessageMatches(task, run, message, true) {
-			return nil, ErrInvalidConversationTask
+			return nil, models.ErrInvalidConversationTask
 		}
 		return message, nil
 	}
@@ -36,19 +37,19 @@ func FindConversationTaskResultMessage(ctx context.Context, store ConversationSt
 	if err != nil {
 		return nil, err
 	}
-	if verified == nil || sourceReport || !sameConversationTask(task, verified) {
-		return nil, ErrInvalidConversationTask
+	if verified == nil || sourceReport || !models.SameConversationTask(task, verified) {
+		return nil, models.ErrInvalidConversationTask
 	}
 	keys := []string{
 		terminalConversationFailureReplyKey(run),
-		conversationTaskFinalResponseKey(run),
-		"team-action-outcome:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+task.SourceMessageID),
+		models.ConversationTaskFinalResponseKey(run),
+		"team-action-outcome:" + models.SHA256DigestString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+task.SourceMessageID),
 		"conversation-run-canceled-result:" + run.ID,
 		"run-reporting-terminal:" + run.ID + ":" + string(run.Status),
 	}
 	for _, key := range keys {
 		message, err := store.FindChannelMessageByIdempotencyKey(ctx, task.Scope, task.ConversationID, key)
-		if errors.Is(err, ErrChannelMessageNotFound) {
+		if errors.Is(err, models.ErrChannelMessageNotFound) {
 			continue
 		}
 		if err != nil {
@@ -58,19 +59,19 @@ func FindConversationTaskResultMessage(ctx context.Context, store ConversationSt
 			continue
 		}
 		if !conversationTaskResultMessageMatches(task, run, message, false) {
-			return nil, ErrInvalidConversationTask
+			return nil, models.ErrInvalidConversationTask
 		}
 		return message, nil
 	}
 	// Team coordination can save several answers in one canonical round. This
 	// Run's own Agent's answer is the stable task result link; the round still
 	// owns the complete answer set.
-	key := "participation-round:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+task.ConversationID+"\x00"+task.SourceMessageID)
+	key := "participation-round:" + models.SHA256DigestString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+task.ConversationID+"\x00"+task.SourceMessageID)
 	round, err := store.FindParticipationRoundByIdempotencyKey(ctx, task.Scope, task.ConversationID, key)
 	if err != nil {
 		return nil, err
 	}
-	if run.Status == AgentRunStatusCompleted && round != nil && round.Round != nil && round.Round.TriggerMessageID == task.SourceMessageID {
+	if run.Status == models.AgentRunStatusCompleted && round != nil && round.Round != nil && round.Round.TriggerMessageID == task.SourceMessageID {
 		for _, message := range round.Messages {
 			if conversationTaskResultMessageMatches(task, run, message, false) {
 				return message, nil
@@ -87,13 +88,13 @@ func FindConversationTaskResultMessage(ctx context.Context, store ConversationSt
 	return nil, nil
 }
 
-func conversationTaskResultMessageMatches(task *ConversationTask, run *AgentRun, message *ChannelMessage, requireTaskReference bool) bool {
+func conversationTaskResultMessageMatches(task *models.ConversationTask, run *models.AgentRun, message *models.ChannelMessage, requireTaskReference bool) bool {
 	if message == nil || message.Scope != task.Scope || message.ConversationID != task.ConversationID ||
 		message.ReplyToMessageID != task.SourceMessageID || message.ThreadRootID != task.ThreadRootID ||
-		message.Intent != MessageIntentAnswer && message.Intent != MessageIntentSystem || strings.TrimSpace(message.Content) == "" {
+		message.Intent != models.MessageIntentAnswer && message.Intent != models.MessageIntentSystem || strings.TrimSpace(message.Content) == "" {
 		return false
 	}
-	if message.Sender.Type != ConversationParticipantAgent && (message.Sender.Type != ConversationParticipantService || message.Sender.ID != "openseal.conversation") {
+	if message.Sender.Type != models.ConversationParticipantAgent && (message.Sender.Type != models.ConversationParticipantService || message.Sender.ID != "openseal.conversation") {
 		return false
 	}
 	// A result is the expected speaker's own answer, never another member's.
@@ -104,15 +105,15 @@ func conversationTaskResultMessageMatches(task *ConversationTask, run *AgentRun,
 	if want == "" {
 		want = task.Owner.ID
 	}
-	if message.Sender.Type == ConversationParticipantAgent && message.Sender.ID != want {
+	if message.Sender.Type == models.ConversationParticipantAgent && message.Sender.ID != want {
 		return false
 	}
 	runReference, taskReference := false, false
 	for _, reference := range message.References {
-		if reference.Kind == ConversationReferenceRun && reference.ID == run.ID {
+		if reference.Kind == models.ConversationReferenceRun && reference.ID == run.ID {
 			runReference = true
 		}
-		if reference.Kind == ConversationReferenceTask {
+		if reference.Kind == models.ConversationReferenceTask {
 			if reference.ID != task.ID {
 				return false
 			}
@@ -122,7 +123,7 @@ func conversationTaskResultMessageMatches(task *ConversationTask, run *AgentRun,
 	return runReference && (!requireTaskReference || taskReference)
 }
 
-func projectConversationTaskContinuationResult(ctx context.Context, store ConversationStore, task *ConversationTask, run *AgentRun) error {
+func projectConversationTaskContinuationResult(ctx context.Context, store models.ConversationStore, task *models.ConversationTask, run *models.AgentRun) error {
 	if message, err := FindConversationTaskResultMessage(ctx, store, task, run); err != nil || message != nil {
 		return err
 	}
@@ -131,7 +132,7 @@ func projectConversationTaskContinuationResult(ctx context.Context, store Conver
 		return err
 	}
 	if source == nil {
-		return ErrChannelMessageNotFound
+		return models.ErrChannelMessageNotFound
 	}
 	service := conversation.NewConversationService(store)
 	channel, err := service.GetConversation(ctx, task.Scope, task.ConversationID)
@@ -140,20 +141,20 @@ func projectConversationTaskContinuationResult(ctx context.Context, store Conver
 	}
 	content := terminalRunStatusLabel(run.Status) + ": " + strings.TrimSpace(task.Goal)
 	content = conversationTaskReportContent(ctx, store, task, false, run, content)
-	sender := ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}
+	sender := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID}
 	if sender.ID == "" {
-		sender = ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"}
+		sender = models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "openseal.conversation"}
 	}
 	request := conversation.PostChannelMessageRequest{
 		Scope: task.Scope, ConversationID: task.ConversationID, ExpectedRevision: channel.Revision,
-		Sender: sender, SenderDisplayName: "Agent", Intent: MessageIntentAnswer, Content: content,
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: source.ID, ResolvesMessageID: source.ID,
+		Sender: sender, SenderDisplayName: "Agent", Intent: models.MessageIntentAnswer, Content: content,
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: source.ID, ResolvesMessageID: source.ID,
 		BroadcastToChannel: source.ThreadRootID == "" || source.BroadcastToChannel, ResponseMode: source.ResponseMode,
-		References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}, {Kind: ConversationReferenceTask, ID: task.ID}},
+		References:     []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}, {Kind: models.ConversationReferenceTask, ID: task.ID}},
 		IdempotencyKey: "run-reporting-terminal:" + run.ID + ":" + string(run.Status),
 	}
 	_, err = service.PostChannelMessage(ctx, request)
-	if errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, models.ErrRevisionConflict) {
 		channel, getErr := service.GetConversation(ctx, task.Scope, task.ConversationID)
 		if getErr != nil {
 			return getErr
@@ -164,14 +165,14 @@ func projectConversationTaskContinuationResult(ctx context.Context, store Conver
 	return err
 }
 
-func conversationTaskReportContent(ctx context.Context, store ConversationStore, task *ConversationTask, source bool, run *AgentRun, fallback string) string {
+func conversationTaskReportContent(ctx context.Context, store models.ConversationStore, task *models.ConversationTask, source bool, run *models.AgentRun, fallback string) string {
 	if source {
 		return task.Acknowledgment
 	}
-	if run.Status == AgentRunStatusFailed {
+	if run.Status == models.AgentRunStatusFailed {
 		return conversation.TerminalRunFailureReply(ctx, store, store, run)
 	}
-	if run.Status == AgentRunStatusCompleted {
+	if run.Status == models.AgentRunStatusCompleted {
 		for _, key := range []string{"report", "summary"} {
 			if answer, ok := run.Output[key].(string); ok && strings.TrimSpace(answer) != "" {
 				return strings.TrimSpace(answer)

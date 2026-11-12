@@ -15,7 +15,7 @@ import (
 // message and starts one member conversation Run per responder, the same Run a
 // 1:1 Agent chat gets. It writes no answer itself; the result is the Run's
 // output, whose responderRunIds the chat client follows.
-func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *AgentRun, conversation *Conversation, triggerID string) (map[string]interface{}, error) {
+func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, triggerID string) (map[string]interface{}, error) {
 	if r.runs == nil || r.coordinator == nil {
 		return nil, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
@@ -23,7 +23,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	if err != nil {
 		return nil, err
 	}
-	childKey := func(participant ConversationParticipant) string {
+	childKey := func(participant models.ConversationParticipant) string {
 		return runtimeconversation.TeamMemberRunKey(run, participant.ID)
 	}
 	result, err := r.coordinator.CoordinateWithChildRuns(ctx, runtimeconversation.ConversationRoutingRequest{
@@ -58,7 +58,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 			return nil, err
 		}
 		if existing == nil {
-			delivered, err := followUps.deliverToConversationLane(ctx, conversation, trigger, ConversationRunLane(conversation.ID, root, responder.Participant.ID))
+			delivered, err := followUps.deliverToConversationLane(ctx, conversation, trigger, models.ConversationRunLane(conversation.ID, root, responder.Participant.ID))
 			if err != nil {
 				return nil, err
 			}
@@ -81,13 +81,13 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 
 // teamMembers lists the members who may answer in the channel, with the
 // names an @mention uses.
-func (r *ConversationRunTurnRunner) teamMembers(ctx context.Context, conversation *Conversation, trigger *ChannelMessage) (runtimeconversation.ConversationTeamRoster, []runtimeconversation.ConversationParticipantBinding, error) {
+func (r *ConversationRunTurnRunner) teamMembers(ctx context.Context, conversation *models.Conversation, trigger *models.ChannelMessage) (runtimeconversation.ConversationTeamRoster, []runtimeconversation.ConversationParticipantBinding, error) {
 	roster := runtimeconversation.LoadConversationTeamRoster(ctx, r.conversationStore, conversation)
 	if r.coordinator == nil {
 		return roster, nil, nil
 	}
 	bindings, err := r.coordinator.ResolveParticipants(ctx, runtimeconversation.ConversationParticipantQuery{
-		Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger),
+		Conversation: models.CloneConversation(conversation), Trigger: models.CloneChannelMessage(trigger),
 	})
 	if errors.Is(err, runtimeconversation.ErrNoConversationParticipants) {
 		return roster, nil, nil
@@ -95,7 +95,7 @@ func (r *ConversationRunTurnRunner) teamMembers(ctx context.Context, conversatio
 	return roster, bindings, err
 }
 
-func (r *ConversationRunTurnRunner) agentConversationTeamContext(ctx context.Context, run *AgentRun, conversation *Conversation, trigger *ChannelMessage) (*runtimeconversation.AgentConversationTeam, error) {
+func (r *ConversationRunTurnRunner) agentConversationTeamContext(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, trigger *models.ChannelMessage) (*runtimeconversation.AgentConversationTeam, error) {
 	roster, bindings, err := r.teamMembers(ctx, conversation, trigger)
 	if err != nil {
 		return nil, err
@@ -106,7 +106,7 @@ func (r *ConversationRunTurnRunner) agentConversationTeamContext(ctx context.Con
 // handoffMentions finds the teammates an answer @mentions, in the order they
 // appear. The sender, unknown names and @everyone are ignored: an Agent's
 // handoff never fans out to the whole Team.
-func (r *ConversationRunTurnRunner) handoffMentions(ctx context.Context, conversation *Conversation, trigger *ChannelMessage, sender string, content string) ([]ConversationParticipant, error) {
+func (r *ConversationRunTurnRunner) handoffMentions(ctx context.Context, conversation *models.Conversation, trigger *models.ChannelMessage, sender string, content string) ([]models.ConversationParticipant, error) {
 	if !strings.Contains(content, "@") {
 		return nil, nil
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
@@ -23,26 +24,26 @@ type undeliverableReport struct{ reason string }
 func (e undeliverableReport) Error() string { return "invalid agent run: " + e.reason }
 
 func (e undeliverableReport) Is(target error) bool {
-	return target == ErrRunTerminalReportUndeliverable || target == ErrInvalidAgentRun
+	return target == ErrRunTerminalReportUndeliverable || target == models.ErrInvalidAgentRun
 }
 
 func undeliverable(reason string) error { return undeliverableReport{reason: reason} }
 
-func terminalConversationFailureReplyKey(run *AgentRun) string {
+func terminalConversationFailureReplyKey(run *models.AgentRun) string {
 	return "conversation-failure:" + run.ID + ":" + strconv.FormatInt(run.Revision, 10)
 }
 
 // projectFailedConversationReply first checks the normal Agent response key.
 // Otherwise outbox recovery and external delivery share one immutable failure
 // key per terminal attempt rather than creating additional status messages.
-func projectFailedConversationReply(ctx context.Context, store ConversationStore, run *AgentRun) error {
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+func projectFailedConversationReply(ctx context.Context, store models.ConversationStore, run *models.AgentRun) error {
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	conversation, err := store.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
 		return err
 	}
-	if conversation == nil || conversation.Status != ConversationStatusActive {
+	if conversation == nil || conversation.Status != models.ConversationStatusActive {
 		// A deleted or archived chat has nobody left to tell.
 		return nil
 	}
@@ -52,7 +53,7 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 	// An application chat explains a credit stop beside the saved message and
 	// retries this attempt once credits are added. A provider channel has no
 	// such surface, so it still receives the failure answer.
-	if run.CreditError != nil && !externalChannelContext(conversation) {
+	if run.CreditError != nil && !models.IsExternalChannelConversation(conversation) {
 		return nil
 	}
 	trigger, err := store.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
@@ -63,10 +64,10 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 		return undeliverable("trigger message is missing or does not start a Run")
 	}
 	initiator := trigger.Sender
-	if voiceCallStartedMessage(trigger) && trigger.Initiator != nil {
+	if models.VoiceCallStartedMessage(trigger) && trigger.Initiator != nil {
 		initiator = *trigger.Initiator
 	}
-	if initiator.Type != ConversationParticipantUser {
+	if initiator.Type != models.ConversationParticipantUser {
 		// Service wakes (connection setup, for example) and Agent handoffs
 		// have no person waiting on this attempt's answer.
 		return nil
@@ -74,31 +75,31 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 	if initiator.Validate() != nil {
 		return undeliverable("trigger initiator is invalid")
 	}
-	expectedRoot := externalConversationThreadRoot(conversation, trigger)
+	expectedRoot := models.ExternalConversationThreadRoot(conversation, trigger)
 	if root, _ := run.Context["threadRootMessageId"].(string); root != expectedRoot {
 		return undeliverable("Run thread differs from the trigger thread")
 	}
 	agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
-	if !validOpaqueIdentifier(agentID, 256) {
+	if !models.IsValidOpaqueIdentifier(agentID, 256) {
 		return undeliverable("Run has no Agent to answer")
 	}
-	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
-	if run.Context[ConversationTaskContextKey] != nil {
+	references := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}
+	if run.Context[models.ConversationTaskContextKey] != nil {
 		task, source, taskErr := runtimeconversation.ConversationTaskForReport(ctx, store, run)
 		if taskErr != nil {
 			return taskErr
 		}
-		if task == nil || source || task.Mode != ConversationTaskModeContinuation {
-			return ErrInvalidConversationTask
+		if task == nil || source || task.Mode != models.ConversationTaskModeContinuation {
+			return models.ErrInvalidConversationTask
 		}
 		if saved, findErr := FindConversationTaskResultMessage(ctx, store, task, run); findErr != nil || saved != nil {
 			return findErr
 		}
-		references = append(references, ConversationReference{Kind: ConversationReferenceTask, ID: task.ID})
+		references = append(references, models.ConversationReference{Kind: models.ConversationReferenceTask, ID: task.ID})
 	}
 	// A model answer committed before terminalization already closes this
 	// attempt. A failure answer from an older manual attempt does not.
-	if saved, findErr := store.FindChannelMessageByIdempotencyKey(ctx, run.Scope, conversationID, conversationTaskFinalResponseKey(run)); findErr != nil && !errors.Is(findErr, ErrChannelMessageNotFound) {
+	if saved, findErr := store.FindChannelMessageByIdempotencyKey(ctx, run.Scope, conversationID, models.ConversationTaskFinalResponseKey(run)); findErr != nil && !errors.Is(findErr, models.ErrChannelMessageNotFound) {
 		return findErr
 	} else if saved != nil {
 		if !terminalConversationReplyMatches(saved, run, triggerID, agentID) {
@@ -107,7 +108,7 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 		return nil
 	}
 	key := terminalConversationFailureReplyKey(run)
-	if saved, findErr := store.FindChannelMessageByIdempotencyKey(ctx, run.Scope, conversationID, key); findErr != nil && !errors.Is(findErr, ErrChannelMessageNotFound) {
+	if saved, findErr := store.FindChannelMessageByIdempotencyKey(ctx, run.Scope, conversationID, key); findErr != nil && !errors.Is(findErr, models.ErrChannelMessageNotFound) {
 		return findErr
 	} else if saved != nil {
 		if !terminalConversationReplyMatches(saved, run, triggerID, agentID) {
@@ -118,15 +119,15 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 	}
 	request := runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}, Intent: MessageIntentAnswer,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: agentID}, Intent: models.MessageIntentAnswer,
 		Content:  runtimeconversation.TerminalRunFailureReply(ctx, store, store, run),
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
 		BroadcastToChannel: trigger.ThreadRootID == "" || trigger.BroadcastToChannel, ResponseMode: trigger.ResponseMode,
 		References: references, IdempotencyKey: key,
 	}
 	service := runtimeconversation.NewConversationService(store)
 	posted, err := service.PostChannelMessage(ctx, request)
-	if errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, models.ErrRevisionConflict) {
 		current, getErr := store.GetConversation(ctx, run.Scope, conversationID)
 		if getErr != nil {
 			return getErr
@@ -142,38 +143,38 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 
 // runFailedNoteSourceKey is per terminal attempt, like the reply key, so a
 // retried Run that fails again records its own note.
-func runFailedNoteSourceKey(run *AgentRun) string {
+func runFailedNoteSourceKey(run *models.AgentRun) string {
 	return "run-failed:" + run.ID + ":" + strconv.FormatInt(run.Revision, 10)
 }
 
 // runFailedNote tells the Run's session what the user was told when the Run
 // stopped, so the next Run in that session knows the attempt ended.
-func runFailedNote(run *AgentRun, message *ChannelMessage) *SessionEntry {
+func runFailedNote(run *models.AgentRun, message *models.ChannelMessage) *models.SessionEntry {
 	key := runFailedNoteSourceKey(run)
 	data, _ := json.Marshal(map[string]string{"messageId": message.ID})
 	text := "Your previous attempt (run " + run.ID + ") stopped and the user was told: " + strconv.Quote(runtimeconversation.BoundedTurnFailureText(message.Content))
-	return &SessionEntry{
-		ID: SessionEntryID(run.SessionID, key), SessionID: run.SessionID, RunID: run.ID,
-		Type: SessionEntryNote, SourceKey: key,
-		Note: &NoteEntry{Kind: NoteRunFailed, Text: text, Data: data},
+	return &models.SessionEntry{
+		ID: models.SessionEntryID(run.SessionID, key), SessionID: run.SessionID, RunID: run.ID,
+		Type: models.SessionEntryNote, SourceKey: key,
+		Note: &models.NoteEntry{Kind: models.NoteRunFailed, Text: text, Data: data},
 	}
 }
 
 // appendRunFailedNote appends the run_failed note without a lease: the Run is
 // terminal and the store accepts lease-less notes for it. The SourceKey makes
 // a repeated report a no-op.
-func appendRunFailedNote(ctx context.Context, sessions AgentSessionStore, run *AgentRun, message *ChannelMessage) error {
+func appendRunFailedNote(ctx context.Context, sessions models.AgentSessionStore, run *models.AgentRun, message *models.ChannelMessage) error {
 	if run.SessionID == "" || message == nil {
 		return nil
 	}
-	_, err := sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+	_, err := sessions.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: run.Scope, SessionID: run.SessionID, RunID: run.ID,
-		Entries: []*SessionEntry{runFailedNote(run, message)}, Now: time.Now().UTC(),
+		Entries: []*models.SessionEntry{runFailedNote(run, message)}, Now: time.Now().UTC(),
 	})
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, ErrAgentSessionNotFound):
+	case errors.Is(err, models.ErrAgentSessionNotFound):
 		// The Run failed before its first step opened the session. A session
 		// created later is seeded from the channel, failure reply included.
 		return nil
@@ -191,8 +192,8 @@ func appendRunFailedNote(ctx context.Context, sessions AgentSessionStore, run *A
 // cannot change, as opposed to a store that could not be reached.
 func runFailedNoteRejected(err error) bool {
 	for _, permanent := range []error{
-		ErrInvalidSessionEntry, ErrSessionEntryTooLarge, ErrInvalidAgentSession, ErrAgentSessionConflict,
-		ErrSessionMoved, ErrLeaseLost, ErrRunNotFound, ErrAgentSessionPathTooLarge,
+		models.ErrInvalidSessionEntry, models.ErrSessionEntryTooLarge, models.ErrInvalidAgentSession, models.ErrAgentSessionConflict,
+		models.ErrSessionMoved, models.ErrLeaseLost, models.ErrRunNotFound, models.ErrAgentSessionPathTooLarge,
 	} {
 		if errors.Is(err, permanent) {
 			return true
@@ -201,13 +202,13 @@ func runFailedNoteRejected(err error) bool {
 	return false
 }
 
-func terminalConversationReplyMatches(message *ChannelMessage, run *AgentRun, triggerID, agentID string) bool {
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	if message == nil || message.Scope != run.Scope || message.ConversationID != conversationID || message.ReplyToMessageID != triggerID || message.Sender.Type != ConversationParticipantAgent || message.Sender.ID != agentID || message.Intent != MessageIntentAnswer || message.Historical || strings.TrimSpace(message.Content) == "" {
+func terminalConversationReplyMatches(message *models.ChannelMessage, run *models.AgentRun, triggerID, agentID string) bool {
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	if message == nil || message.Scope != run.Scope || message.ConversationID != conversationID || message.ReplyToMessageID != triggerID || message.Sender.Type != models.ConversationParticipantAgent || message.Sender.ID != agentID || message.Intent != models.MessageIntentAnswer || message.Historical || strings.TrimSpace(message.Content) == "" {
 		return false
 	}
 	for _, reference := range message.References {
-		if reference.Kind == ConversationReferenceRun && reference.ID == run.ID {
+		if reference.Kind == models.ConversationReferenceRun && reference.ID == run.ID {
 			return true
 		}
 	}

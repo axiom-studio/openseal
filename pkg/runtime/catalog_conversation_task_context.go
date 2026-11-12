@@ -6,6 +6,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -14,26 +15,26 @@ import (
 // The conversation adapter lowers the Run kind for ordinary Agent cognition.
 // Recover the source through its durable identity rather than treating that
 // lowered kind or copied context as authority to create independent work.
-func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTurnCatalog, run *AgentRun, store ConversationTaskKernelStore) (*HostedConversationTaskContext, error) {
+func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTurnCatalog, run *models.AgentRun, store models.ConversationTaskKernelStore) (*models.HostedConversationTaskContext, error) {
 	if run == nil {
 		return nil, nil
 	}
-	conversationID, conversationString := run.Context[conversationRunContextConversationID].(string)
-	messageID, messageString := run.Context[conversationRunContextTriggerID].(string)
-	if !conversationString || !messageString || !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(messageID, 128) {
+	conversationID, conversationString := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	messageID, messageString := run.Context[models.ConversationRunTriggerIDContextKey].(string)
+	if !conversationString || !messageString || !models.IsValidOpaqueIdentifier(conversationID, 128) || !models.IsValidOpaqueIdentifier(messageID, 128) {
 		return nil, nil
 	}
 	if store == nil {
-		store, _ = catalog.(ConversationTaskKernelStore)
-		if provider, ok := catalog.(interface{ Store() KernelStore }); store == nil && ok {
-			store, _ = provider.Store().(ConversationTaskKernelStore)
+		store, _ = catalog.(models.ConversationTaskKernelStore)
+		if provider, ok := catalog.(interface{ Store() models.KernelStore }); store == nil && ok {
+			store, _ = provider.Store().(models.ConversationTaskKernelStore)
 		}
 	}
 	if store == nil {
 		return nil, nil
 	}
 	canonical, err := store.GetAgentRun(ctx, run.Scope, run.ID)
-	if errors.Is(err, ErrRunNotFound) {
+	if errors.Is(err, models.ErrRunNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -43,26 +44,26 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		canonical.AssignedAgentID != run.AssignedAgentID || canonical.ParentRunID != run.ParentRunID || canonical.RootRunID != run.RootRunID {
 		return nil, nil
 	}
-	for _, key := range []string{conversationRunContextConversationID, conversationRunContextTriggerID, "threadRootMessageId"} {
+	for _, key := range []string{models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey, "threadRootMessageId"} {
 		original, originalString := canonical.Context[key].(string)
 		provided, providedString := run.Context[key].(string)
 		if originalString != providedString || original != provided || !originalString && (canonical.Context[key] != nil || run.Context[key] != nil) {
 			return nil, nil
 		}
 	}
-	foreground := canonical.Kind == RunKindConversation && canonical.Source == RunSourceChat && canonical.ParentRunID == "" && canonical.RootRunID == canonical.ID
-	var origin *ConversationTask
-	_, markedTask := canonical.Context[ConversationTaskContextKey]
+	foreground := canonical.Kind == models.RunKindConversation && canonical.Source == models.RunSourceChat && canonical.ParentRunID == "" && canonical.RootRunID == canonical.ID
+	var origin *models.ConversationTask
+	_, markedTask := canonical.Context[models.ConversationTaskContextKey]
 	if !foreground || markedTask {
-		if canonical.Kind != RunKindAgentWork && !foreground {
+		if canonical.Kind != models.RunKindAgentWork && !foreground {
 			return nil, nil
 		}
-		marker, marked := canonical.Context[ConversationTaskContextKey].(string)
-		if !marked || !validOpaqueIdentifier(marker, 128) {
+		marker, marked := canonical.Context[models.ConversationTaskContextKey].(string)
+		if !marked || !models.IsValidOpaqueIdentifier(marker, 128) {
 			return nil, nil
 		}
 		task, taskErr := agentrun.PersistedTaskWorkOrigin(ctx, store, canonical)
-		if errors.Is(taskErr, agentrun.ErrConversationTaskNotFound) || errors.Is(taskErr, ErrInvalidConversationTask) {
+		if errors.Is(taskErr, agentrun.ErrConversationTaskNotFound) || errors.Is(taskErr, models.ErrInvalidConversationTask) {
 			return nil, nil
 		}
 		if taskErr != nil {
@@ -89,10 +90,10 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		return nil, nil
 	}
 	actor := message.Sender
-	if actor.Type == ConversationParticipantService && message.Initiator != nil {
+	if actor.Type == models.ConversationParticipantService && message.Initiator != nil {
 		actor = *message.Initiator
 	}
-	if actor.Type != ConversationParticipantUser || actor.Validate() != nil {
+	if actor.Type != models.ConversationParticipantUser || actor.Validate() != nil {
 		return nil, nil
 	}
 	if origin != nil {
@@ -108,31 +109,31 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 			return nil, nil
 		}
 	}
-	viewer := ConversationViewer{Participant: actor}
+	viewer := models.ConversationViewer{Participant: actor}
 	if _, err := runtimeconversation.NewConversationService(store).GetVisibleChannelMessage(ctx, canonical.Scope, conversation.ID, message.ID, viewer); err != nil {
-		if errors.Is(err, ErrChannelMessageNotFound) {
+		if errors.Is(err, models.ErrChannelMessageNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	thread := externalConversationThreadRoot(conversation, message)
+	thread := models.ExternalConversationThreadRoot(conversation, message)
 	if foreground {
 		storedThread, _ := canonical.Context["threadRootMessageId"].(string)
-		if validateConversationRun(canonical) != nil || storedThread != thread {
+		if models.ValidateConversationRun(canonical) != nil || storedThread != thread {
 			return nil, nil
 		}
 	}
-	result := &HostedConversationTaskContext{ConversationID: conversation.ID, ThreadRootID: thread, Tasks: []ConversationTaskSnapshot{}}
-	result.CanStart = foreground && conversation.Status == ConversationStatusActive && canonical.Status == AgentRunStatusRunning &&
-		canonical.AssignedAgentID != "" && canonical.LeaseOwner != "" && canonical.LeaseExpiresAt != nil && canonical.LeaseExpiresAt.After(time.Now()) && !voiceCallStartedMessage(message)
+	result := &models.HostedConversationTaskContext{ConversationID: conversation.ID, ThreadRootID: thread, Tasks: []models.ConversationTaskSnapshot{}}
+	result.CanStart = foreground && conversation.Status == models.ConversationStatusActive && canonical.Status == models.AgentRunStatusRunning &&
+		canonical.AssignedAgentID != "" && canonical.LeaseOwner != "" && canonical.LeaseExpiresAt != nil && canonical.LeaseExpiresAt.After(time.Now()) && !models.VoiceCallStartedMessage(message)
 	if result.CanStart {
-		onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(store), conversation.Scope, conversation.Owner, runtimeconversation.ConversationRunAgentID(conversation, canonical))
+		onRoster, err := models.AgentOnChatRoster(ctx, models.TeamRosterReaderOf(store), conversation.Scope, conversation.Owner, runtimeconversation.ConversationRunAgentID(conversation, canonical))
 		if err != nil {
 			return nil, err
 		}
 		result.CanStart = onRoster
 	}
-	rows, err := store.ListConversationTasks(ctx, ConversationTaskFilter{
+	rows, err := store.ListConversationTasks(ctx, models.ConversationTaskFilter{
 		Scope: canonical.Scope, Owner: canonical.Owner, ConversationID: conversation.ID, ThreadRootID: thread,
 		AuthenticatedActor: actor, ActiveOnly: true, Limit: 10,
 	})
@@ -142,8 +143,8 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	// The executing independent root needs its own verified task identity even
 	// when newer work fills the bounded active-task page. Forks and foreground
 	// conversations retain their ordinary status view and ordering.
-	if origin != nil && origin.Mode == ConversationTaskModeIndependent && canonical.ID == origin.WorkRunID {
-		rows = append([]*ConversationTaskResult{{Task: origin, WorkRun: canonical}}, rows...)
+	if origin != nil && origin.Mode == models.ConversationTaskModeIndependent && canonical.ID == origin.WorkRunID {
+		rows = append([]*models.ConversationTaskResult{{Task: origin, WorkRun: canonical}}, rows...)
 	}
 	proof, err := runtimeconversation.NewConversationChangeService(store, store)
 	if err != nil {
@@ -152,7 +153,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	seen := make(map[string]bool, len(rows))
 	for _, row := range rows {
 		if row == nil || row.Task == nil || row.WorkRun == nil || row.Task.AuthenticatedActor != actor ||
-			seen[row.Task.ID] || thread != "" && row.Task.ThreadRootID != thread || isTerminalAgentRunStatus(row.WorkRun.Status) {
+			seen[row.Task.ID] || thread != "" && row.Task.ThreadRootID != thread || models.IsTerminalAgentRunStatus(row.WorkRun.Status) {
 			continue
 		}
 		source, err := proof.ProveConversationTaskRun(ctx, conversation, row.Task, row.WorkRun, &viewer)
@@ -163,7 +164,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 			continue
 		}
 		seen[row.Task.ID] = true
-		result.Tasks = append(result.Tasks, ConversationTaskSnapshot{
+		result.Tasks = append(result.Tasks, models.ConversationTaskSnapshot{
 			TaskID: row.Task.ID, Mode: row.Task.Mode, WorkRunID: row.WorkRun.ID, Goal: ConversationTaskGoalSummary(row.Task.Goal),
 			Status: row.WorkRun.Status, Revision: row.WorkRun.Revision, AvailableControls: agentrun.ApplicableAgentRunCommands(row.WorkRun), CreatedAt: row.Task.CreatedAt,
 		})
@@ -186,5 +187,5 @@ type AgentTurnCatalog interface {
 	ActivateSkills(context.Context, skill.ScopeReference, string, skill.HostCapabilityState) (*skill.ActivationSnapshot, error)
 	// ActionCallReader lets deterministic producers (capability invocation)
 	// read the authoritative ActionCall behind their tool entry.
-	ActionCallReader
+	models.ActionCallReader
 }

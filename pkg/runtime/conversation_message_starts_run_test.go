@@ -3,23 +3,24 @@ package runtime
 import (
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 func TestConversationMessageStartsRunSkipsApprovalCoordinatorProjections(t *testing.T) {
-	conversation := &Conversation{
-		ID: "approval-channel", Scope: Scope{Kind: "tenant", ID: "11"},
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coding-agent"}, Status: ConversationStatusActive,
+	conversation := &models.Conversation{
+		ID: "approval-channel", Scope: models.Scope{Kind: "tenant", ID: "11"},
+		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coding-agent"}, Status: models.ConversationStatusActive,
 	}
-	message := &ChannelMessage{
+	message := &models.ChannelMessage{
 		ID: "approval-request", Scope: conversation.Scope, ConversationID: conversation.ID,
-		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
-		Intent: MessageIntentApprovalRequest,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "approval-coordinator"},
+		Intent: models.MessageIntentApprovalRequest,
 	}
 	if conversationMessageStartsRun(conversation, message) {
 		t.Fatal("approval coordinator request recursively started an Agent Run")
 	}
-	message.Intent = MessageIntentUpdate
+	message.Intent = models.MessageIntentUpdate
 	if conversationMessageStartsRun(conversation, message) {
 		t.Fatal("approval coordinator outcome recursively started an Agent Run")
 	}
@@ -30,11 +31,11 @@ func TestConversationMessageStartsRunSkipsApprovalCoordinatorProjections(t *test
 }
 
 func TestTeamMessagesStartRunsOnlyForUsersAndHandoffs(t *testing.T) {
-	conversation := &Conversation{ID: "chat", Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Status: ConversationStatusActive}
-	message := func(sender ConversationParticipant, mentions ...ConversationParticipant) *ChannelMessage {
-		return &ChannelMessage{ID: "m", Scope: conversation.Scope, ConversationID: "chat", Sender: sender, Intent: MessageIntentAnswer, Mentions: mentions}
+	conversation := &models.Conversation{ID: "chat", Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Status: models.ConversationStatusActive}
+	message := func(sender models.ConversationParticipant, mentions ...models.ConversationParticipant) *models.ChannelMessage {
+		return &models.ChannelMessage{ID: "m", Scope: conversation.Scope, ConversationID: "chat", Sender: sender, Intent: models.MessageIntentAnswer, Mentions: mentions}
 	}
-	user := ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}
+	user := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "kev"}
 	if !conversationMessageStartsRun(conversation, message(user)) {
 		t.Fatal("user message did not start a Run")
 	}

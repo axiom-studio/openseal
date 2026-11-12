@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -19,19 +20,19 @@ type idleConversationBenchmarkStore struct {
 	cursorReads  uint64
 }
 
-func (s *idleConversationBenchmarkStore) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
+func (s *idleConversationBenchmarkStore) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
 	s.messageReads++
 	return s.Store.ListChannelMessages(ctx, filter)
 }
 
-func (s *idleConversationBenchmarkStore) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
+func (s *idleConversationBenchmarkStore) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
 	s.roundReads++
 	rounds, err := s.Store.ListParticipationRounds(ctx, filter)
 	s.roundRows += uint64(len(rounds))
 	return rounds, err
 }
 
-func (s *idleConversationBenchmarkStore) GetConversationCursor(ctx context.Context, scope Scope, id string, participant ConversationParticipant) (*ConversationCursor, error) {
+func (s *idleConversationBenchmarkStore) GetConversationCursor(ctx context.Context, scope models.Scope, id string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	s.cursorReads++
 	return s.Store.GetConversationCursor(ctx, scope, id, participant)
 }
@@ -47,17 +48,17 @@ func (s *idleConversationBenchmarkStore) reportReads(b *testing.B) {
 	b.ReportMetric(float64(s.cursorReads)/float64(b.N), "cursor_reads/op")
 }
 
-func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (*idleConversationBenchmarkStore, *ConversationRunScheduler, Scope, []*Conversation) {
+func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (*idleConversationBenchmarkStore, *ConversationRunScheduler, models.Scope, []*models.Conversation) {
 	b.Helper()
 	store := &idleConversationBenchmarkStore{Store: newTestKernelStore(b)}
 	service := runtimeconversation.NewConversationService(store)
-	scope := Scope{Kind: "tenant", ID: "idle-scheduler-benchmark"}
+	scope := models.Scope{Kind: "tenant", ID: "idle-scheduler-benchmark"}
 	ctx := b.Context()
-	conversations := make([]*Conversation, 0, count)
+	conversations := make([]*models.Conversation, 0, count)
 	for index := 0; index < count; index++ {
 		id := fmt.Sprintf("caught-up-%05d", index)
 		conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-			ID: id, Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "benchmark-team"},
+			ID: id, Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "benchmark-team"},
 			Title: id, IdempotencyKey: id,
 		})
 		if err != nil {
@@ -65,9 +66,9 @@ func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (
 		}
 		posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: scope, ConversationID: id, ExpectedRevision: conversation.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "benchmark-user"},
-			Intent: MessageIntentQuestion, Content: "Review this request.", RequiresResponse: true,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "trigger",
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "benchmark-user"},
+			Intent: models.MessageIntentQuestion, Content: "Review this request.", RequiresResponse: true,
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "trigger",
 		})
 		if err != nil {
 			b.Fatal(err)
@@ -85,7 +86,7 @@ func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (
 		}
 		if _, _, err := service.AdvanceCursor(ctx, runtimeconversation.AdvanceConversationCursorRequest{
 			Scope: scope, ConversationID: id,
-			Participant:       ConversationParticipant{Type: ConversationParticipantService, ID: conversationRunSchedulerParticipant},
+			Participant:       models.ConversationParticipant{Type: models.ConversationParticipantService, ID: models.ConversationRunSchedulerParticipant},
 			DeliveredSequence: conversation.LastSequence, ReadSequence: conversation.LastSequence,
 		}); err != nil {
 			b.Fatal(err)

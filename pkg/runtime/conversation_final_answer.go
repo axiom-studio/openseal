@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -36,20 +37,20 @@ const (
 type conversationFinalHandler struct {
 	runner   *ConversationRunTurnRunner
 	sessions runtimeconversation.LoopSessionEntryLister
-	actions  ActionCallReader
+	actions  models.ActionCallReader
 	activity activityAppender
 }
 
 // activityAppender appends one activity event (turn.visual_rejected).
 type activityAppender interface {
-	AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error)
+	AppendActivity(ctx context.Context, event *models.ActivityEvent) (*models.ActivityEvent, error)
 }
 
 // newConversationFinalHandler builds the chat delivery over the stores the
 // loop binding already holds. sessions and actions read this Run's tool
 // entries and governed calls (reactions, artifact references, prior delivery
 // rejections); activity may be nil (no visual_rejected event).
-func newConversationFinalHandler(runner *ConversationRunTurnRunner, sessions runtimeconversation.LoopSessionEntryLister, actions ActionCallReader, activity activityAppender) *conversationFinalHandler {
+func newConversationFinalHandler(runner *ConversationRunTurnRunner, sessions runtimeconversation.LoopSessionEntryLister, actions models.ActionCallReader, activity activityAppender) *conversationFinalHandler {
 	return &conversationFinalHandler{runner: runner, sessions: sessions, actions: actions, activity: activity}
 }
 
@@ -67,14 +68,14 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	}
 	run := d.Run
 	if run == nil {
-		return agentrun.FinalDeliveryResult{}, ErrInvalidAgentRun
+		return agentrun.FinalDeliveryResult{}, models.ErrInvalidAgentRun
 	}
 	r := h.runner
 	answer := d.Answer
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	if !conversationRunHasActingAgent(run) || conversationID == "" || triggerID == "" {
-		return agentrun.FinalDeliveryResult{}, fmt.Errorf("%w: chat delivery needs an acting Agent, a conversation and a trigger", ErrInvalidAgentRun)
+		return agentrun.FinalDeliveryResult{}, fmt.Errorf("%w: chat delivery needs an acting Agent, a conversation and a trigger", models.ErrInvalidAgentRun)
 	}
 	// 2. Participation.
 	if stopped, err := r.participationStopped(ctx, run); err != nil {
@@ -86,7 +87,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	if err != nil {
 		return agentrun.FinalDeliveryResult{}, err
 	}
-	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}}
+	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID}}
 	trigger, err := r.conversations.GetVisibleChannelMessage(ctx, run.Scope, conversation.ID, triggerID, viewer)
 	if err != nil {
 		return agentrun.FinalDeliveryResult{}, err
@@ -95,7 +96,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	content := strings.TrimSpace(answer.Answer)
 	guard := d.Guard
 	// 9 (first part). The Run and the files its answer hands over.
-	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
+	references := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}
 	artifacts, err := runtimeconversation.RunActionArtifactReferences(ctx, h.sessions, h.actions, run)
 	if err != nil {
 		return agentrun.FinalDeliveryResult{}, err
@@ -108,7 +109,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	// The files the Run saved and does not hand over were made to build its
 	// answer; the catalog remembers that so file lists can leave them out.
 	// It is bookkeeping for listings, so it never holds an answer back.
-	_ = markRunFiles(ctx, r.artifacts, run.Scope, artifacts, handedOver)
+	_ = models.MarkRunFiles(ctx, r.artifacts, run.Scope, artifacts, handedOver)
 
 	// 3. Failure explanation: always a visible text reply, never a visual.
 	if runtimeconversation.RunExplainingFailure(run) {
@@ -249,7 +250,7 @@ func participationStoppedDelivery() agentrun.FinalDeliveryResult {
 	return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: maps.Clone(participationStoppedOutput())}
 }
 
-func withConversationOutput(base map[string]interface{}, message *ChannelMessage, replayed bool) map[string]interface{} {
+func withConversationOutput(base map[string]interface{}, message *models.ChannelMessage, replayed bool) map[string]interface{} {
 	output := maps.Clone(base)
 	output["messageId"] = message.ID
 	output["replayed"] = replayed
@@ -258,8 +259,8 @@ func withConversationOutput(base map[string]interface{}, message *ChannelMessage
 
 // answerVisualFollowUpKey separates the visual of a continued Run's later
 // answer from its first: "" without follow-ups, else the latest follow-up.
-func answerVisualFollowUpKey(run *AgentRun) string {
-	followUps := conversationRunFollowUps(run)
+func answerVisualFollowUpKey(run *models.AgentRun) string {
+	followUps := models.ConversationRunFollowUps(run)
 	if len(followUps) == 0 {
 		return ""
 	}
@@ -270,7 +271,7 @@ func answerVisualFollowUpKey(run *AgentRun) string {
 // of ConversationRunTurnRunnerConfig.VisualChecks on a structurally valid
 // visual and stamps its places. A visual that fails them wraps
 // errInvalidAnswerVisual.
-func (r *ConversationRunTurnRunner) checkAnswerVisual(ctx context.Context, run *AgentRun, visual *presentation.Visual) (*presentation.Visual, error) {
+func (r *ConversationRunTurnRunner) checkAnswerVisual(ctx context.Context, run *models.AgentRun, visual *presentation.Visual) (*presentation.Visual, error) {
 	checked := runtimeconversation.CloneVisual(visual)
 	var options presentation.ValidateOptions
 	if r.config.VisualChecks != nil {
@@ -297,18 +298,18 @@ func (r *ConversationRunTurnRunner) checkAnswerVisual(ctx context.Context, run *
 
 // visualRejected records that the answer went out without its visual. The
 // answer is already posted; a lost warning is not retried.
-func (h *conversationFinalHandler) visualRejected(ctx context.Context, run *AgentRun, step *AgentTurn, workerID, reason string) {
+func (h *conversationFinalHandler) visualRejected(ctx context.Context, run *models.AgentRun, step *models.AgentTurn, workerID, reason string) {
 	if h.activity == nil {
 		return
 	}
 	if runes := []rune(reason); len(runes) > 400 {
 		reason = string(runes[:400]) + "…"
 	}
-	event := &ActivityEvent{
-		Scope: run.Scope, RunID: run.ID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: teamIDForRun(run),
-		EventType: answerVisualRejectedEvent, Severity: ActivitySeverityWarning,
-		Summary: answerVisualRejectedSummary + " " + reason, Actor: ActivityActor{Type: "worker", ID: workerID},
-		Visibility: ActivityVisibilityScope,
+	event := &models.ActivityEvent{
+		Scope: run.Scope, RunID: run.ID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: models.TeamIDForRun(run),
+		EventType: answerVisualRejectedEvent, Severity: models.ActivitySeverityWarning,
+		Summary: answerVisualRejectedSummary + " " + reason, Actor: models.ActivityActor{Type: "worker", ID: workerID},
+		Visibility: models.ActivityVisibilityScope,
 	}
 	if step != nil {
 		event.TurnID = step.ID
@@ -318,13 +319,13 @@ func (h *conversationFinalHandler) visualRejected(ctx context.Context, run *Agen
 
 // runReactions are the reactions this Run added: its completed react tool
 // entries, in entry order.
-func (h *conversationFinalHandler) runReactions(ctx context.Context, run *AgentRun) ([]runtimeconversation.TurnReaction, error) {
+func (h *conversationFinalHandler) runReactions(ctx context.Context, run *models.AgentRun) ([]runtimeconversation.TurnReaction, error) {
 	if h.sessions == nil {
 		return nil, nil
 	}
-	entries, err := h.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, ToolNames: []string{string(ControlToolReact)},
-		States: []ToolEntryState{ToolEntryCompleted}, Limit: maxSessionEntryListLimit,
+	entries, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, ToolNames: []string{string(models.ControlToolReact)},
+		States: []models.ToolEntryState{models.ToolEntryCompleted}, Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
 		return nil, err
@@ -346,14 +347,14 @@ func (h *conversationFinalHandler) runReactions(ctx context.Context, run *AgentR
 // priorDeliveryRejections counts this Run's earlier final attempts that
 // delivery rejected with a text matching match: final tool entries in error
 // and final_rejection notes. The answer being delivered is not counted.
-func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, run *AgentRun, answer agentrun.FinalAnswer, match func(string) bool) (int, error) {
+func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, run *models.AgentRun, answer agentrun.FinalAnswer, match func(string) bool) (int, error) {
 	if h.sessions == nil {
 		return 0, nil
 	}
 	count := 0
-	tools, err := h.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, ToolNames: []string{string(ControlToolFinalAnswer)},
-		States: []ToolEntryState{ToolEntryError}, Limit: maxSessionEntryListLimit,
+	tools, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, ToolNames: []string{string(models.ControlToolFinalAnswer)},
+		States: []models.ToolEntryState{models.ToolEntryError}, Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
 		return 0, err
@@ -363,14 +364,14 @@ func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, 
 			continue
 		}
 		for _, part := range entry.Tool.Result.Content {
-			if part.Type == ContentPartText && match(strings.TrimSpace(part.Text)) {
+			if part.Type == models.ContentPartText && match(strings.TrimSpace(part.Text)) {
 				count++
 				break
 			}
 		}
 	}
-	notes, err := h.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, NoteKinds: []NoteKind{NoteFinalRejection}, Limit: maxSessionEntryListLimit,
+	notes, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, NoteKinds: []models.NoteKind{models.NoteFinalRejection}, Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
 		return 0, err

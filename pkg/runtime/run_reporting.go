@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
-func runReportingChannelKey(owner ObjectiveOwner, policy *runbook.ReportingPolicy) string {
+func runReportingChannelKey(owner models.ObjectiveOwner, policy *runbook.ReportingPolicy) string {
 	if policy == nil {
 		return ""
 	}
@@ -20,14 +21,14 @@ func runReportingChannelKey(owner ObjectiveOwner, policy *runbook.ReportingPolic
 
 func prepareRunReporting(
 	ctx context.Context,
-	store ConversationStore,
-	scope Scope,
-	owner ObjectiveOwner,
+	store models.ConversationStore,
+	scope models.Scope,
+	owner models.ObjectiveOwner,
 	policy *runbook.ReportingPolicy,
 	person string,
 	runID string,
 	contextValues map[string]interface{},
-) (*Conversation, string, error) {
+) (*models.Conversation, string, error) {
 	if policy == nil {
 		return nil, "", nil
 	}
@@ -39,15 +40,15 @@ func prepareRunReporting(
 		return nil, "", err
 	}
 	messageKey := "run-reporting-start:" + runID
-	messageID := stableConversationID(scope, messageKey, "message")
-	contextValues[conversationRunContextConversationID] = channel.ID
-	contextValues[conversationRunContextTriggerID] = messageID
-	contextValues[runReportingContextRootRunID] = runID
+	messageID := models.StableConversationID(scope, messageKey, "message")
+	contextValues[models.ConversationRunConversationIDContextKey] = channel.ID
+	contextValues[models.ConversationRunTriggerIDContextKey] = messageID
+	contextValues[models.RunReportingRootRunIDContextKey] = runID
 	milestones := make([]interface{}, len(policy.Milestones))
 	for index, milestone := range policy.Milestones {
 		milestones[index] = string(milestone)
 	}
-	contextValues[runReportingContextMilestones] = milestones
+	contextValues[models.RunReportingMilestonesContextKey] = milestones
 	return channel, messageKey, nil
 }
 
@@ -58,12 +59,12 @@ func prepareRunReporting(
 // for; the channel is created for them.
 func ensureRunReportingChannel(
 	ctx context.Context,
-	store ConversationStore,
-	scope Scope,
-	owner ObjectiveOwner,
+	store models.ConversationStore,
+	scope models.Scope,
+	owner models.ObjectiveOwner,
 	policy *runbook.ReportingPolicy,
 	person string,
-) (*Conversation, error) {
+) (*models.Conversation, error) {
 	if policy == nil {
 		return nil, nil
 	}
@@ -79,34 +80,34 @@ func ensureRunReportingChannel(
 
 func projectRunReportingStart(
 	ctx context.Context,
-	store ConversationStore,
-	channel *Conversation,
+	store models.ConversationStore,
+	channel *models.Conversation,
 	messageKey string,
-	run *AgentRun,
+	run *models.AgentRun,
 ) error {
-	if store == nil || channel == nil || run == nil || messageKey == "" || !runReportsMilestone(run, runbook.ReportingStarted) {
+	if store == nil || channel == nil || run == nil || messageKey == "" || !models.RunReportsMilestone(run, runbook.ReportingStarted) {
 		return nil
 	}
 	service := conversation.NewConversationService(store)
 	_, err := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 		Scope: channel.Scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision,
-		Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
-		SenderDisplayName: "Agent", Intent: MessageIntentUpdate,
-		Content: "Started: " + strings.TrimSpace(run.Goal), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-		References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+		Sender:            models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID},
+		SenderDisplayName: "Agent", Intent: models.MessageIntentUpdate,
+		Content: "Started: " + strings.TrimSpace(run.Goal), Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
+		References:     []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}},
 		IdempotencyKey: messageKey,
 	})
-	if errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, models.ErrRevisionConflict) {
 		latest, getErr := service.GetConversation(ctx, channel.Scope, channel.ID)
 		if getErr != nil {
 			return getErr
 		}
 		_, err = service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 			Scope: latest.Scope, ConversationID: latest.ID, ExpectedRevision: latest.Revision,
-			Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
-			SenderDisplayName: "Agent", Intent: MessageIntentUpdate,
-			Content: "Started: " + strings.TrimSpace(run.Goal), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-			References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+			Sender:            models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID},
+			SenderDisplayName: "Agent", Intent: models.MessageIntentUpdate,
+			Content: "Started: " + strings.TrimSpace(run.Goal), Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
+			References:     []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}},
 			IdempotencyKey: messageKey,
 		})
 	}
@@ -118,13 +119,13 @@ func projectRunReportingStart(
 // on work or approval for hours; users must not need to send the command again
 // merely to learn whether it started. A Run may start several operations, so
 // the message is keyed per child.
-func projectConversationRunbookStart(ctx context.Context, store ConversationStore, source *AgentRun, summary string, child *AgentRun) error {
+func projectConversationRunbookStart(ctx context.Context, store models.ConversationStore, source *models.AgentRun, summary string, child *models.AgentRun) error {
 	summary = strings.TrimSpace(summary)
-	if store == nil || source == nil || summary == "" || child == nil || source.Kind != RunKindConversation {
+	if store == nil || source == nil || summary == "" || child == nil || source.Kind != models.RunKindConversation {
 		return nil
 	}
-	conversationID, _ := source.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := source.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := source.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := source.Context[models.ConversationRunTriggerIDContextKey].(string)
 	conversationID, triggerID = strings.TrimSpace(conversationID), strings.TrimSpace(triggerID)
 	if conversationID == "" || triggerID == "" {
 		return nil
@@ -134,19 +135,19 @@ func projectConversationRunbookStart(ctx context.Context, store ConversationStor
 	if err != nil {
 		return err
 	}
-	post := func(current *Conversation) error {
+	post := func(current *models.Conversation) error {
 		_, postErr := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 			Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
-			Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: source.AssignedAgentID},
-			SenderDisplayName: "Agent", Intent: MessageIntentUpdate,
+			Sender:            models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: source.AssignedAgentID},
+			SenderDisplayName: "Agent", Intent: models.MessageIntentUpdate,
 			Content:  "Started: " + summary,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID,
-			References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: child.ID}},
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: triggerID,
+			References:     []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: child.ID}},
 			IdempotencyKey: "conversation-runbook-start:" + source.ID + ":" + child.ID,
 		})
 		return postErr
 	}
-	if err = post(channel); errors.Is(err, ErrRevisionConflict) {
+	if err = post(channel); errors.Is(err, models.ErrRevisionConflict) {
 		channel, err = service.GetConversation(ctx, source.Scope, conversationID)
 		if err != nil {
 			return err
@@ -156,24 +157,24 @@ func projectConversationRunbookStart(ctx context.Context, store ConversationStor
 	return err
 }
 
-func projectTerminalRunReporting(ctx context.Context, store ConversationStore, run *AgentRun) error {
-	if store == nil || run == nil || !isTerminalAgentRunStatus(run.Status) {
+func projectTerminalRunReporting(ctx context.Context, store models.ConversationStore, run *models.AgentRun) error {
+	if store == nil || run == nil || !models.IsTerminalAgentRunStatus(run.Status) {
 		return nil
 	}
-	if failedConversationReportCandidate(run) {
+	if models.FailedConversationReportCandidate(run) {
 		return projectFailedConversationReply(ctx, store, run)
 	}
-	if run.Kind == RunKindConversation && run.Context[ConversationTaskContextKey] != nil {
+	if run.Kind == models.RunKindConversation && run.Context[models.ConversationTaskContextKey] != nil {
 		task, sourceReport, err := conversation.ConversationTaskForReport(ctx, store, run)
 		if err != nil {
 			return err
 		}
-		if task == nil || sourceReport || task.Mode != ConversationTaskModeContinuation {
-			return ErrInvalidConversationTask
+		if task == nil || sourceReport || task.Mode != models.ConversationTaskModeContinuation {
+			return models.ErrInvalidConversationTask
 		}
 		return projectConversationTaskContinuationResult(ctx, store, task, run)
 	}
-	rootRunID, _ := run.Context[runReportingContextRootRunID].(string)
+	rootRunID, _ := run.Context[models.RunReportingRootRunIDContextKey].(string)
 	if strings.TrimSpace(rootRunID) == "" || strings.TrimSpace(rootRunID) != run.ID {
 		return nil
 	}
@@ -182,58 +183,58 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		// the UI shows it as a quiet line from the Run itself.
 		return nil
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	rootMessageID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	rootMessageID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	conversationID, rootMessageID = strings.TrimSpace(conversationID), strings.TrimSpace(rootMessageID)
 	if conversationID == "" || rootMessageID == "" {
 		return nil
 	}
 	milestone := runbook.ReportingCompleted
 	content := "Completed: " + strings.TrimSpace(run.Goal)
-	if run.Status != AgentRunStatusCompleted {
+	if run.Status != models.AgentRunStatusCompleted {
 		milestone = runbook.ReportingFailed
 		content = fmt.Sprintf("%s: %s", terminalRunStatusLabel(run.Status), strings.TrimSpace(run.Goal))
-		if run.Status == AgentRunStatusFailed {
+		if run.Status == models.AgentRunStatusFailed {
 			content = conversation.TerminalRunFailureReply(ctx, store, store, run)
 		}
 	}
-	if task, _ := run.Context[scheduledTaskContextKey].(bool); task && run.Status == AgentRunStatusCompleted {
+	if task, _ := run.Context[models.ScheduledTaskContextKey].(bool); task && run.Status == models.AgentRunStatusCompleted {
 		if summary, _ := run.Output["summary"].(string); strings.TrimSpace(summary) != "" {
 			content = strings.TrimSpace(summary)
 		}
 	}
-	if !runReportsMilestone(run, milestone) {
+	if !models.RunReportsMilestone(run, milestone) {
 		return nil
 	}
 	task, sourceTaskReport, taskErr := conversation.ConversationTaskForReport(ctx, store, run)
 	if taskErr != nil {
 		return taskErr
 	}
-	intent := MessageIntentUpdate
-	audience := ConversationAudience{Kind: ConversationAudienceChannel}
+	intent := models.MessageIntentUpdate
+	audience := models.ConversationAudience{Kind: models.ConversationAudienceChannel}
 	broadcast := true
 	resolvesMessageID := ""
 	responseMode := ""
-	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
+	references := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}
 	if task != nil {
 		if !sourceTaskReport {
-			portfolio, ok := store.(PortfolioStore)
+			portfolio, ok := store.(models.PortfolioStore)
 			if !ok {
-				return ErrInvalidConversationTask
+				return models.ErrInvalidConversationTask
 			}
 			sourceRun, err := portfolio.GetAgentRun(ctx, task.Scope, task.SourceRunID)
 			if err != nil {
 				return err
 			}
-			if sourceRun == nil || sourceRun.Status != AgentRunStatusCompleted {
-				return ErrInvalidConversationTask
+			if sourceRun == nil || sourceRun.Status != models.AgentRunStatusCompleted {
+				return models.ErrInvalidConversationTask
 			}
 			verified, sourceReport, err := conversation.ConversationTaskForReport(ctx, store, sourceRun)
 			if err != nil || verified == nil || verified.ID != task.ID || !sourceReport {
 				if err != nil {
 					return err
 				}
-				return ErrInvalidConversationTask
+				return models.ErrInvalidConversationTask
 			}
 			// Source and work share the existing outbox, whose concurrent claims
 			// may arrive in either order. Commit the idempotent acknowledgment
@@ -247,20 +248,20 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 			return err
 		}
 		if source == nil {
-			return ErrChannelMessageNotFound
+			return models.ErrChannelMessageNotFound
 		}
 		responseMode = source.ResponseMode
 		// Visibility inherits the canonical source and its thread ancestors.
 		// Channel here preserves the original sender's implicit access to a
 		// directed question without widening access past those ancestors.
-		audience = ConversationAudience{Kind: ConversationAudienceChannel}
+		audience = models.ConversationAudience{Kind: models.ConversationAudienceChannel}
 		broadcast = source.ThreadRootID == "" || source.BroadcastToChannel
 		content = conversationTaskReportContent(ctx, store, task, sourceTaskReport, run, content)
-		intent = MessageIntentAnswer
-		references = append(references, ConversationReference{Kind: ConversationReferenceTask, ID: task.ID})
+		intent = models.MessageIntentAnswer
+		references = append(references, models.ConversationReference{Kind: models.ConversationReferenceTask, ID: task.ID})
 		if sourceTaskReport {
 			resolvesMessageID = task.SourceMessageID
-			references = append(references, ConversationReference{Kind: ConversationReferenceRun, ID: task.WorkRunID})
+			references = append(references, models.ConversationReference{Kind: models.ConversationReferenceRun, ID: task.WorkRunID})
 		}
 	}
 	replyTo := rootMessageID
@@ -276,7 +277,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	}
 	request := conversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision,
-		Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
+		Sender:            models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID},
 		SenderDisplayName: "Agent", Intent: intent, Content: content, ResolvesMessageID: resolvesMessageID,
 		Audience: audience, ReplyToMessageID: replyTo, BroadcastToChannel: broadcast,
 		ResponseMode:   responseMode,
@@ -284,7 +285,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		IdempotencyKey: "run-reporting-terminal:" + run.ID + ":" + string(run.Status),
 	}
 	_, err = service.PostChannelMessage(ctx, request)
-	if errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, models.ErrRevisionConflict) {
 		latest, getErr := service.GetConversation(ctx, run.Scope, conversationID)
 		if getErr != nil {
 			return getErr
@@ -292,7 +293,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		request.ExpectedRevision = latest.Revision
 		_, err = service.PostChannelMessage(ctx, request)
 	}
-	if errors.Is(err, ErrMessageConflict) {
+	if errors.Is(err, models.ErrMessageConflict) {
 		if saved, replayErr := service.ReplayLegacySpokenResponse(ctx, request); replayErr != nil {
 			return replayErr
 		} else if saved != nil {
@@ -303,21 +304,21 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 }
 
 // routineOccurrenceRun reports whether run is an occurrence of a routine.
-func routineOccurrenceRun(run *AgentRun) bool {
-	return run != nil && run.Context[scheduledTaskContextKey] == true
+func routineOccurrenceRun(run *models.AgentRun) bool {
+	return run != nil && run.Context[models.ScheduledTaskContextKey] == true
 }
 
 // silentRoutineOccurrence reports a completed routine occurrence that
 // finished silent: it posts nothing in the chat or any mirror of it.
-func silentRoutineOccurrence(run *AgentRun) bool {
-	if !routineOccurrenceRun(run) || run.Kind == RunKindConversation || run.Status != AgentRunStatusCompleted {
+func silentRoutineOccurrence(run *models.AgentRun) bool {
+	if !routineOccurrenceRun(run) || run.Kind == models.RunKindConversation || run.Status != models.AgentRunStatusCompleted {
 		return false
 	}
 	silent, _ := run.Output[agentrun.FinalOutputSilentKey].(bool)
 	return silent
 }
 
-func terminalRunStatusLabel(status AgentRunStatus) string {
+func terminalRunStatusLabel(status models.AgentRunStatus) string {
 	label := strings.ReplaceAll(strings.TrimSpace(string(status)), "_", " ")
 	if label == "" {
 		return "Stopped"
@@ -327,12 +328,12 @@ func terminalRunStatusLabel(status AgentRunStatus) string {
 	return string(runes)
 }
 
-func projectRunReportingStartForRun(ctx context.Context, store ConversationStore, run *AgentRun) error {
-	if store == nil || run == nil || !runReportsMilestone(run, runbook.ReportingStarted) {
+func projectRunReportingStartForRun(ctx context.Context, store models.ConversationStore, run *models.AgentRun) error {
+	if store == nil || run == nil || !models.RunReportsMilestone(run, runbook.ReportingStarted) {
 		return nil
 	}
-	rootRunID, _ := run.Context[runReportingContextRootRunID].(string)
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	rootRunID, _ := run.Context[models.RunReportingRootRunIDContextKey].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	if strings.TrimSpace(rootRunID) != run.ID || strings.TrimSpace(conversationID) == "" {
 		return nil
 	}

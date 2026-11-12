@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/google/uuid"
@@ -18,8 +19,8 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	ctx := t.Context()
 	store := newTestKernelStore(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	scope := Scope{Kind: "tenant", ID: "run-failed-" + uuid.NewString()[:8]}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
+	scope := models.Scope{Kind: "tenant", ID: "run-failed-" + uuid.NewString()[:8]}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
 	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
@@ -28,39 +29,39 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	}
 	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion,
-		Content: "Check my email", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, StartThread: true,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "kev"}, Intent: models.MessageIntentQuestion,
+		Content: "Check my email", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, StartThread: true,
 		RequiresResponse: true, IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	trigger := posted.Message
-	lane := ConversationRunLane(conversation.ID, trigger.ID, owner.ID)
-	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
-		Goal: "Check my email", ConcurrencyKey: lane, SessionID: ConversationAgentSessionID(scope, lane),
-		Context:        map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID, "threadRootMessageId": trigger.ID},
+	lane := models.ConversationRunLane(conversation.ID, trigger.ID, owner.ID)
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: models.RunKindConversation, Source: models.RunSourceChat,
+		Goal: "Check my email", ConcurrencyKey: lane, SessionID: models.ConversationAgentSessionID(scope, lane),
+		Context:        map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID, models.ConversationRunTriggerIDContextKey: trigger.ID, "threadRootMessageId": trigger.ID},
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now = time.Now().UTC().Add(time.Second).Truncate(time.Millisecond)
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "w", Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	run, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "w", Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || run == nil || run.ID != created.Run.ID {
 		t.Fatalf("claim = %+v %v", run, err)
 	}
-	opened, err := store.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{
+	opened, err := store.OpenConversationAgentSession(ctx, models.OpenConversationAgentSessionRequest{
 		Scope: scope, ConversationID: conversation.ID, ThreadRootID: trigger.ID, AgentID: owner.ID, RunID: run.ID,
-		Lease: AgentRunLeaseGuard{WorkerID: "w", Now: now}, Now: now,
+		Lease: models.AgentRunLeaseGuard{WorkerID: "w", Now: now}, Now: now,
 	})
 	if err != nil || opened.Session.ID != run.SessionID {
 		t.Fatalf("open session = %+v %v", opened, err)
 	}
-	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
-	failed, _, err := activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: "w", Error: "provider down",
+	activity := runtimeactivity.NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
+	failed, _, err := activity.TransitionRun(ctx, scope, run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusFailed, LeaseOwner: "w", Error: "provider down",
 		FailureExplanation: runtimeconversation.BeginRunFailureExplanation(run, runtimeconversation.RunFailureKindExecution, "provider_unavailable", "The model provider was unavailable.", "", ""),
 		EventType:          "run.failed", Summary: "Run failed",
 	})
@@ -76,7 +77,7 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	if err != nil || reply == nil || reply.Content != runtimeconversation.TerminalFailureReply("provider_unavailable") {
 		t.Fatalf("kernel reply = %+v %v", reply, err)
 	}
-	notes, err := store.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: scope, SessionID: run.SessionID, NoteKinds: []NoteKind{NoteRunFailed}})
+	notes, err := store.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: scope, SessionID: run.SessionID, NoteKinds: []models.NoteKind{models.NoteRunFailed}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,18 +94,18 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 
 // refusingNoteStore refuses or fails every session append with err.
 type refusingNoteStore struct {
-	AgentSessionStore
+	models.AgentSessionStore
 	err error
 }
 
-func (s refusingNoteStore) AppendAgentSessionEntries(context.Context, AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+func (s refusingNoteStore) AppendAgentSessionEntries(context.Context, models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	return nil, s.err
 }
 
 func TestRunFailedNoteRefusalDoesNotRetryAPostedReply(t *testing.T) {
-	run := &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "t"}, SessionID: "session", Status: AgentRunStatusFailed}
-	message := &ChannelMessage{ID: "reply", Content: "I stopped."}
-	for _, refusal := range []error{ErrInvalidSessionEntry, ErrSessionMoved, ErrLeaseLost, ErrAgentSessionNotFound} {
+	run := &models.AgentRun{ID: "run", Scope: models.Scope{Kind: "tenant", ID: "t"}, SessionID: "session", Status: models.AgentRunStatusFailed}
+	message := &models.ChannelMessage{ID: "reply", Content: "I stopped."}
+	for _, refusal := range []error{models.ErrInvalidSessionEntry, models.ErrSessionMoved, models.ErrLeaseLost, models.ErrAgentSessionNotFound} {
 		if err := appendRunFailedNote(t.Context(), refusingNoteStore{err: fmt.Errorf("append: %w", refusal)}, run, message); err != nil {
 			t.Fatalf("%v: permanent refusal retried: %v", refusal, err)
 		}

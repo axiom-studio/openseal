@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -13,9 +14,9 @@ import (
 // conversationRunContextNote builds the Run's run_context note: the sections,
 // diffed against what the session last saw. It returns nil when nothing is
 // to be sent (never for a chat Run: respond_to is always sent).
-func (r *ConversationRunTurnRunner) conversationRunContextNote(ctx context.Context, in runtimeconversation.ConversationContextInput) (*SessionEntry, error) {
+func (r *ConversationRunTurnRunner) conversationRunContextNote(ctx context.Context, in runtimeconversation.ConversationContextInput) (*models.SessionEntry, error) {
 	if in.Run == nil || in.Session == nil {
-		return nil, fmt.Errorf("%w: the run context needs a run and a session", ErrInvalidAgentRun)
+		return nil, fmt.Errorf("%w: the run context needs a run and a session", models.ErrInvalidAgentRun)
 	}
 	sections, err := r.conversationContextSections(ctx, in)
 	if err != nil {
@@ -37,7 +38,7 @@ func (r *ConversationRunTurnRunner) conversationRunContextNote(ctx context.Conte
 // an empty Text.
 func (r *ConversationRunTurnRunner) conversationContextSections(ctx context.Context, in runtimeconversation.ConversationContextInput) ([]runtimeconversation.ConversationContextSection, error) {
 	if in.Run == nil || in.Session == nil || in.Conversation == nil || in.Trigger == nil {
-		return nil, fmt.Errorf("%w: the run context needs a run, a session, a conversation and a trigger", ErrInvalidAgentRun)
+		return nil, fmt.Errorf("%w: the run context needs a run, a session, a conversation and a trigger", models.ErrInvalidAgentRun)
 	}
 	path, err := runtimeconversation.RunContextPathMessages(ctx, in)
 	if err != nil {
@@ -56,7 +57,7 @@ func (r *ConversationRunTurnRunner) conversationContextSections(ctx context.Cont
 	)
 
 	team := ""
-	if isTeamMemberRun(in.Run) {
+	if models.IsTeamMemberRun(in.Run) {
 		context, err := r.agentConversationTeamContext(ctx, in.Run, in.Conversation, in.Trigger)
 		if err != nil {
 			return nil, err
@@ -130,7 +131,7 @@ func (r *ConversationRunTurnRunner) runContextReplyParent(ctx context.Context, i
 		return "", nil
 	}
 	parent, err := r.conversations.GetVisibleChannelMessage(ctx, in.Conversation.Scope, in.Conversation.ID, parentID, in.Viewer)
-	if errors.Is(err, ErrChannelMessageNotFound) {
+	if errors.Is(err, models.ErrChannelMessageNotFound) {
 		return "", nil
 	}
 	if err != nil {
@@ -145,28 +146,28 @@ func (r *ConversationRunTurnRunner) runContextReplyParent(ctx context.Context, i
 // runContextObjectivesAndRunbooks lists the chat owner's objectives and
 // runbook activations (a chat started from an objective sees only that
 // objective's). External channels get neither.
-func (r *ConversationRunTurnRunner) runContextObjectivesAndRunbooks(ctx context.Context, conversation *Conversation) (string, string, error) {
-	if externalChannelContext(conversation) {
+func (r *ConversationRunTurnRunner) runContextObjectivesAndRunbooks(ctx context.Context, conversation *models.Conversation) (string, string, error) {
+	if models.IsExternalChannelConversation(conversation) {
 		return "", "", nil
 	}
 	objectiveID := ""
-	if conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceObjective {
+	if conversation.Origin != nil && conversation.Origin.Kind == models.ConversationReferenceObjective {
 		objectiveID = conversation.Origin.ID
 	}
 	objectives := ""
 	if r.portfolio != nil {
-		var list []*Objective
+		var list []*models.Objective
 		if objectiveID != "" {
 			objective, err := r.portfolio.GetObjective(ctx, conversation.Scope, objectiveID)
-			if err != nil && !errors.Is(err, ErrObjectiveNotFound) {
+			if err != nil && !errors.Is(err, models.ErrObjectiveNotFound) {
 				return "", "", err
 			}
 			if objective != nil && objective.Owner == conversation.Owner {
-				list = []*Objective{objective}
+				list = []*models.Objective{objective}
 			}
 		} else {
 			var err error
-			list, err = r.portfolio.ListObjectives(ctx, ObjectiveFilter{Scope: conversation.Scope, Owner: &conversation.Owner, Limit: runtimeconversation.RunContextMaximumObjectives})
+			list, err = r.portfolio.ListObjectives(ctx, models.ObjectiveFilter{Scope: conversation.Scope, Owner: &conversation.Owner, Limit: runtimeconversation.RunContextMaximumObjectives})
 			if err != nil {
 				return "", "", err
 			}
@@ -186,7 +187,7 @@ func (r *ConversationRunTurnRunner) runContextObjectivesAndRunbooks(ctx context.
 	}
 	runbooks := ""
 	if r.runbooks != nil {
-		activations, err := r.runbooks.ListRunbookActivations(ctx, RunbookActivationFilter{
+		activations, err := r.runbooks.ListRunbookActivations(ctx, models.RunbookActivationFilter{
 			Scope: conversation.Scope, Owner: &conversation.Owner, ObjectiveID: objectiveID, Limit: runtimeconversation.RunContextMaximumRunbooks,
 		})
 		if err != nil {
@@ -219,27 +220,27 @@ func (r *ConversationRunTurnRunner) runContextObjectivesAndRunbooks(ctx context.
 // trigger's person started in this conversation and thread, finished ones
 // included, so the model answers progress questions from their real status
 // (the old hosted conversationTasks snapshot, SPEC §6/F10).
-func (r *ConversationRunTurnRunner) runContextConversationTasks(ctx context.Context, conversation *Conversation, trigger *ChannelMessage) (string, error) {
+func (r *ConversationRunTurnRunner) runContextConversationTasks(ctx context.Context, conversation *models.Conversation, trigger *models.ChannelMessage) (string, error) {
 	tasks, ok := r.portfolio.(runtimeconversation.ConversationTaskLister)
 	if !ok || r.portfolio == nil {
 		return "", nil
 	}
 	actor := trigger.Sender
-	if voiceCallStartedMessage(trigger) && trigger.Initiator != nil {
+	if models.VoiceCallStartedMessage(trigger) && trigger.Initiator != nil {
 		actor = *trigger.Initiator
 	}
-	if actor.Type != ConversationParticipantUser || actor.Validate() != nil {
+	if actor.Type != models.ConversationParticipantUser || actor.Validate() != nil {
 		return "", nil
 	}
-	thread := externalConversationThreadRoot(conversation, trigger)
-	rows, err := tasks.ListConversationTasks(ctx, ConversationTaskFilter{
+	thread := models.ExternalConversationThreadRoot(conversation, trigger)
+	rows, err := tasks.ListConversationTasks(ctx, models.ConversationTaskFilter{
 		Scope: conversation.Scope, Owner: conversation.Owner, ConversationID: conversation.ID,
 		ThreadRootID: thread, AuthenticatedActor: actor, Limit: runtimeconversation.RunContextMaximumTasks,
 	})
 	if err != nil {
 		return "", err
 	}
-	proof, _ := r.portfolio.(ConversationTaskProofStore)
+	proof, _ := r.portfolio.(models.ConversationTaskProofStore)
 	lines := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if row == nil || row.Task == nil || row.WorkRun == nil {
@@ -247,10 +248,10 @@ func (r *ConversationRunTurnRunner) runContextConversationTasks(ctx context.Cont
 		}
 		task, work := row.Task, row.WorkRun
 		if task.Scope != conversation.Scope || task.Owner != conversation.Owner || task.ConversationID != conversation.ID ||
-			thread != "" && task.ThreadRootID != thread || task.AuthenticatedActor != actor || !ConversationTaskMatchesWorkRun(task, work) {
+			thread != "" && task.ThreadRootID != thread || task.AuthenticatedActor != actor || !models.ConversationTaskMatchesWorkRun(task, work) {
 			continue
 		}
-		if task.Mode == ConversationTaskModeContinuation {
+		if task.Mode == models.ConversationTaskModeContinuation {
 			if proof == nil {
 				continue
 			}
@@ -263,7 +264,7 @@ func (r *ConversationRunTurnRunner) runContextConversationTasks(ctx context.Cont
 			}
 		}
 		mode := "independent"
-		if task.Mode == ConversationTaskModeContinuation {
+		if task.Mode == models.ConversationTaskModeContinuation {
 			mode = "continued from the chat"
 		}
 		line := fmt.Sprintf("- task %s (%s, %s) workRunId %s revision %d, started %s: %q", task.ID, mode, work.Status, work.ID,

@@ -3,35 +3,38 @@ package runtime
 import (
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
-	for _, status := range []AgentRunStatus{AgentRunStatusPaused, AgentRunStatusCompleted} {
+	for _, status := range []models.AgentRunStatus{models.AgentRunStatusPaused, models.AgentRunStatusCompleted} {
 		for _, accepted := range []bool{false, true} {
 			name := string(status) + "/fresh"
 			if accepted {
 				name = string(status) + "/accepted"
 			}
 			t.Run(name, func(t *testing.T) {
-				f := newConversationActorFixture(t, Scope{Kind: "organization", ID: "shared"}, "writer")
-				a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
+				f := newConversationActorFixture(t, models.Scope{Kind: "organization", ID: "shared"}, "writer")
+				a := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "member-a"}
 				trigger := f.post(t, conversation.PostChannelMessageRequest{Sender: a, IdempotencyKey: "request"})
 				root, child, question := f.waitingQuestion(t, trigger)
-				answer := f.post(t, conversation.PostChannelMessageRequest{Sender: a, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, IdempotencyKey: "answer"})
+				answer := f.post(t, conversation.PostChannelMessageRequest{Sender: a, Intent: models.MessageIntentAnswer, ResolvesMessageID: question.ID, IdempotencyKey: "answer"})
 				if accepted {
 					child = f.schedule(t, answer)
-					if child.Kind != RunKindAgentWork || len(child.PendingInterventions) != 1 {
+					if child.Kind != models.RunKindAgentWork || len(child.PendingInterventions) != 1 {
 						t.Fatalf("clarification was not accepted: %#v", child)
 					}
 				}
-				activity := NewRunActivityService(f.store, f.store)
+				activity := runtimeactivity.NewRunActivityService(f.store, f.store)
 				var err error
-				root, _, err = activity.TransitionRun(t.Context(), root.Scope, root.ID, RunTransitionRequest{ExpectedRevision: root.Revision, Status: AgentRunStatusRunning})
+				root, _, err = activity.TransitionRun(t.Context(), root.Scope, root.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: root.Revision, Status: models.AgentRunStatusRunning})
 				if err != nil {
 					t.Fatal(err)
 				}
-				root, _, err = activity.TransitionRun(t.Context(), root.Scope, root.ID, RunTransitionRequest{ExpectedRevision: root.Revision, Status: status})
+				root, _, err = activity.TransitionRun(t.Context(), root.Scope, root.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: root.Revision, Status: status})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -57,7 +60,7 @@ func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
 func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
 	f := newClarificationFixture(t, newTestKernelStore(t), "targets")
 	q := f.question(t)
-	other, err := NewPortfolioService(f.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: f.root.Scope, Kind: RunKindAgentWork, Owner: f.root.Owner, AssignedAgentID: "writer", ParentRunID: f.root.ID, Goal: "Draft the outline", Source: RunSourceRequest})
+	other, err := portfolio.NewPortfolioService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: f.root.Scope, Kind: models.RunKindAgentWork, Owner: f.root.Owner, AssignedAgentID: "writer", ParentRunID: f.root.ID, Goal: "Draft the outline", Source: models.RunSourceRequest})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +79,7 @@ func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
 		t.Fatalf("explicit reply = %#v %v %v", result, handled, err)
 	}
 	unchanged, _ := f.store.GetAgentRun(t.Context(), f.root.Scope, other.ID)
-	if unchanged.Status != AgentRunStatusWaitingForEvent {
+	if unchanged.Status != models.AgentRunStatusWaitingForEvent {
 		t.Fatal("unrelated task woke")
 	}
 }

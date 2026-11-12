@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
@@ -44,15 +45,15 @@ func cardStateWave2Visual() *presentation.Visual {
 func TestFlashcardStateLinesArePerPerson(t *testing.T) {
 	component := cardStateWave2Visual().Components[0]
 	since := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
-	mark := func(actor, card, result string, at time.Time) *SurfaceInteraction {
-		return &SurfaceInteraction{ComponentID: "deck", ActionID: "mark", ItemKey: card, ActorType: ConversationParticipantUser, ActorID: actor,
+	mark := func(actor, card, result string, at time.Time) *models.SurfaceInteraction {
+		return &models.SurfaceInteraction{ComponentID: "deck", ActionID: "mark", ItemKey: card, ActorType: models.ConversationParticipantUser, ActorID: actor,
 			Repeatable: true, Values: json.RawMessage(`{"result":"` + result + `"}`), CreatedAt: at}
 	}
-	names := map[ConversationParticipant]string{{Type: ConversationParticipantUser, ID: "ann"}: "Ann"}
-	latest := []*SurfaceInteraction{
+	names := map[models.ConversationParticipant]string{{Type: models.ConversationParticipantUser, ID: "ann"}: "Ann"}
+	latest := []*models.SurfaceInteraction{
 		mark("ann", "pain", "got", since.Add(time.Minute)), mark("ann", "eau", "got", since.Add(-time.Hour)),
 		mark("bob", "pain", "again", since), mark("cat", "pomme", "got", since.Add(-time.Minute)),
-		{ComponentID: "pancakes", ItemKey: "flour", ActorType: ConversationParticipantUser, ActorID: "dan", Repeatable: true, Values: json.RawMessage(`{"checked":true}`), CreatedAt: since},
+		{ComponentID: "pancakes", ItemKey: "flour", ActorType: models.ConversationParticipantUser, ActorID: "dan", Repeatable: true, Values: json.RawMessage(`{"checked":true}`), CreatedAt: since},
 	}
 	got := flashcardStateLines(component, latest, since, names)
 	want := []string{`Ann: Flashcards "French food words": 2 got, 0 again, 1 unseen`, `Someone: Flashcards "French food words": 0 got, 1 again, 2 unseen`}
@@ -65,18 +66,18 @@ func TestFlashcardStateLinesArePerPerson(t *testing.T) {
 }
 
 func TestPollVotesKeepEachPersonsLatestVote(t *testing.T) {
-	latest := []*SurfaceInteraction{
-		{ComponentID: "vote", ActionID: presentation.PollVoteAction, ActorType: ConversationParticipantUser, ActorID: "ana", Values: json.RawMessage(`{"optionIds":["thai"]}`)},
-		{ComponentID: "vote", ActionID: presentation.PollVoteAction, ActorType: ConversationParticipantUser, ActorID: "ben", Values: json.RawMessage(`{"optionIds":["pub","thai"]}`)},
-		{ComponentID: "other", ActionID: presentation.PollVoteAction, ActorType: ConversationParticipantUser, ActorID: "cy", Values: json.RawMessage(`{"optionIds":["thai"]}`)},
-		{ComponentID: "vote", ActionID: "share", ActorType: ConversationParticipantUser, ActorID: "dee", Values: json.RawMessage(`{"optionIds":["thai"]}`)},
+	latest := []*models.SurfaceInteraction{
+		{ComponentID: "vote", ActionID: presentation.PollVoteAction, ActorType: models.ConversationParticipantUser, ActorID: "ana", Values: json.RawMessage(`{"optionIds":["thai"]}`)},
+		{ComponentID: "vote", ActionID: presentation.PollVoteAction, ActorType: models.ConversationParticipantUser, ActorID: "ben", Values: json.RawMessage(`{"optionIds":["pub","thai"]}`)},
+		{ComponentID: "other", ActionID: presentation.PollVoteAction, ActorType: models.ConversationParticipantUser, ActorID: "cy", Values: json.RawMessage(`{"optionIds":["thai"]}`)},
+		{ComponentID: "vote", ActionID: "share", ActorType: models.ConversationParticipantUser, ActorID: "dee", Values: json.RawMessage(`{"optionIds":["thai"]}`)},
 		nil,
 	}
 	votes := PollVotes("vote", latest)
 	if len(votes) != 2 || strings.Join(votes["user:ana"], ",") != "thai" || strings.Join(votes["user:ben"], ",") != "pub,thai" {
 		t.Fatalf("votes = %v", votes)
 	}
-	if key := PollVoterKey(ConversationParticipant{Type: ConversationParticipantUser, ID: "ana"}); key != "user:ana" {
+	if key := PollVoterKey(models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"}); key != "user:ana" {
 		t.Fatalf("key = %q", key)
 	}
 }

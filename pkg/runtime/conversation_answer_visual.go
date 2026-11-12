@@ -31,7 +31,7 @@ func answerVisualArtifactID(runID, triggerID, participantID string) string {
 	if participantID != "" {
 		key += "\x00" + participantID
 	}
-	return "visual-" + strings.TrimPrefix(hashString(key), "sha256:")[:40]
+	return "visual-" + strings.TrimPrefix(models.SHA256DigestString(key), "sha256:")[:40]
 }
 
 // storeAnswerVisual stores the visual that rides on an Agent's answer as an
@@ -40,47 +40,47 @@ func answerVisualArtifactID(runID, triggerID, participantID string) string {
 // the delivery. One-to-one and Team answers share it. The routines its
 // routine components show are linked to the conversation (also on a
 // replay, in case the first attempt stopped in between).
-func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *AgentRun, participantID, id string, visual presentation.Visual) (ConversationReference, error) {
+func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *models.AgentRun, participantID, id string, visual presentation.Visual) (models.ConversationReference, error) {
 	reference, err := r.storeAnswerVisualArtifact(ctx, run, participantID, id, visual)
 	if err != nil {
-		return ConversationReference{}, err
+		return models.ConversationReference{}, err
 	}
 	if routines := presentation.RoutineBindings(visual.Surface(presentation.StateReady)); len(routines) > 0 {
-		conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+		conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 		if _, err := r.conversations.LinkRunbooks(ctx, run.Scope, conversationID, routines); err != nil {
-			return ConversationReference{}, fmt.Errorf("link the visual's routines to the chat: %w", err)
+			return models.ConversationReference{}, fmt.Errorf("link the visual's routines to the chat: %w", err)
 		}
 	}
 	return reference, nil
 }
 
-func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Context, run *AgentRun, participantID, id string, visual presentation.Visual) (ConversationReference, error) {
+func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Context, run *models.AgentRun, participantID, id string, visual presentation.Visual) (models.ConversationReference, error) {
 	if r.artifacts == nil || r.config.AttachmentContent == nil {
-		return ConversationReference{}, errors.New("answer visuals require artifact and content storage")
+		return models.ConversationReference{}, errors.New("answer visuals require artifact and content storage")
 	}
-	reference := ConversationReference{Kind: ConversationReferenceArtifact, ID: id, Version: 1}
+	reference := models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: id, Version: 1}
 	existing, err := r.artifacts.GetArtifact(ctx, run.Scope, id, 1)
 	if err != nil && !errors.Is(err, artifactcatalog.ErrArtifactNotFound) {
-		return ConversationReference{}, err
+		return models.ConversationReference{}, err
 	}
 	if existing != nil {
 		if existing.Type != presentation.ArtifactType || existing.Provenance.RunID != run.ID {
-			return ConversationReference{}, ErrArtifactImmutable
+			return models.ConversationReference{}, models.ErrArtifactImmutable
 		}
 		return reference, nil
 	}
 	surface := visual.Surface(presentation.StateReady)
 	content, err := presentation.Encode(surface)
 	if err != nil {
-		return ConversationReference{}, err
+		return models.ConversationReference{}, err
 	}
 	owner := run.Owner
-	stored, err := r.config.AttachmentContent.Put(ctx, ArtifactContentWrite{
+	stored, err := r.config.AttachmentContent.Put(ctx, models.ArtifactContentWrite{
 		Scope: run.Scope, MediaType: presentation.MediaType, Reader: bytes.NewReader(content), SizeBytes: int64(len(content)),
-		Digest: hashBytes(content), Owner: &owner,
+		Digest: models.SHA256Digest(content), Owner: &owner,
 	})
 	if err != nil {
-		return ConversationReference{}, err
+		return models.ConversationReference{}, err
 	}
 	// The name is what a person sees if the card is ever listed: its title.
 	name := strings.TrimSpace(surface.Title)
@@ -95,15 +95,15 @@ func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Contex
 	for _, component := range surface.Components {
 		componentTypes = append(componentTypes, component.Type)
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	placement := artifactcatalog.ArtifactPlacement{}
 	if r.conversations != nil {
 		placement.Conversations = r.conversations
 	}
-	_, err = artifactcatalog.NewArtifactCatalog(r.artifacts, models.WithClock(r.now)).WithPlacement(placement).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &Artifact{
+	_, err = artifactcatalog.NewArtifactCatalog(r.artifacts, models.WithClock(r.now)).WithPlacement(placement).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
 		ID: id, Version: 1, Scope: run.Scope, Name: name,
 		Type: presentation.ArtifactType, MediaType: presentation.MediaType,
-		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: ArtifactClassificationInternal,
+		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: models.ArtifactClassificationInternal,
 		MetadataSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"schema", "state", "componentTypes"},
 			"properties": map[string]interface{}{
@@ -113,23 +113,23 @@ func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Contex
 			},
 		},
 		Metadata: map[string]interface{}{"schema": presentation.Schema, "state": string(surface.State), "componentTypes": componentTypes},
-		Provenance: ArtifactProvenance{
-			Producer: ActivityActor{Type: "agent", ID: participantID}, Owner: &owner, RunID: run.ID, ObjectiveID: run.ObjectiveID,
+		Provenance: models.ArtifactProvenance{
+			Producer: models.ActivityActor{Type: "agent", ID: participantID}, Owner: &owner, RunID: run.ID, ObjectiveID: run.ObjectiveID,
 			ConversationID: conversationID,
 		},
 	}})
 	if err != nil {
-		return ConversationReference{}, err
+		return models.ConversationReference{}, err
 	}
 	return reference, nil
 }
 
 // visualRepeatsAttachedImages reports a visual made only of image and gallery
 // components whose every image is an artifact the answer already references.
-func visualRepeatsAttachedImages(visual presentation.Visual, references []ConversationReference) bool {
+func visualRepeatsAttachedImages(visual presentation.Visual, references []models.ConversationReference) bool {
 	attached := make(map[string]bool, len(references))
 	for _, reference := range references {
-		if reference.Kind == ConversationReferenceArtifact {
+		if reference.Kind == models.ConversationReferenceArtifact {
 			attached[reference.ID] = true
 		}
 	}

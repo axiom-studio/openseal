@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
@@ -17,12 +18,12 @@ const ConversationTaskSkillSetupWakeType = "skill_setup"
 const conversationTaskSetupEvent = "run.skill_setup_completed"
 
 type conversationTaskSetupStore interface {
-	ConversationTaskProofStore
-	SkillSetupRequestStore
-	GetActionCall(context.Context, Scope, string) (*ActionCall, error)
+	models.ConversationTaskProofStore
+	models.SkillSetupRequestStore
+	GetActionCall(context.Context, models.Scope, string) (*models.ActionCall, error)
 }
 
-func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupStore, run *AgentRun, requestID string, requireCompletedAction bool) (*ConversationTask, *SkillSetupRequest, error) {
+func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupStore, run *models.AgentRun, requestID string, requireCompletedAction bool) (*models.ConversationTask, *models.SkillSetupRequest, error) {
 	task, err := skillbinding.ConversationTaskSetupOrigin(ctx, store, run)
 	if err != nil || task == nil {
 		return task, nil, err
@@ -34,26 +35,26 @@ func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupSt
 	if request == nil || request.Validate() != nil || request.ID != requestID || request.Scope != run.Scope ||
 		request.RunID != run.ID || request.Owner != task.Owner || request.DeploymentID != task.Owner.ID || request.AgentID != task.TargetAgentID || request.ConversationID != task.ConversationID ||
 		request.TriggerMessageID != task.SourceMessageID || request.ID != "skill-setup:"+request.ActionCallID {
-		return task, nil, ErrInvalidSkillSetup
+		return task, nil, models.ErrInvalidSkillSetup
 	}
 	call, err := store.GetActionCall(ctx, run.Scope, request.ActionCallID)
 	if err != nil {
 		return task, nil, err
 	}
 	if !skillbinding.TaskSetupActionMatches(call, run, task.TargetAgentID) {
-		return task, nil, ErrInvalidSkillSetup
+		return task, nil, models.ErrInvalidSkillSetup
 	}
-	if call.Status != ActionCallStatusSucceeded {
+	if call.Status != models.ActionCallStatusSucceeded {
 		// The form can be resolved between its save and the action commit. It
 		// already belongs to this task, but cannot wake it before a verified wait.
-		if !requireCompletedAction && (call.Status == ActionCallStatusReady || call.Status == ActionCallStatusRunning) {
+		if !requireCompletedAction && (call.Status == models.ActionCallStatusReady || call.Status == models.ActionCallStatusRunning) {
 			return task, request, nil
 		}
-		return task, nil, ErrInvalidSkillSetup
+		return task, nil, models.ErrInvalidSkillSetup
 	}
 	// Bind the mutable terminal record back to the exact successful action's
 	// original pending receipt. A supplied setup ID alone cannot park or wake work.
-	var admitted SkillSetupRequest
+	var admitted models.SkillSetupRequest
 	encoded, err := json.Marshal(call.Output["setupRequest"])
 	if err != nil || json.Unmarshal(encoded, &admitted) != nil || admitted.Validate() != nil || requireCompletedAction && admitted.Status != "pending" ||
 		admitted.ID != request.ID || admitted.Scope != request.Scope || admitted.RunID != request.RunID ||
@@ -63,7 +64,7 @@ func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupSt
 		admitted.EnablePrompt != request.EnablePrompt || !slices.Equal(admitted.RequiredActions, request.RequiredActions) ||
 		admitted.Reason != request.Reason || !admitted.CreatedAt.Equal(request.CreatedAt) ||
 		!taskSetupTargetFollowsReceipt(&admitted, request) {
-		return task, nil, ErrInvalidSkillSetup
+		return task, nil, models.ErrInvalidSkillSetup
 	}
 	return task, request, nil
 }
@@ -72,7 +73,7 @@ func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupSt
 // account after its canonical binding upgrade. The store's CAS revision records
 // that change; the historical action receipt remains unchanged. The requested
 // capability, purpose, binding identity and task lineage stay fixed.
-func taskSetupTargetFollowsReceipt(admitted, current *SkillSetupRequest) bool {
+func taskSetupTargetFollowsReceipt(admitted, current *models.SkillSetupRequest) bool {
 	if current.Revision < admitted.Revision || current.UpdatedAt.Before(admitted.UpdatedAt) {
 		return false
 	}
@@ -84,7 +85,7 @@ func taskSetupTargetFollowsReceipt(admitted, current *SkillSetupRequest) bool {
 		if current.SkillName != admitted.SkillName || current.InstallationReference != admitted.InstallationReference || current.SourceDigest != admitted.SourceDigest {
 			return false
 		}
-		if admitted.Phase == SkillSetupPhaseBindingUpgrade && current.Phase == SkillSetupPhaseConfiguration {
+		if admitted.Phase == models.SkillSetupPhaseBindingUpgrade && current.Phase == models.SkillSetupPhaseConfiguration {
 			// The requested executable was already pinned in the action receipt.
 			// A canonical binding upgrade rebases its older account baseline in a
 			// separate CAS before any later configuration save can resolve it.
@@ -108,8 +109,8 @@ func taskSetupTargetFollowsReceipt(admitted, current *SkillSetupRequest) bool {
 	return current.Kind == admitted.Kind && current.BindingRevision >= admitted.BindingRevision
 }
 
-func isExactTaskSetupWait(run *AgentRun, requestID string) bool {
-	return run.Status == AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
+func isExactTaskSetupWait(run *models.AgentRun, requestID string) bool {
+	return run.Status == models.AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
 		run.WakeCondition.Type == ConversationTaskSkillSetupWakeType && run.WakeCondition.Reference == requestID &&
 		run.WakeCondition.WakeAt == nil && len(run.WakeCondition.Predicate) == 0
 }
@@ -117,9 +118,9 @@ func isExactTaskSetupWait(run *AgentRun, requestID string) bool {
 // ReconcileSkillSetupTask resumes only the exact task waiting for this saved
 // setup request. Handled remains true for pending, paused, canceled and already
 // resumed tasks: a host must not create a new foreground request for those.
-func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, scope Scope, requestID string) (*agentrun.AgentRunCommandResult, bool, error) {
-	if s == nil || s.runs == nil || scope.Validate() != nil || !validOpaqueIdentifier(requestID, 256) {
-		return nil, false, ErrInvalidSkillSetup
+func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, scope models.Scope, requestID string) (*agentrun.AgentRunCommandResult, bool, error) {
+	if s == nil || s.runs == nil || scope.Validate() != nil || !models.IsValidOpaqueIdentifier(requestID, 256) {
+		return nil, false, models.ErrInvalidSkillSetup
 	}
 	store, ok := s.runStore.(conversationTaskSetupStore)
 	if !ok {
@@ -134,7 +135,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 		return nil, false, err
 	}
 	// Existing ordinary foreground setup completions retain their host path.
-	if run.Kind != RunKindAgentWork || run.ParentRunID != "" {
+	if run.Kind != models.RunKindAgentWork || run.ParentRunID != "" {
 		return nil, false, nil
 	}
 	task, request, err := verifiedTaskSetupRequest(ctx, store, run, requestID, isExactTaskSetupWait(run, requestID))
@@ -155,29 +156,29 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 	// The request settles without resuming once the run no longer acts for
 	// the umbrella and member that asked, for example after the member left
 	// the Team.
-	if resumable, resumeErr := InteractionRunResumable(ctx, teamRosterReader(s.runStore), run, request.Owner, request.AgentID); resumeErr != nil || !resumable {
+	if resumable, resumeErr := models.InteractionRunResumable(ctx, models.TeamRosterReaderOf(s.runStore), run, request.Owner, request.AgentID); resumeErr != nil || !resumable {
 		return result, true, resumeErr
 	}
 	if request.Status != "resolved" && request.Status != "dismissed" {
-		return nil, true, ErrInvalidSkillSetup
+		return nil, true, models.ErrInvalidSkillSetup
 	}
-	receipt := &SkillSetupResolutionReceipt{Scope: scope, RunID: run.ID, RequestID: request.ID, Status: request.Status,
+	receipt := &models.SkillSetupResolutionReceipt{Scope: scope, RunID: run.ID, RequestID: request.ID, Status: request.Status,
 		ActionCallID: request.ActionCallID, Revision: request.Revision, ResolvedBindingID: request.ResolvedBindingID,
 		ResolvedBindingRevision: request.ResolvedBindingRevision}
 	instruction := "The requested Skill setup was dismissed. Do not treat it as authorization or repeat the setup; explain the remaining blocker or use an already authorized alternative."
 	if request.Status == "resolved" {
 		instruction = "The requested Skill configuration was saved. Continue this task from its saved progress. Provider access is not yet verified; use only currently authorized actions to verify it and do not repeat completed work."
 	}
-	updated, event, err := NewRunActivityService(s.runStore, s.runStore, models.WithClock(s.now)).TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusQueued,
+	updated, event, err := activity.NewRunActivityService(s.runStore, s.runStore, models.WithClock(s.now)).TransitionRun(ctx, scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusQueued,
 		Summary: "Received the Skill setup result; continuing the task", EventType: conversationTaskSetupEvent,
-		Actor: ActivityActor{Type: "service", ID: "skill-setup-coordinator"}, CorrelationID: request.ID, CausationID: request.ActionCallID,
+		Actor: models.ActivityActor{Type: "service", ID: "skill-setup-coordinator"}, CorrelationID: request.ID, CausationID: request.ActionCallID,
 		Payload: map[string]interface{}{"requestId": request.ID, "status": request.Status, "revision": request.Revision, "resolvedBy": request.ResolvedBy},
-		Intervention: &AgentRunIntervention{ID: stableConversationID(scope, "skill-setup-result:"+request.ID, "intervention"),
-			Actor: ActivityActor{Type: "service", ID: "skill-setup-coordinator"}, Instruction: instruction,
+		Intervention: &models.AgentRunIntervention{ID: models.StableConversationID(scope, "skill-setup-result:"+request.ID, "intervention"),
+			Actor: models.ActivityActor{Type: "service", ID: "skill-setup-coordinator"}, Instruction: instruction,
 			CreatedAt: request.UpdatedAt, SkillSetupResolution: receipt},
 	})
-	if errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, models.ErrRevisionConflict) {
 		// A competing callback may already have committed the same atomic result.
 		latest, readErr := store.GetAgentRun(ctx, scope, run.ID)
 		if readErr != nil {
@@ -188,7 +189,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 			if readErr != nil {
 				return nil, true, readErr
 			}
-			if accepted || latest.Status != AgentRunStatusWaitingForEvent {
+			if accepted || latest.Status != models.AgentRunStatusWaitingForEvent {
 				return &agentrun.AgentRunCommandResult{Run: latest}, true, nil
 			}
 		}
@@ -199,9 +200,9 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 	return &agentrun.AgentRunCommandResult{Run: updated, Event: event}, true, nil
 }
 
-func skillSetupTaskAccepted(ctx context.Context, store RunActivityStore, run *AgentRun, request *SkillSetupRequest) (bool, error) {
+func skillSetupTaskAccepted(ctx context.Context, store models.RunActivityStore, run *models.AgentRun, request *models.SkillSetupRequest) (bool, error) {
 	for after := int64(0); ; {
-		events, err := store.ListActivity(ctx, ActivityFilter{Scope: run.Scope, RunID: run.ID, EventTypes: []string{conversationTaskSetupEvent}, AfterSequence: after, Limit: 100})
+		events, err := store.ListActivity(ctx, models.ActivityFilter{Scope: run.Scope, RunID: run.ID, EventTypes: []string{conversationTaskSetupEvent}, AfterSequence: after, Limit: 100})
 		if err != nil {
 			return false, err
 		}
@@ -217,7 +218,7 @@ func skillSetupTaskAccepted(ctx context.Context, store RunActivityStore, run *Ag
 	}
 }
 
-func (s *ConversationRunScheduler) reconcileSkillSetupTasks(ctx context.Context, scope Scope, result *ConversationRunReconcileResult) error {
+func (s *ConversationRunScheduler) reconcileSkillSetupTasks(ctx context.Context, scope models.Scope, result *ConversationRunReconcileResult) error {
 	if _, ok := s.runStore.(conversationTaskSetupStore); !ok {
 		return nil
 	}
@@ -225,7 +226,7 @@ func (s *ConversationRunScheduler) reconcileSkillSetupTasks(ctx context.Context,
 	// skip later waits when the first page becomes queued.
 	var requestIDs []string
 	for offset := 0; ; offset += 100 {
-		runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindAgentWork, Statuses: []AgentRunStatus{AgentRunStatusWaitingForEvent}, Limit: 100, Offset: offset})
+		runs, err := s.runStore.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: models.RunKindAgentWork, Statuses: []models.AgentRunStatus{models.AgentRunStatusWaitingForEvent}, Limit: 100, Offset: offset})
 		if err != nil {
 			return err
 		}
@@ -240,7 +241,7 @@ func (s *ConversationRunScheduler) reconcileSkillSetupTasks(ctx context.Context,
 	}
 	for _, id := range requestIDs {
 		resumed, _, err := s.ReconcileSkillSetupTask(ctx, scope, id)
-		if errors.Is(err, ErrInvalidSkillSetup) {
+		if errors.Is(err, models.ErrInvalidSkillSetup) {
 			continue
 		}
 		if err != nil {

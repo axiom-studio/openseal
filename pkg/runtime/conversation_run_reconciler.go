@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 )
@@ -92,7 +93,7 @@ func (r *ConversationRunReconciler) Wake() {
 }
 
 // WakeScope reconciles one scope promptly instead of every listed scope.
-func (r *ConversationRunReconciler) WakeScope(scope Scope) {
+func (r *ConversationRunReconciler) WakeScope(scope models.Scope) {
 	r.queue.WakeScope(scope)
 }
 
@@ -143,7 +144,7 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 		now := time.Now()
 		scopes, deferred := r.queue.Take(now, spacing)
 		for scope, at := range deferred {
-			signals.Schedule(WorkFamilyConversationDue, scope, &at)
+			signals.Schedule(models.WorkFamilyConversationDue, scope, &at)
 		}
 		if full {
 			listed, err := known.List(ctx)
@@ -161,7 +162,7 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 			r.logger.Warnw("failed to check conversation Run scopes", "error", err)
 			if healthy {
 				for _, scope := range scopes {
-					signals.ScheduleIn(WorkFamilyConversationDue, scope, r.config.Interval)
+					signals.ScheduleIn(models.WorkFamilyConversationDue, scope, r.config.Interval)
 				}
 			}
 		}
@@ -174,14 +175,14 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 			if retry := r.queue.Outcome(scope, err, r.config.Interval, time.Now()); retry != nil {
 				r.logger.Warnw("failed to reconcile conversation Runs", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
 				if healthy {
-					signals.Schedule(WorkFamilyConversationDue, scope, retry)
+					signals.Schedule(models.WorkFamilyConversationDue, scope, retry)
 				}
 			}
 		}
 	}
 }
 
-func (r *ConversationRunReconciler) reconcileScopes(ctx context.Context, scopes []Scope) error {
+func (r *ConversationRunReconciler) reconcileScopes(ctx context.Context, scopes []models.Scope) error {
 	for _, scope := range scopes {
 		if _, err := r.scheduler.ReconcileScope(ctx, scope); err != nil {
 			return err

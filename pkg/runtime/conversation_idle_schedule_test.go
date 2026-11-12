@@ -6,24 +6,25 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 type idleScheduleCountingStore struct {
-	ConversationStore
+	models.ConversationStore
 	messages, rounds, cursors int
 	roundError, cursorError   error
 	putCursorError            error
 	onCursor                  func()
 }
 
-func (s *idleScheduleCountingStore) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
+func (s *idleScheduleCountingStore) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
 	s.messages++
 	return s.ConversationStore.ListChannelMessages(ctx, filter)
 }
 
-func (s *idleScheduleCountingStore) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
+func (s *idleScheduleCountingStore) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
 	s.rounds++
 	if s.roundError != nil {
 		return nil, s.roundError
@@ -31,7 +32,7 @@ func (s *idleScheduleCountingStore) ListParticipationRounds(ctx context.Context,
 	return s.ConversationStore.ListParticipationRounds(ctx, filter)
 }
 
-func (s *idleScheduleCountingStore) GetConversationCursor(ctx context.Context, scope Scope, id string, participant ConversationParticipant) (*ConversationCursor, error) {
+func (s *idleScheduleCountingStore) GetConversationCursor(ctx context.Context, scope models.Scope, id string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	s.cursors++
 	if s.cursorError != nil {
 		return nil, s.cursorError
@@ -45,7 +46,7 @@ func (s *idleScheduleCountingStore) GetConversationCursor(ctx context.Context, s
 	return cursor, err
 }
 
-func (s *idleScheduleCountingStore) PutConversationCursor(ctx context.Context, record ConversationCursorRecord) (*ConversationCursor, bool, error) {
+func (s *idleScheduleCountingStore) PutConversationCursor(ctx context.Context, record models.ConversationCursorRecord) (*models.ConversationCursor, bool, error) {
 	if s.putCursorError != nil {
 		err := s.putCursorError
 		s.putCursorError = nil
@@ -55,13 +56,13 @@ func (s *idleScheduleCountingStore) PutConversationCursor(ctx context.Context, r
 }
 
 func TestConversationIdleSchedulingSkipsCaughtUpPayloadReads(t *testing.T) {
-	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel models.KernelStore) {
 		for _, empty := range []bool{true, false} {
 			t.Run(fmt.Sprintf("empty=%t", empty), func(t *testing.T) {
-				store := kernel.(ConversationStore)
-				conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "caught-up"}, fmt.Sprintf("channel-%t", empty))
+				store := kernel.(models.ConversationStore)
+				conversation := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "caught-up"}, fmt.Sprintf("channel-%t", empty))
 				if !empty {
-					conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "caught-up-message"})
+					conversationtest.CommitChannelMessage(t, store, &conversation, &models.ChannelMessage{ID: "caught-up-message"})
 					idleScheduleAdvanceCursor(t, store, conversation)
 				}
 				counter := &idleScheduleCountingStore{ConversationStore: store, roundError: errors.New("caught-up history must not be loaded")}
@@ -79,11 +80,11 @@ func TestConversationIdleSchedulingSkipsCaughtUpPayloadReads(t *testing.T) {
 }
 
 func TestConversationIdleSchedulingPreservesUnreadPagesAndReplay(t *testing.T) {
-	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
-		store := kernel.(ConversationStore)
-		conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "unread-pages"}, "channel")
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel models.KernelStore) {
+		store := kernel.(models.ConversationStore)
+		conversation := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "unread-pages"}, "channel")
 		for index := range 5 {
-			conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: fmt.Sprintf("unread-%d", index)})
+			conversationtest.CommitChannelMessage(t, store, &conversation, &models.ChannelMessage{ID: fmt.Sprintf("unread-%d", index)})
 		}
 		counter := &idleScheduleCountingStore{ConversationStore: store}
 		scheduler := idleScheduleScheduler(t, counter, kernel)
@@ -102,7 +103,7 @@ func TestConversationIdleSchedulingPreservesUnreadPagesAndReplay(t *testing.T) {
 		if err != nil || again.Messages != 0 || counter.messages != 0 || counter.rounds != 0 {
 			t.Fatalf("restarted caught-up pass=%#v messages=%d rounds=%d error=%v", again, counter.messages, counter.rounds, err)
 		}
-		runs, err := kernel.ListAgentRuns(t.Context(), AgentRunFilter{Scope: conversation.Scope, Kind: RunKindConversation})
+		runs, err := kernel.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: conversation.Scope, Kind: models.RunKindConversation})
 		if err != nil || len(runs) != 5 {
 			t.Fatalf("replay duplicated work: runs=%d error=%v", len(runs), err)
 		}
@@ -110,10 +111,10 @@ func TestConversationIdleSchedulingPreservesUnreadPagesAndReplay(t *testing.T) {
 }
 
 func TestConversationIdleSchedulingDoesNotTreatDeliveryAsProcessed(t *testing.T) {
-	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
-		store := kernel.(ConversationStore)
-		conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "delivered-unread"}, "channel")
-		conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "delivered"})
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel models.KernelStore) {
+		store := kernel.(models.ConversationStore)
+		conversation := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "delivered-unread"}, "channel")
+		conversationtest.CommitChannelMessage(t, store, &conversation, &models.ChannelMessage{ID: "delivered"})
 		if _, _, err := runtimeconversation.NewConversationService(store).AdvanceCursor(t.Context(), runtimeconversation.AdvanceConversationCursorRequest{
 			Scope: conversation.Scope, ConversationID: conversation.ID, Participant: idleScheduleParticipant(),
 			DeliveredSequence: 1, ReadSequence: 0,
@@ -129,12 +130,12 @@ func TestConversationIdleSchedulingDoesNotTreatDeliveryAsProcessed(t *testing.T)
 }
 
 func TestConversationIdleSchedulingRetainsCursorOnCoordinationOrCommitFailure(t *testing.T) {
-	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel models.KernelStore) {
 		for _, failure := range []string{"cursor_read", "round_read", "cursor_commit"} {
 			t.Run(failure, func(t *testing.T) {
-				store := kernel.(ConversationStore)
-				conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: failure}, "channel")
-				conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "unread"})
+				store := kernel.(models.ConversationStore)
+				conversation := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: failure}, "channel")
+				conversationtest.CommitChannelMessage(t, store, &conversation, &models.ChannelMessage{ID: "unread"})
 				unavailable := errors.New("temporary " + failure + " failure")
 				counter := &idleScheduleCountingStore{ConversationStore: store}
 				switch failure {
@@ -157,8 +158,8 @@ func TestConversationIdleSchedulingRetainsCursorOnCoordinationOrCommitFailure(t 
 				if err != nil || result.Messages != 1 || result.Scheduled+result.Replayed != 1 {
 					t.Fatalf("restart failed to recover exact unread message=%#v error=%v", result, err)
 				}
-				runs, err := kernel.ListAgentRuns(t.Context(), AgentRunFilter{Scope: conversation.Scope, Kind: RunKindConversation})
-				if err != nil || len(runs) != 1 || runs[0].Context[conversationRunContextTriggerID] != "unread" {
+				runs, err := kernel.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: conversation.Scope, Kind: models.RunKindConversation})
+				if err != nil || len(runs) != 1 || runs[0].Context[models.ConversationRunTriggerIDContextKey] != "unread" {
 					t.Fatalf("recovery lost or duplicated work: runs=%#v error=%v", runs, err)
 				}
 			})
@@ -167,14 +168,14 @@ func TestConversationIdleSchedulingRetainsCursorOnCoordinationOrCommitFailure(t 
 }
 
 func TestConversationIdleSchedulingRecoversConcurrentPostAfterCaughtUpSnapshot(t *testing.T) {
-	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
-		store := kernel.(ConversationStore)
-		conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "concurrent-post"}, "channel")
-		conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "first"})
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel models.KernelStore) {
+		store := kernel.(models.ConversationStore)
+		conversation := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "concurrent-post"}, "channel")
+		conversationtest.CommitChannelMessage(t, store, &conversation, &models.ChannelMessage{ID: "first"})
 		idleScheduleAdvanceCursor(t, store, conversation)
-		staleSnapshot := cloneConversation(conversation)
+		staleSnapshot := models.CloneConversation(conversation)
 		counter := &idleScheduleCountingStore{ConversationStore: store, onCursor: func() {
-			conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "later"})
+			conversationtest.CommitChannelMessage(t, store, &conversation, &models.ChannelMessage{ID: "later"})
 		}}
 		if err := idleScheduleScheduler(t, counter, kernel).reconcileConversation(t.Context(), staleSnapshot, &ConversationRunReconcileResult{}); err != nil {
 			t.Fatal(err)
@@ -186,21 +187,21 @@ func TestConversationIdleSchedulingRecoversConcurrentPostAfterCaughtUpSnapshot(t
 		if err != nil || result.Messages != 1 || result.Scheduled != 1 {
 			t.Fatalf("concurrent post was lost by recovery=%#v error=%v", result, err)
 		}
-		runs, err := kernel.ListAgentRuns(t.Context(), AgentRunFilter{Scope: conversation.Scope, Kind: RunKindConversation})
-		if err != nil || len(runs) != 1 || runs[0].Context[conversationRunContextTriggerID] != "later" {
+		runs, err := kernel.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: conversation.Scope, Kind: models.RunKindConversation})
+		if err != nil || len(runs) != 1 || runs[0].Context[models.ConversationRunTriggerIDContextKey] != "later" {
 			t.Fatalf("wrong concurrent message scheduled: runs=%#v error=%v", runs, err)
 		}
 	})
 }
 
 func TestConversationIdleSchedulingHonorsCommittedRoundAndScopedVisibility(t *testing.T) {
-	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
-		store := kernel.(ConversationStore)
-		first := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "first"}, "same-channel")
-		conversationtest.CommitChannelMessage(t, store, &first, &ChannelMessage{ID: "first-message"})
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel models.KernelStore) {
+		store := kernel.(models.ConversationStore)
+		first := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "first"}, "same-channel")
+		conversationtest.CommitChannelMessage(t, store, &first, &models.ChannelMessage{ID: "first-message"})
 		idleScheduleAdvanceCursor(t, store, first)
-		second := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "second"}, "same-channel")
-		conversationtest.CommitChannelMessage(t, store, &second, &ChannelMessage{ID: "coordinated"})
+		second := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "second"}, "same-channel")
+		conversationtest.CommitChannelMessage(t, store, &second, &models.ChannelMessage{ID: "coordinated"})
 		service := runtimeconversation.NewConversationService(store)
 		if _, err := service.CommitConversationRouting(t.Context(), runtimeconversation.CommitConversationRoutingRequest{
 			Scope: second.Scope, ConversationID: second.ID, ExpectedRevision: second.Revision,
@@ -209,18 +210,18 @@ func TestConversationIdleSchedulingHonorsCommittedRoundAndScopedVisibility(t *te
 			t.Fatal(err)
 		}
 		second, _ = store.GetConversation(t.Context(), second.Scope, second.ID)
-		conversationtest.CommitChannelMessage(t, store, &second, &ChannelMessage{ID: "private-unread", Audience: ConversationAudience{Kind: ConversationAudienceRoles, Roles: []string{"reviewer"}}})
+		conversationtest.CommitChannelMessage(t, store, &second, &models.ChannelMessage{ID: "private-unread", Audience: models.ConversationAudience{Kind: models.ConversationAudienceRoles, Roles: []string{"reviewer"}}})
 		counter := &idleScheduleCountingStore{ConversationStore: store}
 		result, err := idleScheduleScheduler(t, counter, kernel).ReconcileScope(t.Context(), second.Scope)
 		if err != nil || result.Messages != 2 || result.Skipped != 1 || result.Scheduled != 1 || counter.rounds != 1 {
 			t.Fatalf("scoped coordination=%#v rounds=%d error=%v", result, counter.rounds, err)
 		}
-		runs, err := kernel.ListAgentRuns(t.Context(), AgentRunFilter{Scope: second.Scope, Kind: RunKindConversation})
-		if err != nil || len(runs) != 1 || runs[0].Context[conversationRunContextTriggerID] != "private-unread" {
+		runs, err := kernel.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: second.Scope, Kind: models.RunKindConversation})
+		if err != nil || len(runs) != 1 || runs[0].Context[models.ConversationRunTriggerIDContextKey] != "private-unread" {
 			t.Fatalf("scoped cursor skipped unprocessed input: runs=%#v error=%v", runs, err)
 		}
-		viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "reader"}}
-		if _, err := service.GetVisibleChannelMessage(t.Context(), second.Scope, second.ID, "private-unread", viewer); !errors.Is(err, ErrChannelMessageNotFound) {
+		viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "reader"}}
+		if _, err := service.GetVisibleChannelMessage(t.Context(), second.Scope, second.ID, "private-unread", viewer); !errors.Is(err, models.ErrChannelMessageNotFound) {
 			t.Fatalf("private unread message leaked=%v", err)
 		}
 		viewer.Roles = []string{"reviewer"}
@@ -230,11 +231,11 @@ func TestConversationIdleSchedulingHonorsCommittedRoundAndScopedVisibility(t *te
 	})
 }
 
-func idleScheduleParticipant() ConversationParticipant {
-	return ConversationParticipant{Type: ConversationParticipantService, ID: conversationRunSchedulerParticipant}
+func idleScheduleParticipant() models.ConversationParticipant {
+	return models.ConversationParticipant{Type: models.ConversationParticipantService, ID: models.ConversationRunSchedulerParticipant}
 }
 
-func idleScheduleAdvanceCursor(t testing.TB, store ConversationStore, conversation *Conversation) {
+func idleScheduleAdvanceCursor(t testing.TB, store models.ConversationStore, conversation *models.Conversation) {
 	t.Helper()
 	if _, _, err := runtimeconversation.NewConversationService(store).AdvanceCursor(context.Background(), runtimeconversation.AdvanceConversationCursorRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, Participant: idleScheduleParticipant(),
@@ -244,7 +245,7 @@ func idleScheduleAdvanceCursor(t testing.TB, store ConversationStore, conversati
 	}
 }
 
-func idleScheduleScheduler(t testing.TB, conversations ConversationStore, runs RunCommandStore) *ConversationRunScheduler {
+func idleScheduleScheduler(t testing.TB, conversations models.ConversationStore, runs models.RunCommandStore) *ConversationRunScheduler {
 	t.Helper()
 	scheduler, err := NewConversationRunScheduler(conversations, runs, ConversationRunSchedulerConfig{})
 	if err != nil {

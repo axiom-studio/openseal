@@ -32,7 +32,7 @@ func BenchmarkConversationTaskSQLiteActiveHistory(b *testing.B) {
 		}
 		b.Cleanup(func() { _ = store.Close() })
 		db := openTestSQLiteDB(b, path)
-		return store, func(b *testing.B, filter ConversationTaskFilter, _ int) {
+		return store, func(b *testing.B, filter models.ConversationTaskFilter, _ int) {
 			conversationTaskBenchmarkExplain(b, db, filter)
 			conversationActiveRunsBenchmarkExplain(b, db, filter)
 		}
@@ -66,7 +66,7 @@ func BenchmarkConversationTaskPostgresActiveHistory(b *testing.B) {
 			b.Fatal(err)
 		}
 		b.Logf("isolated PostgreSQL: %s", config)
-		return store, func(b *testing.B, filter ConversationTaskFilter, history int) {
+		return store, func(b *testing.B, filter models.ConversationTaskFilter, history int) {
 			conversationTaskPostgresBenchmarkExplain(b, schema, filter, history)
 		}
 	})
@@ -75,32 +75,32 @@ func BenchmarkConversationTaskPostgresActiveHistory(b *testing.B) {
 // conversationTaskBenchmarkExplainPlans checks the backend's plans for the
 // task page of filter over history completed tasks, on the benchmark's own
 // connection to the store's database.
-type conversationTaskBenchmarkExplainPlans func(b *testing.B, filter ConversationTaskFilter, history int)
+type conversationTaskBenchmarkExplainPlans func(b *testing.B, filter models.ConversationTaskFilter, history int)
 
 func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) (conversationTaskSQLTestStore, conversationTaskBenchmarkExplainPlans)) {
 	for _, history := range []int{100, 10000} {
 		b.Run(fmt.Sprintf("completed_%d", history), func(b *testing.B) {
 			store, explain := open(b)
 			base := time.Now().UTC().Add(-2 * time.Hour)
-			kernel, ok := store.(ConversationTaskKernelStore)
+			kernel, ok := store.(models.ConversationTaskKernelStore)
 			if !ok {
 				b.Fatal("benchmark requires canonical task kernel store")
 			}
-			conversation := &Conversation{ID: "conversation", Scope: Scope{Kind: "tenant", ID: "task-sql"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"}, Title: "Task performance fixture", Status: ConversationStatusActive, Revision: 1, CreatedAt: base.Add(-time.Minute), UpdatedAt: base.Add(-time.Minute)}
+			conversation := &models.Conversation{ID: "conversation", Scope: models.Scope{Kind: "tenant", ID: "task-sql"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "task-agent"}, Title: "Task performance fixture", Status: models.ConversationStatusActive, Revision: 1, CreatedAt: base.Add(-time.Minute), UpdatedAt: base.Add(-time.Minute)}
 			if _, _, err := kernel.CreateConversation(context.Background(), conversation, "benchmark-conversation"); err != nil {
 				b.Fatal(err)
 			}
 			conversationTaskBenchmarkPost(b, kernel, "thread", "", base.Add(-time.Second))
-			active := make([]*AgentRun, 0, 5)
+			active := make([]*models.AgentRun, 0, 5)
 			for index := 0; index < 5; index++ {
 				record := conversationTaskBenchmarkRecord(b, store, fmt.Sprintf("old-active-%d", index), base.Add(time.Duration(index)*time.Nanosecond))
 				conversationTaskBenchmarkPost(b, kernel, record.Task.SourceMessageID, "thread", record.Task.CreatedAt)
-				turn := &AgentTurn{ID: record.Task.SourceTurnID, Scope: record.Task.Scope, RunID: record.Task.SourceRunID, Sequence: 1, Status: AgentTurnStatusCompleted, Revision: 1, CreatedAt: record.Task.CreatedAt, UpdatedAt: record.Task.CreatedAt, StartedAt: record.Task.CreatedAt, CompletedAt: &record.Task.CreatedAt}
+				turn := &models.AgentTurn{ID: record.Task.SourceTurnID, Scope: record.Task.Scope, RunID: record.Task.SourceRunID, Sequence: 1, Status: models.AgentTurnStatusCompleted, Revision: 1, CreatedAt: record.Task.CreatedAt, UpdatedAt: record.Task.CreatedAt, StartedAt: record.Task.CreatedAt, CompletedAt: &record.Task.CreatedAt}
 				if _, err := kernel.CreateAgentTurn(context.Background(), turn); err != nil {
 					b.Fatal(err)
 				}
 				service := NewConversationTaskService(kernel, models.WithClock(func() time.Time { return record.Task.CreatedAt }))
-				result, err := service.Start(context.Background(), StartConversationTaskRequest{Scope: record.Task.Scope, SourceRunID: record.Task.SourceRunID, ExpectedSourceRevision: 1, WorkerID: "task-worker", TurnID: turn.ID, AssignedAgentID: record.Task.TargetAgentID, TaskKey: record.Task.TaskKey, Goal: record.Task.Goal, Acknowledgment: record.Task.Acknowledgment, Budget: cloneBudgetPolicy(record.Task.RequestedBudget)})
+				result, err := service.Start(context.Background(), StartConversationTaskRequest{Scope: record.Task.Scope, SourceRunID: record.Task.SourceRunID, ExpectedSourceRevision: 1, WorkerID: "task-worker", TurnID: turn.ID, AssignedAgentID: record.Task.TargetAgentID, TaskKey: record.Task.TaskKey, Goal: record.Task.Goal, Acknowledgment: record.Task.Acknowledgment, Budget: models.CloneBudgetPolicy(record.Task.RequestedBudget)})
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -120,9 +120,9 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 			if err != nil || snapshotSource == nil {
 				b.Fatalf("snapshot source: %v", err)
 			}
-			filter := ConversationTaskFilter{
-				Scope: Scope{Kind: "tenant", ID: "task-sql"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"},
-				ConversationID: "conversation", ThreadRootID: "thread", AuthenticatedActor: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"},
+			filter := models.ConversationTaskFilter{
+				Scope: models.Scope{Kind: "tenant", ID: "task-sql"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "task-agent"},
+				ConversationID: "conversation", ThreadRootID: "thread", AuthenticatedActor: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requester"},
 				ActiveOnly: true, Limit: 20,
 			}
 			// Print the actual scoped indexed SQL plan once per fixture. This
@@ -138,7 +138,7 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 				}
 			})
 			runner := &ConversationRunTurnRunner{portfolio: store}
-			trigger := &ChannelMessage{ID: "current-status-message", Scope: filter.Scope, ConversationID: filter.ConversationID, Sender: filter.AuthenticatedActor, ThreadRootID: filter.ThreadRootID}
+			trigger := &models.ChannelMessage{ID: "current-status-message", Scope: filter.Scope, ConversationID: filter.ConversationID, Sender: filter.AuthenticatedActor, ThreadRootID: filter.ThreadRootID}
 			b.Run("foreground_active_context", func(b *testing.B) {
 				b.ReportAllocs()
 				for index := 0; index < b.N; index++ {
@@ -202,7 +202,7 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 	}
 }
 
-func conversationTaskBenchmarkExplain(t testing.TB, db *sql.DB, filter ConversationTaskFilter) {
+func conversationTaskBenchmarkExplain(t testing.TB, db *sql.DB, filter models.ConversationTaskFilter) {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT t.payload, r.payload FROM conversation_tasks t
         JOIN agent_runs r ON r.scope_kind=t.scope_kind AND r.scope_id=t.scope_id AND r.id=t.work_run_id
@@ -236,64 +236,64 @@ func conversationTaskBenchmarkExplain(t testing.TB, db *sql.DB, filter Conversat
 	}
 }
 
-func conversationTaskBenchmarkRecord(t testing.TB, store conversationTaskSQLTestStore, suffix string, at time.Time) ConversationTaskCreateRecord {
+func conversationTaskBenchmarkRecord(t testing.TB, store conversationTaskSQLTestStore, suffix string, at time.Time) models.ConversationTaskCreateRecord {
 	t.Helper()
 	now := at
 	expires := time.Now().UTC().Add(10 * time.Minute)
-	scope := Scope{Kind: "tenant", ID: "task-sql"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"}
+	scope := models.Scope{Kind: "tenant", ID: "task-sql"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "task-agent"}
 	sourceID := "source-" + suffix
-	source := &AgentRun{ID: sourceID, Scope: scope, Kind: RunKindConversation, RootRunID: sourceID, Owner: owner,
-		AssignedAgentID: owner.ID, ConcurrencyKey: ConversationRunLane("conversation", "thread", owner.ID), Goal: "Accept conversation work", Source: RunSourceChat, Status: AgentRunStatusRunning,
+	source := &models.AgentRun{ID: sourceID, Scope: scope, Kind: models.RunKindConversation, RootRunID: sourceID, Owner: owner,
+		AssignedAgentID: owner.ID, ConcurrencyKey: models.ConversationRunLane("conversation", "thread", owner.ID), Goal: "Accept conversation work", Source: models.RunSourceChat, Status: models.AgentRunStatusRunning,
 		Priority: 90, AvailableAt: now, QueueEnteredAt: now, LeaseOwner: "task-worker", LeaseExpiresAt: &expires,
-		LastAppliedTurn: 1, Budget: &BudgetPolicy{MaxTurns: 20}, Policy: map[string]interface{}{"preserve": "source-policy"},
-		Context:  map[string]interface{}{conversationRunContextConversationID: "conversation", conversationRunContextTriggerID: "message-" + suffix, "threadRootMessageId": "thread"},
+		LastAppliedTurn: 1, Budget: &models.BudgetPolicy{MaxTurns: 20}, Policy: map[string]interface{}{"preserve": "source-policy"},
+		Context:  map[string]interface{}{models.ConversationRunConversationIDContextKey: "conversation", models.ConversationRunTriggerIDContextKey: "message-" + suffix, "threadRootMessageId": "thread"},
 		Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.CreateAgentRun(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
-	taskID := conversationTaskID(scope, sourceID, "task-"+suffix)
+	taskID := models.ConversationTaskID(scope, sourceID, "task-"+suffix)
 	workID := "work-" + suffix
 	// The task asks for the child minimum of 8 Turns.
-	task := &ConversationTask{ID: taskID, Scope: scope, Owner: owner, ConversationID: "conversation", SourceMessageID: "message-" + suffix,
+	task := &models.ConversationTask{ID: taskID, Scope: scope, Owner: owner, ConversationID: "conversation", SourceMessageID: "message-" + suffix,
 		ThreadRootID: "thread", SourceRunID: sourceID, SourceTurnID: "turn-" + suffix, SourceTurnNumber: 1,
-		AuthenticatedActor: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, TargetAgentID: owner.ID,
+		AuthenticatedActor: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requester"}, TargetAgentID: owner.ID,
 		WorkRunID: workID, TaskKey: "task-" + suffix, Goal: "Prepare the requested result", Acknowledgment: "I have started the work.",
-		RequestedBudget: &BudgetPolicy{MaxTurns: 8}, Revision: 1, CreatedAt: now}
+		RequestedBudget: &models.BudgetPolicy{MaxTurns: 8}, Revision: 1, CreatedAt: now}
 	var err error
-	task.RequestDigest, err = conversationTaskDigest(task)
+	task.RequestDigest, err = models.ConversationTaskDigest(task)
 	if err != nil {
 		t.Fatal(err)
 	}
-	work := &AgentRun{ID: workID, Scope: scope, Kind: RunKindAgentWork, RootRunID: workID, Owner: owner, AssignedAgentID: owner.ID,
-		ConcurrencyKey: "task:" + taskID, Goal: task.Goal, Source: RunSourceChat, Status: AgentRunStatusQueued, Priority: source.Priority,
-		AvailableAt: now, QueueEnteredAt: now, Budget: cloneBudgetPolicy(task.RequestedBudget), Revision: 1, CreatedAt: now, UpdatedAt: now,
-		Context: map[string]interface{}{ConversationTaskContextKey: taskID, conversationRunContextConversationID: task.ConversationID,
-			conversationRunContextTriggerID: task.SourceMessageID, "threadRootMessageId": task.ThreadRootID, runReportingContextRootRunID: workID,
-			runReportingContextMilestones: []interface{}{"completed", "failed"}}}
-	updated := cloneAgentRun(source)
-	if err := addRunBudgetAllocation(updated, workID, work.Budget); err != nil {
+	work := &models.AgentRun{ID: workID, Scope: scope, Kind: models.RunKindAgentWork, RootRunID: workID, Owner: owner, AssignedAgentID: owner.ID,
+		ConcurrencyKey: "task:" + taskID, Goal: task.Goal, Source: models.RunSourceChat, Status: models.AgentRunStatusQueued, Priority: source.Priority,
+		AvailableAt: now, QueueEnteredAt: now, Budget: models.CloneBudgetPolicy(task.RequestedBudget), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Context: map[string]interface{}{models.ConversationTaskContextKey: taskID, models.ConversationRunConversationIDContextKey: task.ConversationID,
+			models.ConversationRunTriggerIDContextKey: task.SourceMessageID, "threadRootMessageId": task.ThreadRootID, models.RunReportingRootRunIDContextKey: workID,
+			models.RunReportingMilestonesContextKey: []interface{}{"completed", "failed"}}}
+	updated := models.CloneAgentRun(source)
+	if err := models.AddRunBudgetAllocation(updated, workID, work.Budget); err != nil {
 		t.Fatal(err)
 	}
-	updated.Status = AgentRunStatusCompleted
-	updated.Context[runReportingContextRootRunID] = source.ID
-	updated.Context[runReportingContextMilestones] = []interface{}{"completed", "failed"}
+	updated.Status = models.AgentRunStatusCompleted
+	updated.Context[models.RunReportingRootRunIDContextKey] = source.ID
+	updated.Context[models.RunReportingMilestonesContextKey] = []interface{}{"completed", "failed"}
 	updated.Output = map[string]interface{}{"summary": task.Acknowledgment, "conversationTaskIds": []string{taskID}, "conversationTaskWorkRunId": workID}
 	updated.CompletedAt = &now
 	updated.LeaseOwner = ""
 	updated.LeaseExpiresAt = nil
 	updated.Revision++
-	event := &ActivityEvent{ID: "task-event-" + suffix, Scope: scope, RunID: sourceID, EventType: "conversation.task_started",
-		Summary: "Started independent work", Actor: ActivityActor{Type: "user", ID: "requester"}, CorrelationID: taskID,
-		Visibility: ActivityVisibilityScope, CreatedAt: now}
-	record := ConversationTaskCreateRecord{Task: task, WorkRun: work, SourceRun: updated, ExpectedSourceRevision: 1, WorkerID: "task-worker", Event: event}
-	if err := validateConversationTaskCreateRecord(record); err != nil {
+	event := &models.ActivityEvent{ID: "task-event-" + suffix, Scope: scope, RunID: sourceID, EventType: "conversation.task_started",
+		Summary: "Started independent work", Actor: models.ActivityActor{Type: "user", ID: "requester"}, CorrelationID: taskID,
+		Visibility: models.ActivityVisibilityScope, CreatedAt: now}
+	record := models.ConversationTaskCreateRecord{Task: task, WorkRun: work, SourceRun: updated, ExpectedSourceRevision: 1, WorkerID: "task-worker", Event: event}
+	if err := models.ValidateConversationTaskCreateRecord(record); err != nil {
 		t.Fatalf("invalid SQL fixture: %v", err)
 	}
 	return record
 }
 
-func conversationActiveRunsBenchmarkExplain(t testing.TB, db *sql.DB, filter ConversationTaskFilter) {
+func conversationActiveRunsBenchmarkExplain(t testing.TB, db *sql.DB, filter models.ConversationTaskFilter) {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT child.payload FROM conversation_active_runs linked
 		JOIN agent_runs child INDEXED BY sqlite_autoindex_agent_runs_1 ON child.scope_kind=linked.scope_kind AND child.scope_id=linked.scope_id AND child.id=linked.id
@@ -332,7 +332,7 @@ func conversationActiveRunsBenchmarkExplain(t testing.TB, db *sql.DB, filter Con
 	}
 }
 
-func conversationTaskPostgresBenchmarkExplain(t testing.TB, schema storetest.PostgresSchema, filter ConversationTaskFilter, history int) {
+func conversationTaskPostgresBenchmarkExplain(t testing.TB, schema storetest.PostgresSchema, filter models.ConversationTaskFilter, history int) {
 	t.Helper()
 	// This is an isolated fixture: refreshing its planner statistics performs no
 	// work against platform/application tables and is excluded from timings.
@@ -407,15 +407,15 @@ func conversationTaskPostgresBenchmarkExplain(t testing.TB, schema storetest.Pos
 	}
 }
 
-func conversationTaskBenchmarkPost(t testing.TB, store ConversationTaskKernelStore, id, reply string, at time.Time) {
+func conversationTaskBenchmarkPost(t testing.TB, store models.ConversationTaskKernelStore, id, reply string, at time.Time) {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "task-sql"}
+	scope := models.Scope{Kind: "tenant", ID: "task-sql"}
 	conversation, err := store.GetConversation(context.Background(), scope, "conversation")
 	if err != nil || conversation == nil {
 		t.Fatalf("benchmark conversation: %v", err)
 	}
 	service := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return at }))
-	_, err = service.PostChannelMessage(context.Background(), runtimeconversation.PostChannelMessageRequest{ID: id, Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, Intent: MessageIntentQuestion, Content: "Review the requested result", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: reply, RequiresResponse: true, IdempotencyKey: "benchmark-message-" + id})
+	_, err = service.PostChannelMessage(context.Background(), runtimeconversation.PostChannelMessageRequest{ID: id, Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requester"}, Intent: models.MessageIntentQuestion, Content: "Review the requested result", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: reply, RequiresResponse: true, IdempotencyKey: "benchmark-message-" + id})
 	if err != nil {
 		t.Fatal(err)
 	}

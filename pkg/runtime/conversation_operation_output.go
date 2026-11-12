@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
@@ -25,8 +26,8 @@ func conversationOperationSummary(output map[string]interface{}) string {
 // conversationOperationSavedOutput is a finished operation's user-facing
 // output. A failed or canceled operation has none: the loop writes
 // Output.summary only on a final answer, so no partial draft can exist.
-func conversationOperationSavedOutput(_ context.Context, _ PortfolioStore, operation *AgentRun) (string, error) {
-	if operation == nil || operation.Status != AgentRunStatusCompleted {
+func conversationOperationSavedOutput(_ context.Context, _ models.PortfolioStore, operation *models.AgentRun) (string, error) {
+	if operation == nil || operation.Status != models.AgentRunStatusCompleted {
 		return "", nil
 	}
 	return conversationOperationSummary(operation.Output), nil
@@ -34,16 +35,16 @@ func conversationOperationSavedOutput(_ context.Context, _ PortfolioStore, opera
 
 // Repair old status-only terminal replies without rerunning the model or
 // rewriting history. The same durable recovery key survives restarts.
-func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx context.Context, scope Scope, result *ConversationRunReconcileResult) error {
+func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx context.Context, scope models.Scope, result *ConversationRunReconcileResult) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
-		runs, err := s.runStore.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation, Statuses: []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed}, Limit: pageSize, Offset: offset})
+		runs, err := s.runStore.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: models.RunKindConversation, Statuses: []models.AgentRunStatus{models.AgentRunStatusCompleted, models.AgentRunStatusFailed}, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return err
 		}
 		for _, run := range runs {
-			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+			conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+			triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 			if conversationID == "" || triggerID == "" {
 				continue
 			}
@@ -53,7 +54,7 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			} else if existing != nil {
 				continue
 			}
-			oldKey := conversationRunResponseKey(run, triggerID)
+			oldKey := models.ConversationRunResponseKey(run, triggerID)
 			old, err := s.conversationStore.FindChannelMessageByIdempotencyKey(ctx, scope, conversationID, oldKey)
 			if err != nil {
 				return err
@@ -63,7 +64,7 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			}
 			operationID := ""
 			for _, ref := range old.References {
-				if ref.Kind == ConversationReferenceRun {
+				if ref.Kind == models.ConversationReferenceRun {
 					operationID = ref.ID
 					break
 				}
@@ -90,22 +91,22 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 				continue
 			}
 			conversation, err := s.conversations.GetConversation(ctx, scope, conversationID)
-			if errors.Is(err, ErrConversationNotFound) {
+			if errors.Is(err, models.ErrConversationNotFound) {
 				continue
 			}
 			if err != nil {
 				return err
 			}
-			if conversation.Status != ConversationStatusActive || conversation.Owner != run.Owner {
+			if conversation.Status != models.ConversationStatusActive || conversation.Owner != run.Owner {
 				continue
 			}
 			// Only the Agent that posted the reply repairs it, with its own
 			// operation's output, while it is still on the chat's roster.
 			agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
-			if agentID == "" || old.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}) || operation.AssignedAgentID != agentID {
+			if agentID == "" || old.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: agentID}) || operation.AssignedAgentID != agentID {
 				continue
 			}
-			onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(s.runStore), scope, conversation.Owner, agentID)
+			onRoster, err := models.AgentOnChatRoster(ctx, models.TeamRosterReaderOf(s.runStore), scope, conversation.Owner, agentID)
 			if err != nil {
 				return err
 			}
@@ -114,11 +115,11 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			}
 			posted, err := s.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}, Intent: MessageIntentAnswer,
-				Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
-				References: []ConversationReference{{Kind: ConversationReferenceRun, ID: operation.ID}}, IdempotencyKey: key,
+				Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: agentID}, Intent: models.MessageIntentAnswer,
+				Content: content, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
+				References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: operation.ID}}, IdempotencyKey: key,
 			})
-			if errors.Is(err, ErrRevisionConflict) {
+			if errors.Is(err, models.ErrRevisionConflict) {
 				continue
 			}
 			if err != nil {

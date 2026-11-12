@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -14,7 +15,7 @@ func TestConversationLoopBindingSetsSeams(t *testing.T) {
 		trigger := f.post("trigger", "user-1", "Hi")
 		run := f.startRun(trigger)
 		binding := f.bind(run, &chatLoopProducer{})
-		if binding.Session == nil || binding.Session.Revision == 0 || binding.Session.Kind != AgentSessionKindConversation {
+		if binding.Session == nil || binding.Session.Revision == 0 || binding.Session.Kind != models.AgentSessionKindConversation {
 			t.Fatalf("lane session not opened: %#v", binding.Session)
 		}
 		if _, ok := binding.Final.(conversationObservedFinal); !ok || binding.ToolCheck == nil || binding.AfterTool == nil || len(binding.Preparers) != 2 {
@@ -41,8 +42,8 @@ func TestConversationLoopBindingSetsSeams(t *testing.T) {
 		// apply only narrows: an authority that offers no ask or react tool
 		// (Deterministic, decision, review) does not gain one, and a decision
 		// or review authority gets no chat flags.
-		chat := ConversationLoopAuthority{CanAskConversationQuestion: true, CanReact: true, ExternalChannelReply: true, ApprovalMode: ConversationApprovalAuto}
-		if got := chat.apply(agentrun.ControlAuthority{AgentID: "agent-1"}); got.CanAskUser || got.CanReact || !got.ExternalChannelReply || got.ApprovalMode != ConversationApprovalAuto {
+		chat := ConversationLoopAuthority{CanAskConversationQuestion: true, CanReact: true, ExternalChannelReply: true, ApprovalMode: models.ConversationApprovalAuto}
+		if got := chat.apply(agentrun.ControlAuthority{AgentID: "agent-1"}); got.CanAskUser || got.CanReact || !got.ExternalChannelReply || got.ApprovalMode != models.ConversationApprovalAuto {
 			t.Fatalf("deterministic authority = %#v", got)
 		}
 		if got := chat.apply(agentrun.ControlAuthority{AgentID: "agent-1", FinalMode: agentrun.FinalModeDecision}); got.CanAskUser || got.CanReact || got.ExternalChannelReply || got.ApprovalMode != "" {

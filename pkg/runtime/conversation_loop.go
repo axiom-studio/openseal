@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -35,17 +36,17 @@ type ConversationLoopAuthority struct {
 	CanAskConversationQuestion bool // ask tool offered
 	ExternalChannelReply       bool // answer-preview streaming for connector chats
 	CanReact                   bool // react tool offered (true for every Agent chat Run)
-	ApprovalMode               ConversationApprovalMode
+	ApprovalMode               models.ConversationApprovalMode
 	Spoken                     bool // the spoken system section; FinalModeSpoken comes from ResolveControlAuthority
 }
 
 // conversationLoopAuthority computes the §7 flags of an Agent chat Run.
-func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Context, run *AgentRun) (ConversationLoopAuthority, error) {
+func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Context, run *models.AgentRun) (ConversationLoopAuthority, error) {
 	if r == nil || r.conversations == nil {
 		return ConversationLoopAuthority{}, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
 	if run == nil {
-		return ConversationLoopAuthority{}, fmt.Errorf("%w: run is required", ErrInvalidAgentRun)
+		return ConversationLoopAuthority{}, fmt.Errorf("%w: run is required", models.ErrInvalidAgentRun)
 	}
 	authority := ConversationLoopAuthority{
 		CanReact: true,
@@ -57,7 +58,7 @@ func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Contex
 	}
 	authority.CanAskConversationQuestion = conversation != nil && trigger != nil &&
 		run.AssignedAgentID != "" && run.AssignedAgentID == runtimeconversation.ConversationRunAgentID(conversation, run)
-	authority.ExternalChannelReply = externalChannelContext(conversation)
+	authority.ExternalChannelReply = models.IsExternalChannelConversation(conversation)
 	if _, authority.ApprovalMode, err = action.RunConversationApprovalMode(ctx, r.portfolio, r.conversationStore, run); err != nil {
 		return ConversationLoopAuthority{}, err
 	}
@@ -86,14 +87,14 @@ func (a ConversationLoopAuthority) apply(authority agentrun.ControlAuthority) ag
 // calls: receipts (the call's artifacts) and the replaced-approval stop (the
 // superseding message of the call's approval).
 type conversationLoopActions interface {
-	GetActionCall(ctx context.Context, scope Scope, id string) (*ActionCall, error)
-	GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error)
+	GetActionCall(ctx context.Context, scope models.Scope, id string) (*models.ActionCall, error)
+	GetApproval(ctx context.Context, scope models.Scope, approvalID string) (*models.ApprovalCheckpoint, error)
 }
 
 // ConversationLoopStores are the stores the conversation seams use besides
 // the runner's own.
 type ConversationLoopStores struct {
-	Sessions AgentSessionStore
+	Sessions models.AgentSessionStore
 	Actions  conversationLoopActions
 	Activity activityAppender // nil: no turn.visual_rejected event
 }
@@ -103,10 +104,10 @@ type ConversationLoopStores struct {
 // AfterTool.
 type conversationLoop struct {
 	runner       *ConversationRunTurnRunner
-	conversation *Conversation
-	trigger      *ChannelMessage
+	conversation *models.Conversation
+	trigger      *models.ChannelMessage
 	catchUp      *runtimeconversation.ConversationCatchUp
-	sessions     AgentSessionStore
+	sessions     models.AgentSessionStore
 	actions      conversationLoopActions
 }
 
@@ -124,7 +125,7 @@ const replacedApprovalScan = 32
 // binding (§13). binding holds the Agent's own resolution (model, actions,
 // operations, control authority, the run-start preparer); run is the claimed
 // conversation Run.
-func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, run *AgentRun, binding *agentrun.TurnRunnerBinding, stores ConversationLoopStores) error {
+func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, run *models.AgentRun, binding *agentrun.TurnRunnerBinding, stores ConversationLoopStores) error {
 	if r == nil || r.conversations == nil {
 		return runtimeconversation.ErrConversationCoordinationUnavailable
 	}
@@ -132,16 +133,16 @@ func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, ru
 		return errors.New("conversation loop binding needs a binding, the session log and the action store")
 	}
 	if run == nil || !conversationRunHasActingAgent(run) {
-		return fmt.Errorf("%w: a chat loop needs a Run with an acting Agent", ErrInvalidAgentRun)
+		return fmt.Errorf("%w: a chat loop needs a Run with an acting Agent", models.ErrInvalidAgentRun)
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	conversation, err := r.conversations.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
 		return err
 	}
 	if conversation.Owner != run.Owner {
-		return fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
+		return fmt.Errorf("%w: conversation Run owner does not match its channel", models.ErrInvalidAgentRun)
 	}
 	trigger, err := r.conversations.GetChannelMessage(ctx, run.Scope, conversation.ID, triggerID)
 	if err != nil {
@@ -190,24 +191,24 @@ func (f conversationObservedFinal) Deliver(ctx context.Context, d agentrun.Final
 // openConversationLoopSession resolves the Run's session and creates a lane
 // session row that does not exist yet (C2 GetOrCreateSession). Child and
 // run-owned sessions are already stored.
-func (r *ConversationRunTurnRunner) openConversationLoopSession(ctx context.Context, sessions AgentSessionStore, run *AgentRun) (*AgentSession, error) {
-	session, err := conversationRunSession(ctx, sessions, run)
+func (r *ConversationRunTurnRunner) openConversationLoopSession(ctx context.Context, sessions models.AgentSessionStore, run *models.AgentRun) (*models.AgentSession, error) {
+	session, err := models.ConversationRunSession(ctx, sessions, run)
 	if err != nil {
 		return nil, err
 	}
 	if session == nil {
-		return nil, fmt.Errorf("%w: a chat Run of an Agent needs a session", ErrInvalidAgentRun)
+		return nil, fmt.Errorf("%w: a chat Run of an Agent needs a session", models.ErrInvalidAgentRun)
 	}
-	if session.Kind != AgentSessionKindConversation {
+	if session.Kind != models.AgentSessionKindConversation {
 		return session, nil
 	}
 	if strings.TrimSpace(run.LeaseOwner) == "" {
-		return nil, fmt.Errorf("%w: the lane session opens only under the Run's lease", ErrInvalidAgentRun)
+		return nil, fmt.Errorf("%w: the lane session opens only under the Run's lease", models.ErrInvalidAgentRun)
 	}
 	now := r.now().UTC()
-	opened, err := sessions.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{
+	opened, err := sessions.OpenConversationAgentSession(ctx, models.OpenConversationAgentSessionRequest{
 		Scope: run.Scope, ConversationID: session.ConversationID, ThreadRootID: session.ThreadRootID, AgentID: session.AgentID,
-		RunID: run.ID, Lease: AgentRunLeaseGuard{WorkerID: run.LeaseOwner, Now: now}, Now: now,
+		RunID: run.ID, Lease: models.AgentRunLeaseGuard{WorkerID: run.LeaseOwner, Now: now}, Now: now,
 	})
 	if err != nil {
 		return nil, err
@@ -227,7 +228,7 @@ func (r *ConversationRunTurnRunner) conversationAttachmentReader() *runtimeconve
 // BeforeStep is the conversation preparer (§13 StartRun / BeforeStep).
 func (l *conversationLoop) BeforeStep(ctx context.Context, in agentrun.StepInput, steering agentrun.SteeringPlan) (*agentrun.StepContextAppend, error) {
 	if in.Run == nil || in.Session == nil || in.Step == nil {
-		return nil, fmt.Errorf("%w: the conversation preparer needs a run, a session and a step", ErrInvalidAgentRun)
+		return nil, fmt.Errorf("%w: the conversation preparer needs a run, a session and a step", models.ErrInvalidAgentRun)
 	}
 	started, err := l.runStarted(ctx, in.Run, in.Session)
 	if err != nil {
@@ -242,7 +243,7 @@ func (l *conversationLoop) BeforeStep(ctx context.Context, in agentrun.StepInput
 	if output, replaced, err := l.replacedTeamApproval(ctx, in.Run); err != nil {
 		return nil, err
 	} else if replaced {
-		return &agentrun.StepContextAppend{EarlyFinal: &agentrun.LoopFinal{Status: AgentRunStatusCompleted, Output: output}}, nil
+		return &agentrun.StepContextAppend{EarlyFinal: &agentrun.LoopFinal{Status: models.AgentRunStatusCompleted, Output: output}}, nil
 	}
 	if !l.chatSession(in.Session) || steering.ThroughMessageSequence <= in.Session.ChannelWatermark {
 		// Nothing the steering plan covers is past what the session holds.
@@ -267,7 +268,7 @@ func (l *conversationLoop) BeforeStep(ctx context.Context, in agentrun.StepInput
 
 // chatSession reports whether session reads this chat's channel: the lane
 // session, or a child of it (a promoted Run's) that carries the chat.
-func (l *conversationLoop) chatSession(session *AgentSession) bool {
+func (l *conversationLoop) chatSession(session *models.AgentSession) bool {
 	return session != nil && session.ConversationID != "" && session.ConversationID == l.conversation.ID && session.Scope == l.conversation.Scope
 }
 
@@ -275,7 +276,7 @@ func (l *conversationLoop) chatSession(session *AgentSession) bool {
 // its parent path: a promoted Run's child forked at the lane leaf holds the
 // lane's earlier answers, so their channel messages are not ingested again.
 // It is nil for a session that inherits no path.
-func (l *conversationLoop) inheritedRuns(ctx context.Context, session *AgentSession) (map[string]bool, error) {
+func (l *conversationLoop) inheritedRuns(ctx context.Context, session *models.AgentSession) (map[string]bool, error) {
 	if session.ParentSessionID == "" || session.ForkSequence < 1 {
 		return nil, nil
 	}
@@ -285,7 +286,7 @@ func (l *conversationLoop) inheritedRuns(ctx context.Context, session *AgentSess
 	}
 	runs := map[string]bool{}
 	for _, entry := range path.Entries {
-		if entry != nil && entry.SessionID != session.ID && entry.Type == SessionEntryAssistant && entry.RunID != "" {
+		if entry != nil && entry.SessionID != session.ID && entry.Type == models.SessionEntryAssistant && entry.RunID != "" {
 			runs[entry.RunID] = true
 		}
 	}
@@ -299,13 +300,13 @@ func (l *conversationLoop) inheritedRuns(ctx context.Context, session *AgentSess
 // the lane does not count: a Run promoted between its bind and its first
 // append still starts (its lane append fails with ErrSessionMoved and the
 // loop re-runs the preparers on the child).
-func (l *conversationLoop) runStarted(ctx context.Context, run *AgentRun, session *AgentSession) (bool, error) {
+func (l *conversationLoop) runStarted(ctx context.Context, run *models.AgentRun, session *models.AgentSession) (bool, error) {
 	var through int64 // 0: the whole session
 	for current := session; ; {
 		// Oldest first. The promotion writes at most two entries of run that
 		// are not its own work: the lane's task_promoted note and the child's
 		// goal seed; both are skipped.
-		entries, err := l.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: run.Scope, SessionID: current.ID, RunID: run.ID, Limit: 3})
+		entries, err := l.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: run.Scope, SessionID: current.ID, RunID: run.ID, Limit: 3})
 		if err != nil {
 			return false, err
 		}
@@ -331,12 +332,12 @@ func (l *conversationLoop) runStarted(ctx context.Context, run *AgentRun, sessio
 // promotionEntryOf reports whether entry was written for run by its task
 // promotion rather than by the Run itself: the lane's task_promoted note or
 // the goal seed of a child of an empty lane.
-func promotionEntryOf(run *AgentRun, entry *SessionEntry) bool {
+func promotionEntryOf(run *models.AgentRun, entry *models.SessionEntry) bool {
 	switch entry.Type {
-	case SessionEntryNote:
-		return entry.Note != nil && entry.Note.Kind == NoteTaskPromoted
-	case SessionEntryUser:
-		return entry.User != nil && entry.User.Origin == UserEntryGoal && entry.SourceKey == GoalSourceKey(run.ID)
+	case models.SessionEntryNote:
+		return entry.Note != nil && entry.Note.Kind == models.NoteTaskPromoted
+	case models.SessionEntryUser:
+		return entry.User != nil && entry.User.Origin == models.UserEntryGoal && entry.SourceKey == models.GoalSourceKey(run.ID)
 	}
 	return false
 }
@@ -350,24 +351,24 @@ func (l *conversationLoop) startRun(ctx context.Context, in agentrun.StepInput, 
 		return nil, err
 	}
 	if conversation.Owner != run.Owner {
-		return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
+		return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", models.ErrInvalidAgentRun)
 	}
 	_, viewer, trigger, err := r.agentConversationTurnContext(ctx, run, conversation, l.trigger.ID)
 	if err != nil {
 		return nil, err
 	}
 	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
-		return &agentrun.StepContextAppend{EarlyFinal: &agentrun.LoopFinal{Status: AgentRunStatusCompleted, Output: participationStoppedOutput()}}, nil
+		return &agentrun.StepContextAppend{EarlyFinal: &agentrun.LoopFinal{Status: models.AgentRunStatusCompleted, Output: participationStoppedOutput()}}, nil
 	}
 	l.conversation, l.trigger = conversation, trigger
 	if !l.chatSession(session) {
-		return nil, fmt.Errorf("%w: session %s of chat Run %s does not carry its conversation", ErrInvalidAgentRun, session.ID, run.ID)
+		return nil, fmt.Errorf("%w: session %s of chat Run %s does not carry its conversation", models.ErrInvalidAgentRun, session.ID, run.ID)
 	}
 	// A Run promoted before its first step starts in its child session: a
 	// fork of the lane carries the lane's watermark, so the catch-up ingests
 	// the trigger after the inherited history; a child of an empty lane has
 	// only its task brief and watermark 0, and seeds like a new lane (§3.3).
-	existing, err := l.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: run.Scope, SessionID: session.ID, Limit: 1})
+	existing, err := l.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: run.Scope, SessionID: session.ID, Limit: 1})
 	if err != nil {
 		return nil, err
 	}
@@ -397,12 +398,12 @@ func (l *conversationLoop) startRun(ctx context.Context, in agentrun.StepInput, 
 
 // runContextNote builds the run_context note of the Run's start, which goes
 // after the catch-up entries of catchUp.
-func (l *conversationLoop) runContextNote(ctx context.Context, in agentrun.StepInput, viewer ConversationViewer, catchUp *runtimeconversation.CatchUpResult) (*agentrun.StepContextAppend, error) {
+func (l *conversationLoop) runContextNote(ctx context.Context, in agentrun.StepInput, viewer models.ConversationViewer, catchUp *runtimeconversation.CatchUpResult) (*agentrun.StepContextAppend, error) {
 	through := l.trigger.Sequence
 	if catchUp != nil && catchUp.Watermark > through {
 		through = catchUp.Watermark
 	}
-	recent, err := l.runner.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
+	recent, err := l.runner.conversations.ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: l.conversation.Scope, ConversationID: l.conversation.ID, ThreadRootID: in.Session.ThreadRootID,
 		BeforeSequence: through + 1, Limit: recentRunContextMessages, Descending: true, Viewer: &viewer,
 	})
@@ -429,26 +430,26 @@ func (l *conversationLoop) runContextNote(ctx context.Context, in agentrun.StepI
 // has no hook after its append, so the committed watermark is marked at the
 // next step, after each tool call and before delivery. Receipts are
 // advisory: an error is dropped rather than failing the step.
-func (l *conversationLoop) markObserved(ctx context.Context, run *AgentRun, session *AgentSession) {
+func (l *conversationLoop) markObserved(ctx context.Context, run *models.AgentRun, session *models.AgentSession) {
 	if l.runner.coordinator == nil || run == nil || !l.chatSession(session) || session.ChannelWatermark <= 0 {
 		return
 	}
 	_ = l.runner.coordinator.MarkObserved(ctx, l.conversation, conversationAgentViewer(run).Participant, session.ChannelWatermark)
 }
 
-func conversationAgentViewer(run *AgentRun) ConversationViewer {
-	return ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}}
+func conversationAgentViewer(run *models.AgentRun) models.ConversationViewer {
+	return models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID}}
 }
 
 // replacedTeamApproval is §8.6: a Team member whose held approval was
 // superseded by a newer message that went to another member (not one of
 // this Run's own follow-ups) stops without answering.
-func (l *conversationLoop) replacedTeamApproval(ctx context.Context, run *AgentRun) (map[string]interface{}, bool, error) {
-	if !isTeamMemberRun(run) {
+func (l *conversationLoop) replacedTeamApproval(ctx context.Context, run *models.AgentRun) (map[string]interface{}, bool, error) {
+	if !models.IsTeamMemberRun(run) {
 		return nil, false, nil
 	}
-	entries, err := l.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, Types: []SessionEntryType{SessionEntryTool}, Descending: true, Limit: replacedApprovalScan,
+	entries, err := l.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, Types: []models.SessionEntryType{models.SessionEntryTool}, Descending: true, Limit: replacedApprovalScan,
 	})
 	if err != nil {
 		return nil, false, err
@@ -467,7 +468,7 @@ func (l *conversationLoop) replacedTeamApproval(ctx context.Context, run *AgentR
 
 // supersededApprovalEntry is the superseded governed call among the Run's
 // newest step's tool entries (entries newest first), or nil.
-func supersededApprovalEntry(entries []*SessionEntry) *SessionEntry {
+func supersededApprovalEntry(entries []*models.SessionEntry) *models.SessionEntry {
 	if len(entries) == 0 || entries[0] == nil {
 		return nil
 	}
@@ -476,7 +477,7 @@ func supersededApprovalEntry(entries []*SessionEntry) *SessionEntry {
 		if entry == nil || entry.StepID != newestStep {
 			break
 		}
-		if entry.State == ToolEntryError && entry.Tool != nil && entry.Tool.Result != nil && entry.Tool.Result.Status == ToolResultSuperseded {
+		if entry.State == models.ToolEntryError && entry.Tool != nil && entry.Tool.Result != nil && entry.Tool.Result.Status == models.ToolResultSuperseded {
 			return entry
 		}
 	}
@@ -485,9 +486,9 @@ func supersededApprovalEntry(entries []*SessionEntry) *SessionEntry {
 
 // supersedingMessageID is the message that superseded entry's approval: from
 // its result when the result names it, else from the call's approval.
-func (l *conversationLoop) supersedingMessageID(ctx context.Context, scope Scope, entry *SessionEntry) (string, error) {
+func (l *conversationLoop) supersedingMessageID(ctx context.Context, scope models.Scope, entry *models.SessionEntry) (string, error) {
 	for _, part := range entry.Tool.Result.Content {
-		if part.Type != ContentPartJSON {
+		if part.Type != models.ContentPartJSON {
 			continue
 		}
 		var value struct {
@@ -501,17 +502,17 @@ func (l *conversationLoop) supersedingMessageID(ctx context.Context, scope Scope
 		return "", nil
 	}
 	call, err := l.actions.GetActionCall(ctx, scope, entry.ActionCallID)
-	if errors.Is(err, ErrActionNotFound) {
+	if errors.Is(err, models.ErrActionNotFound) {
 		return "", nil
 	}
 	if err != nil || call == nil || call.ApprovalID == "" {
 		return "", err
 	}
 	approval, err := l.actions.GetApproval(ctx, scope, call.ApprovalID)
-	if errors.Is(err, ErrApprovalNotFound) {
+	if errors.Is(err, models.ErrApprovalNotFound) {
 		return "", nil
 	}
-	if err != nil || approval == nil || approval.Status != ApprovalStatusSuperseded {
+	if err != nil || approval == nil || approval.Status != models.ApprovalStatusSuperseded {
 		return "", err
 	}
 	return approval.SupersededByMessageID, nil
@@ -520,8 +521,8 @@ func (l *conversationLoop) supersedingMessageID(ctx context.Context, scope Scope
 // replacedTeamApproval is the early-finish output of a Team member whose
 // approval messageID superseded, unless that message is one of the Run's
 // own follow-ups (then the member answers it).
-func replacedTeamApproval(run *AgentRun, messageID string) (map[string]interface{}, bool) {
-	if !isTeamMemberRun(run) || strings.TrimSpace(messageID) == "" || conversationRunHasFollowUp(run, messageID) {
+func replacedTeamApproval(run *models.AgentRun, messageID string) (map[string]interface{}, bool) {
+	if !models.IsTeamMemberRun(run) || strings.TrimSpace(messageID) == "" || conversationRunHasFollowUp(run, messageID) {
 		return nil, false
 	}
 	return map[string]interface{}{"approvalReplaced": true, "replacedByMessageId": messageID}, true
@@ -529,12 +530,12 @@ func replacedTeamApproval(run *AgentRun, messageID string) (map[string]interface
 
 // checkToolCall is the binding's ToolCheck (§7): a run-control call must
 // name active work of this chat that accepts the command now.
-func (l *conversationLoop) checkToolCall(ctx context.Context, in agentrun.StepToolsInput, entry *SessionEntry) (string, error) {
+func (l *conversationLoop) checkToolCall(ctx context.Context, in agentrun.StepToolsInput, entry *models.SessionEntry) (string, error) {
 	if entry == nil || entry.Tool == nil || len(entry.Tool.Directive) > 0 {
 		return "", nil
 	}
 	action, err := runtimeconversation.SelectGovernedAction(in.Binding, entry.Tool.Name, nil)
-	if err != nil || action == nil || action.SkillID != RunManagementSkillID {
+	if err != nil || action == nil || action.SkillID != models.RunManagementSkillID {
 		// An unresolvable call is refused by the executor itself.
 		return "", nil
 	}
@@ -569,7 +570,7 @@ func runCommandParticiple(action string) string {
 
 // afterToolEntry is the binding's AfterTool (§8.4). Files a call saves are
 // not posted as they are made: the final answer hands over the finished ones.
-func (l *conversationLoop) afterToolEntry(ctx context.Context, in agentrun.StepToolsInput, entry *SessionEntry) error {
+func (l *conversationLoop) afterToolEntry(ctx context.Context, in agentrun.StepToolsInput, entry *models.SessionEntry) error {
 	l.markObserved(ctx, in.Run, in.Session)
 	return nil
 }
