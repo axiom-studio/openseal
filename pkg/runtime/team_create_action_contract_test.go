@@ -7,6 +7,7 @@ import (
 
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -27,11 +28,11 @@ func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 
 	// The builder dispatcher takes the current create_team and passes a
 	// 2.0.0 binding's on to the next dispatcher.
-	f := NewDispatchFixture(t)
+	f := agentbuildertest.NewDispatchFixture(t)
 	fallback := runtimeaction.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"fallback": true}, nil
 	})
-	dispatcher, err := NewDispatcher(f.Store, f.Agents, f.Teams, f.Catalog, f.Provision, nil, fallback)
+	dispatcher, err := agentbuildertest.NewDispatcher(f.Store, f.Agents, f.Teams, f.Catalog, f.Provision, nil, fallback)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -20,14 +21,14 @@ import (
 const sharedAgentAdopter = "person-2"
 
 type sharedAgentFixture struct {
-	*agentBuilderDispatchFixture
+	*agentbuildertest.DispatchFixture
 	installer *agentbuilder.AgentInstaller
 }
 
 func newSharedAgentFixture(t *testing.T) *sharedAgentFixture {
 	t.Helper()
 	ctx := context.Background()
-	f := newAgentBuilderDispatchFixture(t)
+	f := agentbuildertest.NewDispatchFixture(t)
 	oauthAction := func(name string, risk skill.RiskLevel, slot, provider string) skill.Action {
 		return skill.Action{
 			Name: name, Description: name, Risk: risk, SideEffect: skill.SideEffectRead,
@@ -79,18 +80,18 @@ func newSharedAgentFixture(t *testing.T) *sharedAgentFixture {
 		},
 		skillbindingtest.SlackConversationSkillDefinition(),
 	} {
-		if err := f.catalog.Register(ctx, definition); err != nil {
+		if err := f.Catalog.Register(ctx, definition); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return &sharedAgentFixture{agentBuilderDispatchFixture: f, installer: f.dispatcher.AgentInstaller}
+	return &sharedAgentFixture{DispatchFixture: f, installer: f.Dispatcher.AgentInstaller}
 }
 
 func (f *sharedAgentFixture) bind(t *testing.T, binding *skill.Binding) {
 	t.Helper()
-	binding.Scope = skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}
+	binding.Scope = skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}
 	binding.Revision = 1
-	if err := f.catalog.Bind(context.Background(), binding); err != nil {
+	if err := f.Catalog.Bind(context.Background(), binding); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -111,8 +112,8 @@ func sharedAgentSpecV1() agentbuilder.SharedAgentSpec {
 
 func (f *sharedAgentFixture) installRequest(spec agentbuilder.SharedAgentSpec, key string, version int, risk skill.RiskLevel) agentbuilder.SharedAgentInstallRequest {
 	return agentbuilder.SharedAgentInstallRequest{
-		Scope: f.scope, ActingUserID: sharedAgentAdopter, IdempotencyKey: key,
-		Source: agentbuilder.SharedAgentSource{ShareID: "sa1", Version: version}, Profile: spec.Profile, SpaceID: f.salesID,
+		Scope: f.Scope, ActingUserID: sharedAgentAdopter, IdempotencyKey: key,
+		Source: agentbuilder.SharedAgentSource{ShareID: "sa1", Version: version}, Profile: spec.Profile, SpaceID: f.SalesID,
 		Grants: spec.Grants, AccountSkills: spec.AccountSkills, ExpectedMaximumRisk: risk,
 	}
 }
@@ -179,14 +180,14 @@ func TestSharedAgentExportIsAWhitelist(t *testing.T) {
 		Credentials: map[string]skill.CredentialReference{"drive": {Kind: "oauth", ID: "vault://drive"}},
 	}
 	f.bind(t, drive)
-	if _, err := f.catalog.DisableBinding(ctx, skill.DisableBindingRequest{
+	if _, err := f.Catalog.DisableBinding(ctx, skill.DisableBindingRequest{
 		Scope: drive.Scope, DeploymentID: "researcher", BindingID: drive.ID, ExpectedRevision: 1,
 		Actor: skill.BindingActor{Type: "user", ID: "operator"}, Reason: "off",
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	export, err := f.installer.ExportSharedAgent(ctx, f.scope, "researcher")
+	export, err := f.installer.ExportSharedAgent(ctx, f.Scope, "researcher")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +258,7 @@ func TestSharedAgentExportSlotsMatchInstall(t *testing.T) {
 	google := skill.CredentialRequirement{Name: "google", Kind: "oauth", OAuth2: &skill.OAuth2Requirement{
 		Provider: "google", Subject: skill.OAuth2SubjectUser, Scopes: []string{"google.all"},
 	}}
-	if err := f.catalog.Register(ctx, &skill.Definition{
+	if err := f.Catalog.Register(ctx, &skill.Definition{
 		ID: "acme.mail", Version: "1.0.0", Name: "Mail", Description: "Mail",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: "kernel://mail"},
 		Actions: map[string]skill.Action{
@@ -274,7 +275,7 @@ func TestSharedAgentExportSlotsMatchInstall(t *testing.T) {
 		AllowedActions: []string{"list_labels"}, MaximumRisk: skill.RiskLevelRead,
 		Credentials: map[string]skill.CredentialReference{"google": {Kind: "oauth", ID: "vault://stale-google"}},
 	})
-	export, err := f.installer.ExportSharedAgent(ctx, f.scope, "researcher")
+	export, err := f.installer.ExportSharedAgent(ctx, f.Scope, "researcher")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,15 +304,15 @@ func TestSharedAgentExportSlotsMatchInstall(t *testing.T) {
 
 	// Once an allowed action uses the slot, it is exported and installs as an
 	// account skill.
-	if err := f.catalog.Bind(ctx, &skill.Binding{
-		Scope: skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, Revision: 2,
+	if err := f.Catalog.Bind(ctx, &skill.Binding{
+		Scope: skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}, Revision: 2,
 		ID: "builder:researcher:acme.mail", DeploymentID: "researcher", SkillID: "acme.mail", SkillVersion: "1.0.0",
 		AllowedActions: []string{"list_labels", "send"}, MaximumRisk: skill.RiskLevelRead,
 		Credentials: map[string]skill.CredentialReference{"google": {Kind: "oauth", ID: "vault://google"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	export, err = f.installer.ExportSharedAgent(ctx, f.scope, "researcher")
+	export, err = f.installer.ExportSharedAgent(ctx, f.Scope, "researcher")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +348,7 @@ func TestSharedAgentExportRefusals(t *testing.T) {
 		ID: "mcp-app", DeploymentID: "researcher", SkillID: agentbuilder.SharedAgentMCPSkillID, SkillVersion: "1.0.0",
 		AllowedActions: []string{"call"}, MaximumRisk: skill.RiskLevelRead,
 	})
-	export, err := f.installer.ExportSharedAgent(ctx, f.scope, "researcher")
+	export, err := f.installer.ExportSharedAgent(ctx, f.Scope, "researcher")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,10 +364,10 @@ func TestSharedAgentExportRefusals(t *testing.T) {
 	if strings.Contains(string(encoded), "vault://") {
 		t.Fatalf("refused skills leak credentials: %s", encoded)
 	}
-	if _, err := f.installer.ExportSharedAgent(ctx, f.scope, "finn"); !errors.Is(err, agentbuilder.ErrSharedAgentNotShareable) {
+	if _, err := f.installer.ExportSharedAgent(ctx, f.Scope, "finn"); !errors.Is(err, agentbuilder.ErrSharedAgentNotShareable) {
 		t.Fatalf("export of Finn = %v", err)
 	}
-	if _, err := f.installer.ExportSharedAgent(ctx, f.scope, "old-agent"); !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
+	if _, err := f.installer.ExportSharedAgent(ctx, f.Scope, "old-agent"); !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
 		t.Fatalf("export of a retired agent = %v", err)
 	}
 }
@@ -460,17 +461,17 @@ func TestSharedAgentInstall(t *testing.T) {
 	f := newSharedAgentFixture(t)
 	request := f.installRequest(sharedAgentSpecV1(), "adoption-1", 1, skill.RiskLevelRead)
 	installed := f.install(t, request)
-	if installed.Replayed || installed.DisplayName != "Planner" || installed.Space == nil || installed.Space.ID != f.salesID || installed.ConversationID == "" {
+	if installed.Replayed || installed.DisplayName != "Planner" || installed.Space == nil || installed.Space.ID != f.SalesID || installed.ConversationID == "" {
 		t.Fatalf("installed = %#v", installed)
 	}
-	if installed.AgentID != agentbuilder.AgentBuilderResourceID("agent-deployment", f.scope, "shared:adoption-1") || !f.spaceMember(t, f.salesID, installed.AgentID) {
+	if installed.AgentID != agentbuilder.AgentBuilderResourceID("agent-deployment", f.Scope, "shared:adoption-1") || !f.SpaceMember(t, f.SalesID, installed.AgentID) {
 		t.Fatalf("copy %s is not in its space", installed.AgentID)
 	}
-	deployment, err := f.agents.GetDeployment(ctx, f.reference(), installed.AgentID)
+	deployment, err := f.Agents.GetDeployment(ctx, f.Reference(), installed.AgentID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition, err := f.agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	definition, err := f.Agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,12 +480,12 @@ func TestSharedAgentInstall(t *testing.T) {
 		definition.SystemPrompt != "Plan the week from the calendar." {
 		t.Fatalf("definition = %#v", definition)
 	}
-	if len(f.recorder.prepared) != 1 || f.recorder.prepared[0].OwnerUserID != sharedAgentAdopter || f.recorder.prepared[0].ActionCallID != "shared:adoption-1" {
-		t.Fatalf("model prepared = %#v", f.recorder.prepared)
+	if len(f.Recorder.Prepared) != 1 || f.Recorder.Prepared[0].OwnerUserID != sharedAgentAdopter || f.Recorder.Prepared[0].ActionCallID != "shared:adoption-1" {
+		t.Fatalf("model prepared = %#v", f.Recorder.Prepared)
 	}
-	if len(f.recorder.created) != 1 || f.recorder.created[0].RunID != "" || f.recorder.created[0].InstallKey != "adoption-1" ||
-		f.recorder.created[0].BillingUserID != sharedAgentAdopter {
-		t.Fatalf("after created = %#v", f.recorder.created)
+	if len(f.Recorder.Created) != 1 || f.Recorder.Created[0].RunID != "" || f.Recorder.Created[0].InstallKey != "adoption-1" ||
+		f.Recorder.Created[0].BillingUserID != sharedAgentAdopter {
+		t.Fatalf("after created = %#v", f.Recorder.Created)
 	}
 	if len(installed.Bindings) != 2 || len(installed.Unconnected) != 1 || installed.Unconnected[0].Slot != "google" {
 		t.Fatalf("bindings %#v, unconnected %#v", installed.Bindings, installed.Unconnected)
@@ -497,12 +498,12 @@ func TestSharedAgentInstall(t *testing.T) {
 
 	// A replay returns the same Agent and creates nothing.
 	replay := f.install(t, request)
-	if !replay.Replayed || replay.AgentID != installed.AgentID || f.provision.created != 1 {
-		t.Fatalf("replay = %#v, deployments created %d", replay, f.provision.created)
+	if !replay.Replayed || replay.AgentID != installed.AgentID || f.Provision.Created != 1 {
+		t.Fatalf("replay = %#v, deployments created %d", replay, f.Provision.Created)
 	}
 
 	// A copy can't be shared again.
-	if _, err := f.installer.ExportSharedAgent(ctx, f.scope, installed.AgentID); !errors.Is(err, agentbuilder.ErrSharedAgentIsCopy) || !errors.Is(err, agentbuilder.ErrSharedAgentNotShareable) {
+	if _, err := f.installer.ExportSharedAgent(ctx, f.Scope, installed.AgentID); !errors.Is(err, agentbuilder.ErrSharedAgentIsCopy) || !errors.Is(err, agentbuilder.ErrSharedAgentNotShareable) {
 		t.Fatalf("export of a copy = %v", err)
 	}
 
@@ -575,7 +576,7 @@ func TestSharedAgentInstallUsesTheHostsSlotReference(t *testing.T) {
 	if len(installed.Unconnected) != 0 {
 		t.Fatalf("unconnected = %#v", installed.Unconnected)
 	}
-	binding, err := f.catalog.GetBinding(ctx, skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, installed.AgentID, agentbuilder.AgentBuilderBindingID(installed.AgentID, "acme.calendar"))
+	binding, err := f.Catalog.GetBinding(ctx, skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}, installed.AgentID, agentbuilder.AgentBuilderBindingID(installed.AgentID, "acme.calendar"))
 	if err != nil || binding.Credentials["google"].ID != "vault://adopter-google" || binding.MaximumRisk != skill.RiskLevelRead ||
 		!reflect.DeepEqual(binding.AllowedActions, []string{"list_events"}) {
 		t.Fatalf("calendar binding = %#v, %v", binding, err)
@@ -585,7 +586,7 @@ func TestSharedAgentInstallUsesTheHostsSlotReference(t *testing.T) {
 func TestSharedAgentInstallRetiresOnBindFailure(t *testing.T) {
 	ctx := context.Background()
 	f := newSharedAgentFixture(t)
-	f.provision.putErr = errors.New("space store unavailable")
+	f.Provision.PutErr = errors.New("space store unavailable")
 	plan, err := f.installer.PlanSharedAgentInstall(ctx, f.installRequest(sharedAgentSpecV1(), "adoption-1", 1, skill.RiskLevelRead))
 	if err != nil {
 		t.Fatal(err)
@@ -593,14 +594,14 @@ func TestSharedAgentInstallRetiresOnBindFailure(t *testing.T) {
 	if _, err := f.installer.InstallSharedAgent(ctx, plan); err == nil || !strings.Contains(err.Error(), "space store unavailable") {
 		t.Fatalf("install with a failing placement = %v", err)
 	}
-	deployment, err := f.agents.GetDeployment(ctx, f.reference(), plan.DeploymentID)
+	deployment, err := f.Agents.GetDeployment(ctx, f.Reference(), plan.DeploymentID)
 	if err != nil || deployment.RolloutStatus != kernelagent.RolloutRetired {
 		t.Fatalf("deployment after the failure = %#v, %v", deployment, err)
 	}
-	if len(f.recorder.created) != 0 {
-		t.Fatalf("AfterAgentCreated ran for a failed install: %#v", f.recorder.created)
+	if len(f.Recorder.Created) != 0 {
+		t.Fatalf("AfterAgentCreated ran for a failed install: %#v", f.Recorder.Created)
 	}
-	f.provision.putErr = nil
+	f.Provision.PutErr = nil
 	retry := f.installRequest(sharedAgentSpecV1(), "adoption-2", 1, skill.RiskLevelRead)
 	retry.DisplayName = "Planner"
 	if installed := f.install(t, retry); installed.DisplayName != "Planner" {
@@ -612,15 +613,15 @@ func TestSharedAgentRetireInstall(t *testing.T) {
 	ctx := context.Background()
 	f := newSharedAgentFixture(t)
 	installed := f.install(t, f.installRequest(sharedAgentSpecV1(), "adoption-1", 1, skill.RiskLevelRead))
-	if err := f.installer.RetireSharedAgentInstall(ctx, f.scope, "researcher", sharedAgentAdopter); !errors.Is(err, agentbuilder.ErrSharedAgentNotCopy) {
+	if err := f.installer.RetireSharedAgentInstall(ctx, f.Scope, "researcher", sharedAgentAdopter); !errors.Is(err, agentbuilder.ErrSharedAgentNotCopy) {
 		t.Fatalf("retire of a non-copy = %v", err)
 	}
 	for range 2 {
-		if err := f.installer.RetireSharedAgentInstall(ctx, f.scope, installed.AgentID, sharedAgentAdopter); err != nil {
+		if err := f.installer.RetireSharedAgentInstall(ctx, f.Scope, installed.AgentID, sharedAgentAdopter); err != nil {
 			t.Fatal(err)
 		}
 	}
-	deployment, err := f.agents.GetDeployment(ctx, f.reference(), installed.AgentID)
+	deployment, err := f.Agents.GetDeployment(ctx, f.Reference(), installed.AgentID)
 	if err != nil || deployment.RolloutStatus != kernelagent.RolloutRetired {
 		t.Fatalf("deployment = %#v, %v", deployment, err)
 	}
@@ -665,20 +666,20 @@ func TestSharedAgentUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reference := f.reference()
+	reference := f.Reference()
 	// The adopter edits the copy's purpose.
-	deployment, _ := f.agents.GetDeployment(ctx, reference, installed.AgentID)
-	definition, _ := f.agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	deployment, _ := f.Agents.GetDeployment(ctx, reference, installed.AgentID)
+	definition, _ := f.Agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	edited := agentbuilder.CloneAgentDefinitionForAction(definition)
 	edited.Version = "1.0.1"
 	edited.Purpose = "My own purpose."
 	if _, _, err := f.installer.ActivateApprovedAgentVersion(ctx, reference, deployment, edited, sharedAgentAdopter); err != nil {
 		t.Fatal(err)
 	}
-	deployment, _ = f.agents.GetDeployment(ctx, reference, installed.AgentID)
+	deployment, _ = f.Agents.GetDeployment(ctx, reference, installed.AgentID)
 
 	request := agentbuilder.SharedAgentUpdateRequest{
-		Scope: f.scope, DeploymentID: installed.AgentID, ActingUserID: sharedAgentAdopter, IdempotencyKey: "update-1",
+		Scope: f.Scope, DeploymentID: installed.AgentID, ActingUserID: sharedAgentAdopter, IdempotencyKey: "update-1",
 		Source: agentbuilder.SharedAgentSource{ShareID: "sa1", Version: 2}, From: sharedAgentSpecV1(), To: sharedAgentSpecV2(),
 		ExpectedDeploymentRevision: deployment.Revision, ExpectedMaximumRisk: skill.RiskLevelWrite,
 	}
@@ -732,8 +733,8 @@ func TestSharedAgentUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deployment, _ = f.agents.GetDeployment(ctx, reference, installed.AgentID)
-	definition, _ = f.agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	deployment, _ = f.Agents.GetDeployment(ctx, reference, installed.AgentID)
+	definition, _ = f.Agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if updated.DefinitionVersion != deployment.ActiveVersion || definition.Purpose != "Plan the week and take notes." ||
 		definition.SystemPrompt != "Plan the week from the calendar and write notes." || definition.Provenance.Reference != "sa1@2" ||
 		definition.Provenance.Source != agentbuilder.SharedAgentProvenanceSource || definition.Authority.MaximumRisk != capability.RiskLevelWrite {
@@ -742,10 +743,10 @@ func TestSharedAgentUpdate(t *testing.T) {
 	if updated.Activation == nil || updated.Activation.ActorID != sharedAgentAdopter {
 		t.Fatalf("activation = %#v", updated.Activation)
 	}
-	skillScope := skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}
+	skillScope := skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}
 	binding := func(id string) *skill.Binding {
 		t.Helper()
-		value, err := f.catalog.GetBinding(ctx, skillScope, installed.AgentID, agentbuilder.AgentBuilderBindingID(installed.AgentID, id))
+		value, err := f.Catalog.GetBinding(ctx, skillScope, installed.AgentID, agentbuilder.AgentBuilderBindingID(installed.AgentID, id))
 		if err != nil {
 			t.Fatalf("binding %s: %v", id, err)
 		}
@@ -767,16 +768,16 @@ func TestSharedAgentUpdate(t *testing.T) {
 	}
 
 	// A replay converges on the same version without activating again.
-	activations, _ := f.agents.ListActivations(ctx, reference, installed.AgentID)
+	activations, _ := f.Agents.ListActivations(ctx, reference, installed.AgentID)
 	replay, err := f.installer.ApplySharedAgentUpdate(ctx, request)
 	if err != nil || replay.DefinitionVersion != updated.DefinitionVersion {
 		t.Fatalf("replay = %#v, %v", replay, err)
 	}
-	if again, _ := f.agents.ListActivations(ctx, reference, installed.AgentID); len(again) != len(activations) {
+	if again, _ := f.Agents.ListActivations(ctx, reference, installed.AgentID); len(again) != len(activations) {
 		t.Fatalf("replay activated again: %d -> %d", len(activations), len(again))
 	}
 	// Still a copy after the update.
-	if _, err := f.installer.ExportSharedAgent(ctx, f.scope, installed.AgentID); !errors.Is(err, agentbuilder.ErrSharedAgentIsCopy) {
+	if _, err := f.installer.ExportSharedAgent(ctx, f.Scope, installed.AgentID); !errors.Is(err, agentbuilder.ErrSharedAgentIsCopy) {
 		t.Fatalf("export of an updated copy = %v", err)
 	}
 }
@@ -785,13 +786,13 @@ func TestSharedAgentUpdateReplacesYourSkillEdit(t *testing.T) {
 	ctx := context.Background()
 	f := newSharedAgentFixture(t)
 	installed := f.install(t, f.installRequest(sharedAgentSpecV1(), "adoption-1", 1, skill.RiskLevelRead))
-	skillScope := skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}
+	skillScope := skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}
 	actor := skill.BindingActor{Type: "user", ID: sharedAgentAdopter}
 	calendarID := agentbuilder.AgentBuilderBindingID(installed.AgentID, "acme.calendar")
 	request := func() agentbuilder.SharedAgentUpdateRequest {
-		deployment, _ := f.agents.GetDeployment(ctx, f.reference(), installed.AgentID)
+		deployment, _ := f.Agents.GetDeployment(ctx, f.Reference(), installed.AgentID)
 		return agentbuilder.SharedAgentUpdateRequest{
-			Scope: f.scope, DeploymentID: installed.AgentID, ActingUserID: sharedAgentAdopter,
+			Scope: f.Scope, DeploymentID: installed.AgentID, ActingUserID: sharedAgentAdopter,
 			Source: agentbuilder.SharedAgentSource{ShareID: "sa1", Version: 2}, From: sharedAgentSpecV1(), To: sharedAgentSpecV2(),
 			ExpectedDeploymentRevision: deployment.Revision,
 		}
@@ -822,7 +823,7 @@ func TestSharedAgentUpdateReplacesYourSkillEdit(t *testing.T) {
 	}
 
 	// The adopter changed the calendar's actions instead.
-	if _, err := f.installer.GrantAgentSkill(ctx, f.scope, installed.AgentID, models.AgentSkillGrant{
+	if _, err := f.installer.GrantAgentSkill(ctx, f.Scope, installed.AgentID, models.AgentSkillGrant{
 		SkillID: "acme.calendar", SkillVersion: "1.0.0", AllowedActions: []string{"list_events", "create_event"}, MaximumRisk: skill.RiskLevelWrite,
 	}, map[string]skill.CredentialReference{"google": {Kind: "oauth", ID: skill.PersonCredentialReferenceID}}, actor, "edit"); err != nil {
 		t.Fatal(err)
@@ -840,9 +841,9 @@ func TestSharedAgentUpdateRefusals(t *testing.T) {
 	ctx := context.Background()
 	f := newSharedAgentFixture(t)
 	installed := f.install(t, f.installRequest(sharedAgentSpecV1(), "adoption-1", 1, skill.RiskLevelRead))
-	deployment, _ := f.agents.GetDeployment(ctx, f.reference(), installed.AgentID)
+	deployment, _ := f.Agents.GetDeployment(ctx, f.Reference(), installed.AgentID)
 	request := agentbuilder.SharedAgentUpdateRequest{
-		Scope: f.scope, DeploymentID: "researcher", ActingUserID: sharedAgentAdopter, IdempotencyKey: "update-1",
+		Scope: f.Scope, DeploymentID: "researcher", ActingUserID: sharedAgentAdopter, IdempotencyKey: "update-1",
 		Source: agentbuilder.SharedAgentSource{ShareID: "sa1", Version: 2}, From: sharedAgentSpecV1(), To: sharedAgentSpecV2(),
 		ExpectedDeploymentRevision: 1, ExpectedMaximumRisk: skill.RiskLevelWrite,
 	}
@@ -866,8 +867,8 @@ func TestSharedAgentUpdateRefusals(t *testing.T) {
 	if _, err := f.installer.ApplySharedAgentUpdate(ctx, request); err != nil {
 		t.Fatal(err)
 	}
-	deployment, _ = f.agents.GetDeployment(ctx, f.reference(), installed.AgentID)
-	definition, _ := f.agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	deployment, _ = f.Agents.GetDeployment(ctx, f.Reference(), installed.AgentID)
+	definition, _ := f.Agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if definition.DisplayName != "Researcher 2" {
 		t.Fatalf("renamed copy = %q", definition.DisplayName)
 	}

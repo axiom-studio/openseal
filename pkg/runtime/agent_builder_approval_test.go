@@ -9,16 +9,17 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // agentBuilderApprovalCoordinator wires the builder fixture to a kernel store
 // with a claimed Finn Run, so proposals take the real coordinator path.
-func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPolicyEvaluator, now time.Time) (*Fixture, *sqlite.Store, *AgentRun, *runtimeaction.ActionCoordinator) {
+func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPolicyEvaluator, now time.Time) (*agentbuildertest.Fixture, *sqlite.Store, *AgentRun, *runtimeaction.ActionCoordinator) {
 	t.Helper()
 	ctx := context.Background()
-	fixture := NewFixture(t, true)
+	fixture := agentbuildertest.NewFixture(t, true)
 	store := newTestKernelStore(t)
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: fixture.Scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
@@ -37,7 +38,7 @@ func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPo
 	return fixture, store, claimed, coordinator
 }
 
-func agentBuilderApprovalRequest(fixture *Fixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) runtimeaction.ProposeActionRequest {
+func agentBuilderApprovalRequest(fixture *agentbuildertest.Fixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) runtimeaction.ProposeActionRequest {
 	return actiontest.LoopProposeRequest(runtimeaction.ProposeActionRequest{
 		Scope: fixture.Scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: action,
@@ -69,7 +70,7 @@ func TestAgentBuilderApprovalCardPolicy(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	fixture, _, run, coordinator := agentBuilderApprovalCoordinator(t, generousBuilderPolicy(), now)
-	create := CreateArguments()
+	create := agentbuildertest.CreateArguments()
 	create["spaceId"] = fixture.SalesID
 	cases := []struct {
 		action    string
@@ -108,7 +109,7 @@ func TestAgentBuilderApprovalCannotBeAllowedByPolicy(t *testing.T) {
 		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "host allows everything"}, nil
 	})
 	fixture, store, run, coordinator := agentBuilderApprovalCoordinator(t, allow, time.Now().UTC())
-	create := CreateArguments()
+	create := agentbuildertest.CreateArguments()
 	create["spaceId"] = fixture.SalesID
 	_, err := coordinator.Propose(context.Background(), agentBuilderApprovalRequest(fixture, run, AgentActionCreateAgent, create, "allowed"))
 	if err == nil || !strings.Contains(err.Error(), "always requires explicit review") {
@@ -124,7 +125,7 @@ func TestAgentBuilderApprovalExpiresAndNeverApproves(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	fixture, store, run, coordinator := agentBuilderApprovalCoordinator(t, generousBuilderPolicy(), now)
-	create := CreateArguments()
+	create := agentbuildertest.CreateArguments()
 	create["spaceId"] = fixture.SalesID
 	result, err := coordinator.Propose(ctx, agentBuilderApprovalRequest(fixture, run, AgentActionCreateAgent, create, "expire"))
 	if err != nil {

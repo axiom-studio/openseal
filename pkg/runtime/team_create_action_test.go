@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -25,7 +26,7 @@ import (
 // teamCreateTestProvisioner creates Teams the way the Engine does: its
 // Agents must be in the space, then the registry create and the placement.
 type teamCreateTestProvisioner struct {
-	*Provisioner
+	*agentbuildertest.Provisioner
 	teams       *kernelteam.Registry
 	teamCreates int
 }
@@ -51,7 +52,7 @@ func (p *teamCreateTestProvisioner) CreateTeamDeploymentInSpace(ctx context.Cont
 }
 
 type teamCreateFixture struct {
-	*DispatchFixture
+	*agentbuildertest.DispatchFixture
 	teamProvision *teamCreateTestProvisioner
 	teamValidator *agentbuilder.TeamCreateActionValidator
 }
@@ -59,7 +60,7 @@ type teamCreateFixture struct {
 func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 	t.Helper()
 	ctx := context.Background()
-	base := NewDispatchFixture(t)
+	base := agentbuildertest.NewDispatchFixture(t)
 	if err := base.Catalog.Register(ctx, TeamManagementSkill()); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 		}
 	}
 	provision := &teamCreateTestProvisioner{Provisioner: base.Provision, teams: base.Teams}
-	dispatcher, err := NewDispatcher(base.Store, base.Agents, base.Teams, base.Catalog, provision, base.Recorder, nil)
+	dispatcher, err := agentbuildertest.NewDispatcher(base.Store, base.Agents, base.Teams, base.Catalog, provision, base.Recorder, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,7 @@ func TestTeamCreatePreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	AssertJSON(t, preview, fmt.Sprintf(`{
+	agentbuildertest.AssertJSON(t, preview, fmt.Sprintf(`{
 		"skillId": "openseal.teams", "skillVersion": "2.2.0", "action": "create_team", "risk": "write", "sideEffect": "write",
 		"resourceType": "team", "operation": "create_team",
 		"team": {"displayName": "Launch Crew", "purpose": "Ship product launches."},
@@ -279,7 +280,7 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := f.executeTeam(t, "call-team", arguments, Approver)
+	output, err := f.executeTeam(t, "call-team", arguments, agentbuildertest.Approver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +323,7 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 	}
 
 	// A replay of the same call converges on the same Team.
-	replay, err := f.executeTeam(t, "call-team", arguments, Approver)
+	replay, err := f.executeTeam(t, "call-team", arguments, agentbuildertest.Approver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +351,7 @@ func TestTeamCreateWithoutPurposeUsesComposerDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.executeTeam(t, "call-plain", arguments, Approver); err != nil {
+	if _, err := f.executeTeam(t, "call-plain", arguments, agentbuildertest.Approver); err != nil {
 		t.Fatal(err)
 	}
 	teamID := builtTeamDefinitionID(f.Scope, "Launch Crew", "call-plain")
@@ -391,10 +392,10 @@ func TestTeamCreateFailsWhenNameTakenWhileWaiting(t *testing.T) {
 	// Another Team takes the name while the card waits.
 	first := teamCreateArgumentsFor(f.SalesID)
 	first["members"] = []interface{}{"platform", "researcher"}
-	if _, err := f.executeTeam(t, "call-first", first, Approver); err != nil {
+	if _, err := f.executeTeam(t, "call-first", first, agentbuildertest.Approver); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.executeTeam(t, "call-second", arguments, Approver); err == nil || !strings.Contains(err.Error(), "already used") {
+	if _, err := f.executeTeam(t, "call-second", arguments, agentbuildertest.Approver); err == nil || !strings.Contains(err.Error(), "already used") {
 		t.Fatalf("second create err = %v", err)
 	}
 	if _, err := f.Teams.GetDefinition(ctx, builtTeamDefinitionID(f.Scope, "Launch Crew", "call-second"), "1"); !errors.Is(err, kernelteam.ErrDefinitionNotFound) {
@@ -425,7 +426,7 @@ func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
 	if err := f.Spaces.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: f.Scope, SpaceID: f.SalesID, Type: SpaceMemberAgent, MemberID: "platform"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.executeTeam(t, "call-outside", arguments, Approver); !errors.Is(err, ErrTeamAgentOutsideSpace) {
+	if _, err := f.executeTeam(t, "call-outside", arguments, agentbuildertest.Approver); !errors.Is(err, ErrTeamAgentOutsideSpace) {
 		t.Fatalf("execute err = %v", err)
 	}
 	if f.teamProvision.teamCreates != 0 {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 )
 
 // TestAgentBuilderCardIsDecidedByTheRequester: an agent or team card names
@@ -21,7 +22,7 @@ func TestAgentBuilderCardIsDecidedByTheRequester(t *testing.T) {
 		{"local-operator", []ApprovalPrincipal{{Type: "user", ID: "local-operator"}}},
 		{"", []ApprovalPrincipal{{Type: "user", ID: "operator"}}},
 	} {
-		fixture := NewFixture(t, true)
+		fixture := agentbuildertest.NewFixture(t, true)
 		store := newTestKernelStore(t)
 		if _, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: fixture.Scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
@@ -38,7 +39,7 @@ func TestAgentBuilderCardIsDecidedByTheRequester(t *testing.T) {
 		policy := action.NewDefaultActionPolicy()
 		policy.Approvers = []ApprovalPrincipal{{Type: "user", ID: "operator"}}
 		coordinator := action.NewActionCoordinator(store, store, fixture.Catalog, policy, []action.ActionProposalValidator{fixture.Validator})
-		create := CreateArguments()
+		create := agentbuildertest.CreateArguments()
 		create["spaceId"] = fixture.SalesID
 		result, err := coordinator.Propose(ctx, agentBuilderApprovalRequest(fixture, run, AgentActionCreateAgent, create, "requester-"+tc.actingUser))
 		if err != nil {
