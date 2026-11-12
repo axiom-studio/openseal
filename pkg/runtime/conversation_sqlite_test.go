@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -29,7 +30,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	primaryService := runtimeconversation.NewConversationService(primary, models.WithClock(func() time.Time { return fixed }))
 	replicaService := runtimeconversation.NewConversationService(replica, models.WithClock(func() time.Time { return fixed }))
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	seedTestSpace(t, primary, scope)
+	conversationtest.SeedSpace(t, primary, scope)
 	conversation, _, err := primaryService.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, Title: "Release", IdempotencyKey: "release-v1",
 	})

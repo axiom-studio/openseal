@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 // LastConversationActivity answers what listing each owner's active
@@ -18,8 +19,8 @@ func TestLastConversationActivityMatchesTheOwnerList(t *testing.T) {
 			ctx := context.Background()
 			service := runtimeconversation.NewConversationService(store)
 			scope := models.Scope{Kind: "tenant", ID: "last-activity"}
-			seedTestSpace(t, store.(models.SpaceStore), scope)
-			seedTestSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "elsewhere"})
+			conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
+			conversationtest.SeedSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "elsewhere"})
 			person := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"}
 			create := func(scope models.Scope, ownerType models.OwnerType, ownerID, key string, post bool) *models.Conversation {
 				t.Helper()

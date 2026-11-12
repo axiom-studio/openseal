@@ -8,13 +8,14 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 	t.Parallel()
 	store := kerneltest.NewStore(t)
-	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "one"})
+	conversationtest.SeedSpace(t, store, models.Scope{Kind: "tenant", ID: "one"})
 	service := runtimeconversation.NewConversationService(store)
 	origin := &models.ConversationReference{Kind: models.ConversationReferenceObjective, ID: "objective-reddit-research"}
 
@@ -39,7 +40,7 @@ func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 	service := runtimeconversation.NewConversationService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}, Title: "First title", IdempotencyKey: "chat-one",
 	})
@@ -72,7 +73,7 @@ func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
 	service := runtimeconversation.NewConversationService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "visibility"}
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Title: "Private coordination", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +139,7 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 	service := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return now }))
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, Title: "Operations", IdempotencyKey: "operations-v1",
 	})

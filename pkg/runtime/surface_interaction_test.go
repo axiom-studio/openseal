@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -51,7 +52,7 @@ func newSurfaceInteractionFixture(t *testing.T, store models.KernelStore) surfac
 	scope := models.Scope{Kind: "tenant", ID: "cards"}
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 	conversations := runtimeconversation.NewConversationService(store.(models.ConversationStore), models.WithClock(func() time.Time { now = now.Add(time.Second); return now }))
-	seedTestSpace(t, store.(models.SpaceStore), scope)
+	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "family"}, Title: "Trip", IdempotencyKey: "trip",
 	})

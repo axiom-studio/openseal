@@ -22,7 +22,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})
