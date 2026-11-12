@@ -47,7 +47,7 @@ func testConversationReactions(t *testing.T, store models.ConversationStore) {
 	projector := &recordingReactionProjector{}
 	service.SetReactionProjector(projector)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	seedTestSpace(t, store.(models.SpaceStore), scope)
+	seedConversationTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "launch"}, Title: "Launch", IdempotencyKey: "launch",
 	})
@@ -151,7 +151,7 @@ func testConversationReactions(t *testing.T, store models.ConversationStore) {
 		t.Fatalf("external reaction projected back out: %d, %v", len(projector.events), err)
 	}
 
-	changes, err := NewConversationChangeService(store, newTestKernelStore(t))
+	changes, err := NewConversationChangeService(store, newConversationTestStore(t))
 	if err != nil {
 		t.Fatal(err)
 	}

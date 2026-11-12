@@ -26,10 +26,10 @@ func (s *countedConversationBackdropStore) ListChannelMessages(ctx context.Conte
 func TestConversationThreadBackdropDoesNotSeekPastHiddenPage(t *testing.T) {
 	for _, replyTo := range []bool{false, true} {
 		t.Run(fmt.Sprintf("replyTo=%t", replyTo), func(t *testing.T) {
-			store := newTestKernelStore(t)
+			store := newConversationTestStore(t)
 			service := NewConversationService(store)
-			conversation := conversationThreadStartConversation(t, store)
-			older := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
+			conversation := ThreadStartConversation(t, store)
+			older := ThreadStartPost(t, service, conversation, PostChannelMessageRequest{
 				IdempotencyKey: "older-authorized", Content: "AUTHORIZED_OLDER_CONTEXT", Intent: models.MessageIntentUpdate,
 			})
 			parentID := ""
@@ -37,13 +37,13 @@ func TestConversationThreadBackdropDoesNotSeekPastHiddenPage(t *testing.T) {
 				parentID = older.ID
 			}
 			for index := 0; index < 24; index++ {
-				conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
+				ThreadStartPost(t, service, conversation, PostChannelMessageRequest{
 					IdempotencyKey: fmt.Sprintf("hidden-%02d", index), Intent: models.MessageIntentUpdate,
 					Content: "HIDDEN_CONTEXT_MUST_NOT_APPEAR", ReplyToMessageID: parentID,
 					Audience: models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{{Type: models.ConversationParticipantUser, ID: "private-user"}}},
 				})
 			}
-			root := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
+			root := ThreadStartPost(t, service, conversation, PostChannelMessageRequest{
 				IdempotencyKey: "new-call-root", StartThread: true, ReplyToMessageID: parentID,
 			})
 			counted := &countedConversationBackdropStore{countedPointConversationStore: &countedPointConversationStore{ConversationStore: store}}
@@ -74,7 +74,7 @@ func TestConversationThreadBackdropDoesNotSeekPastHiddenPage(t *testing.T) {
 
 func conversationThreadBackdropFixture(t *testing.T, service *ConversationService, conversation *models.Conversation, replyTo bool) (*models.ChannelMessage, []*models.ChannelMessage) {
 	t.Helper()
-	otherRoot := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "other-root", Intent: models.MessageIntentSystem})
+	otherRoot := ThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "other-root", Intent: models.MessageIntentSystem})
 	own := make([]*models.ChannelMessage, 0, 11)
 	parent := ""
 	for index := 1; index <= 11; index++ {
@@ -83,7 +83,7 @@ func conversationThreadBackdropFixture(t *testing.T, service *ConversationServic
 		if index == 11 {
 			content += strings.Repeat("日本語", 200)
 		}
-		message := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
+		message := ThreadStartPost(t, service, conversation, PostChannelMessageRequest{
 			IdempotencyKey: key, Intent: models.MessageIntentUpdate, Content: content, ReplyToMessageID: parent,
 		})
 		own = append(own, message)
@@ -91,11 +91,11 @@ func conversationThreadBackdropFixture(t *testing.T, service *ConversationServic
 			parent = message.ID
 		}
 	}
-	conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
+	ThreadStartPost(t, service, conversation, PostChannelMessageRequest{
 		IdempotencyKey: "inaccessible-private", Intent: models.MessageIntentUpdate, Content: "PRIVATE_CONTEXT_MUST_NOT_APPEAR",
 		Audience: models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{{Type: models.ConversationParticipantUser, ID: "private-user"}}},
 	})
-	conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
+	ThreadStartPost(t, service, conversation, PostChannelMessageRequest{
 		IdempotencyKey: "other-thread-reply", ReplyToMessageID: otherRoot.ID, Content: "OTHER_THREAD_CONTEXT_MUST_NOT_APPEAR", Intent: models.MessageIntentUpdate,
 	})
 	rootReply := ""
@@ -106,7 +106,7 @@ func conversationThreadBackdropFixture(t *testing.T, service *ConversationServic
 		rootReply = own[0].ID
 		expected = append([]*models.ChannelMessage{own[0]}, own[len(own)-7:]...)
 	}
-	root := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
+	root := ThreadStartPost(t, service, conversation, PostChannelMessageRequest{
 		IdempotencyKey: "call-root", StartThread: true, ReplyToMessageID: rootReply, RequiresResponse: true, Content: "CALL_ROOT_ONLY",
 	})
 	return root, expected
@@ -115,14 +115,14 @@ func conversationThreadBackdropFixture(t *testing.T, service *ConversationServic
 func TestConversationThreadBackdropIsBoundedAuthorizedAndStable(t *testing.T) {
 	for _, replyTo := range []bool{false, true} {
 		t.Run(fmt.Sprintf("replyTo=%t", replyTo), func(t *testing.T) {
-			forConversationThreadStartStores(t, func(t *testing.T, store conversationThreadStartTestStore, _ func(*testing.T) conversationThreadStartTestStore) {
-				conversation := conversationThreadStartConversation(t, store)
+			ForThreadStartStores(t, func(t *testing.T, store ThreadStartStore, _ func(*testing.T) ThreadStartStore) {
+				conversation := ThreadStartConversation(t, store)
 				service := NewConversationService(store)
 				root, expected := conversationThreadBackdropFixture(t, service, conversation, replyTo)
 				viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: conversation.Owner.ID}}
 				backdrop, err := loadConversationThreadBackdrop(t.Context(), service, conversation, root, viewer)
-				if err != nil || !reflect.DeepEqual(conversationThreadStartMessageIDs(backdrop), conversationThreadStartMessageIDs(expected)) {
-					t.Fatalf("backdrop did not select its latest eight authorized originals: ids=%v expected=%v err=%v", conversationThreadStartMessageIDs(backdrop), conversationThreadStartMessageIDs(expected), err)
+				if err != nil || !reflect.DeepEqual(ThreadStartMessageIDs(backdrop), ThreadStartMessageIDs(expected)) {
+					t.Fatalf("backdrop did not select its latest eight authorized originals: ids=%v expected=%v err=%v", ThreadStartMessageIDs(backdrop), ThreadStartMessageIDs(expected), err)
 				}
 				for _, message := range backdrop {
 					if message.Sequence >= root.Sequence || len(message.Content) > 1024 || !utf8.ValidString(message.Content) {
@@ -133,8 +133,8 @@ func TestConversationThreadBackdropIsBoundedAuthorizedAndStable(t *testing.T) {
 				if err != nil || len(longOriginal.Content) <= 1024 || !strings.HasPrefix(longOriginal.Content, backdrop[len(backdrop)-1].Content) {
 					t.Fatalf("prompt excerpt rewrote the durable original: %#v, %v", longOriginal, err)
 				}
-				conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "later-main", Content: "LATER_MAIN_MUST_NOT_APPEAR", Intent: models.MessageIntentUpdate})
-				utterance := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "future-call-utterance", ReplyToMessageID: root.ID, RequiresResponse: true})
+				ThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "later-main", Content: "LATER_MAIN_MUST_NOT_APPEAR", Intent: models.MessageIntentUpdate})
+				utterance := ThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "future-call-utterance", ReplyToMessageID: root.ID, RequiresResponse: true})
 				later, err := loadConversationThreadBackdrop(t.Context(), service, conversation, utterance, viewer)
 				if err != nil || !reflect.DeepEqual(backdrop, later) {
 					t.Fatalf("future call utterance moved the canonical pre-start cutoff: initial=%#v later=%#v err=%v", backdrop, later, err)
@@ -150,11 +150,11 @@ func TestConversationThreadBackdropIsBoundedAuthorizedAndStable(t *testing.T) {
 }
 
 func TestOrdinaryConversationHasNoThreadBackdropReads(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	service := NewConversationService(store)
-	conversation := conversationThreadStartConversation(t, store)
-	root := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "ordinary-root"})
-	reply := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "ordinary-reply", ReplyToMessageID: root.ID})
+	conversation := ThreadStartConversation(t, store)
+	root := ThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "ordinary-root"})
+	reply := ThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "ordinary-reply", ReplyToMessageID: root.ID})
 	counted := &countedConversationBackdropStore{countedPointConversationStore: &countedPointConversationStore{ConversationStore: store}}
 	reader := NewConversationService(counted)
 	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: conversation.Owner.ID}}

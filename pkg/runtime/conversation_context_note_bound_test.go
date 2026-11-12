@@ -40,7 +40,7 @@ func TestRunContextBoundedTo32KiB(t *testing.T) {
 	}
 	// The digest is of the whole section, so an unchanged truncated section is not sent again.
 	again := conversationContextNote(session, "run-2", sections, latestContextDigests([]*models.SessionEntry{note}))
-	if names := runContextSectionNames(t, again); len(names) != 1 || !names[contextSectionRespondTo] {
+	if names := contextNoteSectionNames(t, again); len(names) != 1 || !names[contextSectionRespondTo] {
 		t.Fatalf("re-sent sections = %v", names)
 	}
 	// Past what active work can give, objectives are cut too.

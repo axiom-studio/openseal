@@ -107,7 +107,7 @@ func TestAlwaysReviewActionKeepsApprovalInEveryMode(t *testing.T) {
 
 func TestNewConversationsDefaultToAutoApprovalMode(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation := approvalModeConversation(t, store)
 	if conversation.ApprovalMode != models.ConversationApprovalAuto {
 		t.Fatalf("new conversation approval mode = %q", conversation.ApprovalMode)
@@ -130,7 +130,7 @@ func TestNewConversationsDefaultToAutoApprovalMode(t *testing.T) {
 
 func TestSetApprovalModeIsRevisionCheckedAndRecordsActivity(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
 	if _, err := service.SetApprovalMode(ctx, SetConversationApprovalModeRequest{
@@ -173,7 +173,7 @@ func TestSetApprovalModeIsRevisionCheckedAndRecordsActivity(t *testing.T) {
 
 func TestLooseningApprovalModeApprovesAllowedPendingApprovals(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
 	conversation = setApprovalModeForTest(t, service, conversation, models.ConversationApprovalManual).Conversation
@@ -229,7 +229,7 @@ func TestLooseningApprovalModeApprovesAllowedPendingApprovals(t *testing.T) {
 
 func TestTighteningApprovalModeLeavesPendingApprovals(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
 	coordinator := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.NewDefaultActionPolicy(), nil)
@@ -266,7 +266,7 @@ func (r runsByID) GetAgentRun(_ context.Context, scope models.Scope, runID strin
 
 func TestRunConversationIDFallsBackToRootRun(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	root := &models.AgentRun{ID: "root", Scope: scope, RootRunID: "root", Context: map[string]interface{}{"conversationId": "chat"}}
 	child := &models.AgentRun{ID: "child", Scope: scope, RootRunID: "root", ParentRunID: "root", Context: map[string]interface{}{}}
@@ -295,7 +295,7 @@ func TestRunConversationIDFallsBackToRootRun(t *testing.T) {
 }
 
 func TestActionCoordinatorPassesConversationApprovalModeToPolicy(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation := approvalModeConversation(t, store)
 	var seen runtimeaction.ActionPolicyInput
 	coordinator := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.ActionPolicyEvaluatorFunc(func(_ context.Context, input runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
@@ -316,7 +316,7 @@ func approvalModeConversation(t *testing.T, store *sqlite.Store) *models.Convers
 
 func approvalModeConversationWithKey(t *testing.T, store *sqlite.Store, key string) *models.Conversation {
 	t.Helper()
-	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "one"})
+	seedConversationTestSpace(t, store, models.Scope{Kind: "tenant", ID: "one"})
 	conversation, _, err := NewConversationService(store).CreateConversation(context.Background(), CreateConversationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat " + key, IdempotencyKey: key,
 	})
@@ -446,9 +446,9 @@ func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := openTestSQLiteDB(t, path)
+	sqlDB := openConversationTestDB(t, path)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	seedTestSpace(t, store, scope)
+	seedConversationTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})
@@ -498,7 +498,7 @@ func TestApprovalModeChangeAppearsInConversationChangeFeed(t *testing.T) {
 		models.RunActivityStore
 	}{"sqlite": mustSQLiteApprovalModeStore(t)} {
 		t.Run(name, func(t *testing.T) {
-			seedTestSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "one"})
+			seedConversationTestSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "one"})
 			conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 				Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 			})
@@ -539,7 +539,7 @@ func mustSQLiteApprovalModeStore(t *testing.T) *sqlite.Store {
 
 func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation := approvalModeConversation(t, store)
 	coordinator := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
@@ -581,7 +581,7 @@ func setFixtureApprovalMode(t *testing.T, store *sqlite.Store, conversation *mod
 
 func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
 	conversation = setApprovalModeForTest(t, service, conversation, models.ConversationApprovalSkip).Conversation
@@ -626,7 +626,7 @@ func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
 // ordinary write exactly like a manifest review: always action.
 func TestPolicyReviewFloorParksInSkipAndSurvivesSweep(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
 	conversation = setApprovalModeForTest(t, service, conversation, models.ConversationApprovalSkip).Conversation
@@ -668,7 +668,7 @@ func TestPolicyReviewFloorParksInSkipAndSurvivesSweep(t *testing.T) {
 }
 
 func TestPolicyWithoutReviewFloorKeepsDisposition(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
 	conversation = setApprovalModeForTest(t, service, conversation, models.ConversationApprovalSkip).Conversation

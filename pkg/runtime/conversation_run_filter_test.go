@@ -29,7 +29,7 @@ func (s *countedConversationPortfolio) ListAgentRuns(ctx context.Context, filter
 func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			store, db := newTestSQLiteStore(t)
+			store, db := newConversationTestSQLiteStore(t)
 			scope := models.Scope{Kind: "tenant", ID: "one"}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "writer"}
 			now := time.Now().UTC()
@@ -76,7 +76,7 @@ func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 func TestConversationRunsIncludeTeamMemberLanes(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store models.KernelStore = newTestKernelStore(t)
+			var store models.KernelStore = newConversationTestStore(t)
 			if backend == "sqlite" {
 				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
 				if err != nil {

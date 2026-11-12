@@ -15,7 +15,7 @@ import (
 // (Postgres with OPENSEAL_TEST_POSTGRES_DSN).
 
 type catchUpTestStore interface {
-	conversationThreadStartTestStore
+	ThreadStartStore
 	models.AgentSessionStore
 }
 
@@ -31,13 +31,13 @@ type catchUpFixture struct {
 
 func forCatchUpStores(t *testing.T, owner models.ObjectiveOwner, test func(*testing.T, *catchUpFixture)) {
 	t.Helper()
-	forConversationThreadStartStores(t, func(t *testing.T, store conversationThreadStartTestStore, _ func(*testing.T) conversationThreadStartTestStore) {
+	ForThreadStartStores(t, func(t *testing.T, store ThreadStartStore, _ func(*testing.T) ThreadStartStore) {
 		sessions, ok := store.(catchUpTestStore)
 		if !ok {
 			t.Fatalf("%T is not an agent session store", store)
 		}
 		service := NewConversationService(store)
-		seedTestSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "catch-up"})
+		seedConversationTestSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "catch-up"})
 		conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 			Scope: models.Scope{Kind: "tenant", ID: "catch-up"}, Owner: owner, Title: "Catch-up", IdempotencyKey: "catch-up",
 		})
@@ -54,7 +54,7 @@ func forCatchUpStores(t *testing.T, owner models.ObjectiveOwner, test func(*test
 
 func (f *catchUpFixture) post(req PostChannelMessageRequest) *models.ChannelMessage {
 	f.t.Helper()
-	return conversationThreadStartPost(f.t, f.service, f.conversation, req)
+	return ThreadStartPost(f.t, f.service, f.conversation, req)
 }
 
 func (f *catchUpFixture) say(key, content string) *models.ChannelMessage {
@@ -302,7 +302,7 @@ func TestSeedNewSessionWithLast30AndHistoryOmitted(t *testing.T) {
 		req := f.request(run, session, trigger.Sequence)
 		req.Seed = true
 		result := f.collect(req)
-		want := conversationThreadStartMessageIDs(messages[10:])
+		want := ThreadStartMessageIDs(messages[10:])
 		if got := catchUpMessageIDs(result.Entries); !reflect.DeepEqual(got, want) {
 			t.Fatalf("seed kept %v, want %v", got, want)
 		}
@@ -342,8 +342,8 @@ func TestSeedThreadSessionIncludesBackdropOnce(t *testing.T) {
 		req := f.request(run, session, root.Sequence)
 		req.Seed, req.Trigger = true, root
 		seed := f.collect(req)
-		if got := conversationThreadStartMessageIDs(seed.Backdrop); !reflect.DeepEqual(got, conversationThreadStartMessageIDs(expected)) {
-			t.Fatalf("seed backdrop = %v, want %v", got, conversationThreadStartMessageIDs(expected))
+		if got := ThreadStartMessageIDs(seed.Backdrop); !reflect.DeepEqual(got, ThreadStartMessageIDs(expected)) {
+			t.Fatalf("seed backdrop = %v, want %v", got, ThreadStartMessageIDs(expected))
 		}
 		// The thread session holds only its thread; the backdrop never becomes entries.
 		if got := catchUpMessageIDs(seed.Entries); !reflect.DeepEqual(got, []string{root.ID}) {
@@ -364,10 +364,10 @@ func TestSeedThreadSessionIncludesBackdropOnce(t *testing.T) {
 		next.Trigger = utterance
 		later := f.collect(next)
 		if later.Backdrop != nil || !reflect.DeepEqual(catchUpMessageIDs(later.Entries), []string{utterance.ID}) {
-			t.Fatalf("later thread catch-up = backdrop %v entries %v", conversationThreadStartMessageIDs(later.Backdrop), catchUpMessageIDs(later.Entries))
+			t.Fatalf("later thread catch-up = backdrop %v entries %v", ThreadStartMessageIDs(later.Backdrop), catchUpMessageIDs(later.Entries))
 		}
 		history, err := ReadConversationHistory(t.Context(), f.service, f.conversation.Scope, f.conversation.Owner, f.conversation.ID, f.viewer(), ConversationHistoryReadRequest{}, root.ID)
-		if err != nil || !reflect.DeepEqual(conversationThreadStartHistoryIDs(history), []string{utterance.ID, root.ID}) {
+		if err != nil || !reflect.DeepEqual(ThreadStartHistoryIDs(history), []string{utterance.ID, root.ID}) {
 			t.Fatalf("backdrop widened thread history: page=%#v err=%v", history, err)
 		}
 	})
@@ -383,7 +383,7 @@ func TestCatchUpCapsToOneAppendWithOmittedNote(t *testing.T) {
 		}
 		last := messages[len(messages)-1]
 		result := f.collect(f.request(run, session, last.Sequence))
-		want := conversationThreadStartMessageIDs(messages[30:])
+		want := ThreadStartMessageIDs(messages[30:])
 		if got := catchUpMessageIDs(result.Entries); !reflect.DeepEqual(got, want) {
 			t.Fatalf("capped catch-up kept %d entries starting %v, want the newest %d", len(got), got[:1], len(want))
 		}
@@ -403,9 +403,9 @@ func TestCatchUpCapsToOneAppendWithOmittedNote(t *testing.T) {
 }
 
 func TestCatchUpCapsByAppendBytes(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	service := NewConversationService(store)
-	conversation := conversationThreadStartConversation(t, store)
+	conversation := ThreadStartConversation(t, store)
 	f := &catchUpFixture{t: t, store: store, service: service, conversation: conversation, agentID: conversation.Owner.ID,
 		now: time.Now().UTC().Truncate(time.Millisecond), catchUp: &conversationCatchUp{conversations: service, runs: store}}
 	run, session := f.open("")

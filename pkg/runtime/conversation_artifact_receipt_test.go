@@ -36,7 +36,7 @@ func TestRunActionArtifactReferencesFromSucceededCalls(t *testing.T) {
 		}
 		return map[string]interface{}{"artifactRefs": list}
 	}
-	actions := &fakeActionCalls{calls: map[string]*models.ActionCall{
+	actions := &receiptActionCalls{calls: map[string]*models.ActionCall{
 		"a1": {ID: "a1", RunID: "run", Status: models.ActionCallStatusSucceeded, Output: refs("one", 1, "two", 3)},
 		"a2": {ID: "a2", RunID: "run", Status: models.ActionCallStatusSucceeded, Output: refs("one", 1, strings.Repeat("x", 257), 1, "zero", 0)},
 		"a3": {ID: "a3", RunID: "run", Status: models.ActionCallStatusFailed, Output: refs("failed", 1)},

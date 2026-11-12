@@ -81,7 +81,7 @@ type attachmentFixture struct {
 }
 
 func newAttachmentFixture(t *testing.T) *attachmentFixture {
-	return &attachmentFixture{t: t, store: newTestKernelStore(t), content: &conversationAppContent{byRef: map[string]string{}}, scope: conversationTestArtifact().Scope}
+	return &attachmentFixture{t: t, store: newConversationTestStore(t), content: &conversationAppContent{byRef: map[string]string{}}, scope: conversationTestArtifact().Scope}
 }
 
 func (f *attachmentFixture) put(id, name, mediaType, data string) models.ConversationReference {

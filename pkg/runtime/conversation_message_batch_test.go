@@ -72,7 +72,7 @@ func channelMessageBatchStores(t *testing.T, test func(*testing.T, models.Kernel
 
 func channelMessageBatchConversation(t testing.TB, store models.ConversationStore, scope models.Scope, id string) *models.Conversation {
 	t.Helper()
-	seedTestSpace(t, store.(models.SpaceStore), scope)
+	seedConversationTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(context.Background(), CreateConversationRequest{
 		ID: id, Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Title: "Batch visibility", IdempotencyKey: id,
 	})
@@ -123,7 +123,7 @@ func channelMessageBatchHistory(t testing.TB, store models.KernelStore, count in
 }
 
 func TestConversationMessageBatchReducesIdleHistoricalPollReads(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation, runs := channelMessageBatchHistory(t, store, 100)
 	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "viewer"}, Roles: []string{"reader"}}
 	counted := newCountedBatchConversationStore(store)
@@ -229,7 +229,7 @@ func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := openTestSQLiteDB(t, path)
+	sqlDB := openConversationTestDB(t, path)
 	defer store.Close()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	conversation := channelMessageBatchConversation(t, store, scope, "channel")
@@ -259,7 +259,7 @@ func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T
 }
 
 func TestConversationMessageBatchChunksAndDeduplicatesExactIDs(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := newConversationTestStore(t)
 	conversation, runs := channelMessageBatchHistory(t, store, 401)
 	runs = append(runs, runs[0])
 	counted := newCountedBatchConversationStore(store)
