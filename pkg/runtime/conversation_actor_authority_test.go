@@ -89,7 +89,7 @@ func (f *conversationActorFixture) waitingQuestion(t *testing.T, trigger *Channe
 	if _, err = f.scheduler.ReconcileScope(t.Context(), root.Scope); err != nil {
 		t.Fatal(err)
 	}
-	question, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), root.Scope, f.conversation.ID, clarificationQuestionKey(child))
+	question, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), root.Scope, f.conversation.ID, clarificationQuestionKeyOf(child))
 	if err != nil || question == nil {
 		t.Fatalf("projected question = %#v, %v", question, err)
 	}

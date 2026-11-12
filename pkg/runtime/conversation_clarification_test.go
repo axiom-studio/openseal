@@ -61,7 +61,7 @@ func (f *clarificationFixture) question(t *testing.T) *ChannelMessage {
 	if _, err := f.scheduler.ReconcileScope(t.Context(), f.root.Scope); err != nil {
 		t.Fatal(err)
 	}
-	q, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), f.root.Scope, f.conversation.ID, clarificationQuestionKey(f.child))
+	q, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), f.root.Scope, f.conversation.ID, clarificationQuestionKeyOf(f.child))
 	if err != nil || q == nil {
 		t.Fatalf("missing projected question: %v", err)
 	}
@@ -225,4 +225,15 @@ func TestConversationWorkOriginKeepsOwnerBoundary(t *testing.T) {
 	if len(msgs) != 2 { // the trigger and the earlier ask_user question
 		t.Fatal("external event projected as user question")
 	}
+}
+
+// clarificationQuestionKeyOf is the idempotency key of the question a Run
+// waiting on an ask_user entry posted: the ask_user settle and the question
+// reconciler post under it, so either replays the other. The tests spell it
+// out to pin that key.
+func clarificationQuestionKeyOf(run *AgentRun) string {
+	if run == nil || run.WakeCondition == nil {
+		return ""
+	}
+	return "conversation-clarification:" + run.ID + ":" + run.WakeCondition.Reference
 }

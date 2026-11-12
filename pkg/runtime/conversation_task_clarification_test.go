@@ -135,7 +135,7 @@ func (f *conversationTaskClarificationFixture) question(t *testing.T) *ChannelMe
 	if _, err := f.scheduler.ReconcileScope(t.Context(), f.task.Scope); err != nil {
 		t.Fatal(err)
 	}
-	question, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), f.task.Scope, f.conversation.ID, clarificationQuestionKey(f.work))
+	question, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), f.task.Scope, f.conversation.ID, clarificationQuestionKeyOf(f.work))
 	if err != nil || question == nil {
 		t.Fatalf("independent task did not project its question: %#v, %v", question, err)
 	}
@@ -194,7 +194,7 @@ func (f *conversationTaskClarificationFixture) assertAnswerReceipt(t *testing.T,
 	}
 	eventCount := 0
 	for _, event := range events {
-		if event.EventType != conversationAnswerEvent {
+		if event.EventType != answerReceivedEvent {
 			continue
 		}
 		eventCount++
@@ -496,10 +496,14 @@ func TestConversationTaskGenericInterventionDoesNotMintAnswerReceipt(t *testing.
 			t.Fatal(err)
 		}
 		for _, event := range events {
-			if event.EventType == conversationAnswerEvent {
+			if event.EventType == answerReceivedEvent {
 				t.Fatalf("generic command minted an answer transition: %#v", event)
 			}
 		}
 		f.assertSingleForeground(t)
 	})
 }
+
+// answerReceivedEvent is the activity event of a clarification answer the
+// scheduler delivered to the waiting Run.
+const answerReceivedEvent = "run.conversation_answer_received"
