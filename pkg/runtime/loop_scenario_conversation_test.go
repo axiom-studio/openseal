@@ -28,12 +28,14 @@ import (
 
 // convRunner replaces the fixture's conversation runner with one built from
 // config (Places, ImageStyle, HumanParticipants, participation opt-in), on
-// the fixture's clock.
+// the fixture's clock. It resolves the Agent's own binding through the
+// fixture, as the fixture's runner does.
 func convRunner(f *loopFixture, config ConversationRunTurnRunnerConfig) {
 	f.t.Helper()
 	if config.AttachmentContent == nil {
 		config.AttachmentContent = &answerVisualContent{}
 	}
+	config.AgentTurns = TurnRunnerResolverFunc(f.agentBinding)
 	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), config, models.WithClock(f.clock.Now))
 	if err != nil {
 		f.t.Fatal(err)

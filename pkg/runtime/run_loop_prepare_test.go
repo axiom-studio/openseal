@@ -116,7 +116,7 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 	}
 	for _, tool := range first.Tools {
 		group := ModelStepToolHarness
-		if strings.HasPrefix(tool.Name, governedToolPrefix) {
+		if strings.HasPrefix(tool.Name, kitGovernedToolPrefix) {
 			group = ModelStepToolCore
 		}
 		if tool.Group != group {

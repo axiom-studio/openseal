@@ -74,12 +74,12 @@ func waitCardSkills(f *loopFixture) {
 func waitTool(t *testing.T, v stepView, action string) string {
 	t.Helper()
 	for _, tool := range v.Request().Tools {
-		if strings.HasSuffix(tool.Name, action) && strings.HasPrefix(tool.Name, governedToolPrefix) {
+		if strings.HasSuffix(tool.Name, action) && strings.HasPrefix(tool.Name, kitGovernedToolPrefix) {
 			return tool.Name
 		}
 	}
 	t.Errorf("%s is not offered: %s", action, v.describe())
-	return governedToolPrefix + action
+	return kitGovernedToolPrefix + action
 }
 
 // waitSettleCard is the product's card settle (Engine.continueInteractionRun):

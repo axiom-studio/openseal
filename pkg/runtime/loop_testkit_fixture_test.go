@@ -167,7 +167,7 @@ func (d *fakeDispatcher) Dispatch(ctx context.Context, in ActionDispatchInput) (
 	case "send":
 		return map[string]interface{}{"sent": true}, nil
 	case "explode":
-		return nil, explicitActionResultFailure(map[string]interface{}{"success": false, "error": "the fixture service exploded"})
+		return nil, errors.New("the fixture service exploded")
 	}
 	d.t.Errorf("fake dispatcher: unexpected action %q", action)
 	return nil, fmt.Errorf("fake dispatcher: unknown action %q", action)
@@ -367,7 +367,9 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 		t.Fatal(err)
 	}
 	f.scheduler = scheduler
-	runner, err := NewConversationRunTurnRunner(chats, f.coordinator(), ConversationRunTurnRunnerConfig{AttachmentContent: &answerVisualContent{}}, clock)
+	runner, err := NewConversationRunTurnRunner(chats, f.coordinator(), ConversationRunTurnRunnerConfig{
+		AttachmentContent: &answerVisualContent{}, AgentTurns: TurnRunnerResolverFunc(f.agentBinding),
+	}, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,16 +629,32 @@ func (f *loopFixture) driveToRest(runID string, maxClaims int) *AgentRun {
 }
 
 // binding is the claim's TurnRunnerBinding, built the way the worker's
-// resolver will: the model producer over the catalog preparer, the run-start
-// preparer, the claim tool executor, the control authority, the kernel
-// compactor (with its budget, as the catalog resolver sets it), and for chats
-// the conversation loop seams (bindConversationLoop). A first claim opens the
-// Run's session.
+// resolver will. A chat Run goes through the conversation turn runner, which
+// adds the conversation loop seams (catch-up preparer, read receipts, tool
+// check, artifact receipts and the observed final delivery) on top of
+// agentBinding; any other Run gets agentBinding alone.
 func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
+	f.t.Helper()
+	if conversationID, _ := run.Context[conversationRunContextConversationID].(string); conversationID == "" {
+		binding, _ := f.agentBinding(f.ctx, run)
+		return binding
+	}
+	binding, err := f.runner.ResolveTurnRunner(f.ctx, run)
+	if err != nil {
+		f.t.Fatalf("resolve conversation turn runner: %v", err)
+	}
+	return binding
+}
+
+// agentBinding is the Agent's own TurnRunnerBinding, as the catalog resolver
+// builds it: the model producer over the catalog preparer, the run-start
+// preparer, the claim tool executor, the control authority and the kernel
+// compactor (with its budget). A first claim opens the Run's session. It is
+// the fixture's AgentTurns resolver for the conversation turn runner.
+func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 	f.t.Helper()
 	sessions := f.store.(AgentSessionStore)
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	chat := conversationID != ""
 	session := f.openSession(run, conversationID)
 
 	var authority *workspace.Authority
@@ -679,14 +697,7 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 		Preparers: []StepPreparer{newRunStartPreparer(sessions, f.store)},
 		Tools:     f.dispatcher.ForClaim(LoopToolClaim{Workspace: authority, CapabilityConfig: loopFixtureCapabilities}),
 	}
-	if chat {
-		// The production chat seams: catch-up preparer, read receipts, tool
-		// check, artifact receipts and the observed final delivery.
-		if err := f.runner.bindConversationLoop(f.ctx, run, binding, ConversationLoopStores{Sessions: sessions, Actions: f.store, Activity: f.store}); err != nil {
-			f.t.Fatalf("bind conversation loop: %v", err)
-		}
-	}
-	return binding
+	return binding, nil
 }
 
 // loopFixtureTeamCatalog is the Team roster the control authority reads for a
@@ -1108,12 +1119,16 @@ func reviewedCall(name string, args map[string]any, summary string) tc {
 // kitGovernedTool is the offered tool name of a fixture action.
 func kitGovernedTool(v stepView, action string) string {
 	for _, tool := range v.req.Tools {
-		if strings.HasSuffix(tool.Name, action) && strings.HasPrefix(tool.Name, governedToolPrefix) {
+		if strings.HasSuffix(tool.Name, action) && strings.HasPrefix(tool.Name, kitGovernedToolPrefix) {
 			return tool.Name
 		}
 	}
-	return governedToolPrefix + action
+	return kitGovernedToolPrefix + action
 }
+
+// kitGovernedToolPrefix starts every governed tool name the model is offered.
+// The kit spells it out so its tests pin the names the model sees.
+const kitGovernedToolPrefix = "action_"
 
 func kitDescribeMessages(messages []*ChannelMessage) string {
 	parts := make([]string, len(messages))

@@ -45,13 +45,13 @@ func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate fun
 // request builder and the Run activity budget.
 func (f *loopFixture) withLoopCompactor(binding *TurnRunnerBinding) {
 	f.t.Helper()
-	producer, ok := binding.Producer.(*ModelStepProducer)
+	built, ok := binding.Compactor.(*LoopCompactor)
 	if !ok {
-		f.t.Fatalf("binding producer is %T, want the model step producer", binding.Producer)
+		f.t.Fatalf("binding compactor is %T, want the loop compactor", binding.Compactor)
 	}
 	activity := NewRunActivityService(f.store, f.store, models.WithClock(f.clock.Now))
 	binding.Compactor = &LoopCompactor{
-		Host: binding.Host, Sessions: f.store.(AgentSessionStore), Requests: producer.preparer,
+		Host: binding.Host, Sessions: f.store.(AgentSessionStore), Requests: built.Requests,
 		Budget: newRunActivityCompactionBudget(f.store, activity, f.clock.Now), Now: f.clock.Now,
 	}
 }

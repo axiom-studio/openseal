@@ -61,7 +61,7 @@ func sawToolError(name string) func(stepView) bool {
 func TestLoopUnofferedToolIsAToolError(t *testing.T) {
 	for _, name := range []string{
 		"delete_everything",
-		governedToolPrefix + loopFixtureSkillID + "_delete_all",
+		kitGovernedToolPrefix + loopFixtureSkillID + "_delete_all",
 		hostToolName("read_file"),
 	} {
 		t.Run(name, func(t *testing.T) {
