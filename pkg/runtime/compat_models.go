@@ -389,3 +389,10 @@ func MatchActionCredentialLease(lease models.ActionCredentialLease, call *models
 var ErrNoDefaultSpace = models.ErrNoDefaultSpace
 
 const TeamMemberAmendmentField = models.TeamMemberAmendmentField
+
+type CreateActionCredentialLeaseRequest = models.CreateActionCredentialLeaseRequest
+
+// NewActionCredentialLease forwards to models.NewActionCredentialLease.
+func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*models.ActionCredentialLease, error) {
+	return models.NewActionCredentialLease(request)
+}
