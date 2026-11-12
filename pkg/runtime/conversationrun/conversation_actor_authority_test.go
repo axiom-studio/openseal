@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/control/controltest"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -94,7 +95,7 @@ func (f *conversationActorFixture) waitingQuestion(t *testing.T, trigger *models
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, _ = askUserParked(t, f.store, claimAskUserRun(t, f.store, child, "actor-worker"), "actor-worker", "Who is the report for?")
+	child, _ = controltest.AskUserParked(t, f.store, controltest.ClaimRun(t, f.store, child, "actor-worker"), "actor-worker", "Who is the report for?")
 	if _, err = f.scheduler.ReconcileScope(t.Context(), root.Scope); err != nil {
 		t.Fatal(err)
 	}

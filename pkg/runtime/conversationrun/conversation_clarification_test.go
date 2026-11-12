@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/control/controltest"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -18,7 +19,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-type clarificationStore = askUserTestStore
+type clarificationStore = controltest.AskUserStore
 type clarificationFixture struct {
 	store        clarificationStore
 	service      *runtimeconversation.ConversationService
@@ -60,7 +61,7 @@ func newClarificationFixture(t *testing.T, store clarificationStore, scopeID str
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, _ = askUserParked(t, store, claimAskUserRun(t, store, child, "child-worker"), "child-worker", "Which audience should I use?")
+	child, _ = controltest.AskUserParked(t, store, controltest.ClaimRun(t, store, child, "child-worker"), "child-worker", "Which audience should I use?")
 	return &clarificationFixture{store, service, scheduler, conversation, root, child, trigger}
 }
 func (f *clarificationFixture) question(t *testing.T) *models.ChannelMessage {

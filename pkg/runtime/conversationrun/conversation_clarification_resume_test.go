@@ -5,6 +5,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/control/controltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
@@ -66,7 +67,7 @@ func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, _ = askUserParked(t, f.store, claimAskUserRun(t, f.store, other, "other-worker"), "other-worker", "Which audience should I use?")
+	other, _ = controltest.AskUserParked(t, f.store, controltest.ClaimRun(t, f.store, other, "other-worker"), "other-worker", "Which audience should I use?")
 	if _, err := f.scheduler.ReconcileScope(t.Context(), f.root.Scope); err != nil {
 		t.Fatal(err)
 	}
