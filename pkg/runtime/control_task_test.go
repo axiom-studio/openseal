@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -365,7 +366,7 @@ func TestStartTaskReplayAfterCrashReturnsSameTask(t *testing.T) {
 	forStartTaskStores(t, func(t *testing.T, store startTaskTestStore) {
 		f := newStartTaskFixture(t, store)
 		req := f.request("call-task")
-		req.Budget = controlTaskBudget(nil)
+		req.Budget = modelstep.ControlTaskBudget(nil)
 		var wg sync.WaitGroup
 		results := make(chan *ConversationTaskResult, 6)
 		errs := make(chan error, 6)

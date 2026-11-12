@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/google/uuid"
 )
 
@@ -78,12 +79,12 @@ func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 }
 
 func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
-	for _, code := range []string{"gateway_credits_exhausted", "provider_unavailable", "budget_exhausted", TurnHostContextExceeded, RunFailureCodeCompactionFailed, "agent_behavior_fixed", "model_image_input_unsupported"} {
+	for _, code := range []string{"gateway_credits_exhausted", "provider_unavailable", "budget_exhausted", modelstep.TurnHostContextExceeded, modelstep.RunFailureCodeCompactionFailed, "agent_behavior_fixed", "model_image_input_unsupported"} {
 		if turnFailureCanBeExplained(errors.New("failed"), code) {
 			t.Fatalf("%s must not get an explanation step", code)
 		}
 	}
-	for _, err := range []error{ErrTurnHostUnavailable, ErrBudgetExhausted, context.Canceled, ErrLeaseLost} {
+	for _, err := range []error{modelstep.ErrTurnHostUnavailable, ErrBudgetExhausted, context.Canceled, ErrLeaseLost} {
 		if turnFailureCanBeExplained(err, "execution_failed") {
 			t.Fatalf("%v must not get an explanation step", err)
 		}

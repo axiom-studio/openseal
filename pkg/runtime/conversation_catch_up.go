@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Catch-up of channel messages (run-loop section 05 §4). A chat session holds
@@ -279,7 +280,7 @@ func catchUpHistoryOmittedNote(req catchUpRequest, result *catchUpResult) *Sessi
 		Step: req.Step, Type: SessionEntryNote, SourceKey: key,
 		Note: &NoteEntry{Kind: NoteHistoryOmitted, Text: catchUpHistoryOmittedText, Data: data},
 	}
-	entry.Tokens = estimateEntryTokens(entry)
+	entry.Tokens = modelstep.EstimateEntryTokens(entry)
 	return entry
 }
 

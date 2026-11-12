@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -408,7 +409,7 @@ func (r *modelStepProgressAcknowledgementRenderer) RenderRunProgressAcknowledgem
 	if len(result.Assistant.ToolCalls) > 0 {
 		return "", errors.New("Agent returned an actionable progress acknowledgement")
 	}
-	if err := ValidateModelStepResult(req, result); err != nil {
+	if err := modelstep.ValidateModelStepResult(req, result); err != nil {
 		return "", err
 	}
 	return validateRenderedRunProgressAcknowledgement(result.Assistant.Text, request.MaxSentences, request.MaxCharacters)

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // jsonbStyle is value as Postgres jsonb gives it back: one space after every
@@ -49,7 +51,7 @@ func TestAResultReadBackFromJSONBStillFitsItsCap(t *testing.T) {
 	f.User("run-a", "look it up")
 	f.Assistant("run-a", "step-a", "c1")
 	tool := f.Tool("run-a", "step-a", "c1", ToolEntryCompleted, ContentPart{Type: ContentPartJSON, Value: spaced})
-	views, err := projectSessionPath(context.Background(), f.Path(), NewRenderImageSources().Options(false))
+	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), NewRenderImageSources().Options(false))
 	if err != nil {
 		t.Fatalf("projectSessionPath: %v", err)
 	}
@@ -70,7 +72,7 @@ func TestAStoredResultOverTheCapIsShortenedNotFatal(t *testing.T) {
 	tool := f.Tool("run-a", "step-a", "c1", ToolEntryCompleted,
 		ContentPart{Type: ContentPartText, Text: strings.Repeat("page text ", 4000)},
 		ContentPart{Type: ContentPartJSON, Value: compact})
-	views, err := projectSessionPath(context.Background(), f.Path(), NewRenderImageSources().Options(false))
+	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), NewRenderImageSources().Options(false))
 	if err != nil {
 		t.Fatalf("projectSessionPath: %v", err)
 	}
@@ -90,8 +92,8 @@ func TestAStoredResultOverTheCapIsShortenedNotFatal(t *testing.T) {
 
 // A model step refused for its content is not reported as a misconfigured host.
 func TestAnInvalidStepRequestIsNotCalledAHostProblem(t *testing.T) {
-	err := fmt.Errorf("%w: %w", ErrTurnHostConfiguration, fmt.Errorf("%w: tool entry e1 result text and json are 70000 bytes (max 65536)", ErrInvalidModelStepRequest))
-	if !errors.Is(err, ErrTurnHostConfiguration) || !errors.Is(err, ErrInvalidModelStepRequest) {
+	err := fmt.Errorf("%w: %w", modelstep.ErrTurnHostConfiguration, fmt.Errorf("%w: tool entry e1 result text and json are 70000 bytes (max 65536)", ErrInvalidModelStepRequest))
+	if !errors.Is(err, modelstep.ErrTurnHostConfiguration) || !errors.Is(err, ErrInvalidModelStepRequest) {
 		t.Fatal("the wrapped error lost a cause")
 	}
 }

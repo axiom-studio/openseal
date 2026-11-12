@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -143,12 +144,12 @@ func claimedBindingRun(t *testing.T, store *sqlite.Store, run *AgentRun) *AgentR
 // prepareBindingStep is the model request of the binding's first step.
 func prepareBindingStep(t *testing.T, binding *agentrun.TurnRunnerBinding, run *AgentRun) ModelStepRequest {
 	t.Helper()
-	if _, ok := binding.Producer.(*ModelStepProducer); !ok {
+	if _, ok := binding.Producer.(*modelstep.ModelStepProducer); !ok {
 		t.Fatalf("binding producer = %T, want the model step producer", binding.Producer)
 	}
 	// The compactor builds its summary requests with the producer's own
 	// preparer, so it prepares the step the producer would.
-	compactor, ok := binding.Compactor.(*LoopCompactor)
+	compactor, ok := binding.Compactor.(*modelstep.LoopCompactor)
 	if !ok {
 		t.Fatalf("binding compactor = %T, want the loop compactor", binding.Compactor)
 	}
@@ -242,11 +243,11 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			}
 			switch tc.producer {
 			case "model":
-				if _, ok := binding.Producer.(*ModelStepProducer); !ok {
+				if _, ok := binding.Producer.(*modelstep.ModelStepProducer); !ok {
 					t.Fatalf("producer = %T", binding.Producer)
 				}
 			case "capability":
-				if _, ok := binding.Producer.(*CapabilityInvocationStepProducer); !ok {
+				if _, ok := binding.Producer.(*modelstep.CapabilityInvocationStepProducer); !ok {
 					t.Fatalf("producer = %T", binding.Producer)
 				}
 			}
@@ -305,13 +306,13 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			}
 			req := prepareBindingStep(t, binding, claimed)
 			tools := bindingToolNames(req)
-			hostTool := slices.Contains(tools, hostToolName(workspace.OperationRunCommand))
+			hostTool := slices.Contains(tools, modelstep.HostToolName(workspace.OperationRunCommand))
 			if hostTool != tc.hostTools {
 				t.Fatalf("host tools offered=%v want %v: %v", hostTool, tc.hostTools, tools)
 			}
 			routineSection := false
 			for _, section := range req.System.Sections {
-				routineSection = routineSection || section.ID == loopSectionRoutineScript
+				routineSection = routineSection || section.ID == modelstep.LoopSectionRoutineScript
 			}
 			if routineSection != (tc.name == "routine") {
 				t.Fatalf("routine script section = %v: %#v", routineSection, req.System.Sections)
@@ -400,7 +401,7 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := binding.Producer.(*CapabilityInvocationStepProducer); !ok || len(binding.ModelActions) != 1 {
+	if _, ok := binding.Producer.(*modelstep.CapabilityInvocationStepProducer); !ok || len(binding.ModelActions) != 1 {
 		t.Fatalf("capability binding = %#v", binding)
 	}
 	// Outside a claim nothing is written: no session.
@@ -413,7 +414,7 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	}
 
 	_, err = ResolveLoopBinding(t.Context(), catalog, base, config)
-	if !errors.Is(err, ErrTurnHostUnavailable) {
+	if !errors.Is(err, modelstep.ErrTurnHostUnavailable) {
 		t.Fatalf("unhosted prompt work error = %v", err)
 	}
 	if _, err := ResolveLoopBinding(t.Context(), catalog, base, LoopBindingConfig{Host: &progressAckStepHost{}}); err == nil {
@@ -460,7 +461,7 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 		t.Fatalf("progress acknowledgement request = %#v", ack)
 	}
 	req := prepareBindingStep(t, binding, run)
-	if !slices.Contains(req.System.AgentInstructions, agentResourcefulnessGuidance) {
+	if !slices.Contains(req.System.AgentInstructions, modelstep.AgentResourcefulnessGuidance) {
 		t.Fatal("model work did not receive resourcefulness guidance")
 	}
 	for _, name := range bindingToolNames(req) {
@@ -480,7 +481,7 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tools := bindingToolNames(prepareBindingStep(t, chatBinding, chat)); !slices.Contains(tools, hostToolName(workspace.OperationReadFile)) {
+	if tools := bindingToolNames(prepareBindingStep(t, chatBinding, chat)); !slices.Contains(tools, modelstep.HostToolName(workspace.OperationReadFile)) {
 		t.Fatalf("chat Run lacks its chat files: %v", tools)
 	}
 	// Without a resolver no Run is offered host tools.
@@ -489,7 +490,7 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tools := bindingToolNames(prepareBindingStep(t, plain, chat)); slices.Contains(tools, hostToolName(workspace.OperationReadFile)) {
+	if tools := bindingToolNames(prepareBindingStep(t, plain, chat)); slices.Contains(tools, modelstep.HostToolName(workspace.OperationReadFile)) {
 		t.Fatalf("host tools without a chat workspace resolver: %v", tools)
 	}
 }

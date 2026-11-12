@@ -16,6 +16,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -219,7 +220,7 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 
 		final := f.mustRun(run.ID)
 		if final.FailureExplanation == nil || final.FailureExplanation.Code != action.RunFailureCodeRepeatLimit ||
-			final.FailureExplanation.Kind != RunFailureKindRepeatLimit || !final.FailureExplanation.Explained {
+			final.FailureExplanation.Kind != modelstep.RunFailureKindRepeatLimit || !final.FailureExplanation.Explained {
 			t.Fatalf("failure = %#v, want an explained repeat_limit", final.FailureExplanation)
 		}
 		const repeatLimitMessage = "The agent repeated the same call without making progress, so the run was stopped."
@@ -538,7 +539,7 @@ func TestLoopVMNestedCallsAreNotCountedAsRepeats(t *testing.T) {
 	eachStore(t, "repeat_vm", func(t *testing.T, store KernelStore) {
 		var f *loopFixture
 		var nestedErr error
-		command := hostToolName(workspace.OperationRunCommand)
+		command := modelstep.HostToolName(workspace.OperationRunCommand)
 		f = newLoopFixture(t, store,
 			withHostTool(workspace.OperationRunCommand, func(ctx context.Context, req HostToolRequest) (HostToolResult, error) {
 				capabilityName := ""
@@ -627,10 +628,10 @@ func TestLoopRepeatResultDigestIgnoresTheActionReference(t *testing.T) {
 			{Type: ContentPartImage, MediaType: "image/png", SHA256: "abc", ActionCallID: id},
 		}}
 	}
-	if toolResultDigest(result("a", "open")) != toolResultDigest(result("b", "open")) {
+	if modelstep.ToolResultDigest(result("a", "open")) != modelstep.ToolResultDigest(result("b", "open")) {
 		t.Fatal("results that differ only in their action reference have different digests")
 	}
-	if toolResultDigest(result("a", "open")) == toolResultDigest(result("a", "closed")) {
+	if modelstep.ToolResultDigest(result("a", "open")) == modelstep.ToolResultDigest(result("a", "closed")) {
 		t.Fatal("different outputs have the same digest")
 	}
 }

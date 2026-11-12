@@ -15,6 +15,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // poolFixturePool is a worker pool over the loop fixture's store whose
@@ -165,7 +166,7 @@ func TestLoopTurnsBudgetCountsModelSteps(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			eachStore(t, "loop_turns_budget", func(t *testing.T, store KernelStore) {
-				outage := &modelRule{name: "outage", times: 1, when: func(v stepView) bool { return v.Step() == 2 }, err: ErrTurnHostUnavailable}
+				outage := &modelRule{name: "outage", times: 1, when: func(v stepView) bool { return v.Step() == 2 }, err: modelstep.ErrTurnHostUnavailable}
 				f := newLoopFixture(t, store, withRules(append([]*modelRule{outage}, lookupSteps(c.lookups)...)...))
 				run, err := f.portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
 					Scope: f.scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent},

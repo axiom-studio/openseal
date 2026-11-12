@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // ---------------------------------------------------------------------------
@@ -46,14 +47,14 @@ func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate fun
 // request builder and the Run activity budget.
 func (f *loopFixture) withLoopCompactor(binding *agentrun.TurnRunnerBinding) {
 	f.t.Helper()
-	built, ok := binding.Compactor.(*LoopCompactor)
+	built, ok := binding.Compactor.(*modelstep.LoopCompactor)
 	if !ok {
 		f.t.Fatalf("binding compactor is %T, want the loop compactor", binding.Compactor)
 	}
 	activity := NewRunActivityService(f.store, f.store, models.WithClock(f.clock.Now))
-	binding.Compactor = &LoopCompactor{
+	binding.Compactor = &modelstep.LoopCompactor{
 		Host: binding.Host, Sessions: f.store.(AgentSessionStore), Requests: built.Requests,
-		Budget: newRunActivityCompactionBudget(f.store, activity, f.clock.Now), Now: f.clock.Now,
+		Budget: modelstep.NewRunActivityCompactionBudget(f.store, activity, f.clock.Now), Now: f.clock.Now,
 	}
 }
 
@@ -539,7 +540,7 @@ func TestRunLoopPlainFinalRejectedThenFails(t *testing.T) {
 func TestRunLoopHostUnavailableRetriesThenFails(t *testing.T) {
 	eachStore(t, "rl_host_retry", func(t *testing.T, store KernelStore) {
 		f := newLoopFixture(t, store, withRules(&modelRule{name: "down",
-			err: &TurnHostFailure{Code: "host_draining", Message: "The step host is restarting.", Retryable: true}}))
+			err: &modelstep.TurnHostFailure{Code: "host_draining", Message: "The step host is restarting.", Retryable: true}}))
 		run := f.startRun(RunKindAgentWork, "Check issue 1")
 		// The step host is retried after 2s, 5s and 15s.
 		for i, delay := range []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second} {
@@ -671,7 +672,7 @@ func TestRunLoopFailureExplanationStep(t *testing.T) {
 		var runID string
 		f = newLoopFixture(t, store, withRules(
 			&modelRule{name: "broken", times: 1, when: purposeIs(ModelStepPurposeStep),
-				err: &TurnHostFailure{Code: "model_output_invalid", Message: "The model's reply could not be read."}},
+				err: &modelstep.TurnHostFailure{Code: "model_output_invalid", Message: "The model's reply could not be read."}},
 			&modelRule{name: "explain", when: purposeIs(ModelStepPurposeExplanation),
 				before: func(context.Context, stepView) error {
 					run := f.mustRun(runID)
@@ -715,7 +716,7 @@ func TestRunLoopFailureExplanationStep(t *testing.T) {
 func TestRunLoopUnexplainableFailureEndsDirectly(t *testing.T) {
 	eachStore(t, "rl_unexplainable", func(t *testing.T, store KernelStore) {
 		f := newLoopFixture(t, store, withRules(&modelRule{name: "provider down",
-			err: &TurnHostFailure{Code: "provider_unavailable", Message: "The model provider is unavailable."}}))
+			err: &modelstep.TurnHostFailure{Code: "provider_unavailable", Message: "The model provider is unavailable."}}))
 		_, run := f.startChat("hello")
 		exit, failed := f.runClaim(run.ID)
 		if exit.Reason != RunLoopExitFailed || exit.Err != nil || exit.Steps != 1 {
@@ -737,7 +738,7 @@ func TestRunLoopUnexplainableFailureEndsDirectly(t *testing.T) {
 func TestRunLoopCreditErrorFromFailureExplanation(t *testing.T) {
 	eachStore(t, "rl_credit_error", func(t *testing.T, store KernelStore) {
 		f := newLoopFixture(t, store, withRules(&modelRule{name: "no credits",
-			err: &TurnHostFailure{Code: RunCreditErrorWorkspaceCreditsExhausted, Message: "The workspace has no credits left."}}))
+			err: &modelstep.TurnHostFailure{Code: RunCreditErrorWorkspaceCreditsExhausted, Message: "The workspace has no credits left."}}))
 		_, run := f.startChat("hello")
 		exit, failed := f.runClaim(run.ID)
 		if exit.Reason != RunLoopExitFailed || exit.Err != nil {
@@ -958,7 +959,7 @@ type scriptedRunbookProducer struct {
 	lookup capability.ModelAction
 	park   bool
 	steps  []map[string]interface{} // Run.Checkpoint as each step saw it
-	result *LoopToolResult
+	result *modelstep.LoopToolResult
 }
 
 func (p *scriptedRunbookProducer) Kind() StepProducerKind { return StepProducerDeterministic }
@@ -971,12 +972,12 @@ func (p *scriptedRunbookProducer) Produce(ctx context.Context, in agentrun.StepI
 			KernelState: map[string]interface{}{"phase": "waiting"},
 		}, nil
 	}
-	result, _, err := producerToolResult(ctx, p.f.raw, in.Run, in.Path, scriptedLookupCallID)
+	result, _, err := modelstep.ProducerToolResult(ctx, p.f.raw, in.Run, in.Path, scriptedLookupCallID)
 	if err != nil {
 		return agentrun.StepOutput{}, err
 	}
 	if result == nil {
-		call, err := producerGovernedToolCall(scriptedLookupCallID, &p.lookup, map[string]interface{}{"id": "5"},
+		call, err := modelstep.ProducerGovernedToolCall(scriptedLookupCallID, &p.lookup, map[string]interface{}{"id": "5"},
 			&agentrun.ToolCallDirective{IdempotencyKey: "scripted:" + in.Run.ID + ":lookup", Summary: "Look up issue 5"})
 		if err != nil {
 			return agentrun.StepOutput{}, err

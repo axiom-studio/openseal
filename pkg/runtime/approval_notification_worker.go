@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/callback"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 type ApprovalNotificationWorker struct {
@@ -65,7 +66,7 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 				processErrors = append(processErrors, fmt.Errorf("load approved action %s: %w", approval.ActionCallID, callErr))
 				continue
 			}
-			if !terminalApprovalActionStatus(call.Status) {
+			if !modelstep.IsTerminalApprovalActionStatus(call.Status) {
 				continue
 			}
 			if err := w.notifyInternalOutcome(ctx, approval, call); err != nil {

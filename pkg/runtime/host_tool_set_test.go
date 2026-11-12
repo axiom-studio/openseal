@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 func TestHostToolSpecsChatWorkspaceOffersTenToolsWithoutBatchRead(t *testing.T) {
 	authority := workspace.ChatAuthority("conv_1")
-	specs := HostToolSpecs(authority)
+	specs := modelstep.HostToolSpecs(authority)
 	want := []string{
 		workspace.OperationListDirectory, workspace.OperationReadFile, workspace.OperationSearchFiles,
 		workspace.OperationWriteFile, workspace.OperationEditFile, workspace.OperationDeleteFile,
@@ -51,10 +52,10 @@ func TestHostToolSpecsChatWorkspaceOffersTenToolsWithoutBatchRead(t *testing.T) 
 }
 
 func TestHostToolSpecsNilAuthorityOffersNone(t *testing.T) {
-	if specs := HostToolSpecs(nil); specs != nil {
+	if specs := modelstep.HostToolSpecs(nil); specs != nil {
 		t.Fatalf("nil authority offered %d tools", len(specs))
 	}
-	if specs := HostToolSpecs(&workspace.Authority{}); specs != nil {
+	if specs := modelstep.HostToolSpecs(&workspace.Authority{}); specs != nil {
 		t.Fatalf("invalid authority offered %d tools", len(specs))
 	}
 }
@@ -64,7 +65,7 @@ func TestHostToolSpecsSideEffectsAndConcurrency(t *testing.T) {
 		workspace.OperationListDirectory: true, workspace.OperationReadFile: true,
 		workspace.OperationSearchFiles: true, workspace.OperationListChats: true,
 	}
-	for _, spec := range HostToolSpecs(workspace.ChatAuthority("conv_1")) {
+	for _, spec := range modelstep.HostToolSpecs(workspace.ChatAuthority("conv_1")) {
 		if reads[spec.Operation] {
 			if spec.SideEffect != capability.SideEffectRead || !spec.Concurrent {
 				t.Fatalf("%s: side effect %s concurrent %v, want read and concurrent", spec.Operation, spec.SideEffect, spec.Concurrent)
@@ -78,21 +79,21 @@ func TestHostToolSpecsSideEffectsAndConcurrency(t *testing.T) {
 }
 
 func TestLookupHostToolByProviderNameAndOperation(t *testing.T) {
-	specs := HostToolSpecs(workspace.ChatAuthority("conv_1"))
-	byName, ok := LookupHostTool(specs, "workspace_run_command")
+	specs := modelstep.HostToolSpecs(workspace.ChatAuthority("conv_1"))
+	byName, ok := modelstep.LookupHostTool(specs, "workspace_run_command")
 	if !ok || byName.Operation != workspace.OperationRunCommand {
 		t.Fatalf("lookup by tool name = %+v, %v", byName, ok)
 	}
-	byOperation, ok := LookupHostTool(specs, workspace.OperationReadFile)
+	byOperation, ok := modelstep.LookupHostTool(specs, workspace.OperationReadFile)
 	if !ok || byOperation.ToolName != "workspace_read_file" {
 		t.Fatalf("lookup by operation = %+v, %v", byOperation, ok)
 	}
 	for _, name := range []string{"", workspace.OperationBatchRead, "workspace_batch_read", "gmail.send"} {
-		if _, ok := LookupHostTool(specs, name); ok {
+		if _, ok := modelstep.LookupHostTool(specs, name); ok {
 			t.Fatalf("lookup %q found a host tool", name)
 		}
 	}
-	if _, ok := LookupHostTool(nil, "workspace_read_file"); ok {
+	if _, ok := modelstep.LookupHostTool(nil, "workspace_read_file"); ok {
 		t.Fatal("lookup in no specs found a host tool")
 	}
 }
@@ -110,29 +111,29 @@ func (f *fakeChatWorkspaces) PrepareChatWorkspace(context.Context, *AgentRun) (s
 
 func TestNoChatWorkspacesResolverOffersNoHostTools(t *testing.T) {
 	run := &AgentRun{ID: "run_1", Context: map[string]interface{}{"conversationId": "conv_1"}}
-	authority, err := prepareChatWorkspace(context.Background(), nil, run)
-	if err != nil || authority != nil || HostToolSpecs(authority) != nil {
+	authority, err := modelstep.PrepareChatWorkspace(context.Background(), nil, run)
+	if err != nil || authority != nil || modelstep.HostToolSpecs(authority) != nil {
 		t.Fatalf("no resolver gave authority %+v, err %v", authority, err)
 	}
 
 	noChat := &fakeChatWorkspaces{}
-	authority, err = prepareChatWorkspace(context.Background(), noChat, run)
+	authority, err = modelstep.PrepareChatWorkspace(context.Background(), noChat, run)
 	if err != nil || authority != nil || noChat.calls != 1 {
 		t.Fatalf("no chat gave authority %+v, err %v, calls %d", authority, err, noChat.calls)
 	}
 
 	failing := &fakeChatWorkspaces{conversationID: "conv_1", err: errors.New("chat files down")}
-	authority, err = prepareChatWorkspace(context.Background(), failing, run)
+	authority, err = modelstep.PrepareChatWorkspace(context.Background(), failing, run)
 	if err == nil || authority != nil {
 		t.Fatalf("resolver error gave authority %+v, err %v", authority, err)
 	}
 
 	chat := &fakeChatWorkspaces{conversationID: " conv_root "}
-	authority, err = prepareChatWorkspace(context.Background(), chat, run)
+	authority, err = modelstep.PrepareChatWorkspace(context.Background(), chat, run)
 	if err != nil || authority == nil || authority.ConversationID != "conv_root" {
 		t.Fatalf("chat gave authority %+v, err %v", authority, err)
 	}
-	if len(HostToolSpecs(authority)) != 10 {
+	if len(modelstep.HostToolSpecs(authority)) != 10 {
 		t.Fatal("chat Workspace does not offer the host tools")
 	}
 }

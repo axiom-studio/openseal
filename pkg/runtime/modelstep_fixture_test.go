@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -218,14 +219,14 @@ func NewRenderImageSources() *RenderImageSources {
 	}
 }
 
-func (s *RenderImageSources) Options(imageInput bool) sessionRenderOptions {
-	return sessionRenderOptions{ImageInput: imageInput, Artifacts: s.Artifacts, Content: s.Content, Actions: s.Calls}
+func (s *RenderImageSources) Options(imageInput bool) modelstep.SessionRenderOptions {
+	return modelstep.SessionRenderOptions{ImageInput: imageInput, Artifacts: s.Artifacts, Content: s.Content, Actions: s.Calls}
 }
 
 // CapabilityCatalogFixture is a deferred catalog: eight Notion-like actions
 // bound to one prompt each, four research prompts, and the built-in Skill.
-func CapabilityCatalogFixture() CapabilityCatalog {
-	catalog := CapabilityCatalog{Scope: models.Scope{Kind: "tenant", ID: "tenant-1"}, AgentID: "agent-1"}
+func CapabilityCatalogFixture() modelstep.CapabilityCatalog {
+	catalog := modelstep.CapabilityCatalog{Scope: models.Scope{Kind: "tenant", ID: "tenant-1"}, AgentID: "agent-1"}
 	for i := 0; i < 4; i++ {
 		catalog.SkillPrompts = append(catalog.SkillPrompts, models.HostedSkillPrompt{
 			SkillID: fmt.Sprintf("research.%d", i), Version: "1.0.0", Reference: fmt.Sprintf("skill-research-%d@1", i),
@@ -251,12 +252,12 @@ func CapabilityCatalogFixture() CapabilityCatalog {
 	}, capability.ModelAction{
 		Name: "openseal.builtin.generate_image", SkillID: builtin.SkillID, Version: "1", Action: "generate_image", Description: "Make an image",
 	})
-	catalog.HostTools = HostToolSpecs(workspace.ChatAuthority("chat-1"))
+	catalog.HostTools = modelstep.HostToolSpecs(workspace.ChatAuthority("chat-1"))
 	return catalog
 }
 
 // CapabilityNoteLines is the text of a capability listing, one line per item.
-func CapabilityNoteLines(items []capabilityNoteItem) string {
+func CapabilityNoteLines(items []modelstep.CapabilityNoteItem) string {
 	var b strings.Builder
 	for _, item := range items {
 		b.WriteString("\n" + item.Text)
@@ -297,9 +298,9 @@ func HostReplyError(err error) func(context.Context, models.HostToolRequest) (mo
 }
 
 // HostToolSpecFixture is the host tool operation offered in a chat workspace.
-func HostToolSpecFixture(t *testing.T, operation string) HostToolSpec {
+func HostToolSpecFixture(t *testing.T, operation string) modelstep.HostToolSpec {
 	t.Helper()
-	spec, ok := LookupHostTool(HostToolSpecs(workspace.ChatAuthority("conv_1")), operation)
+	spec, ok := modelstep.LookupHostTool(modelstep.HostToolSpecs(workspace.ChatAuthority("conv_1")), operation)
 	if !ok {
 		t.Fatalf("no host tool %s", operation)
 	}
@@ -307,11 +308,11 @@ func HostToolSpecFixture(t *testing.T, operation string) HostToolSpec {
 }
 
 // HostToolCallFixture is a leased host tool call of operation in chat conv_1.
-func HostToolCallFixture(t *testing.T, operation string, arguments map[string]interface{}) HostToolCall {
+func HostToolCallFixture(t *testing.T, operation string, arguments map[string]interface{}) modelstep.HostToolCall {
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "42"}
 	expires := time.Now().Add(time.Hour)
-	return HostToolCall{
+	return modelstep.HostToolCall{
 		Run: &models.AgentRun{ID: "run_1", Scope: scope, Status: models.AgentRunStatusRunning, AssignedAgentID: "agent_1",
 			LeaseOwner: "worker_1", LeaseExpiresAt: &expires},
 		Step: &models.AgentTurn{ID: "step_1", Scope: scope, RunID: "run_1", Status: models.AgentTurnStatusRunning,
@@ -355,7 +356,7 @@ func ProducerToolPath(runID, toolCallID string, state models.ToolEntryState, act
 
 func RequireValidDeterministicOutput(t *testing.T, out agentrun.StepOutput) {
 	t.Helper()
-	if err := validateStepOutput(models.StepProducerDeterministic, out); err != nil {
+	if err := modelstep.ValidateStepOutput(models.StepProducerDeterministic, out); err != nil {
 		t.Fatalf("invalid deterministic output %#v: %v", out, err)
 	}
 }

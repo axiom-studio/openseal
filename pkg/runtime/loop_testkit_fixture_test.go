@@ -28,6 +28,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -312,7 +313,7 @@ type loopFixtureChatStore interface {
 
 // loopFixtureCapabilities pins the Skills the scenarios bind, so they call
 // their actions without loading them first (loading is always deferred).
-var loopFixtureCapabilities = CapabilitySetConfig{PinnedSkillIDs: []string{
+var loopFixtureCapabilities = modelstep.CapabilitySetConfig{PinnedSkillIDs: []string{
 	loopFixtureSkillID, SkillManagementSkillID, "mail", "openseal.connector",
 }}
 
@@ -446,7 +447,7 @@ func (f *loopFixture) build() {
 	}
 	f.dispatcher, err = NewStepToolDispatcher(StepToolDispatcherConfig{
 		Sessions: f.store.(AgentSessionStore), Turns: f.store, Actions: f.store, Coordinator: f.actions,
-		Governed: governed, Control: f.control, Host: NewHostToolDispatcher(f.tools, f.actions, nil), Now: f.clock.Now,
+		Governed: governed, Control: f.control, Host: modelstep.NewHostToolDispatcher(f.tools, f.actions, nil), Now: f.clock.Now,
 	})
 	if err != nil {
 		f.t.Fatal(err)
@@ -705,11 +706,11 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*agentrun.
 	}
 	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
-		HostTools:         HostToolSpecs(authority),
+		HostTools:         modelstep.HostToolSpecs(authority),
 		Capabilities:      loopFixtureCapabilities,
 	})
 	host := fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}
-	producer, err := NewModelStepProducer(host, preparer, f.store)
+	producer, err := modelstep.NewModelStepProducer(host, preparer, f.store)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -719,9 +720,9 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*agentrun.
 		ModelProvider: string(kitModelProvider), Model: kitModelName,
 		ModelActions: append([]capability.ModelAction(nil), f.offered...),
 		Producer:     producer, Session: session, Host: host, Authority: control,
-		Compactor: &LoopCompactor{
+		Compactor: &modelstep.LoopCompactor{
 			Host: host, Sessions: sessions, Requests: preparer,
-			Budget: newRunActivityCompactionBudget(f.store, NewRunActivityService(f.store, f.store), f.clock.Now),
+			Budget: modelstep.NewRunActivityCompactionBudget(f.store, NewRunActivityService(f.store, f.store), f.clock.Now),
 			Now:    f.clock.Now,
 		},
 		Preparers: []agentrun.StepPreparer{newRunStartPreparer(sessions, f.store)},

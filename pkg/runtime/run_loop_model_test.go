@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 type modelProducerTestHost struct {
@@ -75,7 +76,7 @@ type modelProducerFixture struct {
 	host     *modelProducerTestHost
 	preparer *modelProducerTestPreparer
 	store    *modelProducerTestStore
-	producer *ModelStepProducer
+	producer *modelstep.ModelStepProducer
 	render   *RenderFixture
 	in       agentrun.StepInput
 }
@@ -101,7 +102,7 @@ func newModelProducerFixture(t *testing.T) *modelProducerFixture {
 	f.render.Note("run-1", "Run context")
 	f.store = &modelProducerTestStore{path: f.render.Path()}
 
-	producer, err := NewModelStepProducer(f.host, f.preparer, f.store)
+	producer, err := modelstep.NewModelStepProducer(f.host, f.preparer, f.store)
 	if err != nil {
 		t.Fatalf("NewModelStepProducer: %v", err)
 	}
@@ -121,7 +122,7 @@ func (f *modelProducerFixture) produce(t *testing.T, ctx context.Context, in age
 	if err != nil {
 		t.Fatalf("Produce: %v", err)
 	}
-	if err := validateStepOutput(StepProducerModel, out); err != nil {
+	if err := modelstep.ValidateStepOutput(StepProducerModel, out); err != nil {
 		t.Fatalf("validateStepOutput: %v", err)
 	}
 	return f.host.requests[len(f.host.requests)-1], out
@@ -212,9 +213,9 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 	}
 
 	// A context overflow returns the host failure unchanged for the loop.
-	f.host.err = &TurnHostFailure{Code: TurnHostContextExceeded, Message: "too long"}
-	var failure *TurnHostFailure
-	if _, err := f.producer.Produce(context.Background(), f.in); !errors.As(err, &failure) || failure.Code != TurnHostContextExceeded {
+	f.host.err = &modelstep.TurnHostFailure{Code: modelstep.TurnHostContextExceeded, Message: "too long"}
+	var failure *modelstep.TurnHostFailure
+	if _, err := f.producer.Produce(context.Background(), f.in); !errors.As(err, &failure) || failure.Code != modelstep.TurnHostContextExceeded {
 		t.Fatalf("overflow err = %v", err)
 	}
 }
@@ -244,7 +245,7 @@ func TestModelStepProducerExplainPurposeHasNoTools(t *testing.T) {
 		res.Model.Provider = res.Assistant.Provider
 		return res
 	}
-	if _, err := f.producer.Produce(context.Background(), in); !errors.Is(err, ErrTurnHostConfiguration) {
+	if _, err := f.producer.Produce(context.Background(), in); !errors.Is(err, modelstep.ErrTurnHostConfiguration) {
 		t.Fatalf("explanation with tool calls err = %v, want ErrTurnHostConfiguration", err)
 	}
 }
@@ -257,7 +258,7 @@ func TestModelStepProducerStepIdentityMismatchIsConfigurationError(t *testing.T)
 		return res
 	}
 	out, err := f.producer.Produce(context.Background(), f.in)
-	if !errors.Is(err, ErrTurnHostConfiguration) {
+	if !errors.Is(err, modelstep.ErrTurnHostConfiguration) {
 		t.Fatalf("mismatched step id err = %v, want ErrTurnHostConfiguration", err)
 	}
 	if out.Assistant != nil {
@@ -270,7 +271,7 @@ func TestModelStepProducerStepIdentityMismatchIsConfigurationError(t *testing.T)
 		res.Assistant.Limits = &AssistantModelLimits{ContextTokens: 1}
 		return res
 	}
-	if _, err := f.producer.Produce(context.Background(), f.in); !errors.Is(err, ErrTurnHostConfiguration) {
+	if _, err := f.producer.Produce(context.Background(), f.in); !errors.Is(err, modelstep.ErrTurnHostConfiguration) {
 		t.Fatalf("host-filled limits err = %v, want ErrTurnHostConfiguration", err)
 	}
 
@@ -278,7 +279,7 @@ func TestModelStepProducerStepIdentityMismatchIsConfigurationError(t *testing.T)
 	calls := len(f.host.requests)
 	in := f.in
 	in.Session = nil
-	if _, err := f.producer.Produce(context.Background(), in); !errors.Is(err, ErrTurnHostConfiguration) || len(f.host.requests) != calls {
+	if _, err := f.producer.Produce(context.Background(), in); !errors.Is(err, modelstep.ErrTurnHostConfiguration) || len(f.host.requests) != calls {
 		t.Fatalf("sessionless step err = %v, host calls %d -> %d", err, calls, len(f.host.requests))
 	}
 }

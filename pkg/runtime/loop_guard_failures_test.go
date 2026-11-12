@@ -1,6 +1,10 @@
 package runtime
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+)
 
 func TestGuardRunFailureFor(t *testing.T) {
 	cases := []struct {
@@ -15,7 +19,7 @@ func TestGuardRunFailureFor(t *testing.T) {
 		{"compaction_failed", "context_overflow", "The conversation could not be compacted to fit the model's context.", false},
 	}
 	for _, tc := range cases {
-		failure, ok := guardRunFailureFor(tc.code)
+		failure, ok := modelstep.GuardRunFailureFor(tc.code)
 		if !ok {
 			t.Fatalf("%s: not a guard failure", tc.code)
 		}
@@ -26,7 +30,7 @@ func TestGuardRunFailureFor(t *testing.T) {
 			t.Fatalf("%s: message over the failure text bound", tc.code)
 		}
 	}
-	if _, ok := guardRunFailureFor("provider_unavailable"); ok {
+	if _, ok := modelstep.GuardRunFailureFor("provider_unavailable"); ok {
 		t.Fatal("provider_unavailable is not a guard failure")
 	}
 }

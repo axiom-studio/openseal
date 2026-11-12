@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/google/uuid"
@@ -155,7 +156,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 				}
 				failedSourceCall(t, kernel, sessions, run, "step-1", "skill-live-browser", callError, failure.Code(), failure.Details(), now)
 				// The loop stops on the step's error streak; the failure names no call.
-				explanation := beginRunFailureExplanation(run, RunFailureKindRepeatLimit, RunFailureCodeErrorStreak, "The same error kept repeating.", "", "")
+				explanation := beginRunFailureExplanation(run, modelstep.RunFailureKindRepeatLimit, modelstep.RunFailureCodeErrorStreak, "The same error kept repeating.", "", "")
 				switch code {
 				case "stale rate limit":
 					// A newer untyped failure in a later step stopped the attempt.

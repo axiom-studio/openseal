@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // The runbook StepProducer (D6, section 04 §12). A runbook Run has no model:
@@ -195,7 +196,7 @@ func (p *RunbookStepProducer) Produce(ctx context.Context, in agentrun.StepInput
 					return agentrun.StepOutput{}, traceErr
 				}
 				activeTraceSequence = traceSequence
-				result, call, resultErr := producerToolResult(ctx, p.calls, in.Run, in.Path, state.PendingCall)
+				result, call, resultErr := modelstep.ProducerToolResult(ctx, p.calls, in.Run, in.Path, state.PendingCall)
 				if resultErr != nil {
 					return agentrun.StepOutput{}, &runbookStoreError{resultErr}
 				}
@@ -249,7 +250,7 @@ func (p *RunbookStepProducer) Produce(ctx context.Context, in agentrun.StepInput
 				return agentrun.StepOutput{}, stepError(state.Current, selectErr)
 			}
 			callID := runbookToolCallID(state.Current, traceSequence)
-			call, callErr := producerGovernedToolCall(callID, selected, arguments, &agentrun.ToolCallDirective{
+			call, callErr := modelstep.ProducerGovernedToolCall(callID, selected, arguments, &agentrun.ToolCallDirective{
 				IdempotencyKey: "runbook:" + p.definition.ID + ":" + in.Run.ID + ":" + state.Current + ":" + strconv.FormatInt(in.Step.Sequence, 10),
 				Summary:        "Execute " + step.Action.SkillID + "." + step.Action.Action,
 			})
@@ -625,7 +626,7 @@ func runbookCompactValue(value interface{}, depth, entries, text int) interface{
 
 // runbookToolResultText is the text of a terminal tool result, for failure
 // messages.
-func runbookToolResultText(result *LoopToolResult) string {
+func runbookToolResultText(result *modelstep.LoopToolResult) string {
 	if result == nil || len(result.Content) == 0 {
 		return ""
 	}
@@ -657,7 +658,7 @@ func (p *RunbookStepProducer) kernelCall(checkpoint map[string]interface{}, stat
 // result (refused, lost) and the node fails with its result. An entry that
 // was never recorded is asked for again (same id).
 func (p *RunbookStepProducer) unresolvedKernelCall(ctx context.Context, in agentrun.StepInput, checkpoint map[string]interface{}, state runbookExecutionState, name ControlToolName, traceSequence int64, what string, finishStep func(int64, RunbookStepTraceStatus, string, string, string, map[string]string) error) (agentrun.StepOutput, error) {
-	result, _, err := producerToolResult(ctx, p.calls, in.Run, in.Path, state.PendingCall)
+	result, _, err := modelstep.ProducerToolResult(ctx, p.calls, in.Run, in.Path, state.PendingCall)
 	if err != nil {
 		return agentrun.StepOutput{}, &runbookStoreError{err}
 	}

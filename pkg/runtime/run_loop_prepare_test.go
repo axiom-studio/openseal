@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -21,8 +22,8 @@ func prepareTestActions() []capability.ModelAction {
 		}
 	}
 	actions := []capability.ModelAction{
-		read(pinnedCapabilitySkillID, "openseal.list_setup_requests"),
-		read(pinnedCapabilitySkillID, "openseal.discover_skills"),
+		read(modelstep.PinnedCapabilitySkillID, "openseal.list_setup_requests"),
+		read(modelstep.PinnedCapabilitySkillID, "openseal.discover_skills"),
 	}
 	for _, name := range []string{"notion.search", "notion.fetch", "gmail.list", "gmail.read", "drive.list", "drive.read", "calendar.list"} {
 		actions = append(actions, read("skill-"+strings.SplitN(name, ".", 2)[0], name))
@@ -45,10 +46,10 @@ func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepa
 	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are Finn.", "Purpose: help the team."},
 		SkillPrompts: []HostedSkillPrompt{
-			{SkillID: pinnedCapabilitySkillID, Version: "1", Reference: "openseal.builtin@1", Name: "Built-in", Instructions: "Use the built-in tools."},
+			{SkillID: modelstep.PinnedCapabilitySkillID, Version: "1", Reference: "openseal.builtin@1", Name: "Built-in", Instructions: "Use the built-in tools."},
 			{SkillID: "skill-notion", Version: "1", Reference: "skill-notion@1", Name: "Notion", Instructions: "Notion rules."},
 		},
-		HostTools: HostToolSpecs(workspace.ChatAuthority("chat-1")),
+		HostTools: modelstep.HostToolSpecs(workspace.ChatAuthority("chat-1")),
 	})
 	preparer.controls = registry
 	f := &prepareFixture{
@@ -108,7 +109,7 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 		"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react",
 		"conversation_start_task", "control_fork", "search_capabilities", "load_capabilities",
 	}
-	for _, spec := range HostToolSpecs(workspace.ChatAuthority("chat-1")) {
+	for _, spec := range modelstep.HostToolSpecs(workspace.ChatAuthority("chat-1")) {
 		want = append(want, spec.ToolName)
 	}
 	want = append(want, "action_openseal_discover_skills", "action_openseal_list_setup_requests")
@@ -195,12 +196,12 @@ func (f *prepareFixture) addLoad(step, call string, ids ...string) *SessionEntry
 	arguments, _ := json.Marshal(map[string]interface{}{"ids": ids})
 	f.render.Add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
 		Provider: ModelStepProviderAnthropic, Model: "claude-test", StopReason: ModelStopToolCalls,
-		ToolCalls: []ModelToolCall{{ID: call, Name: LoadCapabilitiesTool, Arguments: arguments}},
+		ToolCalls: []ModelToolCall{{ID: call, Name: modelstep.LoadCapabilitiesTool, Arguments: arguments}},
 	}})
 	set := f.preparer.CapabilitySet(agentrun.StepInput{Run: f.run, Binding: f.binding, Path: f.render.Path()})
 	patch := loadKernelPatch(set, f.binding.ModelActions, ids)
 	return f.render.Add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryTool, State: ToolEntryCompleted, ToolCallID: call, Tool: &ToolEntry{
-		Name: LoadCapabilitiesTool, Arguments: arguments, SideEffect: ToolSideEffectNone,
+		Name: modelstep.LoadCapabilitiesTool, Arguments: arguments, SideEffect: ToolSideEffectNone,
 		SurfacedTools: patch.SurfacedTools, LoadedInstructions: patch.LoadedInstructions,
 		Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: `{"status":"loaded"}`}}},
 	}})
@@ -228,14 +229,14 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	if got := sectionIDs(req.System.Sections); !reflect.DeepEqual(got, want) {
 		t.Fatalf("sections = %v\nwant       %v", got, want)
 	}
-	if req.System.Sections[0].Text != loopProgressRulesText {
+	if req.System.Sections[0].Text != modelstep.LoopProgressRulesText {
 		t.Errorf("progress text is not the foreground variant")
 	}
 	wantInstructions := []string{"You are Finn.", "Purpose: help the team.", "Reply in the chat's language."}
 	if !reflect.DeepEqual(req.System.AgentInstructions, wantInstructions) {
 		t.Errorf("agent instructions = %v", req.System.AgentInstructions)
 	}
-	if len(req.System.SkillPrompts) != 1 || req.System.SkillPrompts[0].SkillID != pinnedCapabilitySkillID {
+	if len(req.System.SkillPrompts) != 1 || req.System.SkillPrompts[0].SkillID != modelstep.PinnedCapabilitySkillID {
 		t.Errorf("skill prompts = %+v, want only the pinned built-in", req.System.SkillPrompts)
 	}
 
@@ -250,7 +251,7 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	if ids := sectionIDs(got.System.Sections); !reflect.DeepEqual(ids, []string{"progress_rules", loopSectionCapabilities, "channel_rules"}) {
 		t.Fatalf("bare sections = %v", ids)
 	}
-	if got.System.Sections[0].Text != loopProgressRulesTaskWorkText {
+	if got.System.Sections[0].Text != modelstep.LoopProgressRulesTaskWorkText {
 		t.Errorf("task work progress text not used")
 	}
 	if names := toolNames(got.Tools); !reflect.DeepEqual(names, []string{"turn_final_answer", "turn_report_progress", "search_capabilities", "load_capabilities", "action_openseal_discover_skills", "action_openseal_list_setup_requests"}) {

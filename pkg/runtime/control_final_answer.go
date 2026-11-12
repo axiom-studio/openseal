@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -810,7 +811,7 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.Contro
 	}
 	cc.Entry = nil
 	mode := cc.Authority.EffectiveFinalMode()
-	finalOffered := controlToolOffered(ControlToolFinalAnswer, cc.Authority)
+	finalOffered := modelstep.ControlToolOffered(ControlToolFinalAnswer, cc.Authority)
 	trimmed := strings.TrimSpace(text)
 	// 1. Repair: the text is the tool's arguments as one JSON object (kernel
 	// fields only: extension fields need a tool entry to be published from).

@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
@@ -51,7 +52,7 @@ const (
 const (
 	StepFailureHostUnavailable      = "host_unavailable"
 	StepFailureHostConfiguration    = "host_configuration"
-	StepFailureContextExceeded      = TurnHostContextExceeded
+	StepFailureContextExceeded      = modelstep.TurnHostContextExceeded
 	StepFailureProducerFailed       = "producer_failed"
 	StepFailurePreparationFailed    = "step_preparation_failed"
 	runFailureCodeFinalRejected     = "final_answer_rejected"

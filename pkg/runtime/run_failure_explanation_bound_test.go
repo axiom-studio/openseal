@@ -3,22 +3,24 @@ package runtime
 import (
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 func TestBeginRunFailureExplanationClassifiesAndBounds(t *testing.T) {
 	for code, want := range map[string]string{
-		"gateway_credits_exhausted":       "workspace_credits_exhausted",
-		"provider_model_unavailable":      "provider_unavailable",
-		RunFailureCodeErrorStreak:         RunFailureCodeErrorStreak,
-		TurnHostContextExceeded:           TurnHostContextExceeded,
-		"task_completion_rejected":        "task_completion_rejected",
-		"":                                "execution_failed",
-		"provider said: TOKEN=SECRET":     "execution_failed",
-		strings.Repeat("x", 100):          "execution_failed",
-		"unverified_approval_claim":       "unverified_approval_claim",
-		"  final_answer_rejected  ":       "final_answer_rejected",
-		"agent_behavior_fixed":            "agent_behavior_fixed",
-		"workspace_turn_budget_exhausted": "budget_exhausted",
+		"gateway_credits_exhausted":         "workspace_credits_exhausted",
+		"provider_model_unavailable":        "provider_unavailable",
+		modelstep.RunFailureCodeErrorStreak: modelstep.RunFailureCodeErrorStreak,
+		modelstep.TurnHostContextExceeded:   modelstep.TurnHostContextExceeded,
+		"task_completion_rejected":          "task_completion_rejected",
+		"":                                  "execution_failed",
+		"provider said: TOKEN=SECRET":       "execution_failed",
+		strings.Repeat("x", 100):            "execution_failed",
+		"unverified_approval_claim":         "unverified_approval_claim",
+		"  final_answer_rejected  ":         "final_answer_rejected",
+		"agent_behavior_fixed":              "agent_behavior_fixed",
+		"workspace_turn_budget_exhausted":   "budget_exhausted",
 	} {
 		f := beginRunFailureExplanation(&AgentRun{}, "", code, "m", "", "")
 		if f.Code != want || f.Kind != RunFailureKindExecution || f.Explained {

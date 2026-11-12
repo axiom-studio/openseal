@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/google/uuid"
 )
 
@@ -248,11 +249,11 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 		return nil, fmt.Errorf("%w: %v", ErrInvalidConversationTask, err)
 	}
 	if source.Budget != nil {
-		hostedBudget, budgetErr := controlRunBudget(source, "")
+		hostedBudget, budgetErr := modelstep.ControlRunBudget(source, "")
 		if budgetErr != nil {
 			return nil, budgetErr
 		}
-		if err := controlChildBudgetFloor(budget, hostedBudget); err != nil {
+		if err := modelstep.ControlChildBudgetFloor(budget, hostedBudget); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidConversationTask, err)
 		}
 	}

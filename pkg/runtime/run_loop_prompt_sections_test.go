@@ -4,17 +4,19 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 func loopKernelSectionTexts() map[string]string {
 	return map[string]string{
-		"skill_access":            loopSkillAccessText,
-		"progress_rules":          loopProgressRulesText,
-		"progress_rules/taskwork": loopProgressRulesTaskWorkText,
-		"conversation_tasks":      loopConversationTasksText,
-		"workspace":               loopWorkspaceText,
-		"media":                   loopMediaText,
-		"review_summaries":        loopReviewSummariesText,
+		"skill_access":            modelstep.LoopSkillAccessText,
+		"progress_rules":          modelstep.LoopProgressRulesText,
+		"progress_rules/taskwork": modelstep.LoopProgressRulesTaskWorkText,
+		"conversation_tasks":      modelstep.LoopConversationTasksText,
+		"workspace":               modelstep.LoopWorkspaceText,
+		"media":                   modelstep.LoopMediaText,
+		"review_summaries":        modelstep.LoopReviewSummariesText,
 	}
 }
 
@@ -35,21 +37,21 @@ func TestPromptSectionsHaveNoFormWords(t *testing.T) {
 
 func TestPromptSectionOrderAndTitles(t *testing.T) {
 	want := []string{"progress_rules", "conversation_tasks", "workspace", "media", "routine_script"}
-	if strings.Join(loopKernelSectionOrder, ",") != strings.Join(want, ",") {
-		t.Fatalf("order = %v, want %v", loopKernelSectionOrder, want)
+	if strings.Join(modelstep.LoopKernelSectionOrder, ",") != strings.Join(want, ",") {
+		t.Fatalf("order = %v, want %v", modelstep.LoopKernelSectionOrder, want)
 	}
 	id := regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
 	seen := map[string]bool{}
-	for _, section := range loopKernelSectionOrder {
+	for _, section := range modelstep.LoopKernelSectionOrder {
 		if !id.MatchString(section) || seen[section] {
 			t.Errorf("section id %q is invalid or repeated", section)
 		}
 		seen[section] = true
-		if strings.TrimSpace(loopKernelSectionTitles[section]) == "" {
+		if strings.TrimSpace(modelstep.LoopKernelSectionTitles[section]) == "" {
 			t.Errorf("section %s has no title", section)
 		}
 	}
-	if len(loopKernelSectionTitles) != len(loopKernelSectionOrder) {
-		t.Errorf("titles cover %d sections, order has %d", len(loopKernelSectionTitles), len(loopKernelSectionOrder))
+	if len(modelstep.LoopKernelSectionTitles) != len(modelstep.LoopKernelSectionOrder) {
+		t.Errorf("titles cover %d sections, order has %d", len(modelstep.LoopKernelSectionTitles), len(modelstep.LoopKernelSectionOrder))
 	}
 }

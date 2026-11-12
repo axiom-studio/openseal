@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Kinds of RunFailureExplanation written by the kernel (SPEC §2.2). The guard
@@ -119,7 +121,7 @@ func failureExplanationNote(sessionID, runID, stepID string, f *RunFailureExplan
 // other failure can be explained.
 func noModelTurnFailureCode(code string) bool {
 	switch strings.TrimSpace(code) {
-	case TurnHostContextExceeded, RunFailureCodeCompactionFailed:
+	case modelstep.TurnHostContextExceeded, modelstep.RunFailureCodeCompactionFailed:
 		// No model call fits the context, so none can explain it either.
 		return true
 	}
@@ -156,7 +158,7 @@ func modelExplainsFailure(run *AgentRun) bool {
 // to answer: not when the host or model provider is unavailable, the
 // Workspace has no credits, the budget is spent, or the work was canceled.
 func turnFailureCanBeExplained(err error, code string) bool {
-	if err == nil || errors.Is(err, ErrTurnHostUnavailable) || errors.Is(err, ErrTurnHostConfiguration) ||
+	if err == nil || errors.Is(err, modelstep.ErrTurnHostUnavailable) || errors.Is(err, modelstep.ErrTurnHostConfiguration) ||
 		errors.Is(err, ErrBudgetExhausted) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, ErrLeaseLost) || errors.Is(err, ErrTurnLeaseHeld) {
 		return false

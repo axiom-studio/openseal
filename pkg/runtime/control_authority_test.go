@@ -8,6 +8,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -18,7 +19,7 @@ import (
 func offeredControlTools(a agentrun.ControlAuthority) []string {
 	names := []string{}
 	for _, name := range controlToolOrder {
-		if controlToolOffered(name, a) {
+		if modelstep.ControlToolOffered(name, a) {
 			names = append(names, string(name))
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Steering (SPEC §3.4, D8, A10). consumeSteering is the only consumer of the
@@ -131,7 +132,7 @@ func consumeSteering(run *AgentRun, step *AgentTurn, session *AgentSession) (ste
 		entry.ID = SessionEntryID(session.ID, steeringEntryID(intervention))
 		entry.Step = stepSequence
 		entry.User.Content = content
-		entry.Tokens = estimateEntryTokens(entry)
+		entry.Tokens = modelstep.EstimateEntryTokens(entry)
 		out.Entries = append(out.Entries, entry)
 	}
 	return out, nil

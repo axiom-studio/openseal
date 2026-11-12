@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // One step of the loop (SPEC §3.1 phases 0-11).
@@ -427,7 +428,7 @@ func (d *drive) resumeRecordedStep(ctx context.Context, st *stepState, assistant
 		st.finalEntry = finalToolEntryID(entries)
 	}
 	if st.current().AssistantEntryID == "" {
-		usage := turnUsageFromModelStep(a.Usage)
+		usage := modelstep.TurnUsageFromModelStep(a.Usage)
 		st.usage = usage
 		if err := d.recordStep(ctx, st, string(a.Provider), a.Model, a, usage, nil); err != nil {
 			return d.stepError(ctx, st, err, StepFailureHostConfiguration)
@@ -453,7 +454,7 @@ func (d *drive) appendContext(ctx context.Context, st *stepState) (*agentrun.Loo
 	if st.mode == agentrun.StepModeExplainFailure {
 		note := failureExplanationNote(d.session.ID, d.run.ID, st.step.ID, d.run.FailureExplanation)
 		note.Scope, note.Step = d.run.Scope, st.step.Sequence
-		note.Tokens = estimateEntryTokens(note)
+		note.Tokens = modelstep.EstimateEntryTokens(note)
 		preparers = []agentrun.StepPreparer{fixedEntriesPreparer{entries: []*SessionEntry{note}}}
 	}
 	for attempt := 0; ; attempt++ {
@@ -527,18 +528,18 @@ func (d *drive) produce(ctx context.Context, st *stepState) (agentrun.StepOutput
 	for attempt := 0; ; attempt++ {
 		st.called = true
 		out, err = d.binding.Producer.Produce(st.durCtx, d.stepInput(st, attempt))
-		var failure *TurnHostFailure
-		if err == nil || !errors.As(err, &failure) || failure.Code != TurnHostContextExceeded {
+		var failure *modelstep.TurnHostFailure
+		if err == nil || !errors.As(err, &failure) || failure.Code != modelstep.TurnHostContextExceeded {
 			break
 		}
 		if attempt > 0 || st.mode != agentrun.StepModeNormal || d.binding.Compactor == nil {
 			if res, done := d.checkRunAfterProduce(ctx, st); done {
 				return out, res, true
 			}
-			guard, _ := guardRunFailureFor(TurnHostContextExceeded)
+			guard, _ := modelstep.GuardRunFailureFor(modelstep.TurnHostContextExceeded)
 			return out, d.fail(ctx, st, agentrun.LoopFailure{Kind: guard.Kind, Code: guard.Code, Message: guard.Message}, err, StepFailureContextExceeded), true
 		}
-		usage, err := d.binding.Compactor.Compact(withCompactionPressure(st.durCtx, failure.ContextPressure), d.stepInput(st, attempt), true)
+		usage, err := d.binding.Compactor.Compact(modelstep.WithCompactionPressure(st.durCtx, failure.ContextPressure), d.stepInput(st, attempt), true)
 		st.addCompaction(usage)
 		if err != nil {
 			return out, d.stepError(ctx, st, err, StepFailureContextExceeded), true
@@ -564,7 +565,7 @@ func (d *drive) produce(ctx context.Context, st *stepState) (agentrun.StepOutput
 	if err != nil {
 		return out, d.stepError(ctx, st, err, StepFailureProducerFailed), true
 	}
-	if err := validateStepOutput(d.binding.Producer.Kind(), out); err != nil {
+	if err := modelstep.ValidateStepOutput(d.binding.Producer.Kind(), out); err != nil {
 		return out, d.fail(ctx, st, agentrun.LoopFailure{
 			Kind: RunFailureKindExecution, Code: StepFailureProducerFailed,
 			Message: "The agent returned a step the kernel could not accept.", Explainable: true,
@@ -620,7 +621,7 @@ func (d *drive) recordModelStep(ctx context.Context, st *stepState, out agentrun
 	st.output = a
 	if d.session == nil {
 		if len(a.ToolCalls) > 0 {
-			return fmt.Errorf("%w: a sessionless binding cannot run tool calls", ErrTurnHostConfiguration)
+			return fmt.Errorf("%w: a sessionless binding cannot run tool calls", modelstep.ErrTurnHostConfiguration)
 		}
 		return d.recordStep(ctx, st, out.ModelProvider, out.Model, a, st.usage, out.SkillSelections)
 	}
@@ -630,7 +631,7 @@ func (d *drive) recordModelStep(ctx context.Context, st *stepState, out agentrun
 			ID: SessionEntryID(session.ID, AssistantEntryKey(step.ID)), Scope: d.run.Scope, SessionID: session.ID,
 			RunID: d.run.ID, StepID: step.ID, Step: step.Sequence, Type: SessionEntryAssistant, Assistant: a,
 		}
-		assistant.Tokens = estimateEntryTokens(assistant)
+		assistant.Tokens = modelstep.EstimateEntryTokens(assistant)
 		entries := []*SessionEntry{assistant}
 		if len(a.ToolCalls) == 0 {
 			return entries, nil
@@ -1109,8 +1110,8 @@ func (d *drive) finishCompleted(ctx context.Context, st *stepState) error {
 // stepError classifies an error of a step phase. defaultCode is the step
 // FailureCode of an unclassified error ("" = execution_failed).
 func (d *drive) stepError(ctx context.Context, st *stepState, err error, defaultCode string) stepResult {
-	var loopFailure *LoopFailureError
-	var hostFailure *TurnHostFailure
+	var loopFailure *modelstep.LoopFailureError
+	var hostFailure *modelstep.TurnHostFailure
 	switch {
 	case errors.Is(err, errRunEnded):
 		if res, done := d.checkRunAfterProduce(ctx, st); done {
@@ -1124,7 +1125,7 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 		return exitResult(RunLoopExit{Run: d.run, Reason: RunLoopExitLeaseLost, Err: err})
 	case st.durCtx != nil && stepDurationExpired(st.stepCtx, st.durCtx):
 		return d.durationExpired(ctx, st, d.l.now().Sub(st.started).Milliseconds())
-	case errors.Is(err, ErrTurnHostUnavailable):
+	case errors.Is(err, modelstep.ErrTurnHostUnavailable):
 		return d.hostUnavailable(ctx, st, err)
 	case errors.As(err, &loopFailure):
 		return d.fail(ctx, st, loopFailure.Failure, err, loopFailure.Failure.Code)
@@ -1137,7 +1138,7 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 			Kind: RunFailureKindExecution, Code: code, Message: hostFailure.Error(),
 			Explainable: turnFailureCanBeExplained(err, code),
 		}, err, code)
-	case errors.Is(err, ErrTurnHostConfiguration):
+	case errors.Is(err, modelstep.ErrTurnHostConfiguration):
 		message := "The agent's step host is not configured correctly."
 		if errors.Is(err, ErrInvalidModelStepRequest) {
 			// The host is fine; the step built from the session was refused.
@@ -1165,12 +1166,12 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 // step lease is released, and the Run's lease expiry lets a later claim
 // resume it.
 func (d *drive) storeError(ctx context.Context, st *stepState, err error, defaultCode string) stepResult {
-	var loopFailure *LoopFailureError
-	var hostFailure *TurnHostFailure
+	var loopFailure *modelstep.LoopFailureError
+	var hostFailure *modelstep.TurnHostFailure
 	switch {
 	case errors.Is(err, errRunEnded), isLeaseLoss(err), st.lease.lost.Load(), ctx.Err() != nil,
 		st.durCtx != nil && stepDurationExpired(st.stepCtx, st.durCtx),
-		errors.Is(err, ErrTurnHostUnavailable), errors.Is(err, ErrTurnHostConfiguration),
+		errors.Is(err, modelstep.ErrTurnHostUnavailable), errors.Is(err, modelstep.ErrTurnHostConfiguration),
 		errors.As(err, &loopFailure), errors.As(err, &hostFailure),
 		errors.Is(err, ErrAgentSessionNotFound), errors.Is(err, ErrAgentSessionPathTooLarge), errors.Is(err, ErrAgentSessionForkTooDeep):
 		return d.stepError(ctx, st, err, defaultCode)

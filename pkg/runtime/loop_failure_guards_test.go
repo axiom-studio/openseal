@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -84,7 +85,7 @@ func TestErrorStreakFailsRun(t *testing.T) {
 	if err != nil || failure == nil {
 		t.Fatalf("eighth all-error step: failure=%+v err=%v", failure, err)
 	}
-	if failure.Kind != RunFailureKindRepeatLimit || failure.Code != RunFailureCodeErrorStreak ||
+	if failure.Kind != modelstep.RunFailureKindRepeatLimit || failure.Code != modelstep.RunFailureCodeErrorStreak ||
 		failure.Message != "The agent's tool calls kept failing without making progress, so the run was stopped." || !failure.Explainable {
 		t.Fatalf("failure = %+v", failure)
 	}
@@ -147,7 +148,7 @@ func TestErrorStreakFailsRun(t *testing.T) {
 	}
 	paged := &fakeSessionEntryLister{entries: long.entries}
 	failure, err = loopErrorStreakFailure(ctx, paged, scope, "session-1", "run-1")
-	if err != nil || failure == nil || failure.Code != RunFailureCodeErrorStreak || paged.calls != 2 {
+	if err != nil || failure == nil || failure.Code != modelstep.RunFailureCodeErrorStreak || paged.calls != 2 {
 		t.Fatalf("paged: failure=%+v err=%v calls=%d", failure, err, paged.calls)
 	}
 }

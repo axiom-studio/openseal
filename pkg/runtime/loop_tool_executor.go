@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"go.uber.org/zap"
@@ -39,7 +40,7 @@ type StepToolDispatcherConfig struct {
 	// every tool of the run loop (loopControlRegistry) here.
 	Control *ControlExecutor
 	// Host runs host tool calls; nil means this host runs none.
-	Host *HostToolDispatcher
+	Host *modelstep.HostToolDispatcher
 	// Output keeps governed results over the 64 KiB cap as chat files
 	// (optional; without it they are compacted).
 	Output ToolOutputKeeper
@@ -74,21 +75,21 @@ func NewStepToolDispatcher(cfg StepToolDispatcherConfig) (*StepToolDispatcher, e
 type LoopToolClaim struct {
 	Workspace        *workspace.Authority // nil: no host tools
 	SkillPrompts     []HostedSkillPrompt
-	CapabilityConfig CapabilitySetConfig
+	CapabilityConfig modelstep.CapabilitySetConfig
 	CommandPins      []workspace.CommandPin
 }
 
 // ForClaim returns the LoopToolExecutor of one claim (TurnRunnerBinding.Tools).
 func (d *StepToolDispatcher) ForClaim(claim LoopToolClaim) agentrun.LoopToolExecutor {
-	return &claimToolExecutor{cfg: d.cfg, claim: claim, hostTools: HostToolSpecs(claim.Workspace)}
+	return &claimToolExecutor{cfg: d.cfg, claim: claim, hostTools: modelstep.HostToolSpecs(claim.Workspace)}
 }
 
 // LoopCapabilityCatalog is the authorized catalog of a claim: the binding's
 // governed actions and runbook operations, the claim's Skill prompts and the
 // host tools of its Workspace. The model-step preparer builds its tool list
 // from the same catalog, so offered and executable tools agree.
-func LoopCapabilityCatalog(run *AgentRun, binding *agentrun.TurnRunnerBinding, claim LoopToolClaim) CapabilityCatalog {
-	catalog := CapabilityCatalog{SkillPrompts: claim.SkillPrompts, HostTools: HostToolSpecs(claim.Workspace)}
+func LoopCapabilityCatalog(run *AgentRun, binding *agentrun.TurnRunnerBinding, claim LoopToolClaim) modelstep.CapabilityCatalog {
+	catalog := modelstep.CapabilityCatalog{SkillPrompts: claim.SkillPrompts, HostTools: modelstep.HostToolSpecs(claim.Workspace)}
 	if run != nil {
 		catalog.Scope, catalog.AgentID = run.Scope, run.AssignedAgentID
 	}
@@ -102,7 +103,7 @@ func LoopCapabilityCatalog(run *AgentRun, binding *agentrun.TurnRunnerBinding, c
 type claimToolExecutor struct {
 	cfg       StepToolDispatcherConfig
 	claim     LoopToolClaim
-	hostTools []HostToolSpec
+	hostTools []modelstep.HostToolSpec
 }
 
 func (x *claimToolExecutor) now() time.Time { return x.cfg.Now().UTC() }
@@ -129,7 +130,7 @@ type resolvedLoopTool struct {
 	Route      loopToolRoute
 	Control    ControlToolName
 	Phase      ControlPhase // control tools only
-	Host       HostToolSpec
+	Host       modelstep.HostToolSpec
 	Action     *capability.ModelAction
 	SideEffect ToolSideEffect
 	Subject    RepeatSubject
@@ -159,14 +160,14 @@ func (x *claimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding,
 			SideEffect: kernelToolSideEffect(effect),
 			Subject:    RepeatSubject{Identity: name, Arguments: args, Effect: effect},
 		}, nil
-	case name == LoadCapabilitiesTool || name == SearchCapabilitiesTool:
+	case name == modelstep.LoadCapabilitiesTool || name == modelstep.SearchCapabilitiesTool:
 		effect := repeatEffectOf(LoopToolKernel, "", false, name)
 		return resolvedLoopTool{
 			Route: loopRouteCapability, SideEffect: kernelToolSideEffect(effect),
 			Subject: RepeatSubject{Identity: name, Arguments: args, Effect: effect},
 		}, nil
 	}
-	if spec, ok := LookupHostTool(x.hostTools, name); ok {
+	if spec, ok := modelstep.LookupHostTool(x.hostTools, name); ok {
 		side := ToolSideEffectWrite
 		if spec.SideEffect == capability.SideEffectRead {
 			side = ToolSideEffectRead
@@ -198,7 +199,7 @@ func (x *claimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding,
 	if len(strings.TrimSpace(string(raw))) == 0 {
 		raw = json.RawMessage(`{}`)
 	}
-	if input, err := ParseGovernedToolInput(*action, raw, governedDirective(directive)); err == nil {
+	if input, err := modelstep.ParseGovernedToolInput(*action, raw, governedDirective(directive)); err == nil {
 		subject.Arguments, subject.ExternalOperation = input.Arguments, input.ExternalOperation
 	}
 	side := ToolSideEffectWrite
@@ -410,7 +411,7 @@ type stepToolRun struct {
 	setupIdx  []int // governed skill-management entries that may need the setup note
 
 	setOnce  sync.Once
-	set      *CapabilitySet
+	set      *modelstep.CapabilitySet
 	setErr   error
 	setMu    sync.Mutex // ExecuteLoadCapabilities updates the set in place
 	viewOnce sync.Once
@@ -563,7 +564,7 @@ func (r *stepToolRun) transition(ctx context.Context, i int, to ToolEntryState, 
 		ActionCallID: actionCallID, Wait: wait, Result: result, Kernel: kernel, Now: lease.Now,
 	}
 	if result != nil {
-		req.Tokens = estimateEntryTokens(withToolResult(entry, to, result))
+		req.Tokens = modelstep.EstimateEntryTokens(withToolResult(entry, to, result))
 	}
 	if executed {
 		req = withRepeatKernelFields(req)
@@ -610,7 +611,7 @@ func (r *stepToolRun) refuse(ctx context.Context, i int, result *ToolResult, gua
 // capabilities is the step's capability set: the claim's catalog with the
 // loads of the path the step started from. Loads in this step are callable
 // in the next step.
-func (r *stepToolRun) capabilities(ctx context.Context) (*CapabilitySet, error) {
+func (r *stepToolRun) capabilities(ctx context.Context) (*modelstep.CapabilitySet, error) {
 	r.setOnce.Do(func() {
 		path := r.in.Path
 		if path == nil && r.x.cfg.Sessions != nil && r.sessionID() != "" {
@@ -619,7 +620,7 @@ func (r *stepToolRun) capabilities(ctx context.Context) (*CapabilitySet, error) 
 				return
 			}
 		}
-		r.set = NewPathCapabilitySet(LoopCapabilityCatalog(r.in.Run, r.binding, r.x.claim), path, r.x.claim.CapabilityConfig)
+		r.set = modelstep.NewPathCapabilitySet(LoopCapabilityCatalog(r.in.Run, r.binding, r.x.claim), path, r.x.claim.CapabilityConfig)
 	})
 	return r.set, r.setErr
 }
@@ -637,7 +638,7 @@ func (r *stepToolRun) visible(ctx context.Context, tool resolvedLoopTool) (bool,
 	case loopRouteGoverned:
 		return set.Loaded(capabilityActionPrefix + tool.Action.Name), nil
 	case loopRouteHost:
-		return set.Loaded(capabilityWorkspacePrefix + tool.Host.Operation), nil
+		return set.Loaded(modelstep.CapabilityWorkspacePrefix + tool.Host.Operation), nil
 	}
 	return true, nil
 }
@@ -700,7 +701,7 @@ func (r *stepToolRun) offerRefusal(ctx context.Context, i int) (*ToolResult, err
 		return controlErrorResult(ToolResultRefused, loopToolNotAvailableCode,
 			fmt.Sprintf("No tool named %q is available here.", entry.Tool.Name), map[string]interface{}{"tool": entry.Tool.Name}), nil
 	case loopRouteControl:
-		if !kernel && (r.x.cfg.Control == nil || !controlToolOffered(tool.Control, r.binding.Authority)) {
+		if !kernel && (r.x.cfg.Control == nil || !modelstep.ControlToolOffered(tool.Control, r.binding.Authority)) {
 			return notAvailable(), nil
 		}
 		if r.x.cfg.Control == nil {
@@ -747,7 +748,7 @@ func (r *stepToolRun) startGuard(ctx context.Context) error {
 	run := r.run()
 	guard, err := startLoopRepeatGuard(ctx, loopRepeatGuardConfig{
 		Sessions: r.x.cfg.Sessions, Refusals: r.refusals(), Run: run, WorkerID: r.in.WorkerID,
-		WaitOffered: controlToolOffered(ControlToolWait, r.binding.Authority), Now: r.x.cfg.Now,
+		WaitOffered: modelstep.ControlToolOffered(ControlToolWait, r.binding.Authority), Now: r.x.cfg.Now,
 	}, calls)
 	if err != nil {
 		return err
@@ -826,7 +827,7 @@ func (r *stepToolRun) runCall(ctx context.Context, i int) error {
 func (r *stepToolRun) runHost(ctx context.Context, i int) error {
 	entry, spec := r.entry(i), r.tools[i].Host
 	if r.x.cfg.Host == nil || r.x.claim.Workspace == nil {
-		return r.refuse(ctx, i, hostToolErrorResult(ToolResultFailed, hostToolUnsupportedMessage), nil)
+		return r.refuse(ctx, i, modelstep.HostToolErrorResult(ToolResultFailed, modelstep.HostToolUnsupportedMessage), nil)
 	}
 	if entry.State != ToolEntryRunning {
 		if err := r.transition(ctx, i, ToolEntryRunning, nil, nil, "", nil, false); err != nil {
@@ -834,7 +835,7 @@ func (r *stepToolRun) runHost(ctx context.Context, i int) error {
 		}
 		entry = r.entry(i)
 	}
-	outcome, ok := r.x.cfg.Host.Run(ctx, HostToolCall{
+	outcome, ok := r.x.cfg.Host.Run(ctx, modelstep.HostToolCall{
 		Run: r.run(), Step: r.current, Binding: r.binding, SessionID: r.sessionID(),
 		ToolEntryID: entry.ID, ToolCallID: entry.ToolCallID, Spec: spec,
 		Arguments: decodeLoopToolArguments(entry.Tool.Arguments), Workspace: *r.x.claim.Workspace,
@@ -869,14 +870,14 @@ func (r *stepToolRun) runCapability(ctx context.Context, i int) error {
 	var loaded []string
 	r.setMu.Lock()
 	switch entry.Tool.Name {
-	case LoadCapabilitiesTool:
-		content, isError, loaded = ExecuteLoadCapabilities(set, args, loopCapabilityToolName(r.binding.ModelActions))
+	case modelstep.LoadCapabilitiesTool:
+		content, isError, loaded = modelstep.ExecuteLoadCapabilities(set, args, loopCapabilityToolName(r.binding.ModelActions))
 	default:
 		searched := 0
 		if r.in.Path != nil {
-			searched = CapabilitySearchesThisRun(r.in.Path.Entries, r.in.Run.ID)
+			searched = modelstep.CapabilitySearchesThisRun(r.in.Path.Entries, r.in.Run.ID)
 		}
-		content, isError = ExecuteSearchCapabilities(set, args, searched+r.searches)
+		content, isError = modelstep.ExecuteSearchCapabilities(set, args, searched+r.searches)
 		if !isError {
 			r.searches++
 		}
@@ -897,16 +898,16 @@ func (r *stepToolRun) runCapability(ctx context.Context, i int) error {
 // loadKernelPatch freezes what a load made visible on its tool entry: the
 // definition of each new tool exactly as later steps declare it, and the IDs
 // of the instructions and runbooks its result carried.
-func loadKernelPatch(set *CapabilitySet, actions []capability.ModelAction, loaded []string) *ToolEntryKernelPatch {
+func loadKernelPatch(set *modelstep.CapabilitySet, actions []capability.ModelAction, loaded []string) *ToolEntryKernelPatch {
 	names := LoopGovernedToolNames(actions)
 	patch := &ToolEntryKernelPatch{}
 	for _, id := range loaded {
-		if action, ok := set.catalogAction(id); ok {
-			patch.SurfacedTools = append(patch.SurfacedTools, surfacedTool(id, governedModelStepTool(action, names[action.Name], ModelStepToolLoaded)))
+		if action, ok := set.CatalogAction(id); ok {
+			patch.SurfacedTools = append(patch.SurfacedTools, modelstep.NewSurfacedTool(id, governedModelStepTool(action, names[action.Name], ModelStepToolLoaded)))
 			continue
 		}
-		if spec, ok := set.catalogHostTool(id); ok {
-			patch.SurfacedTools = append(patch.SurfacedTools, surfacedTool(id, hostModelStepTool(spec, ModelStepToolLoaded)))
+		if spec, ok := set.CatalogHostTool(id); ok {
+			patch.SurfacedTools = append(patch.SurfacedTools, modelstep.NewSurfacedTool(id, hostModelStepTool(spec, ModelStepToolLoaded)))
 			continue
 		}
 		patch.LoadedInstructions = append(patch.LoadedInstructions, id)
@@ -1223,7 +1224,7 @@ func (r *stepToolRun) appendSetupNotes(ctx context.Context) error {
 		if note == nil {
 			continue
 		}
-		note.Tokens = estimateEntryTokens(note)
+		note.Tokens = modelstep.EstimateEntryTokens(note)
 		lease := r.lease()
 		if _, err := r.x.cfg.Sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
 			Scope: run.Scope, SessionID: r.sessionID(), RunID: run.ID, Lease: &lease,

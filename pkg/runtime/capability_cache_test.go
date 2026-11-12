@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Cache-stable capability loading: a load, a new Run and a Skill connected
@@ -42,7 +43,7 @@ func (s fixtureNoteSessions) GetActionCall(context.Context, Scope, string) (*Act
 func (f *prepareFixture) ensureNote(step string) bool {
 	f.t.Helper()
 	host := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult { return progressAckResult(req, "Done.") }}
-	producer, err := NewModelStepProducer(host, f.preparer, fixtureNoteSessions{fixtureNoteAppender{f.render}})
+	producer, err := modelstep.NewModelStepProducer(host, f.preparer, fixtureNoteSessions{fixtureNoteAppender{f.render}})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -258,8 +259,8 @@ func TestSurfacedToolDefinitionFrozen(t *testing.T) {
 }
 
 func TestLoadDescriptionModeIndependent(t *testing.T) {
-	listed := NewCapabilitySet(CapabilityCatalogFixture(), nil, CapabilitySetConfig{})
-	searching := NewCapabilitySet(CapabilityCatalogFixture(), nil, CapabilitySetConfig{CatalogBytes: 200})
+	listed := modelstep.NewCapabilitySet(CapabilityCatalogFixture(), nil, modelstep.CapabilitySetConfig{})
+	searching := modelstep.NewCapabilitySet(CapabilityCatalogFixture(), nil, modelstep.CapabilitySetConfig{CatalogBytes: 200})
 	if listed.Searching() || !searching.Searching() {
 		t.Fatal("fixtures must cover both modes")
 	}
@@ -282,7 +283,7 @@ func TestLoadDescriptionModeIndependent(t *testing.T) {
 func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
 	x := newToolExecFixture(t, agentrun.ControlAuthority{})
 	x.binding.ModelActions = CapabilityCatalogFixture().Actions
-	step := x.step("step-1", AgentTurnStatusRunning, toolCall("call-load", LoadCapabilitiesTool, `{"ids":["action:notion.op2"]}`))
+	step := x.step("step-1", AgentTurnStatusRunning, toolCall("call-load", modelstep.LoadCapabilitiesTool, `{"ids":["action:notion.op2"]}`))
 	if _, err := x.binding.Tools.ExecuteStepTools(x.ctx, x.input(step)); err != nil {
 		t.Fatal(err)
 	}
@@ -303,12 +304,12 @@ func TestValidateSurfaces(t *testing.T) {
 		req := validModelStepRequest()
 		req.Tools = req.Tools[:2]
 		assistant := modelStepTestAssistant("c1")
-		assistant.ToolCalls[0].Name = LoadCapabilitiesTool
+		assistant.ToolCalls[0].Name = modelstep.LoadCapabilitiesTool
 		req.Entries = []SessionEntryView{
 			{ID: "u1", Sequence: 1, Type: SessionEntryUser, User: &UserEntryView{Content: []ContentPart{{Type: ContentPartText, Text: "hi"}}}},
 			{ID: "a1", Sequence: 2, Type: SessionEntryAssistant, Assistant: assistant},
 			{ID: "t1", Sequence: 3, Type: SessionEntryTool, Surfaces: []string{"x_one", "x_two"}, Tool: &ToolEntryView{
-				CallID: "c1", Name: LoadCapabilitiesTool, Arguments: json.RawMessage(`{}`), State: ToolEntryCompleted,
+				CallID: "c1", Name: modelstep.LoadCapabilitiesTool, Arguments: json.RawMessage(`{}`), State: ToolEntryCompleted,
 				Result: ToolResultView{Content: []ContentPart{{Type: ContentPartText, Text: "loaded"}}}}},
 		}
 		object := map[string]interface{}{"type": "object"}

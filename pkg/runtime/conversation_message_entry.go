@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Channel messages reach a chat session as user entries (run-loop section 05
@@ -172,7 +174,7 @@ func conversationMessageEntry(sessionID, runID string, message *ChannelMessage, 
 			MessageSequence: message.Sequence,
 		},
 	}
-	entry.Tokens = estimateEntryTokens(entry)
+	entry.Tokens = modelstep.EstimateEntryTokens(entry)
 	return entry
 }
 

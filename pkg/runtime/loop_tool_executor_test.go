@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"github.com/google/uuid"
@@ -82,7 +83,7 @@ func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real 
 	f.control.useTools(registry)
 	dispatcher, err := NewStepToolDispatcher(StepToolDispatcherConfig{
 		Sessions: store, Turns: store, Actions: store, Control: f.control,
-		Host: NewHostToolDispatcher(f.host, nil, nil), Now: func() time.Time { return now },
+		Host: modelstep.NewHostToolDispatcher(f.host, nil, nil), Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -517,7 +518,7 @@ func governedToolExecutor(t *testing.T, f *governedFixture) (agentrun.LoopToolEx
 	}
 	f.run = f.currentRun()
 	// The release Skill is pinned, so the step calls it without a load.
-	return dispatcher.ForClaim(LoopToolClaim{CapabilityConfig: CapabilitySetConfig{PinnedSkillIDs: []string{"release"}}}), sessions
+	return dispatcher.ForClaim(LoopToolClaim{CapabilityConfig: modelstep.CapabilitySetConfig{PinnedSkillIDs: []string{"release"}}}), sessions
 }
 
 func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // D9 repeat detection (section 08 §5.4, SPEC §5.4). The executor builds a
@@ -166,7 +167,7 @@ func repeatEntryResultDigest(entry *SessionEntry) string {
 	if entry.Tool.ResultDigest != "" {
 		return entry.Tool.ResultDigest
 	}
-	return toolResultDigest(entry.Tool.Result)
+	return modelstep.ToolResultDigest(entry.Tool.Result)
 }
 
 // repeatStreak walks the counted entries of key in sequence order up to and
@@ -417,7 +418,7 @@ func repeatPriorStep(entry *SessionEntry) int64 {
 // repeatLimitRunFailure is the Run failure of a step with a failRun verdict;
 // the executor returns it once every tool entry of the step is terminal and
 // the buffered notes are appended.
-func repeatLimitRunFailure() guardRunFailure {
-	failure, _ := guardRunFailureFor(action.RunFailureCodeRepeatLimit)
+func repeatLimitRunFailure() modelstep.GuardRunFailure {
+	failure, _ := modelstep.GuardRunFailureFor(action.RunFailureCodeRepeatLimit)
 	return failure
 }

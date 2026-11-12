@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Execution order inside a step (SPEC §5.2) and the four LoopToolExecutor
@@ -495,7 +496,7 @@ func (r *stepToolRun) resumeCall(ctx context.Context, i int) error {
 		return r.resumeGoverned(ctx, i)
 	case loopRouteHost:
 		if entry.State == ToolEntryRunning {
-			state, result := HostToolResumeState(tool.Host)
+			state, result := modelstep.HostToolResumeState(tool.Host)
 			if state != ToolEntryPending {
 				return r.transition(ctx, i, state, result, nil, "", nil, false)
 			}

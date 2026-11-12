@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Per-step budget (D12). A bounded Run reserves capacity for every step
@@ -68,7 +69,7 @@ func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time,
 	if binding != nil {
 		producer = binding.Producer
 	}
-	if planner, ok := producer.(StepBudgetPlanner); ok {
+	if planner, ok := producer.(modelstep.StepBudgetPlanner); ok {
 		planIn := in
 		planIn.Run = cloneAgentRun(run)
 		planIn.Step = cloneAgentTurn(step)

@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -116,7 +117,7 @@ func (s *repeatSim) step(step int64, waitOffered bool, calls ...simCall) ([]simO
 			tool.Result = &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{storetest.TextPart(call.result)}}
 		}
 		tool.Parked = call.parked
-		tool.ResultDigest = toolResultDigest(tool.Result)
+		tool.ResultDigest = modelstep.ToolResultDigest(tool.Result)
 		s.store(&next)
 		outcome.entry = &next
 		if note, ok := s.ledger.noteAfter(&next, waitOffered); ok {
@@ -221,7 +222,7 @@ func TestRepeatReadNoteThenRefusalThenFailure(t *testing.T) {
 		t.Fatalf("5th refusal gets the repeat_limit row: %+v", outcomes[0].refusal)
 	}
 	failure := repeatLimitRunFailure()
-	if failure.Kind != RunFailureKindRepeatLimit || failure.Code != action.RunFailureCodeRepeatLimit || !failure.Explainable {
+	if failure.Kind != modelstep.RunFailureKindRepeatLimit || failure.Code != action.RunFailureCodeRepeatLimit || !failure.Explainable {
 		t.Fatalf("failure = %+v", failure)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -240,7 +241,7 @@ func TestStampRepeatFields(t *testing.T) {
 func TestWithRepeatKernelFields(t *testing.T) {
 	result := textResult("ok", false)
 	req := withRepeatKernelFields(ToolEntryTransitionRequest{From: ToolEntryRunning, To: ToolEntryCompleted, Result: result})
-	if req.Kernel == nil || req.Kernel.ResultDigest != toolResultDigest(result) || req.Kernel.Parked != nil {
+	if req.Kernel == nil || req.Kernel.ResultDigest != modelstep.ToolResultDigest(result) || req.Kernel.Parked != nil {
 		t.Fatalf("executed terminal patch = %#v", req.Kernel)
 	}
 	original := &ToolEntryKernelPatch{OriginRef: "command:x"}
@@ -294,7 +295,7 @@ func TestRepeatGuardReadNoteRefusalThenFailure(t *testing.T) {
 	fifth, failure := f.runStep(nil, read, other)
 	requireGuardRefusal(t, fifth[0], action.RefusedLoopCallRepeatLimit, 5, ToolResultRefused, repeatLimitText(5))
 	requireGuardRefusal(t, fifth[1], ToolGuardRunStopping, 0, ToolResultRefused, repeatRunStoppingText)
-	if failure == nil || failure.Kind != RunFailureKindRepeatLimit || failure.Code != action.RunFailureCodeRepeatLimit || !failure.Explainable ||
+	if failure == nil || failure.Kind != modelstep.RunFailureKindRepeatLimit || failure.Code != action.RunFailureCodeRepeatLimit || !failure.Explainable ||
 		failure.Message != repeatLimitRunError {
 		t.Fatalf("5th failure = %#v", failure)
 	}
@@ -492,7 +493,7 @@ func TestRepeatGuardErrorStreakFailsRun(t *testing.T) {
 		if i < loopErrorStreakLimit && failure != nil {
 			t.Fatalf("step %d failed the Run: %#v", i, failure)
 		}
-		if i == loopErrorStreakLimit && (failure == nil || failure.Code != RunFailureCodeErrorStreak || failure.Kind != RunFailureKindRepeatLimit || !failure.Explainable) {
+		if i == loopErrorStreakLimit && (failure == nil || failure.Code != modelstep.RunFailureCodeErrorStreak || failure.Kind != modelstep.RunFailureKindRepeatLimit || !failure.Explainable) {
 			t.Fatalf("step %d failure = %#v", i, failure)
 		}
 	}

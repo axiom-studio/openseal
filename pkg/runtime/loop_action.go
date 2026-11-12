@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"go.uber.org/zap"
 )
 
@@ -156,11 +157,11 @@ func loopIdempotencyKey(stepID, toolCallID string, directive *agentrun.ToolCallD
 }
 
 // governedDirective is the governance part of a producer directive.
-func governedDirective(directive *agentrun.ToolCallDirective) *governedInputDirective {
+func governedDirective(directive *agentrun.ToolCallDirective) *modelstep.GovernedInputDirective {
 	if directive == nil {
 		return nil
 	}
-	return &governedInputDirective{Summary: directive.Summary, ExternalOperation: directive.ExternalOperation, ReviewContext: directive.ReviewContext}
+	return &modelstep.GovernedInputDirective{Summary: directive.Summary, ExternalOperation: directive.ExternalOperation, ReviewContext: directive.ReviewContext}
 }
 
 // Execute proposes the governed tool call and, when it may run, executes it
@@ -278,7 +279,7 @@ func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCal
 			Code: runtimeaction.ProposalRejectionUnknownTool, Message: fmt.Sprintf("No tool named %q is available here.", call.Name),
 		}))
 	}
-	input, err := ParseGovernedToolInput(*action, call.Arguments, governedDirective(call.Directive))
+	input, err := modelstep.ParseGovernedToolInput(*action, call.Arguments, governedDirective(call.Directive))
 	if err != nil {
 		var rejection *runtimeaction.ActionProposalRejection
 		if errors.As(err, &rejection) {
@@ -290,7 +291,7 @@ func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCal
 	injectGovernedIdempotencyKey(*action, input.Arguments, key)
 	summary := input.ReviewSummary
 	if summary == "" {
-		summary = narrationSummary(call.Narration)
+		summary = modelstep.NarrationSummary(call.Narration)
 	}
 	req := runtimeaction.ProposeActionRequest{
 		Scope: call.Run.Scope, RunID: call.Run.ID, TurnID: call.Step.ID, WorkerID: call.WorkerID,

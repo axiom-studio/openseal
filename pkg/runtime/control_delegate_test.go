@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/google/uuid"
 )
 
@@ -542,7 +543,7 @@ func TestDelegateInsufficientBudgetIsToolError(t *testing.T) {
 	})
 	f.call(ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
 	f.mustSettle()
-	if value := delegateResult(t, f.entry); f.entry.State != ToolEntryError || value["error"] != ControlBudgetErrorCode {
+	if value := delegateResult(t, f.entry); f.entry.State != ToolEntryError || value["error"] != modelstep.ControlBudgetErrorCode {
 		t.Fatalf("result = %s %#v", f.entry.State, value)
 	}
 	if len(f.requests()) != 0 {

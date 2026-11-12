@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // The final chain (SPEC §3.3) and failure with explanation (SPEC §3.5).
@@ -240,7 +241,7 @@ func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *
 				StepID: stepID, Step: st.step.Sequence, Type: SessionEntryNote, SourceKey: key,
 				Note: &NoteEntry{Kind: NoteFinalRejection, Text: text},
 			}
-			note.Tokens = estimateEntryTokens(note)
+			note.Tokens = modelstep.EstimateEntryTokens(note)
 			return []*SessionEntry{note}, nil
 		})
 		if err != nil {

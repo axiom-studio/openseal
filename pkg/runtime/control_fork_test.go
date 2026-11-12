@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/google/uuid"
 )
 
@@ -520,7 +521,7 @@ func TestForkInsufficientBudgetIsToolError(t *testing.T) {
 			t.Fatalf("result = %#v entry %s", result, c.entry.State)
 		}
 		value, raw := forkResult(t, c.entry)
-		if value["error"] != ControlBudgetErrorCode || !strings.Contains(raw, "cannot fund 2 more child Runs") {
+		if value["error"] != modelstep.ControlBudgetErrorCode || !strings.Contains(raw, "cannot fund 2 more child Runs") {
 			t.Fatalf("result = %s", raw)
 		}
 		children, err := store.ListAgentRuns(c.ctx, AgentRunFilter{Scope: c.scope, ParentRunID: c.run.ID, Limit: 10})

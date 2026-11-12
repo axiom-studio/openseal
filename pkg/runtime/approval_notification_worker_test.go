@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/callback"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -667,7 +668,7 @@ func TestTerminalApprovalActionStatusIncludesRefused(t *testing.T) {
 		ActionCallStatusCompensated: true, ActionCallStatusRefused: true,
 		ActionCallStatusReady: false, ActionCallStatusRunning: false, ActionCallStatusWaitingApproval: false,
 	} {
-		if got := terminalApprovalActionStatus(status); got != want {
+		if got := modelstep.IsTerminalApprovalActionStatus(status); got != want {
 			t.Fatalf("terminalApprovalActionStatus(%s) = %v, want %v", status, got, want)
 		}
 	}

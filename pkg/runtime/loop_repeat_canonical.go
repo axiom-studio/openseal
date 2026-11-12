@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -156,7 +157,7 @@ var repeatControlArgumentFields = []string{"_reviewSummary", "reviewContext", "e
 // strconv.FormatFloat(v, 'g', -1, 64), strings, booleans and array order
 // untouched, and the top-level control fields removed.
 func canonicalToolArguments(arguments map[string]interface{}) ([]byte, error) {
-	normalized, err := canonicalJSONValue(arguments)
+	normalized, err := modelstep.CanonicalJSONValue(arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +168,7 @@ func canonicalToolArguments(arguments map[string]interface{}) ([]byte, error) {
 	for _, field := range repeatControlArgumentFields {
 		delete(object, field)
 	}
-	return encodeCanonicalJSON(object)
+	return modelstep.EncodeCanonicalJSON(object)
 }
 
 // repeatKey = hex(sha256(Identity + "\x00" + canonicalArgs + "\x00" + extOp)),

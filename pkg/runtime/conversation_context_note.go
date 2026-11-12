@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // The run_context note (run-loop section 05 §5, SPEC §6). Each chat Run
@@ -217,7 +218,7 @@ func conversationContextNote(session *AgentSession, runID string, sections []con
 		Type: SessionEntryNote, SourceKey: key,
 		Note: &NoteEntry{Kind: NoteRunContext, Text: text, Data: encoded},
 	}
-	entry.Tokens = estimateEntryTokens(entry)
+	entry.Tokens = modelstep.EstimateEntryTokens(entry)
 	return entry
 }
 

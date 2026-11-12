@@ -27,6 +27,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -324,7 +325,7 @@ func (c *childFixture) bindingFor(run *AgentRun) *agentrun.TurnRunnerBinding {
 	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 	})
-	producer, err := NewModelStepProducer(host, preparer, c.store)
+	producer, err := modelstep.NewModelStepProducer(host, preparer, c.store)
 	if err != nil {
 		c.t.Fatal(err)
 	}
@@ -754,7 +755,7 @@ func TestLoopChildFailureIsAToolError(t *testing.T) {
 	eachStore(t, "child_fork_failure", func(t *testing.T, store KernelStore) {
 		c := newChildFixture(t, store, withRules(
 			&modelRule{name: "branch-fail", when: func(v stepView) bool { return isForkBranch(v) && branchGoal(v) == "read the ledger" },
-				err: NewTurnHostFailure("step_invalid_request", "the ledger cannot be read", false)},
+				err: modelstep.NewTurnHostFailure("step_invalid_request", "the ledger cannot be read", false)},
 			&modelRule{name: "branch", when: isForkBranch, reply: func(stepView) ModelStepResult { return say("Inventory counted.") }},
 			&modelRule{name: "fork", times: 1, reply: func(stepView) ModelStepResult {
 				return act("Checking both.", childForkCall("read the ledger", "count the inventory"))

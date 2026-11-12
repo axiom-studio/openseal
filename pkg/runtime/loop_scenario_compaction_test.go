@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // ---------------------------------------------------------------------------
@@ -56,7 +57,7 @@ func summaryRule() *modelRule {
 }
 
 func contextExceeded() error {
-	return &TurnHostFailure{Code: TurnHostContextExceeded, Message: "the prompt is longer than the model's context"}
+	return &modelstep.TurnHostFailure{Code: modelstep.TurnHostContextExceeded, Message: "the prompt is longer than the model's context"}
 }
 
 // compactionEntries is the Run's compaction entries in log order.
@@ -437,7 +438,7 @@ func TestLoopSecondLengthRejectionFailsVisibly(t *testing.T) {
 
 		const overflowMessage = "The conversation is too long for the model's context, even after compacting it."
 		failure := done.FailureExplanation
-		if failure == nil || failure.Code != TurnHostContextExceeded || failure.Kind != RunFailureKindContextOverflow ||
+		if failure == nil || failure.Code != modelstep.TurnHostContextExceeded || failure.Kind != modelstep.RunFailureKindContextOverflow ||
 			failure.Message != overflowMessage {
 			t.Fatalf("failure explanation = %#v", failure)
 		}
@@ -455,8 +456,8 @@ func TestLoopSecondLengthRejectionFailsVisibly(t *testing.T) {
 			t.Fatalf("model calls = %s, want %s", got, want)
 		}
 		steps := f.steps(run.ID)
-		if len(steps) != 4 || steps[3].FailureCode != TurnHostContextExceeded {
-			t.Fatalf("step rows = %d, last failure %q; want 4 ending in %s", len(steps), steps[len(steps)-1].FailureCode, TurnHostContextExceeded)
+		if len(steps) != 4 || steps[3].FailureCode != modelstep.TurnHostContextExceeded {
+			t.Fatalf("step rows = %d, last failure %q; want 4 ending in %s", len(steps), steps[len(steps)-1].FailureCode, modelstep.TurnHostContextExceeded)
 		}
 	})
 }

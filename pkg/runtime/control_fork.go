@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // control_fork (section 04 §6): a settle-phase control tool that runs two to
@@ -155,9 +156,9 @@ func (forkHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.Cont
 	if cc.Step != nil {
 		stepID = cc.Step.ID
 	}
-	budgets, err := controlBranchBudgets(cc.Run, stepID, len(branches))
+	budgets, err := modelstep.ControlBranchBudgets(cc.Run, stepID, len(branches))
 	if err != nil {
-		var insufficient *ControlBudgetInsufficientError
+		var insufficient *modelstep.ControlBudgetInsufficientError
 		if errors.As(err, &insufficient) {
 			return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, insufficient.Code(), insufficient.Message(), nil))
 		}

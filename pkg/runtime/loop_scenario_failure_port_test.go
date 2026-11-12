@@ -21,6 +21,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // portVisualArtifactID is the stable artifact ID of the visual on the answer
@@ -174,7 +175,7 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 	t.Run("host_unavailable_exhausted", func(t *testing.T) {
 		eachStore(t, "port_host_exhausted", func(t *testing.T, store KernelStore) {
 			f := newLoopFixture(t, store, withRules(&modelRule{name: "down",
-				err: &TurnHostFailure{Code: "host_draining", Message: "The step host is restarting.", Retryable: true}}))
+				err: &modelstep.TurnHostFailure{Code: "host_draining", Message: "The step host is restarting.", Retryable: true}}))
 			conversation, run := f.startChat("check issue 1")
 			const hostRetries = 3 // the run loop requeues a retryable host failure three times
 			failed := f.driveToRest(run.ID, hostRetries+2)

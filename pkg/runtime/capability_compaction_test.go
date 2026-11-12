@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 func TestCompactionCarriesSurfacedTools(t *testing.T) {
@@ -47,7 +48,7 @@ func TestCompactionCarriesSurfacedTools(t *testing.T) {
 	if set.Loaded("prompt:skill-notion@1") {
 		t.Fatal("a carried tool's instructions count as loaded after the compaction")
 	}
-	content, isError, _ := ExecuteLoadCapabilities(set, map[string]interface{}{"ids": []interface{}{"prompt:skill-notion@1"}}, loopCapabilityToolName(f.binding.ModelActions))
+	content, isError, _ := modelstep.ExecuteLoadCapabilities(set, map[string]interface{}{"ids": []interface{}{"prompt:skill-notion@1"}}, loopCapabilityToolName(f.binding.ModelActions))
 	if isError || !strings.Contains(string(content), "Notion rules.") {
 		t.Fatalf("reloading the carried tool's instructions = %v %s", isError, content)
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // conversation_start_task (section 04 §7, A4): a settle-phase control tool
@@ -75,7 +76,7 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 		if len(run.PendingInterventions) > run.ConsumedInterventions {
 			return x.refuse(ctx, cc, startTaskNewMessage())
 		}
-		budget, err := controlRunBudget(run, "")
+		budget, err := modelstep.ControlRunBudget(run, "")
 		if err != nil {
 			return ControlResult{}, err
 		}
@@ -83,7 +84,7 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 			Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: cc.WorkerID,
 			TurnID: cc.Step.ID, ToolEntryID: cc.Entry.ID, AssignedAgentID: cc.Authority.AgentID,
 			TaskKey: startTaskKey(cc.Entry.ID), Goal: args.Goal, Acknowledgment: args.Acknowledgment,
-			Budget: controlTaskBudget(budget),
+			Budget: modelstep.ControlTaskBudget(budget),
 		})
 		switch {
 		case err == nil:

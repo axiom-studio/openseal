@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -459,7 +460,7 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 	if err != nil || len(b.ModelActions) != 1 {
 		t.Fatalf("live authority=%#v,%v", b, err)
 	}
-	if _, ok := b.Producer.(*ModelStepProducer); !ok {
+	if _, ok := b.Producer.(*modelstep.ModelStepProducer); !ok {
 		t.Fatalf("task did not use the model step producer: %T", b.Producer)
 	}
 	c.activation.Skills = nil // Revoked permission is not resurrected by persisted schedule.

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -63,7 +64,7 @@ func TestLoopUnofferedToolIsAToolError(t *testing.T) {
 	for _, name := range []string{
 		"delete_everything",
 		kitGovernedToolPrefix + loopFixtureSkillID + "_delete_all",
-		hostToolName("read_file"),
+		modelstep.HostToolName("read_file"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			eachStore(t, "unoffered_tool", func(t *testing.T, store KernelStore) {

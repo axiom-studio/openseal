@@ -7,6 +7,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -45,7 +46,7 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				binding.ModelCredential == nil || binding.ModelCredential.ID != "model-account" {
 				t.Fatalf("failure explanation lost verified Agent identity: %#v", binding)
 			}
-			if _, ok := binding.Producer.(*ModelStepProducer); !ok {
+			if _, ok := binding.Producer.(*modelstep.ModelStepProducer); !ok {
 				t.Fatalf("failure explanation producer = %T", binding.Producer)
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutPaused
@@ -54,7 +55,7 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutActive
 			config.Host = nil
-			if _, err := ResolveLoopBinding(t.Context(), catalog, run, config); !errors.Is(err, ErrTurnHostUnavailable) {
+			if _, err := ResolveLoopBinding(t.Context(), catalog, run, config); !errors.Is(err, modelstep.ErrTurnHostUnavailable) {
 				t.Fatalf("explanation without a model host = %v", err)
 			}
 		})

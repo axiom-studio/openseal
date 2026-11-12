@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
@@ -35,7 +36,7 @@ func TestTerminalFailureCodeOfRecordedFailure(t *testing.T) {
 		{nil, "execution_failed"},
 		{&RunFailureExplanation{Kind: "execution", Code: "gateway_credits_exhausted"}, "workspace_credits_exhausted"},
 		{&RunFailureExplanation{Kind: "task_completion", Code: "task_completion_rejected"}, "task_completion_rejected"},
-		{&RunFailureExplanation{Kind: "repeat_limit", Code: RunFailureCodeErrorStreak}, "execution_failed"},
+		{&RunFailureExplanation{Kind: "repeat_limit", Code: modelstep.RunFailureCodeErrorStreak}, "execution_failed"},
 		{&RunFailureExplanation{Kind: "execution", Code: "task_completion_rejected TOKEN_SECRET"}, "execution_failed"},
 		{&RunFailureExplanation{Kind: "workspace"}, "workspace_operation_failed"},
 		{&RunFailureExplanation{Kind: "execution", Code: "action_failed"}, "action_failed"},
@@ -175,7 +176,7 @@ func TestTerminalRunFailureReplyIgnoresAFailureTheRunMovedPast(t *testing.T) {
 		return &AgentRun{ID: "run", Scope: scope, Status: AgentRunStatusFailed, FailureExplanation: f}
 	}
 	log.entries = []*SessionEntry{entry("e1", "step-1", ToolEntryError, "rl")}
-	streak := &RunFailureExplanation{Kind: RunFailureKindRepeatLimit, Code: RunFailureCodeErrorStreak}
+	streak := &RunFailureExplanation{Kind: modelstep.RunFailureKindRepeatLimit, Code: modelstep.RunFailureCodeErrorStreak}
 	if got := terminalRunFailureReply(ctx, log, log, run(streak)); !strings.Contains(got, "HTTP 429") {
 		t.Fatalf("429 that stopped the attempt not named: %q", got)
 	}

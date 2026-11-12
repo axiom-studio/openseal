@@ -27,6 +27,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // mediaContent serves artifact bytes by content ref; set swaps them.
@@ -137,12 +138,12 @@ func (f *mediaFixture) startChatWithAttachments(text string, refs ...Conversatio
 // bind gives the claim's model producer the artifact sources and the
 // fixture's image modality, as the catalog resolver does from the catalog.
 func (f *mediaFixture) bind(binding *agentrun.TurnRunnerBinding) {
-	producer, ok := binding.Producer.(*ModelStepProducer)
+	producer, ok := binding.Producer.(*modelstep.ModelStepProducer)
 	if !ok {
 		f.t.Fatalf("producer is %T", binding.Producer)
 	}
 	vision := f.vision
-	producer.Media = ModelStepMedia{
+	producer.Media = modelstep.ModelStepMedia{
 		Artifacts: f.raw.(ArtifactStore), Content: f.content,
 		ImageInput: func(context.Context, agentrun.StepInput, ModelStepRequest) bool { return vision },
 	}

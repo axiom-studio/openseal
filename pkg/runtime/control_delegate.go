@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // agent_delegate and agent_delegate_reply (section 04 §8): settle-phase
@@ -127,7 +128,7 @@ func (delegateHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.
 		Context: args.Context, Mode: args.Mode,
 	}
 	if cc.Origin != ControlOriginKernel {
-		agentID, err := resolveHostedAgentTarget(args.AgentID, cc.Authority.DelegateTargets)
+		agentID, err := modelstep.ResolveHostedAgentTarget(args.AgentID, cc.Authority.DelegateTargets)
 		if err != nil {
 			return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, controlDelegationRejectedCode, err.Error(), nil))
 		}
@@ -181,7 +182,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 	}
 	budget, err := x.delegationBudget(cc, spec)
 	if err != nil {
-		var insufficient *ControlBudgetInsufficientError
+		var insufficient *modelstep.ControlBudgetInsufficientError
 		if errors.As(err, &insufficient) {
 			return x.refuseIfEntry(ctx, cc, controlErrorResult(ToolResultRefused, insufficient.Code(), insufficient.Message(), nil))
 		}
@@ -290,7 +291,7 @@ func (x *ControlExecutor) delegationBudget(cc agentrun.ControlContext, spec Dele
 	}
 	allocation := spec.Budget
 	if cc.Origin != ControlOriginKernel || allocation == nil {
-		allocations, err := controlBranchBudgets(cc.Run, stepIDOf(cc.Step), 1)
+		allocations, err := modelstep.ControlBranchBudgets(cc.Run, stepIDOf(cc.Step), 1)
 		if err != nil {
 			return nil, err
 		}

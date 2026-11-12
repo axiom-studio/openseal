@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -35,7 +36,7 @@ const RoutineScriptRulesText = "This Run belongs to a routine that runs an appro
 const RunFailureCodeRoutineScript = "routine_script_failed"
 
 // routineScriptRunCommandTool is the loop tool name of workspace.run_command.
-var routineScriptRunCommandTool = hostToolName(workspace.OperationRunCommand)
+var routineScriptRunCommandTool = modelstep.HostToolName(workspace.OperationRunCommand)
 
 // loopRoutineScript is a claim's routine script: the approved script and the
 // pins every run_command of the claim carries.
@@ -49,7 +50,7 @@ type loopRoutineScript struct {
 // only where workspace_run_command is offered (hostTools of the claim's chat
 // workspace); otherwise, or when the pinned script is invalid, the claim
 // cannot run.
-func prepareLoopRoutineScript(run *AgentRun, hostTools []HostToolSpec) (*loopRoutineScript, error) {
+func prepareLoopRoutineScript(run *AgentRun, hostTools []modelstep.HostToolSpec) (*loopRoutineScript, error) {
 	if run == nil || run.Context == nil {
 		return nil, nil
 	}
@@ -61,7 +62,7 @@ func prepareLoopRoutineScript(run *AgentRun, hostTools []HostToolSpec) (*loopRou
 	if err != nil {
 		return nil, fmt.Errorf("routine script in Run context is invalid: %w", err)
 	}
-	if _, offered := LookupHostTool(hostTools, workspace.OperationRunCommand); !offered {
+	if _, offered := modelstep.LookupHostTool(hostTools, workspace.OperationRunCommand); !offered {
 		return nil, errors.New("a routine script runs only in its chat's sandbox")
 	}
 	pin := workspace.CommandPin{Path: script.Path, Digest: script.Digest, FilesVersion: script.FilesVersion, Command: script.Command, TimeoutSeconds: script.TimeoutSeconds}
@@ -81,8 +82,8 @@ func (s *loopRoutineScript) CommandPins() []workspace.CommandPin {
 // session and belong in the section.
 func (s *loopRoutineScript) Section() ModelStepSystemSection {
 	return ModelStepSystemSection{
-		ID:    loopSectionRoutineScript,
-		Title: loopKernelSectionTitles[loopSectionRoutineScript],
+		ID:    modelstep.LoopSectionRoutineScript,
+		Title: modelstep.LoopKernelSectionTitles[modelstep.LoopSectionRoutineScript],
 		Text:  routineScriptSectionText(s.Script),
 	}
 }

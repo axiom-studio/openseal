@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Task completion review (section 04 §11.6), moved from cortex
@@ -146,7 +147,7 @@ func (x *ControlExecutor) reviewTaskCompletion(ctx context.Context, cc agentrun.
 }
 
 func decodeTaskReviewVerdict(req ModelStepRequest, result ModelStepResult) (taskReviewVerdict, string) {
-	if err := ValidateModelStepResult(req, result); err != nil {
+	if err := modelstep.ValidateModelStepResult(req, result); err != nil {
 		return taskReviewVerdict{}, err.Error()
 	}
 	if len(result.Assistant.ToolCalls) > 0 {
@@ -233,7 +234,7 @@ func (x *ControlExecutor) taskReviewRequest(cc agentrun.ControlContext, payload 
 // bindingModelCredential is the model credential the binding's model producer
 // sends with its steps (nil when the binding has none: the host's default).
 func bindingModelCredential(binding *agentrun.TurnRunnerBinding) *capability.CredentialReference {
-	producer, _ := binding.Producer.(*ModelStepProducer)
+	producer, _ := binding.Producer.(*modelstep.ModelStepProducer)
 	if producer == nil {
 		return nil
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -44,11 +45,11 @@ type LoopBindingConfig struct {
 	Tools *StepToolDispatcher
 	// ChatWorkspaces resolves the claim's chat Workspace, whose host tools
 	// the Run is offered. nil: no Run is offered host tools.
-	ChatWorkspaces ChatWorkspaces
+	ChatWorkspaces modelstep.ChatWorkspaces
 	// Media are the image sources of the path renderer; Media.ImageInput also
 	// decides whether the model step system carries the media section.
-	Media        ModelStepMedia
-	Capabilities CapabilitySetConfig
+	Media        modelstep.ModelStepMedia
+	Capabilities modelstep.CapabilitySetConfig
 	// RoutineEventFiles keeps an event routine occurrence's events as a
 	// chat file when they are too big to inline (SPEC §6.3). nil: they are
 	// shortened to fit instead.
@@ -260,7 +261,7 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 		base.RunbookOperations = nil
 	}
 	if _, requested := run.Context["capabilityInvocation"]; requested {
-		producer, resolveErr := NewCapabilityInvocationStepProducer(actions, catalog)
+		producer, resolveErr := modelstep.NewCapabilityInvocationStepProducer(actions, catalog)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve typed capability invocation for Agent %s: %w", deployment.ID, resolveErr)
 		}
@@ -343,7 +344,7 @@ func (r *loopBindingResolution) identity(actionDeploymentID string) *agentrun.Tu
 // the tool executor and the progress acknowledgement renderer.
 func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.TurnRunnerBinding, prompts []HostedSkillPrompt, prompt agentrun.PromptContribution, workspaceTools bool) (*agentrun.TurnRunnerBinding, error) {
 	if r.config.Host == nil {
-		return nil, ErrTurnHostUnavailable
+		return nil, modelstep.ErrTurnHostUnavailable
 	}
 	session, err := r.session(ctx, true)
 	if err != nil {
@@ -353,7 +354,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 	if workspaceTools {
 		chat = r.workspace(ctx)
 	}
-	hostTools := HostToolSpecs(chat)
+	hostTools := modelstep.HostToolSpecs(chat)
 	script, err := prepareLoopRoutineScript(r.run, hostTools)
 	if err != nil {
 		return nil, err
@@ -379,7 +380,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		AgentInstructions: instructions, SkillPrompts: prompts, HostTools: hostTools,
 		ModelCredential: deploymentModelCredential(r.deployment),
 		Capabilities:    r.config.Capabilities,
-		Render:          sessionRenderOptions{Artifacts: r.config.Media.Artifacts, Content: r.config.Media.Content, Actions: r.config.Store},
+		Render:          modelstep.SessionRenderOptions{Artifacts: r.config.Media.Artifacts, Content: r.config.Media.Content, Actions: r.config.Store},
 	}
 	if script != nil {
 		preparerConfig.RoutineScript = script.Section().Text
@@ -392,16 +393,16 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		})
 	}
 	preparer := newCatalogModelStepPreparer(preparerConfig)
-	producer, err := NewModelStepProducer(r.config.Host, preparer, r.config.Store)
+	producer, err := modelstep.NewModelStepProducer(r.config.Host, preparer, r.config.Store)
 	if err != nil {
 		return nil, err
 	}
 	producer.Media = r.config.Media
 	producer.Now = r.config.Now
 	binding.Producer = producer
-	binding.Compactor = &LoopCompactor{
+	binding.Compactor = &modelstep.LoopCompactor{
 		Host: r.config.Host, Sessions: r.config.Store, Requests: preparer,
-		Budget: newRunActivityCompactionBudget(r.config.Store, NewRunActivityService(r.config.Store, r.config.Store, models.WithClock(r.config.Now)), r.config.Now),
+		Budget: modelstep.NewRunActivityCompactionBudget(r.config.Store, NewRunActivityService(r.config.Store, r.config.Store, models.WithClock(r.config.Now)), r.config.Now),
 		Now:    r.config.Now,
 	}
 	binding.Preparers = []agentrun.StepPreparer{newRunStartPreparer(r.config.Store, r.config.Store)}
@@ -482,7 +483,7 @@ func (r *loopBindingResolution) workspace(ctx context.Context) *workspace.Author
 	if !r.claimed() {
 		return nil
 	}
-	authority, err := prepareChatWorkspace(ctx, r.config.ChatWorkspaces, r.run)
+	authority, err := modelstep.PrepareChatWorkspace(ctx, r.config.ChatWorkspaces, r.run)
 	if err != nil {
 		if r.config.Logger != nil {
 			r.config.Logger.Warnw("chat workspace is unavailable; the claim runs without host tools", "runId", r.run.ID, "error", err)
@@ -614,7 +615,7 @@ func hostedAgentInstructions(definition *kernelagent.AgentDefinition) []string {
 	if definition == nil {
 		return nil
 	}
-	instructions := []string{definition.SystemPrompt, "Purpose: " + definition.Purpose, agentResourcefulnessGuidance}
+	instructions := []string{definition.SystemPrompt, "Purpose: " + definition.Purpose, modelstep.AgentResourcefulnessGuidance}
 	if definition.Personality != "" {
 		instructions = append(instructions, "Personality: "+definition.Personality)
 	}

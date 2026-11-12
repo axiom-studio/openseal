@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Self-tests of the run-loop test kit (run-loop section 12 §3.6).
@@ -94,7 +95,7 @@ func TestLoopTestkitRulesAreOrderedAndCounted(t *testing.T) {
 		t.Fatalf("replies = %v, want one,two,two", got)
 	}
 
-	failing := &TurnHostFailure{Code: TurnHostContextExceeded, Message: "too long"}
+	failing := &modelstep.TurnHostFailure{Code: modelstep.TurnHostContextExceeded, Message: "too long"}
 	model = newScriptedModel(t, &modelRule{name: "step", when: func(v stepView) bool { return v.Purpose() == ModelStepPurposeStep }, reply: func(stepView) ModelStepResult { return say("ok") }})
 	model.add(&modelRule{name: "overflow", when: func(v stepView) bool { return v.Purpose() == ModelStepPurposeSummary }, err: failing})
 	summary := kitStepRequest("step-sum")
@@ -209,7 +210,7 @@ func TestLoopTestkitResultBuildersPassValidation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if err := ValidateModelStepResult(req, res); err != nil {
+		if err := modelstep.ValidateModelStepResult(req, res); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if res.Model.ContextTokens != kitDefaultContextWindow || res.Assistant.Model != "fake-model" {

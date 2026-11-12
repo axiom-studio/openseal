@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -185,7 +186,7 @@ func TestRoutineScriptPinIsAttachedToCommandsThatRunIt(t *testing.T) {
 // chat's workspace.
 func loopRoutineScriptFixture(t *testing.T) *loopRoutineScript {
 	t.Helper()
-	routine, err := prepareLoopRoutineScript(routineScriptRun(), HostToolSpecs(workspace.ChatAuthority("chat")))
+	routine, err := prepareLoopRoutineScript(routineScriptRun(), modelstep.HostToolSpecs(workspace.ChatAuthority("chat")))
 	if err != nil || routine == nil {
 		t.Fatalf("prepare = %#v, %v", routine, err)
 	}
@@ -214,7 +215,7 @@ func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int6
 			return HostReplyJSON(result, false)(context.Background(), request)
 		}
 	}
-	dispatcher := NewHostToolDispatcher(&FakeHostToolHost{Replies: []func(context.Context, HostToolRequest) (HostToolResult, error){answer}},
+	dispatcher := modelstep.NewHostToolDispatcher(&FakeHostToolHost{Replies: []func(context.Context, HostToolRequest) (HostToolResult, error){answer}},
 		runtimeaction.NewActionCoordinator(nil, nil, nil, nil, nil), nil)
 	call := HostToolCallFixture(t, workspace.OperationRunCommand, arguments)
 	call.ToolEntryID = fmt.Sprintf("ent_%d", sequence)
@@ -234,7 +235,7 @@ func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int6
 }
 
 func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
-	tools := HostToolSpecs(workspace.ChatAuthority("chat"))
+	tools := modelstep.HostToolSpecs(workspace.ChatAuthority("chat"))
 	if routine, err := prepareLoopRoutineScript(&AgentRun{ID: "chat-run", Context: map[string]interface{}{}}, tools); routine != nil || err != nil {
 		t.Fatalf("plain Run = %#v, %v", routine, err)
 	}
@@ -246,13 +247,13 @@ func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 	if _, err := prepareLoopRoutineScript(invalid, tools); err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("invalid script err = %v", err)
 	}
-	var withoutCommand []HostToolSpec
+	var withoutCommand []modelstep.HostToolSpec
 	for _, spec := range tools {
 		if spec.Operation != workspace.OperationRunCommand {
 			withoutCommand = append(withoutCommand, spec)
 		}
 	}
-	for _, offered := range [][]HostToolSpec{nil, withoutCommand} {
+	for _, offered := range [][]modelstep.HostToolSpec{nil, withoutCommand} {
 		if _, err := prepareLoopRoutineScript(routineScriptRun(), offered); err == nil || !strings.Contains(err.Error(), "sandbox") {
 			t.Fatalf("no run_command err = %v", err)
 		}

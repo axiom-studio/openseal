@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 func conversationSectionIDs(sections []ModelStepSystemSection) []string {
@@ -80,7 +82,7 @@ func TestSystemSectionsHaveNoFormWords(t *testing.T) {
 			t.Errorf("section id %q is invalid or repeated", section.ID)
 		}
 		seen[section.ID] = true
-		for _, kernelID := range loopKernelSectionOrder {
+		for _, kernelID := range modelstep.LoopKernelSectionOrder {
 			if section.ID == kernelID {
 				t.Errorf("section id %q collides with a kernel section", section.ID)
 			}

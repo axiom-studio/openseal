@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -185,23 +186,23 @@ func TestToolResultDigest(t *testing.T) {
 	result := func(status ToolResultStatus, parts ...ContentPart) *ToolResult {
 		return &ToolResult{Status: status, IsError: status != ToolResultSucceeded, Content: parts}
 	}
-	base := toolResultDigest(result(ToolResultSucceeded, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"b":1,"a":2.0}`)}))
+	base := modelstep.ToolResultDigest(result(ToolResultSucceeded, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"b":1,"a":2.0}`)}))
 	if len(base) != 64 {
 		t.Fatalf("digest %q", base)
 	}
-	if toolResultDigest(result(ToolResultSucceeded, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":2,"b":1}`)})) != base {
+	if modelstep.ToolResultDigest(result(ToolResultSucceeded, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":2,"b":1}`)})) != base {
 		t.Fatal("canonically equal content must give the same digest")
 	}
-	if toolResultDigest(result(ToolResultFailed, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":2,"b":1}`)})) == base {
+	if modelstep.ToolResultDigest(result(ToolResultFailed, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":2,"b":1}`)})) == base {
 		t.Fatal("status must be part of the digest")
 	}
-	if toolResultDigest(result(ToolResultSucceeded, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":3,"b":1}`)})) == base {
+	if modelstep.ToolResultDigest(result(ToolResultSucceeded, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":3,"b":1}`)})) == base {
 		t.Fatal("content must be part of the digest")
 	}
-	if toolResultDigest(result(ToolResultSucceeded)) != toolResultDigest(&ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{}}) {
+	if modelstep.ToolResultDigest(result(ToolResultSucceeded)) != modelstep.ToolResultDigest(&ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{}}) {
 		t.Fatal("nil and empty content must digest alike")
 	}
-	if toolResultDigest(nil) != "" {
+	if modelstep.ToolResultDigest(nil) != "" {
 		t.Fatal("nil result has no digest")
 	}
 }

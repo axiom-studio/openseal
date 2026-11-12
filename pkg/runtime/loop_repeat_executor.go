@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -69,7 +70,7 @@ func withRepeatKernelFields(req ToolEntryTransitionRequest) ToolEntryTransitionR
 	}
 	changed := false
 	if req.To.Terminal() && req.Result != nil && patch.Guard == nil && patch.ResultDigest == "" {
-		patch.ResultDigest = toolResultDigest(req.Result)
+		patch.ResultDigest = modelstep.ToolResultDigest(req.Result)
 		changed = true
 	}
 	if req.From.Awaiting() && patch.Parked == nil {
@@ -280,7 +281,7 @@ func (g *loopRepeatGuard) ApplyRefusals(ctx context.Context) ([]*SessionEntry, e
 		result, err := g.cfg.Sessions.TransitionToolEntry(ctx, ToolEntryTransitionRequest{
 			Scope: g.cfg.Run.Scope, EntryID: entry.ID, RunID: g.cfg.Run.ID, Lease: lease,
 			From: ToolEntryPending, ExpectedRevision: entry.Revision, To: ToolEntryError,
-			ActionCallID: actionCallID, Result: refusal.Result, Tokens: estimateEntryTokens(next),
+			ActionCallID: actionCallID, Result: refusal.Result, Tokens: modelstep.EstimateEntryTokens(next),
 			Kernel: &ToolEntryKernelPatch{Guard: refusal.Guard, DuplicateOfEntryID: refusal.DuplicateOfEntryID},
 			Now:    lease.Now,
 		})
@@ -389,7 +390,7 @@ func (g *loopRepeatGuard) Finish(ctx context.Context) (*agentrun.LoopFailure, er
 		return loopFailureFromGuard(repeatLimitRunFailure()), nil
 	}
 	if streak >= loopErrorStreakLimit {
-		failure, _ := guardRunFailureFor(RunFailureCodeErrorStreak)
+		failure, _ := modelstep.GuardRunFailureFor(modelstep.RunFailureCodeErrorStreak)
 		return loopFailureFromGuard(failure), nil
 	}
 	return nil, nil
@@ -403,11 +404,11 @@ func (g *loopRepeatGuard) repeatNote(after *SessionEntry, text string) *SessionE
 		RunID: g.cfg.Run.ID, StepID: after.StepID, Step: after.Step, Type: SessionEntryNote, SourceKey: key,
 		Note: &NoteEntry{Kind: NoteRepeat, Text: text, Data: data},
 	}
-	note.Tokens = estimateEntryTokens(note)
+	note.Tokens = modelstep.EstimateEntryTokens(note)
 	return note
 }
 
-func loopFailureFromGuard(failure guardRunFailure) *agentrun.LoopFailure {
+func loopFailureFromGuard(failure modelstep.GuardRunFailure) *agentrun.LoopFailure {
 	return &agentrun.LoopFailure{Kind: failure.Kind, Code: failure.Code, Message: failure.Message, Explainable: failure.Explainable}
 }
 

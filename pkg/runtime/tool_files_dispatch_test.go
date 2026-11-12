@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
@@ -28,7 +29,7 @@ func TestToolActionDispatcherCarriesFileReferences(t *testing.T) {
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"image": map[string]interface{}{"type": "string", "format": "data-url"}}}}},
 	}}
 	var invocation ToolInvocation
-	dispatcher, err := NewToolActionDispatcher(ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
 		invocation = value
 		return map[string]interface{}{"content": []interface{}{}}, nil
 	}))

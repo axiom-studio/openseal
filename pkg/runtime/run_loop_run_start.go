@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
@@ -71,7 +72,7 @@ func (p *runStartPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput
 			return nil, fmt.Errorf("run start: %w", err)
 		}
 		if !present {
-			note.Tokens = estimateEntryTokens(note)
+			note.Tokens = modelstep.EstimateEntryTokens(note)
 			fresh = append(fresh, note)
 		}
 	}

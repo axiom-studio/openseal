@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Kernel control tools (section 04 §3). The model calls them like any other
@@ -292,7 +293,7 @@ func (r controlRegistry) specs(a agentrun.ControlAuthority) []ControlToolSpec {
 	var specs []ControlToolSpec
 	for _, name := range controlToolOrder {
 		h, ok := r[name]
-		if !ok || !controlToolOffered(name, a) {
+		if !ok || !modelstep.ControlToolOffered(name, a) {
 			continue
 		}
 		spec := h.Spec(a)
@@ -399,7 +400,7 @@ func (x *ControlExecutor) dispatch(ctx context.Context, cc agentrun.ControlConte
 	h, registered := x.registry()[name]
 	// Rule 1: a tool the claim does not offer. Kernel-origin calls are
 	// preauthorized by their producer.
-	if !registered || (cc.Origin != ControlOriginKernel && !controlToolOffered(name, cc.Authority)) {
+	if !registered || (cc.Origin != ControlOriginKernel && !modelstep.ControlToolOffered(name, cc.Authority)) {
 		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "tool_not_available",
 			"This tool is not available in this conversation.", map[string]interface{}{"tool": string(name)}))
 	}
@@ -532,7 +533,7 @@ func (x *ControlExecutor) transitionControlEntry(ctx context.Context, cc agentru
 			Wait: wait, Result: result, Kernel: kernel, Now: now,
 		}
 		if result != nil {
-			req.Tokens = estimateEntryTokens(withToolResult(current, to, result))
+			req.Tokens = modelstep.EstimateEntryTokens(withToolResult(current, to, result))
 		}
 		transitioned, err := x.Sessions.TransitionToolEntry(ctx, req)
 		if err == nil {
@@ -615,7 +616,7 @@ func controlSettleConflicts(calls []ModelToolCall, authority agentrun.ControlAut
 	for i, call := range calls {
 		name := ControlToolName(call.Name)
 		rule, ok := controlToolRules[name]
-		if !ok || rule.Phase != ControlPhaseSettle || !controlToolOffered(name, authority) {
+		if !ok || rule.Phase != ControlPhaseSettle || !modelstep.ControlToolOffered(name, authority) {
 			continue
 		}
 		if rule.Alone && len(calls) > 1 {

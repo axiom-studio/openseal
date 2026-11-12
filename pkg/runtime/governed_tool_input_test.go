@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 func governedTestAction(sideEffect capability.SideEffect, risk capability.RiskLevel, policy capability.ExternalOperationPolicy) capability.ModelAction {
@@ -66,10 +67,10 @@ func TestGovernedSchemaReviewedEnvelope(t *testing.T) {
 	action := governedTestAction(capability.SideEffectExternal, capability.RiskLevelExternal, capability.ExternalOperationRequired)
 	action.InputSchema["$defs"] = map[string]interface{}{"t": map[string]interface{}{"type": "string"}}
 	action.InputSchema["properties"].(map[string]interface{})["ref"] = map[string]interface{}{"$ref": "#/$defs/t"}
-	if !GovernedToolReviewed(action) || GovernedToolNeedsReviewSummary(action) {
+	if !modelstep.GovernedToolReviewed(action) || modelstep.GovernedToolNeedsReviewSummary(action) {
 		t.Fatal("external action must be reviewed and carry no _reviewSummary")
 	}
-	schema := schemaJSON(t, GovernedToolInputSchema(action))
+	schema := schemaJSON(t, modelstep.GovernedToolInputSchema(action))
 	if schema["additionalProperties"] != false || schema["type"] != "object" {
 		t.Fatalf("envelope not closed: %v", schema)
 	}
@@ -111,7 +112,7 @@ func TestGovernedSchemaReviewedEnvelope(t *testing.T) {
 	}
 
 	optional := governedTestAction(capability.SideEffectExternal, capability.RiskLevelExternal, capability.ExternalOperationOptional)
-	optionalSchema := schemaJSON(t, GovernedToolInputSchema(optional))
+	optionalSchema := schemaJSON(t, modelstep.GovernedToolInputSchema(optional))
 	if got := requiredOf(optionalSchema); !reflect.DeepEqual(got, []string{"arguments", "reviewContext"}) {
 		t.Fatalf("optional required = %v", got)
 	}
@@ -119,15 +120,15 @@ func TestGovernedSchemaReviewedEnvelope(t *testing.T) {
 		t.Fatal("optional policy must offer externalOperation")
 	}
 	forbidden := governedTestAction(capability.SideEffectExternal, capability.RiskLevelExternal, capability.ExternalOperationForbidden)
-	if _, ok := schemaJSON(t, GovernedToolInputSchema(forbidden))["properties"].(map[string]interface{})["externalOperation"]; ok {
+	if _, ok := schemaJSON(t, modelstep.GovernedToolInputSchema(forbidden))["properties"].(map[string]interface{})["externalOperation"]; ok {
 		t.Fatal("forbidden policy must not offer externalOperation")
 	}
 	destructive := governedTestAction(capability.SideEffectDestructive, capability.RiskLevelDestructive, "")
-	destructiveSchema := schemaJSON(t, GovernedToolInputSchema(destructive))
+	destructiveSchema := schemaJSON(t, modelstep.GovernedToolInputSchema(destructive))
 	if _, ok := destructiveSchema["properties"].(map[string]interface{})["externalOperation"]; ok {
 		t.Fatal("destructive actions have no externalOperation")
 	}
-	if !GovernedToolReviewed(destructive) {
+	if !modelstep.GovernedToolReviewed(destructive) {
 		t.Fatal("destructive action must be reviewed")
 	}
 }
@@ -137,19 +138,19 @@ func TestGovernedSchemaWriteAddsRequiredReviewSummary(t *testing.T) {
 		governedTestAction(capability.SideEffectWrite, capability.RiskLevelWrite, ""),
 		governedTestAction(capability.SideEffectRead, capability.RiskLevelProduction, ""),
 	} {
-		if !GovernedToolNeedsReviewSummary(action) {
+		if !modelstep.GovernedToolNeedsReviewSummary(action) {
 			t.Fatalf("%s/%s must need a review summary", action.SideEffect, action.Risk)
 		}
-		schema := schemaJSON(t, GovernedToolInputSchema(action))
-		if got := requiredOf(schema); !reflect.DeepEqual(got, []string{"text", GovernedReviewSummaryField}) {
+		schema := schemaJSON(t, modelstep.GovernedToolInputSchema(action))
+		if got := requiredOf(schema); !reflect.DeepEqual(got, []string{"text", modelstep.GovernedReviewSummaryField}) {
 			t.Fatalf("required = %v", got)
 		}
-		field := schema["properties"].(map[string]interface{})[GovernedReviewSummaryField].(map[string]interface{})
+		field := schema["properties"].(map[string]interface{})[modelstep.GovernedReviewSummaryField].(map[string]interface{})
 		if field["type"] != "string" || field["minLength"] != float64(1) || field["maxLength"] != float64(600) ||
 			field["description"] != "One sentence a reviewer reads on the approval card: what this does and to what. Never passed to the tool." {
 			t.Fatalf("_reviewSummary schema = %v", field)
 		}
-		if _, ok := action.InputSchema["properties"].(map[string]interface{})[GovernedReviewSummaryField]; ok {
+		if _, ok := action.InputSchema["properties"].(map[string]interface{})[modelstep.GovernedReviewSummaryField]; ok {
 			t.Fatal("the action's own schema was mutated")
 		}
 	}
@@ -158,12 +159,12 @@ func TestGovernedSchemaWriteAddsRequiredReviewSummary(t *testing.T) {
 func TestGovernedSchemaReadUnchanged(t *testing.T) {
 	for _, sideEffect := range []capability.SideEffect{capability.SideEffectRead, capability.SideEffectNone} {
 		action := governedTestAction(sideEffect, capability.RiskLevelRead, "")
-		if GovernedToolReviewed(action) || GovernedToolNeedsReviewSummary(action) {
+		if modelstep.GovernedToolReviewed(action) || modelstep.GovernedToolNeedsReviewSummary(action) {
 			t.Fatalf("%s read must be offered as is", sideEffect)
 		}
-		schema := schemaJSON(t, GovernedToolInputSchema(action))
+		schema := schemaJSON(t, modelstep.GovernedToolInputSchema(action))
 		properties := schema["properties"].(map[string]interface{})
-		if _, ok := properties[GovernedReviewSummaryField]; ok {
+		if _, ok := properties[modelstep.GovernedReviewSummaryField]; ok {
 			t.Fatal("read got _reviewSummary")
 		}
 		if _, ok := properties["text"]; !ok || len(properties) != 1 {
@@ -171,7 +172,7 @@ func TestGovernedSchemaReadUnchanged(t *testing.T) {
 		}
 	}
 	empty := capability.ModelAction{Name: "demo.list", Risk: capability.RiskLevelRead, SideEffect: capability.SideEffectRead}
-	if got := GovernedToolInputSchema(empty); !reflect.DeepEqual(got, map[string]interface{}{"type": "object"}) {
+	if got := modelstep.GovernedToolInputSchema(empty); !reflect.DeepEqual(got, map[string]interface{}{"type": "object"}) {
 		t.Fatalf("empty schema = %v", got)
 	}
 }
@@ -180,7 +181,7 @@ func TestGovernedSchemaNonExtendableUnchanged(t *testing.T) {
 	cases := map[string]func(map[string]interface{}){
 		"open object": func(s map[string]interface{}) { s["additionalProperties"] = true },
 		"collision": func(s map[string]interface{}) {
-			s["properties"].(map[string]interface{})[GovernedReviewSummaryField] = map[string]interface{}{"type": "string"}
+			s["properties"].(map[string]interface{})[modelstep.GovernedReviewSummaryField] = map[string]interface{}{"type": "string"}
 		},
 		"object keyword": func(s map[string]interface{}) { s["minProperties"] = 1 },
 		"root ref": func(s map[string]interface{}) {
@@ -191,15 +192,15 @@ func TestGovernedSchemaNonExtendableUnchanged(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			action := governedTestAction(capability.SideEffectWrite, capability.RiskLevelWrite, "")
 			mutate(action.InputSchema)
-			if GovernedToolNeedsReviewSummary(action) {
+			if modelstep.GovernedToolNeedsReviewSummary(action) {
 				t.Fatal("non-extendable schema must not need _reviewSummary")
 			}
-			if _, ok := GovernedToolInputSchema(action)["properties"].(map[string]interface{})[GovernedReviewSummaryField]; ok && name != "collision" {
+			if _, ok := modelstep.GovernedToolInputSchema(action)["properties"].(map[string]interface{})[modelstep.GovernedReviewSummaryField]; ok && name != "collision" {
 				t.Fatal("non-extendable schema got _reviewSummary")
 			}
 			// A plain call is accepted and _reviewSummary (if a real field) is kept.
-			input, err := ParseGovernedToolInput(action, json.RawMessage(`{"text":"hi","_reviewSummary":"x"}`), nil)
-			if err != nil || input.ReviewSummary != "" || input.Arguments[GovernedReviewSummaryField] != "x" {
+			input, err := modelstep.ParseGovernedToolInput(action, json.RawMessage(`{"text":"hi","_reviewSummary":"x"}`), nil)
+			if err != nil || input.ReviewSummary != "" || input.Arguments[modelstep.GovernedReviewSummaryField] != "x" {
 				t.Fatalf("parse = %+v, %v", input, err)
 			}
 		})
@@ -210,7 +211,7 @@ const validReviewedInput = `{"arguments":{"text":"Hello"},"reviewContext":{"summ
 
 func TestParseReviewedEnvelopeStrict(t *testing.T) {
 	required := governedTestAction(capability.SideEffectExternal, capability.RiskLevelExternal, capability.ExternalOperationRequired)
-	input, err := ParseGovernedToolInput(required, json.RawMessage(validReviewedInput), nil)
+	input, err := modelstep.ParseGovernedToolInput(required, json.RawMessage(validReviewedInput), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func TestParseReviewedEnvelopeStrict(t *testing.T) {
 		"invalid externalOperation":   {required, `{"arguments":{},"reviewContext":{"summary":"s","content":"c"},"externalOperation":{"resource":"#g","operation":"a/b"}}`, runtimeaction.ProposalRejectionExternalIdentityInvalid},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseGovernedToolInput(tc.action, json.RawMessage(tc.raw), nil)
+			_, err := modelstep.ParseGovernedToolInput(tc.action, json.RawMessage(tc.raw), nil)
 			expectRejection(t, err, tc.code)
 		})
 	}
@@ -250,13 +251,13 @@ func TestReviewedActionRequiresContent(t *testing.T) {
 			`{"arguments":{"text":"x"},"reviewContext":{"summary":"Delete the draft"}}`,
 			`{"arguments":{"text":"x"},"reviewContext":{"summary":"Delete the draft","content":"  "}}`,
 		} {
-			_, err := ParseGovernedToolInput(action, json.RawMessage(raw), nil)
+			_, err := modelstep.ParseGovernedToolInput(action, json.RawMessage(raw), nil)
 			rejection := expectRejection(t, err, runtimeaction.ProposalRejectionReviewInvalid)
 			if !strings.Contains(rejection.Message, "content") || !errors.Is(err, runtimeaction.ErrInvalidApprovalReviewContext) {
 				t.Fatalf("rejection = %q (%v)", rejection.Message, err)
 			}
 		}
-		input, err := ParseGovernedToolInput(action, json.RawMessage(`{"arguments":{"text":"x"},"reviewContext":{"summary":"Delete the draft","content":"Draft: Q3 plan"}}`), nil)
+		input, err := modelstep.ParseGovernedToolInput(action, json.RawMessage(`{"arguments":{"text":"x"},"reviewContext":{"summary":"Delete the draft","content":"Draft: Q3 plan"}}`), nil)
 		if err != nil || input.ReviewContext.Content != "Draft: Q3 plan" {
 			t.Fatalf("parse = %+v, %v", input, err)
 		}
@@ -265,7 +266,7 @@ func TestReviewedActionRequiresContent(t *testing.T) {
 
 func TestParseStripsReviewSummaryAndIdempotencyKey(t *testing.T) {
 	write := governedTestAction(capability.SideEffectWrite, capability.RiskLevelWrite, "")
-	input, err := ParseGovernedToolInput(write, json.RawMessage(`{"text":"x","idempotencyKey":"k","_reviewSummary":"  Save the note to Inbox.  "}`), nil)
+	input, err := modelstep.ParseGovernedToolInput(write, json.RawMessage(`{"text":"x","idempotencyKey":"k","_reviewSummary":"  Save the note to Inbox.  "}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,23 +280,23 @@ func TestParseStripsReviewSummaryAndIdempotencyKey(t *testing.T) {
 		"too long": `{"text":"x","_reviewSummary":"` + strings.Repeat("é", 601) + `"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseGovernedToolInput(write, json.RawMessage(raw), nil)
+			_, err := modelstep.ParseGovernedToolInput(write, json.RawMessage(raw), nil)
 			rejection := expectRejection(t, err, runtimeaction.ProposalRejectionReviewInvalid)
 			if rejection.Message != "_reviewSummary must be one sentence of 1 to 600 characters." {
 				t.Fatalf("message = %q", rejection.Message)
 			}
 		})
 	}
-	if _, err := ParseGovernedToolInput(write, json.RawMessage(`{"text":"x","_reviewSummary":"`+strings.Repeat("é", 600)+`"}`), nil); err != nil {
+	if _, err := modelstep.ParseGovernedToolInput(write, json.RawMessage(`{"text":"x","_reviewSummary":"`+strings.Repeat("é", 600)+`"}`), nil); err != nil {
 		t.Fatalf("600 runes rejected: %v", err)
 	}
 	reviewed := governedTestAction(capability.SideEffectExternal, capability.RiskLevelExternal, capability.ExternalOperationOptional)
-	input, err = ParseGovernedToolInput(reviewed, json.RawMessage(`{"arguments":{"text":"x","idempotencyKey":"k"},"reviewContext":{"summary":"s","content":"c"}}`), nil)
+	input, err = modelstep.ParseGovernedToolInput(reviewed, json.RawMessage(`{"arguments":{"text":"x","idempotencyKey":"k"},"reviewContext":{"summary":"s","content":"c"}}`), nil)
 	if err != nil || !reflect.DeepEqual(input.Arguments, map[string]interface{}{"text": "x"}) {
 		t.Fatalf("reviewed = %+v, %v", input, err)
 	}
 	read := governedTestAction(capability.SideEffectRead, capability.RiskLevelRead, "")
-	input, err = ParseGovernedToolInput(read, json.RawMessage(`{"text":"x","idempotencyKey":"k"}`), nil)
+	input, err = modelstep.ParseGovernedToolInput(read, json.RawMessage(`{"text":"x","idempotencyKey":"k"}`), nil)
 	if err != nil || !reflect.DeepEqual(input.Arguments, map[string]interface{}{"text": "x"}) || input.ReviewSummary != "" {
 		t.Fatalf("read = %+v, %v", input, err)
 	}
@@ -303,12 +304,12 @@ func TestParseStripsReviewSummaryAndIdempotencyKey(t *testing.T) {
 
 func TestParseDirectiveOverrides(t *testing.T) {
 	reviewed := governedTestAction(capability.SideEffectExternal, capability.RiskLevelExternal, capability.ExternalOperationRequired)
-	directive := &governedInputDirective{
+	directive := &modelstep.GovernedInputDirective{
 		Summary:           "Post the weekly report",
 		ExternalOperation: &ExternalOperationIdentity{Resource: "#reports", Operation: "post_weekly"},
 		ReviewContext:     &ApprovalReviewContext{Summary: "Weekly report"},
 	}
-	input, err := ParseGovernedToolInput(reviewed, json.RawMessage(`{"text":"report","idempotencyKey":"k"}`), directive)
+	input, err := modelstep.ParseGovernedToolInput(reviewed, json.RawMessage(`{"text":"report","idempotencyKey":"k"}`), directive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,20 +320,20 @@ func TestParseDirectiveOverrides(t *testing.T) {
 	if input.ExternalOperation == directive.ExternalOperation || input.ReviewContext == directive.ReviewContext {
 		t.Fatal("directive values must be copied")
 	}
-	input, err = ParseGovernedToolInput(reviewed, json.RawMessage(`{"text":"report"}`), &governedInputDirective{
+	input, err = modelstep.ParseGovernedToolInput(reviewed, json.RawMessage(`{"text":"report"}`), &modelstep.GovernedInputDirective{
 		ExternalOperation: directive.ExternalOperation, ReviewContext: directive.ReviewContext,
 	})
 	if err != nil || input.ReviewSummary != "Weekly report" {
 		t.Fatalf("summary from review context = %+v, %v", input, err)
 	}
-	_, err = ParseGovernedToolInput(reviewed, json.RawMessage(`{"text":"report"}`), &governedInputDirective{Summary: "x"})
+	_, err = modelstep.ParseGovernedToolInput(reviewed, json.RawMessage(`{"text":"report"}`), &modelstep.GovernedInputDirective{Summary: "x"})
 	expectRejection(t, err, runtimeaction.ProposalRejectionExternalIdentityInvalid)
 	write := governedTestAction(capability.SideEffectWrite, capability.RiskLevelWrite, "")
-	input, err = ParseGovernedToolInput(write, json.RawMessage(`{"text":"x"}`), &governedInputDirective{Summary: "Save it"})
+	input, err = modelstep.ParseGovernedToolInput(write, json.RawMessage(`{"text":"x"}`), &modelstep.GovernedInputDirective{Summary: "Save it"})
 	if err != nil || input.ReviewSummary != "Save it" {
 		t.Fatalf("write directive = %+v, %v", input, err)
 	}
-	_, err = ParseGovernedToolInput(write, json.RawMessage(`{"text":"x"}`), &governedInputDirective{ReviewContext: &ApprovalReviewContext{}})
+	_, err = modelstep.ParseGovernedToolInput(write, json.RawMessage(`{"text":"x"}`), &modelstep.GovernedInputDirective{ReviewContext: &ApprovalReviewContext{}})
 	expectRejection(t, err, runtimeaction.ProposalRejectionReviewInvalid)
 }
 
@@ -347,7 +348,7 @@ func TestNarrationSummaryFirstSentence(t *testing.T) {
 		"No ending":                              "No ending",
 		strings.Repeat("ab", 400):                strings.Repeat("ab", 300),
 	} {
-		if got := narrationSummary(narration); got != want {
+		if got := modelstep.NarrationSummary(narration); got != want {
 			t.Errorf("narrationSummary(%q) = %q, want %q", narration, got, want)
 		}
 	}

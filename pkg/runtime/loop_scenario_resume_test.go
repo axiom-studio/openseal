@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // resumeTrapStore sits over the fixture's crash store and kills the worker
@@ -639,7 +640,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 				return nil
 			}
 			failed = true
-			return fmt.Errorf("record step: %w", ErrTurnHostUnavailable)
+			return fmt.Errorf("record step: %w", modelstep.ErrTurnHostUnavailable)
 		}
 
 		final := f.driveToRest(run.ID, 6)

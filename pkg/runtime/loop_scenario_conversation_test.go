@@ -23,6 +23,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -554,7 +555,7 @@ func convMemberAgentBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerB
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 	})
 	host := fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}
-	producer, err := NewModelStepProducer(host, preparer, f.store)
+	producer, err := modelstep.NewModelStepProducer(host, preparer, f.store)
 	if err != nil {
 		f.t.Fatal(err)
 	}
