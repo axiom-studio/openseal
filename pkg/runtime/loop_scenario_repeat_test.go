@@ -97,6 +97,24 @@ func repeatCallsByStatus(f *loopFixture, runID, action string, status ActionCall
 	return out
 }
 
+// The repeat guard's model-facing texts, spelled out so the scenarios pin
+// what the model reads. times is "twice" or "<n> times".
+func wantRepeatNote(priorStep int64) string {
+	return fmt.Sprintf("You already made this exact call at step %d and got the same result. Use that result instead of calling again.", priorStep)
+}
+
+func wantRepeatRefused(times string, priorStep int64) string {
+	return fmt.Sprintf("Not run: this exact call was already made %s in this run with the same result (last at step %d). Use the earlier result, try a different step, or say what is blocking you.", times, priorStep)
+}
+
+func wantRepeatLimit(times string) string {
+	return fmt.Sprintf("Not run: this exact call has now been repeated %s without progress, so this run is stopping.", times)
+}
+
+func wantRepeatSuppressed(priorStep int64) string {
+	return fmt.Sprintf("Not run: this exact call already succeeded at step %d, so it was not repeated. If it really has to happen again, tell the user; a new request can do it. Its result was:", priorStep)
+}
+
 func describeRepeatEntries(entries []*SessionEntry) string {
 	parts := make([]string, len(entries))
 	for i, e := range entries {
@@ -143,7 +161,7 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 		if note == nil {
 			t.Fatalf("the second identical call got no note; log %v", f.entryTypes(run.ID))
 		}
-		if want := repeatNoteText(lookups[0].Step, false); !strings.HasPrefix(note.Note.Text, want) {
+		if want := wantRepeatNote(lookups[0].Step); !strings.HasPrefix(note.Note.Text, want) {
 			t.Fatalf("note = %q, want it to start with %q", note.Note.Text, want)
 		}
 		if !strings.Contains(note.Note.Text, fmt.Sprintf("step %d", lookups[0].Step)) {
@@ -157,11 +175,12 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 		}
 		for i, entry := range lookups[2:4] {
 			count := i + 3
+			times := []string{"twice", "3 times"}[i]
 			if entry.State != ToolEntryError || repeatGuard(entry) != RefusedLoopCallRepeat ||
 				entry.Tool.Result.Status != ToolResultRefused || !entry.Tool.Result.IsError {
 				t.Fatalf("call %d = %s, want refused", count, describeRepeatEntries(lookups))
 			}
-			if want := repeatRefusedText(count, lookups[1].Step); repeatResultText(entry) != want {
+			if want := wantRepeatRefused(times, lookups[1].Step); repeatResultText(entry) != want {
 				t.Fatalf("call %d text = %q, want %q", count, repeatResultText(entry), want)
 			}
 		}
@@ -169,7 +188,7 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 			t.Fatalf("3rd call text = %q, want it to say the call was already made twice", repeatResultText(lookups[2]))
 		}
 		fifth := lookups[4]
-		if fifth.State != ToolEntryError || repeatGuard(fifth) != RefusedLoopCallRepeatLimit || repeatResultText(fifth) != repeatLimitText(5) {
+		if fifth.State != ToolEntryError || repeatGuard(fifth) != RefusedLoopCallRepeatLimit || repeatResultText(fifth) != wantRepeatLimit("5 times") {
 			t.Fatalf("5th call = %s, want the repeat_limit refusal", describeRepeatEntries(lookups[4:]))
 		}
 
@@ -201,8 +220,9 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 			final.FailureExplanation.Kind != RunFailureKindRepeatLimit || !final.FailureExplanation.Explained {
 			t.Fatalf("failure = %#v, want an explained repeat_limit", final.FailureExplanation)
 		}
-		if final.Error != runFailureMessageRepeatLimit {
-			t.Fatalf("run error = %q, want %q", final.Error, runFailureMessageRepeatLimit)
+		const repeatLimitMessage = "The agent repeated the same call without making progress, so the run was stopped."
+		if final.Error != repeatLimitMessage {
+			t.Fatalf("run error = %q, want %q", final.Error, repeatLimitMessage)
 		}
 		messages := f.messages(conversation.ID)
 		last := messages[len(messages)-1]
@@ -404,7 +424,7 @@ func TestLoopIdenticalWriteAfterSuccessIsSuppressed(t *testing.T) {
 			t.Fatalf("second send = %s (dup of %q), want duplicate_suppressed of the first", describeRepeatEntries(sends[1:]), second.Tool.DuplicateOfEntryID)
 		}
 		text := repeatResultText(second)
-		if !strings.HasPrefix(text, repeatSuppressedText(sends[0].Step)) || !strings.Contains(text, fmt.Sprintf("already succeeded at step %d", sends[0].Step)) {
+		if !strings.HasPrefix(text, wantRepeatSuppressed(sends[0].Step)) || !strings.Contains(text, fmt.Sprintf("already succeeded at step %d", sends[0].Step)) {
 			t.Fatalf("suppressed text = %q", text)
 		}
 		if !strings.Contains(text, repeatResultText(sends[0])) || !strings.Contains(text, "sent") {
@@ -442,7 +462,7 @@ func TestLoopIdenticalWriteAfterFailureMayRetry(t *testing.T) {
 			defer mu.Unlock()
 			attempts++
 			if attempts == 1 {
-				return nil, explicitActionResultFailure(map[string]interface{}{"success": false, "error": "the mail relay is down"})
+				return nil, errors.New("the mail relay is down")
 			}
 			return map[string]interface{}{"sent": true}, nil
 		})

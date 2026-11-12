@@ -20,6 +20,20 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+// waitCredentialRequestOutput is what request_credential returns for the
+// request it saved: the request's JSON under credentialRequest.
+func waitCredentialRequestOutput(request *CredentialRequest) (map[string]interface{}, error) {
+	data, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+	var value map[string]interface{}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"credentialRequest": value}, nil
+}
+
 // waitCardSkills binds the kernel's Skill management Skill (request_credential,
 // request_connection) and a Mail Skill whose send uses each person's own
 // Google account to finn, next to the fixture Skill.
@@ -167,7 +181,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 				if err := f.raw.(CredentialRequestStore).SaveCredentialRequest(f.ctx, request, 0); err != nil {
 					return nil, err
 				}
-				return credentialRequestResult(request)
+				return waitCredentialRequestOutput(request)
 			})
 			f.model.add(waitCardRules(t, SkillActionRequestCredential, func(v stepView) ModelStepResult {
 				return act("I need your card.", call(waitTool(t, v, SkillActionRequestCredential), map[string]any{"kind": CredentialRequestKindPaymentCard, "reason": "Add your card so I can pay"}))
@@ -254,13 +268,12 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 
 	t.Run("connect_account", func(t *testing.T) {
 		eachStore(t, "wait-connect-account", func(t *testing.T, store KernelStore) {
-			f := newLoopFixture(t, store)
+			f := newLoopFixture(t, store, withCredentials(CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+				return map[string]string{"google": "token"}, nil
+			})))
 			waitCardSkills(f)
 			connected := false
-			f.executor.credentials = CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
-				return map[string]string{"google": "token"}, nil
-			})
-			f.executor.setCredentialAvailabilityChecker(availabilityFunc(func(_ context.Context, req CredentialAvailabilityRequest) (CredentialAvailability, error) {
+			f.executor.SetCredentialAvailabilityChecker(availabilityFunc(func(_ context.Context, req CredentialAvailabilityRequest) (CredentialAvailability, error) {
 				if connected {
 					return CredentialAvailability{}, nil
 				}
@@ -341,7 +354,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			conversation, run := f.startChat("Look up 6815")
 			steerToRest(f, run.ID, 4)
 			tool := kitGovernedTool(stepView{req: convFirstStep(f, run.ID)}, "lookup")
-			waitParked(f, run.ID, tool, governedHumanInterventionWakeType)
+			waitParked(f, run.ID, tool, "human_intervention")
 			parked := f.mustRun(run.ID)
 			if len(parked.HumanInterventions) != 1 || parked.HumanInterventions[0].Status != HumanInterventionStatusPending ||
 				parked.WakeCondition.Reference != parked.HumanInterventions[0].ID {

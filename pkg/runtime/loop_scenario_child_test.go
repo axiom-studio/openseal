@@ -95,10 +95,11 @@ func (c childTeamCatalog) GetTeamDefinition(_ context.Context, id, version strin
 	}, nil
 }
 
-// childCollaborationStore adds the Team definitions to the collaboration
-// store, as the production store with the Team registry does.
-type childCollaborationStore struct {
-	CollaborationStore
+// childTeamStore adds the crew's Team catalog to the store, as the
+// production store with the Team registry does, so the collaboration services
+// read Team rosters and delegation policies from it.
+type childTeamStore struct {
+	childTestStore
 	childTeamCatalog
 }
 
@@ -114,15 +115,15 @@ func newChildFixture(t *testing.T, store KernelStore, opts ...loopOption) *child
 	if !ok {
 		t.Fatalf("%T lacks the dependency and collaboration stores", f.raw)
 	}
-	teams := childTeamCatalog{scope: capability.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}}
-	collab := NewCollaborationService(stores, models.WithClock(f.clock.Now))
-	collab.teams = teams
-	collab.store = childCollaborationStore{CollaborationStore: stores, childTeamCatalog: teams}
-	commands := NewRunCommandService(stores, models.WithClock(f.clock.Now))
+	teams := childTeamStore{childTestStore: stores, childTeamCatalog: childTeamCatalog{scope: capability.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}}}
+	collab := NewCollaborationService(teams, models.WithClock(f.clock.Now))
+	inbox, err := NewAgentRequestInboxReconciler(teams, models.WithClock(f.clock.Now))
+	if err != nil {
+		t.Fatal(err)
+	}
 	c := &childFixture{
 		loopFixture: f, forks: NewRunForkCoordinator(stores, models.WithClock(f.clock.Now)), collab: collab,
-		inbox:    &AgentRequestInboxReconciler{collaboration: collab, commands: commands, now: f.clock.Now},
-		runbooks: map[string]*runbook.Definition{}, claims: map[string]int{},
+		inbox: inbox, runbooks: map[string]*runbook.Definition{}, claims: map[string]int{},
 	}
 	c.forks.SetAcceptedRunExecutionPreparer(childRunbookPreparer{c})
 	if tasks, ok := f.raw.(ConversationTaskKernelStore); ok {
@@ -340,12 +341,7 @@ func (c *childFixture) bindingFor(run *AgentRun) *TurnRunnerBinding {
 		binding.ModelActions = append([]capability.ModelAction(nil), c.offered...)
 	}
 	if run.Kind == RunKindConversation && conversationID != "" && triggerID != "" {
-		if err := c.runner.bindConversationLoop(c.ctx, run, binding, ConversationLoopStores{
-			Sessions: c.store.(AgentSessionStore), Actions: c.store, Activity: c.store,
-		}); err != nil {
-			c.t.Fatalf("bind conversation loop: %v", err)
-		}
-		return binding
+		return c.conversationBinding(run, func(*AgentRun) *TurnRunnerBinding { return binding })
 	}
 	binding.Session = c.runSession(run, true)
 	return binding
@@ -366,13 +362,11 @@ func (c *childFixture) runSession(run *AgentRun, seeded bool) *AgentSession {
 	}
 	var initial []*SessionEntry
 	if seeded {
-		seed, err := loopRunSessionSeed(run)
+		entries, err := loopRunSessionSeedEntries(c.ctx, c.store, nil, nil, run)
 		if err != nil {
 			c.t.Fatal(err)
 		}
-		if seed != nil {
-			initial = []*SessionEntry{seed}
-		}
+		initial = entries
 	}
 	now := c.clock.Now()
 	opened, err := sessions.CreateRunAgentSession(c.ctx, CreateRunAgentSessionRequest{

@@ -204,6 +204,23 @@ func (f *externalLoopFixture) outbox(kind string) []*ExternalConversationDeliver
 	return out
 }
 
+// replyDelivery is the delivery of the reply to the inbox item: the one
+// whose idempotency key names the item, nil when there is none.
+func (f *externalLoopFixture) replyDelivery(itemID string) *ExternalConversationDelivery {
+	f.t.Helper()
+	var found *ExternalConversationDelivery
+	for _, delivery := range f.outbox("") {
+		if delivery.IdempotencyKey != "external-conversation-reply-delivery:"+itemID {
+			continue
+		}
+		if found != nil {
+			f.t.Fatalf("two reply deliveries for item %s: %s and %s", itemID, found.ID, delivery.ID)
+		}
+		found = delivery
+	}
+	return found
+}
+
 func (f *externalLoopFixture) operations() []capability.ConversationDeliveryOperation {
 	out := make([]capability.ConversationDeliveryOperation, 0, len(f.host.requests))
 	for _, request := range f.host.requests {
@@ -498,10 +515,10 @@ func TestExternalAnswerStreamFollowsTheLoopPreview(t *testing.T) {
 			f.reply()
 			f.mustDeliverAll()
 		}
-		final, err := f.ext.GetExternalConversationDelivery(f.ctx, f.scope, stableExternalConversationID(f.scope, f.endpoint.ID, "delivery", externalConversationReplyKey(chat.item.ID)))
-		if err != nil || final == nil || final.Operation != capability.ConversationDeliveryMessageUpdate || final.Parameters["providerMessageId"] != "chat-1" ||
+		final := f.replyDelivery(chat.item.ID)
+		if final == nil || final.Operation != capability.ConversationDeliveryMessageUpdate || final.Parameters["providerMessageId"] != "chat-1" ||
 			final.Status != ExternalConversationDeliveryDelivered {
-			t.Fatalf("committed reply = %#v, %v", final, err)
+			t.Fatalf("committed reply = %#v", final)
 		}
 		answer := lastAgentMessage(f.messages(chat.conversation.ID), MessageIntentAnswer)
 		if answer == nil || answer.Content != finalAnswer || final.ChannelMessageID != answer.ID {
@@ -556,12 +573,8 @@ func TestProgressAcknowledgementIsOneToolFreeStepWithoutSession(t *testing.T) {
 						}},
 					&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return say("The deployment is healthy.") }},
 				))
-				renderer.inner = &modelStepProgressAcknowledgementRenderer{
-					host: fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}, agentID: loopFixtureAgent,
-					definitionID: loopFixtureDefinition, definitionVersion: "1",
-					system: []string{"You are finn, the fixture Agent.", runProgressAcknowledgementSystemInstruction},
-					now:    f.clock.Now,
-				}
+				renderer.inner = newProgressAcknowledgementRenderer(fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}, loopFixtureAgent,
+					loopFixtureDefinition, "1", nil, []string{"You are finn, the fixture Agent."}, models.WithClock(f.clock.Now))
 				chat := f.startExternal("Can you check the deployment?")
 				f.clock.Advance(time.Minute)
 
@@ -583,7 +596,7 @@ func TestProgressAcknowledgementIsOneToolFreeStepWithoutSession(t *testing.T) {
 				if steps := f.steps(chat.run.ID); len(steps) != 0 {
 					t.Fatalf("the acknowledgement wrote %d step rows", len(steps))
 				}
-				acknowledgements := f.outbox(runProgressAcknowledgementCorrelationKind)
+				acknowledgements := f.outbox("run_acknowledgement")
 				messages := f.messages(chat.conversation.ID)
 				if c.toolCall {
 					if err == nil || !strings.Contains(err.Error(), "actionable progress acknowledgement") || len(deliveries) != 0 || len(acknowledgements) != 0 || len(messages) != 1 {

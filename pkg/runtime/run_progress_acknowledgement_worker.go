@@ -358,11 +358,12 @@ type modelStepProgressAcknowledgementRenderer struct {
 // newProgressAcknowledgementRenderer renders through host as the Agent
 // agentID at its definition version, with its model credential and
 // instructions (the system prompt adds the acknowledgement rules).
-func newProgressAcknowledgementRenderer(host StepHost, agentID, definitionID, definitionVersion string, modelCredential *capability.CredentialReference, instructions []string) *modelStepProgressAcknowledgementRenderer {
+func newProgressAcknowledgementRenderer(host StepHost, agentID, definitionID, definitionVersion string, modelCredential *capability.CredentialReference, instructions []string, opts ...models.ServiceOption) *modelStepProgressAcknowledgementRenderer {
 	return &modelStepProgressAcknowledgementRenderer{
 		host: host, agentID: agentID, definitionID: definitionID, definitionVersion: definitionVersion,
 		modelCredential: modelCredential,
 		system:          append(append([]string(nil), instructions...), runProgressAcknowledgementSystemInstruction),
+		now:             models.ClockFrom(opts),
 	}
 }
 
