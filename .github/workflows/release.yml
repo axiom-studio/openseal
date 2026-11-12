@@ -258,8 +258,8 @@ jobs:
   #
   # Why native rather than a single cross-building job: the daemon links
   # github.com/mattn/go-sqlite3, so cgo is mandatory. `CGO_ENABLED=0` does not
-  # degrade the binary, it fails to compile outright (undefined: sqlite3.Error
-  # and two siblings in pkg/runtime/authoring_apply_sqlite.go). Cross-compiling
+  # degrade the binary, it fails to compile outright (pkg/runtime/store/sqlite
+  # uses go-sqlite3's cgo types). Cross-compiling
   # cgo needs a C toolchain per target, and darwin additionally needs the
   # platform SDK. Building natively on each runner avoids all of it — and the
   # desktop job needs these same runners regardless, so it costs no extra

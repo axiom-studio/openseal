@@ -45,7 +45,7 @@ export type Reply = {
   usage?: { prompt_tokens: number; completion_tokens: number };
 };
 
-// Kernel tool names (pkg/runtime/control_tools.go). One place to change.
+// Kernel tool names (pkg/runtime/control/control_tools.go). One place to change.
 export const FINAL_TOOL = "turn_final_answer";
 export const DELEGATE_TOOL = "agent_delegate";
 export const REQUEST_DECISION_TOOL = "agent_request_decision";
@@ -54,7 +54,7 @@ export const COMPLETION_REVIEW_TOOL = "agent_request_review";
 export const ROUTE_TOOL = "route_message";
 export const LOAD_TOOL = "load_capabilities";
 
-// The builder's governed tools (pkg/runtime/run_loop_prepare.go names a
+// The builder's governed tools (pkg/runtime/runloop/run_loop_prepare.go names a
 // governed action "action_" + its model name with dots as underscores).
 export const CREATE_AGENT_ACTION = "openseal.agents.create_agent";
 export const CREATE_TEAM_ACTION = "openseal.teams.create_team";
