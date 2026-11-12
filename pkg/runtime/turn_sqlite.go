@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func migrateAgentTurns(db *sql.DB) error {
@@ -72,7 +75,7 @@ func addMissingAgentTurnColumns(db *sql.DB) error {
 	return nil
 }
 
-func (s *SQLiteStore) CreateAgentTurn(ctx context.Context, turn *AgentTurn) (*AgentTurn, error) {
+func (s *SQLiteStore) CreateAgentTurn(ctx context.Context, turn *models.AgentTurn) (*models.AgentTurn, error) {
 	if err := turn.Validate(); err != nil {
 		return nil, err
 	}
@@ -94,21 +97,21 @@ func (s *SQLiteStore) CreateAgentTurn(ctx context.Context, turn *AgentTurn) (*Ag
 	err = conn.QueryRowContext(ctx, `SELECT 1 FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		turn.Scope.Kind, turn.Scope.ID, turn.RunID).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
 	err = conn.QueryRowContext(ctx, `SELECT 1 FROM agent_turns
 		WHERE scope_kind = ? AND scope_id = ? AND run_id = ? AND status = ? LIMIT 1`,
-		turn.Scope.Kind, turn.Scope.ID, turn.RunID, AgentTurnStatusRunning).Scan(&exists)
+		turn.Scope.Kind, turn.Scope.ID, turn.RunID, models.AgentTurnStatusRunning).Scan(&exists)
 	if err == nil {
-		return nil, ErrActiveTurnExists
+		return nil, models.ErrActiveTurnExists
 	}
 	if err != sql.ErrNoRows {
 		return nil, err
 	}
-	persisted := cloneAgentTurn(turn)
+	persisted := models.CloneAgentTurn(turn)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM agent_turns
 		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`,
 		turn.Scope.Kind, turn.Scope.ID, turn.RunID).Scan(&persisted.Sequence); err != nil {
@@ -121,10 +124,10 @@ func (s *SQLiteStore) CreateAgentTurn(ctx context.Context, turn *AgentTurn) (*Ag
 		return nil, err
 	}
 	committed = true
-	return cloneAgentTurn(persisted), nil
+	return models.CloneAgentTurn(persisted), nil
 }
 
-func (s *SQLiteStore) GetAgentTurn(ctx context.Context, scope Scope, turnID string) (*AgentTurn, error) {
+func (s *SQLiteStore) GetAgentTurn(ctx context.Context, scope models.Scope, turnID string) (*models.AgentTurn, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -137,15 +140,15 @@ func (s *SQLiteStore) GetAgentTurn(ctx context.Context, scope Scope, turnID stri
 	if err != nil {
 		return nil, err
 	}
-	return decodeAgentTurnRecord(payload)
+	return sqlstore.DecodeAgentTurnRecord(payload)
 }
 
-func (s *SQLiteStore) ListAgentTurns(ctx context.Context, filter AgentTurnFilter) ([]*AgentTurn, error) {
+func (s *SQLiteStore) ListAgentTurns(ctx context.Context, filter models.AgentTurnFilter) ([]*models.AgentTurn, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(filter.RunID) == "" {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
@@ -171,13 +174,13 @@ func (s *SQLiteStore) ListAgentTurns(ctx context.Context, filter AgentTurnFilter
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*AgentTurn, 0, limit)
+	result := make([]*models.AgentTurn, 0, limit)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		turn, err := decodeAgentTurnRecord(payload)
+		turn, err := sqlstore.DecodeAgentTurnRecord(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -186,12 +189,12 @@ func (s *SQLiteStore) ListAgentTurns(ctx context.Context, filter AgentTurnFilter
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error {
+func (s *SQLiteStore) UpdateAgentTurn(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, workerID string) error {
 	if err := turn.Validate(); err != nil {
 		return err
 	}
 	if turn.Revision != expectedRevision+1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	payload, err := json.Marshal(turn)
 	if err != nil {
@@ -209,13 +212,13 @@ func (s *SQLiteStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expe
 		return err
 	}
 	if affected != 1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	return nil
 }
 
-func (s *SQLiteStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentTurn, expectedRevision int64, events []*ActivityEvent) error {
-	if err := validateStepModelRecordInput(turn, expectedRevision, events); err != nil {
+func (s *SQLiteStore) RecordAgentTurnStepModel(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, events []*models.ActivityEvent) error {
+	if err := models.ValidateStepModelRecordInput(turn, expectedRevision, events); err != nil {
 		return err
 	}
 	payload, err := json.Marshal(turn)
@@ -240,7 +243,7 @@ func (s *SQLiteStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentT
 	err = conn.QueryRowContext(ctx, `SELECT 1 FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		turn.Scope.Kind, turn.Scope.ID, turn.RunID).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return ErrRunNotFound
+		return models.ErrRunNotFound
 	}
 	if err != nil {
 		return err
@@ -249,16 +252,16 @@ func (s *SQLiteStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentT
 	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_turns WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		turn.Scope.Kind, turn.Scope.ID, turn.ID).Scan(&currentPayload)
 	if err == sql.ErrNoRows {
-		return ErrTurnNotFound
+		return models.ErrTurnNotFound
 	}
 	if err != nil {
 		return err
 	}
-	current, err := decodeAgentTurnRecord(currentPayload)
+	current, err := sqlstore.DecodeAgentTurnRecord(currentPayload)
 	if err != nil {
 		return err
 	}
-	if err := validateStepModelWrite(current, turn, expectedRevision); err != nil {
+	if err := models.ValidateStepModelWrite(current, turn, expectedRevision); err != nil {
 		return err
 	}
 	result, err := conn.ExecContext(ctx, `UPDATE agent_turns SET status = ?, revision = ?, lease_owner = ?, lease_expires_at = ?, payload = ?
@@ -273,7 +276,7 @@ func (s *SQLiteStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentT
 		return err
 	}
 	if affected != 1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	for _, event := range events {
 		if _, err := insertSQLiteActivityConn(ctx, conn, event); err != nil {
@@ -287,7 +290,7 @@ func (s *SQLiteStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentT
 	return nil
 }
 
-func (s *SQLiteStore) ClaimAgentTurn(ctx context.Context, scope Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentTurn, error) {
+func (s *SQLiteStore) ClaimAgentTurn(ctx context.Context, scope models.Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentTurn, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -311,16 +314,16 @@ func (s *SQLiteStore) ClaimAgentTurn(ctx context.Context, scope Scope, turnID, w
 		WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, turnID).
 		Scan(&payload, &status, &leaseOwner, &leaseExpires)
 	if err == sql.ErrNoRows {
-		return nil, ErrTurnNotFound
+		return nil, models.ErrTurnNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if AgentTurnStatus(status) != AgentTurnStatusRunning ||
+	if models.AgentTurnStatus(status) != models.AgentTurnStatusRunning ||
 		(leaseOwner != workerID && leaseExpires.Valid && leaseExpires.Time.After(now)) {
-		return nil, ErrTurnLeaseHeld
+		return nil, models.ErrTurnLeaseHeld
 	}
-	turn, err := decodeAgentTurnRecord(payload)
+	turn, err := sqlstore.DecodeAgentTurnRecord(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +348,7 @@ func (s *SQLiteStore) ClaimAgentTurn(ctx context.Context, scope Scope, turnID, w
 		return nil, err
 	}
 	if affected != 1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err
@@ -354,7 +357,7 @@ func (s *SQLiteStore) ClaimAgentTurn(ctx context.Context, scope Scope, turnID, w
 	return turn, nil
 }
 
-func insertSQLiteAgentTurn(ctx context.Context, exec sqliteExecer, turn *AgentTurn) error {
+func insertSQLiteAgentTurn(ctx context.Context, exec sqliteExecer, turn *models.AgentTurn) error {
 	payload, err := json.Marshal(turn)
 	if err != nil {
 		return err

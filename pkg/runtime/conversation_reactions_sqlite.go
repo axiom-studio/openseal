@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const sqliteConversationReactionSchema = `
@@ -24,15 +27,15 @@ func migrateSQLiteConversationReactions(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) AddMessageReaction(ctx context.Context, record MessageReactionRecord) (*ConversationReactionEvent, error) {
+func (s *SQLiteStore) AddMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
 	return s.changeSQLiteReaction(ctx, record, true)
 }
 
-func (s *SQLiteStore) RemoveMessageReaction(ctx context.Context, record MessageReactionRecord) (*ConversationReactionEvent, error) {
+func (s *SQLiteStore) RemoveMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
 	return s.changeSQLiteReaction(ctx, record, false)
 }
 
-func (s *SQLiteStore) changeSQLiteReaction(ctx context.Context, record MessageReactionRecord, add bool) (*ConversationReactionEvent, error) {
+func (s *SQLiteStore) changeSQLiteReaction(ctx context.Context, record models.MessageReactionRecord, add bool) (*models.ConversationReactionEvent, error) {
 	if err := record.Validate(); err != nil {
 		return nil, err
 	}
@@ -47,17 +50,17 @@ func (s *SQLiteStore) changeSQLiteReaction(ctx context.Context, record MessageRe
 		return nil, err
 	}
 	if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	key := []interface{}{record.Scope.Kind, record.Scope.ID, record.ConversationID, record.MessageID, record.Actor.Type, record.Actor.ID, record.Emoji}
-	eventType := ConversationReactionAdded
+	eventType := models.ConversationReactionAdded
 	var result sql.Result
 	if add {
 		result, err = conn.ExecContext(ctx, `INSERT INTO conversation_message_reactions
 			(scope_kind, scope_id, conversation_id, message_id, actor_type, actor_id, emoji, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`, append(key, record.CreatedAt)...)
 	} else {
-		eventType = ConversationReactionRemoved
+		eventType = models.ConversationReactionRemoved
 		result, err = conn.ExecContext(ctx, `DELETE FROM conversation_message_reactions
 			WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND message_id = ? AND actor_type = ? AND actor_id = ? AND emoji = ?`, key...)
 	}
@@ -79,7 +82,7 @@ func (s *SQLiteStore) changeSQLiteReaction(ctx context.Context, record MessageRe
 		WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ?`, record.Scope.Kind, record.Scope.ID, record.ConversationID).Scan(&sequence); err != nil {
 		return nil, err
 	}
-	event := newConversationReactionEvent(eventType, record, sequence)
+	event := models.NewConversationReactionEvent(eventType, record, sequence)
 	if _, err := conn.ExecContext(ctx, `INSERT INTO conversation_reaction_events
 		(scope_kind, scope_id, conversation_id, sequence, type, message_id, actor_type, actor_id, emoji, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, record.Scope.Kind, record.Scope.ID, record.ConversationID, sequence, eventType,
@@ -93,35 +96,35 @@ func (s *SQLiteStore) changeSQLiteReaction(ctx context.Context, record MessageRe
 	return event, nil
 }
 
-func (s *SQLiteStore) ListMessageReactions(ctx context.Context, scope Scope, conversationID string, messageIDs []string) ([]*MessageReactionRecord, error) {
+func (s *SQLiteStore) ListMessageReactions(ctx context.Context, scope models.Scope, conversationID string, messageIDs []string) ([]*models.MessageReactionRecord, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	if len(messageIDs) == 0 {
-		return []*MessageReactionRecord{}, nil
+		return []*models.MessageReactionRecord{}, nil
 	}
 	args := []interface{}{scope.Kind, scope.ID, conversationID}
 	for _, id := range messageIDs {
 		args = append(args, id)
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT message_id, actor_type, actor_id, emoji, created_at FROM conversation_message_reactions
-		WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND message_id IN (`+reactionMessagePlaceholders(4, len(messageIDs), false)+`)
+		WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND message_id IN (`+sqlstore.ReactionMessagePlaceholders(4, len(messageIDs), false)+`)
 		ORDER BY created_at ASC, actor_type ASC, actor_id ASC, emoji ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
-	return scanMessageReactionRecords(rows, scope, conversationID)
+	return sqlstore.ScanMessageReactionRecords(rows, scope, conversationID)
 }
 
-func (s *SQLiteStore) ListConversationReactionEvents(ctx context.Context, scope Scope, conversationID string, afterSequence int64, limit int) ([]*ConversationReactionEvent, error) {
+func (s *SQLiteStore) ListConversationReactionEvents(ctx context.Context, scope models.Scope, conversationID string, afterSequence int64, limit int) ([]*models.ConversationReactionEvent, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT sequence, type, message_id, actor_type, actor_id, emoji, created_at FROM conversation_reaction_events
 		WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?`,
-		scope.Kind, scope.ID, conversationID, afterSequence, reactionEventLimit(limit))
+		scope.Kind, scope.ID, conversationID, afterSequence, sqlstore.ReactionEventLimit(limit))
 	if err != nil {
 		return nil, err
 	}
-	return scanConversationReactionEvents(rows, scope, conversationID)
+	return sqlstore.ScanConversationReactionEvents(rows, scope, conversationID)
 }

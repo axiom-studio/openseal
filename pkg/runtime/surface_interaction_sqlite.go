@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction *SurfaceInteraction) (*SurfaceInteraction, bool, error) {
+func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction *models.SurfaceInteraction) (*models.SurfaceInteraction, bool, error) {
 	if err := interaction.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -30,7 +33,7 @@ func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction 
 		return nil, false, err
 	}
 	if conversation == nil {
-		return nil, false, ErrConversationNotFound
+		return nil, false, models.ErrConversationNotFound
 	}
 	scope := []interface{}{interaction.Scope.Kind, interaction.Scope.ID, interaction.ConversationID}
 	existing, err := getSQLiteSurfaceInteraction(ctx, conn, `idempotency_key = ?`, append(scope, interaction.IdempotencyKey)...)
@@ -38,8 +41,8 @@ func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction 
 		return nil, false, err
 	}
 	if existing != nil {
-		if !sameSurfaceInteractionTarget(existing, interaction) {
-			return nil, false, &SurfaceInteractionConflictError{Existing: existing}
+		if !models.SameSurfaceInteractionTarget(existing, interaction) {
+			return nil, false, &models.SurfaceInteractionConflictError{Existing: existing}
 		}
 		return existing, true, commit()
 	}
@@ -50,10 +53,10 @@ func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction 
 			return nil, false, err
 		}
 		if existing != nil {
-			return nil, false, &SurfaceInteractionConflictError{Existing: existing}
+			return nil, false, &models.SurfaceInteractionConflictError{Existing: existing}
 		}
 	}
-	created := cloneSurfaceInteraction(interaction)
+	created := models.CloneSurfaceInteraction(interaction)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM surface_interactions
 		WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ?`, scope...).Scan(&created.Sequence); err != nil {
 		return nil, false, err
@@ -69,24 +72,24 @@ func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction 
 		created.ID, created.Sequence, created.SurfaceArtifactID, created.SurfaceID, created.SurfaceVersion, created.MessageID, created.ComponentID,
 		created.ItemKey, created.ActorType, created.ActorID, created.Repeatable, created.IdempotencyKey, created.CreatedAt, string(payload)); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return nil, false, ErrSurfaceInteractionConflict
+			return nil, false, models.ErrSurfaceInteractionConflict
 		}
 		return nil, false, err
 	}
 	if err := commit(); err != nil {
 		return nil, false, err
 	}
-	return cloneSurfaceInteraction(created), false, nil
+	return models.CloneSurfaceInteraction(created), false, nil
 }
 
-func (s *SQLiteStore) ListSurfaceInteractions(ctx context.Context, filter SurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
+func (s *SQLiteStore) ListSurfaceInteractions(ctx context.Context, filter models.SurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
 	if conversation, err := getSQLiteConversation(ctx, s.db, filter.Scope, filter.ConversationID); err != nil {
 		return nil, err
 	} else if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	query := `SELECT payload FROM surface_interactions WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND sequence > ?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, filter.AfterSequence}
@@ -98,29 +101,29 @@ func (s *SQLiteStore) ListSurfaceInteractions(ctx context.Context, filter Surfac
 	if err != nil {
 		return nil, err
 	}
-	return scanSurfaceInteractions(rows)
+	return sqlstore.ScanSurfaceInteractions(rows)
 }
 
-func (s *SQLiteStore) ListLatestSurfaceInteractions(ctx context.Context, filter LatestSurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
+func (s *SQLiteStore) ListLatestSurfaceInteractions(ctx context.Context, filter models.LatestSurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
 	if conversation, err := getSQLiteConversation(ctx, s.db, filter.Scope, filter.ConversationID); err != nil {
 		return nil, err
 	} else if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
-	rows, err := s.db.QueryContext(ctx, latestSurfaceInteractionQuery("surface_interactions", filter.AcrossActors, [4]string{"?", "?", "?", "?"}),
+	rows, err := s.db.QueryContext(ctx, sqlstore.LatestSurfaceInteractionQuery("surface_interactions", filter.AcrossActors, [4]string{"?", "?", "?", "?"}),
 		filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, filter.SurfaceID)
 	if err != nil {
 		return nil, err
 	}
-	return scanSurfaceInteractions(rows)
+	return sqlstore.ScanSurfaceInteractions(rows)
 }
 
 // getSQLiteSurfaceInteraction reads one interaction of a conversation; where
 // filters after the leading scope and conversation parameters.
-func getSQLiteSurfaceInteraction(ctx context.Context, queryer sqliteConversationQueryer, where string, args ...interface{}) (*SurfaceInteraction, error) {
+func getSQLiteSurfaceInteraction(ctx context.Context, queryer sqliteConversationQueryer, where string, args ...interface{}) (*models.SurfaceInteraction, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM surface_interactions
 		WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND `+where+` ORDER BY sequence LIMIT 1`, args...).Scan(&payload)
@@ -130,5 +133,5 @@ func getSQLiteSurfaceInteraction(ctx context.Context, queryer sqliteConversation
 	if err != nil {
 		return nil, err
 	}
-	return decodeSurfaceInteraction(payload)
+	return sqlstore.DecodeSurfaceInteraction(payload)
 }

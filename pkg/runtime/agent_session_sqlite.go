@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // SQLite backend of AgentSessionStore (run-loop SPEC §2.1, section 01 §2.2).
@@ -17,7 +19,7 @@ import (
 // variants for stores that already hold a BEGIN IMMEDIATE connection (child
 // Run, dependency group, AgentRequest and ConversationTask create, promotion).
 
-var _ AgentSessionStore = (*SQLiteStore)(nil)
+var _ models.AgentSessionStore = (*SQLiteStore)(nil)
 
 // migrateAgentSessionLogSQLite mirrors PostgreSQL migration 75 and is safe to
 // replay on every open. It creates tables only.
@@ -119,24 +121,24 @@ type sqliteSessionQueryer interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 }
 
-func getSQLiteAgentSession(ctx context.Context, q sqliteSessionQueryer, scope Scope, sessionID string) (*AgentSession, error) {
+func getSQLiteAgentSession(ctx context.Context, q sqliteSessionQueryer, scope models.Scope, sessionID string) (*models.AgentSession, error) {
 	var payload string
 	err := q.QueryRowContext(ctx, `SELECT payload FROM agent_sessions WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		scope.Kind, scope.ID, sessionID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrAgentSessionNotFound
+		return nil, models.ErrAgentSessionNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	var session AgentSession
+	var session models.AgentSession
 	if err := json.Unmarshal([]byte(payload), &session); err != nil {
 		return nil, fmt.Errorf("decode agent session: %w", err)
 	}
 	return &session, nil
 }
 
-func insertSQLiteAgentSession(ctx context.Context, conn *sql.Conn, session *AgentSession) error {
+func insertSQLiteAgentSession(ctx context.Context, conn *sql.Conn, session *models.AgentSession) error {
 	if err := session.Validate(); err != nil {
 		return err
 	}
@@ -153,12 +155,12 @@ func insertSQLiteAgentSession(ctx context.Context, conn *sql.Conn, session *Agen
 		session.Depth, session.NextSequence, session.ChannelWatermark, session.Revision,
 		sqliteSessionTime(session.CreatedAt), sqliteSessionTime(session.UpdatedAt), string(payload))
 	if sqliteUniqueViolation(err) {
-		return ErrAgentSessionConflict
+		return models.ErrAgentSessionConflict
 	}
 	return err
 }
 
-func updateSQLiteAgentSession(ctx context.Context, conn *sql.Conn, session *AgentSession, expectedRevision int64) error {
+func updateSQLiteAgentSession(ctx context.Context, conn *sql.Conn, session *models.AgentSession, expectedRevision int64) error {
 	if err := session.Validate(); err != nil {
 		return err
 	}
@@ -176,25 +178,25 @@ func updateSQLiteAgentSession(ctx context.Context, conn *sql.Conn, session *Agen
 	if affected, err := result.RowsAffected(); err != nil {
 		return err
 	} else if affected != 1 {
-		return ErrAgentSessionConflict
+		return models.ErrAgentSessionConflict
 	}
 	return nil
 }
 
-func decodeSQLiteSessionEntry(payload string) (*SessionEntry, error) {
-	var entry SessionEntry
+func decodeSQLiteSessionEntry(payload string) (*models.SessionEntry, error) {
+	var entry models.SessionEntry
 	if err := json.Unmarshal([]byte(payload), &entry); err != nil {
 		return nil, fmt.Errorf("decode agent session entry: %w", err)
 	}
 	return &entry, nil
 }
 
-func getSQLiteSessionEntry(ctx context.Context, q sqliteSessionQueryer, scope Scope, entryID string) (*SessionEntry, error) {
+func getSQLiteSessionEntry(ctx context.Context, q sqliteSessionQueryer, scope models.Scope, entryID string) (*models.SessionEntry, error) {
 	var payload string
 	err := q.QueryRowContext(ctx, `SELECT payload FROM agent_session_entries WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		scope.Kind, scope.ID, entryID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrSessionEntryNotFound
+		return nil, models.ErrSessionEntryNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -202,13 +204,13 @@ func getSQLiteSessionEntry(ctx context.Context, q sqliteSessionQueryer, scope Sc
 	return decodeSQLiteSessionEntry(payload)
 }
 
-func querySQLiteSessionEntries(ctx context.Context, q sqliteSessionQueryer, query string, args ...interface{}) ([]*SessionEntry, error) {
+func querySQLiteSessionEntries(ctx context.Context, q sqliteSessionQueryer, query string, args ...interface{}) ([]*models.SessionEntry, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*SessionEntry
+	var out []*models.SessionEntry
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
@@ -225,7 +227,7 @@ func querySQLiteSessionEntries(ctx context.Context, q sqliteSessionQueryer, quer
 
 // latestSQLiteSessionEntry is the highest-sequence entry of one type in a
 // session at or below bound, or nil.
-func latestSQLiteSessionEntry(ctx context.Context, q sqliteSessionQueryer, session *AgentSession, kind SessionEntryType, bound int64) (*SessionEntry, error) {
+func latestSQLiteSessionEntry(ctx context.Context, q sqliteSessionQueryer, session *models.AgentSession, kind models.SessionEntryType, bound int64) (*models.SessionEntry, error) {
 	entries, err := querySQLiteSessionEntries(ctx, q, `SELECT payload FROM agent_session_entries
 		WHERE scope_kind = ? AND scope_id = ? AND session_id = ? AND type = ? AND sequence <= ?
 		ORDER BY sequence DESC LIMIT 1`, session.Scope.Kind, session.Scope.ID, session.ID, kind, bound)
@@ -235,7 +237,7 @@ func latestSQLiteSessionEntry(ctx context.Context, q sqliteSessionQueryer, sessi
 	return entries[0], nil
 }
 
-func insertSQLiteSessionEntry(ctx context.Context, conn *sql.Conn, entry *SessionEntry) error {
+func insertSQLiteSessionEntry(ctx context.Context, conn *sql.Conn, entry *models.SessionEntry) error {
 	payload, err := json.Marshal(entry)
 	if err != nil {
 		return err
@@ -248,12 +250,12 @@ func insertSQLiteSessionEntry(ctx context.Context, conn *sql.Conn, entry *Sessio
 		entry.Step, entry.Type, entry.State, entry.ToolCallID, entry.ActionCallID, entry.SourceKey, entry.Tokens,
 		entry.Revision, sqliteSessionTime(entry.CreatedAt), sqliteSessionTime(entry.UpdatedAt), string(payload))
 	if sqliteUniqueViolation(err) {
-		return ErrAgentSessionConflict
+		return models.ErrAgentSessionConflict
 	}
 	return err
 }
 
-func updateSQLiteSessionEntry(ctx context.Context, conn *sql.Conn, entry *SessionEntry, expectedRevision int64) error {
+func updateSQLiteSessionEntry(ctx context.Context, conn *sql.Conn, entry *models.SessionEntry, expectedRevision int64) error {
 	payload, err := json.Marshal(entry)
 	if err != nil {
 		return err
@@ -268,31 +270,31 @@ func updateSQLiteSessionEntry(ctx context.Context, conn *sql.Conn, entry *Sessio
 	if affected, err := result.RowsAffected(); err != nil {
 		return err
 	} else if affected != 1 {
-		return ErrToolEntryStateConflict
+		return models.ErrToolEntryStateConflict
 	}
 	return nil
 }
 
 // sqliteSessionRunLease is the lease check of UpdateAgentRunWithEvent on a
 // write connection. The expiry is compared at full precision from the payload.
-func sqliteSessionRunLease(ctx context.Context, conn *sql.Conn, scope Scope, runID string, lease AgentRunLeaseGuard) (*AgentRun, error) {
+func sqliteSessionRunLease(ctx context.Context, conn *sql.Conn, scope models.Scope, runID string, lease models.AgentRunLeaseGuard) (*models.AgentRun, error) {
 	run, err := getSQLiteAgentRun(ctx, conn, scope, runID)
 	if err != nil {
 		return nil, err
 	}
 	if run.LeaseOwner != lease.WorkerID || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(lease.Now) {
-		return nil, ErrLeaseLost
+		return nil, models.ErrLeaseLost
 	}
 	return run, nil
 }
 
-func insertSQLiteSessionEvents(ctx context.Context, conn *sql.Conn, events []*ActivityEvent, now time.Time) ([]*ActivityEvent, error) {
+func insertSQLiteSessionEvents(ctx context.Context, conn *sql.Conn, events []*models.ActivityEvent, now time.Time) ([]*models.ActivityEvent, error) {
 	if len(events) == 0 {
 		return nil, nil
 	}
-	out := make([]*ActivityEvent, 0, len(events))
+	out := make([]*models.ActivityEvent, 0, len(events))
 	for _, event := range events {
-		event = cloneActivityEvent(event)
+		event = models.CloneActivityEvent(event)
 		if event.CreatedAt.IsZero() {
 			event.CreatedAt = now
 		}
@@ -327,42 +329,42 @@ func (s *SQLiteStore) withSQLiteSessionWrite(ctx context.Context, fn func(*sql.C
 // ---------------------------------------------------------------------------
 // Open / create
 
-func (s *SQLiteStore) OpenConversationAgentSession(ctx context.Context, req OpenConversationAgentSessionRequest) (*OpenAgentSessionResult, error) {
+func (s *SQLiteStore) OpenConversationAgentSession(ctx context.Context, req models.OpenConversationAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
 	if err := req.Scope.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidAgentSession, err)
+		return nil, fmt.Errorf("%w: %v", models.ErrInvalidAgentSession, err)
 	}
 	if strings.TrimSpace(req.ConversationID) == "" || strings.TrimSpace(req.AgentID) == "" ||
 		strings.TrimSpace(req.RunID) == "" || strings.TrimSpace(req.Lease.WorkerID) == "" {
-		return nil, fmt.Errorf("%w: conversationId, agentId, runId and a lease are required", ErrInvalidAgentSession)
+		return nil, fmt.Errorf("%w: conversationId, agentId, runId and a lease are required", models.ErrInvalidAgentSession)
 	}
 	now := sessionNow(req.Now)
-	lane := ConversationRunLane(req.ConversationID, req.ThreadRootID, req.AgentID)
-	id := ConversationAgentSessionID(req.Scope, lane)
+	lane := models.ConversationRunLane(req.ConversationID, req.ThreadRootID, req.AgentID)
+	id := models.ConversationAgentSessionID(req.Scope, lane)
 
-	var result *OpenAgentSessionResult
+	var result *models.OpenAgentSessionResult
 	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
 		run, err := sqliteSessionRunLease(ctx, conn, req.Scope, req.RunID, req.Lease)
 		if err != nil {
 			return err
 		}
 		if run.SessionID != id {
-			return ErrSessionMoved
+			return models.ErrSessionMoved
 		}
 		current, err := getSQLiteAgentSession(ctx, conn, req.Scope, id)
 		switch {
 		case err == nil:
-			if current.Kind != AgentSessionKindConversation || current.LaneKey != lane || current.AgentID != req.AgentID {
-				return ErrAgentSessionConflict
+			if current.Kind != models.AgentSessionKindConversation || current.LaneKey != lane || current.AgentID != req.AgentID {
+				return models.ErrAgentSessionConflict
 			}
-			result = &OpenAgentSessionResult{Session: current}
+			result = &models.OpenAgentSessionResult{Session: current}
 			return nil
-		case !errors.Is(err, ErrAgentSessionNotFound):
+		case !errors.Is(err, models.ErrAgentSessionNotFound):
 			return err
 		}
-		session := &AgentSession{
+		session := &models.AgentSession{
 			ID:             id,
 			Scope:          req.Scope,
-			Kind:           AgentSessionKindConversation,
+			Kind:           models.AgentSessionKindConversation,
 			LaneKey:        lane,
 			ConversationID: req.ConversationID,
 			ThreadRootID:   req.ThreadRootID,
@@ -376,7 +378,7 @@ func (s *SQLiteStore) OpenConversationAgentSession(ctx context.Context, req Open
 		if err := insertSQLiteAgentSession(ctx, conn, session); err != nil {
 			return err
 		}
-		result = &OpenAgentSessionResult{Session: session, Created: true}
+		result = &models.OpenAgentSessionResult{Session: session, Created: true}
 		return nil
 	})
 	if err != nil {
@@ -388,8 +390,8 @@ func (s *SQLiteStore) OpenConversationAgentSession(ctx context.Context, req Open
 // CreateRunAgentSession creates the parentless run session of OwnerRunID at its
 // first claim, fenced by that Run's lease. The Run must be unbound or already
 // bound to this session; a Run bound elsewhere gets ErrSessionMoved.
-func (s *SQLiteStore) CreateRunAgentSession(ctx context.Context, req CreateRunAgentSessionRequest) (*OpenAgentSessionResult, error) {
-	txReq := CreateRunAgentSessionTxRequest{
+func (s *SQLiteStore) CreateRunAgentSession(ctx context.Context, req models.CreateRunAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
+	txReq := models.CreateRunAgentSessionTxRequest{
 		Scope:          req.Scope,
 		OwnerRunID:     req.OwnerRunID,
 		AgentID:        req.AgentID,
@@ -399,19 +401,19 @@ func (s *SQLiteStore) CreateRunAgentSession(ctx context.Context, req CreateRunAg
 		Now:            sessionNow(req.Now),
 	}
 	if strings.TrimSpace(req.Lease.WorkerID) == "" {
-		return nil, fmt.Errorf("%w: a lease is required", ErrInvalidAgentSession)
+		return nil, fmt.Errorf("%w: a lease is required", models.ErrInvalidAgentSession)
 	}
-	if err := validateCreateRunAgentSessionTxRequest(txReq); err != nil {
+	if err := models.ValidateCreateRunAgentSessionTxRequest(txReq); err != nil {
 		return nil, err
 	}
-	var result *OpenAgentSessionResult
+	var result *models.OpenAgentSessionResult
 	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
 		run, err := sqliteSessionRunLease(ctx, conn, req.Scope, req.OwnerRunID, req.Lease)
 		if err != nil {
 			return err
 		}
-		if id := RunAgentSessionID(req.Scope, req.OwnerRunID); run.SessionID != "" && run.SessionID != id {
-			return ErrSessionMoved
+		if id := models.RunAgentSessionID(req.Scope, req.OwnerRunID); run.SessionID != "" && run.SessionID != id {
+			return models.ErrSessionMoved
 		}
 		result, err = createSQLiteRunAgentSessionCore(ctx, conn, txReq)
 		return err
@@ -427,16 +429,16 @@ func (s *SQLiteStore) CreateRunAgentSession(ctx context.Context, req CreateRunAg
 // already be stored; its SessionID is set to the new session in the same
 // transaction (Revision+1 when it changes). A replay with the same parent and
 // Agent returns the existing session with Created=false and writes nothing.
-func (s *SQLiteStore) createRunAgentSessionTx(ctx context.Context, conn *sql.Conn, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
+func (s *SQLiteStore) createRunAgentSessionTx(ctx context.Context, conn *sql.Conn, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
 	req.Now = sessionNow(req.Now)
-	if err := validateCreateRunAgentSessionTxRequest(req); err != nil {
+	if err := models.ValidateCreateRunAgentSessionTxRequest(req); err != nil {
 		return nil, err
 	}
 	return createSQLiteRunAgentSessionCore(ctx, conn, req)
 }
 
-func createSQLiteRunAgentSessionCore(ctx context.Context, conn *sql.Conn, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
-	id := RunAgentSessionID(req.Scope, req.OwnerRunID)
+func createSQLiteRunAgentSessionCore(ctx context.Context, conn *sql.Conn, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
+	id := models.RunAgentSessionID(req.Scope, req.OwnerRunID)
 	run, err := getSQLiteAgentRun(ctx, conn, req.Scope, req.OwnerRunID)
 	if err != nil {
 		return nil, err
@@ -444,18 +446,18 @@ func createSQLiteRunAgentSessionCore(ctx context.Context, conn *sql.Conn, req Cr
 	current, err := getSQLiteAgentSession(ctx, conn, req.Scope, id)
 	switch {
 	case err == nil:
-		if current.Kind != AgentSessionKindRun || current.OwnerRunID != req.OwnerRunID ||
+		if current.Kind != models.AgentSessionKindRun || current.OwnerRunID != req.OwnerRunID ||
 			current.ParentSessionID != req.ParentSessionID || current.AgentID != req.AgentID {
-			return nil, ErrAgentSessionConflict
+			return nil, models.ErrAgentSessionConflict
 		}
-		return &OpenAgentSessionResult{Session: current}, nil
-	case !errors.Is(err, ErrAgentSessionNotFound):
+		return &models.OpenAgentSessionResult{Session: current}, nil
+	case !errors.Is(err, models.ErrAgentSessionNotFound):
 		return nil, err
 	}
-	session := &AgentSession{
+	session := &models.AgentSession{
 		ID:             id,
 		Scope:          req.Scope,
-		Kind:           AgentSessionKindRun,
+		Kind:           models.AgentSessionKindRun,
 		ConversationID: req.ConversationID,
 		ThreadRootID:   req.ThreadRootID,
 		AgentID:        req.AgentID,
@@ -472,10 +474,10 @@ func createSQLiteRunAgentSessionCore(ctx context.Context, conn *sql.Conn, req Cr
 			return nil, err
 		}
 		if req.ForkSequence > parent.NextSequence-1 {
-			return nil, fmt.Errorf("%w: fork sequence %d is past the parent leaf %d", ErrInvalidAgentSession, req.ForkSequence, parent.NextSequence-1)
+			return nil, fmt.Errorf("%w: fork sequence %d is past the parent leaf %d", models.ErrInvalidAgentSession, req.ForkSequence, parent.NextSequence-1)
 		}
-		if parent.Depth+1 > MaxAgentSessionDepth {
-			return nil, ErrAgentSessionForkTooDeep
+		if parent.Depth+1 > models.MaxAgentSessionDepth {
+			return nil, models.ErrAgentSessionForkTooDeep
 		}
 		session.ParentSessionID = parent.ID
 		session.ForkSequence = req.ForkSequence
@@ -506,7 +508,7 @@ func createSQLiteRunAgentSessionCore(ctx context.Context, conn *sql.Conn, req Cr
 
 	var plan *sqliteAppendPlan
 	if len(req.InitialEntries) > 0 {
-		plan, err = planSQLiteAppend(ctx, conn, initialEntriesAppend(req, id), session, nil)
+		plan, err = planSQLiteAppend(ctx, conn, models.InitialEntriesAppendRequest(req, id), session, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -522,7 +524,7 @@ func createSQLiteRunAgentSessionCore(ctx context.Context, conn *sql.Conn, req Cr
 		stored = plan.session
 	}
 	if run.SessionID != id {
-		next := cloneAgentRun(run)
+		next := models.CloneAgentRun(run)
 		next.SessionID = id
 		next.Revision++
 		next.UpdatedAt = req.Now
@@ -530,16 +532,16 @@ func createSQLiteRunAgentSessionCore(ctx context.Context, conn *sql.Conn, req Cr
 			return nil, err
 		}
 	}
-	return &OpenAgentSessionResult{Session: stored, Created: true}, nil
+	return &models.OpenAgentSessionResult{Session: stored, Created: true}, nil
 }
 
 // sqliteForkModel is the model of the latest model_change entry on the
 // parent's chain up to the fork point, or the parent's own model when the
 // chain has none in bounds.
-func sqliteForkModel(ctx context.Context, q sqliteSessionQueryer, parent *AgentSession, forkSequence int64) (string, string, error) {
+func sqliteForkModel(ctx context.Context, q sqliteSessionQueryer, parent *models.AgentSession, forkSequence int64) (string, string, error) {
 	session, bound := parent, forkSequence
-	for depth := 0; depth <= MaxAgentSessionDepth; depth++ {
-		change, err := latestSQLiteSessionEntry(ctx, q, session, SessionEntryModelChange, bound)
+	for depth := 0; depth <= models.MaxAgentSessionDepth; depth++ {
+		change, err := latestSQLiteSessionEntry(ctx, q, session, models.SessionEntryModelChange, bound)
 		if err != nil {
 			return "", "", err
 		}
@@ -551,7 +553,7 @@ func sqliteForkModel(ctx context.Context, q sqliteSessionQueryer, parent *AgentS
 		}
 		bound = session.ForkSequence
 		next, err := getSQLiteAgentSession(ctx, q, session.Scope, session.ParentSessionID)
-		if errors.Is(err, ErrAgentSessionNotFound) {
+		if errors.Is(err, models.ErrAgentSessionNotFound) {
 			break
 		}
 		if err != nil {
@@ -565,16 +567,16 @@ func sqliteForkModel(ctx context.Context, q sqliteSessionQueryer, parent *AgentS
 // ---------------------------------------------------------------------------
 // Reads
 
-func (s *SQLiteStore) GetAgentSession(ctx context.Context, scope Scope, sessionID string) (*AgentSession, error) {
+func (s *SQLiteStore) GetAgentSession(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSession, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidAgentSession, err)
+		return nil, fmt.Errorf("%w: %v", models.ErrInvalidAgentSession, err)
 	}
 	return getSQLiteAgentSession(ctx, s.db, scope, sessionID)
 }
 
-func (s *SQLiteStore) GetSessionEntry(ctx context.Context, scope Scope, entryID string) (*SessionEntry, error) {
+func (s *SQLiteStore) GetSessionEntry(ctx context.Context, scope models.Scope, entryID string) (*models.SessionEntry, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidSessionEntry, err)
+		return nil, fmt.Errorf("%w: %v", models.ErrInvalidSessionEntry, err)
 	}
 	return getSQLiteSessionEntry(ctx, s.db, scope, entryID)
 }
@@ -582,9 +584,9 @@ func (s *SQLiteStore) GetSessionEntry(ctx context.Context, scope Scope, entryID 
 // LoadAgentSessionPath reads the chain, the latest compaction and the
 // segments on one connection inside BEGIN, so a concurrent append or
 // compaction is either wholly visible or not at all.
-func (s *SQLiteStore) LoadAgentSessionPath(ctx context.Context, scope Scope, sessionID string) (*AgentSessionPath, error) {
+func (s *SQLiteStore) LoadAgentSessionPath(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSessionPath, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidAgentSession, err)
+		return nil, fmt.Errorf("%w: %v", models.ErrInvalidAgentSession, err)
 	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -606,15 +608,15 @@ func (s *SQLiteStore) LoadAgentSessionPath(ctx context.Context, scope Scope, ses
 // modified, or not yet stored, copy of the row), with extra entries appended
 // to the leaf's stored segment. It loads only the entries from the start point
 // of the latest compaction onward.
-func loadSQLiteSessionPath(ctx context.Context, q sqliteSessionQueryer, leaf *AgentSession, extra []*SessionEntry) (*AgentSessionPath, error) {
-	chain := []*AgentSession{leaf}
+func loadSQLiteSessionPath(ctx context.Context, q sqliteSessionQueryer, leaf *models.AgentSession, extra []*models.SessionEntry) (*models.AgentSessionPath, error) {
+	chain := []*models.AgentSession{leaf}
 	for current := leaf; current.ParentSessionID != ""; {
-		if len(chain) > MaxAgentSessionDepth {
-			return nil, ErrAgentSessionForkTooDeep
+		if len(chain) > models.MaxAgentSessionDepth {
+			return nil, models.ErrAgentSessionForkTooDeep
 		}
 		parent, err := getSQLiteAgentSession(ctx, q, current.Scope, current.ParentSessionID)
-		if errors.Is(err, ErrAgentSessionNotFound) {
-			return nil, fmt.Errorf("%w: parent session %s is missing", ErrInvalidAgentSession, current.ParentSessionID)
+		if errors.Is(err, models.ErrAgentSessionNotFound) {
+			return nil, fmt.Errorf("%w: parent session %s is missing", models.ErrInvalidAgentSession, current.ParentSessionID)
 		}
 		if err != nil {
 			return nil, err
@@ -642,13 +644,13 @@ func loadSQLiteSessionPath(ctx context.Context, q sqliteSessionQueryer, leaf *Ag
 	startSegment, startSequence := 0, int64(1)
 	extraCompaction := false
 	for _, entry := range extra {
-		if entry != nil && entry.Type == SessionEntryCompaction {
+		if entry != nil && entry.Type == models.SessionEntryCompaction {
 			extraCompaction = true
 		}
 	}
 	if !extraCompaction {
 		for i := len(chain) - 1; i >= 0; i-- {
-			compaction, err := latestSQLiteSessionEntry(ctx, q, chain[i], SessionEntryCompaction, bounds[i])
+			compaction, err := latestSQLiteSessionEntry(ctx, q, chain[i], models.SessionEntryCompaction, bounds[i])
 			if err != nil {
 				return nil, err
 			}
@@ -656,7 +658,7 @@ func loadSQLiteSessionPath(ctx context.Context, q sqliteSessionQueryer, leaf *Ag
 				continue
 			}
 			if compaction.Compaction == nil {
-				return nil, fmt.Errorf("%w: compaction %s has no payload", ErrInvalidSessionEntry, compaction.ID)
+				return nil, fmt.Errorf("%w: compaction %s has no payload", models.ErrInvalidSessionEntry, compaction.ID)
 			}
 			startSegment, startSequence = i, compaction.Sequence
 			if kept := compaction.Compaction.FirstKeptEntryID; kept != "" {
@@ -669,7 +671,7 @@ func loadSQLiteSessionPath(ctx context.Context, q sqliteSessionQueryer, leaf *Ag
 				}
 				seg, ok := index[keptSession]
 				if err != nil || !ok || keptSequence > bounds[seg] || seg > i || (seg == i && keptSequence > compaction.Sequence) {
-					return nil, fmt.Errorf("%w: compaction %s keeps %s, which is not on the path", ErrInvalidSessionEntry, compaction.ID, kept)
+					return nil, fmt.Errorf("%w: compaction %s keeps %s, which is not on the path", models.ErrInvalidSessionEntry, compaction.ID, kept)
 				}
 				startSegment, startSequence = seg, keptSequence
 			}
@@ -677,7 +679,7 @@ func loadSQLiteSessionPath(ctx context.Context, q sqliteSessionQueryer, leaf *Ag
 		}
 	}
 
-	segments := make([][]*SessionEntry, len(chain))
+	segments := make([][]*models.SessionEntry, len(chain))
 	for i := startSegment; i < len(chain); i++ {
 		from := int64(1)
 		if i == startSegment {
@@ -695,11 +697,11 @@ func loadSQLiteSessionPath(ctx context.Context, q sqliteSessionQueryer, leaf *Ag
 		last := len(chain) - 1
 		segments[last] = append(segments[last], extra...)
 	}
-	return buildAgentSessionPath(chain, segments, nil)
+	return models.BuildAgentSessionPath(chain, segments, nil)
 }
 
-func (s *SQLiteStore) ListAgentSessionEntries(ctx context.Context, filter SessionEntryFilter) ([]*SessionEntry, error) {
-	filter, err := normalizeSessionEntryFilter(filter)
+func (s *SQLiteStore) ListAgentSessionEntries(ctx context.Context, filter models.SessionEntryFilter) ([]*models.SessionEntry, error) {
+	filter, err := models.NormalizeSessionEntryFilter(filter)
 	if err != nil {
 		return nil, err
 	}
@@ -758,7 +760,7 @@ func (s *SQLiteStore) ListAgentSessionEntries(ctx context.Context, filter Sessio
 		return nil, err
 	}
 	defer rows.Close()
-	out := []*SessionEntry{}
+	out := []*models.SessionEntry{}
 	for rows.Next() && len(out) < filter.Limit {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
@@ -768,7 +770,7 @@ func (s *SQLiteStore) ListAgentSessionEntries(ctx context.Context, filter Sessio
 		if err != nil {
 			return nil, err
 		}
-		if sessionEntryMatchesFilter(entry, filter) {
+		if models.SessionEntryMatchesFilter(entry, filter) {
 			out = append(out, entry)
 		}
 	}
@@ -786,17 +788,17 @@ func sqlitePlaceholders(n int) string {
 // with Lease nil, by the Run being terminal) and by run.SessionID ==
 // req.SessionID. The watermark CAS, the intervention cursor, the entries and
 // the events commit together.
-func (s *SQLiteStore) AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+func (s *SQLiteStore) AppendAgentSessionEntries(ctx context.Context, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	req.Now = sessionNow(req.Now)
-	if err := validateAppendAgentSessionEntries(req); err != nil {
+	if err := models.ValidateAppendAgentSessionEntries(req); err != nil {
 		return nil, err
 	}
-	if err := validateSessionEvents(req.Scope, req.RunID, req.Events, ErrInvalidSessionEntry); err != nil {
+	if err := models.ValidateSessionEvents(req.Scope, req.RunID, req.Events, models.ErrInvalidSessionEntry); err != nil {
 		return nil, err
 	}
-	var result *AppendAgentSessionEntriesResult
+	var result *models.AppendAgentSessionEntriesResult
 	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
-		var run *AgentRun
+		var run *models.AgentRun
 		var err error
 		if req.Lease != nil {
 			run, err = sqliteSessionRunLease(ctx, conn, req.Scope, req.RunID, *req.Lease)
@@ -806,11 +808,11 @@ func (s *SQLiteStore) AppendAgentSessionEntries(ctx context.Context, req AppendA
 		if err != nil {
 			return err
 		}
-		if req.Lease == nil && !isTerminalAgentRunStatus(run.Status) {
-			return ErrLeaseLost
+		if req.Lease == nil && !models.IsTerminalAgentRunStatus(run.Status) {
+			return models.ErrLeaseLost
 		}
 		if run.SessionID != req.SessionID {
-			return ErrSessionMoved
+			return models.ErrSessionMoved
 		}
 		result, err = appendSQLiteAgentSessionEntriesCore(ctx, conn, req)
 		return err
@@ -825,18 +827,18 @@ func (s *SQLiteStore) AppendAgentSessionEntries(ctx context.Context, req AppendA
 // IMMEDIATE and the caller owns the fence (lease and session binding are not
 // checked); everything else, including the watermark CAS and the cursor, is
 // as AppendAgentSessionEntries.
-func (s *SQLiteStore) appendAgentSessionEntriesTx(ctx context.Context, conn *sql.Conn, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+func (s *SQLiteStore) appendAgentSessionEntriesTx(ctx context.Context, conn *sql.Conn, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	req.Now = sessionNow(req.Now)
-	if err := validateAppendAgentSessionEntries(req); err != nil {
+	if err := models.ValidateAppendAgentSessionEntries(req); err != nil {
 		return nil, err
 	}
-	if err := validateSessionEvents(req.Scope, req.RunID, req.Events, ErrInvalidSessionEntry); err != nil {
+	if err := models.ValidateSessionEvents(req.Scope, req.RunID, req.Events, models.ErrInvalidSessionEntry); err != nil {
 		return nil, err
 	}
 	return appendSQLiteAgentSessionEntriesCore(ctx, conn, req)
 }
 
-func appendSQLiteAgentSessionEntriesCore(ctx context.Context, conn *sql.Conn, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+func appendSQLiteAgentSessionEntriesCore(ctx context.Context, conn *sql.Conn, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	session, err := getSQLiteAgentSession(ctx, conn, req.Scope, req.SessionID)
 	if err != nil {
 		return nil, err
@@ -844,7 +846,7 @@ func appendSQLiteAgentSessionEntriesCore(ctx context.Context, conn *sql.Conn, re
 	if replayed, ok, err := sqliteAppendReplay(ctx, conn, req, session); err != nil || ok {
 		return replayed, err
 	}
-	var run *AgentRun
+	var run *models.AgentRun
 	if req.ConsumeInterventionsThrough != nil {
 		run, err = getSQLiteAgentRun(ctx, conn, req.Scope, req.RunID)
 		if err != nil {
@@ -852,7 +854,7 @@ func appendSQLiteAgentSessionEntriesCore(ctx context.Context, conn *sql.Conn, re
 		}
 		through := *req.ConsumeInterventionsThrough
 		if through < run.ConsumedInterventions || through > len(run.PendingInterventions) {
-			return nil, invalidEntry("intervention cursor %d is outside %d..%d", through, run.ConsumedInterventions, len(run.PendingInterventions))
+			return nil, models.InvalidSessionEntryf("intervention cursor %d is outside %d..%d", through, run.ConsumedInterventions, len(run.PendingInterventions))
 		}
 	}
 	plan, err := planSQLiteAppend(ctx, conn, req, session, run)
@@ -868,9 +870,9 @@ func appendSQLiteAgentSessionEntriesCore(ctx context.Context, conn *sql.Conn, re
 	}
 	entries := plan.entries
 	if entries == nil {
-		entries = []*SessionEntry{}
+		entries = []*models.SessionEntry{}
 	}
-	return &AppendAgentSessionEntriesResult{
+	return &models.AppendAgentSessionEntriesResult{
 		Session: plan.session,
 		Entries: entries,
 		Skipped: plan.skipped,
@@ -881,22 +883,22 @@ func appendSQLiteAgentSessionEntriesCore(ctx context.Context, conn *sql.Conn, re
 // sqliteAppendReplay reports a whole-batch replay: every request entry is
 // stored in this session already, or would be skipped by its SourceKey. An
 // entry id stored in another session, or a partial batch, is a conflict.
-func sqliteAppendReplay(ctx context.Context, conn *sql.Conn, req AppendAgentSessionEntriesRequest, session *AgentSession) (*AppendAgentSessionEntriesResult, bool, error) {
+func sqliteAppendReplay(ctx context.Context, conn *sql.Conn, req models.AppendAgentSessionEntriesRequest, session *models.AgentSession) (*models.AppendAgentSessionEntriesResult, bool, error) {
 	if len(req.Entries) == 0 {
 		return nil, false, nil
 	}
-	stored := make([]*SessionEntry, len(req.Entries))
+	stored := make([]*models.SessionEntry, len(req.Entries))
 	found := false
 	for i, entry := range req.Entries {
 		existing, err := getSQLiteSessionEntry(ctx, conn, req.Scope, entry.ID)
-		if errors.Is(err, ErrSessionEntryNotFound) {
+		if errors.Is(err, models.ErrSessionEntryNotFound) {
 			continue
 		}
 		if err != nil {
 			return nil, false, err
 		}
 		if existing.SessionID != session.ID {
-			return nil, false, ErrAgentSessionConflict
+			return nil, false, models.ErrAgentSessionConflict
 		}
 		stored[i] = existing
 		found = true
@@ -904,7 +906,7 @@ func sqliteAppendReplay(ctx context.Context, conn *sql.Conn, req AppendAgentSess
 	if !found {
 		return nil, false, nil
 	}
-	result := &AppendAgentSessionEntriesResult{Session: session, Replayed: true, Entries: []*SessionEntry{}}
+	result := &models.AppendAgentSessionEntriesResult{Session: session, Replayed: true, Entries: []*models.SessionEntry{}}
 	for i, entry := range req.Entries {
 		if stored[i] != nil {
 			result.Entries = append(result.Entries, stored[i])
@@ -920,12 +922,12 @@ func sqliteAppendReplay(ctx context.Context, conn *sql.Conn, req AppendAgentSess
 				continue
 			}
 		}
-		return nil, false, ErrAgentSessionConflict
+		return nil, false, models.ErrAgentSessionConflict
 	}
 	return result, true, nil
 }
 
-func sqliteSessionSourceKeyExists(ctx context.Context, q sqliteSessionQueryer, scope Scope, sessionID, sourceKey string) (bool, error) {
+func sqliteSessionSourceKeyExists(ctx context.Context, q sqliteSessionQueryer, scope models.Scope, sessionID, sourceKey string) (bool, error) {
 	var one int
 	err := q.QueryRowContext(ctx, `SELECT 1 FROM agent_session_entries
 		WHERE scope_kind = ? AND scope_id = ? AND session_id = ? AND source_key = ?`,
@@ -936,7 +938,7 @@ func sqliteSessionSourceKeyExists(ctx context.Context, q sqliteSessionQueryer, s
 	return err == nil, err
 }
 
-func sqliteSessionEntryExists(ctx context.Context, q sqliteSessionQueryer, scope Scope, entryID string) (bool, error) {
+func sqliteSessionEntryExists(ctx context.Context, q sqliteSessionQueryer, scope models.Scope, entryID string) (bool, error) {
 	var one int
 	err := q.QueryRowContext(ctx, `SELECT 1 FROM agent_session_entries WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		scope.Kind, scope.ID, entryID).Scan(&one)
@@ -947,22 +949,22 @@ func sqliteSessionEntryExists(ctx context.Context, q sqliteSessionQueryer, scope
 }
 
 type sqliteAppendPlan struct {
-	session   *AgentSession // the session row after the append
-	entries   []*SessionEntry
+	session   *models.AgentSession // the session row after the append
+	entries   []*models.SessionEntry
 	skipped   []string
-	run       *AgentRun // the Run row after the cursor write; nil when unchanged
-	sessionUp bool      // the session row changes
+	run       *models.AgentRun // the Run row after the cursor write; nil when unchanged
+	sessionUp bool             // the session row changes
 }
 
 // planSQLiteAppend runs every check and builds the new rows without writing,
 // mirroring planMemoryAppendLocked. session is the current row (or the
 // not-yet-inserted row of a new session); run is the current Run row when the
 // request moves the cursor.
-func planSQLiteAppend(ctx context.Context, conn *sql.Conn, req AppendAgentSessionEntriesRequest, session *AgentSession, run *AgentRun) (*sqliteAppendPlan, error) {
+func planSQLiteAppend(ctx context.Context, conn *sql.Conn, req models.AppendAgentSessionEntriesRequest, session *models.AgentSession, run *models.AgentRun) (*sqliteAppendPlan, error) {
 	if req.ExpectedChannelWatermark != nil && session.ChannelWatermark != *req.ExpectedChannelWatermark {
-		return nil, ErrChannelWatermarkMoved
+		return nil, models.ErrChannelWatermarkMoved
 	}
-	next := cloneAgentSession(session)
+	next := models.CloneAgentSession(session)
 	plan := &sqliteAppendPlan{session: next, skipped: []string{}}
 	skippedSteps := make(map[string]bool)
 	batchKeys := make(map[string]bool)
@@ -974,14 +976,14 @@ func planSQLiteAppend(ctx context.Context, conn *sql.Conn, req AppendAgentSessio
 			}
 			if exists || batchKeys[entry.SourceKey] {
 				plan.skipped = append(plan.skipped, entry.ID)
-				if entry.Type == SessionEntryAssistant {
+				if entry.Type == models.SessionEntryAssistant {
 					skippedSteps[entry.StepID] = true
 				}
 				continue
 			}
 			batchKeys[entry.SourceKey] = true
 		}
-		if entry.Type == SessionEntryTool && len(entry.Tool.Directive) == 0 && skippedSteps[entry.StepID] {
+		if entry.Type == models.SessionEntryTool && len(entry.Tool.Directive) == 0 && skippedSteps[entry.StepID] {
 			plan.skipped = append(plan.skipped, entry.ID)
 			continue
 		}
@@ -990,24 +992,24 @@ func planSQLiteAppend(ctx context.Context, conn *sql.Conn, req AppendAgentSessio
 			return nil, err
 		}
 		if exists {
-			return nil, ErrAgentSessionConflict
+			return nil, models.ErrAgentSessionConflict
 		}
-		stamped := stampAppendedSessionEntry(entry, req, next.NextSequence+int64(len(plan.entries)))
+		stamped := models.StampAppendedSessionEntry(entry, req, next.NextSequence+int64(len(plan.entries)))
 		if err := stamped.Validate(); err != nil {
 			return nil, err
 		}
-		if stamped.Type == SessionEntryCompaction {
-			leaf := cloneAgentSession(session)
+		if stamped.Type == models.SessionEntryCompaction {
+			leaf := models.CloneAgentSession(session)
 			leaf.NextSequence = stamped.Sequence
 			path, err := loadSQLiteSessionPath(ctx, conn, leaf, plan.entries)
 			if err != nil {
 				return nil, err
 			}
-			if err := validateCompactionAgainstPath(path, stamped); err != nil {
+			if err := models.ValidateCompactionAgainstPath(path, stamped); err != nil {
 				return nil, err
 			}
 		}
-		if stamped.Type == SessionEntryModelChange {
+		if stamped.Type == models.SessionEntryModelChange {
 			next.ModelProvider = stamped.ModelChange.Provider
 			next.Model = stamped.ModelChange.Model
 		}
@@ -1026,7 +1028,7 @@ func planSQLiteAppend(ctx context.Context, conn *sql.Conn, req AppendAgentSessio
 		next.UpdatedAt = req.Now
 	}
 	if run != nil && *req.ConsumeInterventionsThrough != run.ConsumedInterventions {
-		updated := cloneAgentRun(run)
+		updated := models.CloneAgentRun(run)
 		updated.ConsumedInterventions = *req.ConsumeInterventionsThrough
 		updated.Revision++
 		updated.UpdatedAt = req.Now
@@ -1063,23 +1065,23 @@ func commitSQLiteAppend(ctx context.Context, conn *sql.Conn, plan *sqliteAppendP
 // by the lease of the entry's Run, or, with an empty lease, by that Run being
 // terminal (loop-16 terminal close). The session binding is not checked, so a
 // promoted Run can still settle entries it left in the parent session.
-func (s *SQLiteStore) TransitionToolEntry(ctx context.Context, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
+func (s *SQLiteStore) TransitionToolEntry(ctx context.Context, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
 	req.Now = sessionNow(req.Now)
-	if err := validateToolEntryTransitionRequest(req); err != nil {
+	if err := models.ValidateToolEntryTransitionRequest(req); err != nil {
 		return nil, err
 	}
-	if err := validateSessionEvents(req.Scope, req.RunID, req.Events, ErrInvalidToolEntryTransition); err != nil {
+	if err := models.ValidateSessionEvents(req.Scope, req.RunID, req.Events, models.ErrInvalidToolEntryTransition); err != nil {
 		return nil, err
 	}
-	var result *ToolEntryTransitionResult
+	var result *models.ToolEntryTransitionResult
 	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
 		if req.Lease.WorkerID == "" {
 			run, err := getSQLiteAgentRun(ctx, conn, req.Scope, req.RunID)
 			if err != nil {
 				return err
 			}
-			if !isTerminalAgentRunStatus(run.Status) {
-				return ErrLeaseLost
+			if !models.IsTerminalAgentRunStatus(run.Status) {
+				return models.ErrLeaseLost
 			}
 		} else if _, err := sqliteSessionRunLease(ctx, conn, req.Scope, req.RunID, req.Lease); err != nil {
 			return err
@@ -1096,23 +1098,23 @@ func (s *SQLiteStore) TransitionToolEntry(ctx context.Context, req ToolEntryTran
 
 // transitionToolEntryTx is the in-transaction transition. conn holds BEGIN
 // IMMEDIATE and the caller owns the lease check.
-func (s *SQLiteStore) transitionToolEntryTx(ctx context.Context, conn *sql.Conn, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
+func (s *SQLiteStore) transitionToolEntryTx(ctx context.Context, conn *sql.Conn, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
 	req.Now = sessionNow(req.Now)
-	if err := validateToolEntryTransitionRequest(req); err != nil {
+	if err := models.ValidateToolEntryTransitionRequest(req); err != nil {
 		return nil, err
 	}
-	if err := validateSessionEvents(req.Scope, req.RunID, req.Events, ErrInvalidToolEntryTransition); err != nil {
+	if err := models.ValidateSessionEvents(req.Scope, req.RunID, req.Events, models.ErrInvalidToolEntryTransition); err != nil {
 		return nil, err
 	}
 	return transitionSQLiteToolEntryCore(ctx, conn, req)
 }
 
-func transitionSQLiteToolEntryCore(ctx context.Context, conn *sql.Conn, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
+func transitionSQLiteToolEntryCore(ctx context.Context, conn *sql.Conn, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
 	current, err := getSQLiteSessionEntry(ctx, conn, req.Scope, req.EntryID)
 	if err != nil {
 		return nil, err
 	}
-	next, err := applyToolEntryTransition(current, req)
+	next, err := models.ApplyToolEntryTransition(current, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1123,5 +1125,5 @@ func transitionSQLiteToolEntryCore(ctx context.Context, conn *sql.Conn, req Tool
 	if err != nil {
 		return nil, err
 	}
-	return &ToolEntryTransitionResult{Entry: next, Events: events}, nil
+	return &models.ToolEntryTransitionResult{Entry: next, Events: events}, nil
 }

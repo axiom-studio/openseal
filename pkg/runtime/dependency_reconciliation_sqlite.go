@@ -3,12 +3,15 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ RunDependencyReconciliationStore = (*SQLiteStore)(nil)
+var _ models.RunDependencyReconciliationStore = (*SQLiteStore)(nil)
 
-func (s *SQLiteStore) ListWaitingRunDependencyGroups(ctx context.Context, scope Scope, afterID string, limit int) ([]RunDependencyGroupWork, error) {
-	if err := validateWaitingDependencyGroupPage(scope, afterID, limit); err != nil {
+func (s *SQLiteStore) ListWaitingRunDependencyGroups(ctx context.Context, scope models.Scope, afterID string, limit int) ([]models.RunDependencyGroupWork, error) {
+	if err := models.ValidateWaitingDependencyGroupPage(scope, afterID, limit); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT g.id, g.revision, g.source_run_id, r.revision,
@@ -24,9 +27,9 @@ func (s *SQLiteStore) ListWaitingRunDependencyGroups(ctx context.Context, scope 
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]RunDependencyGroupWork, 0, limit)
+	result := make([]models.RunDependencyGroupWork, 0, limit)
 	for rows.Next() {
-		work := RunDependencyGroupWork{Scope: scope}
+		work := models.RunDependencyGroupWork{Scope: scope}
 		if err := rows.Scan(&work.GroupID, &work.GroupRevision, &work.SourceRunID, &work.SourceRevision, &work.Ready); err != nil {
 			return nil, err
 		}
@@ -35,8 +38,8 @@ func (s *SQLiteStore) ListWaitingRunDependencyGroups(ctx context.Context, scope 
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) ReconcileRunDependencyGroup(ctx context.Context, record RunDependencyGroupReconciliationRecord) (*RunDependencyResult, error) {
-	if err := validateDependencyGroupReconciliationRecord(record); err != nil {
+func (s *SQLiteStore) ReconcileRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupReconciliationRecord) (*models.RunDependencyResult, error) {
+	if err := models.ValidateDependencyGroupReconciliationRecord(record); err != nil {
 		return nil, err
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
@@ -50,7 +53,7 @@ func (s *SQLiteStore) ReconcileRunDependencyGroup(ctx context.Context, record Ru
 		return nil, err
 	}
 	if group == nil {
-		return nil, ErrDependencyGroupNotFound
+		return nil, models.ErrDependencyGroupNotFound
 	}
 	edges, err := listSQLiteDependencies(ctx, conn, record.Scope, group.ID)
 	if err != nil {
@@ -60,8 +63,8 @@ func (s *SQLiteStore) ReconcileRunDependencyGroup(ctx context.Context, record Ru
 	if err != nil {
 		return nil, err
 	}
-	targets := make(map[string]*AgentRun)
-	if !isTerminalAgentRunStatus(source.Status) && !isTerminalDependencyGroup(group) {
+	targets := make(map[string]*models.AgentRun)
+	if !models.IsTerminalAgentRunStatus(source.Status) && !models.IsTerminalDependencyGroup(group) {
 		rows, err := conn.QueryContext(ctx, `SELECT r.payload FROM run_dependencies d JOIN agent_runs r
 			ON r.scope_kind=d.scope_kind AND r.scope_id=d.scope_id AND r.id=d.target_run_id
 			WHERE d.scope_kind=? AND d.scope_id=? AND d.group_id=? AND d.kind='run' AND d.state IN ('pending','running')
@@ -75,7 +78,7 @@ func (s *SQLiteStore) ReconcileRunDependencyGroup(ctx context.Context, record Ru
 				rows.Close()
 				return nil, err
 			}
-			target, err := decodeAgentRun(payload)
+			target, err := sqlstore.DecodeAgentRun(payload)
 			if err != nil {
 				rows.Close()
 				return nil, err
@@ -88,7 +91,7 @@ func (s *SQLiteStore) ReconcileRunDependencyGroup(ctx context.Context, record Ru
 			return nil, rowErr
 		}
 	}
-	result, err := applyDependencyGroupReconciliation(group, edges, source, targets, record)
+	result, err := models.ApplyDependencyGroupReconciliation(group, edges, source, targets, record)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +107,7 @@ func (s *SQLiteStore) ReconcileRunDependencyGroup(ctx context.Context, record Ru
 	return result, nil
 }
 
-func persistSQLiteDependencyResult(ctx context.Context, conn *sql.Conn, group *RunDependencyGroup, edges []*RunDependency, source *AgentRun, result *RunDependencyResult) error {
+func persistSQLiteDependencyResult(ctx context.Context, conn *sql.Conn, group *models.RunDependencyGroup, edges []*models.RunDependency, source *models.AgentRun, result *models.RunDependencyResult) error {
 	previous := make(map[string]int64, len(edges))
 	for _, edge := range edges {
 		previous[edge.ID] = edge.Revision

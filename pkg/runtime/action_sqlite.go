@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -78,8 +79,8 @@ func migrateActions(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error) {
-	if err := validateActionProposalRecord(proposal); err != nil {
+func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal models.ActionProposalRecord) (*models.ActionProposalResult, error) {
+	if err := models.ValidateActionProposalRecord(proposal); err != nil {
 		return nil, err
 	}
 	conn, err := s.db.Conn(ctx)
@@ -100,14 +101,14 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 	call := proposal.Call
 	if call.IdempotencyKey != "" {
 		existing, err := getActionCallFrom(ctx, conn, call.Scope, `run_id = ? AND idempotency_key = ?`, call.RunID, call.IdempotencyKey)
-		if err != nil && err != ErrActionNotFound {
+		if err != nil && err != models.ErrActionNotFound {
 			return nil, err
 		}
 		if existing != nil {
 			if existing.InvocationDigest != call.InvocationDigest {
-				return nil, ErrIdempotencyConflict
+				return nil, models.ErrIdempotencyConflict
 			}
-			var approval *ApprovalCheckpoint
+			var approval *models.ApprovalCheckpoint
 			if existing.ApprovalID != "" {
 				approval, err = getApprovalFrom(ctx, conn, call.Scope, `id = ?`, existing.ApprovalID)
 				if err != nil {
@@ -118,13 +119,13 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 				return nil, err
 			}
 			committed = true
-			return &ActionProposalResult{Call: existing, Approval: approval, Created: false}, nil
+			return &models.ActionProposalResult{Call: existing, Approval: approval, Created: false}, nil
 		}
 	}
 	if gate, err := sqliteSkillRuntimeMaintenanceActiveTx(ctx, conn, call.Scope, call.SkillID); err != nil {
 		return nil, err
 	} else if gate != nil {
-		return nil, &SkillRuntimeMaintenanceError{Maintenance: *gate}
+		return nil, &models.SkillRuntimeMaintenanceError{Maintenance: *gate}
 	}
 	if proposal.RequireBindingFence {
 		var bindingPayload string
@@ -132,7 +133,7 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 			WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? AND id = ?`,
 			call.Scope.Kind, call.Scope.ID, call.DeploymentID, call.BindingID).Scan(&bindingPayload)
 		if errors.Is(err, sql.ErrNoRows) {
-			if err := validateActionSubmissionBinding(call, proposal.HostBinding); err != nil {
+			if err := models.ValidateActionSubmissionBinding(call, proposal.HostBinding); err != nil {
 				return nil, err
 			}
 		} else if err != nil {
@@ -145,19 +146,19 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 			if proposal.HostBinding != nil {
 				return nil, skill.ErrBindingAmbiguous
 			}
-			if err := validateActionSubmissionBinding(call, &binding); err != nil {
+			if err := models.ValidateActionSubmissionBinding(call, &binding); err != nil {
 				return nil, err
 			}
 		}
 	}
-	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && externalOperationProtects(call.Status) {
+	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && models.ExternalOperationProtects(call.Status) {
 		existing, lookupErr := getActionCallFrom(ctx, conn, call.Scope,
 			`external_operation_digest = ? AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`, call.ExternalOperationDigest)
-		if lookupErr != nil && lookupErr != ErrActionNotFound {
+		if lookupErr != nil && lookupErr != models.ErrActionNotFound {
 			return nil, lookupErr
 		}
 		if existing != nil {
-			return nil, &ExternalOperationConflictError{Prior: existing}
+			return nil, &models.ExternalOperationConflictError{Prior: existing}
 		}
 	}
 
@@ -168,17 +169,17 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 		WHERE scope_kind = ? AND scope_id = ? AND id = ?`, call.Scope.Kind, call.Scope.ID, call.RunID).
 		Scan(&currentRevision, &currentStatus, &currentLeaseOwner, &currentLeaseExpiry)
 	if err == sql.ErrNoRows {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
 	if proposal.Nested != nil {
-		state := nestedActionTurnState{RunStatus: AgentRunStatus(currentStatus), RunLeaseOwner: currentLeaseOwner}
+		state := models.NestedActionTurnState{RunStatus: models.AgentRunStatus(currentStatus), RunLeaseOwner: currentLeaseOwner}
 		if currentLeaseExpiry.Valid {
 			state.RunLeaseExpiry = &currentLeaseExpiry.Time
 		}
-		turn := &AgentTurn{}
+		turn := &models.AgentTurn{}
 		var turnLeaseExpiry sql.NullTime
 		err := conn.QueryRowContext(ctx, `SELECT run_id, status, lease_owner, lease_expires_at FROM agent_turns
 			WHERE scope_kind = ? AND scope_id = ? AND id = ?`, call.Scope.Kind, call.Scope.ID, call.TurnID).
@@ -195,22 +196,22 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN status IN (?, ?, ?) THEN 1 ELSE 0 END), 0) FROM action_calls
 			WHERE scope_kind = ? AND scope_id = ? AND run_id = ? AND turn_id = ? AND json_extract(payload, '$.origin') = ?`,
 			models.NestedActionUnfinishedStatuses[0], models.NestedActionUnfinishedStatuses[1], models.NestedActionUnfinishedStatuses[2],
-			call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, string(ActionOriginVM)).Scan(&state.TotalCalls, &state.UnfinishedCalls); err != nil {
+			call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, string(models.ActionOriginVM)).Scan(&state.TotalCalls, &state.UnfinishedCalls); err != nil {
 			return nil, err
 		}
 		if err := proposal.Nested.Admit(call, state); err != nil {
 			return nil, err
 		}
 	} else {
-		if call.Origin == ActionOriginLoop && AgentRunStatus(currentStatus) != AgentRunStatusRunning {
-			return nil, ErrLeaseLost
+		if call.Origin == models.ActionOriginLoop && models.AgentRunStatus(currentStatus) != models.AgentRunStatusRunning {
+			return nil, models.ErrLeaseLost
 		}
 		if proposal.Run != nil && (currentRevision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1) {
-			return nil, ErrRevisionConflict
+			return nil, models.ErrRevisionConflict
 		}
 	}
 	if proposal.Lease != nil && (currentLeaseOwner != proposal.Lease.WorkerID || !currentLeaseExpiry.Valid || !currentLeaseExpiry.Time.After(proposal.Lease.Now)) {
-		return nil, ErrLeaseLost
+		return nil, models.ErrLeaseLost
 	}
 
 	if err := insertSQLiteActionCall(ctx, conn, call); err != nil {
@@ -242,11 +243,11 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 			return nil, err
 		}
 		if affected != 1 {
-			return nil, ErrRevisionConflict
+			return nil, models.ErrRevisionConflict
 		}
 	}
 
-	event := cloneActivityEvent(proposal.Event)
+	event := models.CloneActivityEvent(proposal.Event)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
 		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&event.Sequence); err != nil {
 		return nil, err
@@ -265,17 +266,17 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 		return nil, err
 	}
 	committed = true
-	return &ActionProposalResult{Call: cloneActionCall(call), Approval: cloneApprovalCheckpoint(proposal.Approval), Run: cloneAgentRun(proposal.Run), Event: event, Created: true}, nil
+	return &models.ActionProposalResult{Call: models.CloneActionCall(call), Approval: models.CloneApprovalCheckpoint(proposal.Approval), Run: models.CloneAgentRun(proposal.Run), Event: event, Created: true}, nil
 }
 
-func (s *SQLiteStore) GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error) {
+func (s *SQLiteStore) GetActionCall(ctx context.Context, scope models.Scope, actionID string) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getActionCallFrom(ctx, s.db, scope, `id = ?`, actionID)
 }
 
-func (s *SQLiteStore) ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error) {
+func (s *SQLiteStore) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -285,13 +286,13 @@ func (s *SQLiteStore) ListActionCalls(ctx context.Context, filter ActionFilter) 
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*ActionCall, 0)
+	result := make([]*models.ActionCall, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		call, err := decodeActionCall(payload)
+		call, err := sqlstore.DecodeActionCall(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -305,35 +306,35 @@ func (s *SQLiteStore) ListActionCalls(ctx context.Context, filter ActionFilter) 
 	return pageActionCalls(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *SQLiteStore) GetActionCallByExternalOperation(ctx context.Context, scope Scope, digest string) (*ActionCall, error) {
+func (s *SQLiteStore) GetActionCallByExternalOperation(ctx context.Context, scope models.Scope, digest string) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	if err := validateSHA256Digest(digest); err != nil {
+	if err := models.ValidateSHA256Digest(digest); err != nil {
 		return nil, err
 	}
 	return getActionCallFrom(ctx, s.db, scope,
 		`external_operation_digest = ? AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`, digest)
 }
 
-func (s *SQLiteStore) GetActionCallByIdempotencyKey(ctx context.Context, scope Scope, runID, key string) (*ActionCall, error) {
+func (s *SQLiteStore) GetActionCallByIdempotencyKey(ctx context.Context, scope models.Scope, runID, key string) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(runID) == "" || key == "" {
-		return nil, ErrActionNotFound
+		return nil, models.ErrActionNotFound
 	}
 	return getActionCallFrom(ctx, s.db, scope, `run_id = ? AND idempotency_key = ?`, runID, key)
 }
 
-func (s *SQLiteStore) GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error) {
+func (s *SQLiteStore) GetApproval(ctx context.Context, scope models.Scope, approvalID string) (*models.ApprovalCheckpoint, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getApprovalFrom(ctx, s.db, scope, `id = ?`, approvalID)
 }
 
-func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error) {
+func (s *SQLiteStore) ListApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -373,7 +374,7 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 	}
 	if filter.RunIDs != nil {
 		if len(filter.RunIDs) == 0 {
-			return []*ApprovalCheckpoint{}, nil
+			return []*models.ApprovalCheckpoint{}, nil
 		}
 		query += ` AND a.run_id IN (?` + strings.Repeat(`,?`, len(filter.RunIDs)-1) + `)`
 		for _, id := range filter.RunIDs {
@@ -390,10 +391,10 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*ApprovalCheckpoint, 0)
+	result := make([]*models.ApprovalCheckpoint, 0)
 	for rows.Next() {
 		var payload string
-		projection := &ApprovalConversationContext{}
+		projection := &models.ApprovalConversationContext{}
 		var scanErr error
 		if filter.ConversationID != "" {
 			scanErr = rows.Scan(&payload, &projection.ConversationID, &projection.TriggerMessageID)
@@ -403,7 +404,7 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 		if scanErr != nil {
 			return nil, scanErr
 		}
-		approval, err := decodeApproval(payload)
+		approval, err := sqlstore.DecodeApproval(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -426,8 +427,8 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 	return pageApprovals(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error) {
-	if err := validateApprovalResolutionRecord(resolution); err != nil {
+func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution models.ApprovalResolutionRecord) (*models.ApprovalResolutionResult, error) {
+	if err := models.ValidateApprovalResolutionRecord(resolution); err != nil {
 		return nil, err
 	}
 	conn, err := s.db.Conn(ctx)
@@ -456,29 +457,29 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		resolution.Approval.Scope.Kind, resolution.Approval.Scope.ID, resolution.Approval.RunID).Scan(&runPayload)
 	if err == sql.ErrNoRows {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	currentRun, err := decodeAgentRun(runPayload)
+	currentRun, err := sqlstore.DecodeAgentRun(runPayload)
 	if err != nil {
 		return nil, err
 	}
-	if currentApproval.Status != ApprovalStatusPending {
+	if currentApproval.Status != models.ApprovalStatusPending {
 		if currentApproval.DecisionID != "" && currentApproval.DecisionID == resolution.Approval.DecisionID {
 			if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 				return nil, err
 			}
 			committed = true
-			return &ApprovalResolutionResult{Approval: currentApproval, Call: currentCall, Run: currentRun, Resolved: false}, nil
+			return &models.ApprovalResolutionResult{Approval: currentApproval, Call: currentCall, Run: currentRun, Resolved: false}, nil
 		}
-		return nil, ErrApprovalResolved
+		return nil, models.ErrApprovalResolved
 	}
 	if currentApproval.Revision != resolution.ExpectedApprovalRevision || currentCall.Revision != resolution.ExpectedCallRevision ||
 		resolution.Approval.Revision != resolution.ExpectedApprovalRevision+1 || resolution.Call.Revision != resolution.ExpectedCallRevision+1 ||
 		resolution.Run != nil && (currentRun.Revision != resolution.ExpectedRunRevision || resolution.Run.Revision != resolution.ExpectedRunRevision+1) {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	approvalPayload, err := json.Marshal(resolution.Approval)
 	if err != nil {
@@ -487,12 +488,12 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 	result, err := conn.ExecContext(ctx, `UPDATE approval_checkpoints SET status = ?, expires_at = ?, revision = ?, payload = ?
 		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND status = ?`,
 		resolution.Approval.Status, resolution.Approval.ExpiresAt, resolution.Approval.Revision, string(approvalPayload),
-		resolution.Approval.Scope.Kind, resolution.Approval.Scope.ID, resolution.Approval.ID, resolution.ExpectedApprovalRevision, ApprovalStatusPending)
+		resolution.Approval.Scope.Kind, resolution.Approval.Scope.ID, resolution.Approval.ID, resolution.ExpectedApprovalRevision, models.ApprovalStatusPending)
 	if err != nil {
 		return nil, err
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	callPayload, err := json.Marshal(resolution.Call)
 	if err != nil {
@@ -507,7 +508,7 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 		return nil, err
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	resolvedRun := currentRun
 	if resolution.Run != nil {
@@ -527,10 +528,10 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 			return nil, err
 		}
 		if affected, _ := result.RowsAffected(); affected != 1 {
-			return nil, ErrRevisionConflict
+			return nil, models.ErrRevisionConflict
 		}
 	}
-	event := cloneActivityEvent(resolution.Event)
+	event := models.CloneActivityEvent(resolution.Event)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
 		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&event.Sequence); err != nil {
 		return nil, err
@@ -549,10 +550,10 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 		return nil, err
 	}
 	committed = true
-	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolvedRun), Event: event, Resolved: true}, nil
+	return &models.ApprovalResolutionResult{Approval: models.CloneApprovalCheckpoint(resolution.Approval), Call: models.CloneActionCall(resolution.Call), Run: models.CloneAgentRun(resolvedRun), Event: event, Resolved: true}, nil
 }
 
-func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
+func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim models.ActionClaim) (*models.ActionCall, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -586,10 +587,10 @@ func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*
 					WHERE r2.scope_kind = c.scope_kind AND r2.scope_id = c.scope_id AND r2.id = c.run_id
 					AND r2.status NOT IN ('completed', 'failed', 'canceled'))) END)
 		ORDER BY c.available_at, c.created_at, c.id LIMIT 1`, claim.Scope.Kind, claim.Scope.ID,
-		ActionCallStatusReady, claim.Now, ActionCallStatusRunning, claim.Now,
-		claim.OwnActionID, claim.OwnActionID, string(ActionExecutionHost), string(ActionExecutionLoop),
-		string(ActionExecutionHost), ActionCallStatusReady, claim.HostReadyCutoff(),
-		string(ActionExecutionLoop)).Scan(&selectedPayload)
+		models.ActionCallStatusReady, claim.Now, models.ActionCallStatusRunning, claim.Now,
+		claim.OwnActionID, claim.OwnActionID, string(models.ActionExecutionHost), string(models.ActionExecutionLoop),
+		string(models.ActionExecutionHost), models.ActionCallStatusReady, claim.HostReadyCutoff(),
+		string(models.ActionExecutionLoop)).Scan(&selectedPayload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 			return nil, err
@@ -600,14 +601,14 @@ func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*
 	if err != nil {
 		return nil, err
 	}
-	selected, err := decodeActionCall(selectedPayload)
+	selected, err := sqlstore.DecodeActionCall(selectedPayload)
 	if err != nil {
 		return nil, err
 	}
 	previousRevision := selected.Revision
 	expires := claim.Now.Add(claim.LeaseDuration)
-	selected.RecoveredRunning = selected.RecoveredRunning || selected.Status == ActionCallStatusRunning
-	selected.Status = ActionCallStatusRunning
+	selected.RecoveredRunning = selected.RecoveredRunning || selected.Status == models.ActionCallStatusRunning
+	selected.Status = models.ActionCallStatusRunning
 	selected.LeaseOwner = claim.WorkerID
 	selected.LeaseExpiresAt = &expires
 	selected.Attempt++
@@ -627,7 +628,7 @@ func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*
 		return nil, err
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err
@@ -636,7 +637,7 @@ func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*
 	return selected, nil
 }
 
-func (s *SQLiteStore) RenewActionLease(ctx context.Context, scope Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*ActionCall, error) {
+func (s *SQLiteStore) RenewActionLease(ctx context.Context, scope models.Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -661,8 +662,8 @@ func (s *SQLiteStore) RenewActionLease(ctx context.Context, scope Scope, actionI
 	if err != nil {
 		return nil, err
 	}
-	if current.Status != ActionCallStatusRunning || current.LeaseOwner != workerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(now) {
-		return nil, ErrLeaseLost
+	if current.Status != models.ActionCallStatusRunning || current.LeaseOwner != workerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(now) {
+		return nil, models.ErrLeaseLost
 	}
 	previousRevision := current.Revision
 	expires := now.Add(leaseDuration)
@@ -680,7 +681,7 @@ func (s *SQLiteStore) RenewActionLease(ctx context.Context, scope Scope, actionI
 		return nil, err
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
-		return nil, ErrLeaseLost
+		return nil, models.ErrLeaseLost
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err
@@ -689,8 +690,8 @@ func (s *SQLiteStore) RenewActionLease(ctx context.Context, scope Scope, actionI
 	return current, nil
 }
 
-func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution ActionExecutionRecord) (*ActionExecutionResult, error) {
-	if err := validateActionExecutionRecord(execution); err != nil {
+func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution models.ActionExecutionRecord) (*models.ActionExecutionResult, error) {
+	if err := models.ValidateActionExecutionRecord(execution); err != nil {
 		return nil, err
 	}
 	conn, err := s.db.Conn(ctx)
@@ -712,25 +713,25 @@ func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution Acti
 		return nil, err
 	}
 	if currentCall.RunID != execution.Call.RunID {
-		return nil, ErrInvalidScope
+		return nil, models.ErrInvalidScope
 	}
 	if currentCall.Revision != execution.ExpectedCallRevision || execution.Call.Revision != execution.ExpectedCallRevision+1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	if currentCall.Status != ActionCallStatusRunning || currentCall.LeaseOwner != execution.WorkerID || currentCall.LeaseExpiresAt == nil || !currentCall.LeaseExpiresAt.After(execution.Now) {
-		return nil, ErrLeaseLost
+	if currentCall.Status != models.ActionCallStatusRunning || currentCall.LeaseOwner != execution.WorkerID || currentCall.LeaseExpiresAt == nil || !currentCall.LeaseExpiresAt.After(execution.Now) {
+		return nil, models.ErrLeaseLost
 	}
 	var currentRunRevision int64
 	err = conn.QueryRowContext(ctx, `SELECT revision FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		currentCall.Scope.Kind, currentCall.Scope.ID, currentCall.RunID).Scan(&currentRunRevision)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
 	if currentRunRevision != execution.ExpectedRunRevision || execution.Run != nil && execution.Run.Revision != execution.ExpectedRunRevision+1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	callPayload, err := json.Marshal(execution.Call)
 	if err != nil {
@@ -745,7 +746,7 @@ func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution Acti
 		return nil, err
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
-		return nil, ErrLeaseLost
+		return nil, models.ErrLeaseLost
 	}
 	if execution.Run != nil {
 		runPayload, err := json.Marshal(execution.Run)
@@ -763,7 +764,7 @@ func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution Acti
 			return nil, err
 		}
 		if affected, _ := result.RowsAffected(); affected != 1 {
-			return nil, ErrRevisionConflict
+			return nil, models.ErrRevisionConflict
 		}
 	}
 	if execution.CreatedFromBuilderConversationID != "" {
@@ -772,7 +773,7 @@ func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution Acti
 			return nil, err
 		}
 	}
-	event := cloneActivityEvent(execution.Event)
+	event := models.CloneActivityEvent(execution.Event)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
 		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&event.Sequence); err != nil {
 		return nil, err
@@ -791,42 +792,42 @@ func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution Acti
 		return nil, err
 	}
 	committed = true
-	return &ActionExecutionResult{Call: cloneActionCall(execution.Call), Run: cloneAgentRun(execution.Run), Event: event}, nil
+	return &models.ActionExecutionResult{Call: models.CloneActionCall(execution.Call), Run: models.CloneAgentRun(execution.Run), Event: event}, nil
 }
 
 type queryRower interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
-func getActionCallFrom(ctx context.Context, queryer queryRower, scope Scope, predicate string, args ...interface{}) (*ActionCall, error) {
+func getActionCallFrom(ctx context.Context, queryer queryRower, scope models.Scope, predicate string, args ...interface{}) (*models.ActionCall, error) {
 	queryArgs := []interface{}{scope.Kind, scope.ID}
 	queryArgs = append(queryArgs, args...)
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM action_calls WHERE scope_kind = ? AND scope_id = ? AND `+predicate, queryArgs...).Scan(&payload)
 	if err == sql.ErrNoRows {
-		return nil, ErrActionNotFound
+		return nil, models.ErrActionNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return decodeActionCall(payload)
+	return sqlstore.DecodeActionCall(payload)
 }
 
-func getApprovalFrom(ctx context.Context, queryer queryRower, scope Scope, predicate string, args ...interface{}) (*ApprovalCheckpoint, error) {
+func getApprovalFrom(ctx context.Context, queryer queryRower, scope models.Scope, predicate string, args ...interface{}) (*models.ApprovalCheckpoint, error) {
 	queryArgs := []interface{}{scope.Kind, scope.ID}
 	queryArgs = append(queryArgs, args...)
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM approval_checkpoints WHERE scope_kind = ? AND scope_id = ? AND `+predicate, queryArgs...).Scan(&payload)
 	if err == sql.ErrNoRows {
-		return nil, ErrApprovalNotFound
+		return nil, models.ErrApprovalNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return decodeApproval(payload)
+	return sqlstore.DecodeApproval(payload)
 }
 
-func insertSQLiteActionCall(ctx context.Context, exec sqliteExecer, call *ActionCall) error {
+func insertSQLiteActionCall(ctx context.Context, exec sqliteExecer, call *models.ActionCall) error {
 	payload, err := json.Marshal(call)
 	if err != nil {
 		return err
@@ -836,12 +837,12 @@ func insertSQLiteActionCall(ctx context.Context, exec sqliteExecer, call *Action
 		 lease_owner, lease_expires_at, revision, created_at, payload, deployment_id, binding_id, binding_revision, skill_id, skill_version)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, call.Status, call.IdempotencyKey,
-		externalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload),
+		models.ExternalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload),
 		call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion)
 	return err
 }
 
-func insertSQLiteApprovalCheckpoint(ctx context.Context, exec sqliteExecer, approval *ApprovalCheckpoint) error {
+func insertSQLiteApprovalCheckpoint(ctx context.Context, exec sqliteExecer, approval *models.ApprovalCheckpoint) error {
 	payload, err := json.Marshal(approval)
 	if err != nil {
 		return err

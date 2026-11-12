@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func migratePortfolio(db *sql.DB) error {
@@ -143,7 +146,7 @@ func addMissingAgentRunColumns(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateObjective(ctx context.Context, objective *Objective) error {
+func (s *SQLiteStore) CreateObjective(ctx context.Context, objective *models.Objective) error {
 	if err := objective.Validate(); err != nil {
 		return err
 	}
@@ -159,7 +162,7 @@ func (s *SQLiteStore) CreateObjective(ctx context.Context, objective *Objective)
 	return err
 }
 
-func (s *SQLiteStore) GetObjective(ctx context.Context, scope Scope, objectiveID string) (*Objective, error) {
+func (s *SQLiteStore) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -171,10 +174,10 @@ func (s *SQLiteStore) GetObjective(ctx context.Context, scope Scope, objectiveID
 	if err != nil {
 		return nil, err
 	}
-	return decodeObjective(payload)
+	return sqlstore.DecodeObjective(payload)
 }
 
-func (s *SQLiteStore) ListObjectives(ctx context.Context, filter ObjectiveFilter) ([]*Objective, error) {
+func (s *SQLiteStore) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -183,17 +186,17 @@ func (s *SQLiteStore) ListObjectives(ctx context.Context, filter ObjectiveFilter
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*Objective, 0)
+	result := make([]*models.Objective, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		objective, err := decodeObjective(payload)
+		objective, err := sqlstore.DecodeObjective(payload)
 		if err != nil {
 			return nil, err
 		}
-		if matchesObjectiveFilter(objective, filter) {
+		if models.MatchesObjectiveFilter(objective, filter) {
 			result = append(result, objective)
 		}
 	}
@@ -209,18 +212,18 @@ func (s *SQLiteStore) ListObjectives(ctx context.Context, filter ObjectiveFilter
 		}
 		return result[i].ID < result[j].ID
 	})
-	return pageObjectives(result, filter.Offset, filter.Limit), nil
+	return models.PageObjectives(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *SQLiteStore) ListObjectiveScopes(ctx context.Context) ([]Scope, error) {
+func (s *SQLiteStore) ListObjectiveScopes(ctx context.Context) ([]models.Scope, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope_kind, scope_id FROM objectives ORDER BY scope_kind, scope_id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]Scope, 0)
+	result := make([]models.Scope, 0)
 	for rows.Next() {
-		var scope Scope
+		var scope models.Scope
 		if err := rows.Scan(&scope.Kind, &scope.ID); err != nil {
 			return nil, err
 		}
@@ -229,12 +232,12 @@ func (s *SQLiteStore) ListObjectiveScopes(ctx context.Context) ([]Scope, error) 
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateObjective(ctx context.Context, objective *Objective, expectedRevision int64) error {
+func (s *SQLiteStore) UpdateObjective(ctx context.Context, objective *models.Objective, expectedRevision int64) error {
 	if err := objective.Validate(); err != nil {
 		return err
 	}
 	if objective.Revision != expectedRevision+1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	payload, err := json.Marshal(objective)
 	if err != nil {
@@ -252,12 +255,12 @@ func (s *SQLiteStore) UpdateObjective(ctx context.Context, objective *Objective,
 		return err
 	}
 	if affected != 1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	return nil
 }
 
-func (s *SQLiteStore) CreateAgentRun(ctx context.Context, run *AgentRun) error {
+func (s *SQLiteStore) CreateAgentRun(ctx context.Context, run *models.AgentRun) error {
 	if err := run.Validate(); err != nil {
 		return err
 	}
@@ -280,7 +283,7 @@ func (s *SQLiteStore) CreateAgentRun(ctx context.Context, run *AgentRun) error {
 	return nil
 }
 
-func allocateSQLiteObjectiveRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun) error {
+func allocateSQLiteObjectiveRunConn(ctx context.Context, conn *sql.Conn, run *models.AgentRun) error {
 	if run == nil || run.ObjectiveID == "" || run.ParentRunID != "" {
 		return nil
 	}
@@ -288,15 +291,15 @@ func allocateSQLiteObjectiveRunConn(ctx context.Context, conn *sql.Conn, run *Ag
 	if err := conn.QueryRowContext(ctx, `SELECT payload FROM objectives WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		run.Scope.Kind, run.Scope.ID, run.ObjectiveID).Scan(&payload); err != nil {
 		if err == sql.ErrNoRows {
-			return ErrObjectiveNotFound
+			return models.ErrObjectiveNotFound
 		}
 		return err
 	}
-	objective, err := decodeObjective(payload)
+	objective, err := sqlstore.DecodeObjective(payload)
 	if err != nil {
 		return err
 	}
-	updated, err := allocateObjectiveRunBudget(objective, run, run.CreatedAt)
+	updated, err := models.AllocateObjectiveRunBudget(objective, run, run.CreatedAt)
 	if err != nil || updated == objective {
 		return err
 	}
@@ -315,12 +318,12 @@ func allocateSQLiteObjectiveRunConn(ctx context.Context, conn *sql.Conn, run *Ag
 		return err
 	}
 	if affected != 1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	return nil
 }
 
-func (s *SQLiteStore) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {
+func (s *SQLiteStore) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -332,10 +335,10 @@ func (s *SQLiteStore) GetAgentRun(ctx context.Context, scope Scope, runID string
 	if err != nil {
 		return nil, err
 	}
-	return decodeAgentRun(payload)
+	return sqlstore.DecodeAgentRun(payload)
 }
 
-func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -373,28 +376,28 @@ func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) 
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*AgentRun, 0)
+	result := make([]*models.AgentRun, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			return nil, err
 		}
-		if matchesRunFilter(run, matchFilter) {
+		if models.MatchesRunFilter(run, matchFilter) {
 			result = append(result, run)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	sortAgentRuns(result, filter.Order)
+	models.SortAgentRuns(result, filter.Order)
 	return pageAgentRuns(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *SQLiteStore) SummarizeAgentRuns(ctx context.Context, scope Scope, owners []ObjectiveOwner) ([]AgentRunOwnerSummary, error) {
+func (s *SQLiteStore) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -403,13 +406,13 @@ func (s *SQLiteStore) SummarizeAgentRuns(ctx context.Context, scope Scope, owner
 		return nil, err
 	}
 	defer rows.Close()
-	runs := make([]*AgentRun, 0)
+	runs := make([]*models.AgentRun, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -418,5 +421,5 @@ func (s *SQLiteStore) SummarizeAgentRuns(ctx context.Context, scope Scope, owner
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return summarizeAgentRunOwners(runs, owners), nil
+	return models.SummarizeAgentRunOwners(runs, owners), nil
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
@@ -35,7 +36,7 @@ func migrateDeploymentIdentitiesSQLite(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	collisions, err := deploymentIdentityCollisions(rows)
+	collisions, err := sqlstore.DeploymentIdentityCollisions(rows)
 	if err != nil {
 		return err
 	}
@@ -50,7 +51,7 @@ func migrateDeploymentIdentitiesSQLite(db *sql.DB) error {
 	return tx.Commit()
 }
 
-func reserveDeploymentIDSQLite(ctx context.Context, db sqlExecQueryer, scope capability.ScopeReference, id string, kind workforce.DeploymentKind) error {
+func reserveDeploymentIDSQLite(ctx context.Context, db sqlstore.ExecRowQuerier, scope capability.ScopeReference, id string, kind workforce.DeploymentKind) error {
 	if err := workforce.ValidDeploymentReservation(scope, id, kind); err != nil {
 		return err
 	}

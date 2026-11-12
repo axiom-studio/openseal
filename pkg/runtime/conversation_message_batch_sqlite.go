@@ -1,9 +1,14 @@
 package runtime
 
-import "context"
+import (
+	"context"
 
-func (s *SQLiteStore) GetChannelMessagesByIDs(ctx context.Context, scope Scope, conversationID string, ids []string) ([]*ChannelMessage, error) {
-	return getChannelMessageBatchSQL(ctx, s.db, "channel_messages", scope, conversationID, ids, false)
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+)
+
+func (s *SQLiteStore) GetChannelMessagesByIDs(ctx context.Context, scope models.Scope, conversationID string, ids []string) ([]*models.ChannelMessage, error) {
+	return sqlstore.GetChannelMessageBatch(ctx, s.db, "channel_messages", scope, conversationID, ids, false)
 }
 
-var _ ChannelMessageBatchStore = (*SQLiteStore)(nil)
+var _ models.ChannelMessageBatchStore = (*SQLiteStore)(nil)

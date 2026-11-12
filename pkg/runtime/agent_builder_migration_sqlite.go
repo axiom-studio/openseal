@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 var retiredChangeSetIndexesSQLite = []string{
@@ -23,7 +25,7 @@ func migrateAgentBuilderSQLite(db *sql.DB) error {
 		return err
 	}
 	var present int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, retiredChangeSetTable).Scan(&present); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, sqlstore.RetiredChangeSetTable).Scan(&present); err != nil {
 		return err
 	}
 	if present == 0 {
@@ -41,14 +43,14 @@ func migrateAgentBuilderSQLite(db *sql.DB) error {
 			return err
 		}
 	}
-	if err := foldChangeSetDrafts(ctx, tx, retiredChangeSetTable,
+	if err := sqlstore.FoldChangeSetDrafts(ctx, tx, sqlstore.RetiredChangeSetTable,
 		`SELECT scope_kind, scope_id, id, status, json_extract(payload, '$.parentId'), json_extract(payload, '$.prompt') FROM workforce_change_sets ORDER BY created_at, id`,
 		`UPDATE workforce_change_sets SET payload = json_set(payload, '$.cutoverPrompts', json(?)) WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		`DELETE FROM workforce_change_sets WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `ALTER TABLE workforce_change_sets RENAME TO `+agentBuilderCutoverTable); err != nil {
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE workforce_change_sets RENAME TO `+sqlstore.AgentBuilderCutoverTable); err != nil {
 		return err
 	}
 	for _, index := range retiredChangeSetIndexesSQLite {

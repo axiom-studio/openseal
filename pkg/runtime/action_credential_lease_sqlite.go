@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -42,17 +44,17 @@ func migrateActionCredentialLeaseRedemptionsSQLite(db *sql.DB) error {
 // of the same atomic authority boundary as Postgres. BEGIN IMMEDIATE prevents
 // ActionCall, Run, or SkillBinding writers from committing between recheck and
 // nonce insertion.
-func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request ActionCredentialLeaseRedemptionRequest) error {
+func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request models.ActionCredentialLeaseRedemptionRequest) error {
 	if s == nil || s.db == nil {
 		return errors.New("SQLite store is not configured")
 	}
-	request.Lease.Credentials = cloneActionCredentialFieldReferences(request.Lease.Credentials)
-	request.CredentialFields = cloneActionCredentialFields(request.CredentialFields)
+	request.Lease.Credentials = models.CloneActionCredentialFieldReferences(request.Lease.Credentials)
+	request.CredentialFields = models.CloneActionCredentialFields(request.CredentialFields)
 	if err := request.Lease.Validate(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(request.Transport) == "" {
-		return ErrActionCredentialLeaseMismatch
+		return models.ErrActionCredentialLeaseMismatch
 	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -70,8 +72,8 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 	}()
 
 	call, err := getActionCallFrom(ctx, conn, request.Lease.Scope, `id = ?`, request.Lease.ActionCallID)
-	if errors.Is(err, ErrActionNotFound) {
-		return ErrActionCredentialLeaseMismatch
+	if errors.Is(err, models.ErrActionNotFound) {
+		return models.ErrActionCredentialLeaseMismatch
 	}
 	if err != nil {
 		return err
@@ -80,12 +82,12 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_runs
 		WHERE scope_kind = ? AND scope_id = ? AND id = ?`, call.Scope.Kind, call.Scope.ID, call.RunID).Scan(&runPayload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrActionCredentialLeaseMismatch
+		return models.ErrActionCredentialLeaseMismatch
 	}
 	if err != nil {
 		return err
 	}
-	run, err := decodeAgentRun(runPayload)
+	run, err := sqlstore.DecodeAgentRun(runPayload)
 	if err != nil {
 		return err
 	}
@@ -97,13 +99,13 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if request.HostBinding == nil {
-			return ErrActionCredentialLeaseMismatch
+			return models.ErrActionCredentialLeaseMismatch
 		}
 		binding = *request.HostBinding
 	case err != nil:
 		return err
 	case request.HostBinding != nil:
-		return ErrActionCredentialLeaseMismatch
+		return models.ErrActionCredentialLeaseMismatch
 	default:
 		if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
 			return err
@@ -124,30 +126,30 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 	expiresAt := canonicalSQLiteLeaseTime(request.Lease.ExpiresAt)
 	actionLeaseExpiresAt := canonicalSQLiteLeaseTime(request.Lease.ActionLease.ExpiresAt)
 	if now.Before(issuedAt) || !now.Before(expiresAt) || !now.Before(actionLeaseExpiresAt) {
-		return ErrActionCredentialLeaseExpired
+		return models.ErrActionCredentialLeaseExpired
 	}
 	if call.LeaseExpiresAt == nil || !now.Before(canonicalSQLiteLeaseTime(*call.LeaseExpiresAt)) {
-		return ErrActionCredentialLeaseExpired
+		return models.ErrActionCredentialLeaseExpired
 	}
-	if err := MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields); err != nil {
+	if err := models.MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields); err != nil {
 		return err
 	}
-	if err := matchCurrentActionCredentialBinding(request.Lease, call, &binding); err != nil {
+	if err := models.CheckCurrentActionCredentialBinding(request.Lease, call, &binding); err != nil {
 		return err
 	}
-	if err := matchActionCredentialLeaseUmbrella(request.Lease, run, &binding); err != nil {
+	if err := models.CheckActionCredentialLeaseUmbrella(request.Lease, run, &binding); err != nil {
 		return err
 	}
-	credentialFieldsDigest, err := digestActionCredentialFieldSelection(request.CredentialFields)
+	credentialFieldsDigest, err := models.ActionCredentialFieldSelectionDigest(request.CredentialFields)
 	if err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM action_credential_lease_redemptions WHERE rowid IN (
 		SELECT rowid FROM action_credential_lease_redemptions WHERE expires_at <= ? ORDER BY expires_at LIMIT ?
-	)`, now, actionCredentialLeaseCleanupBatch); err != nil {
+	)`, now, sqlstore.ActionCredentialLeaseCleanupBatch); err != nil {
 		return err
 	}
-	digest := actionCredentialLeaseNonceDigest(request.Lease)
+	digest := models.ActionCredentialLeaseNonceDigest(request.Lease)
 	result, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO action_credential_lease_redemptions
 		(issuer,audience,nonce_digest,scope_kind,scope_id,run_id,action_call_id,action_lease_id,
 		 deployment_id,binding_id,binding_revision,transport,credential_fields_digest,expires_at,consumed_at)
@@ -163,7 +165,7 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 		return err
 	}
 	if rows != 1 {
-		return ErrActionCredentialLeaseReplay
+		return models.ErrActionCredentialLeaseReplay
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return err
@@ -173,5 +175,5 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 }
 
 func canonicalSQLiteLeaseTime(value time.Time) time.Time {
-	return canonicalLeaseTime(value).Truncate(time.Millisecond)
+	return models.CanonicalLeaseTime(value).Truncate(time.Millisecond)
 }

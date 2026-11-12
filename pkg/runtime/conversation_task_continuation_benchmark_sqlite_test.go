@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -19,13 +20,13 @@ func BenchmarkConversationTaskContinuationDueSQLite(b *testing.B) {
 			b.Fatal(err)
 		}
 		b.Cleanup(func() { _ = store.Close() })
-		return store, func(b *testing.B, filter ConversationTaskDueFilter) {
+		return store, func(b *testing.B, filter models.ConversationTaskDueFilter) {
 			explainSQLiteConversationTaskDue(b, store, filter)
 		}
 	})
 }
 
-func explainSQLiteConversationTaskDue(b *testing.B, store *SQLiteStore, filter ConversationTaskDueFilter) {
+func explainSQLiteConversationTaskDue(b *testing.B, store *SQLiteStore, filter models.ConversationTaskDueFilter) {
 	b.Helper()
 	query := `EXPLAIN QUERY PLAN SELECT payload FROM agent_runs WHERE scope_kind=? AND scope_id=? AND ` + sqliteConversationTaskDuePredicate + ` AND created_at<=?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.BeforeCreatedAt.UTC()}

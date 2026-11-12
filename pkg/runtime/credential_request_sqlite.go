@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func migrateCredentialRequests(db *sql.DB) error {
@@ -10,14 +13,14 @@ func migrateCredentialRequests(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) GetCredentialRequest(ctx context.Context, scope Scope, id string) (*CredentialRequest, error) {
-	return getCredentialRequest(ctx, s.db, "credential_requests", scope, id)
+func (s *SQLiteStore) GetCredentialRequest(ctx context.Context, scope models.Scope, id string) (*models.CredentialRequest, error) {
+	return sqlstore.GetCredentialRequest(ctx, s.db, "credential_requests", scope, id)
 }
 
-func (s *SQLiteStore) ListCredentialRequests(ctx context.Context, scope Scope, deploymentID, conversationID string) ([]*CredentialRequest, error) {
-	return listCredentialRequests(ctx, s.db, "credential_requests", scope, deploymentID, conversationID)
+func (s *SQLiteStore) ListCredentialRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.CredentialRequest, error) {
+	return sqlstore.ListCredentialRequests(ctx, s.db, "credential_requests", scope, deploymentID, conversationID)
 }
 
-func (s *SQLiteStore) SaveCredentialRequest(ctx context.Context, r *CredentialRequest, expected int64) error {
-	return saveCredentialRequest(ctx, s.db, "credential_requests", r, expected)
+func (s *SQLiteStore) SaveCredentialRequest(ctx context.Context, r *models.CredentialRequest, expected int64) error {
+	return sqlstore.SaveCredentialRequest(ctx, s.db, "credential_requests", r, expected)
 }

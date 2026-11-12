@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -127,7 +128,7 @@ func (s *SQLiteStore) ActivateTeamAmendment(ctx context.Context, amendment *kern
 	if err != nil {
 		return err
 	}
-	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.TeamRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -211,7 +212,7 @@ func (s *SQLiteStore) ListTeamDefinitionVersions(ctx context.Context, id string)
 }
 
 func (s *SQLiteStore) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, activation workforce.DefinitionActivation) error {
-	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.TeamRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -283,7 +284,7 @@ func (s *SQLiteStore) UpdateTeamDeployment(ctx context.Context, deployment *kern
 }
 
 func updateTeamDeploymentSQLiteTx(ctx context.Context, tx *sql.Tx, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
-	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.TeamRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}

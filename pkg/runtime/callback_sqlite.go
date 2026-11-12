@@ -7,6 +7,9 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func migrateCallbackRegistrySQLite(db *sql.DB) error {
@@ -59,7 +62,7 @@ func migrateCallbackRegistrySQLite(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateCallbackRegistration(ctx context.Context, value *CallbackRegistration) error {
+func (s *SQLiteStore) CreateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -72,12 +75,12 @@ func (s *SQLiteStore) CreateCallbackRegistration(ctx context.Context, value *Cal
 		value.Scope.Kind, value.Scope.ID, value.ID, value.IngressRoute, value.Provider, value.Status,
 		value.Revision, value.UpdatedAt, string(payload))
 	if sqliteUniqueViolation(err) {
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	return err
 }
 
-func (s *SQLiteStore) GetCallbackRegistration(ctx context.Context, scope Scope, id string) (*CallbackRegistration, error) {
+func (s *SQLiteStore) GetCallbackRegistration(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -85,15 +88,15 @@ func (s *SQLiteStore) GetCallbackRegistration(ctx context.Context, scope Scope, 
 		WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *SQLiteStore) GetCallbackRegistrationByIngressRoute(ctx context.Context, route string) (*CallbackRegistration, error) {
-	if !validOpaqueIdentifier(strings.TrimSpace(route), 128) {
-		return nil, ErrInvalidCallbackRegistration
+func (s *SQLiteStore) GetCallbackRegistrationByIngressRoute(ctx context.Context, route string) (*models.CallbackRegistration, error) {
+	if !models.IsValidOpaqueIdentifier(strings.TrimSpace(route), 128) {
+		return nil, models.ErrInvalidCallbackRegistration
 	}
 	return scanSQLiteCallbackRegistration(s.db.QueryRowContext(ctx,
 		`SELECT payload FROM callback_registrations WHERE ingress_route=?`, strings.TrimSpace(route)))
 }
 
-func (s *SQLiteStore) ListCallbackRegistrations(ctx context.Context, filter CallbackRegistrationFilter) ([]*CallbackRegistration, error) {
+func (s *SQLiteStore) ListCallbackRegistrations(ctx context.Context, filter models.CallbackRegistrationFilter) ([]*models.CallbackRegistration, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -113,14 +116,14 @@ func (s *SQLiteStore) ListCallbackRegistrations(ctx context.Context, filter Call
 	}
 	query, args = appendSQLiteActivityStrings(query, args, "status", statuses)
 	query += ` ORDER BY updated_at DESC,id ASC LIMIT ? OFFSET ?`
-	limit, offset := normalizeExternalConversationPage(filter.Limit, filter.Offset)
+	limit, offset := models.NormalizeExternalConversationPage(filter.Limit, filter.Offset)
 	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*CallbackRegistration, 0)
+	result := make([]*models.CallbackRegistration, 0)
 	for rows.Next() {
 		value, err := scanSQLiteCallbackRegistration(rows)
 		if err != nil {
@@ -131,7 +134,7 @@ func (s *SQLiteStore) ListCallbackRegistrations(ctx context.Context, filter Call
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateCallbackRegistration(ctx context.Context, value *CallbackRegistration, expectedRevision int64) error {
+func (s *SQLiteStore) UpdateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -143,7 +146,7 @@ func (s *SQLiteStore) UpdateCallbackRegistration(ctx context.Context, value *Cal
 		WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, value.IngressRoute, value.Provider, value.Status,
 		value.Revision, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision)
 	if sqliteUniqueViolation(err) {
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	if err != nil {
 		return err
@@ -158,14 +161,14 @@ func (s *SQLiteStore) UpdateCallbackRegistration(ctx context.Context, value *Cal
 			return getErr
 		}
 		if current == nil {
-			return ErrCallbackRegistrationNotFound
+			return models.ErrCallbackRegistrationNotFound
 		}
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	return nil
 }
 
-func (s *SQLiteStore) ReceiveCallbackEvent(ctx context.Context, value *CallbackEventReceipt) (*CallbackEventReceipt, bool, error) {
+func (s *SQLiteStore) ReceiveCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt) (*models.CallbackEventReceipt, bool, error) {
 	if err := value.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -186,7 +189,7 @@ func (s *SQLiteStore) ReceiveCallbackEvent(ctx context.Context, value *CallbackE
 		return nil, false, err
 	}
 	if rows == 1 {
-		return cloneCallbackEventReceipt(value), false, nil
+		return models.CloneCallbackEventReceipt(value), false, nil
 	}
 	current, err := scanSQLiteCallbackEvent(s.db.QueryRowContext(ctx, `SELECT payload FROM callback_events
 		WHERE scope_kind=? AND scope_id=? AND registration_id=? AND event_source=? AND event_id=?`,
@@ -194,7 +197,7 @@ func (s *SQLiteStore) ReceiveCallbackEvent(ctx context.Context, value *CallbackE
 	return current, true, err
 }
 
-func (s *SQLiteStore) UpdateCallbackEvent(ctx context.Context, value *CallbackEventReceipt, expectedRevision int64) error {
+func (s *SQLiteStore) UpdateCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -214,14 +217,14 @@ func (s *SQLiteStore) UpdateCallbackEvent(ctx context.Context, value *CallbackEv
 		return err
 	}
 	if rows != 1 {
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	return nil
 }
 
-func (s *SQLiteStore) ClaimCallbackEvent(ctx context.Context, scope Scope, worker string, now time.Time, leaseDuration time.Duration) (*CallbackEventReceipt, error) {
-	if scope.Validate() != nil || !validOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
-		return nil, ErrInvalidCallbackRegistration
+func (s *SQLiteStore) ClaimCallbackEvent(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.CallbackEventReceipt, error) {
+	if scope.Validate() != nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
+		return nil, models.ErrInvalidCallbackRegistration
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
 	if err != nil {
@@ -233,11 +236,11 @@ func (s *SQLiteStore) ClaimCallbackEvent(ctx context.Context, scope Scope, worke
 		WHERE scope_kind=? AND scope_id=? AND available_at<=?
 		  AND (status=? OR (status=? AND lease_expires_at<=?))
 		ORDER BY available_at ASC,updated_at ASC,id ASC LIMIT 1`, scope.Kind, scope.ID, now,
-		CallbackEventPending, CallbackEventLeased, now))
+		models.CallbackEventPending, models.CallbackEventLeased, now))
 	if err != nil || receipt == nil {
 		return nil, err
 	}
-	receipt.Status, receipt.LeaseOwner = CallbackEventLeased, strings.TrimSpace(worker)
+	receipt.Status, receipt.LeaseOwner = models.CallbackEventLeased, strings.TrimSpace(worker)
 	receipt.LeaseExpiresAt = now.Add(leaseDuration).UTC()
 	receipt.Attempts++
 	receipt.Revision++
@@ -255,7 +258,7 @@ func (s *SQLiteStore) ClaimCallbackEvent(ctx context.Context, scope Scope, worke
 		return nil, err
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return nil, ErrCallbackRegistrationConflict
+		return nil, models.ErrCallbackRegistrationConflict
 	}
 	if err := commitSQLiteConn(ctx, conn, &committed); err != nil {
 		return nil, err
@@ -263,7 +266,7 @@ func (s *SQLiteStore) ClaimCallbackEvent(ctx context.Context, scope Scope, worke
 	return receipt, nil
 }
 
-func (s *SQLiteStore) SaveClaimedCallbackEvent(ctx context.Context, receipt *CallbackEventReceipt, expectedRevision int64, leaseOwner string) error {
+func (s *SQLiteStore) SaveClaimedCallbackEvent(ctx context.Context, receipt *models.CallbackEventReceipt, expectedRevision int64, leaseOwner string) error {
 	if err := receipt.Validate(); err != nil {
 		return err
 	}
@@ -276,41 +279,41 @@ func (s *SQLiteStore) SaveClaimedCallbackEvent(ctx context.Context, receipt *Cal
 		WHERE scope_kind=? AND scope_id=? AND id=? AND revision=? AND status=? AND lease_owner=?`, receipt.Status,
 		receipt.AvailableAt, receipt.LeaseOwner, nullableSQLiteTime(receipt.LeaseExpiresAt), receipt.Attempts,
 		receipt.Revision, receipt.UpdatedAt, string(payload), receipt.Scope.Kind, receipt.Scope.ID, receipt.ID,
-		expectedRevision, CallbackEventLeased, strings.TrimSpace(leaseOwner))
+		expectedRevision, models.CallbackEventLeased, strings.TrimSpace(leaseOwner))
 	if err != nil {
 		return err
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return ErrCallbackRegistrationConflict
+		return models.ErrCallbackRegistrationConflict
 	}
 	return nil
 }
 
-func scanSQLiteCallbackRegistration(scanner sqliteExternalConversationScanner) (*CallbackRegistration, error) {
+func scanSQLiteCallbackRegistration(scanner sqlstore.RowScanner) (*models.CallbackRegistration, error) {
 	var payload string
 	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value CallbackRegistration
+	var value models.CallbackRegistration
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}
 	return &value, value.Validate()
 }
 
-func scanSQLiteCallbackEvent(scanner sqliteExternalConversationScanner) (*CallbackEventReceipt, error) {
+func scanSQLiteCallbackEvent(scanner sqlstore.RowScanner) (*models.CallbackEventReceipt, error) {
 	var payload string
 	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value CallbackEventReceipt
+	var value models.CallbackEventReceipt
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}
-	normalizeStoredCallbackReceipt(&value)
+	models.NormalizeStoredCallbackReceipt(&value)
 	return &value, value.Validate()
 }

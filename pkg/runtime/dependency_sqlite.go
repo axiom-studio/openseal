@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func migrateRunDependencies(db *sql.DB) error {
@@ -60,8 +63,8 @@ func migrateRunDependencies(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDependencyGroupCreateRecord) (*RunDependencyResult, error) {
-	if err := validateRunDependencyGroupCreateRecord(record); err != nil {
+func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupCreateRecord) (*models.RunDependencyResult, error) {
+	if err := models.ValidateRunDependencyGroupCreateRecord(record); err != nil {
 		return nil, err
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
@@ -83,18 +86,18 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 		if err != nil {
 			return nil, err
 		}
-		if !sameDependencyGroupRecord(existing, edges, record) {
-			return nil, ErrDependencyConflict
+		if !models.SameDependencyGroupRecord(existing, edges, record) {
+			return nil, models.ErrDependencyConflict
 		}
 		source, err := getSQLiteAgentRun(ctx, conn, existing.Scope, existing.SourceRunID)
 		if err != nil {
 			return nil, err
 		}
-		evaluation, err := EvaluateRunDependencies(existing, edges)
+		evaluation, err := models.EvaluateRunDependencies(existing, edges)
 		if err != nil {
 			return nil, err
 		}
-		replayed := &RunDependencyResult{Group: existing, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}
+		replayed := &models.RunDependencyResult{Group: existing, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}
 		if err := readSQLiteDependencyGroupSessionState(ctx, conn, record, replayed); err != nil {
 			return nil, err
 		}
@@ -108,7 +111,7 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 	if err != nil {
 		return nil, err
 	}
-	if err := checkDependencyGroupCreateSource(currentSource, record); err != nil {
+	if err := models.CheckDependencyGroupCreateSource(currentSource, record); err != nil {
 		return nil, err
 	}
 	if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
@@ -130,7 +133,7 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 		record.Group.CreatedAt, record.Group.UpdatedAt, string(groupPayload))
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return nil, ErrDependencyConflict
+			return nil, models.ErrDependencyConflict
 		}
 		return nil, err
 	}
@@ -143,8 +146,8 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 	if err != nil {
 		return nil, err
 	}
-	result := &RunDependencyResult{
-		Group: cloneRunDependencyGroup(record.Group), Source: cloneAgentRun(record.SourceRun), Events: []*ActivityEvent{persisted},
+	result := &models.RunDependencyResult{
+		Group: models.CloneRunDependencyGroup(record.Group), Source: models.CloneAgentRun(record.SourceRun), Events: []*models.ActivityEvent{persisted},
 	}
 	if err := s.applySQLiteDependencyGroupSessionWrites(ctx, conn, record, currentSource.SessionID, result); err != nil {
 		return nil, err
@@ -153,8 +156,8 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 		return nil, err
 	}
 	committed = true
-	result.Dependencies = cloneDependencySlice(record.Dependencies)
-	result.Evaluation, err = EvaluateRunDependencies(record.Group, result.Dependencies)
+	result.Dependencies = models.CloneRunDependencies(record.Dependencies)
+	result.Evaluation, err = models.EvaluateRunDependencies(record.Group, result.Dependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -164,27 +167,27 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 // applySQLiteDependencyGroupSessionWrites creates the record's same-Agent
 // child sessions and moves the source's control tool entry, inside the
 // create's BEGIN IMMEDIATE. The source fence was checked by the caller.
-func (s *SQLiteStore) applySQLiteDependencyGroupSessionWrites(ctx context.Context, conn *sql.Conn, record RunDependencyGroupCreateRecord, sourceSessionID string, result *RunDependencyResult) error {
+func (s *SQLiteStore) applySQLiteDependencyGroupSessionWrites(ctx context.Context, conn *sql.Conn, record models.RunDependencyGroupCreateRecord, sourceSessionID string, result *models.RunDependencyResult) error {
 	for i := range record.ChildSessions {
-		created, err := s.createRunAgentSessionTx(ctx, conn, dependencyGroupChildSession(record, i))
+		created, err := s.createRunAgentSessionTx(ctx, conn, models.DependencyGroupChildSession(record, i))
 		if err != nil {
 			return err
 		}
 		if !created.Created {
-			return ErrAgentSessionConflict
+			return models.ErrAgentSessionConflict
 		}
 		result.ChildSessions = append(result.ChildSessions, created.Session)
 	}
 	if record.ToolTransition == nil {
 		return nil
 	}
-	transition := dependencyGroupToolTransition(record)
+	transition := models.DependencyGroupToolTransition(record)
 	current, err := getSQLiteSessionEntry(ctx, conn, transition.Scope, transition.EntryID)
 	if err != nil {
 		return err
 	}
 	if current.SessionID != sourceSessionID {
-		return ErrSessionMoved
+		return models.ErrSessionMoved
 	}
 	moved, err := s.transitionToolEntryTx(ctx, conn, transition)
 	if err != nil {
@@ -197,17 +200,17 @@ func (s *SQLiteStore) applySQLiteDependencyGroupSessionWrites(ctx context.Contex
 
 // readSQLiteDependencyGroupSessionState fills a replay with the current
 // tool entry and child sessions; a replay writes nothing.
-func readSQLiteDependencyGroupSessionState(ctx context.Context, conn *sql.Conn, record RunDependencyGroupCreateRecord, result *RunDependencyResult) error {
+func readSQLiteDependencyGroupSessionState(ctx context.Context, conn *sql.Conn, record models.RunDependencyGroupCreateRecord, result *models.RunDependencyResult) error {
 	if transition := record.ToolTransition; transition != nil {
 		entry, err := getSQLiteSessionEntry(ctx, conn, transition.Scope, transition.EntryID)
-		if err != nil && !errors.Is(err, ErrSessionEntryNotFound) {
+		if err != nil && !errors.Is(err, models.ErrSessionEntryNotFound) {
 			return err
 		}
 		result.ToolEntry = entry
 	}
 	for _, child := range record.ChildSessions {
-		session, err := getSQLiteAgentSession(ctx, conn, child.Scope, RunAgentSessionID(child.Scope, child.OwnerRunID))
-		if errors.Is(err, ErrAgentSessionNotFound) {
+		session, err := getSQLiteAgentSession(ctx, conn, child.Scope, models.RunAgentSessionID(child.Scope, child.OwnerRunID))
+		if errors.Is(err, models.ErrAgentSessionNotFound) {
 			continue
 		}
 		if err != nil {
@@ -218,14 +221,14 @@ func readSQLiteDependencyGroupSessionState(ctx context.Context, conn *sql.Conn, 
 	return nil
 }
 
-func (s *SQLiteStore) GetRunDependencyGroup(ctx context.Context, scope Scope, groupID string) (*RunDependencyGroup, error) {
+func (s *SQLiteStore) GetRunDependencyGroup(ctx context.Context, scope models.Scope, groupID string) (*models.RunDependencyGroup, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getSQLiteDependencyGroup(ctx, s.db, scope, strings.TrimSpace(groupID), "")
 }
 
-func (s *SQLiteStore) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope Scope, key string) (*RunDependencyGroup, error) {
+func (s *SQLiteStore) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.RunDependencyGroup, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -235,7 +238,7 @@ func (s *SQLiteStore) FindRunDependencyGroupByIdempotencyKey(ctx context.Context
 	return getSQLiteDependencyGroup(ctx, s.db, scope, "", strings.TrimSpace(key))
 }
 
-func (s *SQLiteStore) ListRunDependencies(ctx context.Context, scope Scope, groupID string) ([]*RunDependency, error) {
+func (s *SQLiteStore) ListRunDependencies(ctx context.Context, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -244,13 +247,13 @@ func (s *SQLiteStore) ListRunDependencies(ctx context.Context, scope Scope, grou
 		return nil, err
 	}
 	if group == nil {
-		return nil, ErrDependencyGroupNotFound
+		return nil, models.ErrDependencyGroupNotFound
 	}
 	return listSQLiteDependencies(ctx, s.db, scope, group.ID)
 }
 
-func (s *SQLiteStore) ResolveRunDependency(ctx context.Context, record RunDependencyResolutionRecord) (*RunDependencyResult, error) {
-	if err := validateRunDependencyResolutionRecord(record); err != nil {
+func (s *SQLiteStore) ResolveRunDependency(ctx context.Context, record models.RunDependencyResolutionRecord) (*models.RunDependencyResult, error) {
+	if err := models.ValidateRunDependencyResolutionRecord(record); err != nil {
 		return nil, err
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
@@ -270,13 +273,13 @@ func (s *SQLiteStore) ResolveRunDependency(ctx context.Context, record RunDepend
 	return result, nil
 }
 
-func (s *SQLiteStore) resolveSQLiteDependencyConn(ctx context.Context, conn *sql.Conn, record RunDependencyResolutionRecord) (*RunDependencyResult, error) {
+func (s *SQLiteStore) resolveSQLiteDependencyConn(ctx context.Context, conn *sql.Conn, record models.RunDependencyResolutionRecord) (*models.RunDependencyResult, error) {
 	group, err := getSQLiteDependencyGroup(ctx, conn, record.Scope, record.GroupID, "")
 	if err != nil {
 		return nil, err
 	}
 	if group == nil {
-		return nil, ErrDependencyGroupNotFound
+		return nil, models.ErrDependencyGroupNotFound
 	}
 	edges, err := listSQLiteDependencies(ctx, conn, record.Scope, group.ID)
 	if err != nil {
@@ -286,7 +289,7 @@ func (s *SQLiteStore) resolveSQLiteDependencyConn(ctx context.Context, conn *sql
 	if err != nil {
 		return nil, err
 	}
-	result, err := applyRunDependencyResolution(group, edges, source, record)
+	result, err := models.ApplyRunDependencyResolution(group, edges, source, record)
 	if err != nil || result.Replayed {
 		return result, err
 	}
@@ -301,7 +304,7 @@ type sqliteDependencyQueryer interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 }
 
-func getSQLiteDependencyGroup(ctx context.Context, queryer sqliteDependencyQueryer, scope Scope, groupID, idempotencyKey string) (*RunDependencyGroup, error) {
+func getSQLiteDependencyGroup(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, groupID, idempotencyKey string) (*models.RunDependencyGroup, error) {
 	query := `SELECT payload FROM run_dependency_groups WHERE scope_kind = ? AND scope_id = ?`
 	args := []interface{}{scope.Kind, scope.ID}
 	if strings.TrimSpace(groupID) != "" {
@@ -319,23 +322,23 @@ func getSQLiteDependencyGroup(ctx context.Context, queryer sqliteDependencyQuery
 	if err != nil {
 		return nil, err
 	}
-	return decodeRunDependencyGroup(payload)
+	return sqlstore.DecodeRunDependencyGroup(payload)
 }
 
-func listSQLiteDependencies(ctx context.Context, queryer sqliteDependencyQueryer, scope Scope, groupID string) ([]*RunDependency, error) {
+func listSQLiteDependencies(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
 	rows, err := queryer.QueryContext(ctx, `SELECT payload FROM run_dependencies
 		WHERE scope_kind = ? AND scope_id = ? AND group_id = ? ORDER BY id`, scope.Kind, scope.ID, groupID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*RunDependency, 0)
+	result := make([]*models.RunDependency, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		edge, err := decodeRunDependency(payload)
+		edge, err := sqlstore.DecodeRunDependency(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -344,20 +347,20 @@ func listSQLiteDependencies(ctx context.Context, queryer sqliteDependencyQueryer
 	return result, rows.Err()
 }
 
-func getSQLiteAgentRun(ctx context.Context, queryer sqliteDependencyQueryer, scope Scope, runID string) (*AgentRun, error) {
+func getSQLiteAgentRun(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, runID string) (*models.AgentRun, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		scope.Kind, scope.ID, runID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return decodeAgentRun(payload)
+	return sqlstore.DecodeAgentRun(payload)
 }
 
-func insertSQLiteDependency(ctx context.Context, conn *sql.Conn, edge *RunDependency) error {
+func insertSQLiteDependency(ctx context.Context, conn *sql.Conn, edge *models.RunDependency) error {
 	payload, err := json.Marshal(edge)
 	if err != nil {
 		return err
@@ -374,7 +377,7 @@ func insertSQLiteDependency(ctx context.Context, conn *sql.Conn, edge *RunDepend
 	return err
 }
 
-func updateSQLiteDependency(ctx context.Context, conn *sql.Conn, edge *RunDependency, expectedRevision int64) error {
+func updateSQLiteDependency(ctx context.Context, conn *sql.Conn, edge *models.RunDependency, expectedRevision int64) error {
 	payload, err := json.Marshal(edge)
 	if err != nil {
 		return err
@@ -386,7 +389,7 @@ func updateSQLiteDependency(ctx context.Context, conn *sql.Conn, edge *RunDepend
 	return expectDependencyRow(result, err)
 }
 
-func updateSQLiteDependencyGroup(ctx context.Context, conn *sql.Conn, group *RunDependencyGroup, expectedRevision int64) error {
+func updateSQLiteDependencyGroup(ctx context.Context, conn *sql.Conn, group *models.RunDependencyGroup, expectedRevision int64) error {
 	payload, err := json.Marshal(group)
 	if err != nil {
 		return err
@@ -406,7 +409,7 @@ func expectDependencyRow(result sql.Result, err error) error {
 		return err
 	}
 	if affected != 1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	return nil
 }

@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
+func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRun, error) {
 	decision, err := s.ClaimNextAgentRunWithDecision(ctx, claim)
 	if err != nil || decision == nil {
 		return nil, err
@@ -15,7 +18,7 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 	return decision.Run, nil
 }
 
-func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
+func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -35,19 +38,19 @@ func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim A
 	}()
 	rows, err := conn.QueryContext(ctx, `SELECT payload FROM agent_runs
 		WHERE scope_kind = ? AND scope_id = ? AND status IN (?, ?)`,
-		claim.Scope.Kind, claim.Scope.ID, AgentRunStatusQueued, AgentRunStatusRunning)
+		claim.Scope.Kind, claim.Scope.ID, models.AgentRunStatusQueued, models.AgentRunStatusRunning)
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]*AgentRun, 0)
-	objectives := make(map[string]*Objective)
+	candidates := make([]*models.AgentRun, 0)
+	objectives := make(map[string]*models.Objective)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			rows.Close()
 			return nil, err
@@ -67,7 +70,7 @@ func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim A
 			objectiveRows.Close()
 			return nil, err
 		}
-		objective, err := decodeObjective(payload)
+		objective, err := sqlstore.DecodeObjective(payload)
 		if err != nil {
 			objectiveRows.Close()
 			return nil, err
@@ -80,7 +83,7 @@ func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim A
 	if err := s.prepareConversationTaskAdmissionConn(ctx, conn, &claim, candidates); err != nil {
 		return nil, err
 	}
-	selected, decision := evaluateAgentRunAdmission(candidates, objectives, claim)
+	selected, decision := models.EvaluateAgentRunAdmission(candidates, objectives, claim)
 	if selected == nil {
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 			return nil, err
@@ -89,7 +92,7 @@ func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim A
 		return decision, nil
 	}
 	previousRevision := selected.Revision
-	if err := applyAgentRunClaim(selected, claim); err != nil {
+	if err := models.ApplyAgentRunClaim(selected, claim); err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(selected)
@@ -110,25 +113,25 @@ func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim A
 		return nil, err
 	}
 	if affected != 1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err
 	}
 	committed = true
 	decision.Run = selected
-	decision.Outcome = AgentRunAdmissionClaimed
-	if selected.Status == AgentRunStatusPaused && selected.BudgetState == BudgetStateExhausted {
-		decision.Outcome = AgentRunAdmissionBudgetStopped
-		decision.Blocks = []AgentRunAdmissionBlock{{
+	decision.Outcome = models.AgentRunAdmissionClaimed
+	if selected.Status == models.AgentRunStatusPaused && selected.BudgetState == models.BudgetStateExhausted {
+		decision.Outcome = models.AgentRunAdmissionBudgetStopped
+		decision.Blocks = []models.AgentRunAdmissionBlock{{
 			RunID: selected.ID, ObjectiveID: selected.ObjectiveID, AssignedAgentID: selected.AssignedAgentID,
-			Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: AgentRunAdmissionReasonAttemptBudgetExhausted,
+			Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: models.AgentRunAdmissionReasonAttemptBudgetExhausted,
 		}}
 	}
 	return decision, nil
 }
 
-func (s *SQLiteStore) RenewAgentRunLease(ctx context.Context, scope Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentRun, error) {
+func (s *SQLiteStore) RenewAgentRunLease(ctx context.Context, scope models.Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -150,17 +153,17 @@ func (s *SQLiteStore) RenewAgentRunLease(ctx context.Context, scope Scope, runID
 	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 		scope.Kind, scope.ID, runID).Scan(&payload)
 	if err == sql.ErrNoRows {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	run, err := decodeAgentRun(payload)
+	run, err := sqlstore.DecodeAgentRun(payload)
 	if err != nil {
 		return nil, err
 	}
-	if run.Status != AgentRunStatusRunning || run.LeaseOwner != workerID || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
-		return nil, ErrLeaseLost
+	if run.Status != models.AgentRunStatusRunning || run.LeaseOwner != workerID || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
+		return nil, models.ErrLeaseLost
 	}
 	previousRevision := run.Revision
 	expires := now.Add(leaseDuration)
@@ -182,7 +185,7 @@ func (s *SQLiteStore) RenewAgentRunLease(ctx context.Context, scope Scope, runID
 		return nil, err
 	}
 	if affected != 1 {
-		return nil, ErrLeaseLost
+		return nil, models.ErrLeaseLost
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err

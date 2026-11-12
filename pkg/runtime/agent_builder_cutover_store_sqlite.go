@@ -3,37 +3,40 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ AgentBuilderCutoverStore = (*SQLiteStore)(nil)
+var _ models.AgentBuilderCutoverStore = (*SQLiteStore)(nil)
 
 func sqliteAgentBuilderCutoverTablePresent(ctx context.Context, query interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }) (bool, error) {
 	var present int
-	err := query.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, agentBuilderCutoverTable).Scan(&present)
+	err := query.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, sqlstore.AgentBuilderCutoverTable).Scan(&present)
 	return present > 0, err
 }
 
-func (s *SQLiteStore) ListAgentBuilderCutoverDrafts(ctx context.Context) ([]AgentBuilderCutoverDraft, error) {
+func (s *SQLiteStore) ListAgentBuilderCutoverDrafts(ctx context.Context) ([]models.AgentBuilderCutoverDraft, error) {
 	present, err := sqliteAgentBuilderCutoverTablePresent(ctx, s.db)
 	if err != nil || !present {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT scope_kind, scope_id, id, idempotency_key, payload FROM `+
-		agentBuilderCutoverTable+` ORDER BY created_at, scope_kind, scope_id, id`)
+		sqlstore.AgentBuilderCutoverTable+` ORDER BY created_at, scope_kind, scope_id, id`)
 	if err != nil {
 		return nil, err
 	}
-	return scanAgentBuilderCutoverDrafts(rows)
+	return sqlstore.ScanAgentBuilderCutoverDrafts(rows)
 }
 
-func (s *SQLiteStore) DeleteAgentBuilderCutoverDraft(ctx context.Context, scope Scope, id string) error {
+func (s *SQLiteStore) DeleteAgentBuilderCutoverDraft(ctx context.Context, scope models.Scope, id string) error {
 	present, err := sqliteAgentBuilderCutoverTablePresent(ctx, s.db)
 	if err != nil || !present {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM `+agentBuilderCutoverTable+` WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id)
+	_, err = s.db.ExecContext(ctx, `DELETE FROM `+sqlstore.AgentBuilderCutoverTable+` WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id)
 	return err
 }
 
@@ -48,13 +51,13 @@ func (s *SQLiteStore) DropAgentBuilderCutoverTable(ctx context.Context) (bool, e
 		return false, err
 	}
 	var remaining int
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+agentBuilderCutoverTable+`)`).Scan(&remaining); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+sqlstore.AgentBuilderCutoverTable+`)`).Scan(&remaining); err != nil {
 		return false, err
 	}
 	if remaining != 0 {
 		return false, nil
 	}
-	if _, err := tx.ExecContext(ctx, `DROP TABLE `+agentBuilderCutoverTable); err != nil {
+	if _, err := tx.ExecContext(ctx, `DROP TABLE `+sqlstore.AgentBuilderCutoverTable); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {

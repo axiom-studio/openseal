@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -28,8 +30,8 @@ func seedSQLiteChangeSets(t *testing.T, path string) string {
 	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
 	ctx := context.Background()
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: storetest.BuilderCutoverScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "author", Source: RunSourceManual,
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: storetest.BuilderCutoverScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "author", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +122,7 @@ func TestAgentBuilderMigrationSQLiteKeepsLeafDraftsAndRetiresChangeSets(t *testi
 	storetest.AssertCutoverLeafDrafts(t, drafts)
 
 	run, err := store.GetAgentRun(ctx, storetest.BuilderCutoverScope, runID)
-	if err != nil || run.Status != AgentRunStatusCanceled || run.LeaseOwner != "" {
+	if err != nil || run.Status != models.AgentRunStatusCanceled || run.LeaseOwner != "" {
 		t.Fatalf("authoring run = %#v, %v; want canceled without lease", run, err)
 	}
 	var status, leaseOwner string
@@ -176,7 +178,7 @@ func TestAgentBuilderMigrationSQLiteFreshStoreHasNoChangeSets(t *testing.T) {
 	}
 	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
-	for _, prefix := range []string{"workforce_change_sets", agentBuilderCutoverTable} {
+	for _, prefix := range []string{"workforce_change_sets", sqlstore.AgentBuilderCutoverTable} {
 		if names := sqliteObjectNames(t, sqlDB, "table", prefix); len(names) != 0 {
 			t.Fatalf("fresh store has %v", names)
 		}

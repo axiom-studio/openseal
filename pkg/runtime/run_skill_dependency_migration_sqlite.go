@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // Canonical Run triggers cover older binaries during a rolling upgrade. Only
@@ -20,7 +22,7 @@ func migrateRunSkillDependenciesSQLite(db *sql.DB) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS run_skill_dependencies(scope_kind TEXT NOT NULL,scope_id TEXT NOT NULL,run_id TEXT NOT NULL,skill_id TEXT NOT NULL,skill_version TEXT NOT NULL,deployment_id TEXT NOT NULL,PRIMARY KEY(scope_kind,scope_id,run_id,skill_id,skill_version,deployment_id))`,
 		`CREATE INDEX IF NOT EXISTS idx_run_skill_dependencies_runtime ON run_skill_dependencies(scope_kind,scope_id,skill_id,skill_version,deployment_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_agent_runs_legacy_skill_dependency_page ON agent_runs(scope_kind,scope_id,id) WHERE status IN (` + unfinishedSkillRunSQL + `)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runs_legacy_skill_dependency_page ON agent_runs(scope_kind,scope_id,id) WHERE status IN (` + sqlstore.UnfinishedSkillRunSQL + `)`,
 	} {
 		if _, err := tx.Exec(statement); err != nil {
 			return err
@@ -30,10 +32,10 @@ func migrateRunSkillDependenciesSQLite(db *sql.DB) error {
 		p := sqliteDependencyPayload("r")
 		statement := `INSERT OR IGNORE INTO run_skill_dependencies
    SELECT r.scope_kind,r.scope_id,r.id,trim(json_extract(` + p + `,'$.context.capabilityInvocation.skillId')),trim(json_extract(` + p + `,'$.context.capabilityInvocation.skillVersion')),CASE WHEN json_extract(` + p + `,'$.owner.type')='team' THEN '' ELSE r.assigned_agent_id END
-   FROM agent_runs r WHERE r.status IN (` + unfinishedSkillRunSQL + `) AND ` + sqliteTypedDependencyValid(p) + `
+   FROM agent_runs r WHERE r.status IN (` + sqlstore.UnfinishedSkillRunSQL + `) AND ` + sqliteTypedDependencyValid(p) + `
    UNION SELECT r.scope_kind,r.scope_id,r.id,trim(json_extract(ref.value,'$.skillId')),trim(json_extract(ref.value,'$.skillVersion')),CASE WHEN json_extract(` + p + `,'$.owner.type')='team' THEN '' ELSE r.assigned_agent_id END
    FROM agent_runs r,json_each(` + p + `,'$.context.acceptedRunExecution.skillDependencies') ref
-   WHERE r.status IN (` + unfinishedSkillRunSQL + `) AND ` + sqliteAcceptedDependencyValid("r", p) + ` AND ` + sqliteDependencyReferenceValid() + `;`
+   WHERE r.status IN (` + sqlstore.UnfinishedSkillRunSQL + `) AND ` + sqliteAcceptedDependencyValid("r", p) + ` AND ` + sqliteDependencyReferenceValid() + `;`
 		if _, err := tx.Exec(statement); err != nil {
 			return err
 		}
@@ -42,7 +44,7 @@ func migrateRunSkillDependenciesSQLite(db *sql.DB) error {
 			return err
 		}
 		if registryPresent {
-			if err := backfillLegacyRunSkillDependencies(context.Background(), tx, "agent_runs", "agent_deployments", "agent_definitions", "run_skill_dependencies", false); err != nil {
+			if err := sqlstore.BackfillLegacyRunSkillDependencies(context.Background(), tx, "agent_runs", "agent_deployments", "agent_definitions", "run_skill_dependencies", false); err != nil {
 				return err
 			}
 		}
@@ -56,13 +58,13 @@ func migrateRunSkillDependenciesSQLite(db *sql.DB) error {
 		}
 		statement := `CREATE TRIGGER IF NOT EXISTS project_run_skill_dependencies_` + operation.name + ` AFTER ` + operation.event + ` ON agent_runs BEGIN
    ` + immutable + `
-   SELECT CASE WHEN NEW.status IN (` + unfinishedSkillRunSQL + `) AND EXISTS(SELECT 1 FROM (` + pending + `) c JOIN skill_runtime_maintenance m ON m.scope_kind=NEW.scope_kind AND m.scope_id=NEW.scope_id AND m.skill_id=c.skill_id AND m.active=1) THEN RAISE(ABORT,'Skill runtime maintenance is in progress') END;
-   SELECT CASE WHEN NEW.status IN (` + unfinishedSkillRunSQL + `) AND EXISTS(SELECT 1 FROM (` + pending + `) c
+   SELECT CASE WHEN NEW.status IN (` + sqlstore.UnfinishedSkillRunSQL + `) AND EXISTS(SELECT 1 FROM (` + pending + `) c JOIN skill_runtime_maintenance m ON m.scope_kind=NEW.scope_kind AND m.scope_id=NEW.scope_id AND m.skill_id=c.skill_id AND m.active=1) THEN RAISE(ABORT,'Skill runtime maintenance is in progress') END;
+   SELECT CASE WHEN NEW.status IN (` + sqlstore.UnfinishedSkillRunSQL + `) AND EXISTS(SELECT 1 FROM (` + pending + `) c
     WHERE EXISTS(SELECT 1 FROM skill_bindings b WHERE b.scope_kind=NEW.scope_kind AND b.scope_id=NEW.scope_id AND b.skill_id=c.skill_id AND (` + sqliteDependencyDeployment("NEW") + `='' OR b.deployment_id=` + sqliteDependencyDeployment("NEW") + `))
     AND NOT EXISTS(SELECT 1 FROM skill_bindings b WHERE b.scope_kind=NEW.scope_kind AND b.scope_id=NEW.scope_id AND b.skill_id=c.skill_id AND (` + sqliteDependencyDeployment("NEW") + `='' OR b.deployment_id=` + sqliteDependencyDeployment("NEW") + `) AND b.skill_version=c.skill_version AND COALESCE(json_extract(b.payload,'$.disabled'),0)=0))
     THEN RAISE(ABORT,'selected Skill executable version is unavailable') END;
-   DELETE FROM run_skill_dependencies WHERE scope_kind=NEW.scope_kind AND scope_id=NEW.scope_id AND run_id=NEW.id AND NEW.status NOT IN (` + unfinishedSkillRunSQL + `);
-   INSERT OR IGNORE INTO run_skill_dependencies SELECT NEW.scope_kind,NEW.scope_id,NEW.id,c.skill_id,c.skill_version,` + sqliteDependencyDeployment("NEW") + ` FROM (` + candidates + `) c WHERE NEW.status IN (` + unfinishedSkillRunSQL + `);
+   DELETE FROM run_skill_dependencies WHERE scope_kind=NEW.scope_kind AND scope_id=NEW.scope_id AND run_id=NEW.id AND NEW.status NOT IN (` + sqlstore.UnfinishedSkillRunSQL + `);
+   INSERT OR IGNORE INTO run_skill_dependencies SELECT NEW.scope_kind,NEW.scope_id,NEW.id,c.skill_id,c.skill_version,` + sqliteDependencyDeployment("NEW") + ` FROM (` + candidates + `) c WHERE NEW.status IN (` + sqlstore.UnfinishedSkillRunSQL + `);
    END`
 		if _, err := tx.Exec(statement); err != nil {
 			return err

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -194,14 +195,14 @@ func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Bindi
 			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 		}
 	}()
-	maintenanceScope := Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
+	maintenanceScope := models.Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
 	for _, skillID := range []string{binding.SkillID} {
 		g, err := sqliteSkillRuntimeMaintenanceActiveTx(ctx, conn, maintenanceScope, skillID)
 		if err != nil {
 			return err
 		}
 		if g != nil {
-			return &SkillRuntimeMaintenanceError{Maintenance: *g}
+			return &models.SkillRuntimeMaintenanceError{Maintenance: *g}
 		}
 	}
 	var previousSkillID string
@@ -216,7 +217,7 @@ func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Bindi
 			return err
 		}
 		if g != nil {
-			return &SkillRuntimeMaintenanceError{Maintenance: *g}
+			return &models.SkillRuntimeMaintenanceError{Maintenance: *g}
 		}
 	}
 	if !exists {
@@ -329,10 +330,10 @@ func (s *SQLiteStore) DeleteSkillBinding(ctx context.Context, scope skill.ScopeR
 	if revision != expectedRevision {
 		return skill.ErrBindingRevisionConflict
 	}
-	if g, err := sqliteSkillRuntimeMaintenanceActiveTx(ctx, conn, Scope{Kind: scope.Kind, ID: scope.ID}, skillID); err != nil {
+	if g, err := sqliteSkillRuntimeMaintenanceActiveTx(ctx, conn, models.Scope{Kind: scope.Kind, ID: scope.ID}, skillID); err != nil {
 		return err
 	} else if g != nil {
-		return &SkillRuntimeMaintenanceError{Maintenance: *g}
+		return &models.SkillRuntimeMaintenanceError{Maintenance: *g}
 	}
 	result, err := conn.ExecContext(ctx, `DELETE FROM skill_bindings WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=? AND revision=?`,
 		scope.Kind, scope.ID, deploymentID, bindingID, expectedRevision)

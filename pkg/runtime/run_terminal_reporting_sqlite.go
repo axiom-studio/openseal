@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ RunTerminalReportingStore = (*SQLiteStore)(nil)
+var _ models.RunTerminalReportingStore = (*SQLiteStore)(nil)
 
 // Queue timestamps use integer microseconds, matching PostgreSQL precision.
 // Trigger-generated RFC3339 values must not be compared as strings against
@@ -29,13 +32,13 @@ const sqliteTerminalReportAvailableAt = `CAST(strftime('%s',CASE
 
 const sqliteTerminalReportEligible = `NEW.status IN ('completed','failed','canceled')
 	AND json_type(NEW.payload,'$.context.conversationId')='text'
-	AND trim(json_extract(NEW.payload,'$.context.conversationId'),'` + runTerminalReportingWhitespace + `')<>''
+	AND trim(json_extract(NEW.payload,'$.context.conversationId'),'` + sqlstore.RunTerminalReportingWhitespace + `')<>''
 	AND json_type(NEW.payload,'$.context.triggerMessageId')='text'
-	AND trim(json_extract(NEW.payload,'$.context.triggerMessageId'),'` + runTerminalReportingWhitespace + `')<>''
+	AND trim(json_extract(NEW.payload,'$.context.triggerMessageId'),'` + sqlstore.RunTerminalReportingWhitespace + `')<>''
 	AND ((NEW.status='failed' AND json_extract(NEW.payload,'$.kind')='conversation'
 		AND COALESCE(json_extract(NEW.payload,'$.parentRunId'),'')='')
 	OR (json_type(NEW.payload,'$.context.reportingRootRunId')='text'
-		AND trim(json_extract(NEW.payload,'$.context.reportingRootRunId'),'` + runTerminalReportingWhitespace + `')=NEW.id
+		AND trim(json_extract(NEW.payload,'$.context.reportingRootRunId'),'` + sqlstore.RunTerminalReportingWhitespace + `')=NEW.id
 		AND EXISTS (SELECT 1 FROM json_each(CASE
 			WHEN json_type(NEW.payload,'$.context.reportingMilestones')='array'
 			THEN json_extract(NEW.payload,'$.context.reportingMilestones') ELSE '[]' END) milestone
@@ -133,13 +136,13 @@ func migrateRunTerminalReportingSQLite(db *sql.DB) error {
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) ClaimRunTerminalReports(ctx context.Context, request RunTerminalReportingClaim) ([]*RunTerminalReport, error) {
+func (s *SQLiteStore) ClaimRunTerminalReports(ctx context.Context, request models.RunTerminalReportingClaim) ([]*models.RunTerminalReport, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
 	expires := request.Now.Add(request.LeaseDuration).UTC().Truncate(time.Microsecond)
 	if !expires.After(request.Now) {
-		return nil, ErrInvalidRunTerminalReport
+		return nil, models.ErrInvalidRunTerminalReport
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
 	if err != nil {
@@ -161,7 +164,7 @@ func (s *SQLiteStore) ClaimRunTerminalReports(ctx context.Context, request RunTe
 	if err != nil {
 		return nil, err
 	}
-	reports := make([]*RunTerminalReport, 0, request.Limit)
+	reports := make([]*models.RunTerminalReport, 0, request.Limit)
 	for rows.Next() {
 		report, scanErr := scanSQLiteRunTerminalReport(rows)
 		if scanErr != nil {
@@ -197,12 +200,12 @@ func (s *SQLiteStore) ClaimRunTerminalReports(ctx context.Context, request RunTe
 	return reports, nil
 }
 
-func (s *SQLiteStore) CompleteRunTerminalReport(ctx context.Context, request RunTerminalReportingCompletion) error {
+func (s *SQLiteStore) CompleteRunTerminalReport(ctx context.Context, request models.RunTerminalReportingCompletion) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
 	if !request.LeaseExpiresAt.Equal(request.LeaseExpiresAt.Truncate(time.Microsecond)) {
-		return ErrLeaseLost
+		return models.ErrLeaseLost
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE run_terminal_reports
 		SET queue_state='delivered',delivered_at=?,lease_owner='',lease_expires_at=NULL,payload=NULL
@@ -210,18 +213,18 @@ func (s *SQLiteStore) CompleteRunTerminalReport(ctx context.Context, request Run
 		AND lease_owner=? AND lease_expires_at=? AND lease_expires_at>? AND terminal_revision=?`,
 		request.Now.UnixMicro(), request.Scope.Kind, request.Scope.ID, request.RunID, request.Status,
 		request.WorkerID, request.LeaseExpiresAt.UnixMicro(), request.Now.UnixMicro(), request.TerminalRevision)
-	return runTerminalReportLeaseResult(result, err)
+	return sqlstore.RunTerminalReportLeaseResult(result, err)
 }
 
-func (s *SQLiteStore) RetryRunTerminalReport(ctx context.Context, request RunTerminalReportingRetry) error {
+func (s *SQLiteStore) RetryRunTerminalReport(ctx context.Context, request models.RunTerminalReportingRetry) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
 	if !request.LeaseExpiresAt.Equal(request.LeaseExpiresAt.Truncate(time.Microsecond)) {
-		return ErrLeaseLost
+		return models.ErrLeaseLost
 	}
 	if !request.AvailableAt.Truncate(time.Microsecond).After(request.Now) {
-		return ErrInvalidRunTerminalReport
+		return models.ErrInvalidRunTerminalReport
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE run_terminal_reports
 		SET available_at=?,lease_owner='',lease_expires_at=NULL
@@ -229,27 +232,27 @@ func (s *SQLiteStore) RetryRunTerminalReport(ctx context.Context, request RunTer
 		AND lease_owner=? AND lease_expires_at=? AND lease_expires_at>? AND terminal_revision=?`,
 		request.AvailableAt.UnixMicro(), request.Scope.Kind, request.Scope.ID, request.RunID, request.Status,
 		request.WorkerID, request.LeaseExpiresAt.UnixMicro(), request.Now.UnixMicro(), request.TerminalRevision)
-	return runTerminalReportLeaseResult(result, err)
+	return sqlstore.RunTerminalReportLeaseResult(result, err)
 }
 
-func (s *SQLiteStore) GetRunTerminalReport(ctx context.Context, scope Scope, runID string, status AgentRunStatus) (*RunTerminalReport, error) {
+func (s *SQLiteStore) GetRunTerminalReport(ctx context.Context, scope models.Scope, runID string, status models.AgentRunStatus) (*models.RunTerminalReport, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	if !validOpaqueIdentifier(runID, 128) || !isTerminalAgentRunStatus(status) {
-		return nil, ErrInvalidRunTerminalReport
+	if !models.IsValidOpaqueIdentifier(runID, 128) || !models.IsTerminalAgentRunStatus(status) {
+		return nil, models.ErrInvalidRunTerminalReport
 	}
 	report, err := scanSQLiteRunTerminalReport(s.db.QueryRowContext(ctx, `SELECT scope_kind,scope_id,run_id,terminal_status,terminal_revision,
 		payload,available_at,attempts,lease_owner,lease_expires_at,delivered_at FROM run_terminal_reports
 		WHERE scope_kind=? AND scope_id=? AND run_id=? AND terminal_status=? ORDER BY terminal_revision DESC LIMIT 1`, scope.Kind, scope.ID, runID, status))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrRunTerminalReportNotFound
+		return nil, models.ErrRunTerminalReportNotFound
 	}
 	return report, err
 }
 
-func scanSQLiteRunTerminalReport(scanner interface{ Scan(...interface{}) error }) (*RunTerminalReport, error) {
-	var report RunTerminalReport
+func scanSQLiteRunTerminalReport(scanner interface{ Scan(...interface{}) error }) (*models.RunTerminalReport, error) {
+	var report models.RunTerminalReport
 	var payload sql.NullString
 	var available int64
 	var expires, delivered sql.NullInt64
@@ -267,7 +270,7 @@ func scanSQLiteRunTerminalReport(scanner interface{ Scan(...interface{}) error }
 		report.DeliveredAt = &at
 	}
 	if payload.Valid {
-		report.Run = &AgentRun{}
+		report.Run = &models.AgentRun{}
 		decoder := json.NewDecoder(strings.NewReader(payload.String))
 		decoder.UseNumber()
 		if err := decoder.Decode(report.Run); err != nil {

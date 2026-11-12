@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // migrateConnectOnceSQLite mirrors PostgreSQL migration 74 and is safe to
@@ -13,7 +15,7 @@ func migrateConnectOnceSQLite(db *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := (connectOnceMigration{DB: tx, Table: func(name string) string { return name }, SQLite: true}).Run(context.Background()); err != nil {
+	if err := (sqlstore.ConnectOnceMigration{DB: tx, Table: func(name string) string { return name }, SQLite: true}).Run(context.Background()); err != nil {
 		return err
 	}
 	return tx.Commit()

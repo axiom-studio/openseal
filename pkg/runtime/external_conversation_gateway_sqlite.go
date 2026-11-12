@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func (s *SQLiteStore) CreateExternalConversationGateway(
 	ctx context.Context,
-	value *ExternalConversationGatewayRegistration,
+	value *models.ExternalConversationGatewayRegistration,
 ) error {
 	if err := value.Validate(); err != nil {
 		return err
@@ -25,16 +28,16 @@ func (s *SQLiteStore) CreateExternalConversationGateway(
 		value.Gateway.Scope.Kind, value.Gateway.Scope.ID, value.ID, value.IngressRoute,
 		value.Gateway.Provider, value.Status, value.Revision, value.UpdatedAt, string(payload))
 	if sqliteUniqueViolation(err) {
-		return ErrExternalConversationConflict
+		return models.ErrExternalConversationConflict
 	}
 	return err
 }
 
 func (s *SQLiteStore) GetExternalConversationGateway(
 	ctx context.Context,
-	scope Scope,
+	scope models.Scope,
 	id string,
-) (*ExternalConversationGatewayRegistration, error) {
+) (*models.ExternalConversationGatewayRegistration, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -46,9 +49,9 @@ func (s *SQLiteStore) GetExternalConversationGateway(
 func (s *SQLiteStore) GetExternalConversationGatewayByIngressRoute(
 	ctx context.Context,
 	route string,
-) (*ExternalConversationGatewayRegistration, error) {
-	if !validOpaqueIdentifier(strings.TrimSpace(route), 128) {
-		return nil, ErrInvalidExternalConversation
+) (*models.ExternalConversationGatewayRegistration, error) {
+	if !models.IsValidOpaqueIdentifier(strings.TrimSpace(route), 128) {
+		return nil, models.ErrInvalidExternalConversation
 	}
 	return scanSQLiteExternalConversationGateway(s.db.QueryRowContext(ctx,
 		`SELECT payload FROM external_conversation_gateways WHERE ingress_route=?`, strings.TrimSpace(route)))
@@ -56,8 +59,8 @@ func (s *SQLiteStore) GetExternalConversationGatewayByIngressRoute(
 
 func (s *SQLiteStore) ListExternalConversationGateways(
 	ctx context.Context,
-	filter ExternalConversationGatewayFilter,
-) ([]*ExternalConversationGatewayRegistration, error) {
+	filter models.ExternalConversationGatewayFilter,
+) ([]*models.ExternalConversationGatewayRegistration, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -81,14 +84,14 @@ func (s *SQLiteStore) ListExternalConversationGateways(
 	}
 	query, args = appendSQLiteActivityStrings(query, args, "status", statuses)
 	query += ` ORDER BY updated_at DESC,id ASC LIMIT ? OFFSET ?`
-	limit, offset := normalizeExternalConversationPage(filter.Limit, filter.Offset)
+	limit, offset := models.NormalizeExternalConversationPage(filter.Limit, filter.Offset)
 	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*ExternalConversationGatewayRegistration, 0)
+	result := make([]*models.ExternalConversationGatewayRegistration, 0)
 	for rows.Next() {
 		value, scanErr := scanSQLiteExternalConversationGateway(rows)
 		if scanErr != nil {
@@ -101,7 +104,7 @@ func (s *SQLiteStore) ListExternalConversationGateways(
 
 func (s *SQLiteStore) UpdateExternalConversationGateway(
 	ctx context.Context,
-	value *ExternalConversationGatewayRegistration,
+	value *models.ExternalConversationGatewayRegistration,
 	expectedRevision int64,
 ) error {
 	if err := value.Validate(); err != nil {
@@ -117,7 +120,7 @@ func (s *SQLiteStore) UpdateExternalConversationGateway(
 		value.IngressRoute, value.Gateway.Provider, value.Status, value.Revision, value.UpdatedAt, string(payload),
 		value.Gateway.Scope.Kind, value.Gateway.Scope.ID, value.ID, expectedRevision)
 	if sqliteUniqueViolation(err) {
-		return ErrExternalConversationConflict
+		return models.ErrExternalConversationConflict
 	}
 	if err != nil {
 		return err
@@ -132,23 +135,23 @@ func (s *SQLiteStore) UpdateExternalConversationGateway(
 			return getErr
 		}
 		if current == nil {
-			return ErrExternalConversationGatewayNotFound
+			return models.ErrExternalConversationGatewayNotFound
 		}
-		return ErrExternalConversationConflict
+		return models.ErrExternalConversationConflict
 	}
 	return nil
 }
 
 func scanSQLiteExternalConversationGateway(
-	scanner sqliteExternalConversationScanner,
-) (*ExternalConversationGatewayRegistration, error) {
+	scanner sqlstore.RowScanner,
+) (*models.ExternalConversationGatewayRegistration, error) {
 	var payload string
 	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var value ExternalConversationGatewayRegistration
+	var value models.ExternalConversationGatewayRegistration
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}

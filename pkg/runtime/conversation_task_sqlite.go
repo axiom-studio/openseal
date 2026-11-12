@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func migrateConversationTasksSQLite(db *sql.DB) error {
@@ -82,8 +85,8 @@ func migrateConversationTasksSQLite(db *sql.DB) error {
 	return migrateConversationTaskContinuationsSQLite(db)
 }
 
-func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record ConversationTaskCreateRecord) (*ConversationTaskResult, error) {
-	if err := validateConversationTaskCreateRecord(record); err != nil {
+func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record models.ConversationTaskCreateRecord) (*models.ConversationTaskResult, error) {
+	if err := models.ValidateConversationTaskCreateRecord(record); err != nil {
 		return nil, err
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
@@ -103,15 +106,15 @@ func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record Convers
 		}
 	}
 	if existing != nil {
-		if !sameConversationTask(existing, record.Task) {
-			return nil, ErrConversationTaskConflict
+		if !models.SameConversationTask(existing, record.Task) {
+			return nil, models.ErrConversationTaskConflict
 		}
 		if record.ToolTransition != nil {
-			entry, err := optionalSessionEntry(getSQLiteSessionEntry(ctx, conn, record.Task.Scope, record.ToolTransition.EntryID))
+			entry, err := models.OptionalSessionEntry(getSQLiteSessionEntry(ctx, conn, record.Task.Scope, record.ToolTransition.EntryID))
 			if err != nil {
 				return nil, err
 			}
-			if err := conversationTaskToolReplayMatches(record, entry); err != nil {
+			if err := models.CheckConversationTaskToolReplay(record, entry); err != nil {
 				return nil, err
 			}
 		}
@@ -134,28 +137,28 @@ func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record Convers
 	if err != nil {
 		return nil, err
 	}
-	if continuation != nil && continuation.Mode == ConversationTaskModeContinuation {
-		return replayConversationTaskContinuation(continuation, current)
+	if continuation != nil && continuation.Mode == models.ConversationTaskModeContinuation {
+		return models.ReplayConversationTaskContinuation(continuation, current)
 	}
-	if err := conversationTaskSteeringSettled(record, current); err != nil {
+	if err := models.CheckConversationTaskSteeringSettled(record, current); err != nil {
 		return nil, err
 	}
-	if err := validateConversationTaskSourceUpdate(current, record); err != nil {
+	if err := models.ValidateConversationTaskSourceUpdate(current, record); err != nil {
 		return nil, err
 	}
 	if record.ToolTransition != nil {
-		entry, err := optionalSessionEntry(getSQLiteSessionEntry(ctx, conn, record.Task.Scope, record.ToolTransition.EntryID))
+		entry, err := models.OptionalSessionEntry(getSQLiteSessionEntry(ctx, conn, record.Task.Scope, record.ToolTransition.EntryID))
 		if err != nil {
 			return nil, err
 		}
-		var assistant *SessionEntry
+		var assistant *models.SessionEntry
 		if entry != nil {
-			if assistant, err = optionalSessionEntry(getSQLiteSessionEntry(ctx, conn, record.Task.Scope,
-				SessionEntryID(entry.SessionID, AssistantEntryKey(entry.StepID)))); err != nil {
+			if assistant, err = models.OptionalSessionEntry(getSQLiteSessionEntry(ctx, conn, record.Task.Scope,
+				models.SessionEntryID(entry.SessionID, models.AssistantEntryKey(entry.StepID)))); err != nil {
 				return nil, err
 			}
 		}
-		if err := verifyConversationTaskToolEntry(record, current, entry, assistant); err != nil {
+		if err := models.VerifyConversationTaskToolEntry(record, current, entry, assistant); err != nil {
 			return nil, err
 		}
 	}
@@ -185,10 +188,10 @@ func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record Convers
 		return nil, err
 	}
 	committed = true
-	return &ConversationTaskResult{Task: cloneConversationTask(record.Task), WorkRun: cloneAgentRun(record.WorkRun), SourceRun: cloneAgentRun(record.SourceRun)}, nil
+	return &models.ConversationTaskResult{Task: models.CloneConversationTask(record.Task), WorkRun: models.CloneAgentRun(record.WorkRun), SourceRun: models.CloneAgentRun(record.SourceRun)}, nil
 }
 
-func (s *SQLiteStore) GetConversationTask(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
+func (s *SQLiteStore) GetConversationTask(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -198,7 +201,7 @@ func (s *SQLiteStore) GetConversationTask(ctx context.Context, scope Scope, id s
 	return getSQLiteConversationTask(ctx, s.db, scope, strings.TrimSpace(id), "", "")
 }
 
-func (s *SQLiteStore) FindConversationTaskByWorkRunID(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
+func (s *SQLiteStore) FindConversationTaskByWorkRunID(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -214,10 +217,10 @@ func (s *SQLiteStore) FindConversationTaskByWorkRunID(ctx context.Context, scope
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversationTaskSQL(payload)
+	return sqlstore.DecodeConversationTask(payload)
 }
 
-func (s *SQLiteStore) ListConversationTasks(ctx context.Context, filter ConversationTaskFilter) ([]*ConversationTaskResult, error) {
+func (s *SQLiteStore) ListConversationTasks(ctx context.Context, filter models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -247,10 +250,10 @@ func (s *SQLiteStore) ListConversationTasks(ctx context.Context, filter Conversa
 		return nil, err
 	}
 	defer rows.Close()
-	return scanConversationTaskResults(rows)
+	return sqlstore.ScanConversationTaskResults(rows)
 }
 
-func getSQLiteConversationTask(ctx context.Context, queryer sqliteDependencyQueryer, scope Scope, id, sourceRunID, taskKey string) (*ConversationTask, error) {
+func getSQLiteConversationTask(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, id, sourceRunID, taskKey string) (*models.ConversationTask, error) {
 	query := `SELECT payload FROM conversation_tasks WHERE scope_kind = ? AND scope_id = ?`
 	args := []interface{}{scope.Kind, scope.ID}
 	if id != "" {
@@ -268,10 +271,10 @@ func getSQLiteConversationTask(ctx context.Context, queryer sqliteDependencyQuer
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversationTaskSQL(payload)
+	return sqlstore.DecodeConversationTask(payload)
 }
 
-func sqliteConversationTaskResult(ctx context.Context, queryer sqliteDependencyQueryer, task *ConversationTask) (*ConversationTaskResult, error) {
+func sqliteConversationTaskResult(ctx context.Context, queryer sqliteDependencyQueryer, task *models.ConversationTask) (*models.ConversationTaskResult, error) {
 	work, err := getSQLiteAgentRun(ctx, queryer, task.Scope, task.WorkRunID)
 	if err != nil {
 		return nil, err
@@ -280,25 +283,25 @@ func sqliteConversationTaskResult(ctx context.Context, queryer sqliteDependencyQ
 	if err != nil {
 		return nil, err
 	}
-	return &ConversationTaskResult{Task: task, WorkRun: work, SourceRun: source}, nil
+	return &models.ConversationTaskResult{Task: task, WorkRun: work, SourceRun: source}, nil
 }
 
 func normalizeSQLiteConversationTaskConflict(err error) error {
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return ErrConversationTaskConflict
+		return models.ErrConversationTaskConflict
 	}
 	return err
 }
 
 // insertSQLiteConversationTask stores task beside the status of its work Run,
 // which the row indexes. A task is active until that Run is terminal.
-func insertSQLiteConversationTask(ctx context.Context, exec sqliteExecer, task *ConversationTask, workStatus AgentRunStatus) error {
+func insertSQLiteConversationTask(ctx context.Context, exec sqliteExecer, task *models.ConversationTask, workStatus models.AgentRunStatus) error {
 	payload, err := json.Marshal(task)
 	if err != nil {
 		return err
 	}
 	active := 1
-	if isTerminalAgentRunStatus(workStatus) {
+	if models.IsTerminalAgentRunStatus(workStatus) {
 		active = 0
 	}
 	_, err = exec.ExecContext(ctx, `INSERT INTO conversation_tasks

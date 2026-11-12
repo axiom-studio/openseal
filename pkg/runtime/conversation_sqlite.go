@@ -8,6 +8,9 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func migrateConversations(db *sql.DB) error {
@@ -77,14 +80,14 @@ func migrateConversations(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conversation, idempotencyKey string) (*Conversation, bool, error) {
+func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *models.Conversation, idempotencyKey string) (*models.Conversation, bool, error) {
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
 	}
-	applyConversationDefaults(conversation)
+	models.ApplyConversationDefaults(conversation)
 	key := strings.TrimSpace(idempotencyKey)
 	if key == "" {
-		return nil, false, ErrInvalidConversation
+		return nil, false, models.ErrInvalidConversation
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
 	if err != nil {
@@ -98,8 +101,8 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conv
 	}
 	if existing != nil {
 		if existing.Owner != conversation.Owner || existing.Title != conversation.Title ||
-			!reflect.DeepEqual(existing.Origin, conversation.Origin) || !sameRequestedSpace(existing, conversation.SpaceID) {
-			return nil, false, ErrMessageConflict
+			!reflect.DeepEqual(existing.Origin, conversation.Origin) || !models.SameRequestedSpace(existing, conversation.SpaceID) {
+			return nil, false, models.ErrMessageConflict
 		}
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 			return nil, false, err
@@ -107,7 +110,7 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conv
 		committed = true
 		return existing, true, nil
 	}
-	conversation = cloneConversation(conversation)
+	conversation = models.CloneConversation(conversation)
 	if err := resolveSQLiteConversationSpace(ctx, conn, conversation); err != nil {
 		return nil, false, err
 	}
@@ -122,7 +125,7 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conv
 		conversation.CreatedAt, conversation.UpdatedAt, string(payload), conversation.SpaceID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return nil, false, ErrMessageConflict
+			return nil, false, models.ErrMessageConflict
 		}
 		return nil, false, err
 	}
@@ -130,14 +133,14 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conv
 		return nil, false, err
 	}
 	committed = true
-	return cloneConversation(conversation), false, nil
+	return models.CloneConversation(conversation), false, nil
 }
 
-func (s *SQLiteStore) UpdateConversation(ctx context.Context, conversation *Conversation, expectedRevision int64) (*Conversation, error) {
+func (s *SQLiteStore) UpdateConversation(ctx context.Context, conversation *models.Conversation, expectedRevision int64) (*models.Conversation, error) {
 	if err := conversation.Validate(); err != nil {
 		return nil, err
 	}
-	applyConversationDefaults(conversation)
+	models.ApplyConversationDefaults(conversation)
 	conn, err := beginImmediateSQLite(ctx, s.db)
 	if err != nil {
 		return nil, err
@@ -151,14 +154,14 @@ func (s *SQLiteStore) UpdateConversation(ctx context.Context, conversation *Conv
 		return nil, err
 	}
 	committed = true
-	return cloneConversation(conversation), nil
+	return models.CloneConversation(conversation), nil
 }
 
-func (s *SQLiteStore) UpdateConversationWithEvent(ctx context.Context, conversation *Conversation, expectedRevision int64, event *ActivityEvent) (*Conversation, *ActivityEvent, error) {
-	if err := validateConversationEvent(conversation, event); err != nil {
+func (s *SQLiteStore) UpdateConversationWithEvent(ctx context.Context, conversation *models.Conversation, expectedRevision int64, event *models.ActivityEvent) (*models.Conversation, *models.ActivityEvent, error) {
+	if err := models.ValidateConversationEvent(conversation, event); err != nil {
 		return nil, nil, err
 	}
-	applyConversationDefaults(conversation)
+	models.ApplyConversationDefaults(conversation)
 	conn, err := beginImmediateSQLite(ctx, s.db)
 	if err != nil {
 		return nil, nil, err
@@ -176,17 +179,17 @@ func (s *SQLiteStore) UpdateConversationWithEvent(ctx context.Context, conversat
 		return nil, nil, err
 	}
 	committed = true
-	return cloneConversation(conversation), cloneActivityEvent(persisted), nil
+	return models.CloneConversation(conversation), models.CloneActivityEvent(persisted), nil
 }
 
-func (s *SQLiteStore) GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error) {
+func (s *SQLiteStore) GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getSQLiteConversation(ctx, s.db, scope, strings.TrimSpace(conversationID))
 }
 
-func (s *SQLiteStore) FindConversationByIdempotencyKey(ctx context.Context, scope Scope, key string) (*Conversation, error) {
+func (s *SQLiteStore) FindConversationByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.Conversation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -196,7 +199,7 @@ func (s *SQLiteStore) FindConversationByIdempotencyKey(ctx context.Context, scop
 	return getSQLiteConversationByKey(ctx, s.db, scope, strings.TrimSpace(key))
 }
 
-func (s *SQLiteStore) ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error) {
+func (s *SQLiteStore) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -242,13 +245,13 @@ func (s *SQLiteStore) ListConversations(ctx context.Context, filter Conversation
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*Conversation, 0)
+	result := make([]*models.Conversation, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		conversation, err := decodeConversation(payload)
+		conversation, err := sqlstore.DecodeConversation(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -257,7 +260,7 @@ func (s *SQLiteStore) ListConversations(ctx context.Context, filter Conversation
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) LastConversationActivity(ctx context.Context, scope Scope, ownerType OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+func (s *SQLiteStore) LastConversationActivity(ctx context.Context, scope models.Scope, ownerType models.OwnerType, ownerIDs []string) (map[string]time.Time, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -268,7 +271,7 @@ func (s *SQLiteStore) LastConversationActivity(ctx context.Context, scope Scope,
 	// With MAX, SQLite takes payload from the row that holds the maximum.
 	query, args := appendSQLiteActivityStrings(`SELECT owner_id, MAX(updated_at), payload FROM conversations
 		WHERE scope_kind = ? AND scope_id = ? AND owner_type = ? AND status = ? AND last_sequence > 0`,
-		[]interface{}{scope.Kind, scope.ID, ownerType, ConversationStatusActive}, "owner_id", ownerIDs)
+		[]interface{}{scope.Kind, scope.ID, ownerType, models.ConversationStatusActive}, "owner_id", ownerIDs)
 	rows, err := s.db.QueryContext(ctx, query+` GROUP BY owner_id`, args...)
 	if err != nil {
 		return nil, err
@@ -280,7 +283,7 @@ func (s *SQLiteStore) LastConversationActivity(ctx context.Context, scope Scope,
 		if err := rows.Scan(&ownerID, &newest, &payload); err != nil {
 			return nil, err
 		}
-		conversation, err := decodeConversation(payload)
+		conversation, err := sqlstore.DecodeConversation(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -289,8 +292,8 @@ func (s *SQLiteStore) LastConversationActivity(ctx context.Context, scope Scope,
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMessageCommitRecord) (*ChannelMessageCommitResult, error) {
-	if err := validateChannelMessageCommitRecord(record); err != nil {
+func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record models.ChannelMessageCommitRecord) (*models.ChannelMessageCommitResult, error) {
+	if err := models.ValidateChannelMessageCommitRecord(record); err != nil {
 		return nil, err
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
@@ -301,7 +304,7 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMe
 	defer rollbackSQLiteConn(conn, &committed)
 	// BEGIN IMMEDIATE holds the write lock, so the Run read here stays
 	// current until COMMIT (Run before conversation, SPEC §4.1).
-	var guardedRun *AgentRun
+	var guardedRun *models.AgentRun
 	if record.RunGuard != nil {
 		if guardedRun, err = getSQLiteAgentRun(ctx, conn, record.RunGuard.Scope, record.RunGuard.RunID); err != nil {
 			return nil, err
@@ -312,8 +315,8 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMe
 		return nil, err
 	}
 	if existing != nil {
-		if !sameChannelMessage(existing, record.Message) {
-			return nil, ErrMessageConflict
+		if !models.SameChannelMessage(existing, record.Message) {
+			return nil, models.ErrMessageConflict
 		}
 		conversation, err := getSQLiteConversation(ctx, conn, record.Message.Scope, record.Message.ConversationID)
 		if err != nil {
@@ -323,10 +326,10 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMe
 			return nil, err
 		}
 		committed = true
-		return &ChannelMessageCommitResult{Conversation: conversation, Message: existing, Replayed: true}, nil
+		return &models.ChannelMessageCommitResult{Conversation: conversation, Message: existing, Replayed: true}, nil
 	}
 	if guardedRun != nil {
-		if err := replyRunGuardHolds(guardedRun, record.RunGuard, time.Now().UTC()); err != nil {
+		if err := models.CheckReplyRunGuard(guardedRun, record.RunGuard, time.Now().UTC()); err != nil {
 			return nil, err
 		}
 	}
@@ -335,11 +338,11 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMe
 		return nil, err
 	}
 	if current == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	if current.Revision != record.ExpectedRevision || record.Conversation.Revision != current.Revision+1 ||
 		record.Message.Sequence != current.LastSequence+1 || record.Conversation.LastSequence != record.Message.Sequence {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	if err := updateSQLiteConversation(ctx, conn, record.Conversation, record.ExpectedRevision); err != nil {
 		return nil, err
@@ -347,7 +350,7 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMe
 	if err := insertSQLiteChannelMessage(ctx, conn, record.Message); err != nil {
 		return nil, err
 	}
-	if requester := agentBuilderDraftStarter(current, record.Message); requester != "" {
+	if requester := models.AgentBuilderDraftStarterID(current, record.Message); requester != "" {
 		if _, err := conn.ExecContext(ctx, `UPDATE conversations SET builder_draft_requester = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 			requester, current.Scope.Kind, current.Scope.ID, current.ID); err != nil {
 			return nil, err
@@ -357,17 +360,17 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMe
 		return nil, err
 	}
 	committed = true
-	return &ChannelMessageCommitResult{Conversation: cloneConversation(record.Conversation), Message: cloneChannelMessage(record.Message)}, nil
+	return &models.ChannelMessageCommitResult{Conversation: models.CloneConversation(record.Conversation), Message: models.CloneChannelMessage(record.Message)}, nil
 }
 
-func (s *SQLiteStore) GetChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string) (*ChannelMessage, error) {
+func (s *SQLiteStore) GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getSQLiteChannelMessage(ctx, s.db, scope, conversationID, messageID)
 }
 
-func (s *SQLiteStore) FindChannelMessageByIdempotencyKey(ctx context.Context, scope Scope, conversationID, key string) (*ChannelMessage, error) {
+func (s *SQLiteStore) FindChannelMessageByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ChannelMessage, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -377,8 +380,8 @@ func (s *SQLiteStore) FindChannelMessageByIdempotencyKey(ctx context.Context, sc
 	return getSQLiteChannelMessageByKey(ctx, s.db, scope, conversationID, strings.TrimSpace(key))
 }
 
-func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
-	if err := validateChannelMessageViewFilter(filter); err != nil {
+func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
+	if err := models.ValidateChannelMessageViewFilter(filter); err != nil {
 		return nil, err
 	}
 	if err := filter.Scope.Validate(); err != nil {
@@ -389,7 +392,7 @@ func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter ChannelMes
 		return nil, err
 	}
 	if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	query := `SELECT payload FROM channel_messages WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND sequence > ?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, filter.AfterSequence}
@@ -425,13 +428,13 @@ func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter ChannelMes
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*ChannelMessage, 0)
+	result := make([]*models.ChannelMessage, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		message, err := decodeChannelMessage(payload)
+		message, err := sqlstore.DecodeChannelMessage(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -440,8 +443,8 @@ func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter ChannelMes
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) CommitParticipationRound(ctx context.Context, record ParticipationRoundCommitRecord) (*ParticipationRoundResult, error) {
-	if err := validateParticipationRoundCommitRecord(record); err != nil {
+func (s *SQLiteStore) CommitParticipationRound(ctx context.Context, record models.ParticipationRoundCommitRecord) (*models.ParticipationRoundResult, error) {
+	if err := models.ValidateParticipationRoundCommitRecord(record); err != nil {
 		return nil, err
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
@@ -455,8 +458,8 @@ func (s *SQLiteStore) CommitParticipationRound(ctx context.Context, record Parti
 		return nil, err
 	}
 	if existing != nil {
-		if !sameParticipationRound(existing, record.Round) {
-			return nil, ErrMessageConflict
+		if !models.SameParticipationRound(existing, record.Round) {
+			return nil, models.ErrMessageConflict
 		}
 		result, err := loadSQLiteParticipationRoundResult(ctx, conn, existing)
 		if err != nil {
@@ -474,20 +477,20 @@ func (s *SQLiteStore) CommitParticipationRound(ctx context.Context, record Parti
 		return nil, err
 	}
 	if current == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	if current.Revision != record.ExpectedRevision || record.Conversation.Revision != current.Revision+1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	expectedSequence := current.LastSequence
 	for _, message := range record.Messages {
 		expectedSequence++
 		if message.Sequence != expectedSequence || message.ParticipationRoundID != record.Round.ID {
-			return nil, ErrInvalidConversation
+			return nil, models.ErrInvalidConversation
 		}
 	}
 	if record.Conversation.LastSequence != expectedSequence {
-		return nil, ErrInvalidConversation
+		return nil, models.ErrInvalidConversation
 	}
 	if err := updateSQLiteConversation(ctx, conn, record.Conversation, record.ExpectedRevision); err != nil {
 		return nil, err
@@ -504,10 +507,10 @@ func (s *SQLiteStore) CommitParticipationRound(ctx context.Context, record Parti
 		return nil, err
 	}
 	committed = true
-	return &ParticipationRoundResult{Conversation: cloneConversation(record.Conversation), Round: cloneParticipationRound(record.Round), Messages: cloneChannelMessages(record.Messages)}, nil
+	return &models.ParticipationRoundResult{Conversation: models.CloneConversation(record.Conversation), Round: models.CloneParticipationRound(record.Round), Messages: models.CloneChannelMessages(record.Messages)}, nil
 }
 
-func (s *SQLiteStore) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRoundResult, error) {
+func (s *SQLiteStore) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ParticipationRoundResult, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -525,7 +528,7 @@ func (s *SQLiteStore) FindParticipationRoundByIdempotencyKey(ctx context.Context
 	return result, err
 }
 
-func (s *SQLiteStore) GetParticipationRound(ctx context.Context, scope Scope, conversationID, roundID string) (*ParticipationRoundResult, error) {
+func (s *SQLiteStore) GetParticipationRound(ctx context.Context, scope models.Scope, conversationID, roundID string) (*models.ParticipationRoundResult, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -536,7 +539,7 @@ func (s *SQLiteStore) GetParticipationRound(ctx context.Context, scope Scope, co
 	return loadSQLiteParticipationRoundResult(ctx, s.db, round)
 }
 
-func (s *SQLiteStore) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
+func (s *SQLiteStore) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -554,13 +557,13 @@ func (s *SQLiteStore) ListParticipationRounds(ctx context.Context, filter Partic
 		return nil, err
 	}
 	defer rows.Close()
-	rounds := make([]*ParticipationRound, 0)
+	rounds := make([]*models.ParticipationRound, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		round, err := decodeParticipationRound(payload)
+		round, err := sqlstore.DecodeParticipationRound(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -569,7 +572,7 @@ func (s *SQLiteStore) ListParticipationRounds(ctx context.Context, filter Partic
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	result := make([]*ParticipationRoundResult, 0, len(rounds))
+	result := make([]*models.ParticipationRoundResult, 0, len(rounds))
 	for _, round := range rounds {
 		loaded, err := loadSQLiteParticipationRoundResult(ctx, s.db, round)
 		if err != nil {
@@ -580,7 +583,7 @@ func (s *SQLiteStore) ListParticipationRounds(ctx context.Context, filter Partic
 	return result, nil
 }
 
-func (s *SQLiteStore) GetConversationCursor(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error) {
+func (s *SQLiteStore) GetConversationCursor(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -596,10 +599,10 @@ func (s *SQLiteStore) GetConversationCursor(ctx context.Context, scope Scope, co
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversationCursor(payload)
+	return sqlstore.DecodeConversationCursor(payload)
 }
 
-func (s *SQLiteStore) ListConversationCursors(ctx context.Context, scope Scope, conversationID string) ([]*ConversationCursor, error) {
+func (s *SQLiteStore) ListConversationCursors(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationCursor, error) {
 	if _, err := s.GetConversation(ctx, scope, conversationID); err != nil {
 		return nil, err
 	}
@@ -610,13 +613,13 @@ func (s *SQLiteStore) ListConversationCursors(ctx context.Context, scope Scope, 
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*ConversationCursor, 0)
+	result := make([]*models.ConversationCursor, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		cursor, err := decodeConversationCursor(payload)
+		cursor, err := sqlstore.DecodeConversationCursor(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -625,9 +628,9 @@ func (s *SQLiteStore) ListConversationCursors(ctx context.Context, scope Scope, 
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record ConversationCursorRecord) (*ConversationCursor, bool, error) {
+func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record models.ConversationCursorRecord) (*models.ConversationCursor, bool, error) {
 	if record.Cursor == nil {
-		return nil, false, ErrConversationCursorConflict
+		return nil, false, models.ErrConversationCursorConflict
 	}
 	if err := record.Cursor.Validate(); err != nil {
 		return nil, false, err
@@ -647,10 +650,10 @@ func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record Conversa
 		return nil, false, err
 	}
 	if conversation == nil {
-		return nil, false, ErrConversationNotFound
+		return nil, false, models.ErrConversationNotFound
 	}
 	if record.Cursor.DeliveredSequence > conversation.LastSequence {
-		return nil, false, ErrConversationCursorConflict
+		return nil, false, models.ErrConversationCursorConflict
 	}
 	current, err := getSQLiteConversationCursor(ctx, conn, record.Cursor.Scope, record.Cursor.ConversationID, record.Cursor.Participant)
 	if err != nil {
@@ -665,7 +668,7 @@ func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record Conversa
 	}
 	if current == nil {
 		if record.ExpectedRevision != 0 {
-			return nil, false, ErrConversationCursorConflict
+			return nil, false, models.ErrConversationCursorConflict
 		}
 		_, err = conn.ExecContext(ctx, `INSERT INTO conversation_cursors
 			(scope_kind, scope_id, conversation_id, participant_type, participant_id, delivered_sequence, read_sequence, revision, updated_at, payload)
@@ -674,7 +677,7 @@ func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record Conversa
 			record.Cursor.Revision, record.Cursor.UpdatedAt, string(payload))
 	} else {
 		if current.Revision != record.ExpectedRevision || record.Cursor.Revision != current.Revision+1 {
-			return nil, false, ErrConversationCursorConflict
+			return nil, false, models.ErrConversationCursorConflict
 		}
 		var result sql.Result
 		result, err = conn.ExecContext(ctx, `UPDATE conversation_cursors SET delivered_sequence = ?, read_sequence = ?, revision = ?, updated_at = ?, payload = ?
@@ -692,10 +695,10 @@ func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record Conversa
 		return nil, false, err
 	}
 	committed = true
-	return cloneConversationCursor(record.Cursor), false, nil
+	return models.CloneConversationCursor(record.Cursor), false, nil
 }
 
-func (s *SQLiteStore) GetConversationPresence(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationPresence, error) {
+func (s *SQLiteStore) GetConversationPresence(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationPresence, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -705,9 +708,9 @@ func (s *SQLiteStore) GetConversationPresence(ctx context.Context, scope Scope, 
 	return getSQLiteConversationPresence(ctx, s.db, scope, conversationID, participant)
 }
 
-func (s *SQLiteStore) PutConversationPresence(ctx context.Context, record ConversationPresenceRecord) (*ConversationPresence, error) {
+func (s *SQLiteStore) PutConversationPresence(ctx context.Context, record models.ConversationPresenceRecord) (*models.ConversationPresence, error) {
 	if record.Presence == nil {
-		return nil, ErrConversationPresenceConflict
+		return nil, models.ErrConversationPresenceConflict
 	}
 	if err := record.Presence.Validate(); err != nil {
 		return nil, err
@@ -727,7 +730,7 @@ func (s *SQLiteStore) PutConversationPresence(ctx context.Context, record Conver
 		return nil, err
 	}
 	if conversation == nil {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	current, err := getSQLiteConversationPresence(ctx, conn, record.Presence.Scope, record.Presence.ConversationID, record.Presence.Participant)
 	if err != nil {
@@ -735,7 +738,7 @@ func (s *SQLiteStore) PutConversationPresence(ctx context.Context, record Conver
 	}
 	if current != nil && current.ExpiresAt.After(record.Presence.UpdatedAt) {
 		if current.Revision != record.ExpectedRevision || current.LeaseID != record.Presence.LeaseID || record.Presence.Revision != current.Revision+1 {
-			return nil, ErrConversationPresenceConflict
+			return nil, models.ErrConversationPresenceConflict
 		}
 		result, err := conn.ExecContext(ctx, `UPDATE conversation_presence SET state = ?, lease_id = ?, revision = ?, updated_at = ?, expires_at = ?, payload = ?
 			WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND participant_type = ? AND participant_id = ? AND revision = ?`,
@@ -750,7 +753,7 @@ func (s *SQLiteStore) PutConversationPresence(ctx context.Context, record Conver
 		}
 	} else {
 		if record.ExpectedRevision != 0 || record.Presence.Revision != 1 {
-			return nil, ErrConversationPresenceConflict
+			return nil, models.ErrConversationPresenceConflict
 		}
 		_, err = conn.ExecContext(ctx, `INSERT INTO conversation_presence
 			(scope_kind, scope_id, conversation_id, participant_type, participant_id, state, lease_id, revision, updated_at, expires_at, payload)
@@ -768,10 +771,10 @@ func (s *SQLiteStore) PutConversationPresence(ctx context.Context, record Conver
 		return nil, err
 	}
 	committed = true
-	return cloneConversationPresence(record.Presence), nil
+	return models.CloneConversationPresence(record.Presence), nil
 }
 
-func (s *SQLiteStore) ReleaseConversationPresence(ctx context.Context, request ReleaseConversationPresenceRequest) error {
+func (s *SQLiteStore) ReleaseConversationPresence(ctx context.Context, request models.ReleaseConversationPresenceRequest) error {
 	if err := request.Scope.Validate(); err != nil {
 		return err
 	}
@@ -794,13 +797,13 @@ func (s *SQLiteStore) ReleaseConversationPresence(ctx context.Context, request R
 			return err
 		}
 		if current != nil {
-			return ErrConversationPresenceConflict
+			return models.ErrConversationPresenceConflict
 		}
 	}
 	return nil
 }
 
-func (s *SQLiteStore) ListConversationPresence(ctx context.Context, scope Scope, conversationID string, activeAt time.Time) ([]*ConversationPresence, error) {
+func (s *SQLiteStore) ListConversationPresence(ctx context.Context, scope models.Scope, conversationID string, activeAt time.Time) ([]*models.ConversationPresence, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -810,13 +813,13 @@ func (s *SQLiteStore) ListConversationPresence(ctx context.Context, scope Scope,
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*ConversationPresence, 0)
+	result := make([]*models.ConversationPresence, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		presence, err := decodeConversationPresence(payload)
+		presence, err := sqlstore.DecodeConversationPresence(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -830,7 +833,7 @@ type sqliteConversationQueryer interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 }
 
-func getSQLiteConversation(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, id string) (*Conversation, error) {
+func getSQLiteConversation(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, id string) (*models.Conversation, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversations WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -839,10 +842,10 @@ func getSQLiteConversation(ctx context.Context, queryer sqliteConversationQuerye
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversation(payload)
+	return sqlstore.DecodeConversation(payload)
 }
 
-func getSQLiteConversationByKey(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, key string) (*Conversation, error) {
+func getSQLiteConversationByKey(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, key string) (*models.Conversation, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversations WHERE scope_kind = ? AND scope_id = ? AND idempotency_key = ?`, scope.Kind, scope.ID, key).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -851,10 +854,10 @@ func getSQLiteConversationByKey(ctx context.Context, queryer sqliteConversationQ
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversation(payload)
+	return sqlstore.DecodeConversation(payload)
 }
 
-func updateSQLiteConversation(ctx context.Context, conn *sql.Conn, conversation *Conversation, expectedRevision int64) error {
+func updateSQLiteConversation(ctx context.Context, conn *sql.Conn, conversation *models.Conversation, expectedRevision int64) error {
 	payload, err := json.Marshal(conversation)
 	if err != nil {
 		return err
@@ -867,8 +870,8 @@ func updateSQLiteConversation(ctx context.Context, conn *sql.Conn, conversation 
 	return expectDependencyRow(result, err)
 }
 
-func insertSQLiteChannelMessage(ctx context.Context, conn *sql.Conn, message *ChannelMessage) error {
-	payload, err := json.Marshal(persistedChannelMessage(message))
+func insertSQLiteChannelMessage(ctx context.Context, conn *sql.Conn, message *models.ChannelMessage) error {
+	payload, err := json.Marshal(models.PersistedChannelMessage(message))
 	if err != nil {
 		return err
 	}
@@ -878,12 +881,12 @@ func insertSQLiteChannelMessage(ctx context.Context, conn *sql.Conn, message *Ch
 		message.Sequence, message.Sender.Type, message.Sender.ID, message.Intent, message.ThreadRootID, message.ParticipationRoundID,
 		message.IdempotencyKey, message.CreatedAt, string(payload))
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return ErrMessageConflict
+		return models.ErrMessageConflict
 	}
 	return err
 }
 
-func getSQLiteChannelMessage(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, conversationID, id string) (*ChannelMessage, error) {
+func getSQLiteChannelMessage(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID, id string) (*models.ChannelMessage, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM channel_messages WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND id = ?`,
 		scope.Kind, scope.ID, conversationID, id).Scan(&payload)
@@ -893,10 +896,10 @@ func getSQLiteChannelMessage(ctx context.Context, queryer sqliteConversationQuer
 	if err != nil {
 		return nil, err
 	}
-	return decodeChannelMessage(payload)
+	return sqlstore.DecodeChannelMessage(payload)
 }
 
-func getSQLiteChannelMessageByKey(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, conversationID, key string) (*ChannelMessage, error) {
+func getSQLiteChannelMessageByKey(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID, key string) (*models.ChannelMessage, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM channel_messages WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND idempotency_key = ?`,
 		scope.Kind, scope.ID, conversationID, key).Scan(&payload)
@@ -906,10 +909,10 @@ func getSQLiteChannelMessageByKey(ctx context.Context, queryer sqliteConversatio
 	if err != nil {
 		return nil, err
 	}
-	return decodeChannelMessage(payload)
+	return sqlstore.DecodeChannelMessage(payload)
 }
 
-func insertSQLiteParticipationRound(ctx context.Context, conn *sql.Conn, round *ParticipationRound) error {
+func insertSQLiteParticipationRound(ctx context.Context, conn *sql.Conn, round *models.ParticipationRound) error {
 	payload, err := json.Marshal(round)
 	if err != nil {
 		return err
@@ -919,12 +922,12 @@ func insertSQLiteParticipationRound(ctx context.Context, conn *sql.Conn, round *
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, round.Scope.Kind, round.Scope.ID, round.ConversationID, round.ID, round.Status,
 		round.IdempotencyKey, round.Revision, round.CreatedAt, round.CommittedAt, string(payload))
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return ErrMessageConflict
+		return models.ErrMessageConflict
 	}
 	return err
 }
 
-func getSQLiteParticipationRoundByKey(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, conversationID, key string) (*ParticipationRound, error) {
+func getSQLiteParticipationRoundByKey(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID, key string) (*models.ParticipationRound, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM participation_rounds WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND idempotency_key = ?`,
 		scope.Kind, scope.ID, conversationID, key).Scan(&payload)
@@ -934,10 +937,10 @@ func getSQLiteParticipationRoundByKey(ctx context.Context, queryer sqliteConvers
 	if err != nil {
 		return nil, err
 	}
-	return decodeParticipationRound(payload)
+	return sqlstore.DecodeParticipationRound(payload)
 }
 
-func getSQLiteParticipationRound(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, conversationID, id string) (*ParticipationRound, error) {
+func getSQLiteParticipationRound(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID, id string) (*models.ParticipationRound, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM participation_rounds WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND id = ?`,
 		scope.Kind, scope.ID, conversationID, id).Scan(&payload)
@@ -947,10 +950,10 @@ func getSQLiteParticipationRound(ctx context.Context, queryer sqliteConversation
 	if err != nil {
 		return nil, err
 	}
-	return decodeParticipationRound(payload)
+	return sqlstore.DecodeParticipationRound(payload)
 }
 
-func loadSQLiteParticipationRoundResult(ctx context.Context, queryer sqliteConversationQueryer, round *ParticipationRound) (*ParticipationRoundResult, error) {
+func loadSQLiteParticipationRoundResult(ctx context.Context, queryer sqliteConversationQueryer, round *models.ParticipationRound) (*models.ParticipationRoundResult, error) {
 	conversation, err := getSQLiteConversation(ctx, queryer, round.Scope, round.ConversationID)
 	if err != nil {
 		return nil, err
@@ -961,22 +964,22 @@ func loadSQLiteParticipationRoundResult(ctx context.Context, queryer sqliteConve
 		return nil, err
 	}
 	defer rows.Close()
-	messages := make([]*ChannelMessage, 0)
+	messages := make([]*models.ChannelMessage, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		message, err := decodeChannelMessage(payload)
+		message, err := sqlstore.DecodeChannelMessage(payload)
 		if err != nil {
 			return nil, err
 		}
 		messages = append(messages, message)
 	}
-	return &ParticipationRoundResult{Conversation: conversation, Round: round, Messages: messages}, rows.Err()
+	return &models.ParticipationRoundResult{Conversation: conversation, Round: round, Messages: messages}, rows.Err()
 }
 
-func getSQLiteConversationCursor(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error) {
+func getSQLiteConversationCursor(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversation_cursors WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND participant_type = ? AND participant_id = ?`,
 		scope.Kind, scope.ID, conversationID, participant.Type, participant.ID).Scan(&payload)
@@ -986,10 +989,10 @@ func getSQLiteConversationCursor(ctx context.Context, queryer sqliteConversation
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversationCursor(payload)
+	return sqlstore.DecodeConversationCursor(payload)
 }
 
-func getSQLiteConversationPresence(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationPresence, error) {
+func getSQLiteConversationPresence(ctx context.Context, queryer sqliteConversationQueryer, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationPresence, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversation_presence WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND participant_type = ? AND participant_id = ?`,
 		scope.Kind, scope.ID, conversationID, participant.Type, participant.ID).Scan(&payload)
@@ -999,7 +1002,7 @@ func getSQLiteConversationPresence(ctx context.Context, queryer sqliteConversati
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversationPresence(payload)
+	return sqlstore.DecodeConversationPresence(payload)
 }
 
-var _ ConversationStore = (*SQLiteStore)(nil)
+var _ models.ConversationStore = (*SQLiteStore)(nil)

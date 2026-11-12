@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Store test: the SQLite store's lease clock resolution
@@ -36,8 +38,8 @@ func TestSQLiteActionCredentialLeaseClockResolutionAndExpiry(t *testing.T) {
 		request.Lease.IssuedAt = time.Now().UTC().Add(-2 * time.Minute)
 		request.Lease.ExpiresAt = time.Now().UTC().Add(-time.Minute)
 
-		if err := store.RedeemActionCredentialLease(ctx, request); !errors.Is(err, ErrActionCredentialLeaseExpired) {
-			t.Fatalf("expired lease error = %v, want %v", err, ErrActionCredentialLeaseExpired)
+		if err := store.RedeemActionCredentialLease(ctx, request); !errors.Is(err, models.ErrActionCredentialLeaseExpired) {
+			t.Fatalf("expired lease error = %v, want %v", err, models.ErrActionCredentialLeaseExpired)
 		}
 		var consumed int
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions`).Scan(&consumed); err != nil {

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func (s *SQLiteStore) CreateObjectiveWithEvent(ctx context.Context, objective *Objective, event *ActivityEvent) (*ActivityEvent, error) {
-	if err := validateObjectiveActivity(objective, event); err != nil {
+func (s *SQLiteStore) CreateObjectiveWithEvent(ctx context.Context, objective *models.Objective, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+	if err := models.ValidateObjectiveActivity(objective, event); err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(objective)
@@ -27,12 +29,12 @@ func (s *SQLiteStore) CreateObjectiveWithEvent(ctx context.Context, objective *O
 	})
 }
 
-func (s *SQLiteStore) UpdateObjectiveWithEvent(ctx context.Context, objective *Objective, expectedRevision int64, event *ActivityEvent) (*ActivityEvent, error) {
-	if err := validateObjectiveActivity(objective, event); err != nil {
+func (s *SQLiteStore) UpdateObjectiveWithEvent(ctx context.Context, objective *models.Objective, expectedRevision int64, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+	if err := models.ValidateObjectiveActivity(objective, event); err != nil {
 		return nil, err
 	}
 	if objective.Revision != expectedRevision+1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	payload, err := json.Marshal(objective)
 	if err != nil {
@@ -51,13 +53,13 @@ func (s *SQLiteStore) UpdateObjectiveWithEvent(ctx context.Context, objective *O
 			return updateErr
 		}
 		if affected != 1 {
-			return ErrRevisionConflict
+			return models.ErrRevisionConflict
 		}
 		return nil
 	})
 }
 
-func (s *SQLiteStore) CreateAgentRunWithEvent(ctx context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error) {
+func (s *SQLiteStore) CreateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
 	}
@@ -65,7 +67,7 @@ func (s *SQLiteStore) CreateAgentRunWithEvent(ctx context.Context, run *AgentRun
 		return nil, err
 	}
 	if run.Scope != event.Scope || run.ID != event.RunID {
-		return nil, ErrInvalidScope
+		return nil, models.ErrInvalidScope
 	}
 	return s.withImmediateActivity(ctx, event, func(conn *sql.Conn) error {
 		if err := allocateSQLiteObjectiveRunConn(ctx, conn, run); err != nil {
@@ -158,7 +160,7 @@ func addMissingActivityColumns(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error) {
+func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, expectedRevision int64, event *models.ActivityEvent, lease *models.AgentRunLeaseGuard) (*models.ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
 	}
@@ -166,10 +168,10 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 		return nil, err
 	}
 	if run.Scope != event.Scope || run.ID != event.RunID {
-		return nil, ErrInvalidScope
+		return nil, models.ErrInvalidScope
 	}
 	if run.Revision != expectedRevision+1 {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	runPayload, err := json.Marshal(run)
 	if err != nil {
@@ -188,7 +190,7 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 				WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 				run.Scope.Kind, run.Scope.ID, run.ID).Scan(&owner, &expiry, &actingUser, &revision)
 			if err == sql.ErrNoRows {
-				return ErrLeaseLost
+				return models.ErrLeaseLost
 			}
 			if err != nil {
 				return err
@@ -197,14 +199,14 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 			// it) is a revision conflict, not a lost lease: the holder
 			// re-plans instead of abandoning the Run.
 			if revision != expectedRevision {
-				return ErrRevisionConflict
+				return models.ErrRevisionConflict
 			}
 			if actingUser != run.ActingUser {
-				return ErrRevisionConflict
+				return models.ErrRevisionConflict
 			}
 			expires, err := time.Parse(time.RFC3339Nano, expiry.String)
 			if owner != lease.WorkerID || !expiry.Valid || err != nil || !expires.After(lease.Now) {
-				return ErrLeaseLost
+				return models.ErrLeaseLost
 			}
 		}
 		query := `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
@@ -221,7 +223,7 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 		}
 		result, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
-			return normalizeRunSkillDependencyError(err)
+			return models.NormalizeRunSkillDependencyError(err)
 		}
 		affected, err := result.RowsAffected()
 		if err != nil {
@@ -229,15 +231,15 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 		}
 		if affected != 1 {
 			if lease != nil {
-				return ErrLeaseLost
+				return models.ErrLeaseLost
 			}
-			return ErrRevisionConflict
+			return models.ErrRevisionConflict
 		}
 		return nil
 	})
 }
 
-func (s *SQLiteStore) AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error) {
+func (s *SQLiteStore) AppendActivity(ctx context.Context, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := event.Validate(); err != nil {
 		return nil, err
 	}
@@ -251,15 +253,15 @@ func (s *SQLiteStore) AppendActivity(ctx context.Context, event *ActivityEvent) 
 			event.Scope.Kind, event.Scope.ID, id).Scan(&exists)
 		if err == sql.ErrNoRows {
 			if event.RunID == "" {
-				return ErrObjectiveNotFound
+				return models.ErrObjectiveNotFound
 			}
-			return ErrRunNotFound
+			return models.ErrRunNotFound
 		}
 		return err
 	})
 }
 
-func (s *SQLiteStore) withImmediateActivity(ctx context.Context, event *ActivityEvent, beforeInsert func(*sql.Conn) error) (*ActivityEvent, error) {
+func (s *SQLiteStore) withImmediateActivity(ctx context.Context, event *models.ActivityEvent, beforeInsert func(*sql.Conn) error) (*models.ActivityEvent, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -285,14 +287,14 @@ func (s *SQLiteStore) withImmediateActivity(ctx context.Context, event *Activity
 		return nil, err
 	}
 	committed = true
-	return cloneActivityEvent(persisted), nil
+	return models.CloneActivityEvent(persisted), nil
 }
 
-func insertSQLiteActivityConn(ctx context.Context, conn *sql.Conn, event *ActivityEvent) (*ActivityEvent, error) {
-	persisted := cloneActivityEvent(event)
+func insertSQLiteActivityConn(ctx context.Context, conn *sql.Conn, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+	persisted := models.CloneActivityEvent(event)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
 		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`,
-		event.Scope.Kind, event.Scope.ID, activityStreamID(event)).Scan(&persisted.Sequence); err != nil {
+		event.Scope.Kind, event.Scope.ID, models.ActivityStreamID(event)).Scan(&persisted.Sequence); err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(persisted)
@@ -301,15 +303,15 @@ func insertSQLiteActivityConn(ctx context.Context, conn *sql.Conn, event *Activi
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO run_activity
 		(scope_kind, scope_id, run_id, agent_id, objective_id, team_id, severity, visibility, sequence, id, event_type, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, persisted.Scope.Kind, persisted.Scope.ID, activityStreamID(persisted),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, persisted.Scope.Kind, persisted.Scope.ID, models.ActivityStreamID(persisted),
 		persisted.AgentID, persisted.ObjectiveID, persisted.TeamID, persisted.Severity, persisted.Visibility,
 		persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
 		return nil, err
 	}
-	return cloneActivityEvent(persisted), nil
+	return models.CloneActivityEvent(persisted), nil
 }
 
-func (s *SQLiteStore) ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error) {
+func (s *SQLiteStore) ListActivity(ctx context.Context, filter models.ActivityFilter) ([]*models.ActivityEvent, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -372,15 +374,15 @@ func appendSQLiteActivityStrings(query string, args []interface{}, column string
 	return query, args
 }
 
-func scanSQLiteActivity(rows *sql.Rows, capacity int) ([]*ActivityEvent, error) {
+func scanSQLiteActivity(rows *sql.Rows, capacity int) ([]*models.ActivityEvent, error) {
 	defer rows.Close()
-	result := make([]*ActivityEvent, 0, capacity)
+	result := make([]*models.ActivityEvent, 0, capacity)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		var event ActivityEvent
+		var event models.ActivityEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			return nil, err
 		}

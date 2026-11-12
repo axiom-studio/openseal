@@ -1,12 +1,17 @@
 package runtime
 
-import "context"
+import (
+	"context"
 
-func (s *SQLiteStore) ListConversationForegroundRuns(ctx context.Context, scope Scope, owner ObjectiveOwner, conversationID string, limit, offset int) ([]*AgentRun, error) {
-	if err := validateConversationForegroundRunsQuery(scope, owner, conversationID, limit, offset); err != nil {
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+)
+
+func (s *SQLiteStore) ListConversationForegroundRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit, offset int) ([]*models.AgentRun, error) {
+	if err := models.ValidateConversationForegroundRunsQuery(scope, owner, conversationID, limit, offset); err != nil {
 		return nil, err
 	}
-	pageSize := conversationForegroundSQLPageSize(limit, offset)
+	pageSize := sqlstore.ConversationForegroundPageSize(limit, offset)
 	rows, err := s.db.QueryContext(ctx, `SELECT payload,created_at,id FROM (SELECT payload,created_at,id FROM agent_runs
 		WHERE scope_kind=? AND scope_id=? AND json_extract(payload,'$.owner.type')=? AND json_extract(payload,'$.owner.id')=?
 		AND json_extract(payload,'$.kind')='conversation' AND json_extract(payload,'$.concurrencyKey')=?
@@ -28,5 +33,5 @@ func (s *SQLiteStore) ListConversationForegroundRuns(ctx context.Context, scope 
 		return nil, err
 	}
 	defer rows.Close()
-	return scanConversationForegroundRunsSQL(rows)
+	return sqlstore.ScanConversationForegroundRuns(rows)
 }

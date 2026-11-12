@@ -7,11 +7,13 @@ import (
 	"errors"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, application *SkillReferenceUpgradeMutation) error {
-	if err := validateSkillReferenceUpgradeMutation(application); err != nil {
+func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, application *models.SkillReferenceUpgradeMutation) error {
+	if err := models.ValidateSkillReferenceUpgradeMutation(application); err != nil {
 		return err
 	}
 	conn, err := s.db.Conn(ctx)
@@ -32,7 +34,7 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 	if err != nil {
 		return err
 	}
-	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+	if err := models.ValidateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
 		return err
 	}
 	// Every binding the upgrade moves is locked and checked before any write.
@@ -44,7 +46,7 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			application.Plan.Scope.Kind, application.Plan.Scope.ID, application.Plan.DeploymentID,
 			member.Binding.ID, member.ExpectedRevision).Scan(&bindingPayload); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return ErrSkillReferenceUpgradeConflict
+				return models.ErrSkillReferenceUpgradeConflict
 			}
 			return err
 		}
@@ -52,17 +54,17 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 		if json.Unmarshal([]byte(bindingPayload), &currentBinding) != nil || currentBinding.Disabled ||
 			currentBinding.SkillID != application.Plan.From.ID || currentBinding.SkillVersion != application.Plan.From.Version ||
 			currentBinding.SourceIdentity != application.Plan.From.SourceIdentity {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
-		busy, err := hasSkillRuntimeUsage(ctx, conn, skillBindingUpgradeUsageFilter(application, member.Binding.ID), "action_calls", "agent_runs", false)
+		busy, err := sqlstore.HasSkillRuntimeUsage(ctx, conn, models.SkillBindingUpgradeUsageFilter(application, member.Binding.ID), "action_calls", "agent_runs", false)
 		if err != nil {
 			return err
 		}
 		if busy {
-			return ErrSkillReferenceUpgradeBusy
+			return models.ErrSkillReferenceUpgradeBusy
 		}
 	}
-	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+	if err := models.ValidateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
 		return err
 	}
 	var result sql.Result
@@ -81,7 +83,7 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			return err
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
 	}
 	for _, mutation := range application.Objectives {
@@ -99,7 +101,7 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			return err
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
 		if _, err = insertSQLiteActivityConn(ctx, conn, mutation.Event); err != nil {
 			return err
@@ -119,7 +121,7 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			return err
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
 	}
 	for _, mutation := range application.CallbackRegistrations {
@@ -136,7 +138,7 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			return err
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
+			return models.ErrSkillReferenceUpgradeConflict
 		}
 	}
 	if _, err = conn.ExecContext(ctx, "COMMIT"); err != nil {

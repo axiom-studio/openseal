@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func migrateArtifacts(db *sql.DB) error {
@@ -46,7 +49,7 @@ func migrateArtifacts(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateArtifactVersion(ctx context.Context, artifact *Artifact, expectedLatestVersion int64) error {
+func (s *SQLiteStore) CreateArtifactVersion(ctx context.Context, artifact *models.Artifact, expectedLatestVersion int64) error {
 	if err := artifact.Validate(); err != nil {
 		return err
 	}
@@ -55,7 +58,7 @@ func (s *SQLiteStore) CreateArtifactVersion(ctx context.Context, artifact *Artif
 
 // insertSQLiteArtifactVersion stores artifact only while the artifact's latest
 // stored version is expectedLatestVersion (0 when none is stored).
-func insertSQLiteArtifactVersion(ctx context.Context, exec sqliteExecer, artifact *Artifact, expectedLatestVersion int64) error {
+func insertSQLiteArtifactVersion(ctx context.Context, exec sqliteExecer, artifact *models.Artifact, expectedLatestVersion int64) error {
 	payload, err := json.Marshal(artifact)
 	if err != nil {
 		return err
@@ -77,12 +80,12 @@ func insertSQLiteArtifactVersion(ctx context.Context, exec sqliteExecer, artifac
 		return err
 	}
 	if changed != 1 {
-		return ErrArtifactVersionConflict
+		return models.ErrArtifactVersionConflict
 	}
 	return nil
 }
 
-func (s *SQLiteStore) GetArtifact(ctx context.Context, scope Scope, id string, version int64) (*Artifact, error) {
+func (s *SQLiteStore) GetArtifact(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -100,21 +103,21 @@ func (s *SQLiteStore) GetArtifact(ctx context.Context, scope Scope, id string, v
 	} else if err != nil {
 		return nil, err
 	}
-	return decodeArtifact(payload)
+	return sqlstore.DecodeArtifact(payload)
 }
 
-func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter ArtifactFilter) ([]*Artifact, error) {
+func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
 	if filter.EvidenceTarget == "" && filter.RetentionDueBefore == nil {
-		query, args := artifactListQuery(filter, "artifacts", "artifact_working_files", false)
-		return queryArtifactPage(ctx, s.db, query, args)
+		query, args := sqlstore.ArtifactListQuery(filter, "artifacts", "artifact_working_files", false)
+		return sqlstore.QueryArtifactPage(ctx, s.db, query, args)
 	}
 	var working map[string]bool
-	if filter.Files != ArtifactFilesAll {
+	if filter.Files != models.ArtifactFilesAll {
 		var err error
-		if working, err = workingArtifactIDs(ctx, s.db, `SELECT id FROM artifact_working_files WHERE scope_kind = ? AND scope_id = ?`, filter.Scope); err != nil {
+		if working, err = sqlstore.WorkingArtifactIDs(ctx, s.db, `SELECT id FROM artifact_working_files WHERE scope_kind = ? AND scope_id = ?`, filter.Scope); err != nil {
 			return nil, err
 		}
 	}
@@ -123,14 +126,14 @@ func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter ArtifactFilter) 
 		return nil, err
 	}
 	defer rows.Close()
-	all := make([]*Artifact, 0)
+	all := make([]*models.Artifact, 0)
 	latest := make(map[string]int64)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		artifact, err := decodeArtifact(payload)
+		artifact, err := sqlstore.DecodeArtifact(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -142,12 +145,12 @@ func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter ArtifactFilter) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	result := make([]*Artifact, 0, len(all))
+	result := make([]*models.Artifact, 0, len(all))
 	for _, artifact := range all {
 		if filter.LatestOnly && artifact.Version != latest[artifact.ID] {
 			continue
 		}
-		if matchesArtifactFilter(artifact, filter) && filter.Files.Keeps(working[artifact.ID]) {
+		if models.MatchesArtifactFilter(artifact, filter) && filter.Files.Keeps(working[artifact.ID]) {
 			result = append(result, artifact)
 		}
 	}
@@ -165,4 +168,4 @@ func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter ArtifactFilter) 
 	return result[start:end], nil
 }
 
-var _ ArtifactStore = (*SQLiteStore)(nil)
+var _ models.ArtifactStore = (*SQLiteStore)(nil)

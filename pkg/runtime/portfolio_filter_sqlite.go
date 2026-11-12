@@ -1,11 +1,13 @@
 package runtime
 
-func pageAgentRuns(values []*AgentRun, offset, limit int) []*AgentRun {
+import "github.com/axiom-studio/openseal/pkg/models"
+
+func pageAgentRuns(values []*models.AgentRun, offset, limit int) []*models.AgentRun {
 	if offset < 0 {
 		offset = 0
 	}
 	if offset >= len(values) {
-		return []*AgentRun{}
+		return []*models.AgentRun{}
 	}
 	values = values[offset:]
 	if limit > 0 && limit < len(values) {

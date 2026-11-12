@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // SQLite has no ledger: the table is created, if missing, on every open.
@@ -15,7 +17,7 @@ const sqliteWorkingFilesTable = `
 		PRIMARY KEY (scope_kind, scope_id, id)
 	);`
 
-func (s *SQLiteStore) MarkArtifactFiles(ctx context.Context, scope Scope, working, results []string) error {
+func (s *SQLiteStore) MarkArtifactFiles(ctx context.Context, scope models.Scope, working, results []string) error {
 	if err := scope.Validate(); err != nil {
 		return err
 	}
@@ -39,4 +41,4 @@ func (s *SQLiteStore) MarkArtifactFiles(ctx context.Context, scope Scope, workin
 	return tx.Commit()
 }
 
-var _ ArtifactWorkingFileStore = (*SQLiteStore)(nil)
+var _ models.ArtifactWorkingFileStore = (*SQLiteStore)(nil)

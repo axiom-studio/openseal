@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const sqliteConversationActiveRunProjection = `SELECT child.scope_kind, child.scope_id, child.id,
@@ -23,7 +26,7 @@ func migrateConversationActiveRunsSQLite(db *sql.DB) error {
 	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_active_runs')`).Scan(&exists); err != nil {
 		return err
 	}
-	insert := `INSERT OR REPLACE INTO conversation_active_runs ` + conversationActiveRunProjectionColumns + ` ` + sqliteConversationActiveRunProjection
+	insert := `INSERT OR REPLACE INTO conversation_active_runs ` + sqlstore.ConversationActiveRunProjectionColumns + ` ` + sqliteConversationActiveRunProjection
 	refreshChild := `
 		DELETE FROM conversation_active_runs WHERE scope_kind=NEW.scope_kind AND scope_id=NEW.scope_id AND id=NEW.id;
 		` + insert + ` AND child.scope_kind=NEW.scope_kind AND child.scope_id=NEW.scope_id AND child.id=NEW.id;`
@@ -71,8 +74,8 @@ func migrateConversationActiveRunsSQLite(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) ListConversationActiveRuns(ctx context.Context, scope Scope, owner ObjectiveOwner, conversationID string, limit int) ([]*AgentRun, error) {
-	if err := validateConversationActiveRunsQuery(scope, owner, conversationID, limit); err != nil {
+func (s *SQLiteStore) ListConversationActiveRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit int) ([]*models.AgentRun, error) {
+	if err := models.ValidateConversationActiveRunsQuery(scope, owner, conversationID, limit); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT child.payload FROM conversation_active_runs linked
@@ -91,5 +94,5 @@ func (s *SQLiteStore) ListConversationActiveRuns(ctx context.Context, scope Scop
 		return nil, err
 	}
 	defer rows.Close()
-	return scanConversationActiveRunsSQL(rows)
+	return sqlstore.ScanConversationActiveRuns(rows)
 }

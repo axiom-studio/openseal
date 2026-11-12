@@ -3,10 +3,12 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func sqliteTeamMembersMigration(tx *sql.Tx) teamMembersMigration {
-	return teamMembersMigration{
+func sqliteTeamMembersMigration(tx *sql.Tx) sqlstore.TeamMembersMigration {
+	return sqlstore.TeamMembersMigration{
 		Ctx: context.Background(), DB: tx, Table: func(name string) string { return name }, Placeholder: func(int) string { return "?" },
 		Exists: func(table string) (bool, error) {
 			var count int

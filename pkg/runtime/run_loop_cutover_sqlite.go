@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"sync"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // runLoopCutoverLocalMu serializes the cutover inside one process for the
@@ -21,12 +24,12 @@ func (s *SQLiteStore) WithRunLoopCutoverLock(ctx context.Context, fn func(contex
 	return withRunLoopCutoverLocalLock(ctx, fn)
 }
 
-func (s *SQLiteStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]RunLoopCutoverRef, error) {
+func (s *SQLiteStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]models.RunLoopCutoverRef, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT scope_kind, scope_id, id FROM agent_runs
 		WHERE status NOT IN ('completed', 'failed', 'canceled') AND COALESCE(json_extract(payload, '$.engine'), '') = ''
 		ORDER BY created_at, id`)
 	if err != nil {
 		return nil, err
 	}
-	return scanRunLoopCutoverRefs(rows)
+	return sqlstore.ScanRunLoopCutoverRefs(rows)
 }

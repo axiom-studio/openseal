@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func migrateExternalConversationGatewayAuthoritySQLite(db *sql.DB) error {
@@ -40,7 +42,7 @@ func migrateExternalConversationGatewayAuthoritySQLite(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	updates := make([]*ExternalConversationGatewayRegistration, 0)
+	updates := make([]*models.ExternalConversationGatewayRegistration, 0)
 	now := time.Now().UTC()
 	for rows.Next() {
 		var gatewayJSON, endpointJSON []byte
@@ -49,8 +51,8 @@ func migrateExternalConversationGatewayAuthoritySQLite(db *sql.DB) error {
 			rows.Close()
 			return err
 		}
-		var gateway ExternalConversationGatewayRegistration
-		var endpoint ExternalConversationEndpoint
+		var gateway models.ExternalConversationGatewayRegistration
+		var endpoint models.ExternalConversationEndpoint
 		if err := json.Unmarshal(gatewayJSON, &gateway); err != nil {
 			rows.Close()
 			return err
@@ -59,7 +61,7 @@ func migrateExternalConversationGatewayAuthoritySQLite(db *sql.DB) error {
 			rows.Close()
 			return err
 		}
-		updated, changed, err := backfilledGatewayAuthority(&gateway, []*ExternalConversationEndpoint{&endpoint}, now, bindingRevision)
+		updated, changed, err := backfilledGatewayAuthority(&gateway, []*models.ExternalConversationEndpoint{&endpoint}, now, bindingRevision)
 		if err != nil {
 			rows.Close()
 			return err
@@ -93,28 +95,28 @@ func migrateExternalConversationGatewayAuthoritySQLite(db *sql.DB) error {
 	return nil
 }
 
-func backfilledGatewayAuthority(value *ExternalConversationGatewayRegistration, endpoints []*ExternalConversationEndpoint, now time.Time, currentBindingRevision ...int64) (*ExternalConversationGatewayRegistration, bool, error) {
-	if value.Status == ExternalConversationGatewayRetired {
+func backfilledGatewayAuthority(value *models.ExternalConversationGatewayRegistration, endpoints []*models.ExternalConversationEndpoint, now time.Time, currentBindingRevision ...int64) (*models.ExternalConversationGatewayRegistration, bool, error) {
+	if value.Status == models.ExternalConversationGatewayRetired {
 		return value, false, nil
 	}
 	effective := value.Gateway
 	if len(currentBindingRevision) > 0 && currentBindingRevision[0] > effective.Adapter.BindingRevision {
 		effective.Adapter.BindingRevision = currentBindingRevision[0]
 	}
-	gateway, changed, err := gatewayAuthorityFromEndpoints(effective, endpoints)
+	gateway, changed, err := models.GatewayAuthorityFromEndpoints(effective, endpoints)
 	if err != nil || !changed {
 		return value, false, err
 	}
-	updated := cloneExternalConversationGateway(value)
+	updated := models.CloneExternalConversationGateway(value)
 	updated.Gateway.InstallationID, updated.Gateway.ApplicationID = gateway.InstallationID, gateway.ApplicationID
 	updated.Revision++
 	if now.Before(updated.UpdatedAt) {
 		now = updated.UpdatedAt
 	}
 	updated.UpdatedAt = now.UTC()
-	updated.Lifecycle = append(updated.Lifecycle, ExternalConversationGatewayLifecycleEntry{
-		Revision: updated.Revision, Action: ExternalConversationGatewayUpdated,
-		Actor:  ActivityActor{Type: "system", ID: "gateway-authority-migration"},
+	updated.Lifecycle = append(updated.Lifecycle, models.ExternalConversationGatewayLifecycleEntry{
+		Revision: updated.Revision, Action: models.ExternalConversationGatewayUpdated,
+		Actor:  models.ActivityActor{Type: "system", ID: "gateway-authority-migration"},
 		Reason: "Pin provider installation from unique reviewed endpoint authority", At: updated.UpdatedAt,
 	})
 	if err := updated.Validate(); err != nil {

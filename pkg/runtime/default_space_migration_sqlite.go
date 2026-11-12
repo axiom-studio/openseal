@@ -3,6 +3,8 @@ package runtime
 import (
 	"database/sql"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // migrateDefaultSpaceSQLite mirrors PostgreSQL migration 78. It runs before
@@ -27,7 +29,7 @@ func migrateDefaultSpaceSQLite(db *sql.DB) error {
 		`DROP INDEX IF EXISTS idx_spaces_personal`,
 		`ALTER TABLE spaces RENAME COLUMN is_personal TO is_default`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_default ON spaces(scope_kind, scope_id) WHERE is_default = 1`,
-	}, defaultSpaceRewrites("spaces", "space_members", "conversations", "artifacts", false)...)
+	}, sqlstore.DefaultSpaceRewrites("spaces", "space_members", "conversations", "artifacts", false)...)
 	if !artifacts {
 		statements = removeArtifactRewrite(statements)
 	}

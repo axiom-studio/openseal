@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // This one-time projection keeps the recurring drain checks independent of
@@ -42,7 +44,7 @@ func migrateSkillUpgradeDrainSQLite(db *sql.DB) error {
 			return err
 		}
 	}
-	for _, statement := range skillUpgradeDrainIndexStatements("action_calls", "agent_runs", false) {
+	for _, statement := range sqlstore.SkillUpgradeDrainIndexStatements("action_calls", "agent_runs", false) {
 		if _, err := tx.Exec(statement); err != nil {
 			return err
 		}

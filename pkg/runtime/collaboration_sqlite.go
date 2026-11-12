@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func migrateCollaboration(db *sql.DB) error {
@@ -39,8 +42,8 @@ func migrateCollaboration(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentRequestCreateRecord) (*ActivityEvent, error) {
-	if err := validateAgentRequestCreateRecord(record); err != nil {
+func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record models.AgentRequestCreateRecord) (*models.ActivityEvent, error) {
+	if err := models.ValidateAgentRequestCreateRecord(record); err != nil {
 		return nil, err
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
@@ -54,13 +57,13 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_requests
 			WHERE scope_kind = ? AND scope_id = ? AND status IN (?, ?, ?, ?)
 			AND json_extract(payload, '$.delegationPolicy.teamDeploymentId') = ?`,
-			record.Request.Scope.Kind, record.Request.Scope.ID, AgentRequestStatusPending,
-			AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, AgentRequestStatusCompletionReview,
+			record.Request.Scope.Kind, record.Request.Scope.ID, models.AgentRequestStatusPending,
+			models.AgentRequestStatusClarificationRequested, models.AgentRequestStatusAccepted, models.AgentRequestStatusCompletionReview,
 			record.DelegationTeamID).Scan(&active); err != nil {
 			return nil, err
 		}
 		if active >= record.MaximumConcurrent {
-			return nil, fmt.Errorf("%w: Team has %d active delegations, reaching maximum %d", ErrAgentRequestAssignment, active, record.MaximumConcurrent)
+			return nil, fmt.Errorf("%w: Team has %d active delegations, reaching maximum %d", models.ErrAgentRequestAssignment, active, record.MaximumConcurrent)
 		}
 	}
 	if record.RequireInterventionCount != nil || record.ToolTransition != nil {
@@ -69,7 +72,7 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 			return nil, err
 		}
 		if record.RequireInterventionCount != nil && len(source.PendingInterventions) != *record.RequireInterventionCount {
-			return nil, ErrSteeringArrived
+			return nil, models.ErrSteeringArrived
 		}
 		if transition := record.ToolTransition; transition != nil {
 			if _, err := sqliteSessionRunLease(ctx, conn, transition.Scope, transition.RunID, transition.Lease); err != nil {
@@ -86,7 +89,7 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 		if err := conn.QueryRowContext(ctx, `SELECT 1 FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 			record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.SourceRunID).Scan(&exists); err != nil {
 			if err == sql.ErrNoRows {
-				return nil, ErrRunNotFound
+				return nil, models.ErrRunNotFound
 			}
 			return nil, err
 		}
@@ -98,7 +101,7 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 	}
 	if err := insertSQLiteAgentRequest(ctx, conn, record.Request); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return nil, ErrAgentRequestIdempotency
+			return nil, models.ErrAgentRequestIdempotency
 		}
 		return nil, err
 	}
@@ -113,7 +116,7 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 	return persisted, nil
 }
 
-func (s *SQLiteStore) GetAgentRequest(ctx context.Context, scope Scope, requestID string) (*AgentRequest, error) {
+func (s *SQLiteStore) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -126,10 +129,10 @@ func (s *SQLiteStore) GetAgentRequest(ctx context.Context, scope Scope, requestI
 	if err != nil {
 		return nil, err
 	}
-	return decodeAgentRequest(payload)
+	return sqlstore.DecodeAgentRequest(payload)
 }
 
-func (s *SQLiteStore) FindAgentRequestByIdempotencyKey(ctx context.Context, scope Scope, key string) (*AgentRequest, error) {
+func (s *SQLiteStore) FindAgentRequestByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.AgentRequest, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -145,10 +148,10 @@ func (s *SQLiteStore) FindAgentRequestByIdempotencyKey(ctx context.Context, scop
 	if err != nil {
 		return nil, err
 	}
-	return decodeAgentRequest(payload)
+	return sqlstore.DecodeAgentRequest(payload)
 }
 
-func (s *SQLiteStore) ListAgentRequests(ctx context.Context, filter AgentRequestFilter) ([]*AgentRequest, error) {
+func (s *SQLiteStore) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -191,13 +194,13 @@ func (s *SQLiteStore) ListAgentRequests(ctx context.Context, filter AgentRequest
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]*AgentRequest, 0, limit)
+	result := make([]*models.AgentRequest, 0, limit)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		request, err := decodeAgentRequest(payload)
+		request, err := sqlstore.DecodeAgentRequest(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -206,8 +209,8 @@ func (s *SQLiteStore) ListAgentRequests(ctx context.Context, filter AgentRequest
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) CoordinateAgentRequest(ctx context.Context, record AgentRequestCoordinationRecord) (*ActivityEvent, error) {
-	if err := validateAgentRequestCoordinationRecord(record); err != nil {
+func (s *SQLiteStore) CoordinateAgentRequest(ctx context.Context, record models.AgentRequestCoordinationRecord) (*models.ActivityEvent, error) {
+	if err := models.ValidateAgentRequestCoordinationRecord(record); err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(record.Request)
@@ -231,7 +234,7 @@ func (s *SQLiteStore) CoordinateAgentRequest(ctx context.Context, record AgentRe
 		if rowsErr != nil {
 			return nil, rowsErr
 		}
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	persisted, err := insertSQLiteActivityConn(ctx, conn, record.Event)
 	if err != nil {
@@ -244,8 +247,8 @@ func (s *SQLiteStore) CoordinateAgentRequest(ctx context.Context, record AgentRe
 	return persisted, nil
 }
 
-func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record AgentRequestResponseRecord) ([]*ActivityEvent, error) {
-	if err := validateAgentRequestResponseRecord(record); err != nil {
+func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record models.AgentRequestResponseRecord) ([]*models.ActivityEvent, error) {
+	if err := models.ValidateAgentRequestResponseRecord(record); err != nil {
 		return nil, err
 	}
 	requestPayload, err := json.Marshal(record.Request)
@@ -268,14 +271,14 @@ func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record AgentReque
 			return nil, err
 		}
 	}
-	var dependencyEvents []*ActivityEvent
+	var dependencyEvents []*models.ActivityEvent
 	if record.DependencyResolution != nil {
 		dependencyResult, err := s.resolveSQLiteDependencyConn(ctx, conn, *record.DependencyResolution)
 		if err != nil {
 			return nil, err
 		}
 		if dependencyResult.Replayed {
-			return nil, ErrInvalidAgentRequestState
+			return nil, models.ErrInvalidAgentRequestState
 		}
 		dependencyEvents = dependencyResult.Events
 	}
@@ -290,10 +293,10 @@ func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record AgentReque
 		if err != nil {
 			return nil, err
 		}
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	events := make([]*ActivityEvent, 0, 2+len(dependencyEvents))
-	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
+	events := make([]*models.ActivityEvent, 0, 2+len(dependencyEvents))
+	for _, event := range []*models.ActivityEvent{record.SourceEvent, record.ChildEvent} {
 		if event == nil {
 			continue
 		}
@@ -311,8 +314,8 @@ func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record AgentReque
 	return events, nil
 }
 
-func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record AgentRequestCompletionRecord) ([]*ActivityEvent, error) {
-	if err := validateAgentRequestCompletionRecord(record); err != nil {
+func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record models.AgentRequestCompletionRecord) ([]*models.ActivityEvent, error) {
+	if err := models.ValidateAgentRequestCompletionRecord(record); err != nil {
 		return nil, err
 	}
 	requestPayload, err := json.Marshal(record.Request)
@@ -325,14 +328,14 @@ func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record AgentRequ
 	}
 	committed := false
 	defer rollbackSQLiteConn(conn, &committed)
-	var dependencyEvents []*ActivityEvent
+	var dependencyEvents []*models.ActivityEvent
 	if record.DependencyResolution != nil {
 		dependencyResult, err := s.resolveSQLiteDependencyConn(ctx, conn, *record.DependencyResolution)
 		if err != nil {
 			return nil, err
 		}
 		if dependencyResult.Replayed {
-			return nil, ErrInvalidAgentRequestState
+			return nil, models.ErrInvalidAgentRequestState
 		}
 		dependencyEvents = dependencyResult.Events
 	} else if record.SourceRun != nil {
@@ -354,10 +357,10 @@ func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record AgentRequ
 		if rowsErr != nil {
 			return nil, rowsErr
 		}
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	events := make([]*ActivityEvent, 0, 2+len(dependencyEvents))
-	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
+	events := make([]*models.ActivityEvent, 0, 2+len(dependencyEvents))
+	for _, event := range []*models.ActivityEvent{record.SourceEvent, record.ChildEvent} {
 		persisted, insertErr := insertSQLiteActivityConn(ctx, conn, event)
 		if insertErr != nil {
 			return nil, insertErr
@@ -394,7 +397,7 @@ func rollbackSQLiteConn(conn *sql.Conn, committed *bool) {
 	_ = conn.Close()
 }
 
-func insertSQLiteAgentRequest(ctx context.Context, exec sqliteExecer, request *AgentRequest) error {
+func insertSQLiteAgentRequest(ctx context.Context, exec sqliteExecer, request *models.AgentRequest) error {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return err
@@ -410,7 +413,7 @@ func insertSQLiteAgentRequest(ctx context.Context, exec sqliteExecer, request *A
 	return err
 }
 
-func insertSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun) error {
+func insertSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *models.AgentRun) error {
 	payload, err := json.Marshal(run)
 	if err != nil {
 		return err
@@ -423,12 +426,12 @@ func insertSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun
 		run.Deadline, run.AvailableAt, run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt,
 		run.Attempt, run.CreatedAt, string(payload))
 	if err != nil {
-		return normalizeRunSkillDependencyError(err)
+		return models.NormalizeRunSkillDependencyError(err)
 	}
 	return nil
 }
 
-func updateSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun, expectedRevision int64) error {
+func updateSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *models.AgentRun, expectedRevision int64) error {
 	payload, err := json.Marshal(run)
 	if err != nil {
 		return err
@@ -439,14 +442,14 @@ func updateSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun
 		run.Revision, run.Deadline, run.AvailableAt, run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt,
 		run.Attempt, string(payload), run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision)
 	if err != nil {
-		return normalizeRunSkillDependencyError(err)
+		return models.NormalizeRunSkillDependencyError(err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
 	if affected != 1 {
-		return ErrRevisionConflict
+		return models.ErrRevisionConflict
 	}
 	return nil
 }

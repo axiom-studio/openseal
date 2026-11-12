@@ -1,6 +1,8 @@
 package runtime
 
-func containsActionStatus(values []ActionCallStatus, status ActionCallStatus) bool {
+import "github.com/axiom-studio/openseal/pkg/models"
+
+func containsActionStatus(values []models.ActionCallStatus, status models.ActionCallStatus) bool {
 	for _, value := range values {
 		if value == status {
 			return true
@@ -9,7 +11,7 @@ func containsActionStatus(values []ActionCallStatus, status ActionCallStatus) bo
 	return false
 }
 
-func containsApprovalStatus(values []ApprovalStatus, status ApprovalStatus) bool {
+func containsApprovalStatus(values []models.ApprovalStatus, status models.ApprovalStatus) bool {
 	for _, value := range values {
 		if value == status {
 			return true
@@ -18,12 +20,12 @@ func containsApprovalStatus(values []ApprovalStatus, status ApprovalStatus) bool
 	return false
 }
 
-func pageActionCalls(values []*ActionCall, offset, limit int) []*ActionCall {
+func pageActionCalls(values []*models.ActionCall, offset, limit int) []*models.ActionCall {
 	if offset < 0 {
 		offset = 0
 	}
 	if offset >= len(values) {
-		return []*ActionCall{}
+		return []*models.ActionCall{}
 	}
 	values = values[offset:]
 	if limit <= 0 || limit > 500 {
@@ -35,12 +37,12 @@ func pageActionCalls(values []*ActionCall, offset, limit int) []*ActionCall {
 	return values
 }
 
-func pageApprovals(values []*ApprovalCheckpoint, offset, limit int) []*ApprovalCheckpoint {
+func pageApprovals(values []*models.ApprovalCheckpoint, offset, limit int) []*models.ApprovalCheckpoint {
 	if offset < 0 {
 		offset = 0
 	}
 	if offset >= len(values) {
-		return []*ApprovalCheckpoint{}
+		return []*models.ApprovalCheckpoint{}
 	}
 	values = values[offset:]
 	if limit <= 0 || limit > 500 {

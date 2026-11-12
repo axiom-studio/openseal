@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // Store tests: the SQLite store's skill runtime usage projections, their
@@ -23,7 +26,7 @@ func TestSkillUpgradeDrainQueriesUseIndexedMetadataWithoutPayloads(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	filter := SkillRuntimeUsageFilter{Scope: Scope{Kind: "tenant", ID: "metadata"}, SkillID: "skill", SkillVersion: "1", DeploymentID: "agent", BindingID: "account"}
+	filter := models.SkillRuntimeUsageFilter{Scope: models.Scope{Kind: "tenant", ID: "metadata"}, SkillID: "skill", SkillVersion: "1", DeploymentID: "agent", BindingID: "account"}
 	if busy, err := store.HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
 		t.Fatalf("metadata query decoded payload: %v %v", busy, err)
 	}
@@ -31,8 +34,8 @@ func TestSkillUpgradeDrainQueriesUseIndexedMetadataWithoutPayloads(t *testing.T)
 	if err != nil || len(refs) != 1 || refs[0].SourceIdentity != "" {
 		t.Fatalf("metadata retention: %#v %v", refs, err)
 	}
-	for _, selected := range []SkillRuntimeUsageFilter{filter, {Scope: filter.Scope, SkillID: filter.SkillID, SkillVersion: filter.SkillVersion}} {
-		query, args := skillRuntimeUsageQuery(selected, "action_calls", "agent_runs", false)
+	for _, selected := range []models.SkillRuntimeUsageFilter{filter, {Scope: filter.Scope, SkillID: filter.SkillID, SkillVersion: filter.SkillVersion}} {
+		query, args := sqlstore.SkillRuntimeUsageQuery(selected, "action_calls", "agent_runs", false)
 		plan := sqliteSkillUsageExplain(t, store.db, query, args...)
 		activeIndex := "idx_action_calls_skill_runtime_active"
 		if selected.BindingID != "" {
@@ -47,7 +50,7 @@ func TestSkillUpgradeDrainQueriesUseIndexedMetadataWithoutPayloads(t *testing.T)
 			t.Fatalf("unbounded action/run scan: %s", plan)
 		}
 	}
-	plan := sqliteSkillUsageExplain(t, store.db, listReferencedSkillRuntimeVersionsQuery("skill_bindings", "action_calls", "agent_runs", false), filter.Scope.Kind, filter.Scope.ID)
+	plan := sqliteSkillUsageExplain(t, store.db, sqlstore.ListReferencedSkillRuntimeVersionsQuery("skill_bindings", "action_calls", "agent_runs", false), filter.Scope.Kind, filter.Scope.ID)
 	for _, index := range []string{"idx_agent_runs_skill_runtime_active", "idx_action_calls_skill_run_receipt"} {
 		if !strings.Contains(plan, index) {
 			t.Fatalf("retention missing %s: %s", index, plan)
@@ -93,7 +96,7 @@ func TestSkillUpgradeDrainMigrationProjectsLegacyMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	call := ActionCall{ID: "old", Scope: Scope{Kind: "tenant", ID: "one"}, RunID: "run", DeploymentID: "agent", BindingID: "account", BindingRevision: 7, SkillID: "skill", SkillVersion: "2", Status: ActionCallStatusReady}
+	call := models.ActionCall{ID: "old", Scope: models.Scope{Kind: "tenant", ID: "one"}, RunID: "run", DeploymentID: "agent", BindingID: "account", BindingRevision: 7, SkillID: "skill", SkillVersion: "2", Status: models.ActionCallStatusReady}
 	payload, _ := json.Marshal(call)
 	if _, err = db.Exec(`INSERT INTO action_calls VALUES(?,?,?,?,?,?)`, call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.Status, string(payload)); err != nil {
 		t.Fatal(err)
@@ -133,8 +136,8 @@ func TestRunSkillDependencySQLiteProjectionMigrationAndMetadataQueries(t *testin
 	if _, err := db.Exec(`CREATE TABLE agent_runs(scope_kind TEXT,scope_id TEXT,id TEXT,status TEXT,assigned_agent_id TEXT,payload TEXT); CREATE TABLE skill_runtime_maintenance(scope_kind TEXT,scope_id TEXT,skill_id TEXT,active INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	run := &AgentRun{Scope: Scope{Kind: "tenant", ID: "legacy"}, ID: "accepted", AssignedAgentID: "agent", Status: AgentRunStatusSleeping,
-		Context: map[string]interface{}{capabilityInvocationContextKey: map[string]interface{}{"skillId": "reader", "skillVersion": "1.0.0", "action": "read", "inputs": map[string]interface{}{"scope": map[string]interface{}{"kind": "tenant", "id": "untrusted"}}}}}
+	run := &models.AgentRun{Scope: models.Scope{Kind: "tenant", ID: "legacy"}, ID: "accepted", AssignedAgentID: "agent", Status: models.AgentRunStatusSleeping,
+		Context: map[string]interface{}{models.CapabilityInvocationContextKey: map[string]interface{}{"skillId": "reader", "skillVersion": "1.0.0", "action": "read", "inputs": map[string]interface{}{"scope": map[string]interface{}{"kind": "tenant", "id": "untrusted"}}}}}
 	payload, _ := json.Marshal(run)
 	for _, status := range []string{"sleeping", "completed"} {
 		if _, err := db.Exec(`INSERT INTO agent_runs VALUES('tenant','legacy',?,?,?,?)`, status, status, "agent", string(payload)); err != nil {

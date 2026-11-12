@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // migrateTeamSkillGrantRemovalSQLite mirrors PostgreSQL migration 71 and is
@@ -13,7 +15,7 @@ func migrateTeamSkillGrantRemovalSQLite(db *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := stripTeamSkillGrants(context.Background(), tx, func(name string) string { return name }, func(int) string { return "?" }); err != nil {
+	if err := sqlstore.StripTeamSkillGrants(context.Background(), tx, func(name string) string { return name }, func(int) string { return "?" }); err != nil {
 		return err
 	}
 	return tx.Commit()

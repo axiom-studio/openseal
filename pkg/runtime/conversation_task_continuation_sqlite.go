@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 const sqliteConversationTaskDuePredicate = `json_extract(payload,'$.kind')='conversation'
@@ -17,7 +20,7 @@ func migrateConversationTaskContinuationsSQLite(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) ListDueConversationTaskRuns(ctx context.Context, filter ConversationTaskDueFilter) ([]*AgentRun, error) {
+func (s *SQLiteStore) ListDueConversationTaskRuns(ctx context.Context, filter models.ConversationTaskDueFilter) ([]*models.AgentRun, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -34,13 +37,13 @@ func (s *SQLiteStore) ListDueConversationTaskRuns(ctx context.Context, filter Co
 		return nil, err
 	}
 	defer rows.Close()
-	runs := make([]*AgentRun, 0, filter.Limit)
+	runs := make([]*models.AgentRun, 0, filter.Limit)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		run, err := decodeAgentRun(payload)
+		run, err := sqlstore.DecodeAgentRun(payload)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +52,7 @@ func (s *SQLiteStore) ListDueConversationTaskRuns(ctx context.Context, filter Co
 	return runs, rows.Err()
 }
 
-func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req ConversationTaskPromotionRequest) (*ConversationTaskResult, error) {
+func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req models.ConversationTaskPromotionRequest) (*models.ConversationTaskResult, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -64,20 +67,20 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req Conversat
 		return nil, err
 	}
 	if run == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	existing, err := getSQLiteConversationTaskByWorkRun(ctx, conn, req.Scope, req.RunID)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return replayConversationTaskContinuation(existing, run)
+		return models.ReplayConversationTaskContinuation(existing, run)
 	}
-	if !conversationTaskContinuationCandidate(run) {
+	if !models.ConversationTaskContinuationCandidate(run) {
 		return nil, nil
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	messageID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	messageID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	conversation, err := getSQLiteConversation(ctx, conn, req.Scope, conversationID)
 	if err != nil {
 		return nil, err
@@ -86,7 +89,7 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req Conversat
 	if err != nil {
 		return nil, err
 	}
-	for _, responseKey := range conversationTaskFinalResponseKeys(run) {
+	for _, responseKey := range models.ConversationTaskFinalResponseKeys(run) {
 		final, err := getSQLiteChannelMessageByKey(ctx, conn, req.Scope, conversationID, responseKey)
 		if err != nil {
 			return nil, err
@@ -101,25 +104,25 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req Conversat
 		return nil, err
 	}
 	if err == nil {
-		step, err := decodeAgentTurnRecord(turnPayload)
+		step, err := sqlstore.DecodeAgentTurnRecord(turnPayload)
 		if err != nil {
 			return nil, err
 		}
-		if conversationTaskFinishedBeforePromotion(step) {
+		if models.ConversationTaskFinishedBeforePromotion(step) {
 			return nil, nil
 		}
 	}
-	var chat *AgentSession
+	var chat *models.AgentSession
 	if run.SessionID != "" {
 		chat, err = getSQLiteAgentSession(ctx, conn, req.Scope, run.SessionID)
-		if errors.Is(err, ErrAgentSessionNotFound) {
+		if errors.Is(err, models.ErrAgentSessionNotFound) {
 			chat, err = nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
 	}
-	task, updated, event, fork, err := buildConversationTaskContinuation(req, run, conversation, message, chat)
+	task, updated, event, fork, err := models.BuildConversationTaskContinuation(req, run, conversation, message, chat)
 	if err != nil || task == nil {
 		return nil, err
 	}
@@ -129,10 +132,10 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req Conversat
 			return nil, err
 		}
 		if root == nil || root.ConversationID != conversationID {
-			return nil, ErrInvalidConversationTask
+			return nil, models.ErrInvalidConversationTask
 		}
 	}
-	ack, err := buildConversationTaskAcknowledgment(task, conversation, message)
+	ack, err := models.BuildConversationTaskAcknowledgment(task, conversation, message)
 	if err != nil {
 		return nil, err
 	}
@@ -166,10 +169,10 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req Conversat
 		return nil, err
 	}
 	committed = true
-	return &ConversationTaskResult{Task: cloneConversationTask(task), WorkRun: cloneAgentRun(updated), SourceRun: cloneAgentRun(updated), AcknowledgmentMessageID: ack.Message.ID}, nil
+	return &models.ConversationTaskResult{Task: models.CloneConversationTask(task), WorkRun: models.CloneAgentRun(updated), SourceRun: models.CloneAgentRun(updated), AcknowledgmentMessageID: ack.Message.ID}, nil
 }
 
-func getSQLiteConversationTaskByWorkRun(ctx context.Context, queryer sqliteDependencyQueryer, scope Scope, runID string) (*ConversationTask, error) {
+func getSQLiteConversationTaskByWorkRun(ctx context.Context, queryer sqliteDependencyQueryer, scope models.Scope, runID string) (*models.ConversationTask, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM conversation_tasks WHERE scope_kind=? AND scope_id=? AND work_run_id=?`, scope.Kind, scope.ID, runID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -178,5 +181,5 @@ func getSQLiteConversationTaskByWorkRun(ctx context.Context, queryer sqliteDepen
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversationTaskSQL(payload)
+	return sqlstore.DecodeConversationTask(payload)
 }

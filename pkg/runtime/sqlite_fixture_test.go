@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // The put* fixtures write kernel records straight into a SQLiteStore's tables,
@@ -18,7 +20,7 @@ import (
 // (newTestSQLiteStore with the helpers in raw_sql_test.go). A test that needs
 // a state only these fixtures produce is a store test and moves with them.
 
-func putStoredRun(t testing.TB, store *SQLiteStore, run *AgentRun) {
+func putStoredRun(t testing.TB, store *SQLiteStore, run *models.AgentRun) {
 	t.Helper()
 	ctx := context.Background()
 	payload := mustJSON(t, run)
@@ -45,7 +47,7 @@ func putStoredRun(t testing.TB, store *SQLiteStore, run *AgentRun) {
 	}
 }
 
-func putStoredTurn(t testing.TB, store *SQLiteStore, turn *AgentTurn) {
+func putStoredTurn(t testing.TB, store *SQLiteStore, turn *models.AgentTurn) {
 	t.Helper()
 	deleteStoredRow(t, store, "agent_turns", turn.Scope, turn.ID)
 	if err := insertSQLiteAgentTurn(context.Background(), store.db, turn); err != nil {
@@ -53,7 +55,7 @@ func putStoredTurn(t testing.TB, store *SQLiteStore, turn *AgentTurn) {
 	}
 }
 
-func putStoredAction(t testing.TB, store *SQLiteStore, call *ActionCall) {
+func putStoredAction(t testing.TB, store *SQLiteStore, call *models.ActionCall) {
 	t.Helper()
 	deleteStoredRow(t, store, "action_calls", call.Scope, call.ID)
 	if err := insertSQLiteActionCall(context.Background(), store.db, call); err != nil {
@@ -61,7 +63,7 @@ func putStoredAction(t testing.TB, store *SQLiteStore, call *ActionCall) {
 	}
 }
 
-func putStoredApproval(t testing.TB, store *SQLiteStore, approval *ApprovalCheckpoint) {
+func putStoredApproval(t testing.TB, store *SQLiteStore, approval *models.ApprovalCheckpoint) {
 	t.Helper()
 	deleteStoredRow(t, store, "approval_checkpoints", approval.Scope, approval.ID)
 	if err := insertSQLiteApprovalCheckpoint(context.Background(), store.db, approval); err != nil {
@@ -71,7 +73,7 @@ func putStoredApproval(t testing.TB, store *SQLiteStore, approval *ApprovalCheck
 
 // putStoredConversationTask stores task with workRun as the state of its work
 // Run, which the store keeps beside the task.
-func putStoredConversationTask(t testing.TB, store *SQLiteStore, task *ConversationTask, workRun *AgentRun) {
+func putStoredConversationTask(t testing.TB, store *SQLiteStore, task *models.ConversationTask, workRun *models.AgentRun) {
 	t.Helper()
 	deleteStoredRow(t, store, "conversation_tasks", task.Scope, task.ID)
 	if err := insertSQLiteConversationTask(context.Background(), store.db, task, workRun.Status); err != nil {
@@ -79,7 +81,7 @@ func putStoredConversationTask(t testing.TB, store *SQLiteStore, task *Conversat
 	}
 }
 
-func putStoredExternalEndpoint(t testing.TB, store *SQLiteStore, endpoint *ExternalConversationEndpoint) {
+func putStoredExternalEndpoint(t testing.TB, store *SQLiteStore, endpoint *models.ExternalConversationEndpoint) {
 	t.Helper()
 	deleteStoredRow(t, store, "external_conversation_endpoints", endpoint.Scope, endpoint.ID)
 	if err := insertSQLiteExternalConversationEndpoint(context.Background(), store.db, endpoint); err != nil {
@@ -87,7 +89,7 @@ func putStoredExternalEndpoint(t testing.TB, store *SQLiteStore, endpoint *Exter
 	}
 }
 
-func putStoredExternalDelivery(t testing.TB, store *SQLiteStore, delivery *ExternalConversationDelivery) {
+func putStoredExternalDelivery(t testing.TB, store *SQLiteStore, delivery *models.ExternalConversationDelivery) {
 	t.Helper()
 	deleteStoredRow(t, store, "external_conversation_deliveries", delivery.Scope, delivery.ID)
 	if err := insertSQLiteExternalConversationDelivery(context.Background(), store.db, delivery); err != nil {
@@ -95,7 +97,7 @@ func putStoredExternalDelivery(t testing.TB, store *SQLiteStore, delivery *Exter
 	}
 }
 
-func putStoredArtifact(t testing.TB, store *SQLiteStore, artifact *Artifact) {
+func putStoredArtifact(t testing.TB, store *SQLiteStore, artifact *models.Artifact) {
 	t.Helper()
 	ctx := context.Background()
 	execStoreSQL(t, store, `DELETE FROM artifacts WHERE scope_kind = ? AND scope_id = ? AND id = ? AND version = ?`,
@@ -110,7 +112,7 @@ func putStoredArtifact(t testing.TB, store *SQLiteStore, artifact *Artifact) {
 	}
 }
 
-func putStoredAgentRequest(t testing.TB, store *SQLiteStore, request *AgentRequest) {
+func putStoredAgentRequest(t testing.TB, store *SQLiteStore, request *models.AgentRequest) {
 	t.Helper()
 	deleteStoredRow(t, store, "agent_requests", request.Scope, request.ID)
 	if err := insertSQLiteAgentRequest(context.Background(), store.db, request); err != nil {
@@ -123,7 +125,7 @@ func putStoredAgentRequest(t testing.TB, store *SQLiteStore, request *AgentReque
 // its last caller has moved to the raw_sql_test.go form.
 
 // rewriteStoredPayload is rewriteRowPayload on the store's own connection.
-func rewriteStoredPayload[T any](t testing.TB, store *SQLiteStore, table string, scope Scope, id string, edit func(*T)) {
+func rewriteStoredPayload[T any](t testing.TB, store *SQLiteStore, table string, scope models.Scope, id string, edit func(*T)) {
 	t.Helper()
 	rewriteRowPayload(t, store.db, table, scope, id, edit)
 }
@@ -143,14 +145,14 @@ func countStoreRows(t testing.TB, store *SQLiteStore, table string) int {
 	return countRows(t, store.db, table)
 }
 
-func deleteStoredRow(t testing.TB, store *SQLiteStore, table string, scope Scope, id string) {
+func deleteStoredRow(t testing.TB, store *SQLiteStore, table string, scope models.Scope, id string) {
 	t.Helper()
 	execStoreSQL(t, store, `DELETE FROM `+table+` WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id)
 }
 
 // listStoredRoutineEvents is listRoutineEventRows on the store's own
 // connection.
-func listStoredRoutineEvents(t testing.TB, store *SQLiteStore, scope Scope) []storedRoutineEvent {
+func listStoredRoutineEvents(t testing.TB, store *SQLiteStore, scope models.Scope) []storedRoutineEvent {
 	t.Helper()
 	return listRoutineEventRows(t, store.db, scope)
 }

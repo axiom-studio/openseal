@@ -10,6 +10,8 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
@@ -205,7 +207,7 @@ func (s *SQLiteStore) activateAmendment(ctx context.Context, amendment *kernelag
 	if err != nil {
 		return err
 	}
-	deploymentPayload, activationPayload, err := registryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -303,7 +305,7 @@ func (s *SQLiteStore) ListDefinitionVersions(ctx context.Context, id string) ([]
 }
 
 func (s *SQLiteStore) CreateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, activation kernelagent.DefinitionActivation) error {
-	deploymentPayload, activationPayload, err := registryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -361,7 +363,7 @@ func (s *SQLiteStore) ListDeployments(ctx context.Context, scope capability.Scop
 }
 
 func (s *SQLiteStore) UpdateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, activation kernelagent.DefinitionActivation) error {
-	deploymentPayload, activationPayload, err := registryPayloads(deployment, activation)
+	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
 	}
@@ -405,14 +407,14 @@ func (s *SQLiteStore) synchronizeAgentRunbookActivations(ctx context.Context, tx
 	if err != nil {
 		return err
 	}
-	var current []*RunbookActivation
+	var current []*models.RunbookActivation
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
 			rows.Close()
 			return err
 		}
-		var activation RunbookActivation
+		var activation models.RunbookActivation
 		if err := json.Unmarshal([]byte(payload), &activation); err != nil {
 			rows.Close()
 			return err
@@ -422,7 +424,7 @@ func (s *SQLiteStore) synchronizeAgentRunbookActivations(ctx context.Context, tx
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	next, err := reconcileAgentRunbookActivations(current, definition, deployment, deployment.UpdatedAt)
+	next, err := models.ReconcileAgentRunbookActivations(current, definition, deployment, deployment.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -439,7 +441,7 @@ func (s *SQLiteStore) synchronizeAgentRunbookActivations(ctx context.Context, tx
 			if err != nil {
 				return err
 			}
-			return ErrRunbookActivationRevision
+			return models.ErrRunbookActivationRevision
 		}
 	}
 	return nil

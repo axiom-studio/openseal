@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func migrateSkillSetupRequests(db *sql.DB) error {
@@ -14,9 +16,9 @@ func migrateSkillSetupRequests(db *sql.DB) error {
 	_, err := db.Exec(`CREATE INDEX IF NOT EXISTS skill_setup_requests_chat_idx ON skill_setup_requests(scope_kind,scope_id,conversation_id,created_at)`)
 	return err
 }
-func (s *SQLiteStore) GetSkillSetupRequest(ctx context.Context, scope Scope, id string) (*SkillSetupRequest, error) {
+func (s *SQLiteStore) GetSkillSetupRequest(ctx context.Context, scope models.Scope, id string) (*models.SkillSetupRequest, error) {
 	if scope.Validate() != nil {
-		return nil, ErrInvalidSkillSetup
+		return nil, models.ErrInvalidSkillSetup
 	}
 	var payload []byte
 	err := s.db.QueryRowContext(ctx, `SELECT payload FROM skill_setup_requests WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, id).Scan(&payload)
@@ -26,26 +28,26 @@ func (s *SQLiteStore) GetSkillSetupRequest(ctx context.Context, scope Scope, id 
 	if err != nil {
 		return nil, err
 	}
-	var r SkillSetupRequest
+	var r models.SkillSetupRequest
 	err = json.Unmarshal(payload, &r)
 	return &r, err
 }
-func (s *SQLiteStore) ListSkillSetupRequests(ctx context.Context, scope Scope, deploymentID, conversationID string) ([]*SkillSetupRequest, error) {
+func (s *SQLiteStore) ListSkillSetupRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.SkillSetupRequest, error) {
 	if scope.Validate() != nil || conversationID == "" {
-		return nil, ErrInvalidSkillSetup
+		return nil, models.ErrInvalidSkillSetup
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM skill_setup_requests WHERE scope_kind=? AND scope_id=? AND (?='' OR deployment_id=?) AND conversation_id=? ORDER BY created_at,id`, scope.Kind, scope.ID, deploymentID, deploymentID, conversationID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := []*SkillSetupRequest{}
+	result := []*models.SkillSetupRequest{}
 	for rows.Next() {
 		var payload []byte
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
-		var r SkillSetupRequest
+		var r models.SkillSetupRequest
 		if err := json.Unmarshal(payload, &r); err != nil {
 			return nil, err
 		}
@@ -53,12 +55,12 @@ func (s *SQLiteStore) ListSkillSetupRequests(ctx context.Context, scope Scope, d
 	}
 	return result, rows.Err()
 }
-func (s *SQLiteStore) SaveSkillSetupRequest(ctx context.Context, r *SkillSetupRequest, expected int64) error {
+func (s *SQLiteStore) SaveSkillSetupRequest(ctx context.Context, r *models.SkillSetupRequest, expected int64) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
 	if r.Revision != expected+1 {
-		return invalidSkillSetupField("revision", "must advance the expected request revision by one")
+		return models.NewSkillSetupValidationError("revision", "must advance the expected request revision by one")
 	}
 	payload, err := json.Marshal(r)
 	if err != nil {
@@ -78,7 +80,7 @@ func (s *SQLiteStore) SaveSkillSetupRequest(ctx context.Context, r *SkillSetupRe
 		return err
 	}
 	if n != 1 {
-		return ErrSkillSetupConflict
+		return models.ErrSkillSetupConflict
 	}
 	return nil
 }
