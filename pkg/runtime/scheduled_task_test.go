@@ -21,6 +21,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -59,14 +60,14 @@ func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ..
 		t.Fatal(err)
 	}
 	catalog := skill.NewCatalog()
-	def := RunbookManagementSkill()
+	def := routine.RunbookManagementSkill()
 	if len(runbookDefinitions) == 1 {
 		def = runbookDefinitions[0]
 	}
 	if err := catalog.Register(ctx, def); err != nil {
 		t.Fatal(err)
 	}
-	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: owner.ID, SkillID: def.ID, SkillVersion: def.Version, AllowedActions: []string{action.RunbookActionCreateTask, action.RunbookActionList, action.RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule, RunbookActionEventSources, RunbookActionSendTestEvent}, MaximumRisk: skill.RiskLevelWrite}
+	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: owner.ID, SkillID: def.ID, SkillVersion: def.Version, AllowedActions: []string{action.RunbookActionCreateTask, action.RunbookActionList, action.RunbookActionSetStatus, routine.RunbookActionStart, routine.RunbookActionReplaceSchedule, routine.RunbookActionEventSources, routine.RunbookActionSendTestEvent}, MaximumRisk: skill.RiskLevelWrite}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +106,7 @@ type routineActionStore interface {
 
 func dispatchTaskForTest(t *testing.T, store KernelStore, run *AgentRun, bound *skill.BoundAction, args map[string]interface{}, callID string) map[string]interface{} {
 	t.Helper()
-	d, err := NewRunbookActionDispatcher(store.(routineActionStore), nil)
+	d, err := routine.NewRunbookActionDispatcher(store.(routineActionStore), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 				if err := catalog.ValidateInput(t.Context(), bound, args); err != nil {
 					t.Fatal(err)
 				}
-				validator, _ := NewRunbookActionValidator(store.(routineActionStore))
+				validator, _ := routine.NewRunbookActionValidator(store.(routineActionStore))
 				if _, err := validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err != nil {
 					t.Fatal(err)
 				}
@@ -164,13 +165,13 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 				for occurrence := 0; occurrence < occurrences; occurrence++ {
 					current, _ := store.GetRunbookActivation(t.Context(), run.Scope, a.ID)
 					now := current.NextRunAt.Add(time.Second)
-					scheduler := NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
+					scheduler := routine.NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
 					r, err := scheduler.ReconcileScope(t.Context(), run.Scope, 20)
 					if err != nil || r.Scheduled != 1 {
 						t.Fatalf("schedule=%#v,%v", r, err)
 					}
 					// A different scheduler instance sees the durable cursor, never a private timer.
-					if r, err := NewRunbookScheduler(store).ReconcileScope(t.Context(), run.Scope, 20); err != nil || r.Scheduled != 0 {
+					if r, err := routine.NewRunbookScheduler(store).ReconcileScope(t.Context(), run.Scope, 20); err != nil || r.Scheduled != 0 {
 						t.Fatalf("restart replay=%#v,%v", r, err)
 					}
 					work, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: run.Scope, ObjectiveID: a.ObjectiveID, Limit: 10})
@@ -233,7 +234,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion(t *testing.T) {
 	store := newTestKernelStore(t)
 	run, _, bound, args := scheduledTaskFixture(t, store)
-	v, _ := NewRunbookActionValidator(store)
+	v, _ := routine.NewRunbookActionValidator(store)
 	for _, change := range []string{"scope", "owner", "background", "conversation", "binding", "cron", "timezone", "foreign-input"} {
 		t.Run(change, func(t *testing.T) {
 			candidate := cloneAgentRun(run)
@@ -276,7 +277,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 			if err != nil || claimed == nil {
 				t.Fatalf("claim=%#v,%v", claimed, err)
 			}
-			validator, _ := NewRunbookActionValidator(store.(routineActionStore))
+			validator, _ := routine.NewRunbookActionValidator(store.(routineActionStore))
 			policyCalls := 0
 			coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 				policyCalls++
@@ -341,7 +342,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 	if replay := dispatchTaskForTest(t, store, run, statusBound, pause, "pause"); replay["replayed"] != true {
 		t.Fatal("pause replay failed")
 	}
-	d, _ := NewRunbookActionDispatcher(store, nil)
+	d, _ := routine.NewRunbookActionDispatcher(store, nil)
 	if _, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: statusBound, Call: &ActionCall{ID: "different", Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID}, Arguments: pause}); !errors.Is(err, ErrRunbookActivationRevision) {
 		t.Fatalf("stale different action: %v", err)
 	}
@@ -357,7 +358,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 	}
 	other := cloneAgentRun(run)
 	other.Owner.ID = "foreign"
-	validator, err := NewRunbookActionValidator(store)
+	validator, err := routine.NewRunbookActionValidator(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +395,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 			if err != nil || claimed == nil {
 				t.Fatalf("claim=%#v,%v", claimed, err)
 			}
-			validator, _ := NewRunbookActionValidator(store)
+			validator, _ := routine.NewRunbookActionValidator(store)
 			coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 				return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
 			}), []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
@@ -433,7 +434,7 @@ func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
 	if err != nil || claimed == nil {
 		t.Fatalf("claim=%#v,%v", claimed, err)
 	}
-	validator, _ := NewRunbookActionValidator(store)
+	validator, _ := routine.NewRunbookActionValidator(store)
 	policy := action.NewDefaultActionPolicy()
 	policy.Approvers = []ApprovalPrincipal{{Type: "role", ID: "operator"}}
 	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
@@ -451,7 +452,7 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 	store := newTestKernelStore(t)
 	source, _, bound, args := scheduledTaskFixture(t, store)
 	a := dispatchTaskForTest(t, store, source, bound, args, "create")["activation"].(*RunbookActivation)
-	scheduler := NewRunbookScheduler(store, models.WithClock(func() time.Time { return a.NextRunAt.Add(time.Second) }))
+	scheduler := routine.NewRunbookScheduler(store, models.WithClock(func() time.Time { return a.NextRunAt.Add(time.Second) }))
 	if _, err := scheduler.ReconcileScope(t.Context(), source.Scope, 10); err != nil {
 		t.Fatal(err)
 	}

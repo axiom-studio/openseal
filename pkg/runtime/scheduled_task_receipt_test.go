@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
 // The create_task approval names the activation the approved call creates, so
@@ -19,7 +20,7 @@ func TestCreateTaskApprovalNamesItsActivation(t *testing.T) {
 	if claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || claimed == nil {
 		t.Fatalf("claim=%#v,%v", claimed, err)
 	}
-	validator, _ := NewRunbookActionValidator(store)
+	validator, _ := routine.NewRunbookActionValidator(store)
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
 	}), []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
@@ -28,7 +29,7 @@ func TestCreateTaskApprovalNamesItsActivation(t *testing.T) {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
 	named, _ := result.Approval.ProposedAction["activationId"].(string)
-	if named == "" || named != RunbookActivationIDForKey(run.Scope, "routine-key") {
+	if named == "" || named != routine.RunbookActivationIDForKey(run.Scope, "routine-key") {
 		t.Fatalf("approval activationId = %q", named)
 	}
 	created := dispatchTaskForTest(t, store, run, bound, args, result.Call.IdempotencyKey)

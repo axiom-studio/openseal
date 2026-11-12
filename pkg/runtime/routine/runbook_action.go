@@ -1,0 +1,552 @@
+package routine
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/google/uuid"
+)
+
+const (
+	RunbookManagementSkillVersion = "1.9.0"
+	RunbookActionStart            = "start"
+	RunbookActionReplaceSchedule  = "replace_schedule"
+	RunbookManagementEndpoint     = "kernel://runbooks"
+	runbookActivationResourceType = "runbook_activation"
+)
+
+// RunbookManagementSkill exposes operations on reviewed, owner-scoped
+// Runbook activations. Starting an activation creates a normal durable Run;
+// the model cannot manufacture a definition, execution policy, or authority.
+func RunbookManagementSkill() *skill.Definition {
+	return &skill.Definition{
+		ID: models.RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
+		Name: "Routines", Description: "Create routines that run on a schedule or when something happens, list them, start them now, pause, resume or cancel them. Work uses the current Agent's tools and reports back to the chat it was created in.",
+		Transport: skill.TransportReference{Kind: "kernel", Endpoint: RunbookManagementEndpoint},
+		Actions: map[string]skill.Action{
+			action.RunbookActionCreateTask: scheduledTaskCreateAction(),
+			RunbookActionEventSources:      routineEventSourcesAction(),
+			RunbookActionSendTestEvent:     routineTestEventAction(),
+			action.RunbookActionSetScript:  scheduledTaskSetScriptAction(),
+			action.RunbookActionList:       scheduledTaskListAction(),
+			action.RunbookActionSetStatus:  scheduledTaskStatusAction(),
+			RunbookActionStart: {
+				Name:        RunbookActionStart,
+				Description: "Start one reviewed Runbook now. Active activations and automatically exhausted scheduled activations remain callable on demand. Omit activationId when the current Objective channel has exactly one callable Runbook; otherwise use an activation ID from the conversation context.",
+				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
+				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
+				InputSchema: map[string]interface{}{
+					"type": "object", "additionalProperties": false,
+					"properties": map[string]interface{}{
+						"activationId": map[string]interface{}{"type": "string", "minLength": 1},
+						"reason":       map[string]interface{}{"type": "string", "minLength": 1},
+					},
+					"required": []interface{}{"reason"},
+				},
+				OutputSchema: map[string]interface{}{
+					"type": "object", "additionalProperties": false,
+					"properties": map[string]interface{}{
+						"resourceType": map[string]interface{}{"type": "string", "const": runbookActivationResourceType},
+						"operation":    map[string]interface{}{"type": "string", "const": RunbookActionStart},
+						"activation":   map[string]interface{}{"type": "object"},
+						"run":          map[string]interface{}{"type": "object"},
+						"replayed":     map[string]interface{}{"type": "boolean"},
+					},
+					"required": []interface{}{"resourceType", "operation", "activation", "run", "replayed"},
+				},
+			},
+			RunbookActionReplaceSchedule: {
+				Name:        RunbookActionReplaceSchedule,
+				Description: "Replace one retired scheduled Runbook with a fresh reviewed activation. Omit activationId when the current Objective has one Runbook lineage. Only schedule timing changes; the definition, authority, inputs, budget, and reporting remain unchanged.",
+				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
+				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
+				InputSchema: map[string]interface{}{
+					"type": "object", "additionalProperties": false,
+					"anyOf": []interface{}{
+						map[string]interface{}{"required": []interface{}{"cron"}},
+						map[string]interface{}{"required": []interface{}{"timezone"}},
+						map[string]interface{}{"required": []interface{}{"jitterSeconds"}},
+						map[string]interface{}{"required": []interface{}{"maximumOccurrences"}},
+					},
+					"properties": map[string]interface{}{
+						"activationId":       map[string]interface{}{"type": "string", "minLength": 1},
+						"cron":               map[string]interface{}{"type": "string", "pattern": `^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+$`, "description": "Optional six-field cron expression including seconds, for example 0 0 * * * *; omit to preserve the reviewed cadence."},
+						"timezone":           map[string]interface{}{"type": "string", "minLength": 1, "description": "Optional IANA timezone; omit to preserve the reviewed timezone."},
+						"jitterSeconds":      map[string]interface{}{"type": "integer", "minimum": 0, "maximum": 2678400, "description": "Optional timing variation; omit to preserve the reviewed value."},
+						"maximumOccurrences": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 1000000, "description": "Optional bounded number of occurrences; omit to preserve the reviewed value."},
+						"reason":             map[string]interface{}{"type": "string", "minLength": 1},
+					},
+					"required": []interface{}{"reason"},
+				},
+				OutputSchema: map[string]interface{}{
+					"type": "object", "additionalProperties": false,
+					"properties": map[string]interface{}{
+						"resourceType":     map[string]interface{}{"type": "string", "const": runbookActivationResourceType},
+						"operation":        map[string]interface{}{"type": "string", "const": RunbookActionReplaceSchedule},
+						"sourceActivation": map[string]interface{}{"type": "object"},
+						"activation":       map[string]interface{}{"type": "object"},
+						"replayed":         map[string]interface{}{"type": "boolean"},
+					},
+					"required": []interface{}{"resourceType", "operation", "sourceActivation", "activation", "replayed"},
+				},
+			},
+		},
+	}
+}
+
+type runbookStartArguments struct {
+	ActivationID string `json:"activationId"`
+	Reason       string `json:"reason"`
+}
+
+type runbookReplaceScheduleArguments struct {
+	ActivationID       string `json:"activationId"`
+	Cron               string `json:"cron"`
+	Timezone           string `json:"timezone"`
+	JitterSeconds      *int64 `json:"jitterSeconds"`
+	MaximumOccurrences *int64 `json:"maximumOccurrences"`
+	Reason             string `json:"reason"`
+}
+
+type RunbookActionStore interface {
+	models.KernelStore
+	models.ConversationStore
+}
+
+// RunbookActionValidator resolves an omitted activation from the current
+// Objective channel, then proves that the activation is active and belongs to
+// the conversation owner before policy evaluation or approval persistence.
+type RunbookActionValidator struct {
+	store          RunbookActionStore
+	routineTeams   collaboration.RoutineTeamCatalog
+	grantCatalog   RoutineGrantCatalog
+	ownerAddresses models.RoutineOwnerAddressResolver
+	chatFiles      ChatFileResolver
+	events         routineEventActions
+}
+
+// SetRoutineEvents lets routines start on events: offerer takes test
+// events, sources lists the host's own sources (Google) and hooksAvailable
+// says whether the host can serve webhooks. Without an offerer,
+// send_test_event is refused.
+func (v *RunbookActionValidator) SetRoutineEvents(offerer externalconversation.RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) {
+	if v != nil {
+		v.events = newRoutineEventActions(offerer, sources, hooksAvailable)
+	}
+}
+
+// SetChatFiles lets routines run saved scripts: proposals pin a script's
+// version from the chat's files.
+func (v *RunbookActionValidator) SetChatFiles(files ChatFileResolver) {
+	if v != nil {
+		v.chatFiles = files
+	}
+}
+
+// SetRoutineGrantCatalog lets routine briefs name the Agent's bound actions.
+func (v *RunbookActionValidator) SetRoutineGrantCatalog(catalog RoutineGrantCatalog) {
+	if v != nil {
+		v.grantCatalog = catalog
+	}
+}
+
+// SetRoutineOwnerAddresses lets routine briefs offer owner-only sends.
+func (v *RunbookActionValidator) SetRoutineOwnerAddresses(resolver models.RoutineOwnerAddressResolver) {
+	if v != nil {
+		v.ownerAddresses = resolver
+	}
+}
+
+// SetRoutineTeams lets routine actions check a Team's current roster.
+func (v *RunbookActionValidator) SetRoutineTeams(teams collaboration.RoutineTeamCatalog) {
+	if v != nil {
+		v.routineTeams = teams
+	}
+}
+
+func NewRunbookActionValidator(store RunbookActionStore) (*RunbookActionValidator, error) {
+	if store == nil {
+		return nil, errors.New("Runbook action store is required")
+	}
+	return &RunbookActionValidator{store: store}, nil
+}
+
+func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+	if !isRunbookAction(input.Bound) {
+		return nil, false, nil
+	}
+	arguments := maps.Clone(input.Arguments)
+	if input.Bound.Action.Name == action.RunbookActionCreateTask {
+		if err := resolveRoutineBriefArguments(ctx, v.grantCatalog, v.ownerAddresses, input.Run, arguments, scheduledTaskCreatesEventRoutine(arguments)); err != nil {
+			return nil, true, err
+		}
+		if err := pinRoutineScriptArguments(ctx, v.chatFiles, input.Run, arguments); err != nil {
+			return nil, true, err
+		}
+		return arguments, true, nil
+	}
+	if input.Bound.Action.Name == action.RunbookActionSetScript {
+		if v == nil || v.store == nil || input.Run == nil {
+			return nil, true, errors.New("Runbook action validator is not configured")
+		}
+		if err := pinRoutineScriptRepinArguments(ctx, v.store, v.chatFiles, input.Run, arguments); err != nil {
+			return nil, true, err
+		}
+		return arguments, true, nil
+	}
+	if input.Bound.Action.Name == action.RunbookActionList || input.Bound.Action.Name == RunbookActionEventSources || input.Bound.Action.Name == RunbookActionSendTestEvent {
+		return arguments, true, nil
+	}
+	if id, _ := arguments["activationId"].(string); strings.TrimSpace(id) != "" {
+		return arguments, true, nil
+	}
+	if v == nil || v.store == nil || input.Run == nil {
+		return nil, true, errors.New("Runbook action validator is not configured")
+	}
+	objectiveID, err := action.ConversationObjectiveOrigin(ctx, v.store, input.Run)
+	if err != nil {
+		return nil, true, err
+	}
+	statuses := []models.RunbookActivationStatus{models.RunbookActivationActive, models.RunbookActivationRetired}
+	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
+		statuses = []models.RunbookActivationStatus{models.RunbookActivationRetired}
+	}
+	filter := models.RunbookActivationFilter{Scope: input.Run.Scope, Owner: &input.Run.Owner, ObjectiveID: objectiveID, Statuses: statuses, Limit: 100}
+	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
+		filter.TriggerKinds = []runbook.TriggerKind{runbook.TriggerSchedule}
+	}
+	activations, err := v.store.ListRunbookActivations(ctx, filter)
+	if err != nil {
+		return nil, true, err
+	}
+	if input.Bound.Action.Name == RunbookActionStart {
+		activations = slices.DeleteFunc(activations, func(activation *models.RunbookActivation) bool { return !activation.Callable() })
+		active := slices.DeleteFunc(slices.Clone(activations), func(activation *models.RunbookActivation) bool {
+			return activation.Status != models.RunbookActivationActive
+		})
+		if len(active) > 0 {
+			activations = active
+		}
+	}
+	if len(activations) == 0 {
+		if input.Bound.Action.Name == RunbookActionReplaceSchedule {
+			return nil, true, errors.New("no retired scheduled Runbook is available in this conversation context")
+		}
+		return nil, true, errors.New("no callable reviewed Runbook is available in this conversation context")
+	}
+	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
+		selected, selectErr := selectLatestRunbookLineage(activations)
+		if selectErr != nil {
+			return nil, true, selectErr
+		}
+		arguments["activationId"] = selected.ID
+		return arguments, true, nil
+	}
+	if len(activations) != 1 {
+		selected, selectErr := selectLatestRunbookLineage(activations)
+		if selectErr != nil {
+			return nil, true, errors.New("multiple callable Runbooks are available; choose one by activationId")
+		}
+		arguments["activationId"] = selected.ID
+		return arguments, true, nil
+	}
+	arguments["activationId"] = activations[0].ID
+	return arguments, true, nil
+}
+
+func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+	if !isRunbookAction(input.Bound) {
+		return nil, nil
+	}
+	if v == nil || v.store == nil || input.Run == nil || input.Bound.Binding == nil {
+		return nil, errors.New("Runbook action validator is not configured")
+	}
+	switch input.Bound.Action.Name {
+	case action.RunbookActionCreateTask, action.RunbookActionList, action.RunbookActionSetStatus, action.RunbookActionSetScript, RunbookActionEventSources, RunbookActionSendTestEvent:
+		return validateScheduledTaskAction(ctx, v.store, v.chatFiles, v.routineTeams, v.events, input)
+	case RunbookActionStart:
+		args, activation, objective, err := resolveRunbookStart(ctx, v.store, input.Run, input.Arguments)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"resourceType": runbookActivationResourceType, "operation": RunbookActionStart,
+			"activationId": activation.ID, "objectiveId": objective.ID,
+			"definitionId": activation.DefinitionID, "definitionVersion": activation.DefinitionVersion,
+			"entrypoint": activation.Trigger.Entrypoint, "reason": args.Reason,
+		}, nil
+	case RunbookActionReplaceSchedule:
+		args, activation, objective, schedule, err := resolveRunbookScheduleReplacement(ctx, v.store, input.Run, input.Arguments)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"resourceType": runbookActivationResourceType, "operation": RunbookActionReplaceSchedule,
+			"sourceActivationId": activation.ID, "objectiveId": objective.ID,
+			"definitionId": activation.DefinitionID, "definitionVersion": activation.DefinitionVersion,
+			"entrypoint": activation.Trigger.Entrypoint, "reason": args.Reason,
+			"currentSchedule": activation.Trigger.Schedule, "replacementSchedule": schedule,
+		}, nil
+	default:
+		return nil, errors.New("unsupported Runbook action")
+	}
+}
+
+type RunbookActionDispatcher struct {
+	store             RunbookActionStore
+	fallback          agentrun.ActionDispatcher
+	routineTeams      collaboration.RoutineTeamCatalog
+	executionPreparer models.AcceptedRunExecutionPreparer
+	chatFiles         ChatFileResolver
+	events            routineEventActions
+}
+
+// SetRoutineEvents lets routines start on events; see
+// RunbookActionValidator.SetRoutineEvents.
+func (d *RunbookActionDispatcher) SetRoutineEvents(offerer externalconversation.RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) {
+	if d != nil {
+		d.events = newRoutineEventActions(offerer, sources, hooksAvailable)
+	}
+}
+
+// SetChatFiles lets approved routines verify their pinned script versions.
+func (d *RunbookActionDispatcher) SetChatFiles(files ChatFileResolver) {
+	if d != nil {
+		d.chatFiles = files
+	}
+}
+
+func (d *RunbookActionDispatcher) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
+	if d != nil {
+		d.executionPreparer = preparer
+	}
+}
+
+// SetRoutineTeams lets routine actions check a Team's current roster.
+func (d *RunbookActionDispatcher) SetRoutineTeams(teams collaboration.RoutineTeamCatalog) {
+	if d != nil {
+		d.routineTeams = teams
+	}
+}
+
+func NewRunbookActionDispatcher(store RunbookActionStore, fallback agentrun.ActionDispatcher) (*RunbookActionDispatcher, error) {
+	if store == nil {
+		return nil, errors.New("Runbook action store is required")
+	}
+	return &RunbookActionDispatcher{store: store, fallback: fallback}, nil
+}
+
+func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	if !isRunbookAction(input.Bound) {
+		if d == nil || d.fallback == nil {
+			return nil, errors.New("action dispatcher does not support this action")
+		}
+		return d.fallback.DispatchAction(ctx, input)
+	}
+	if d == nil || d.store == nil || input.Call == nil || input.Run == nil {
+		return nil, errors.New("Runbook action dispatcher is not configured")
+	}
+	switch input.Bound.Action.Name {
+	case action.RunbookActionCreateTask, action.RunbookActionList, action.RunbookActionSetStatus, action.RunbookActionSetScript, RunbookActionEventSources, RunbookActionSendTestEvent:
+		return dispatchScheduledTaskAction(ctx, d.store, d.chatFiles, d.routineTeams, d.events, input)
+	}
+	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
+		_, source, _, schedule, err := resolveRunbookScheduleReplacement(ctx, d.store, input.Run, input.Arguments)
+		if err != nil {
+			return nil, err
+		}
+		trigger := source.Trigger
+		trigger.Schedule = schedule
+		// A retired activation is one immutable schedule generation. Key its
+		// successor by that generation rather than by the conversation ActionCall:
+		// delayed, retried, or concurrent proposals must converge on one successor.
+		// Once that successor is retired it has its own ID, so a later generation
+		// remains independently replaceable.
+		idempotencyKey := "conversation-runbook-replace-schedule:" + source.ID
+		activationID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(source.Scope.Kind+"\x00"+source.Scope.ID+"\x00runbook-activation\x00"+models.SHA256DigestString(idempotencyKey))).String()
+		existing, err := d.store.GetRunbookActivation(ctx, source.Scope, activationID)
+		if err != nil {
+			return nil, err
+		}
+		activation, err := NewRunbookActivationService(d.store).Create(ctx, CreateRunbookActivationRequest{
+			Scope: source.Scope, Owner: source.Owner, ObjectiveID: source.ObjectiveID, AssignedAgentID: source.AssignedAgentID,
+			DefinitionID: source.DefinitionID, DefinitionVersion: source.DefinitionVersion, TriggerID: source.TriggerID,
+			Task: source.Task, Trigger: trigger, Input: source.Input, Policy: source.Policy, Budget: source.Budget,
+			MaximumConcurrent: source.MaximumConcurrent, Status: models.RunbookActivationActive,
+			IdempotencyKey: idempotencyKey,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"resourceType": runbookActivationResourceType, "operation": RunbookActionReplaceSchedule,
+			"sourceActivation": source, "activation": activation,
+			"replayed": existing != nil,
+		}, nil
+	}
+	_, activation, _, err := resolveRunbookStart(ctx, d.store, input.Run, input.Arguments)
+	if err != nil {
+		return nil, err
+	}
+	visibility := models.ActivityVisibilityPrivate
+	if input.Run.Owner.Type == models.OwnerTypeTeam {
+		visibility = models.ActivityVisibilityTeam
+	}
+	result, err := StartRunbookActivationWithExecutionPreparer(ctx, d.store, input.Run.Scope, activation.ID, StartRunbookActivationRequest{
+		IdempotencyKey: "conversation-runbook-start:" + input.Call.ID,
+		Actor:          models.ActivityActor{Type: "agent", ID: input.Run.AssignedAgentID},
+		Visibility:     visibility,
+	}, d.executionPreparer)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"resourceType": runbookActivationResourceType, "operation": RunbookActionStart,
+		"activation": activation, "run": result.Run, "replayed": result.Event == nil,
+	}, nil
+}
+
+func resolveRunbookScheduleReplacement(ctx context.Context, store RunbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookReplaceScheduleArguments, *models.RunbookActivation, *models.Objective, *runbook.Schedule, error) {
+	var args runbookReplaceScheduleArguments
+	encoded, err := json.Marshal(arguments)
+	if err != nil {
+		return args, nil, nil, nil, err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&args); err != nil {
+		return args, nil, nil, nil, fmt.Errorf("decode Runbook schedule replacement arguments: %w", err)
+	}
+	args.ActivationID, args.Cron, args.Timezone, args.Reason = strings.TrimSpace(args.ActivationID), strings.TrimSpace(args.Cron), strings.TrimSpace(args.Timezone), strings.TrimSpace(args.Reason)
+	if args.ActivationID == "" || args.Reason == "" {
+		return args, nil, nil, nil, errors.New("Runbook schedule replacement requires activationId and reason")
+	}
+	if args.Cron == "" && args.Timezone == "" && args.JitterSeconds == nil && args.MaximumOccurrences == nil {
+		return args, nil, nil, nil, errors.New("Runbook schedule replacement requires at least one timing change")
+	}
+	activation, err := store.GetRunbookActivation(ctx, run.Scope, args.ActivationID)
+	if err != nil {
+		return args, nil, nil, nil, err
+	}
+	if activation == nil {
+		return args, nil, nil, nil, models.ErrRunbookActivationNotFound
+	}
+	if activation.Owner != run.Owner {
+		return args, nil, nil, nil, errors.New("Runbook activation is not owned by the conversation Agent or Team")
+	}
+	if activation.Task != nil && activation.Task.Event != nil {
+		return args, nil, nil, nil, errors.New("replace_schedule only changes scheduled routines; this routine starts on an event")
+	}
+	if activation.Status != models.RunbookActivationRetired || activation.Trigger.Kind != runbook.TriggerSchedule || activation.Trigger.Schedule == nil {
+		return args, nil, nil, nil, errors.New("Runbook schedule replacement requires a retired scheduled activation")
+	}
+	objective, err := store.GetObjective(ctx, run.Scope, activation.ObjectiveID)
+	if err != nil {
+		return args, nil, nil, nil, err
+	}
+	if objective == nil {
+		return args, nil, nil, nil, models.ErrObjectiveNotFound
+	}
+	if objective.Owner != run.Owner || objective.Status != models.ObjectiveStatusActive {
+		return args, nil, nil, nil, errors.New("Runbook schedule replacement requires its active owning Objective")
+	}
+	schedule := *activation.Trigger.Schedule
+	if args.Cron != "" {
+		schedule.Cron = args.Cron
+	}
+	if args.Timezone != "" {
+		schedule.Timezone = args.Timezone
+	}
+	if args.JitterSeconds != nil {
+		schedule.JitterSeconds = *args.JitterSeconds
+	}
+	if args.MaximumOccurrences != nil {
+		schedule.MaximumOccurrences = *args.MaximumOccurrences
+	}
+	if err := schedule.Validate(); err != nil {
+		return args, nil, nil, nil, fmt.Errorf("replacement schedule: %w", err)
+	}
+	return args, activation, objective, &schedule, nil
+}
+
+func selectLatestRunbookLineage(activations []*models.RunbookActivation) (*models.RunbookActivation, error) {
+	if len(activations) == 0 {
+		return nil, models.ErrRunbookActivationNotFound
+	}
+	definitionID, triggerID := activations[0].DefinitionID, activations[0].TriggerID
+	selected := activations[0]
+	for _, activation := range activations[1:] {
+		if activation.DefinitionID != definitionID || activation.TriggerID != triggerID {
+			return nil, errors.New("multiple retired Runbook lineages are available; choose one by activationId")
+		}
+		if activation.UpdatedAt.After(selected.UpdatedAt) || activation.UpdatedAt.Equal(selected.UpdatedAt) && activation.ID > selected.ID {
+			selected = activation
+		}
+	}
+	return selected, nil
+}
+
+func resolveRunbookStart(ctx context.Context, store RunbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookStartArguments, *models.RunbookActivation, *models.Objective, error) {
+	var args runbookStartArguments
+	encoded, err := json.Marshal(arguments)
+	if err != nil {
+		return args, nil, nil, err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&args); err != nil {
+		return args, nil, nil, fmt.Errorf("decode Runbook action arguments: %w", err)
+	}
+	args.ActivationID, args.Reason = strings.TrimSpace(args.ActivationID), strings.TrimSpace(args.Reason)
+	if args.ActivationID == "" || args.Reason == "" {
+		return args, nil, nil, errors.New("Runbook start requires activationId and reason")
+	}
+	activation, err := store.GetRunbookActivation(ctx, run.Scope, args.ActivationID)
+	if err != nil {
+		return args, nil, nil, err
+	}
+	if activation == nil {
+		return args, nil, nil, models.ErrRunbookActivationNotFound
+	}
+	if activation.Owner != run.Owner {
+		return args, nil, nil, errors.New("Runbook activation is not owned by the conversation Agent or Team")
+	}
+	if !activation.Callable() {
+		return args, nil, nil, ErrRunbookActivationInactive
+	}
+	objective, err := store.GetObjective(ctx, run.Scope, activation.ObjectiveID)
+	if err != nil {
+		return args, nil, nil, err
+	}
+	if objective == nil {
+		return args, nil, nil, models.ErrObjectiveNotFound
+	}
+	if objective.Owner != run.Owner || objective.Status != models.ObjectiveStatusActive {
+		return args, nil, nil, errors.New("Runbook start requires its active owning Objective")
+	}
+	return args, activation, objective, nil
+}
+
+func isRunbookAction(bound *skill.BoundAction) bool {
+	return bound != nil && bound.Definition != nil && bound.Definition.ID == models.RunbookManagementSkillID &&
+		bound.Definition.Version == RunbookManagementSkillVersion &&
+		slices.Contains(runbookManagementActions, bound.Action.Name)
+}
+
+// runbookManagementActions are every action of openseal.runbooks.
+var runbookManagementActions = []string{
+	action.RunbookActionCreateTask, RunbookActionEventSources, RunbookActionSendTestEvent, action.RunbookActionSetScript,
+	action.RunbookActionList, action.RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule,
+}

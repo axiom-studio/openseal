@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -105,7 +106,7 @@ func TestAcceptedRunExecutionResolverKeepsOriginalDefinitionAndChecksLiveGrants(
 	}
 	// The producer and the binding's runbook reference both come from the
 	// accepted definition: version 1 of the method, not the current 2.
-	producer, ok := binding.Producer.(*RunbookStepProducer)
+	producer, ok := binding.Producer.(*routine.RunbookStepProducer)
 	if !ok || !slices.Contains(binding.InputContextRefs, "runbook:"+original.Runbook.ID+"@"+original.Runbook.Version) || slices.Contains(binding.InputContextRefs, "runbook:"+latest.Runbook.ID+"@"+latest.Runbook.Version) {
 		t.Fatalf("resolver did not recover exact accepted implementation: %#v %v", binding.Producer, binding.InputContextRefs)
 	}

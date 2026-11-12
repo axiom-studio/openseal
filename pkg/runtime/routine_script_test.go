@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -42,7 +43,7 @@ func (f *routineScriptFiles) write(conversationID, path, digest string) {
 	f.snapshots[conversationID] = append(versions, next)
 }
 
-func (f *routineScriptFiles) ResolveChatFile(_ context.Context, _ Scope, _ ObjectiveOwner, conversationID, path string, version int64) (*ChatFile, error) {
+func (f *routineScriptFiles) ResolveChatFile(_ context.Context, _ Scope, _ ObjectiveOwner, conversationID, path string, version int64) (*routine.ChatFile, error) {
 	versions := f.snapshots[conversationID]
 	if version == 0 {
 		version = int64(len(versions))
@@ -52,9 +53,9 @@ func (f *routineScriptFiles) ResolveChatFile(_ context.Context, _ Scope, _ Objec
 	}
 	digest, ok := versions[version-1][path]
 	if !ok {
-		return nil, ErrChatFileNotFound
+		return nil, routine.ErrChatFileNotFound
 	}
-	return &ChatFile{Path: path, Digest: digest, FilesVersion: version, SizeBytes: 10}, nil
+	return &routine.ChatFile{Path: path, Digest: digest, FilesVersion: version, SizeBytes: 10}, nil
 }
 
 func routineScriptDigestOf(seed string) string {
@@ -65,10 +66,10 @@ func routineScriptDigestOf(seed string) string {
 // change to its descriptions or schemas after release needs a new version. Its create_task runs saved
 // scripts, documents testing before scheduling and starts routines on a schedule or an event.
 func TestRoutineScriptContractVersions(t *testing.T) {
-	if RunbookManagementSkillVersion != "1.9.0" {
-		t.Fatalf("version=%s", RunbookManagementSkillVersion)
+	if routine.RunbookManagementSkillVersion != "1.9.0" {
+		t.Fatalf("version=%s", routine.RunbookManagementSkillVersion)
 	}
-	current := RunbookManagementSkill()
+	current := routine.RunbookManagementSkill()
 	encoded, err := json.Marshal(current)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +78,7 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published190SHA256 {
 		t.Fatalf("published 1.9.0 definition changed: got %s", got)
 	}
-	for _, action := range []string{runtimeaction.RunbookActionCreateTask, RunbookActionEventSources, RunbookActionSendTestEvent, runtimeaction.RunbookActionSetScript, runtimeaction.RunbookActionList, runtimeaction.RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule} {
+	for _, action := range []string{runtimeaction.RunbookActionCreateTask, routine.RunbookActionEventSources, routine.RunbookActionSendTestEvent, runtimeaction.RunbookActionSetScript, runtimeaction.RunbookActionList, runtimeaction.RunbookActionSetStatus, routine.RunbookActionStart, routine.RunbookActionReplaceSchedule} {
 		if _, ok := current.Actions[action]; !ok {
 			t.Fatalf("1.9.0 lacks %s", action)
 		}
@@ -102,7 +103,7 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 
 // Creating and re-pinning a script routine both always ask, in every mode.
 func TestRoutineScriptChangesAlwaysNeedApproval(t *testing.T) {
-	definition := RunbookManagementSkill()
+	definition := routine.RunbookManagementSkill()
 	for _, action := range []string{runtimeaction.RunbookActionCreateTask, runtimeaction.RunbookActionSetScript} {
 		decision, err := runtimeaction.NewDefaultActionPolicy().EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{
 			Run:   &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}},
@@ -136,7 +137,7 @@ func hasInstructionPrefix(values []string, prefix, contains string) bool {
 func routineScriptRun() *AgentRun {
 	return &AgentRun{ID: "occurrence", Scope: Scope{Kind: "tenant", ID: "one"}, AssignedAgentID: "agent", Context: map[string]interface{}{
 		conversationRunContextConversationID: "chat",
-		RoutineScriptContextKey: map[string]interface{}{"path": "scripts/weekly.py", "digest": routineScriptDigestOf("a"), "filesVersion": float64(2),
+		routine.RoutineScriptContextKey: map[string]interface{}{"path": "scripts/weekly.py", "digest": routineScriptDigestOf("a"), "filesVersion": float64(2),
 			"command": "python3 scripts/weekly.py", "timeoutSeconds": float64(120)},
 	}}
 }
@@ -246,7 +247,7 @@ func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 		t.Fatalf("nil Run = %#v, %v", routine, err)
 	}
 	invalid := routineScriptRun()
-	invalid.Context[RoutineScriptContextKey] = map[string]interface{}{"path": "scripts/weekly.py", "command": "rm -rf /"}
+	invalid.Context[routine.RoutineScriptContextKey] = map[string]interface{}{"path": "scripts/weekly.py", "command": "rm -rf /"}
 	if _, err := prepareLoopRoutineScript(invalid, tools); err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("invalid script err = %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -38,8 +39,8 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 				t.Fatal(err)
 			}
 			now := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
-			service := NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
-			activation, err := service.Create(ctx, CreateRunbookActivationRequest{
+			service := routine.NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
+			activation, err := service.Create(ctx, routine.CreateRunbookActivationRequest{
 				ID: "five-hour-acceptance", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 				DefinitionID: "hourly-comment", DefinitionVersion: "1", TriggerID: "hourly", MaximumConcurrent: 10,
 				Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "comment", Schedule: &runbook.Schedule{
@@ -49,7 +50,7 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 			if err != nil {
 				t.Fatal(err)
 			}
-			scheduler := NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
+			scheduler := routine.NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
 			if result, err := scheduler.ReconcileScope(ctx, scope, 10); err != nil || result.Initialized != 1 {
 				t.Fatalf("initialize = %#v, %v", result, err)
 			}
@@ -110,9 +111,9 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
-	activationService := NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
+	activationService := routine.NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
 	seedTestSpace(t, store, scope)
-	activation, err := activationService.Create(ctx, CreateRunbookActivationRequest{
+	activation, err := activationService.Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "daily-review", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "rowan",
 		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "daily", MaximumConcurrent: 2,
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{
@@ -125,7 +126,7 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler := NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
+	scheduler := routine.NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
 	initialized, err := scheduler.ReconcileScope(ctx, scope, 50)
 	if err != nil || initialized.Initialized != 1 || initialized.Scheduled != 0 {
 		t.Fatalf("initialize=%#v err=%v", initialized, err)
@@ -223,9 +224,9 @@ func TestRunbookSchedulerKeepsSiblingRunbooksIndependent(t *testing.T) {
 		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Pursue several methods", Status: ObjectiveStatusActive,
 	})
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
-	service := NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
+	service := routine.NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
 	for _, id := range []string{"scan", "report"} {
-		_, err := service.Create(ctx, CreateRunbookActivationRequest{
+		_, err := service.Create(ctx, routine.CreateRunbookActivationRequest{
 			ID: id, Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "rowan", DefinitionID: id,
 			DefinitionVersion: "1", TriggerID: "daily", MaximumConcurrent: 1,
 			Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "run", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
@@ -234,7 +235,7 @@ func TestRunbookSchedulerKeepsSiblingRunbooksIndependent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	scheduler := NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
+	scheduler := routine.NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
 	if result, err := scheduler.ReconcileScope(ctx, scope, 50); err != nil || result.Initialized != 2 {
 		t.Fatalf("initialize=%#v err=%v", result, err)
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -134,9 +135,9 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	conversationID := run.Context[conversationRunContextConversationID].(string)
 	files := &routineScriptFiles{}
 	files.write(conversationID, "scripts/weekly.py", routineScriptDigestOf("a"))
-	validator, _ := NewRunbookActionValidator(store)
+	validator, _ := routine.NewRunbookActionValidator(store)
 	validator.SetChatFiles(files)
-	dispatcher, _ := NewRunbookActionDispatcher(store, nil)
+	dispatcher, _ := routine.NewRunbookActionDispatcher(store, nil)
 	dispatcher.SetChatFiles(files)
 	dispatch := func(as *AgentRun, b *skill.BoundAction, arguments map[string]interface{}, callID string) (map[string]interface{}, error) {
 		return dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Run: as, Bound: b, Call: &ActionCall{ID: callID, Scope: as.Scope, RunID: as.ID, DeploymentID: as.AssignedAgentID, IdempotencyKey: callID}, Arguments: arguments})
@@ -180,7 +181,7 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	if _, err := setStatus(intruder, RunbookActivationPaused, "intruder-pause"); err != nil {
 		t.Fatalf("another person's pause: %v", err)
 	}
-	if _, err := setStatus(intruder, RunbookActivationActive, "intruder-resume"); !errors.Is(err, ErrRoutineNotCreator) {
+	if _, err := setStatus(intruder, RunbookActivationActive, "intruder-resume"); !errors.Is(err, routine.ErrRoutineNotCreator) {
 		t.Fatalf("another person's resume: %v", err)
 	}
 	if _, err := setStatus(run, RunbookActivationActive, "creator-resume"); err != nil {
@@ -189,21 +190,21 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 
 	files.write(conversationID, "scripts/weekly.py", routineScriptDigestOf("b"))
 	current, _ := store.GetRunbookActivation(ctx, run.Scope, activation.ID)
-	repinBound := &skill.BoundAction{Definition: bound.Definition, Binding: bound.Binding, Action: RunbookManagementSkill().Actions[action.RunbookActionSetScript]}
+	repinBound := &skill.BoundAction{Definition: bound.Definition, Binding: bound.Binding, Action: routine.RunbookManagementSkill().Actions[action.RunbookActionSetScript]}
 	repin, _, err := validator.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{Run: run, Bound: repinBound, Arguments: map[string]interface{}{"activationId": activation.ID, "expectedRevision": float64(current.Revision)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: intruder, Bound: repinBound, Arguments: repin}); !errors.Is(err, ErrRoutineNotCreator) {
+	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: intruder, Bound: repinBound, Arguments: repin}); !errors.Is(err, routine.ErrRoutineNotCreator) {
 		t.Fatalf("another person's script proposal: %v", err)
 	}
-	if _, err := dispatch(intruder, repinBound, repin, "intruder-repin"); !errors.Is(err, ErrRoutineNotCreator) {
+	if _, err := dispatch(intruder, repinBound, repin, "intruder-repin"); !errors.Is(err, routine.ErrRoutineNotCreator) {
 		t.Fatalf("another person's script change: %v", err)
 	}
 	if _, err := dispatch(run, repinBound, repin, "creator-repin"); err != nil {
 		t.Fatalf("the creator's script change: %v", err)
 	}
-	if _, err := dispatch(intruder, repinBound, repin, "creator-repin"); !errors.Is(err, ErrRoutineNotCreator) {
+	if _, err := dispatch(intruder, repinBound, repin, "creator-repin"); !errors.Is(err, routine.ErrRoutineNotCreator) {
 		t.Fatalf("another person replayed the creator's script change: %v", err)
 	}
 
@@ -223,7 +224,7 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	if _, err := setStatus(run, RunbookActivationPaused, "creator-pause"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := setStatus(run, RunbookActivationActive, "former-creator-resume"); !errors.Is(err, ErrRoutineNotCreator) {
+	if _, err := setStatus(run, RunbookActivationActive, "former-creator-resume"); !errors.Is(err, routine.ErrRoutineNotCreator) {
 		t.Fatalf("former creator resumed an adopted routine: %v", err)
 	}
 }
@@ -235,7 +236,7 @@ func TestRoutineRunsActForTheirCreatorOnlyWithATask(t *testing.T) {
 	store := newTestKernelStore(t)
 	run, _, bound, args := scheduledTaskFixture(t, store)
 	activation := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*RunbookActivation)
-	started, err := StartRunbookActivation(t.Context(), store, run.Scope, activation.ID, StartRunbookActivationRequest{IdempotencyKey: "start-now", Actor: ActivityActor{Type: "user", ID: "user"}})
+	started, err := routine.StartRunbookActivation(t.Context(), store, run.Scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "start-now", Actor: ActivityActor{Type: "user", ID: "user"}})
 	if err != nil || started.Run.ActingUser != "user" {
 		t.Fatalf("started routine run = %#v, %v", started, err)
 	}

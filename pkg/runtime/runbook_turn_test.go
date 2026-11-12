@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
@@ -30,12 +31,12 @@ func runbookRef(pointer string) *runbook.Value {
 	return &value
 }
 
-func newTestRunbookProducer(t *testing.T, definition *runbook.Definition, entrypoint string, calls ActionCallReader, opts ...models.ServiceOption) *RunbookStepProducer {
+func newTestRunbookProducer(t *testing.T, definition *runbook.Definition, entrypoint string, calls ActionCallReader, opts ...models.ServiceOption) *routine.RunbookStepProducer {
 	t.Helper()
 	if calls == nil {
 		calls = modelsteptest.FixedActionCalls{}
 	}
-	producer, err := NewRunbookStepProducer(definition, entrypoint, calls, opts...)
+	producer, err := routine.NewRunbookStepProducer(definition, entrypoint, calls, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func runbookInput(run *AgentRun, sequence int64, binding *agentrun.TurnRunnerBin
 }
 
 // produceRunbook runs one step and checks it is a valid deterministic output.
-func produceRunbook(t *testing.T, producer *RunbookStepProducer, in agentrun.StepInput) agentrun.StepOutput {
+func produceRunbook(t *testing.T, producer *routine.RunbookStepProducer, in agentrun.StepInput) agentrun.StepOutput {
 	t.Helper()
 	out, err := producer.Produce(t.Context(), in)
 	if err != nil {
@@ -111,8 +112,8 @@ func TestRunbookProducerFailsOnUnsuccessfulOrRefusedAction(t *testing.T) {
 			if second.Failure == nil || !strings.Contains(second.Failure.Message, item.expect) || second.Failure.Kind != conversation.RunFailureKindExecution {
 				t.Fatalf("second=%#v", second)
 			}
-			trace, err := RunbookTraceFromCheckpoint(second.KernelState)
-			if err != nil || len(trace.Entries) != 1 || trace.Entries[0].Status != RunbookStepTraceFailed || !strings.Contains(trace.Entries[0].Error, item.expect) {
+			trace, err := routine.RunbookTraceFromCheckpoint(second.KernelState)
+			if err != nil || len(trace.Entries) != 1 || trace.Entries[0].Status != routine.RunbookStepTraceFailed || !strings.Contains(trace.Entries[0].Error, item.expect) {
 				t.Fatalf("trace=%#v err=%v", trace, err)
 			}
 		})
@@ -246,8 +247,8 @@ func TestRunbookProducerValidatesCallableOutput(t *testing.T) {
 	if out.Failure == nil || out.Failure.Message == "" {
 		t.Fatalf("output mismatch out=%#v", out)
 	}
-	trace, traceErr := RunbookTraceFromCheckpoint(out.KernelState)
-	if traceErr != nil || len(trace.Entries) != 1 || trace.Entries[0].StepID != "done" || trace.Entries[0].Status != RunbookStepTraceFailed || trace.Entries[0].Error == "" {
+	trace, traceErr := routine.RunbookTraceFromCheckpoint(out.KernelState)
+	if traceErr != nil || len(trace.Entries) != 1 || trace.Entries[0].StepID != "done" || trace.Entries[0].Status != routine.RunbookStepTraceFailed || trace.Entries[0].Error == "" {
 		t.Fatalf("failure trace=%#v err=%v", trace, traceErr)
 	}
 }
@@ -301,16 +302,16 @@ func TestRunbookProducerWaitsOnceAndResumesFromCheckpoint(t *testing.T) {
 	if first.Park == nil || first.Park.Status != AgentRunStatusSleeping || first.Park.Wake == nil || first.Park.Wake.Type != "timer" || !first.Park.Wake.WakeAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("first=%#v", first)
 	}
-	firstTrace, err := RunbookTraceFromCheckpoint(first.KernelState)
-	if err != nil || len(firstTrace.Entries) != 1 || firstTrace.Entries[0].StepID != "wait" || firstTrace.Entries[0].Status != RunbookStepTraceWaiting {
+	firstTrace, err := routine.RunbookTraceFromCheckpoint(first.KernelState)
+	if err != nil || len(firstTrace.Entries) != 1 || firstTrace.Entries[0].StepID != "wait" || firstTrace.Entries[0].Status != routine.RunbookStepTraceWaiting {
 		t.Fatalf("waiting trace=%#v err=%v", firstTrace, err)
 	}
 	second := produceRunbook(t, producer, runbookInput(&AgentRun{ID: "run", Checkpoint: first.KernelState}, 2, nil, nil))
 	if second.Final == nil || second.Final.Status != AgentRunStatusCompleted {
 		t.Fatalf("second=%#v", second)
 	}
-	trace, err := RunbookTraceFromCheckpoint(second.KernelState)
-	if err != nil || len(trace.Entries) != 2 || trace.Entries[0].Status != RunbookStepTraceSucceeded || trace.Entries[1].StepID != "done" || trace.Entries[1].Status != RunbookStepTraceSucceeded {
+	trace, err := routine.RunbookTraceFromCheckpoint(second.KernelState)
+	if err != nil || len(trace.Entries) != 2 || trace.Entries[0].Status != routine.RunbookStepTraceSucceeded || trace.Entries[1].StepID != "done" || trace.Entries[1].Status != routine.RunbookStepTraceSucceeded {
 		t.Fatalf("resumed trace=%#v err=%v", trace, err)
 	}
 }
@@ -364,7 +365,7 @@ type runbookLoopFixture struct {
 	control  *control.ControlExecutor
 	tools    *StepToolDispatcher
 	loop     *RunLoop
-	producer *RunbookStepProducer
+	producer *routine.RunbookStepProducer
 }
 
 func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runbookLoopFixture {
@@ -481,8 +482,8 @@ func TestRunbookForkSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 	if err != nil || state.PendingFork != "fork" || state.PendingCall == "" {
 		t.Fatalf("engine state was not applied before the fork: %#v err=%v", state, err)
 	}
-	trace, err := RunbookTraceFromCheckpoint(waiting.Checkpoint)
-	if err != nil || len(trace.Entries) != 2 || trace.Entries[1].StepID != "fork" || trace.Entries[1].Status != RunbookStepTraceWaiting {
+	trace, err := routine.RunbookTraceFromCheckpoint(waiting.Checkpoint)
+	if err != nil || len(trace.Entries) != 2 || trace.Entries[1].StepID != "fork" || trace.Entries[1].Status != routine.RunbookStepTraceWaiting {
 		t.Fatalf("source trace=%#v err=%v", trace, err)
 	}
 	entries := f.toolEntries(source.ID)
@@ -540,8 +541,8 @@ func TestRunbookForkSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 	if len(entries) != 1 || entries[0].State != ToolEntryCompleted {
 		t.Fatalf("fork entry after resume=%#v", entries)
 	}
-	trace, err = RunbookTraceFromCheckpoint(completed.Checkpoint)
-	if err != nil || trace.Entries[1].Status != RunbookStepTraceSucceeded || trace.Entries[len(trace.Entries)-1].StepID != "done" {
+	trace, err = routine.RunbookTraceFromCheckpoint(completed.Checkpoint)
+	if err != nil || trace.Entries[1].Status != routine.RunbookStepTraceSucceeded || trace.Entries[len(trace.Entries)-1].StepID != "done" {
 		t.Fatalf("completed trace=%#v err=%v", trace, err)
 	}
 }

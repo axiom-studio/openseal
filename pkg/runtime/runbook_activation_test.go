@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -25,7 +26,7 @@ func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := CreateRunbookActivationRequest{
+	request := routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "hourly", Status: RunbookActivationActive,
 		Trigger:        runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC", MaximumOccurrences: 5}},
@@ -41,7 +42,7 @@ func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			activation, createErr := NewRunbookActivationService(store).Create(ctx, request)
+			activation, createErr := routine.NewRunbookActivationService(store).Create(ctx, request)
 			results <- activation
 			errs <- createErr
 		}()
@@ -104,7 +105,7 @@ func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "daily-review", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
@@ -112,7 +113,7 @@ func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := ResolveRunbookDetail(ctx, store, registry, scope, activation.ID)
+	detail, err := routine.ResolveRunbookDetail(ctx, store, registry, scope, activation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,17 +162,17 @@ func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "hourly", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: definition.Runbook.ID, DefinitionVersion: definition.Runbook.Version, TriggerID: "hourly", Trigger: definition.Runbook.Triggers["hourly"],
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := StartRunbookActivation(ctx, store, scope, activation.ID, StartRunbookActivationRequest{}); !errors.Is(err, ErrRunbookActivationUnverified) {
+	if _, err := routine.StartRunbookActivation(ctx, store, scope, activation.ID, routine.StartRunbookActivationRequest{}); !errors.Is(err, routine.ErrRunbookActivationUnverified) {
 		t.Fatalf("manual activation error = %v", err)
 	}
-	result, err := NewRunbookScheduler(store).ReconcileScope(ctx, scope, 10)
+	result, err := routine.NewRunbookScheduler(store).ReconcileScope(ctx, scope, 10)
 	if err != nil || result.Suspended != 1 || result.Examined != 1 {
 		t.Fatalf("schedule verification = %#v, %v", result, err)
 	}
@@ -193,8 +194,8 @@ func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewRunbookActivationService(store)
-	activation, err := service.Create(ctx, CreateRunbookActivationRequest{
+	service := routine.NewRunbookActivationService(store)
+	activation, err := service.Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "daily-community-review", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "rowan",
 		DefinitionID: "community-review", DefinitionVersion: "1.0.0", TriggerID: "daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{
@@ -229,8 +230,8 @@ func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewRunbookActivationService(store)
-	request := CreateRunbookActivationRequest{
+	service := routine.NewRunbookActivationService(store)
+	request := routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "daily", IdempotencyKey: "rowan:daily",
 		Trigger: runbook.Trigger{
@@ -280,8 +281,8 @@ func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewRunbookActivationService(store)
-	activation, err := service.Create(ctx, CreateRunbookActivationRequest{
+	service := routine.NewRunbookActivationService(store)
+	activation, err := service.Create(ctx, routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
 		DefinitionID: "weekly-brief", DefinitionVersion: "1", TriggerID: "weekly", Status: RunbookActivationPaused,
 		Trigger: runbook.Trigger{
@@ -300,7 +301,7 @@ func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T)
 	if err != nil || len(channels) != 0 {
 		t.Fatalf("paused channels=%#v err=%v", channels, err)
 	}
-	activation, err = service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{
+	activation, err = service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{
 		ExpectedRevision: activation.Revision, Status: RunbookActivationActive,
 	})
 	if err != nil {
@@ -327,7 +328,7 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "rowan", DefinitionID: "community-review",
 		DefinitionVersion: "1", TriggerID: "daily", IdempotencyKey: "rowan:daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC", JitterSeconds: 86399}},
@@ -356,7 +357,7 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 	if err != nil || restored == nil || restored.ObjectiveID != objective.ID || restored.NextRunAt == nil || !restored.NextRunAt.Equal(due) {
 		t.Fatalf("restored=%#v err=%v", restored, err)
 	}
-	replayed, err := NewRunbookActivationService(restarted).Create(ctx, CreateRunbookActivationRequest{
+	replayed, err := routine.NewRunbookActivationService(restarted).Create(ctx, routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "rowan", DefinitionID: "community-review",
 		DefinitionVersion: "1", TriggerID: "daily", IdempotencyKey: "rowan:daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC", JitterSeconds: 86399}},
@@ -376,7 +377,7 @@ func TestRunbookActivationCannotCrossObjectiveOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	_, err = routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}, ObjectiveID: objective.ID, AssignedAgentID: "other",
 		DefinitionID: "work", DefinitionVersion: "1", TriggerID: "daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "run", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
@@ -397,8 +398,8 @@ func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewRunbookActivationService(store)
-	activation, err := service.Create(ctx, CreateRunbookActivationRequest{
+	service := routine.NewRunbookActivationService(store)
+	activation, err := service.Create(ctx, routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "rowan", DefinitionID: "work",
 		DefinitionVersion: "1", TriggerID: "daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "run", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
@@ -406,28 +407,28 @@ func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := StartRunbookActivation(ctx, store, scope, activation.ID, StartRunbookActivationRequest{IdempotencyKey: "manual-run"})
+	started, err := routine.StartRunbookActivation(ctx, store, scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "manual-run"})
 	if err != nil || started.Run == nil {
 		t.Fatalf("started=%#v err=%v", started, err)
 	}
 	if pin, ok := started.Run.Plan["runbook"].(map[string]interface{}); !ok || pin["id"] != "work" || pin["version"] != "1" || pin["trigger"] != "daily" {
 		t.Fatalf("manual Run pin=%#v", started.Run.Plan)
 	}
-	paused, err := service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused})
+	paused, err := service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused})
 	if err != nil || paused.Status != RunbookActivationPaused || paused.Revision != 2 {
 		t.Fatalf("paused=%#v err=%v", paused, err)
 	}
-	if _, err = StartRunbookActivation(ctx, store, scope, activation.ID, StartRunbookActivationRequest{IdempotencyKey: "paused-run"}); !errors.Is(err, ErrRunbookActivationInactive) {
+	if _, err = routine.StartRunbookActivation(ctx, store, scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "paused-run"}); !errors.Is(err, routine.ErrRunbookActivationInactive) {
 		t.Fatalf("paused start error=%v", err)
 	}
-	if _, err = service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: 1, Status: RunbookActivationActive}); !errors.Is(err, ErrRunbookActivationRevision) {
+	if _, err = service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: 1, Status: RunbookActivationActive}); !errors.Is(err, ErrRunbookActivationRevision) {
 		t.Fatalf("stale update error=%v", err)
 	}
-	retired, err := service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: paused.Revision, Status: RunbookActivationRetired})
+	retired, err := service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: paused.Revision, Status: RunbookActivationRetired})
 	if err != nil || retired.Status != RunbookActivationRetired {
 		t.Fatalf("retired=%#v err=%v", retired, err)
 	}
-	if _, err = service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: retired.Revision, Status: RunbookActivationActive}); err == nil {
+	if _, err = service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: retired.Revision, Status: RunbookActivationActive}); err == nil {
 		t.Fatal("retired Runbook resumed")
 	}
 }
@@ -443,7 +444,7 @@ func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "work", DefinitionVersion: "1", TriggerID: "hourly",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "run", Schedule: &runbook.Schedule{
@@ -460,7 +461,7 @@ func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 	if err := store.UpdateRunbookActivation(ctx, activation, expectedRevision); err != nil {
 		t.Fatal(err)
 	}
-	started, err := StartRunbookActivation(ctx, store, scope, activation.ID, StartRunbookActivationRequest{IdempotencyKey: "off-cycle"})
+	started, err := routine.StartRunbookActivation(ctx, store, scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "off-cycle"})
 	if err != nil || started.Run == nil || started.Run.Source != RunSourceManual {
 		t.Fatalf("off-cycle exhausted start=%#v err=%v", started, err)
 	}
@@ -468,7 +469,7 @@ func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 
 // eventTaskFixture creates an Objective and a chat with a user request that an
 // event Task can report to, and returns a create request for a webhook routine.
-func eventTaskFixture(t *testing.T, store *sqlite.Store) (Scope, CreateRunbookActivationRequest) {
+func eventTaskFixture(t *testing.T, store *sqlite.Store) (Scope, routine.CreateRunbookActivationRequest) {
 	t.Helper()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "event-task"}
@@ -490,8 +491,8 @@ func eventTaskFixture(t *testing.T, store *sqlite.Store) (Scope, CreateRunbookAc
 		t.Fatal(err)
 	}
 	key := "create-task:orders"
-	hookID := HookID(scope, RunbookActivationIDForKey(scope, key))
-	return scope, CreateRunbookActivationRequest{
+	hookID := HookID(scope, routine.RunbookActivationIDForKey(scope, key))
+	return scope, routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, TriggerID: "event", MaximumConcurrent: 1,
 		Trigger: runbook.Trigger{Kind: runbook.TriggerEvent}, IdempotencyKey: key,
 		Task: &ScheduledAgentTask{
@@ -507,11 +508,11 @@ func eventTaskFixture(t *testing.T, store *sqlite.Store) (Scope, CreateRunbookAc
 func TestRunbookActivationCreateEventTaskNoCursor(t *testing.T) {
 	store := newTestKernelStore(t)
 	scope, request := eventTaskFixture(t, store)
-	activation, err := NewRunbookActivationService(store).Create(t.Context(), request)
+	activation, err := routine.NewRunbookActivationService(store).Create(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if activation.ID != RunbookActivationIDForKey(scope, request.IdempotencyKey) {
+	if activation.ID != routine.RunbookActivationIDForKey(scope, request.IdempotencyKey) {
 		t.Fatalf("activation ID %q is not the ID for its key", activation.ID)
 	}
 	if activation.NextOccurrenceBase != nil || activation.NextRunAt != nil || activation.OccurrencesProcessed != 0 {
@@ -524,7 +525,7 @@ func TestRunbookActivationCreateEventTaskNoCursor(t *testing.T) {
 	if err != nil || stored == nil || stored.Task.Event == nil || stored.Task.Event.Kind != RoutineEventWebhook {
 		t.Fatalf("stored=%#v err=%v", stored, err)
 	}
-	replayed, err := NewRunbookActivationService(store).Create(t.Context(), request)
+	replayed, err := routine.NewRunbookActivationService(store).Create(t.Context(), request)
 	if err != nil || replayed.ID != activation.ID {
 		t.Fatalf("replayed=%#v err=%v", replayed, err)
 	}
@@ -532,7 +533,7 @@ func TestRunbookActivationCreateEventTaskNoCursor(t *testing.T) {
 	task := *request.Task
 	task.CreatedBy = ""
 	missingCreator.Task, missingCreator.IdempotencyKey = &task, "create-task:no-creator"
-	if _, err := NewRunbookActivationService(store).Create(t.Context(), missingCreator); err == nil {
+	if _, err := routine.NewRunbookActivationService(store).Create(t.Context(), missingCreator); err == nil {
 		t.Fatal("event task without a creator was created")
 	}
 }
@@ -540,18 +541,18 @@ func TestRunbookActivationCreateEventTaskNoCursor(t *testing.T) {
 func TestRunbookActivationPausedReason(t *testing.T) {
 	store := newTestKernelStore(t)
 	scope, request := eventTaskFixture(t, store)
-	service := NewRunbookActivationService(store)
+	service := routine.NewRunbookActivationService(store)
 	activation, err := service.Create(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Update(t.Context(), scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationActive, PausedReason: RoutinePausedNeedsSignIn}); err == nil {
+	if _, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationActive, PausedReason: RoutinePausedNeedsSignIn}); err == nil {
 		t.Fatal("paused reason accepted without a pause")
 	}
-	if _, err := service.Update(t.Context(), scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: "tired"}); err == nil {
+	if _, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: "tired"}); err == nil {
 		t.Fatal("unknown paused reason accepted")
 	}
-	paused, err := service.Update(t.Context(), scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedNeedsSignIn})
+	paused, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedNeedsSignIn})
 	if err != nil || paused.Status != RunbookActivationPaused || paused.PausedReason != RoutinePausedNeedsSignIn || paused.Revision != activation.Revision+1 {
 		t.Fatalf("paused=%#v err=%v", paused, err)
 	}
@@ -559,7 +560,7 @@ func TestRunbookActivationPausedReason(t *testing.T) {
 	if err != nil || stored.PausedReason != RoutinePausedNeedsSignIn {
 		t.Fatalf("stored=%#v err=%v", stored, err)
 	}
-	resumed, err := service.Update(t.Context(), scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: paused.Revision, Status: RunbookActivationActive})
+	resumed, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: paused.Revision, Status: RunbookActivationActive})
 	if err != nil || resumed.Status != RunbookActivationActive || resumed.PausedReason != "" {
 		t.Fatalf("resumed=%#v err=%v", resumed, err)
 	}
@@ -571,24 +572,24 @@ func TestRunbookActivationPausedReason(t *testing.T) {
 func TestRunbookActivationPausedReasonOnPausedRoutine(t *testing.T) {
 	store := newTestKernelStore(t)
 	scope, request := eventTaskFixture(t, store)
-	service := NewRunbookActivationService(store)
+	service := routine.NewRunbookActivationService(store)
 	activation, err := service.Create(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	byPerson, err := service.Update(t.Context(), scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused})
+	byPerson, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused})
 	if err != nil || byPerson.PausedReason != "" {
 		t.Fatalf("person pause=%#v err=%v", byPerson, err)
 	}
-	bySystem, err := service.Update(t.Context(), scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: byPerson.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedSourceRemoved})
+	bySystem, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: byPerson.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedSourceRemoved})
 	if err != nil || bySystem.PausedReason != RoutinePausedSourceRemoved || bySystem.Revision != byPerson.Revision+1 {
 		t.Fatalf("system pause of a paused routine=%#v err=%v", bySystem, err)
 	}
-	again, err := service.Update(t.Context(), scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: bySystem.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedSourceRemoved})
+	again, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: bySystem.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedSourceRemoved})
 	if err != nil || again.Revision != bySystem.Revision {
 		t.Fatalf("same reason wrote a revision: %#v err=%v", again, err)
 	}
-	repaused, err := service.Update(t.Context(), scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: bySystem.Revision, Status: RunbookActivationPaused})
+	repaused, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: bySystem.Revision, Status: RunbookActivationPaused})
 	if err != nil || repaused.PausedReason != RoutinePausedSourceRemoved || repaused.Revision != bySystem.Revision {
 		t.Fatalf("a person pausing a paused routine dropped its reason: %#v err=%v", repaused, err)
 	}

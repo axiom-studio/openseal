@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -29,8 +30,8 @@ type routineEventHarness struct {
 	store        *sqlite.Store
 	scope        Scope
 	owner        ObjectiveOwner
-	matcher      *RoutineEventMatcher
-	dispatcher   *RoutineEventDispatcher
+	matcher      *routine.RoutineEventMatcher
+	dispatcher   *routine.RoutineEventDispatcher
 	now          time.Time
 	conversation string
 	message      string
@@ -57,9 +58,9 @@ func newRoutineEventHarnessOn(t *testing.T, store *sqlite.Store) *routineEventHa
 		t: t, ctx: t.Context(), store: store, scope: Scope{Kind: "tenant", ID: "event-routines"},
 		owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}, now: time.Now().UTC(),
 	}
-	h.matcher = NewRoutineEventMatcher(h.store, models.WithClock(h.clock))
+	h.matcher = routine.NewRoutineEventMatcher(h.store, models.WithClock(h.clock))
 	t.Cleanup(h.matcher.Close)
-	h.dispatcher = NewRoutineEventDispatcher(h.store, h.matcher, models.WithClock(h.clock))
+	h.dispatcher = routine.NewRoutineEventDispatcher(h.store, h.matcher, models.WithClock(h.clock))
 	seedTestSpace(t, h.store, h.scope)
 	h.deployOwner()
 	h.conversation, h.message = h.chat("Inbox")
@@ -125,7 +126,7 @@ func (h *routineEventHarness) routine(name string, mutate func(*RoutineEventTrig
 	if mutate != nil {
 		mutate(trigger)
 	}
-	activation, err := NewRunbookActivationService(h.store, models.WithClock(h.clock)).Create(h.ctx, CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(h.store, models.WithClock(h.clock)).Create(h.ctx, routine.CreateRunbookActivationRequest{
 		Scope: h.scope, Owner: h.owner, ObjectiveID: objective.ID, AssignedAgentID: h.owner.ID, TriggerID: "event", MaximumConcurrent: 1,
 		Trigger: runbook.Trigger{Kind: runbook.TriggerEvent}, IdempotencyKey: "create-task:" + name,
 		Task: &ScheduledAgentTask{
@@ -166,7 +167,7 @@ func (h *routineEventHarness) offer(activation *RunbookActivation, count int) []
 	return ids
 }
 
-func (h *routineEventHarness) pass() *RoutineEventDispatchResult {
+func (h *routineEventHarness) pass() *routine.RoutineEventDispatchResult {
 	h.t.Helper()
 	result, err := h.dispatcher.ReconcileAll(h.ctx, 200)
 	if err != nil {
@@ -189,7 +190,7 @@ func (h *routineEventHarness) setStatus(activation *RunbookActivation, status Ru
 	current := h.get(activation)
 	// The creator stays signed in to Google, so a resume passes its source check.
 	signedIn := routineGoogleSourcesForTest{{Kind: current.Task.Event.Kind, Source: current.Task.Event.SourceRef, Available: true}}
-	updated, err := NewRunbookActivationService(h.store, models.WithClock(h.clock)).WithRoutineEventSources(signedIn).Update(h.ctx, h.scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: status})
+	updated, err := routine.NewRunbookActivationService(h.store, models.WithClock(h.clock)).WithRoutineEventSources(signedIn).Update(h.ctx, h.scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: status})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -322,7 +323,7 @@ func TestRoutineEventMatcherIndexesBySource(t *testing.T) {
 	// Owner check: a webhook routine matches only when its hook row belongs
 	// to it.
 	webhook := h.routine("webhook", func(trigger *RoutineEventTrigger) {
-		hookID := HookID(h.scope, RunbookActivationIDForKey(h.scope, "create-task:webhook"))
+		hookID := HookID(h.scope, routine.RunbookActivationIDForKey(h.scope, "create-task:webhook"))
 		*trigger = RoutineEventTrigger{Kind: RoutineEventWebhook, SourceRef: HookSourceRef(hookID), SourceLabel: "your shop", MaxPerHour: 20, Webhook: &RoutineWebhook{HookID: hookID}}
 	})
 	hookEvent := &RoutineEvent{Scope: h.scope, ID: "hs:1", Kind: RoutineEventWebhook, SourceRef: webhook.Task.Event.SourceRef, OccurredAt: h.now, Summary: "Order", Payload: json.RawMessage(`{"order":1}`)}
@@ -381,7 +382,7 @@ func (h *routineEventHarness) createCallbackRegistration(name, deploymentID stri
 func TestRoutineEventMatcherHookOwnerMatches(t *testing.T) {
 	h := newRoutineEventHarness(t)
 	webhook := h.routine("webhook", func(trigger *RoutineEventTrigger) {
-		hookID := HookID(h.scope, RunbookActivationIDForKey(h.scope, "create-task:webhook"))
+		hookID := HookID(h.scope, routine.RunbookActivationIDForKey(h.scope, "create-task:webhook"))
 		*trigger = RoutineEventTrigger{Kind: RoutineEventWebhook, SourceRef: HookSourceRef(hookID), SourceLabel: "your shop", MaxPerHour: 20, Webhook: &RoutineWebhook{HookID: hookID}}
 	})
 	if _, err := h.store.CreateHook(h.ctx, &Hook{ID: webhook.Task.Event.Webhook.HookID, Scope: h.scope, ActivationID: webhook.ID}); err != nil {
@@ -431,13 +432,13 @@ func TestRoutineEventIndexRefreshOnActivationChange(t *testing.T) {
 	}
 
 	// A peer's signal and the backstop rebuild read the store.
-	peer := NewRoutineEventMatcher(h.store)
+	peer := routine.NewRoutineEventMatcher(h.store)
 	defer peer.Close()
 	other := h.routine("other", nil)
 	if !peer.Listening(h.scope, RoutineEventGmailMessage, other.Task.Event.SourceRef) {
 		t.Fatal("a second matcher on the same store did not follow the write")
 	}
-	cold := NewRoutineEventMatcher(&routineEventStoreOnly{RoutineEventStore: h.store, activations: h.store})
+	cold := routine.NewRoutineEventMatcher(&routineEventStoreOnly{RoutineEventStore: h.store, activations: h.store})
 	defer cold.Close()
 	if cold.Listening(h.scope, RoutineEventGmailMessage, other.Task.Event.SourceRef) {
 		t.Fatal("a cold matcher listens before its first rebuild")
@@ -474,7 +475,7 @@ func (s *routineEventStoreOnly) GetRunbookActivation(ctx context.Context, scope 
 func TestRoutineEventOverflowStoresNoPayload(t *testing.T) {
 	h, db := newRoutineEventRowsHarness(t)
 	activation := h.routine("busy", nil)
-	h.offer(activation, RoutineEventMaxPendingPerRoutine)
+	h.offer(activation, routine.RoutineEventMaxPendingPerRoutine)
 	h.serial++
 	overflowID := fmt.Sprintf("gmail:%06d", h.serial)
 	offer, err := h.matcher.OfferRoutineEvent(h.ctx, h.event(activation, overflowID))
@@ -535,7 +536,7 @@ func TestRoutineEventStats(t *testing.T) {
 	if stats.QueueDepth != 3 {
 		t.Fatalf("queue depth = %d, want 3 (one test and two real events read in the pass)", stats.QueueDepth)
 	}
-	if len(stats.MatchLatencyBuckets) != len(RoutineEventLatencyBuckets) || len(stats.MatchLatencyCounts) != len(RoutineEventLatencyBuckets) {
+	if len(stats.MatchLatencyBuckets) != len(routine.RoutineEventLatencyBuckets) || len(stats.MatchLatencyCounts) != len(routine.RoutineEventLatencyBuckets) {
 		t.Fatalf("latency buckets %#v counts %#v", stats.MatchLatencyBuckets, stats.MatchLatencyCounts)
 	}
 	if last := stats.MatchLatencyCounts[len(stats.MatchLatencyCounts)-1]; last != 5 {
@@ -554,7 +555,7 @@ func TestRoutineEventStats(t *testing.T) {
 func TestRoutineTestEventDoesNotConsumeOccurrence(t *testing.T) {
 	h := newRoutineEventHarness(t)
 	activation := h.routine("once", func(trigger *RoutineEventTrigger) { trigger.MaximumOccurrences = 1 })
-	if _, _, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-2", nil); !errors.Is(err, ErrRoutineNotCreator) {
+	if _, _, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-2", nil); !errors.Is(err, routine.ErrRoutineNotCreator) {
 		t.Fatalf("non-creator test event err = %v", err)
 	}
 	eventID, offer, err := h.matcher.OfferRoutineTestEvent(h.ctx, h.scope, activation.ID, "user-1", nil)
@@ -583,12 +584,12 @@ func TestRoutineTestEventDoesNotConsumeOccurrence(t *testing.T) {
 	// Test events are capped per hour.
 	h2 := newRoutineEventHarness(t)
 	capped := h2.routine("capped", nil)
-	for i := 0; i < RoutineTestEventsPerHour; i++ {
+	for i := 0; i < routine.RoutineTestEventsPerHour; i++ {
 		if _, _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, capped.ID, "user-1", json.RawMessage(`{"n":1}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, capped.ID, "user-1", nil); !errors.Is(err, ErrRoutineTestEventLimit) {
+	if _, _, err := h2.matcher.OfferRoutineTestEvent(h2.ctx, h2.scope, capped.ID, "user-1", nil); !errors.Is(err, routine.ErrRoutineTestEventLimit) {
 		t.Fatalf("sixth test event err = %v", err)
 	}
 	h2.advance(time.Hour + time.Minute)

@@ -22,6 +22,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -59,7 +60,7 @@ type LoopBindingConfig struct {
 	// RoutineEventFiles keeps an event routine occurrence's events as a
 	// chat file when they are too big to inline (SPEC §6.3). nil: they are
 	// shortened to fit instead.
-	RoutineEventFiles RoutineEventFileKeeper
+	RoutineEventFiles routine.RoutineEventFileKeeper
 	Logger            *zap.SugaredLogger
 	Now               func() time.Time
 }
@@ -283,7 +284,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 		if err := validatePinnedRunbookPlan(definition.Runbook, run); err != nil {
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, err)
 		}
-		producer, resolveErr := NewRunbookStepProducer(definition.Runbook, strings.TrimSpace(run.Entrypoint), catalog, models.WithClock(config.Now))
+		producer, resolveErr := routine.NewRunbookStepProducer(definition.Runbook, strings.TrimSpace(run.Entrypoint), catalog, models.WithClock(config.Now))
 		if resolveErr != nil {
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, resolveErr)
 		}
@@ -302,8 +303,8 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 	}
 	for _, action := range actions {
 		if action.SkillID == RunbookManagementSkillID && action.Action == runtimeaction.RunbookActionCreateTask {
-			prompt.AgentInstructions = append(prompt.AgentInstructions, RoutineTimezoneInstruction, RoutineDeliveryInstruction)
-			if instruction := BindingToolGrantInstruction(actions); instruction != "" {
+			prompt.AgentInstructions = append(prompt.AgentInstructions, routine.RoutineTimezoneInstruction, routine.RoutineDeliveryInstruction)
+			if instruction := routine.BindingToolGrantInstruction(actions); instruction != "" {
 				prompt.AgentInstructions = append(prompt.AgentInstructions, instruction)
 			}
 			break
@@ -461,7 +462,7 @@ func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*Agen
 	}
 	var initial []*SessionEntry
 	if seeded {
-		entries, err := SessionSeedEntries(ctx, r.config.Store, r.config.RoutineEventFiles, r.config.Logger, run)
+		entries, err := routine.SessionSeedEntries(ctx, r.config.Store, r.config.RoutineEventFiles, r.config.Logger, run)
 		if err != nil {
 			return nil, err
 		}
@@ -549,7 +550,7 @@ func restrictActivatedSkillsToRun(activation *skill.ActivationSnapshot, context 
 func withoutRunbookActivationStart(actions []capability.ModelAction) []capability.ModelAction {
 	filtered := make([]capability.ModelAction, 0, len(actions))
 	for _, action := range actions {
-		if action.SkillID == RunbookManagementSkillID && action.Action == RunbookActionStart {
+		if action.SkillID == RunbookManagementSkillID && action.Action == routine.RunbookActionStart {
 			continue
 		}
 		filtered = append(filtered, action)

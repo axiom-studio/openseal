@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -55,11 +56,11 @@ func prepareLoopRoutineScript(run *AgentRun, hostTools []modelstep.HostToolSpec)
 	if run == nil || run.Context == nil {
 		return nil, nil
 	}
-	raw, ok := run.Context[RoutineScriptContextKey]
+	raw, ok := run.Context[routine.RoutineScriptContextKey]
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	script, err := DecodeScript(raw)
+	script, err := routine.DecodeScript(raw)
 	if err != nil {
 		return nil, fmt.Errorf("routine script in Run context is invalid: %w", err)
 	}

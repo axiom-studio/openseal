@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
@@ -356,7 +357,7 @@ func (d *drive) fillStepApplication(req *RunTransitionRequest, run *AgentRun, st
 		if current := runbookCurrentStep(st.kernelState); current != "" {
 			req.Payload["runbookStep"] = current
 		}
-		if delta := RunbookTraceDelta(run.Checkpoint, st.kernelState); len(delta) > 0 {
+		if delta := routine.RunbookTraceDelta(run.Checkpoint, st.kernelState); len(delta) > 0 {
 			req.Payload["runbookTraceDelta"] = delta
 		}
 	}

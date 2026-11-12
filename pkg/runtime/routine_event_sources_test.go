@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -43,10 +44,10 @@ func (o *routineTestOfferer) OfferRoutineTestEvent(_ context.Context, scope Scop
 
 // routineGoogleSourcesForTest returns its options whoever asks, so the
 // kernel's own person check is what is tested.
-type routineGoogleSourcesForTest []RoutineEventSourceOption
+type routineGoogleSourcesForTest []routine.RoutineEventSourceOption
 
-func (c routineGoogleSourcesForTest) ListRoutineEventSources(context.Context, Scope, ObjectiveOwner, string) ([]RoutineEventSourceOption, error) {
-	return append([]RoutineEventSourceOption(nil), c...), nil
+func (c routineGoogleSourcesForTest) ListRoutineEventSources(context.Context, Scope, ObjectiveOwner, string) ([]routine.RoutineEventSourceOption, error) {
+	return append([]routine.RoutineEventSourceOption(nil), c...), nil
 }
 
 type eventRoutineFixture struct {
@@ -57,8 +58,8 @@ type eventRoutineFixture struct {
 	args       map[string]interface{}
 	offerer    *routineTestOfferer
 	google     routineGoogleSourcesForTest
-	validator  *RunbookActionValidator
-	dispatcher *RunbookActionDispatcher
+	validator  *routine.RunbookActionValidator
+	dispatcher *routine.RunbookActionDispatcher
 	slackRef   string
 	githubRef  string
 }
@@ -120,14 +121,14 @@ func newEventRoutineFixture(t *testing.T, hooksAvailable bool) *eventRoutineFixt
 	google := routineGoogleSourcesForTest{
 		{Kind: RoutineEventGmailMessage, Source: RoutineGoogleSourceRef("user", "g-user"), Label: "your Gmail (user@acme.com)", Available: true, SkillID: "google"},
 		{Kind: RoutineEventGmailMessage, Source: RoutineGoogleSourceRef("other", "g-other"), Label: "Gmail (other@acme.com)", Available: true, SkillID: "google"},
-		{Kind: RoutineEventCalendar, Source: RoutineGoogleSourceRef("user", "g-user"), Label: "your Google Calendar (user@acme.com)", Available: false, Reason: RoutineEventSourceNeedsSignIn, SkillID: "google"},
+		{Kind: RoutineEventCalendar, Source: RoutineGoogleSourceRef("user", "g-user"), Label: "your Google Calendar (user@acme.com)", Available: false, Reason: routine.RoutineEventSourceNeedsSignIn, SkillID: "google"},
 	}
-	validator, err := NewRunbookActionValidator(store)
+	validator, err := routine.NewRunbookActionValidator(store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	validator.SetRoutineEvents(offerer, google, hooksAvailable)
-	dispatcher, err := NewRunbookActionDispatcher(store, nil)
+	dispatcher, err := routine.NewRunbookActionDispatcher(store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,12 +189,12 @@ func (f *eventRoutineFixture) dispatch(t *testing.T, run *AgentRun, action strin
 
 func TestEventSourcesListsConnections(t *testing.T) {
 	f := newEventRoutineFixture(t, true)
-	result, err := f.dispatch(t, f.run, RunbookActionEventSources, map[string]interface{}{}, "sources")
+	result, err := f.dispatch(t, f.run, routine.RunbookActionEventSources, map[string]interface{}{}, "sources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	sources := result["sources"].([]*RoutineEventSourceView)
-	bySource := map[string]*RoutineEventSourceView{}
+	sources := result["sources"].([]*routine.RoutineEventSourceView)
+	bySource := map[string]*routine.RoutineEventSourceView{}
 	for _, source := range sources {
 		if source.Kind != RoutineEventCalendar {
 			bySource[source.Source] = source
@@ -201,7 +202,7 @@ func TestEventSourcesListsConnections(t *testing.T) {
 	}
 	slack := bySource[f.slackRef]
 	if slack == nil || slack.Kind != RoutineEventSlackMessage || slack.Label != "Acme Slack" || !slack.Available ||
-		!reflect.DeepEqual(slack.Channels, []RoutineEventSourceChannel{{ID: "C1", Name: "#support"}}) {
+		!reflect.DeepEqual(slack.Channels, []routine.RoutineEventSourceChannel{{ID: "C1", Name: "#support"}}) {
 		t.Fatalf("slack source=%#v", slack)
 	}
 	github := bySource[f.githubRef]
@@ -217,35 +218,35 @@ func TestEventSourcesListsConnections(t *testing.T) {
 	if gmail == nil || gmail.Kind != RoutineEventGmailMessage || !gmail.Available || !reflect.DeepEqual(gmail.Fields, RoutineEventFilterFields(RoutineEventGmailMessage)) {
 		t.Fatalf("gmail source=%#v", gmail)
 	}
-	if webhook := bySource[RoutineEventSourceNew]; webhook == nil || webhook.Kind != RoutineEventWebhook || !webhook.Available {
+	if webhook := bySource[routine.RoutineEventSourceNew]; webhook == nil || webhook.Kind != RoutineEventWebhook || !webhook.Available {
 		t.Fatalf("webhook source=%#v", webhook)
 	}
-	calendar := sources[slices.IndexFunc(sources, func(source *RoutineEventSourceView) bool { return source.Kind == RoutineEventCalendar })]
-	if calendar.Available || calendar.Reason != RoutineEventSourceNeedsSignIn || calendar.SkillID != "google" {
+	calendar := sources[slices.IndexFunc(sources, func(source *routine.RoutineEventSourceView) bool { return source.Kind == RoutineEventCalendar })]
+	if calendar.Available || calendar.Reason != routine.RoutineEventSourceNeedsSignIn || calendar.SkillID != "google" {
 		t.Fatalf("calendar source=%#v", calendar)
 	}
 	if len(sources) != 5 {
 		t.Fatalf("sources=%d %#v", len(sources), sources)
 	}
 
-	filtered, err := f.dispatch(t, f.run, RunbookActionEventSources, map[string]interface{}{"kind": "github.event"}, "github-sources")
+	filtered, err := f.dispatch(t, f.run, routine.RunbookActionEventSources, map[string]interface{}{"kind": "github.event"}, "github-sources")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if only := filtered["sources"].([]*RoutineEventSourceView); len(only) != 1 || only[0].Source != f.githubRef {
+	if only := filtered["sources"].([]*routine.RoutineEventSourceView); len(only) != 1 || only[0].Source != f.githubRef {
 		t.Fatalf("filtered=%#v", only)
 	}
 
 	noHooks := newEventRoutineFixture(t, false)
-	result, err = noHooks.dispatch(t, noHooks.run, RunbookActionEventSources, map[string]interface{}{"kind": "webhook"}, "webhooks")
+	result, err = noHooks.dispatch(t, noHooks.run, routine.RunbookActionEventSources, map[string]interface{}{"kind": "webhook"}, "webhooks")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if listed := result["sources"].([]*RoutineEventSourceView); len(listed) != 0 {
+	if listed := result["sources"].([]*routine.RoutineEventSourceView); len(listed) != 0 {
 		t.Fatalf("webhook offered without hooks: %#v", listed)
 	}
 
-	checker := NewRoutineEventSourceChecker(f.store)
+	checker := routine.NewRoutineEventSourceChecker(f.store)
 	for _, check := range []struct {
 		kind      RoutineEventKind
 		sourceRef string

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
 // countingRoutineEventStore fails the test on any store call: an offer for
@@ -53,10 +54,10 @@ func unboundRoutineEvent() *RoutineEvent {
 	}
 }
 
-func newUnboundRoutineEventMatcher(tb testing.TB) (*RoutineEventMatcher, *countingRoutineEventStore) {
+func newUnboundRoutineEventMatcher(tb testing.TB) (*routine.RoutineEventMatcher, *countingRoutineEventStore) {
 	tb.Helper()
 	store := &countingRoutineEventStore{}
-	matcher := NewRoutineEventMatcher(store)
+	matcher := routine.NewRoutineEventMatcher(store)
 	tb.Cleanup(matcher.Close)
 	// The scope has a routine, but on another connection.
 	if err := matcher.RefreshRoutineIndex(context.Background(), Scope{Kind: "tenant", ID: "busy"}); err != nil {
@@ -112,10 +113,10 @@ func TestRoutineEventTenantRunCap(t *testing.T) {
 		routines = append(routines, activation)
 	}
 	result := h.pass()
-	if result.Started != RoutineEventTenantRunCap || result.TenantCapped != 1 || h.activeEventRuns() != RoutineEventTenantRunCap {
+	if result.Started != routine.RoutineEventTenantRunCap || result.TenantCapped != 1 || h.activeEventRuns() != routine.RoutineEventTenantRunCap {
 		t.Fatalf("first pass = %#v, active %d", result, h.activeEventRuns())
 	}
-	if result := h.pass(); result.Started != 0 || h.activeEventRuns() != RoutineEventTenantRunCap {
+	if result := h.pass(); result.Started != 0 || h.activeEventRuns() != routine.RoutineEventTenantRunCap {
 		t.Fatalf("second pass = %#v, active %d", result, h.activeEventRuns())
 	}
 	// Finish three Runs: the two waiting routines start, and no more.
@@ -164,7 +165,7 @@ func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 	runStartedAt := map[string]time.Time{}
 	for minute := 0; minute < 180; minute++ {
 		h.pass()
-		if active := h.activeEventRuns(); active > RoutineEventTenantRunCap {
+		if active := h.activeEventRuns(); active > routine.RoutineEventTenantRunCap {
 			t.Fatalf("minute %d: %d event Runs are not finished", minute, active)
 		}
 		for _, activation := range routines {

@@ -1,0 +1,242 @@
+package routine
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+)
+
+type RunbookScheduleResult struct {
+	Scopes        int `json:"scopes"`
+	Examined      int `json:"examined"`
+	Scheduled     int `json:"scheduled"`
+	Replayed      int `json:"replayed"`
+	Backpressured int `json:"backpressured"`
+	Suspended     int `json:"suspended"`
+	Initialized   int `json:"initialized"`
+	Retired       int `json:"retired"`
+}
+
+// RunbookScheduler projects due Runbook trigger occurrences into durable Runs.
+// The persisted activation cursor plus deterministic Run idempotency makes the
+// operation safe across replicas, crashes, and retries without one timer or
+// goroutine per Agent.
+type RunbookScheduler struct {
+	store interface {
+		models.RunCommandStore
+		models.PortfolioStore
+		models.RunbookActivationStore
+	}
+	reportingStore    models.ConversationStore
+	executionPreparer models.AcceptedRunExecutionPreparer
+	now               func() time.Time
+}
+
+func (s *RunbookScheduler) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
+	if s != nil {
+		s.executionPreparer = preparer
+	}
+}
+
+func NewRunbookScheduler(store interface {
+	models.RunCommandStore
+	models.PortfolioStore
+	models.RunbookActivationStore
+}, opts ...models.ServiceOption) *RunbookScheduler {
+	scheduler := &RunbookScheduler{store: store, now: models.ClockFrom(opts)}
+	if reportingStore, ok := store.(models.ConversationStore); ok {
+		scheduler.reportingStore = reportingStore
+	}
+	return scheduler
+}
+
+func (s *RunbookScheduler) ReconcileAll(ctx context.Context, limitPerScope int) (*RunbookScheduleResult, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("Runbook scheduler store is not configured")
+	}
+	scopes, err := s.store.ListRunbookActivationScopes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	total := &RunbookScheduleResult{Scopes: len(scopes)}
+	for _, scope := range scopes {
+		result, err := s.ReconcileScope(ctx, scope, limitPerScope)
+		if err != nil {
+			return total, err
+		}
+		total.Examined += result.Examined
+		total.Scheduled += result.Scheduled
+		total.Replayed += result.Replayed
+		total.Backpressured += result.Backpressured
+		total.Suspended += result.Suspended
+		total.Initialized += result.Initialized
+		total.Retired += result.Retired
+	}
+	return total, nil
+}
+
+func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope models.Scope, limit int) (*RunbookScheduleResult, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("Runbook scheduler store is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	activations, err := s.store.ListRunbookActivations(ctx, models.RunbookActivationFilter{
+		Scope: scope, Statuses: []models.RunbookActivationStatus{models.RunbookActivationActive}, TriggerKinds: []runbook.TriggerKind{runbook.TriggerSchedule}, Limit: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	now := s.now().UTC()
+	result := &RunbookScheduleResult{}
+	for _, activation := range activations {
+		result.Examined++
+		if verifyErr := verifyRunbookActivationExecution(ctx, s.store, scope, activation.ID); verifyErr != nil {
+			if errors.Is(verifyErr, ErrRunbookActivationUnverified) {
+				if _, pauseErr := NewRunbookActivationService(s.store, models.WithClock(s.now)).Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: models.RunbookActivationPaused}); pauseErr != nil && !errors.Is(pauseErr, models.ErrRunbookActivationRevision) {
+					return result, pauseErr
+				}
+				result.Suspended++
+				continue
+			}
+			return result, verifyErr
+		}
+		if activation.NextOccurrenceBase == nil {
+			if err := s.initialize(ctx, activation, now); err != nil && !errors.Is(err, models.ErrRunbookActivationRevision) {
+				return result, err
+			}
+			result.Initialized++
+			continue
+		}
+		if activation.NextRunAt.After(now) {
+			continue
+		}
+		base := activation.NextOccurrenceBase.UTC()
+		idempotencyKey := fmt.Sprintf("runbook-schedule:%s:%s", activation.ID, base.Format(time.RFC3339Nano))
+		runID := agentrun.RunIDForIdempotencyKey(scope, idempotencyKey)
+		existing, err := s.store.GetAgentRun(ctx, scope, runID)
+		if err != nil {
+			return result, err
+		}
+		if existing != nil {
+			if err := conversationrun.ProjectRunReportingStartForRun(ctx, s.reportingStore, existing); err != nil {
+				return result, fmt.Errorf("restore Runbook activation %s reporting: %w", activation.ID, err)
+			}
+			result.Replayed++
+			retired, advanceErr := s.advance(ctx, activation, base)
+			if advanceErr != nil && !errors.Is(advanceErr, models.ErrRunbookActivationRevision) {
+				return result, advanceErr
+			}
+			if retired {
+				result.Retired++
+			}
+			continue
+		}
+		objective, err := s.store.GetObjective(ctx, scope, activation.ObjectiveID)
+		if err != nil {
+			return result, err
+		}
+		if objective == nil {
+			return result, fmt.Errorf("Runbook activation %s Objective %s: %w", activation.ID, activation.ObjectiveID, models.ErrObjectiveNotFound)
+		}
+		if objective.Owner != activation.Owner {
+			return result, fmt.Errorf("Runbook activation %s owner drifted from Objective %s", activation.ID, objective.ID)
+		}
+		if objective.Status != models.ObjectiveStatusActive {
+			result.Suspended++
+			continue
+		}
+		backpressured, err := activationBackpressured(ctx, s.store, activation)
+		if err != nil {
+			return result, err
+		}
+		if backpressured {
+			result.Backpressured++
+			continue
+		}
+		windowStart, windowEnd, err := activation.Trigger.Schedule.Window(base)
+		if err != nil {
+			return result, fmt.Errorf("Runbook activation %s schedule window: %w", activation.ID, err)
+		}
+		created, err := startActivationOccurrence(ctx, s.store, s.reportingStore, activation, objective, models.RunSourceSchedule, idempotencyKey, map[string]interface{}{
+			"scheduledFor":        activation.NextRunAt.UTC().Format(time.RFC3339Nano),
+			"scheduleWindowStart": windowStart.Format(time.RFC3339Nano),
+			"scheduleWindowEnd":   windowEnd.Format(time.RFC3339Nano),
+		}, models.ActivityActor{Type: "service", ID: "runbook-scheduler"}, runbookScheduleVisibility(activation), s.executionPreparer)
+		if err != nil {
+			return result, fmt.Errorf("schedule Runbook activation %s: %w", activation.ID, err)
+		}
+		if created.Event == nil {
+			result.Replayed++
+		} else {
+			result.Scheduled++
+		}
+		retired, advanceErr := s.advance(ctx, activation, base)
+		if advanceErr != nil && !errors.Is(advanceErr, models.ErrRunbookActivationRevision) {
+			return result, advanceErr
+		}
+		if retired {
+			result.Retired++
+		}
+	}
+	return result, nil
+}
+
+func (s *RunbookScheduler) initialize(ctx context.Context, activation *models.RunbookActivation, now time.Time) error {
+	base, err := activation.Trigger.Schedule.NextBase(now)
+	if err != nil {
+		return fmt.Errorf("Runbook activation %s schedule: %w", activation.ID, err)
+	}
+	due, err := activation.Trigger.Schedule.DueAt(runbookTriggerKey(activation), base)
+	if err != nil {
+		return err
+	}
+	updated := models.CloneRunbookActivation(activation)
+	updated.NextOccurrenceBase, updated.NextRunAt = &base, &due
+	updated.Revision++
+	updated.UpdatedAt = now.UTC()
+	return s.store.UpdateRunbookActivation(ctx, updated, activation.Revision)
+}
+
+func (s *RunbookScheduler) advance(ctx context.Context, activation *models.RunbookActivation, base time.Time) (bool, error) {
+	updated := models.CloneRunbookActivation(activation)
+	updated.OccurrencesProcessed++
+	updated.Revision++
+	updated.UpdatedAt = s.now().UTC()
+	if maximum := activation.Trigger.Schedule.MaximumOccurrences; maximum > 0 && updated.OccurrencesProcessed >= maximum {
+		updated.Status = models.RunbookActivationRetired
+		updated.NextOccurrenceBase, updated.NextRunAt = nil, nil
+		return true, s.store.UpdateRunbookActivation(ctx, updated, activation.Revision)
+	}
+	nextBase, err := activation.Trigger.Schedule.NextBase(base)
+	if err != nil {
+		return false, fmt.Errorf("Runbook activation %s next schedule: %w", activation.ID, err)
+	}
+	nextDue, err := activation.Trigger.Schedule.DueAt(runbookTriggerKey(activation), nextBase)
+	if err != nil {
+		return false, err
+	}
+	updated.NextOccurrenceBase, updated.NextRunAt = &nextBase, &nextDue
+	return false, s.store.UpdateRunbookActivation(ctx, updated, activation.Revision)
+}
+
+func runbookTriggerKey(activation *models.RunbookActivation) string {
+	return activation.Scope.Key() + ":" + activation.ID + ":" + activation.TriggerID + ":" + fmt.Sprint(activation.Revision)
+}
+
+func runbookScheduleVisibility(activation *models.RunbookActivation) models.ActivityVisibility {
+	if activation != nil && activation.Owner.Type == models.OwnerTypeTeam {
+		return models.ActivityVisibilityTeam
+	}
+	return models.ActivityVisibilityScope
+}

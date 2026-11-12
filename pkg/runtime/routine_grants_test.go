@@ -12,6 +12,7 @@ import (
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -31,7 +32,7 @@ type routineGrantFixtureState struct {
 	catalog   *skill.Catalog
 	bound     *skill.BoundAction
 	args      map[string]interface{}
-	validator *RunbookActionValidator
+	validator *routine.RunbookActionValidator
 	owners    routineOwnerAddressesForTest
 	// occurrence is the routine occurrence last claimed, still running.
 	occurrence *AgentRun
@@ -63,7 +64,7 @@ func routineGrantFixture(t *testing.T) *routineGrantFixtureState {
 	if err := catalog.Bind(t.Context(), &skill.Binding{ID: "mail-binding", Revision: 1, Scope: bound.Binding.Scope, DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", AllowedActions: []string{"send", "chat", "raw", "search", "note", "pay"}, MaximumRisk: skill.RiskLevelExternal}); err != nil {
 		t.Fatal(err)
 	}
-	validator, err := NewRunbookActionValidator(store)
+	validator, err := routine.NewRunbookActionValidator(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,12 +113,12 @@ func (f *routineGrantFixtureState) createRoutine(t *testing.T, grants ...map[str
 
 func TestCreateTaskAlwaysAsksForItsBriefInEveryMode(t *testing.T) {
 	f := routineGrantFixture(t)
-	if action := RunbookManagementSkill().Actions[runtimeaction.RunbookActionCreateTask]; !action.AlwaysReview() {
+	if action := routine.RunbookManagementSkill().Actions[runtimeaction.RunbookActionCreateTask]; !action.AlwaysReview() {
 		t.Fatalf("create_task review = %q, want always", action.Review)
 	}
 	policy := runtimeaction.NewDefaultActionPolicy()
 	policy.ApprovalTimeout = ApprovalTimeoutApprove
-	definition := RunbookManagementSkill()
+	definition := routine.RunbookManagementSkill()
 	bound := &skill.BoundAction{Definition: definition, Binding: f.bound.Binding, Action: definition.Actions[runtimeaction.RunbookActionCreateTask]}
 	for _, mode := range []ConversationApprovalMode{"", ConversationApprovalManual, ConversationApprovalAuto, ConversationApprovalSkip} {
 		decision, err := policy.EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
@@ -196,7 +197,7 @@ func TestApprovedBriefGrantsArePersistedOnTheRoutine(t *testing.T) {
 	// Dispatch reads only the approved arguments: a grant the brief lacks
 	// (here, missing labels never filled by the catalog) cannot be stored.
 	unresolved := f.withGrants(map[string]interface{}{"action": "mail.note"})
-	d, _ := NewRunbookActionDispatcher(f.store, nil)
+	d, _ := routine.NewRunbookActionDispatcher(f.store, nil)
 	if _, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: f.run, Bound: f.bound, Call: &ActionCall{ID: "unapproved", Scope: f.run.Scope, RunID: f.run.ID, DeploymentID: f.run.AssignedAgentID, IdempotencyKey: "unapproved"}, Arguments: unresolved}); err == nil {
 		t.Fatal("dispatch stored a grant without an approved label")
 	}
@@ -334,11 +335,11 @@ func TestRoutineGrantWithoutOwnerLimitAndRevoke(t *testing.T) {
 		t.Fatal("granted note asked")
 	}
 
-	service := NewRunbookActivationService(f.store)
-	if _, err := service.RevokeGrants(t.Context(), f.run.Scope, activation.ID, RevokeRoutineGrantsRequest{Requester: ConversationParticipant{Type: ConversationParticipantUser, ID: "someone-else"}}); !errors.Is(err, ErrRoutineGrantsNotOwner) {
+	service := routine.NewRunbookActivationService(f.store)
+	if _, err := service.RevokeGrants(t.Context(), f.run.Scope, activation.ID, routine.RevokeRoutineGrantsRequest{Requester: ConversationParticipant{Type: ConversationParticipantUser, ID: "someone-else"}}); !errors.Is(err, routine.ErrRoutineGrantsNotOwner) {
 		t.Fatalf("another user revoked: %v", err)
 	}
-	owner := RevokeRoutineGrantsRequest{Requester: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}}
+	owner := routine.RevokeRoutineGrantsRequest{Requester: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}}
 	revoked, err := service.RevokeGrants(t.Context(), f.run.Scope, activation.ID, owner)
 	if err != nil || revoked.Task.Grants != nil || revoked.Revision != activation.Revision+1 {
 		t.Fatalf("revoke = %#v, %v", revoked, err)
@@ -365,7 +366,7 @@ func TestCreateTaskEventSendGrantMustBePinned(t *testing.T) {
 	read := map[string]interface{}{"action": "mail.search", "label": "Search the web"}
 
 	f.args["trigger"] = event
-	if _, err := f.resolve(t, f.withGrants(read, free)); !errors.Is(err, ErrRoutineEventSendGrantNotPinned) {
+	if _, err := f.resolve(t, f.withGrants(read, free)); !errors.Is(err, routine.ErrRoutineEventSendGrantNotPinned) {
 		t.Fatalf("free-recipient send in an event routine: %v", err)
 	}
 	if _, err := f.resolve(t, f.withGrants(read, owned)); err != nil {
@@ -374,7 +375,7 @@ func TestCreateTaskEventSendGrantMustBePinned(t *testing.T) {
 	// Sends whose target the kernel cannot read from a known argument fail
 	// closed: a chat ID key must be pinned, and a raw message body never can.
 	freeChat := map[string]interface{}{"action": "mail.chat", "label": "Post the summary"}
-	if _, err := f.resolve(t, f.withGrants(freeChat)); !errors.Is(err, ErrRoutineEventSendGrantNotPinned) &&
+	if _, err := f.resolve(t, f.withGrants(freeChat)); !errors.Is(err, routine.ErrRoutineEventSendGrantNotPinned) &&
 		(err == nil || !strings.Contains(err.Error(), "toDestinations")) {
 		t.Fatalf("free chat send in an event routine: %v", err)
 	}
@@ -383,7 +384,7 @@ func TestCreateTaskEventSendGrantMustBePinned(t *testing.T) {
 		t.Fatalf("pinned chat send in an event routine: %v", err)
 	}
 	raw := map[string]interface{}{"action": "mail.raw", "label": "Send the draft"}
-	if _, err := f.resolve(t, f.withGrants(raw)); !errors.Is(err, ErrRoutineEventSendGrantNotPinned) {
+	if _, err := f.resolve(t, f.withGrants(raw)); !errors.Is(err, routine.ErrRoutineEventSendGrantNotPinned) {
 		t.Fatalf("raw-body send in an event routine: %v", err)
 	}
 	f.args["trigger"] = schedule

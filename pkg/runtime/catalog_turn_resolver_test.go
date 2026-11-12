@@ -19,6 +19,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -207,7 +208,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 		{name: "agent work", run: AgentRun{Goal: "Summarize the forum"},
 			producer: "model", fork: true, actions: 1, goalKind: "routine"},
 		{name: "routine", run: AgentRun{Goal: "Report the weekly numbers", Source: RunSourceSchedule, Context: map[string]interface{}{
-			conversationRunContextConversationID: "chat-1", RoutineScriptContextKey: script,
+			conversationRunContextConversationID: "chat-1", routine.RoutineScriptContextKey: script,
 		}}, producer: "model", fork: true, actions: 1, goalKind: "routine", hostTools: true},
 		{name: "task work", run: AgentRun{Goal: "Research in the background", Source: RunSourceFork, Context: map[string]interface{}{
 			ConversationTaskContextKey: "task-1",
@@ -609,12 +610,12 @@ func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(
 		}},
 	}
 	start := capability.ModelAction{
-		Name: "openseal.runbooks.start", SkillID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
-		Action: RunbookActionStart, BindingID: "bundled:runbooks", BindingRevision: 1,
+		Name: "openseal.runbooks.start", SkillID: RunbookManagementSkillID, Version: routine.RunbookManagementSkillVersion,
+		Action: routine.RunbookActionStart, BindingID: "bundled:runbooks", BindingRevision: 1,
 	}
 	replace := capability.ModelAction{
-		Name: "openseal.runbooks.replace_schedule", SkillID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
-		Action: RunbookActionReplaceSchedule, BindingID: "bundled:runbooks", BindingRevision: 1,
+		Name: "openseal.runbooks.replace_schedule", SkillID: RunbookManagementSkillID, Version: routine.RunbookManagementSkillVersion,
+		Action: routine.RunbookActionReplaceSchedule, BindingID: "bundled:runbooks", BindingRevision: 1,
 	}
 	catalog := &resolverCatalog{
 		deployment: &kernelagent.AgentDeployment{
@@ -628,7 +629,7 @@ func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(
 			SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "community-agent",
 			Skills: []skill.ActivatedSkill{{
 				BindingID: "bundled:runbooks", BindingRevision: 1, SkillID: RunbookManagementSkillID,
-				SkillVersion: RunbookManagementSkillVersion, Name: "Runbooks", Actions: []capability.ModelAction{start, replace},
+				SkillVersion: routine.RunbookManagementSkillVersion, Name: "Runbooks", Actions: []capability.ModelAction{start, replace},
 			}},
 		},
 	}
@@ -642,7 +643,7 @@ func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(
 		t.Fatal(err)
 	}
 	if len(binding.RunbookOperations) != 1 || binding.RunbookOperations[0].Entrypoint != "engage-now" ||
-		len(binding.ModelActions) != 1 || binding.ModelActions[0].Action != RunbookActionReplaceSchedule ||
+		len(binding.ModelActions) != 1 || binding.ModelActions[0].Action != routine.RunbookActionReplaceSchedule ||
 		len(binding.Authority.Operations) != 1 {
 		t.Fatalf("conversation capabilities = %#v", binding)
 	}

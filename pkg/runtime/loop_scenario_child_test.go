@@ -31,6 +31,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -367,7 +368,7 @@ func (c *childFixture) runSession(run *AgentRun, seeded bool) *AgentSession {
 	}
 	var initial []*SessionEntry
 	if seeded {
-		entries, err := SessionSeedEntries(c.ctx, c.store, nil, nil, run)
+		entries, err := routine.SessionSeedEntries(c.ctx, c.store, nil, nil, run)
 		if err != nil {
 			c.t.Fatal(err)
 		}
@@ -391,7 +392,7 @@ func (c *childFixture) runbookBinding(run *AgentRun) *agentrun.TurnRunnerBinding
 	if definition == nil {
 		c.t.Fatalf("runbook Run %s pins unknown definition %q", run.ID, id)
 	}
-	producer, err := NewRunbookStepProducer(definition, run.Entrypoint, c.store)
+	producer, err := routine.NewRunbookStepProducer(definition, run.Entrypoint, c.store)
 	if err != nil {
 		c.t.Fatal(err)
 	}
@@ -1307,7 +1308,7 @@ func TestDeterministicRunbookHasNoRenderedSession(t *testing.T) {
 				t.Fatalf("runbook session holds a %s entry", e.Type)
 			}
 		}
-		if _, err := RunbookTraceFromCheckpoint(child.Checkpoint); err != nil || len(child.Checkpoint) == 0 {
+		if _, err := routine.RunbookTraceFromCheckpoint(child.Checkpoint); err != nil || len(child.Checkpoint) == 0 {
 			t.Fatalf("runbook engine state is not in the Run: %v", err)
 		}
 	})

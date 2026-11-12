@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -19,19 +20,19 @@ import (
 func TestRunbookScheduleReplacementContractRequiresTimingChange(t *testing.T) {
 	ctx := context.Background()
 	catalog := skill.NewCatalog()
-	definition := RunbookManagementSkill()
+	definition := routine.RunbookManagementSkill()
 	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
 	}
 	binding := &skill.Binding{
 		ID: "runbooks", Revision: 1, Scope: skill.ScopeReference{Kind: "tenant", ID: "3"}, DeploymentID: "rowan",
 		SkillID: definition.ID, SkillVersion: definition.Version,
-		AllowedActions: []string{RunbookActionReplaceSchedule}, MaximumRisk: skill.RiskLevelWrite,
+		AllowedActions: []string{routine.RunbookActionReplaceSchedule}, MaximumRisk: skill.RiskLevelWrite,
 	}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	bound, err := catalog.Resolve(ctx, binding.Scope, binding.DeploymentID, definition.ID, definition.Version, RunbookActionReplaceSchedule)
+	bound, err := catalog.Resolve(ctx, binding.Scope, binding.DeploymentID, definition.ID, definition.Version, routine.RunbookActionReplaceSchedule)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "hourly-community-review", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "hourly",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}},
@@ -102,9 +103,9 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 		t.Fatalf("resolved Objective arguments = %#v", resolvedObjective)
 	}
 
-	runbookDefinition := RunbookManagementSkill()
-	runbookBound := &skill.BoundAction{Definition: runbookDefinition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: runbookDefinition.Actions[RunbookActionStart]}
-	runbookValidator, err := NewRunbookActionValidator(store)
+	runbookDefinition := routine.RunbookManagementSkill()
+	runbookBound := &skill.BoundAction{Definition: runbookDefinition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: runbookDefinition.Actions[routine.RunbookActionStart]}
+	runbookValidator, err := routine.NewRunbookActionValidator(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	if err != nil || preview["activationId"] != activation.ID || preview["objectiveId"] != objective.ID {
 		t.Fatalf("Runbook preview=%#v err=%v", preview, err)
 	}
-	dispatcher, err := NewRunbookActionDispatcher(store, nil)
+	dispatcher, err := routine.NewRunbookActionDispatcher(store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +152,7 @@ func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "exhausted-community-review", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "hourly",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC", MaximumOccurrences: 2}},
@@ -180,9 +181,9 @@ func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := RunbookManagementSkill()
-	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: definition.Actions[RunbookActionStart]}
-	validator, err := NewRunbookActionValidator(store)
+	definition := routine.RunbookManagementSkill()
+	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: definition.Actions[routine.RunbookActionStart]}
+	validator, err := routine.NewRunbookActionValidator(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +206,7 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	source, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "exhausted-hourly-community-review", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "community-review", DefinitionVersion: "2.0.19", TriggerID: "hourly", Status: RunbookActivationRetired,
 		Trigger: runbook.Trigger{
@@ -236,9 +237,9 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 		t.Fatal(err)
 	}
 
-	definition := RunbookManagementSkill()
-	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: definition.Actions[RunbookActionReplaceSchedule]}
-	validator, _ := NewRunbookActionValidator(store)
+	definition := routine.RunbookManagementSkill()
+	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: definition.Actions[routine.RunbookActionReplaceSchedule]}
+	validator, _ := routine.NewRunbookActionValidator(store)
 	resolved, handled, err := validator.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{
 		Run: conversationRun, Bound: bound, Arguments: map[string]interface{}{"maximumOccurrences": float64(5), "reason": "Run five hourly acceptance cycles"},
 	})
@@ -253,7 +254,7 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 	if replacementSchedule == nil || replacementSchedule.MaximumOccurrences != 5 || replacementSchedule.Cron != source.Trigger.Schedule.Cron || preview["sourceActivationId"] != source.ID {
 		t.Fatalf("replacement preview = %#v", preview)
 	}
-	dispatcher, _ := NewRunbookActionDispatcher(store, nil)
+	dispatcher, _ := routine.NewRunbookActionDispatcher(store, nil)
 	call := &ActionCall{ID: "replace-five-hour-schedule", Scope: scope, RunID: conversationRun.ID, DeploymentID: owner.ID}
 	result, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: call, Run: conversationRun, Bound: bound, Arguments: resolved})
 	if err != nil {
@@ -304,7 +305,7 @@ func TestRunbookScheduleReplacementRejectsActiveOrForeignActivation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	foreign, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	foreign, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "other-retired-runbook", Scope: scope, Owner: other, ObjectiveID: objective.ID, AssignedAgentID: other.ID,
 		DefinitionID: "other", DefinitionVersion: "1", TriggerID: "daily", Status: RunbookActivationRetired,
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "run", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC", MaximumOccurrences: 1}},
@@ -312,9 +313,9 @@ func TestRunbookScheduleReplacementRejectsActiveOrForeignActivation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := RunbookManagementSkill()
-	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: rowan.ID}, Action: definition.Actions[RunbookActionReplaceSchedule]}
-	validator, _ := NewRunbookActionValidator(store)
+	definition := routine.RunbookManagementSkill()
+	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: rowan.ID}, Action: definition.Actions[routine.RunbookActionReplaceSchedule]}
+	validator, _ := routine.NewRunbookActionValidator(store)
 	_, err = validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 		Run: &AgentRun{Scope: scope, Owner: rowan, AssignedAgentID: rowan.ID}, Bound: bound,
 		Arguments: map[string]interface{}{"activationId": foreign.ID, "maximumOccurrences": float64(5), "reason": "Try foreign work"},
@@ -334,7 +335,7 @@ func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "other-runbook", Scope: scope, Owner: other, ObjectiveID: objective.ID, AssignedAgentID: other.ID,
 		DefinitionID: "other", DefinitionVersion: "1", TriggerID: "daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "run", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
@@ -343,9 +344,9 @@ func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := &AgentRun{Scope: scope, Owner: rowan, AssignedAgentID: rowan.ID}
-	definition := RunbookManagementSkill()
-	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: rowan.ID}, Action: definition.Actions[RunbookActionStart]}
-	validator, _ := NewRunbookActionValidator(store)
+	definition := routine.RunbookManagementSkill()
+	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: rowan.ID}, Action: definition.Actions[routine.RunbookActionStart]}
+	validator, _ := routine.NewRunbookActionValidator(store)
 	_, err = validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: bound, Arguments: map[string]interface{}{"activationId": activation.ID, "reason": "Try foreign work"},
 	})

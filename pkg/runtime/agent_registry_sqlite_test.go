@@ -11,6 +11,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -49,7 +50,7 @@ func TestSQLiteAgentDefinitionActivationAdvancesRunbookAtomicallyAndRollsBack(t 
 	}
 	definitionV1, _ := registry.GetDefinition(ctx, "operator", "1.0.0")
 	trigger := definitionV1.Runbook.Triggers["hourly"]
-	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "operator-hourly", Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, ObjectiveID: objective.ID,
 		AssignedAgentID: deployment.ID, DefinitionID: definitionV1.Runbook.ID, DefinitionVersion: definitionV1.Runbook.Version,
 		TriggerID: "hourly", Trigger: trigger, Budget: runbookBudgetPolicyValue(trigger.Budget), Status: RunbookActivationActive,
@@ -313,7 +314,7 @@ func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testi
 		t.Fatal(err)
 	}
 	trigger := registered.Runbook.Triggers["hourly"]
-	runbookActivation, err := NewRunbookActivationService(store).Create(context.Background(), CreateRunbookActivationRequest{
+	runbookActivation, err := routine.NewRunbookActivationService(store).Create(context.Background(), routine.CreateRunbookActivationRequest{
 		ID: "operator-hourly", Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, ObjectiveID: objective.ID,
 		AssignedAgentID: deployment.ID, DefinitionID: registered.Runbook.ID, DefinitionVersion: registered.Runbook.Version,
 		TriggerID: "hourly", Trigger: trigger, Budget: runbookBudgetPolicyValue(trigger.Budget), Status: RunbookActivationActive,

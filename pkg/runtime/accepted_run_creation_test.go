@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -77,7 +78,7 @@ func acceptedCreationActivation(t *testing.T, store KernelStore, trigger runbook
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := NewRunbookActivationService(store).Create(t.Context(), CreateRunbookActivationRequest{
+	activation, err := routine.NewRunbookActivationService(store).Create(t.Context(), routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "review", DefinitionVersion: "1", TriggerID: "trigger", Trigger: trigger,
 		MaximumConcurrent: 10, Input: map[string]interface{}{"project": "preserve-input"},
@@ -101,8 +102,8 @@ func TestAcceptedRunCreationManualPinsOnceAndReplaysBeforeMutableAdmission(t *te
 		activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{
 			Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"},
 		})
-		request := StartRunbookActivationRequest{IdempotencyKey: "manual-exact-method"}
-		created, err := StartRunbookActivationWithExecutionPreparer(t.Context(), store, activation.Scope, activation.ID, request, preparer)
+		request := routine.StartRunbookActivationRequest{IdempotencyKey: "manual-exact-method"}
+		created, err := routine.StartRunbookActivationWithExecutionPreparer(t.Context(), store, activation.Scope, activation.ID, request, preparer)
 		if err != nil || created == nil || created.Event == nil || preparer.calls != 1 {
 			t.Fatalf("manual creation = %#v, %v; preparations=%d", created, err, preparer.calls)
 		}
@@ -112,12 +113,12 @@ func TestAcceptedRunCreationManualPinsOnceAndReplaysBeforeMutableAdmission(t *te
 			t.Fatal(err)
 		}
 		preparer.err = errors.New("deployment active definition changed")
-		replayed, err := StartRunbookActivationWithExecutionPreparer(t.Context(), store, activation.Scope, activation.ID, request, preparer)
+		replayed, err := routine.StartRunbookActivationWithExecutionPreparer(t.Context(), store, activation.Scope, activation.ID, request, preparer)
 		if err != nil || replayed == nil || replayed.Event != nil || preparer.calls != 1 || !reflect.DeepEqual(accepted, replayed.Run) {
 			t.Fatalf("accepted manual retry consulted mutable admission or changed its pin: %#v, %v; preparations=%d", replayed, err, preparer.calls)
 		}
 		request.IdempotencyKey = "new-manual-stale-method"
-		rejected, err := StartRunbookActivationWithExecutionPreparer(t.Context(), store, activation.Scope, activation.ID, request, preparer)
+		rejected, err := routine.StartRunbookActivationWithExecutionPreparer(t.Context(), store, activation.Scope, activation.ID, request, preparer)
 		if rejected != nil || !errors.Is(err, preparer.err) || preparer.calls != 2 {
 			t.Fatalf("new manual occurrence bypassed immutable admission: %#v, %v", rejected, err)
 		}
@@ -151,7 +152,7 @@ func TestAcceptedRunCreationSchedulerRetainsPinAcrossOccurrenceDeliveryRetry(t *
 		})
 		wrapped := &acceptedCreationCursorFailure{KernelStore: store}
 		now := time.Now().UTC()
-		scheduler := NewRunbookScheduler(wrapped, models.WithClock(func() time.Time { return now }))
+		scheduler := routine.NewRunbookScheduler(wrapped, models.WithClock(func() time.Time { return now }))
 		scheduler.SetAcceptedRunExecutionPreparer(preparer)
 		initialized, err := scheduler.ReconcileScope(t.Context(), activation.Scope, 10)
 		if err != nil || initialized.Initialized != 1 || preparer.calls != 0 {
@@ -253,15 +254,15 @@ func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatcher, err := NewRunbookActionDispatcher(store, nil)
+	dispatcher, err := routine.NewRunbookActionDispatcher(store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dispatcher.SetAcceptedRunExecutionPreparer(preparer)
-	definition := RunbookManagementSkill()
+	definition := routine.RunbookManagementSkill()
 	input := agentrun.ActionDispatchInput{
 		Run: parent, Call: &ActionCall{ID: "approved-start", Scope: activation.Scope, RunID: parent.ID, DeploymentID: "rowan"},
-		Bound:     &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: "rowan"}, Action: definition.Actions[RunbookActionStart]},
+		Bound:     &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: "rowan"}, Action: definition.Actions[routine.RunbookActionStart]},
 		Arguments: map[string]interface{}{"activationId": activation.ID, "reason": "User requested immediate review"},
 	}
 	created, err := dispatcher.DispatchAction(t.Context(), input)

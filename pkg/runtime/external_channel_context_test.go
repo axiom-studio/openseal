@@ -7,6 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
 // bindChatAgent resolves the chat seams for a Run of agentID's own chat, as
@@ -65,7 +66,7 @@ func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := NewRunbookActivationService(portfolio).Create(f.ctx, CreateRunbookActivationRequest{
+		if _, err := routine.NewRunbookActivationService(portfolio).Create(f.ctx, routine.CreateRunbookActivationRequest{
 			Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, DefinitionID: "private-workflow", DefinitionVersion: "1",
 			TriggerID: "scheduled", Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "private-workflow", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}},
 			Status: RunbookActivationActive, IdempotencyKey: "private-workflow",

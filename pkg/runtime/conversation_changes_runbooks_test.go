@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	runtimeroutine "github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -36,8 +37,8 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 				t.Fatal(err)
 			}
 			now := time.Date(2026, 10, 28, 6, 0, 0, 0, time.UTC)
-			activations := NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
-			daily, err := activations.Create(ctx, CreateRunbookActivationRequest{
+			activations := runtimeroutine.NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
+			daily, err := activations.Create(ctx, runtimeroutine.CreateRunbookActivationRequest{
 				ID: "daily-news", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 				DefinitionID: "news", DefinitionVersion: "1", TriggerID: "daily", MaximumConcurrent: 1,
 				Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "summarise", Schedule: &runbook.Schedule{Cron: "0 0 7 * * *", Timezone: "Europe/London"}},
@@ -88,7 +89,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 			}
 
 			// The scheduler sets the next run and then starts it.
-			scheduler := NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
+			scheduler := runtimeroutine.NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
 			if _, err := scheduler.ReconcileScope(ctx, scope, 10); err != nil {
 				t.Fatal(err)
 			}
@@ -107,7 +108,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 			}
 
 			current, _ = store.GetRunbookActivation(ctx, scope, daily.ID)
-			if _, err := activations.Update(ctx, scope, daily.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: RunbookActivationPaused}); err != nil {
+			if _, err := activations.Update(ctx, scope, daily.ID, runtimeroutine.UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: RunbookActivationPaused}); err != nil {
 				t.Fatal(err)
 			}
 			paused := f.list(t, ran.Cursor)
@@ -115,7 +116,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 				t.Fatalf("paused runbook = %#v", paused.Runbooks)
 			}
 			current, _ = store.GetRunbookActivation(ctx, scope, daily.ID)
-			if _, err := activations.Update(ctx, scope, daily.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: RunbookActivationRetired}); err != nil {
+			if _, err := activations.Update(ctx, scope, daily.ID, runtimeroutine.UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: RunbookActivationRetired}); err != nil {
 				t.Fatal(err)
 			}
 			stopped := f.list(t, paused.Cursor)
@@ -256,9 +257,9 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 			}
 
 			// A system pause shows why, and the waiting run time goes away.
-			activations := NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
+			activations := runtimeroutine.NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
 			current, _ := store.GetRunbookActivation(ctx, scope, routine.ID)
-			if _, err := activations.Update(ctx, scope, routine.ID, UpdateRunbookActivationRequest{
+			if _, err := activations.Update(ctx, scope, routine.ID, runtimeroutine.UpdateRunbookActivationRequest{
 				ExpectedRevision: current.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedNeedsSignIn,
 			}); err != nil {
 				t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -203,10 +204,10 @@ func TestRoutineGrantPinsTheApprovedTool(t *testing.T) {
 }
 
 func TestRoutineBindingToolGrantInstruction(t *testing.T) {
-	if instruction := BindingToolGrantInstruction([]skill.ModelAction{{Name: "mail.send", SkillID: "mail", Action: "send"}}); instruction != "" {
+	if instruction := routine.BindingToolGrantInstruction([]skill.ModelAction{{Name: "mail.send", SkillID: "mail", Action: "send"}}); instruction != "" {
 		t.Fatalf("instruction without binding tools = %q", instruction)
 	}
-	instruction := BindingToolGrantInstruction([]skill.ModelAction{
+	instruction := routine.BindingToolGrantInstruction([]skill.ModelAction{
 		{Name: "mail.send", SkillID: "mail", Action: "send"},
 		{Name: "mcp.github.create_issue", SkillID: "openseal.connector", Action: "call", BindingTool: &skill.ModelActionBindingTool{Name: "create_issue"}},
 	})
