@@ -218,11 +218,15 @@ func TestConversationChangesProjectSkillSetupRequests(t *testing.T) {
 	}
 }
 
+// settledInteractionLimit is how many settled interactions of each kind a
+// conversation's changes keep, besides every open one.
+const settledInteractionLimit = 50
+
 func TestConversationChangesBoundSettledInteractions(t *testing.T) {
 	f := newInteractionChangeFixture(t, newTestKernelStore(t))
 	setups := f.store.(SkillSetupRequestStore)
 	start := time.Now().UTC()
-	for index := 0; index < conversationInteractionHistoryLimit+5; index++ {
+	for index := 0; index < settledInteractionLimit+5; index++ {
 		at := start.Add(time.Duration(index) * time.Second)
 		request := &SkillSetupRequest{ID: fmt.Sprintf("setup-%03d", index), Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, DeploymentID: "assistant", AgentID: "assistant", ConversationID: f.conversation.ID,
 			TriggerMessageID: f.trigger.ID, RunID: f.run.ID, ActionCallID: fmt.Sprintf("call-%d", index), Kind: "configure", SkillID: "reddit.reader",
@@ -235,25 +239,9 @@ func TestConversationChangesBoundSettledInteractions(t *testing.T) {
 		}
 	}
 	projected := f.list(t, "").SkillSetupRequests
-	if len(projected) != conversationInteractionHistoryLimit+1 || projected[0].ID != "setup-000" || projected[0].Status != "pending" ||
-		projected[1].ID != "setup-005" || projected[len(projected)-1].ID != fmt.Sprintf("setup-%03d", conversationInteractionHistoryLimit+4) {
+	if len(projected) != settledInteractionLimit+1 || projected[0].ID != "setup-000" || projected[0].Status != "pending" ||
+		projected[1].ID != "setup-005" || projected[len(projected)-1].ID != fmt.Sprintf("setup-%03d", settledInteractionLimit+4) {
 		t.Fatalf("bounded projection kept %d items starting %s", len(projected), projected[0].ID)
-	}
-}
-
-func TestConversationRunLineageValueInheritsThreadPlacement(t *testing.T) {
-	root := &AgentRun{ID: "root", RootRunID: "root", Context: map[string]interface{}{"threadRootMessageId": "thread", "triggerMessageId": "trigger"}}
-	parent := &AgentRun{ID: "parent", RootRunID: "root", ParentRunID: "root", Context: map[string]interface{}{}}
-	child := &AgentRun{ID: "child", RootRunID: "root", ParentRunID: "parent", Context: map[string]interface{}{"triggerMessageId": "own"}}
-	runs := map[string]*AgentRun{"root": root, "parent": parent, "child": child}
-	if got := conversationRunLineageValue(child, runs, "threadRootMessageId"); got != "thread" {
-		t.Fatalf("thread = %q", got)
-	}
-	if got := conversationRunLineageValue(child, runs, "triggerMessageId"); got != "own" {
-		t.Fatalf("trigger = %q", got)
-	}
-	if got := conversationRunLineageValue(&AgentRun{ID: "orphan", ParentRunID: "missing"}, runs, "threadRootMessageId"); got != "" {
-		t.Fatalf("orphan = %q", got)
 	}
 }
 

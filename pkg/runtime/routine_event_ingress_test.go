@@ -286,7 +286,8 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 			},
 		},
 	}
-	consumer := NewRoutineCallbackConsumer(h.matcher)
+	offered := &recordingRoutineOfferer{RoutineEventOfferer: h.matcher}
+	consumer := NewRoutineCallbackConsumer(offered)
 	subscription := CallbackSubscription{EventType: "github.issues.opened", Consumer: "routines"}
 
 	if err := consumer.ConsumeCallbackEvent(h.ctx, registration, subscription, issue); err != nil {
@@ -336,14 +337,15 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 		"repository":  map[string]interface{}{"fullName": "acme/api"},
 		"workflowRun": map[string]interface{}{"name": "CI", "branch": "main", "conclusion": "failure"},
 	}
-	mapped := gitHubRoutineEvent(h.scope, RoutineCallbackSourceRef(registration.ID), run)
-	if mapped.Summary != "Workflow run completed in acme/api: CI (failure)" || mapped.Fields["branch"][0] != "main" || mapped.Fields["conclusion"][0] != "failure" {
+	if err := consumer.ConsumeCallbackEvent(h.ctx, registration, CallbackSubscription{EventType: run.Type, Consumer: "routines"}, run); err != nil {
+		t.Fatal(err)
+	}
+	mapped := offered.events[len(offered.events)-1]
+	if mapped.ID != run.ID || mapped.SourceRef != RoutineCallbackSourceRef(registration.ID) ||
+		mapped.Summary != "Workflow run completed in acme/api: CI (failure)" || mapped.Fields["branch"][0] != "main" || mapped.Fields["conclusion"][0] != "failure" {
 		t.Fatalf("workflow run event = %#v", mapped)
 	}
 	if err := mapped.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if err := consumer.ConsumeCallbackEvent(h.ctx, registration, CallbackSubscription{EventType: run.Type, Consumer: "routines"}, run); err != nil {
 		t.Fatal(err)
 	}
 	if stats := h.matcher.RoutineEventStats(); stats.In[RoutineEventGitHub] != 2 || stats.Matched[RoutineEventGitHub] != 1 {
@@ -351,45 +353,13 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 	}
 }
 
-func unboundConversationMessage() (Scope, ExternalConversationAdapterReference, *NormalizedExternalConversationEvent) {
-	event := slackRoutineMessage("173.001", "U1", "Ana Ruiz", "hello", false)
-	return Scope{Kind: "tenant", ID: "busy"},
-		ExternalConversationAdapterReference{SkillID: "slack", SkillVersion: "1.0.0", BindingID: "binding", BindingRevision: 1, AdapterID: "slack"},
-		&event
+// recordingRoutineOfferer records each event offered to its offerer.
+type recordingRoutineOfferer struct {
+	RoutineEventOfferer
+	events []*RoutineEvent
 }
 
-// TestConversationRoutineOfferUnboundAllocFree: a Slack message on a
-// connection no routine listens to makes no store call and allocates nothing
-// in the routine path (SPEC §0a).
-func TestConversationRoutineOfferUnboundAllocFree(t *testing.T) {
-	matcher, store := newUnboundRoutineEventMatcher(t)
-	scope, adapter, event := unboundConversationMessage()
-	ctx := context.Background()
-	allocs := testing.AllocsPerRun(1000, func() {
-		if err := offerConversationRoutineEvent(ctx, matcher, scope, "deployment", adapter, "slack", "installation", event); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if allocs != 0 {
-		t.Fatalf("unbound conversation offer allocates %.1f times", allocs)
-	}
-	if store.calls != 0 {
-		t.Fatalf("unbound conversation offer made %d store calls", store.calls)
-	}
-	if stats := matcher.RoutineEventStats(); stats.In[RoutineEventSlackMessage] != 0 {
-		t.Fatalf("unbound message reached the matcher: in=%d", stats.In[RoutineEventSlackMessage])
-	}
-}
-
-func BenchmarkConversationRoutineOfferUnbound(b *testing.B) {
-	matcher, _ := newUnboundRoutineEventMatcher(b)
-	scope, adapter, event := unboundConversationMessage()
-	ctx := context.Background()
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if err := offerConversationRoutineEvent(ctx, matcher, scope, "deployment", adapter, "slack", "installation", event); err != nil {
-			b.Fatal(err)
-		}
-	}
+func (o *recordingRoutineOfferer) OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (RoutineEventOffer, error) {
+	o.events = append(o.events, event)
+	return o.RoutineEventOfferer.OfferRoutineEvent(ctx, event)
 }

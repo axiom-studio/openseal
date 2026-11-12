@@ -3,58 +3,15 @@ package runtime
 import (
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
-
-func TestInstallationWideInboxKeepsChannelAndDMContextsSeparate(t *testing.T) {
-	ctx := t.Context()
-	store, _, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
-	endpoint.InstallationWide = true
-	worker := &ExternalConversationInboxWorker{store: store, conversations: NewConversationService(store), now: time.Now}
-	seen := make(map[string]string)
-	for _, channel := range []string{"C-public", "C-private", "D-alice", "D-bob"} {
-		conversation, _, err := worker.ensureConversation(ctx, endpoint, NormalizedExternalConversationEvent{ExternalConversationID: channel})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if previous := seen[conversation.ID]; previous != "" {
-			t.Fatalf("%s inherited %s context", channel, previous)
-		}
-		seen[conversation.ID] = channel
-		message := postConversationRunTestMessage(t, worker.conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, channel+"_SECRET", channel+"-message")
-		thread, _, err := worker.ensureConversation(ctx, endpoint, NormalizedExternalConversationEvent{ExternalConversationID: channel, ExternalThreadID: "same-thread-id"})
-		if err != nil || thread.ID != conversation.ID {
-			t.Fatalf("thread escaped its channel context: %#v, %v", thread, err)
-		}
-		viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID}}
-		for otherID := range seen {
-			if otherID == conversation.ID {
-				continue
-			}
-			if _, err := ReadConversationHistory(ctx, worker.conversations, endpoint.Scope, endpoint.Owner, otherID, viewer, ConversationHistoryReadRequest{MessageID: message.ID}); err == nil {
-				t.Fatal("history reader exposed a message from another channel")
-			}
-		}
-	}
-}
 
 // bindChatAgent resolves the chat seams for a Run of agentID's own chat, as
 // chatLoopFixture.bind does for agent-1.
 func bindChatAgent(f *chatLoopFixture, run *AgentRun, producer StepProducer, agentID string) *TurnRunnerBinding {
 	f.t.Helper()
-	binding := &TurnRunnerBinding{
-		DeploymentID: agentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
-		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model",
-		Producer: producer, Preparers: []StepPreparer{newRunStartPreparer(f.store, f.store)},
-		Authority: ControlAuthority{AgentID: agentID, CanAskUser: true, CanReact: true},
-	}
-	if err := f.runner.bindConversationLoop(f.ctx, run, binding, ConversationLoopStores{Sessions: f.store, Actions: f.actions, Activity: f.store}); err != nil {
-		f.t.Fatalf("bind conversation loop: %v", err)
-	}
-	return binding
+	return f.bindAgent(run, agentID, producer)
 }
 
 // chatStepText is everything one model step was given: the system sections

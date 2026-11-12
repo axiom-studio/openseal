@@ -47,7 +47,7 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	}
 	// A follow-up in an active thread is delivered to that thread's Run
 	// instead of starting a parallel Run in the same lane.
-	if applied[2].RunID != first.ID || !conversationRunHasFollowUp(first, applied[2].ChannelMessageID) || len(first.PendingInterventions) != 1 ||
+	if applied[2].RunID != first.ID || !runHasFollowUp(first, applied[2].ChannelMessageID) || len(first.PendingInterventions) != 1 ||
 		first.PendingInterventions[0].Instruction != "followup-one" {
 		t.Fatalf("follow-up was not delivered to the active thread Run: item=%#v run=%#v", applied[2], first)
 	}
@@ -71,23 +71,24 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	if blocked, err := store.ClaimNextAgentRun(ctx, claim); err != nil || blocked != nil {
 		t.Fatalf("thread follow-up created another Run: %#v %v", blocked, err)
 	}
+	conversations := NewConversationService(store)
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID}}
 	root, _ := first.Context["threadRootMessageId"].(string)
-	page, err := ReadConversationHistory(ctx, worker.conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{}, root)
+	page, err := ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{}, root)
 	if err != nil || len(page.Messages) != 2 {
 		t.Fatalf("thread history=%#v %v", page, err)
 	}
 	after := int64(0)
-	forward, err := ReadConversationHistory(ctx, worker.conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{AfterSequence: &after, Limit: 1}, root)
+	forward, err := ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{AfterSequence: &after, Limit: 1}, root)
 	if err != nil || len(forward.Messages) != 1 || forward.Messages[0].ID != root || forward.NextAfterSequence == 0 {
 		t.Fatalf("forward thread history=%#v %v", forward, err)
 	}
-	if _, err := ReadConversationHistory(ctx, worker.conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{MessageID: applied[1].ChannelMessageID}, root); err == nil {
+	if _, err := ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{MessageID: applied[1].ChannelMessageID}, root); err == nil {
 		t.Fatal("explicit message lookup escaped its thread")
 	}
 	// Explicit cancellation remains available. A later message in the thread
 	// of a terminal Run starts a new Run rather than reviving the old one.
-	if _, err := scheduler.runs.CommandAgentRun(ctx, AgentRunCommandRequest{Scope: endpoint.Scope, RunID: a.ID, ExpectedRevision: a.Revision, Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "human"}}); err != nil {
+	if _, err := NewRunCommandService(store).CommandAgentRun(ctx, AgentRunCommandRequest{Scope: endpoint.Scope, RunID: a.ID, ExpectedRevision: a.Revision, Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "human"}}); err != nil {
 		t.Fatal(err)
 	}
 	canceled, _ := store.GetAgentRun(ctx, endpoint.Scope, a.ID)

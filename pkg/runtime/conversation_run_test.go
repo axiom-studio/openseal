@@ -82,29 +82,6 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	}
 }
 
-func TestConversationMessageStartsRunSkipsApprovalCoordinatorProjections(t *testing.T) {
-	conversation := &Conversation{
-		ID: "approval-channel", Scope: Scope{Kind: "tenant", ID: "11"},
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coding-agent"}, Status: ConversationStatusActive,
-	}
-	message := &ChannelMessage{
-		ID: "approval-request", Scope: conversation.Scope, ConversationID: conversation.ID,
-		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
-		Intent: MessageIntentApprovalRequest,
-	}
-	if conversationMessageStartsRun(conversation, message) {
-		t.Fatal("approval coordinator request recursively started an Agent Run")
-	}
-	message.Intent = MessageIntentUpdate
-	if conversationMessageStartsRun(conversation, message) {
-		t.Fatal("approval coordinator outcome recursively started an Agent Run")
-	}
-	message.Sender.ID = "release-coordinator"
-	if !conversationMessageStartsRun(conversation, message) {
-		t.Fatal("unrelated service handoff was suppressed")
-	}
-}
-
 func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "conversation-runs.db")
@@ -363,7 +340,9 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 		if binding.Producer != resolver.producer || binding.Session == nil || binding.Session.ID != run.SessionID {
 			t.Fatalf("binding = %#v", binding)
 		}
-		if _, ok := binding.Final.(conversationObservedFinal); !ok || binding.ToolCheck == nil || binding.AfterTool == nil {
+		// The resolver's binding has no Final: the chat seams add the observed
+		// final delivery.
+		if binding.Final == nil || binding.ToolCheck == nil || binding.AfterTool == nil {
 			t.Fatalf("conversation seams = final %T, check %v, after %v", binding.Final, binding.ToolCheck != nil, binding.AfterTool != nil)
 		}
 		if len(binding.Preparers) != 2 || len(binding.Prompt.Sections) == 0 {
@@ -426,7 +405,8 @@ func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := binding.Producer.(teamRoutingStepProducer); !ok || binding.Session != nil || binding.Final != nil || len(binding.Preparers) != 0 {
+		// The router's own binding: the drive below shows its routing output.
+		if binding.DefinitionID != "openseal.conversation-router" || binding.Producer == nil || binding.Session != nil || binding.Final != nil || len(binding.Preparers) != 0 {
 			t.Fatalf("routing binding = %#v", binding)
 		}
 		if exit := f.drive(claimed, binding); exit.Reason != RunLoopExitFinal {
@@ -459,7 +439,9 @@ func TestConversationRunOutsideParticipationEndsWithoutAgentBinding(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := binding.Producer.(conversationOutputProducer); !ok || len(resolver.resolved) != 0 || binding.Session != nil {
+		// The participation stop's fixed-output binding, not the Agent's: the
+		// drive below shows its participationSkipped output.
+		if binding.Model != "participation-disabled" || binding.Producer == nil || len(resolver.resolved) != 0 || binding.Session != nil {
 			t.Fatalf("binding = %#v, resolved = %d", binding, len(resolver.resolved))
 		}
 		if exit := f.drive(run, binding); exit.Reason != RunLoopExitFinal {

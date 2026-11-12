@@ -23,6 +23,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // mediaContent serves artifact bytes by content ref; set swaps them.
@@ -76,7 +78,14 @@ type mediaFixture struct {
 func newMediaFixture(t *testing.T, store KernelStore, vision bool, rules ...*modelRule) *mediaFixture {
 	t.Helper()
 	f := &mediaFixture{loopFixture: newLoopFixture(t, store, withRules(rules...)), content: &mediaContent{byRef: map[string][]byte{}}, vision: vision}
-	f.runner.config.AttachmentContent = f.content
+	// The kit's conversation turn runner, reading attachments from content.
+	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), ConversationRunTurnRunnerConfig{
+		AttachmentContent: f.content, AgentTurns: TurnRunnerResolverFunc(f.agentBinding),
+	}, models.WithClock(f.clock.Now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.runner = runner
 	return f
 }
 
@@ -316,7 +325,7 @@ func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 	t.Run("text_only_model", func(t *testing.T) {
 		eachStore(t, "media_text_only", func(t *testing.T, store KernelStore) {
 			chart, shot := mediaPNG(t, 3, 2), mediaPNG(t, 4, 4)
-			omitted := renderImageOmittedText("image/png")
+			omitted := "[image omitted: image/png]"
 			f := newMediaFixture(t, store, false,
 				&modelRule{name: "answer", when: func(v stepView) bool { _, _, ok := v.ToolResult(kitGovernedTool(v, "lookup")); return ok }, reply: func(v stepView) ModelStepResult {
 					if user, tool := viewImageParts(v); len(user)+len(tool) != 0 {
@@ -360,7 +369,7 @@ func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 		eachStore(t, "media_provenance", func(t *testing.T, store KernelStore) {
 			good, other := mediaPNG(t, 3, 2), mediaPNG(t, 5, 5)
 			encoded := base64.StdEncoding.EncodeToString(good)
-			unavailable := renderImageUnavailableText("image/png")
+			unavailable := "[image unavailable: image/png]"
 			var f *mediaFixture
 			f = newMediaFixture(t, store, true,
 				&modelRule{name: "after_swap", when: func(v stepView) bool { _, _, ok := v.ToolResult(kitGovernedTool(v, "lookup")); return ok }, reply: func(v stepView) ModelStepResult {

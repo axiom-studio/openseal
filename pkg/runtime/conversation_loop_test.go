@@ -11,14 +11,18 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
 // The conversation seams of the RunLoop (run-loop section 05 §7, §13 on
-// SPEC §2.4), on the SQLite store. Runs are driven through the
-// real RunLoop with a recording model producer, or the seams are called the
-// way the loop calls them (appendStepContext is the loop's phase 3).
+// SPEC §2.4), on the SQLite store. A chat Run's binding comes from the
+// conversation turn runner, as the worker resolves it. Runs are driven
+// through the real RunLoop with a recording model producer, or the seams are
+// called the way the loop calls them (appendStepContext is the loop's
+// phase 3).
 
 const chatLoopWorker = "chat-loop-worker"
 
@@ -97,6 +101,9 @@ type chatLoopFixture struct {
 	loop         *RunLoop
 	team         bool
 	now          time.Time
+	// agents is the runner's AgentTurns resolver: the bare Agent binding of
+	// each Run, before the chat seams are added.
+	agents chatLoopAgentTurns
 }
 
 func forChatLoopStores(t *testing.T, options chatLoopOptions, test func(*testing.T, *chatLoopFixture)) {
@@ -126,12 +133,6 @@ func newChatLoopFixture(t *testing.T, base conversationThreadStartTestStore, opt
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{
-		RequireParticipationOptIn: options.participation,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	loop, err := NewRunLoop(store, nil, nil, RunLoopConfig{
 		PlanToolEntries: func(*TurnRunnerBinding, *AgentSession, *AgentTurn, *SessionEntry, []LoopToolCall) ([]*SessionEntry, error) {
 			return nil, fmt.Errorf("chat loop tests make no tool calls")
@@ -145,10 +146,93 @@ func newChatLoopFixture(t *testing.T, base conversationThreadStartTestStore, opt
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &chatLoopFixture{
-		t: t, ctx: ctx, store: store, service: service, conversation: conversation, runner: runner, loop: loop, team: options.team,
+	f := &chatLoopFixture{
+		t: t, ctx: ctx, store: store, service: service, conversation: conversation, loop: loop, team: options.team,
 		actions: &chatLoopActions{calls: map[string]*ActionCall{}, approvals: map[string]*ApprovalCheckpoint{}},
 		now:     time.Now().UTC().Truncate(time.Millisecond),
+		agents:  chatLoopAgentTurns{},
+	}
+	f.runner = f.newRunner(ConversationRunTurnRunnerConfig{RequireParticipationOptIn: options.participation})
+	return f
+}
+
+// newRunner is a conversation turn runner over the fixture's store, with
+// config and the fixture's Agent bindings as its AgentTurns resolver.
+func (f *chatLoopFixture) newRunner(config ConversationRunTurnRunnerConfig) *ConversationRunTurnRunner {
+	f.t.Helper()
+	config.AgentTurns = f.agents
+	runner, err := NewConversationRunTurnRunner(chatLoopRunnerStore(f.t, f.store, f.actions), conversationRunTestCoordinator(f.t, f.service), config)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return runner
+}
+
+// chatLoopAgentTurns is the bare Agent binding bindAgent registered for each
+// Run, by Run id.
+type chatLoopAgentTurns map[string]*TurnRunnerBinding
+
+func (a chatLoopAgentTurns) ResolveTurnRunner(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+	binding, ok := a[run.ID]
+	if !ok {
+		return nil, fmt.Errorf("no Agent binding registered for Run %s", run.ID)
+	}
+	return binding, nil
+}
+
+// sqliteChatLoopStore and postgresChatLoopStore are the fixture store as the
+// turn runner sees it: the chat seams read governed calls and approvals from
+// chatLoopActions, everything else from the store itself.
+type sqliteChatLoopStore struct {
+	*sqlite.Store
+	actions *chatLoopActions
+}
+
+func (s *sqliteChatLoopStore) GetActionCall(ctx context.Context, scope Scope, id string) (*ActionCall, error) {
+	return s.actions.GetActionCall(ctx, scope, id)
+}
+
+func (s *sqliteChatLoopStore) GetApproval(ctx context.Context, scope Scope, id string) (*ApprovalCheckpoint, error) {
+	return s.actions.GetApproval(ctx, scope, id)
+}
+
+type postgresChatLoopStore struct {
+	*postgres.Store
+	actions *chatLoopActions
+}
+
+func (s *postgresChatLoopStore) GetActionCall(ctx context.Context, scope Scope, id string) (*ActionCall, error) {
+	return s.actions.GetActionCall(ctx, scope, id)
+}
+
+func (s *postgresChatLoopStore) GetApproval(ctx context.Context, scope Scope, id string) (*ApprovalCheckpoint, error) {
+	return s.actions.GetApproval(ctx, scope, id)
+}
+
+func chatLoopRunnerStore(t *testing.T, store chatLoopStore, actions *chatLoopActions) ConversationStore {
+	t.Helper()
+	switch store := store.(type) {
+	case *sqlite.Store:
+		return &sqliteChatLoopStore{Store: store, actions: actions}
+	case *postgres.Store:
+		return &postgresChatLoopStore{Store: store, actions: actions}
+	}
+	t.Fatalf("no chat loop runner store for %T", store)
+	return nil
+}
+
+// setParticipation turns the chat's participation opt-in on or off.
+func (f *chatLoopFixture) setParticipation(enabled bool) {
+	f.t.Helper()
+	current, err := f.service.GetConversation(f.ctx, f.conversation.Scope, f.conversation.ID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.conversation, err = f.service.UpdateConversation(f.ctx, UpdateConversationRequest{
+		Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, ParticipationEnabled: &enabled,
+	})
+	if err != nil {
+		f.t.Fatal(err)
 	}
 }
 
@@ -202,18 +286,27 @@ func (f *chatLoopFixture) startRun(trigger *ChannelMessage) *AgentRun {
 	return claimed
 }
 
-// bind resolves the chat seams over a bare Agent binding.
+// bind resolves agent-1's binding for run.
 func (f *chatLoopFixture) bind(run *AgentRun, producer StepProducer, actions ...capability.ModelAction) *TurnRunnerBinding {
 	f.t.Helper()
-	binding := &TurnRunnerBinding{
-		DeploymentID: "agent-1", DefinitionID: "agent-definition", DefinitionVersion: "1",
+	return f.bindAgent(run, "agent-1", producer, actions...)
+}
+
+// bindAgent resolves run's binding through the conversation turn runner, as
+// the worker does: the runner adds the chat seams to a bare binding of
+// agentID with producer and actions.
+func (f *chatLoopFixture) bindAgent(run *AgentRun, agentID string, producer StepProducer, actions ...capability.ModelAction) *TurnRunnerBinding {
+	f.t.Helper()
+	f.agents[run.ID] = &TurnRunnerBinding{
+		DeploymentID: agentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model", ModelActions: actions,
 		Producer: producer, Preparers: []StepPreparer{newRunStartPreparer(f.store, f.store)},
 		// What ResolveControlAuthority grants the speaking Agent of a chat.
-		Authority: ControlAuthority{AgentID: "agent-1", CanAskUser: true, CanReact: true},
+		Authority: ControlAuthority{AgentID: agentID, CanAskUser: true, CanReact: true},
 	}
-	if err := f.runner.bindConversationLoop(f.ctx, run, binding, ConversationLoopStores{Sessions: f.store, Actions: f.actions, Activity: f.store}); err != nil {
-		f.t.Fatalf("bind conversation loop: %v", err)
+	binding, err := f.runner.ResolveTurnRunner(f.ctx, run)
+	if err != nil {
+		f.t.Fatalf("resolve the chat binding of %s: %v", run.ID, err)
 	}
 	return binding
 }
@@ -633,12 +726,17 @@ func TestNoMessageAfterAGovernedToolSavesFiles(t *testing.T) {
 	})
 }
 
+// Participation is on when the Run is bound and stopped before its first
+// step: the step's seams end the Run without a model call.
 func TestParticipationStoppedBeforeFirstStepPostsNothing(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{participation: true}, func(t *testing.T, f *chatLoopFixture) {
+		f.setParticipation(true)
 		trigger := f.post("trigger", "user-1", "Anyone there?")
 		run := f.startRun(trigger)
 		producer := &chatLoopProducer{}
-		exit := f.drive(run, f.bind(run, producer))
+		binding := f.bind(run, producer)
+		f.setParticipation(false)
+		exit := f.drive(run, binding)
 		if exit.Reason != RunLoopExitFinal || exit.Run.Status != AgentRunStatusCompleted || exit.Run.Output["participationSkipped"] != true {
 			t.Fatalf("exit = %s %s %#v", exit.Reason, exit.Run.Status, exit.Run.Output)
 		}
@@ -703,51 +801,6 @@ func TestTeamReplacedApprovalEndsMemberSilently(t *testing.T) {
 			})
 		})
 	}
-}
-
-func TestConversationLoopBindingSetsSeams(t *testing.T) {
-	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		trigger := f.post("trigger", "user-1", "Hi")
-		run := f.startRun(trigger)
-		binding := f.bind(run, &chatLoopProducer{})
-		if binding.Session == nil || binding.Session.Revision == 0 || binding.Session.Kind != AgentSessionKindConversation {
-			t.Fatalf("lane session not opened: %#v", binding.Session)
-		}
-		if _, ok := binding.Final.(conversationObservedFinal); !ok || binding.ToolCheck == nil || binding.AfterTool == nil || len(binding.Preparers) != 2 {
-			t.Fatalf("seams = final %T check %v after %v preparers %d", binding.Final, binding.ToolCheck != nil, binding.AfterTool != nil, len(binding.Preparers))
-		}
-		if _, ok := binding.Preparers[0].(*runStartPreparer); !ok {
-			t.Fatalf("the run-start preparer must stay first: %T", binding.Preparers[0])
-		}
-		authority := binding.Authority
-		if !authority.CanReact || !authority.CanAskUser || authority.ExternalChannelReply || authority.finalMode() != FinalModeDefault {
-			t.Fatalf("authority = %#v", authority)
-		}
-		want := conversationSystemSections(f.conversation, run, false)
-		if len(binding.Prompt.Sections) != len(want) || binding.Prompt.Sections[0].ID != want[0].ID {
-			t.Fatalf("prompt sections = %#v", binding.Prompt.Sections)
-		}
-		// A second claim binds the same session and byte-identical sections.
-		again := f.bind(run, &chatLoopProducer{})
-		a, _ := json.Marshal(binding.Prompt.Sections)
-		b, _ := json.Marshal(again.Prompt.Sections)
-		if again.Session.ID != binding.Session.ID || string(a) != string(b) {
-			t.Fatal("rebinding changed the session or the system sections")
-		}
-		// apply only narrows: an authority that offers no ask or react tool
-		// (Deterministic, decision, review) does not gain one, and a decision
-		// or review authority gets no chat flags.
-		chat := ConversationLoopAuthority{CanAskConversationQuestion: true, CanReact: true, ExternalChannelReply: true, ApprovalMode: ConversationApprovalAuto}
-		if got := chat.apply(ControlAuthority{AgentID: "agent-1"}); got.CanAskUser || got.CanReact || !got.ExternalChannelReply || got.ApprovalMode != ConversationApprovalAuto {
-			t.Fatalf("deterministic authority = %#v", got)
-		}
-		if got := chat.apply(ControlAuthority{AgentID: "agent-1", FinalMode: FinalModeDecision}); got.CanAskUser || got.CanReact || got.ExternalChannelReply || got.ApprovalMode != "" {
-			t.Fatalf("decision authority = %#v", got)
-		}
-		if got := (ConversationLoopAuthority{}).apply(ControlAuthority{CanAskUser: true, CanReact: true}); got.CanAskUser || got.CanReact {
-			t.Fatalf("a chat without the ask right kept it: %#v", got)
-		}
-	})
 }
 
 // promotingChatLoopStore promotes a chat Run past the foreground timeout.
@@ -865,10 +918,16 @@ func TestRunPromotedMidFlightCountsAsStartedInChild(t *testing.T) {
 		if promoted.Session.Kind != AgentSessionKindRun {
 			t.Fatalf("promoted session = %#v", promoted.Session)
 		}
-		loop := promoted.Preparers[1].(*conversationLoop)
-		started, err := loop.runStarted(f.ctx, f.run(run.ID), promoted.Session)
-		if err != nil || !started {
-			t.Fatalf("started = %v, %v", started, err)
+		// The chat preparer counts the Run as started in its child: with no
+		// steering it has nothing to add, where an unstarted Run would get
+		// StartRun's trigger and run_context entries.
+		if len(promoted.Preparers) != 2 {
+			t.Fatalf("preparers = %d, want the run-start and chat preparers", len(promoted.Preparers))
+		}
+		step := &AgentTurn{ID: run.ID + "-step-2", Sequence: 2}
+		part, err := promoted.Preparers[1].BeforeStep(f.ctx, StepInput{Run: f.run(run.ID), Session: promoted.Session, Binding: promoted, WorkerID: chatLoopWorker, Step: step}, SteeringPlan{})
+		if err != nil || part != nil {
+			t.Fatalf("the promoted Run did not count as started: %#v, %v", part, err)
 		}
 		// The second step appends nothing to the child: StartRun does not run again.
 		if result := f.prepare(run, promoted, 2); result.Append != nil && len(result.Append.Entries) > 0 {

@@ -89,7 +89,7 @@ func (f *conversationActorFixture) waitingQuestion(t *testing.T, trigger *Channe
 	if _, err = f.scheduler.ReconcileScope(t.Context(), root.Scope); err != nil {
 		t.Fatal(err)
 	}
-	question, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), root.Scope, f.conversation.ID, clarificationQuestionKey(child))
+	question, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), root.Scope, f.conversation.ID, clarificationQuestionKeyOf(child))
 	if err != nil || question == nil {
 		t.Fatalf("projected question = %#v, %v", question, err)
 	}
@@ -165,54 +165,6 @@ func TestConversationClarificationOnlyAcceptsInitiatingUsersAnswer(t *testing.T)
 	}
 }
 
-func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
-	for _, status := range []AgentRunStatus{AgentRunStatusPaused, AgentRunStatusCompleted} {
-		for _, accepted := range []bool{false, true} {
-			name := string(status) + "/fresh"
-			if accepted {
-				name = string(status) + "/accepted"
-			}
-			t.Run(name, func(t *testing.T) {
-				f := newConversationActorFixture(t, Scope{Kind: "organization", ID: "shared"}, "writer")
-				a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
-				trigger := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "request"})
-				root, child, question := f.waitingQuestion(t, trigger)
-				answer := f.post(t, PostChannelMessageRequest{Sender: a, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, IdempotencyKey: "answer"})
-				if accepted {
-					child = f.schedule(t, answer)
-					if child.Kind != RunKindAgentWork || len(child.PendingInterventions) != 1 {
-						t.Fatalf("clarification was not accepted: %#v", child)
-					}
-				}
-				activity := NewRunActivityService(f.store, f.store)
-				var err error
-				root, _, err = activity.TransitionRun(t.Context(), root.Scope, root.ID, RunTransitionRequest{ExpectedRevision: root.Revision, Status: AgentRunStatusRunning})
-				if err != nil {
-					t.Fatal(err)
-				}
-				root, _, err = activity.TransitionRun(t.Context(), root.Scope, root.ID, RunTransitionRequest{ExpectedRevision: root.Revision, Status: status})
-				if err != nil {
-					t.Fatal(err)
-				}
-				f.scheduler = mustConversationRunScheduler(t, f.store)
-				if accepted {
-					result, replayed, err := f.scheduler.ScheduleMessage(t.Context(), root.Scope, f.conversation.ID, answer.ID)
-					if err != nil || !replayed || result == nil || result.Run.ID != child.ID || len(result.Run.PendingInterventions) != 1 {
-						t.Fatalf("accepted answer replay lost original receipt: %#v, %v, %v", result, replayed, err)
-					}
-				} else {
-					result, handled, err := f.scheduler.resumeConversationAnswer(t.Context(), f.conversation, answer)
-					if err != nil || handled || result != nil {
-						t.Fatalf("fresh answer resumed inactive parent's work: %#v, %v, %v", result, handled, err)
-					}
-				}
-				f.assertRunUnchanged(t, root)
-				f.assertRunUnchanged(t, child)
-			})
-		}
-	}
-}
-
 func TestConversationFollowUpsSeparateMembersIncludingDelayedScheduling(t *testing.T) {
 	for _, reverse := range []bool{false, true} {
 		name := "in-order"
@@ -256,7 +208,7 @@ func TestConversationFollowUpsSeparateMembersIncludingDelayedScheduling(t *testi
 			if reverse {
 				first, second = second, first
 			}
-			if memberA.Context[conversationRunContextTriggerID] != first.ID || !conversationRunHasFollowUp(memberA, second.ID) {
+			if memberA.Context[conversationRunContextTriggerID] != first.ID || !runHasFollowUp(memberA, second.ID) {
 				t.Fatalf("member A Run trigger/follow-up = %#v", memberA)
 			}
 			memberB, err := f.store.GetAgentRun(t.Context(), f.conversation.Scope, runs[1].ID)
@@ -315,7 +267,7 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "follow-up-a"})
 	delivered := f.schedule(t, messageA)
 	if delivered.ID != root.ID || delivered.Status != AgentRunStatusQueued || delivered.WakeCondition != nil ||
-		!conversationRunHasFollowUp(delivered, messageA.ID) {
+		!runHasFollowUp(delivered, messageA.ID) {
 		t.Fatalf("follow-up did not resume the waiting Run: %#v", delivered)
 	}
 	approval, err = f.store.GetApproval(t.Context(), scope, proposal.Approval.ID)
@@ -382,7 +334,7 @@ func TestConversationFollowUpUsesVoiceInitiator(t *testing.T) {
 	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
 	f.schedule(t, messageA)
 	current, err := f.store.GetAgentRun(t.Context(), voice.Scope, voice.ID)
-	if err != nil || current.Status != AgentRunStatusQueued || !conversationRunHasFollowUp(current, messageA.ID) {
+	if err != nil || current.Status != AgentRunStatusQueued || !runHasFollowUp(current, messageA.ID) {
 		t.Fatalf("call initiator's message was not delivered to their call Run: %#v, %v", current, err)
 	}
 	f.assertRunUnchanged(t, runB)

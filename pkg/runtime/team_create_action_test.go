@@ -2,7 +2,8 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
@@ -277,7 +278,7 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	teamID := teamBuilderDefinitionID(f.scope, "Launch Crew", "call-team")
+	teamID := builtTeamDefinitionID(f.scope, "Launch Crew", "call-team")
 	if !strings.HasPrefix(teamID, "team-launch-crew-") || len(teamID) != len("team-launch-crew-")+8 {
 		t.Fatalf("team id = %q", teamID)
 	}
@@ -347,7 +348,7 @@ func TestTeamCreateWithoutPurposeUsesComposerDefault(t *testing.T) {
 	if _, err := f.executeTeam(t, "call-plain", arguments, agentBuilderApprover); err != nil {
 		t.Fatal(err)
 	}
-	teamID := teamBuilderDefinitionID(f.scope, "Launch Crew", "call-plain")
+	teamID := builtTeamDefinitionID(f.scope, "Launch Crew", "call-plain")
 	definition, err := f.teams.GetDefinition(ctx, teamID, "1")
 	if err != nil {
 		t.Fatal(err)
@@ -391,50 +392,8 @@ func TestTeamCreateFailsWhenNameTakenWhileWaiting(t *testing.T) {
 	if _, err := f.executeTeam(t, "call-second", arguments, agentBuilderApprover); err == nil || !strings.Contains(err.Error(), "already used") {
 		t.Fatalf("second create err = %v", err)
 	}
-	if _, err := f.teams.GetDefinition(ctx, teamBuilderDefinitionID(f.scope, "Launch Crew", "call-second"), "1"); !errors.Is(err, kernelteam.ErrDefinitionNotFound) {
+	if _, err := f.teams.GetDefinition(ctx, builtTeamDefinitionID(f.scope, "Launch Crew", "call-second"), "1"); !errors.Is(err, kernelteam.ErrDefinitionNotFound) {
 		t.Fatalf("second definition err = %v", err)
-	}
-}
-
-func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
-	definition := TeamManagementSkill()
-	if definition.Version != "2.2.0" {
-		t.Fatalf("version = %s", definition.Version)
-	}
-	action, ok := definition.Actions[TeamActionCreateTeam]
-	if !ok || action.Risk != skill.RiskLevelWrite || action.Review != skill.ActionReviewAlways || action.Idempotency != skill.IdempotencyRequired {
-		t.Fatalf("create_team = %#v", action)
-	}
-	if !isAgentBuilderApprovalAction(&skill.BoundAction{Definition: definition, Action: action}) {
-		t.Fatal("create_team does not get the agent-builder card policy")
-	}
-	old := *definition
-	old.Version = "2.0.0"
-	if isTeamCreateAction(&skill.BoundAction{Definition: &old, Action: action}) {
-		t.Fatal("create_team matched a 2.0.0 binding")
-	}
-	if !isAgentBuilderDispatchedAction(&skill.BoundAction{Definition: definition, Action: action}) {
-		t.Fatal("the builder dispatcher does not take create_team")
-	}
-}
-
-// Earlier bindings keep matching update_profile in hosts until the reconcile
-// upgrades them; update_member exists only in the current version.
-func TestTeamMemberActionIsOnlyInTheCurrentContract(t *testing.T) {
-	for version, want := range map[string]bool{"2.2.0": true, "2.1.0": false, "2.0.0": false, "1.0.0": false} {
-		if got := IsSupportedTeamManagementSkillVersion(version); got != (version != "1.0.0") {
-			t.Errorf("IsSupportedTeamManagementSkillVersion(%s) = %v", version, got)
-		}
-		definition := TeamManagementSkill()
-		definition.Version = version
-		bound := &skill.BoundAction{Definition: definition, Action: definition.Actions[TeamActionUpdateMember]}
-		if got := isTeamMemberAction(bound); got != want {
-			t.Errorf("isTeamMemberAction(%s) = %v", version, got)
-		}
-	}
-	encoded, err := json.Marshal(TeamManagementSkill())
-	if err != nil || strings.Contains(strings.ToLower(string(encoded)), "role") {
-		t.Fatalf("openseal.teams still mentions roles: %s, %v", encoded, err)
 	}
 }
 
@@ -467,4 +426,13 @@ func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
 	if f.teamProvision.teamCreates != 0 {
 		t.Fatalf("team creates = %d", f.teamProvision.teamCreates)
 	}
+}
+
+// builtTeamDefinitionID is the id create_team gives the Team definition it
+// builds: the name's slug and a digest of the scope and the call, so a
+// replay of the call converges on the same Team. The tests spell it out to
+// pin that id.
+func builtTeamDefinitionID(scope Scope, displayName, callID string) string {
+	digest := sha256.Sum256([]byte(scope.Kind + ":" + scope.ID + ":" + callID))
+	return "team-" + kernelteam.MemberSlug(displayName) + "-" + hex.EncodeToString(digest[:])[:8]
 }

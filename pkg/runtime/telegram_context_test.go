@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type quotedPhotoHost struct{ calls int }
@@ -44,11 +46,9 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 		t.Fatalf("messages: %#v", messages)
 	}
 	// The quoted parent reaches a chat session as a user entry whose image
-	// part the step renders (catch-up's entry builder with the runner's
-	// attachment reader).
-	reader := &conversationAttachmentReader{artifacts: store, content: content}
-	session := &AgentSession{ID: "session-1", Scope: endpoint.Scope, ConversationID: conversation.ID, AgentID: "agent"}
-	entry := readConversationMessageEntry(t.Context(), reader, conversation, session, "run-1", messages[0], false)
+	// part the step renders: the first step of the reply's chat Run, through
+	// the conversation turn runner with the same attachment content.
+	entry := quotedPhotoStepEntry(t, store, content, conversation, messages[1], messages[0].ID)
 	var images []ContentPart
 	for _, part := range entry.User.Content {
 		if part.Type == ContentPartImage {
@@ -61,6 +61,48 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 	if text := entry.User.Content[0].Text; !strings.Contains(text, "historical") || !strings.Contains(text, "Attached: photo.png") {
 		t.Fatalf("quoted photo header: %q", text)
 	}
+}
+
+// quotedPhotoStepEntry is the user entry of messageID in the first step
+// context of the chat Run that answers trigger.
+func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactContentStore, conversation *Conversation, trigger *ChannelMessage, messageID string) *SessionEntry {
+	t.Helper()
+	ctx := t.Context()
+	created, err := NewRunCommandService(store).CreateAgentRun(ctx, conversationAgentRunRequest(conversation, trigger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: conversation.Scope, WorkerID: "photo-step", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	if err != nil || run == nil || run.ID != created.Run.ID {
+		t.Fatalf("claim = %#v, %v", run, err)
+	}
+	agent := chatLoopAgentTurns{run.ID: {
+		DeploymentID: run.AssignedAgentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
+		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model", Producer: &chatLoopProducer{},
+		Authority: ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
+	}}
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, NewConversationService(store)), ConversationRunTurnRunnerConfig{
+		AttachmentContent: content, AgentTurns: agent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := binding.Preparers[len(binding.Preparers)-1]
+	part, err := chat.BeforeStep(ctx, StepInput{Run: run, Session: binding.Session, Binding: binding, WorkerID: "photo-step", Step: &AgentTurn{ID: run.ID + "-step-1", Sequence: 1}}, SteeringPlan{})
+	if err != nil || part == nil {
+		t.Fatalf("first step context = %#v, %v", part, err)
+	}
+	for _, entry := range part.Entries {
+		if entry.User != nil && entry.User.MessageID == messageID {
+			return entry
+		}
+	}
+	t.Fatalf("message %s is not in the first step context", messageID)
+	return nil
 }
 
 func TestQuotedPhotoContextRejectsInvalidOriginAndUnboundedFiles(t *testing.T) {
