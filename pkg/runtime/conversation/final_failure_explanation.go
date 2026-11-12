@@ -25,7 +25,7 @@ const (
 
 const maximumRunFailureCodeBytes = 64
 
-// beginRunFailureExplanation records the failure of a stopped attempt. The
+// BeginRunFailureExplanation records the failure of a stopped attempt. The
 // caller stores the result through RunTransitionRequest.FailureExplanation.
 // While the Run is still running with it, the Run is in explain mode: the
 // loop's next step offers no tools (runExplainingFailure). A Run that already
@@ -53,7 +53,7 @@ func BeginRunFailureExplanation(run *models.AgentRun, kind, code, message, stepE
 	}
 }
 
-// explainedRunFailure is the failure after its model explanation was posted.
+// ExplainedRunFailure is the failure after its model explanation was posted.
 func ExplainedRunFailure(f *models.RunFailureExplanation) *models.RunFailureExplanation {
 	if f == nil {
 		return nil
@@ -73,7 +73,7 @@ func runFailureCode(code string) string {
 	return "execution_failed"
 }
 
-// runFailureCodeOrEmpty keeps a kernel code only when it is a plain bounded
+// RunFailureCodeOrEmpty keeps a kernel code only when it is a plain bounded
 // identifier; anything else (provider text, for example) is dropped.
 func RunFailureCodeOrEmpty(code string) string {
 	code = strings.TrimSpace(code)
@@ -88,7 +88,7 @@ func RunFailureCodeOrEmpty(code string) string {
 	return code
 }
 
-// runExplainingFailure reports whether the Run's next step is its one
+// RunExplainingFailure reports whether the Run's next step is its one
 // tool-free failure explanation.
 func RunExplainingFailure(run *models.AgentRun) bool {
 	return run != nil && run.FailureExplanation != nil && !run.FailureExplanation.Explained && !models.IsTerminalAgentRunStatus(run.Status)
@@ -100,7 +100,7 @@ func failureExplanationNoteText(f *models.RunFailureExplanation) string {
 	return "This attempt has stopped: " + strings.TrimRight(f.Message, ". ") + ". Give one brief, useful final reply in your configured voice explaining what did not work and any next step the user actually needs. Ground it in this failure and the successful tool results above. Do not expose internal tool names, ids or governance details, and do not guess that the user's plan, account or permissions are wrong without evidence. Do not call tools, retry, repair, set anything up, schedule, wait, fork or delegate."
 }
 
-// failureExplanationNote is the note the loop appends at the start of the
+// FailureExplanationNote is the note the loop appends at the start of the
 // explanation step (stepID). Its SourceKey is attempt-scoped, so a replayed
 // append of the same step is a no-op and a later attempt gets its own note.
 func FailureExplanationNote(sessionID, runID, stepID string, f *models.RunFailureExplanation) *models.SessionEntry {
@@ -116,7 +116,7 @@ func FailureExplanationNote(sessionID, runID, stepID string, f *models.RunFailur
 	}
 }
 
-// noModelTurnFailureCode names the host failures under which no model can
+// NoModelTurnFailureCode names the host failures under which no model can
 // answer this turn: the Workspace has no credits, or the model provider or
 // its configuration is unavailable, or the context no longer fits. Every
 // other failure can be explained.
@@ -148,14 +148,14 @@ func BoundedTurnFailureText(text string) string {
 	return text
 }
 
-// modelExplainsFailure reports whether a stopped attempt of this Run gets an
+// ModelExplainsFailure reports whether a stopped attempt of this Run gets an
 // answer-only model turn to explain its failure before it ends. Hosted Agent
 // work and conversations do; other kinds end with the kernel's reply.
 func ModelExplainsFailure(run *models.AgentRun) bool {
 	return run != nil && (run.Kind == models.RunKindAgentWork || run.Kind == models.RunKindConversation)
 }
 
-// turnFailureCanBeExplained reports whether a failed turn leaves a model able
+// TurnFailureCanBeExplained reports whether a failed turn leaves a model able
 // to answer: not when the host or model provider is unavailable, the
 // Workspace has no credits, the budget is spent, or the work was canceled.
 func TurnFailureCanBeExplained(err error, code string) bool {

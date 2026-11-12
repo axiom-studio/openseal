@@ -14,7 +14,7 @@ import (
 
 const ConversationArtifactReceiptService = "openseal.artifact-delivery"
 
-// runActionArtifactReferences returns the artifact references of run's
+// RunActionArtifactReferences returns the artifact references of run's
 // succeeded governed tool calls, in entry order, deduplicated by (id,
 // version). They ride on the Run's final answer. A Run with no session log
 // (or stores that cannot read it) has none.

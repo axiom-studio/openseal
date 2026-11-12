@@ -15,13 +15,13 @@ func ConversationClarificationReferences(run *models.AgentRun) []models.Conversa
 
 const conversationClarificationKeyPrefix = "conversation-clarification:"
 
-// conversationClarificationKey is the idempotency key of the question message
+// ConversationClarificationKey is the idempotency key of the question message
 // an ask_user entry posts.
 func ConversationClarificationKey(runID, entryID string) string {
 	return conversationClarificationKeyPrefix + runID + ":" + entryID
 }
 
-// conversationQuestionPostRequest is the one shape of a clarification question
+// ConversationQuestionPostRequest is the one shape of a clarification question
 // message; the ask_user settle and the question reconciler post the same
 // request, so either replays the other.
 func ConversationQuestionPostRequest(run *models.AgentRun, conversation *models.Conversation, trigger *models.ChannelMessage, args *models.AskUserArgs, key string) PostChannelMessageRequest {

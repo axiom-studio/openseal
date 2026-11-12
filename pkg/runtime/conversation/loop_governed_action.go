@@ -65,7 +65,7 @@ func LoopGovernedAction(actions []capability.ModelAction, toolName string) (capa
 	return capability.ModelAction{}, false
 }
 
-// selectGovernedAction resolves a governed tool call to the binding's model
+// SelectGovernedAction resolves a governed tool call to the binding's model
 // action with the exact-name selector (section 03 §3.1). nil means the
 // binding offers no such action. A name exposed twice and a directive whose
 // pinned Skill version the binding no longer authorizes

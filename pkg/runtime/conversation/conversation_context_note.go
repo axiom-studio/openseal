@@ -103,7 +103,7 @@ type ConversationContextInput struct {
 	Step         int64                    // the step the note is appended in
 }
 
-// previousConversationContextDigests is what the session last saw of each
+// PreviousConversationContextDigests is what the session last saw of each
 // section: the digests of the newest run_context notes after its last
 // compaction, merged newest first. The Run's own note (a rebuilt start) is
 // left out.
@@ -167,7 +167,7 @@ func latestContextDigests(entries []*models.SessionEntry) map[string]string {
 	return digests
 }
 
-// conversationContextNote selects the sections to send and builds the note
+// ConversationContextNote selects the sections to send and builds the note
 // entry of runID in session. It is nil when no section is to be sent.
 func ConversationContextNote(session *models.AgentSession, runID string, sections []ConversationContextSection, previous map[string]string) *models.SessionEntry {
 	if session == nil {
@@ -286,7 +286,7 @@ func shrinkRunContextList(section string, over int) string {
 	return strings.Join(kept, "\n")
 }
 
-// truncateUTF8Bytes cuts value to at most limit bytes on a rune boundary.
+// TruncateUTF8Bytes cuts value to at most limit bytes on a rune boundary.
 func TruncateUTF8Bytes(value string, limit int) string {
 	if len(value) <= limit {
 		return value
@@ -301,7 +301,7 @@ func TruncateUTF8Bytes(value string, limit int) string {
 	return value[:cut]
 }
 
-// boundedRunContextValue is value on one line, at most limit runes.
+// BoundedRunContextValue is value on one line, at most limit runes.
 func BoundedRunContextValue(value string, limit int) string {
 	return models.TruncateRunes(strings.Join(strings.Fields(value), " "), limit)
 }
@@ -309,7 +309,7 @@ func BoundedRunContextValue(value string, limit int) string {
 // ---------------------------------------------------------------------------
 // Sections
 
-// runContextPathMessages is the set of channel message ids that are user
+// RunContextPathMessages is the set of channel message ids that are user
 // entries of the session: the recent ones already stored and the ones being
 // appended with the note.
 func RunContextPathMessages(ctx context.Context, in ConversationContextInput) (map[string]bool, error) {
@@ -342,7 +342,7 @@ func RunContextPathMessages(ctx context.Context, in ConversationContextInput) (m
 	return path, nil
 }
 
-// runContextRespondTo names the message to answer and how: spoken, a voice
+// RunContextRespondTo names the message to answer and how: spoken, a voice
 // call greeting, why a Team router picked this member, work handed over.
 func RunContextRespondTo(in ConversationContextInput) string {
 	trigger := in.Trigger
@@ -371,7 +371,7 @@ func RunContextRespondTo(in ConversationContextInput) string {
 	return strings.Join(lines, "\n")
 }
 
-// runContextMessage is a message's header line and content, the content cut
+// RunContextMessage is a message's header line and content, the content cut
 // to limit bytes.
 func RunContextMessage(in ConversationContextInput, message *models.ChannelMessage, limit int) string {
 	attribution := conversationMessageAttribution(message, in.Session, in.Conversation.Owner.Type == models.OwnerTypeTeam)
@@ -444,7 +444,7 @@ func RunContextTeam(team *AgentConversationTeam) string {
 	return strings.Join(lines, "\n")
 }
 
-// approvalModeText is the conversation's approval mode. It is a line of the
+// ApprovalModeText is the conversation's approval mode. It is a line of the
 // per-step capabilities note, not a system hint: every Run with a
 // conversation origin (chat, task and delegated Runs) sees it, and a mode
 // changed mid-Run reaches the next step as a one-line update instead of
@@ -459,7 +459,7 @@ func ApprovalModeText(mode models.ConversationApprovalMode) string {
 	return "Approval mode: auto. Reads and ordinary writes run without approval; external, production and destructive actions wait for the user's approval in chat."
 }
 
-// runContextActiveRuns is never empty: "none" is a fact the model relies on.
+// RunContextActiveRuns is never empty: "none" is a fact the model relies on.
 func RunContextActiveRuns(active []AgentConversationActiveRun) string {
 	if len(active) == 0 {
 		return "Active work: none."
@@ -479,7 +479,7 @@ func RunContextActiveRuns(active []AgentConversationActiveRun) string {
 	return strings.Join(lines, "\n")
 }
 
-// conversationTaskLister reads the conversation task ledger.
+// ConversationTaskLister reads the conversation task ledger.
 type ConversationTaskLister interface {
 	ListConversationTasks(context.Context, models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error)
 }
@@ -494,7 +494,7 @@ func RunContextLines(lines []string) string {
 	return strings.Join(out, "\n")
 }
 
-// runContextReactions lists reactions on the recent messages the session
+// RunContextReactions lists reactions on the recent messages the session
 // holds (its user entries) and on this Agent's own answers, newest first.
 func RunContextReactions(in ConversationContextInput, path map[string]bool) string {
 	reactions := reactionPromptLines(in.Recent, in.Trigger)

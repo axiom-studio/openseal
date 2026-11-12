@@ -9,11 +9,11 @@ import (
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
-// finalOutputFilesKey lists the ids of the files saved in this Run that
+// FinalOutputFilesKey lists the ids of the files saved in this Run that
 // the answer hands over; only those go out with it.
 const FinalOutputFilesKey = "files"
 
-// cloneVisual deep-copies a visual so forms, responses and outcomes never
+// CloneVisual deep-copies a visual so forms, responses and outcomes never
 // share component slices.
 func CloneVisual(visual *presentation.Visual) *presentation.Visual {
 	if visual == nil {
@@ -32,7 +32,7 @@ func CloneVisual(visual *presentation.Visual) *presentation.Visual {
 	return &cloned
 }
 
-// handedOverFileIDs trims and deduplicates the answer's file ids.
+// HandedOverFileIDs trims and deduplicates the answer's file ids.
 func HandedOverFileIDs(ids []string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -45,7 +45,7 @@ func HandedOverFileIDs(ids []string) []string {
 	return out
 }
 
-// handedOverArtifacts keeps the Run's saved files the final output hands over
+// HandedOverArtifacts keeps the Run's saved files the final output hands over
 // (its "files", by id or by the path a tool saved it from) and the ones the
 // Agent showed in the chat itself (save_app, present), in the Run's order.
 // A file saved more than once goes out as its newest version only. A Run's
@@ -104,7 +104,7 @@ func handedOverPath(name string) string {
 	return strings.TrimLeft(name, "/")
 }
 
-// unknownHandedOverFilesText sends a final whose files name no saved file
+// UnknownHandedOverFilesText sends a final whose files name no saved file
 // back to the model, which otherwise attaches nothing without a word.
 func UnknownHandedOverFilesText(unknown []string, saved []models.SavedArtifact) string {
 	names := make([]string, 0, len(saved))

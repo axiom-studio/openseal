@@ -16,7 +16,7 @@ func ConversationWorkOrigin(ctx context.Context, runs models.PortfolioStore, con
 	return ConversationWorkOriginForState(ctx, runs, conversations, run, false)
 }
 
-// workOrigin is conversationWorkOrigin over the service's store.
+// WorkOrigin is conversationWorkOrigin over the service's store.
 func (s *ConversationService) WorkOrigin(ctx context.Context, runs models.PortfolioStore, run *models.AgentRun) (*models.AgentRun, *models.Conversation, *models.ChannelMessage, error) {
 	return ConversationWorkOrigin(ctx, runs, s.store, run)
 }

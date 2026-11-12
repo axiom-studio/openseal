@@ -153,7 +153,7 @@ func terminalFailureReplyOf(f *models.RunFailureExplanation, stoppingCall, lates
 	return reply
 }
 
-// terminalRunFailureReply is the kernel's reply for a failed Run. A failed
+// TerminalRunFailureReply is the kernel's reply for a failed Run. A failed
 // governed call in the Run's last step with tool entries is what stopped the
 // attempt, and gives the typed rate-limit, browser and file-size replies. A
 // failure the model already moved past (later steps ran tools) is not named.

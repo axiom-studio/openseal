@@ -1,5 +1,8 @@
-// Re-exports of declarations moved to github.com/axiom-studio/openseal/pkg/runtime/conversation,
-// kept so that importers of github.com/axiom-studio/openseal/pkg/runtime continue to compile.
+// Temporary compatibility for the pkg/runtime split. New code imports
+// pkg/runtime/conversation. Remove once in-flight branches have landed.
+//
+// Exported declarations of pkg/runtime/conversation, kept so that importers
+// of pkg/runtime continue to compile.
 
 package runtime
 

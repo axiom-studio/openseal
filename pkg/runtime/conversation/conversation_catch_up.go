@@ -45,7 +45,7 @@ const (
 // messages exist that the session does not hold.
 const catchUpHistoryOmittedText = "Earlier messages of this chat are not shown here. Read them with read_conversation_history when the request depends on them."
 
-// conversationCatchUp turns visible channel messages newer than the session
+// ConversationCatchUp turns visible channel messages newer than the session
 // watermark into user entries.
 type ConversationCatchUp struct {
 	conversations *ConversationService
@@ -88,7 +88,7 @@ type CatchUpResult struct {
 	Backdrop []*models.ChannelMessage
 }
 
-// collect reads the messages in (session watermark, Through] that the viewer
+// Collect reads the messages in (session watermark, Through] that the viewer
 // can see and builds their user entries.
 func (c *ConversationCatchUp) Collect(ctx context.Context, req CatchUpRequest) (*CatchUpResult, error) {
 	if c == nil || c.conversations == nil || c.runs == nil {
@@ -285,7 +285,7 @@ func catchUpHistoryOmittedNote(req CatchUpRequest, result *CatchUpResult) *model
 	return entry
 }
 
-// stepContextAppend is the result as the conversation preparer's part of the
+// StepContextAppend is the result as the conversation preparer's part of the
 // step's context append: the history_omitted note, then the message entries,
 // with the watermark CAS from session's watermark. It is nil when there is
 // nothing to write.

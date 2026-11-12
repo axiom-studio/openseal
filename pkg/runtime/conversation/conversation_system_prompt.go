@@ -44,7 +44,7 @@ const conversationSpokenRules = models.SpokenResponseStyleInstruction +
 	" If ambient speech is not directed at you, call turn_final_answer with silent=true. " +
 	models.SpokenResponseAuthorityInstruction
 
-// conversationSystemSections returns the stable conversation sections of the
+// ConversationSystemSections returns the stable conversation sections of the
 // system prompt for run, in order: channel rules, attachment rules, external
 // source rules (external conversations), Team rules (Team-owned Runs) and
 // spoken rules (spoken replies, ConversationLoopAuthority.Spoken).

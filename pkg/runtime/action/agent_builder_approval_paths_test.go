@@ -26,9 +26,9 @@ import (
 //     allow-all ApprovalAuthorizerFunc for origin-conversation participants.
 //   - callback_approval_consumer.go: EligibleApprovalAuthorizer.
 //   - approval_notification_worker.go: EligibleApprovalAuthorizer, ResolveTimeout.
-//   - conversation_approval_mode.go: nil, ResolveByApprovalMode.
+//   - conversation/conversation_approval_mode.go: nil, ResolveByApprovalMode.
 //   - conversation_run.go (ConversationRunScheduler): nil.
-//   - conversation_team_responder.go (team follow-ups): nil.
+//   - conversation/conversation_team_responder.go (team follow-ups): nil.
 //   - pkg/openseal Engine: the host's WithApprovalAuthorizer, default
 //     EligibleApprovalAuthorizer (cortex passes its Casbin authorizer).
 //   - internal/server/action_approvals.go: DesktopApprovalAuthorizer, which
@@ -141,10 +141,10 @@ func TestAgentBuilderApprovalPathsRefuseInKernelApprove(t *testing.T) {
 }
 
 func TestAgentBuilderApprovalPathsRefuseApprovalModeAndNilCoordinators(t *testing.T) {
-	// conversation_approval_mode.go, conversation_run.go and
-	// conversation_team_responder.go build their coordinator with no
-	// authorizer: the approval-mode approve is refused, a principal approve is
-	// not configured at all.
+	// conversation/conversation_approval_mode.go, conversation_run.go and
+	// conversation/conversation_team_responder.go build their coordinator
+	// with no authorizer: the approval-mode approve is refused, a principal
+	// approve is not configured at all.
 	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f, approval := cardApproval(t, store, "mode", createAgentCard(), models.ApprovalTimeoutExpire)
 		coordinator := action.NewApprovalCoordinator(f.Store, f.Store, nil)

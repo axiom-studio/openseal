@@ -39,7 +39,7 @@ const (
 	conversationImageMaxBytes = models.MaxModelStepMediaBytes
 )
 
-// conversationAttachmentReader reads the artifact attachments of one channel
+// ConversationAttachmentReader reads the artifact attachments of one channel
 // message as content parts of that message's user entry. Attachments belong
 // to one immutable message version, so they are ingested once, with the
 // message (run-loop section 05 §4.6). Image bytes are never stored: an image

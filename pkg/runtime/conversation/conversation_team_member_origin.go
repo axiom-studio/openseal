@@ -32,7 +32,7 @@ func ConversationRunAgentID(conversation *models.Conversation, run *models.Agent
 	return ""
 }
 
-// teamMemberRunKey is the idempotency key the routing Run creates a member's
+// TeamMemberRunKey is the idempotency key the routing Run creates a member's
 // answer Run with, so the member Run's ID is derived from its routing Run.
 func TeamMemberRunKey(routing *models.AgentRun, memberID string) string {
 	return "team-member-run:" + models.SHA256DigestString(routing.Scope.Kind+"\x00"+routing.Scope.ID+"\x00"+routing.ID+"\x00"+memberID)
@@ -42,7 +42,7 @@ type teamMemberRunReader interface {
 	GetAgentRun(context.Context, models.Scope, string) (*models.AgentRun, error)
 }
 
-// verifyTeamMemberRun checks a member's answer Run against kernel-owned
+// VerifyTeamMemberRun checks a member's answer Run against kernel-owned
 // lineage: the routing Run scheduled for trigger created it under the derived
 // ID, in the member's lane. Copied context fields alone never pass.
 func VerifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversation *models.Conversation, trigger *models.ChannelMessage, run *models.AgentRun) (bool, error) {

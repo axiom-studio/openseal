@@ -130,7 +130,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 	return c.CoordinateWithChildRuns(ctx, req, nil)
 }
 
-// coordinateWithChildRuns is Coordinate for a Team channel's routing Run.
+// CoordinateWithChildRuns is Coordinate for a Team channel's routing Run.
 // childRunKey derives each responder's child Run idempotency key, so the
 // round records the Run id before the Run exists.
 func (c *ConversationCoordinator) CoordinateWithChildRuns(ctx context.Context, req ConversationRoutingRequest, childRunKey func(models.ConversationParticipant) string) (*models.ParticipationRoundResult, error) {
@@ -434,7 +434,7 @@ type conversationAgentCatalog interface {
 	GetDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
 }
 
-// loadConversationTeamRoster reads the Team's routing notes, lead and member
+// LoadConversationTeamRoster reads the Team's routing notes, lead and member
 // names, purposes and owned topics from the kernel store. It is best effort: a
 // store without Team records yields an empty roster, never an error, because
 // membership itself comes from the host's participant source.
@@ -573,7 +573,7 @@ func ReverseChannelMessages(messages []*models.ChannelMessage) {
 	}
 }
 
-// resolveParticipants lists the participants who may answer in query's
+// ResolveParticipants lists the participants who may answer in query's
 // conversation.
 func (c *ConversationCoordinator) ResolveParticipants(ctx context.Context, query ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
 	return c.participants.ResolveConversationParticipants(ctx, query)

@@ -30,7 +30,7 @@ Do not perform work, repair the candidate, use outside sources, call tools, or e
 
 const (
 	taskCompletionReviseCode   = "task_completion_revise"
-	taskCompletionRejectedCode = "task_completion_rejected" // terminal_failure_reply.go recognizes it
+	taskCompletionRejectedCode = "task_completion_rejected" // conversation/terminal_failure_reply.go recognizes it
 
 	taskReviewMaxReasonBytes     = 4096
 	taskReviewMaxToolResultBytes = 2 << 10

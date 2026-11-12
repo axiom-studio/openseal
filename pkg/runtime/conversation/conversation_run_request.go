@@ -10,7 +10,7 @@ const (
 	ConversationRunContextTriggerSeq = "triggerSequence"
 )
 
-// conversationMessageInitiatingUser resolves only the canonical scoped human
+// ConversationMessageInitiatingUser resolves only the canonical scoped human
 // identity. A host-owned voice-call start may name its authenticated initiator;
 // arbitrary service metadata and copied Run context never grant that authority.
 func ConversationMessageInitiatingUser(conversation *models.Conversation, message *models.ChannelMessage) (models.ConversationParticipant, bool) {
@@ -104,5 +104,5 @@ func conversationRunAssignment(run *models.AgentRun) *agentConversationAssignmen
 	return &agentConversationAssignment{From: from, Kind: string(run.Source), Work: run.Goal}
 }
 
-// collaborationHandedOffByContextKey records the teammate that handed work over in a chat.
+// CollaborationHandedOffByContextKey records the teammate that handed work over in a chat.
 const CollaborationHandedOffByContextKey = "handedOffBy"

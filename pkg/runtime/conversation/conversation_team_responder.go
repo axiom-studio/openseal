@@ -23,7 +23,7 @@ const teamChannelRules = "You are one member of this Team channel and answer und
 	"Never @mention teammates just to agree, thank or acknowledge. " +
 	"Prefer a reaction (👀 picked up, ✅ done, 👍 agree) over a filler message."
 
-// isTeamRoutingRun reports whether run is a Team's routing Run: a
+// IsTeamRoutingRun reports whether run is a Team's routing Run: a
 // conversation Run with no assigned Agent, which starts member Runs.
 func IsTeamRoutingRun(run *models.AgentRun) bool {
 	return run != nil && run.Kind == models.RunKindConversation && run.Owner.Type == models.OwnerTypeTeam &&
@@ -34,7 +34,7 @@ func ConversationRoutingKey(scope models.Scope, conversationID, triggerID string
 	return "participation-round:" + models.SHA256DigestString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+triggerID)
 }
 
-// teamMemberRunRequest is a member's answer Run: a root conversation Run in
+// TeamMemberRunRequest is a member's answer Run: a root conversation Run in
 // the member's own lane, shaped like a 1:1 Agent chat's Run.
 func TeamMemberRunRequest(routing *models.AgentRun, conversation *models.Conversation, trigger *models.ChannelMessage, responder models.ConversationResponder, key string) models.CreateAgentRunRequest {
 	context := map[string]interface{}{
@@ -65,7 +65,7 @@ func TeamMemberRunRequest(routing *models.AgentRun, conversation *models.Convers
 	}
 }
 
-// agentConversationTeam is the short Team context a member's turn gets.
+// AgentConversationTeam is the short Team context a member's turn gets.
 // The routing reason is a respond_to line of the run context and the Team
 // rules are a system section (teamChannelRules).
 type AgentConversationTeam struct {
@@ -82,7 +82,7 @@ type agentConversationTeamMember struct {
 	You     bool     `json:"you,omitempty"`
 }
 
-// agentTeam is the team context of the Agent you: the routing notes and
+// AgentTeam is the team context of the Agent you: the routing notes and
 // every member who may answer, by binding.
 func (roster ConversationTeamRoster) AgentTeam(bindings []ConversationParticipantBinding, you string) *AgentConversationTeam {
 	team := &AgentConversationTeam{Notes: roster.notes, Roster: make([]agentConversationTeamMember, 0, len(bindings))}

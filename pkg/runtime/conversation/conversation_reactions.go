@@ -355,7 +355,7 @@ func admitTurnReactions(in []TurnReaction) []TurnReaction {
 	return out
 }
 
-// reactionEcho reports whether content says nothing beyond the turn's
+// ReactionEcho reports whether content says nothing beyond the turn's
 // reactions: empty, or only the reacted emoji and whitespace.
 func ReactionEcho(content string, reactions []TurnReaction) bool {
 	for _, reaction := range reactions {
