@@ -15,6 +15,13 @@ func TestKernelHTTPClientChannelTimelineRoundTrip(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
 	service := runtime.NewConversationService(store)
 	scope := runtime.Scope{Kind: "tenant", ID: "timeline"}
+	// The kernel creates no space: a conversation made with no person goes
+	// to the empty owner's default space, so the test seeds it.
+	if _, err := runtime.NewSpaceService(store).CreateSpace(t.Context(), runtime.CreateSpaceRequest{
+		Scope: scope, Name: "Home", Look: runtime.DefaultSpaceLook,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	conversation, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{
 		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, Title: "Timeline", IdempotencyKey: "timeline",
 	})
