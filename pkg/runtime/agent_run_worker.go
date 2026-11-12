@@ -146,6 +146,12 @@ func (p *AgentRunWorkerPool) IdleFor(now time.Time) time.Duration {
 }
 
 func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
+	return newAgentRunWorkerPool(store, resolver, logger, config, RunLoopMaxStepsPerClaim, opts...)
+}
+
+// newAgentRunWorkerPool is NewAgentRunWorkerPool with the number of steps
+// one claim may run before it yields.
+func newAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, maxStepsPerClaim int, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
 	if store == nil || resolver == nil {
 		return nil, errors.New("kernel store and turn runner resolver are required")
 	}
@@ -157,7 +163,7 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	}
 	clock := models.ClockFrom(opts)
 	loop, err := NewRunLoop(store, nil, logger, RunLoopConfig{
-		StepLeaseDuration: config.TurnLeaseDuration, Now: clock,
+		StepLeaseDuration: config.TurnLeaseDuration, MaxStepsPerClaim: maxStepsPerClaim, Now: clock,
 		PlanToolEntries: workerPlanToolEntries(store), PlainTextFinal: workerPlainTextFinal,
 	})
 	if err != nil {
