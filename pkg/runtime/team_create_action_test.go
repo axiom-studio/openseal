@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -73,7 +74,7 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 			t.Fatal(err)
 		}
 	}
-	for _, spaceID := range []string{DefaultSpaceID(base.scope), base.salesID} {
+	for _, spaceID := range []string{base.homeID, base.salesID} {
 		for _, agentID := range []string{"researcher", "platform"} {
 			if _, _, err := base.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: base.scope, SpaceID: spaceID, Type: SpaceMemberAgent, MemberID: agentID}); err != nil {
 				t.Fatal(err)
@@ -174,7 +175,7 @@ func TestTeamCreatePreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAgentBuilderJSON(t, preview, fmt.Sprintf(`{
-		"skillId": "openseal.teams", "skillVersion": "2.1.0", "action": "create_team", "risk": "write", "sideEffect": "write",
+		"skillId": "openseal.teams", "skillVersion": "2.2.0", "action": "create_team", "risk": "write", "sideEffect": "write",
 		"resourceType": "team", "operation": "create_team",
 		"team": {"displayName": "Launch Crew", "purpose": "Ship product launches."},
 		"approvals": {"maximumRisk": "write"},
@@ -197,11 +198,11 @@ func TestTeamCreateResolvesSpaceToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defaultSpace := DefaultSpaceID(f.scope)
+	defaultSpace := f.homeID
 	if arguments["spaceId"] != defaultSpace {
 		t.Fatalf("spaceId = %#v, want %q", arguments["spaceId"], defaultSpace)
 	}
-	if space := preview["space"].(map[string]interface{}); space["id"] != defaultSpace || space["name"] != DefaultSpaceName {
+	if space := preview["space"].(map[string]interface{}); space["id"] != defaultSpace || space["name"] != "Home" {
 		t.Fatalf("space = %#v", space)
 	}
 }
@@ -292,19 +293,6 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantRoles := []kernelteam.RoleSlot{
-		{
-			ID: "researcher-1", DisplayName: "Researcher", Purpose: "Researcher work", MinimumMembers: 1, MaximumMembers: 1,
-			RequiredDefinitionIDs: []string{"researcher-definition"}, ChannelParticipation: kernelteam.RoleChannelActive,
-		},
-		{
-			ID: "platform-helper-2", DisplayName: "Platform Helper", Purpose: "Platform Helper work", MinimumMembers: 1, MaximumMembers: 1,
-			RequiredDefinitionIDs: []string{"platform-definition"}, ChannelParticipation: kernelteam.RoleChannelActive,
-		},
-	}
-	if !reflect.DeepEqual(definition.Roles, wantRoles) {
-		t.Fatalf("roles = %#v", definition.Roles)
-	}
 	if definition.DisplayName != "Launch Crew" || definition.Purpose != "Ship product launches." ||
 		definition.Approvals.MaximumRisk != capability.RiskLevelWrite ||
 		definition.Provenance != (workforce.DefinitionProvenance{Source: "agent-builder", Reference: "call-team", CreatedBy: "person-1"}) {
@@ -316,14 +304,14 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantRoster := []kernelteam.RosterAssignment{
-		{ID: "researcher-1", RoleID: "researcher-1", AgentDeploymentID: "researcher", DisplayName: "Researcher"},
-		{ID: "platform-helper-2", RoleID: "platform-helper-2", AgentDeploymentID: "platform", DisplayName: "Platform Helper"},
+		{ID: "researcher-1", AgentDeploymentID: "researcher", DisplayName: "Researcher", Purpose: "Researcher work", ChannelParticipation: kernelteam.ChannelActive},
+		{ID: "platform-helper-2", AgentDeploymentID: "platform", DisplayName: "Platform Helper", Purpose: "Platform Helper work", ChannelParticipation: kernelteam.ChannelActive},
 	}
 	if deployment.Status != kernelteam.DeploymentActive || deployment.DefinitionID != teamID || deployment.ActiveVersion != "1" ||
 		!reflect.DeepEqual(deployment.Roster, wantRoster) {
 		t.Fatalf("deployment = %#v", deployment)
 	}
-	if !f.teamInSpace(t, f.salesID, teamID) || f.teamInSpace(t, DefaultSpaceID(f.scope), teamID) {
+	if !f.teamInSpace(t, f.salesID, teamID) || f.teamInSpace(t, f.homeID, teamID) {
 		t.Fatal("team is not only in the reviewed space")
 	}
 
@@ -367,8 +355,8 @@ func TestTeamCreateWithoutPurposeUsesComposerDefault(t *testing.T) {
 	if definition.Purpose != "Launch Crew team" {
 		t.Fatalf("purpose = %q", definition.Purpose)
 	}
-	if !f.teamInSpace(t, DefaultSpaceID(f.scope), teamID) {
-		t.Fatal("team is not in Default")
+	if !f.teamInSpace(t, f.homeID, teamID) || f.teamInSpace(t, f.salesID, teamID) {
+		t.Fatal("team is not only in the person's default space")
 	}
 }
 
@@ -410,7 +398,7 @@ func TestTeamCreateFailsWhenNameTakenWhileWaiting(t *testing.T) {
 
 func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	definition := TeamManagementSkill()
-	if definition.Version != "2.1.0" {
+	if definition.Version != "2.2.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}
 	action, ok := definition.Actions[TeamActionCreateTeam]
@@ -430,19 +418,23 @@ func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	}
 }
 
-// 2.0.0 bindings keep matching update_role (and, in hosts, update_profile)
-// until the reconcile upgrades them to 2.1.0.
-func TestTeamRoleActionMatchesSupportedVersions(t *testing.T) {
-	for version, want := range map[string]bool{"2.1.0": true, "2.0.0": true, "1.0.0": false, "2.2.0": false} {
-		if got := IsSupportedTeamManagementSkillVersion(version); got != want {
+// Earlier bindings keep matching update_profile in hosts until the reconcile
+// upgrades them; update_member exists only in the current version.
+func TestTeamMemberActionIsOnlyInTheCurrentContract(t *testing.T) {
+	for version, want := range map[string]bool{"2.2.0": true, "2.1.0": false, "2.0.0": false, "1.0.0": false} {
+		if got := IsSupportedTeamManagementSkillVersion(version); got != (version != "1.0.0") {
 			t.Errorf("IsSupportedTeamManagementSkillVersion(%s) = %v", version, got)
 		}
 		definition := TeamManagementSkill()
 		definition.Version = version
-		bound := &skill.BoundAction{Definition: definition, Action: definition.Actions[TeamActionUpdateRole]}
-		if got := isTeamRoleAction(bound); got != want {
-			t.Errorf("isTeamRoleAction(%s) = %v", version, got)
+		bound := &skill.BoundAction{Definition: definition, Action: definition.Actions[TeamActionUpdateMember]}
+		if got := isTeamMemberAction(bound); got != want {
+			t.Errorf("isTeamMemberAction(%s) = %v", version, got)
 		}
+	}
+	encoded, err := json.Marshal(TeamManagementSkill())
+	if err != nil || strings.Contains(strings.ToLower(string(encoded)), "role") {
+		t.Fatalf("openseal.teams still mentions roles: %s, %v", encoded, err)
 	}
 }
 

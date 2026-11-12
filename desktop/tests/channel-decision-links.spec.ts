@@ -89,7 +89,6 @@ async function setup(page: Page) {
             definition: {
               displayName: "Evidence team",
               purpose: "Review evidence together.",
-              roles: [],
             },
           },
         ],

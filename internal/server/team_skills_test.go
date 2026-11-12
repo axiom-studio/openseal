@@ -42,9 +42,6 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	teams := kernelteam.NewRegistryWithStore(store, agents)
 	teamDefinition, err := teams.RegisterDefinition(ctx, &kernelteam.Definition{
 		ID: "research", Version: "1", DisplayName: "Research", Purpose: "Research",
-		Roles: []kernelteam.RoleSlot{{
-			ID: "analyst", DisplayName: "Analyst", Purpose: "Analyze", MinimumMembers: 1,
-		}},
 		Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	})
 	if err != nil {
@@ -52,7 +49,7 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	}
 	if _, _, err := teams.CreateDeployment(ctx, &kernelteam.Deployment{
 		ID: "research-one", Scope: scope, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version, Status: kernelteam.DeploymentActive,
-		Roster: []kernelteam.RosterAssignment{{ID: "analyst", RoleID: "analyst", AgentDeploymentID: agentDeployment.ID}},
+		Roster: []kernelteam.RosterAssignment{{ID: "analyst", AgentDeploymentID: agentDeployment.ID}},
 	}, "user", "operator", "activate Team"); err != nil {
 		t.Fatal(err)
 	}

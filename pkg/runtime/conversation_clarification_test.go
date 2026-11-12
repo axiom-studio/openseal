@@ -24,6 +24,7 @@ func newClarificationFixture(t *testing.T, store clarificationStore, scopeID str
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: scopeID}
 	service := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}, Title: "Writing", IdempotencyKey: "writing"})
 	if err != nil {
 		t.Fatal(err)

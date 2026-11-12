@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -635,12 +636,12 @@ func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	}
 	service := NewCollaborationService(store)
 	service.teams = activeCollaborationTeam(scope, "gtm",
-		kernelteam.RosterAssignment{ID: "marketer", RoleID: "lead", AgentDeploymentID: "marketing-agent"},
-		kernelteam.RosterAssignment{ID: "marketer-two", RoleID: "lead", AgentDeploymentID: "marketing-agent-two"})
+		kernelteam.RosterAssignment{ID: "marketer", AgentDeploymentID: "marketing-agent"},
+		kernelteam.RosterAssignment{ID: "marketer-two", AgentDeploymentID: "marketing-agent-two"})
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindHandoff, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"}, Goal: "Own launch and lead follow-up", SemanticRole: "lead",
+		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"}, Goal: "Own launch and lead follow-up",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -688,16 +689,16 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 		t.Fatal(err)
 	}
 	teamStore := activeCollaborationTeam(scope, "reviewers",
-		kernelteam.RosterAssignment{ID: "z", RoleID: "reviewer", AgentDeploymentID: "z-agent"},
-		kernelteam.RosterAssignment{ID: "a", RoleID: "reviewer", AgentDeploymentID: "a-agent"},
-		kernelteam.RosterAssignment{ID: "m", RoleID: "reviewer", AgentDeploymentID: "m-agent"})
+		kernelteam.RosterAssignment{ID: "z", AgentDeploymentID: "z-agent"},
+		kernelteam.RosterAssignment{ID: "a", AgentDeploymentID: "a-agent"},
+		kernelteam.RosterAssignment{ID: "m", AgentDeploymentID: "m-agent"})
 	service := NewCollaborationService(store)
 	service.teams = teamStore
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "coordinator"},
-		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "reviewers"}, SemanticRole: "reviewer",
-		Goal: "Review release evidence", IdempotencyKey: "release-review",
+		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "reviewers"},
+		Goal:      "Review release evidence", IdempotencyKey: "release-review",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -749,7 +750,7 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 	}
 }
 
-func TestTeamWorkOfferFiltersExactRoleSkillsAndRecordsCapacity(t *testing.T) {
+func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "team-authority"}
@@ -763,7 +764,7 @@ func TestTeamWorkOfferFiltersExactRoleSkillsAndRecordsCapacity(t *testing.T) {
 		},
 		definitions: map[string]*kernelagent.AgentDefinition{
 			"analyst@1": {ID: "analyst", Version: "1", Authority: kernelagent.AuthorityPolicy{AllowedSkillIDs: []string{"research"}}},
-			"writer@1":  {ID: "writer", Version: "1", Authority: kernelagent.AuthorityPolicy{AllowedSkillIDs: []string{"research"}}},
+			"writer@1":  {ID: "writer", Version: "1", Authority: kernelagent.AuthorityPolicy{AllowedSkillIDs: []string{"writing"}}},
 		},
 	}
 	portfolio := NewPortfolioService(store)
@@ -787,19 +788,17 @@ func TestTeamWorkOfferFiltersExactRoleSkillsAndRecordsCapacity(t *testing.T) {
 		deployment: &kernelteam.Deployment{
 			ID: "analysis", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analysis", ActiveVersion: "1",
 			Status: kernelteam.DeploymentActive, Revision: 1, Roster: []kernelteam.RosterAssignment{
-				{ID: "eligible", RoleID: "analyst", AgentDeploymentID: "eligible"},
-				{ID: "busy", RoleID: "analyst", AgentDeploymentID: "busy"},
-				{ID: "wrong", RoleID: "analyst", AgentDeploymentID: "wrong"},
+				{ID: "eligible", AgentDeploymentID: "eligible", RequiredSkillIDs: []string{"research"}},
+				{ID: "busy", AgentDeploymentID: "busy", RequiredSkillIDs: []string{"research"}},
+				{ID: "wrong", AgentDeploymentID: "wrong", RequiredSkillIDs: []string{"research"}},
 			},
 		},
-		definition: &kernelteam.Definition{ID: "analysis", Version: "1", Roles: []kernelteam.RoleSlot{{
-			ID: "analyst", RequiredDefinitionIDs: []string{"analyst"}, RequiredSkillIDs: []string{"research"},
-		}}},
+		definition: &kernelteam.Definition{ID: "analysis", Version: "1"},
 	}
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"}, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "analysis"},
-		SemanticRole: "analyst", Goal: "Analyze evidence",
+		Goal: "Analyze evidence",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -808,6 +807,26 @@ func TestTeamWorkOfferFiltersExactRoleSkillsAndRecordsCapacity(t *testing.T) {
 		created.Request.Candidates[0].AvailableSlots != 0 || created.Request.Candidates[1].AgentDeploymentID != "eligible" ||
 		created.Request.Candidates[1].AvailableSlots != 1 {
 		t.Fatalf("authority and capacity candidates = %#v", created.Request.Candidates)
+	}
+	// A semantic role names one member by its roster id.
+	second, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
+		Goal: "Coordinate more analysis", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	single, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: second.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"}, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "analysis"},
+		SemanticRole: "eligible", Goal: "Analyze more evidence",
+	})
+	if err != nil || len(single.Request.Candidates) != 1 || single.Request.Candidates[0].RosterAssignmentID != "eligible" {
+		t.Fatalf("member request = %#v, %v", single, err)
+	}
+	encoded, _ := json.Marshal(single.Request)
+	if strings.Contains(string(encoded), "roleId") {
+		t.Fatalf("request still carries a role id: %s", encoded)
 	}
 }
 
@@ -956,7 +975,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 		t.Fatal(err)
 	}
 	service := NewCollaborationService(store)
-	service.teams = activeCollaborationTeam(scope, "marketing", kernelteam.RosterAssignment{ID: "editor", RoleID: "publisher", AgentDeploymentID: "marketing-editor"})
+	service.teams = activeCollaborationTeam(scope, "marketing", kernelteam.RosterAssignment{ID: "editor", AgentDeploymentID: "marketing-editor"})
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"},

@@ -541,6 +541,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 
 	conversations := NewConversationService(store)
 	conversations.now = func() time.Time { return now }
+	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
 		Title: "Slack C012345", IdempotencyKey: "external:" + endpoint.ID + ":C/one",

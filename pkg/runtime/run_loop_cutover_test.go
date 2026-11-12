@@ -124,6 +124,7 @@ func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string,
 	t.Helper()
 	ctx := context.Background()
 	service := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), cutoverScope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: cutoverScope, Owner: owner,
 		Title: "Operations " + key, IdempotencyKey: "channel-" + key,

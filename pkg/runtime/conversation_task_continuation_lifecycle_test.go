@@ -15,6 +15,7 @@ func continuationLifecycleFixture(t *testing.T, store *SQLiteStore, id string) (
 	t.Helper()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: id}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: id,
 	})

@@ -146,7 +146,13 @@ func TestTeamProgressionUsesSameApprovalAndRejectionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deployment, _, err := teams.CreateDeployment(ctx, &team.Deployment{ID: "team-deployment", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version, Status: team.DeploymentActive, Revision: 1}, "user", "admin", "initial")
+	if _, err := agents.RegisterDefinition(ctx, testAgentDefinition()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := agents.CreateDeployment(ctx, &agent.AgentDeployment{ID: "operator", Scope: scope, DefinitionID: "operator", ActiveVersion: "1", RolloutStatus: agent.RolloutActive, Environment: "default", Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 1}, "user", "admin", "initial"); err != nil {
+		t.Fatal(err)
+	}
+	deployment, _, err := teams.CreateDeployment(ctx, &team.Deployment{ID: "team-deployment", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version, Status: team.DeploymentActive, Revision: 1, Roster: []team.RosterAssignment{{ID: "operator", AgentDeploymentID: "operator"}}}, "user", "admin", "initial")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,5 +247,5 @@ func testAgentDefinition() *agent.AgentDefinition {
 }
 
 func testTeamDefinition() *team.Definition {
-	return &team.Definition{ID: "operations", Version: "1", DisplayName: "Operations", Purpose: "Coordinate operations", Roles: []team.RoleSlot{{ID: "operator", DisplayName: "Operator", Purpose: "Operate", ChannelParticipation: team.RoleChannelActive}}, Delegation: team.DelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 1}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}, Evaluations: []workforce.EvaluationCriterion{{ID: "quality", Description: "Output quality", Required: true}}, Amendments: workforce.AmendmentPolicy{AgentMayPropose: true, AllowedFields: []string{"delegation", "purpose"}, ApproverPrincipals: []string{"user:admin"}}}
+	return &team.Definition{ID: "operations", Version: "1", DisplayName: "Operations", Purpose: "Coordinate operations", Delegation: team.DelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 1}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}, Evaluations: []workforce.EvaluationCriterion{{ID: "quality", Description: "Output quality", Required: true}}, Amendments: workforce.AmendmentPolicy{AgentMayPropose: true, AllowedFields: []string{"delegation", "purpose"}, ApproverPrincipals: []string{"user:admin"}}}
 }

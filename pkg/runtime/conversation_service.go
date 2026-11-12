@@ -19,8 +19,12 @@ type CreateConversationRequest struct {
 	Title  string
 	Origin *ConversationReference
 	// SpaceID places the conversation in a space. When empty the store uses
-	// the owner's first space, else the scope's Default space.
-	SpaceID        string
+	// the owner's first space, else the default space of CreatedBy, else it
+	// returns ErrNoDefaultSpace.
+	SpaceID string
+	// CreatedBy is the person behind the call: the user on the request, or
+	// the person a run or routine acts for.
+	CreatedBy      string
 	IdempotencyKey string
 }
 
@@ -34,9 +38,12 @@ type UpdateConversationRequest struct {
 }
 
 type ConversationFilter struct {
-	Scope    Scope
-	Owner    *ObjectiveOwner
-	SpaceID  string
+	Scope   Scope
+	Owner   *ObjectiveOwner
+	SpaceID string
+	// SpaceIDs, when not nil, keeps only conversations in these spaces; an
+	// empty list keeps none.
+	SpaceIDs []string
 	Statuses []ConversationStatus
 	// OriginKind keeps only conversations whose Origin has this kind; empty
 	// lists every origin.
@@ -297,6 +304,7 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 	conversation := &Conversation{
 		ID: id, Scope: req.Scope, Owner: req.Owner, SpaceID: strings.TrimSpace(req.SpaceID), Title: strings.TrimSpace(req.Title), Status: ConversationStatusActive,
 		Origin: cloneConversationReference(req.Origin), ApprovalMode: DefaultConversationApprovalMode, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		CreatedBy: strings.TrimSpace(req.CreatedBy),
 	}
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err

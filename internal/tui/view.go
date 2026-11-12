@@ -719,7 +719,7 @@ func (m *Model) renderTeamsContent(width int) string {
 			if strings.TrimSpace(name) == "" {
 				name = assignment.AgentDeploymentID
 			}
-			lines = append(lines, compact(fmt.Sprintf("• %s · %s · Agent %s", name, assignment.RoleID, assignment.AgentDeploymentID), max(width-6, 24)))
+			lines = append(lines, compact(fmt.Sprintf("• %s · %s · Agent %s", name, assignment.ID, assignment.AgentDeploymentID), max(width-6, 24)))
 		}
 	}
 	if definition != nil && len(definition.ObjectiveTemplates) > 0 {

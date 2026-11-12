@@ -27,6 +27,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	replicaService := NewConversationService(replica)
 	replicaService.now = func() time.Time { return fixed }
 	scope := Scope{Kind: "tenant", ID: "one"}
+	seedTestSpace(t, primary, scope)
 	conversation, _, err := primaryService.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, Title: "Release", IdempotencyKey: "release-v1",
 	})

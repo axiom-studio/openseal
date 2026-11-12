@@ -10,35 +10,22 @@ const team: Team = {
     roster: [
       {
         id: "member-1",
-        roleId: "research",
         agentDeploymentId: "researcher",
         displayName: "Evidence lead",
+        purpose: "Find and compare sources.",
+        lead: true,
       },
-      { id: "member-2", roleId: "review", agentDeploymentId: "missing-agent" },
+      {
+        id: "member-2",
+        agentDeploymentId: "missing-agent",
+        purpose: "Challenge conclusions and identify uncertainty.",
+        approver: true,
+      },
     ],
   },
   definition: {
     displayName: "Evidence team",
     purpose: "Investigate claims and explain what the evidence supports.",
-    roles: [
-      {
-        id: "research",
-        displayName: "Research",
-        purpose: "Find and compare sources.",
-        minimumMembers: 1,
-        maximumMembers: 2,
-      },
-      {
-        id: "review",
-        displayName: "Review",
-        purpose: "Challenge conclusions and identify uncertainty.",
-      },
-      {
-        id: "editor",
-        displayName: "Editing",
-        purpose: "Make the final report clear.",
-      },
-    ],
     operatingPrinciples: ["Keep uncertainty explicit."],
   },
 };
@@ -83,7 +70,7 @@ async function setup(page: Page, available = true) {
     page.getByRole("heading", { name: "Teams", exact: true }),
   ).toBeVisible();
 }
-test("teams expose roles and member availability, search, keyboard details and narrow layout", async ({
+test("teams expose members and their availability, search, keyboard details and narrow layout", async ({
   page,
 }) => {
   await page.route("**/api/v1/team-deployments?*", (r) => {
@@ -100,7 +87,6 @@ test("teams expose roles and member availability, search, keyboard details and n
   const details = page.getByRole("region", { name: "Evidence team details" });
   await expect(details.getByText("inactive", { exact: true })).toBeVisible();
   await expect(details.getByText("Agent details unavailable")).toBeVisible();
-  await expect(details.getByText("No member assigned.")).toBeVisible();
   await expect(details.getByText("Keep uncertainty explicit.")).toBeVisible();
   await page.screenshot({
     path: "../.impeccable/review/teams-desktop.png",
@@ -115,7 +101,7 @@ test("teams expose roles and member availability, search, keyboard details and n
   await expect(
     page.getByRole("button", { name: "View Evidence lead" }),
   ).toBeFocused();
-  await page.getByRole("searchbox", { name: "Search teams" }).fill("Editing");
+  await page.getByRole("searchbox", { name: "Search teams" }).fill("Challenge");
   await expect(row).toBeVisible();
   await page
     .getByRole("combobox", { name: "Team status" })
@@ -191,7 +177,7 @@ test("team capability prevents unavailable requests and empty workspace is hones
     page.getByRole("heading", { name: "Your teams will appear here" }),
   ).toBeVisible();
   await expect(
-    page.getByText(/Review its roles and permissions before installing it/),
+    page.getByText(/Review its members and permissions before installing it/),
   ).toBeVisible();
 });
 test("initial team load failure has explicit retry and unavailable data cannot look empty", async ({

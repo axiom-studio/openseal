@@ -324,6 +324,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			store := newTestKernelStore(t)
 			service := NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "private-task"}
+			seedTestSpace(t, store, scope)
 			conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Private question", IdempotencyKey: "private-task"})
 			if err != nil {
 				t.Fatal(err)

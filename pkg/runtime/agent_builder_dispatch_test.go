@@ -36,14 +36,18 @@ type agentBuilderTestProvisioner struct {
 	putErr        error
 }
 
-func (p *agentBuilderTestProvisioner) CreateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+func (p *agentBuilderTestProvisioner) CreateAgentDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	scope := Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
+	if _, err := p.spaces.GetSpace(ctx, scope, spaceID); err != nil {
+		return nil, nil, err
+	}
 	created, activation, err := p.agents.CreateDeployment(ctx, deployment, actorType, actorID, reason)
 	if err != nil {
 		return nil, nil, err
 	}
 	p.created++
-	if _, err := p.spaces.EnsureMemberHasSpace(ctx, Scope{Kind: created.Scope.Kind, ID: created.Scope.ID}, SpaceMemberAgent, created.ID); err != nil {
-		return nil, nil, err
+	if _, _, err := p.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: SpaceMemberAgent, MemberID: created.ID}); err != nil {
+		return created, activation, err
 	}
 	if _, err := p.EnsureAgentControlConversation(ctx, created); err != nil {
 		return created, activation, err
@@ -79,10 +83,6 @@ func (p *agentBuilderTestProvisioner) PutSpaceMember(ctx context.Context, reques
 	return p.spaces.PutSpaceMember(ctx, request)
 }
 
-func (p *agentBuilderTestProvisioner) DeleteSpaceMember(ctx context.Context, request DeleteSpaceMemberRequest) error {
-	return p.spaces.DeleteSpaceMember(ctx, request)
-}
-
 // agentBuilderRecordingHost records what the dispatcher asks the host.
 type agentBuilderRecordingHost struct {
 	agentBuilderTestHost
@@ -114,19 +114,16 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 	base := newAgentBuilderFixture(t, false)
 	store := &agentBuilderDispatchStore{SQLiteStore: newTestKernelStore(t), approvals: map[string]*ApprovalCheckpoint{}}
 	base.spaces = NewSpaceService(store)
-	sales, err := base.spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: base.scope, Name: "Sales", Look: DefaultSpaceLook, OwnerID: "operator"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	base.salesID = sales.ID
+	base.salesID, base.homeID = seedAgentBuilderSpaces(t, base.spaces, base.scope)
 	recorder := &agentBuilderRecordingHost{}
+	var err error
 	base.validator, err = NewAgentBuilderActionValidator(base.agents, base.teams, base.catalog, base.spaces, store, store, recorder)
 	if err != nil {
 		t.Fatal(err)
 	}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: base.scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
-		AssignedAgentID: "finn", Goal: "Build an Agent", Source: RunSourceChat,
+		AssignedAgentID: "finn", ActingUser: agentBuilderApprover.ID, Goal: "Build an Agent", Source: RunSourceChat,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +243,7 @@ func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 		len(binding.Lifecycle) != 1 || binding.Lifecycle[0].Actor.Type != "user" || binding.Lifecycle[0].Actor.ID != agentBuilderApprover.ID {
 		t.Fatalf("binding = %#v, %v", binding, err)
 	}
-	if !f.spaceMember(t, f.salesID, deploymentID) || f.spaceMember(t, DefaultSpaceID(f.scope), deploymentID) {
+	if !f.spaceMember(t, f.salesID, deploymentID) || f.spaceMember(t, f.homeID, deploymentID) {
 		t.Fatal("the created Agent is not only in the reviewed space")
 	}
 	control, err := f.provision.EnsureAgentControlConversation(ctx, deployment)
@@ -310,7 +307,7 @@ func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 
 func TestAgentBuilderCreateAgentInDefaultSpace(t *testing.T) {
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := agentBuilderDispatchCreateArguments(DefaultSpaceID(f.scope))
+	arguments := agentBuilderDispatchCreateArguments(f.homeID)
 	delete(arguments, "skills")
 	delete(arguments, "connections")
 	delete(arguments, "model")
@@ -319,8 +316,8 @@ func TestAgentBuilderCreateAgentInDefaultSpace(t *testing.T) {
 		t.Fatal(err)
 	}
 	deploymentID, _ := output["deploymentId"].(string)
-	if !f.spaceMember(t, DefaultSpaceID(f.scope), deploymentID) {
-		t.Fatal("the created Agent is not in Personal")
+	if !f.spaceMember(t, f.homeID, deploymentID) || f.spaceMember(t, f.salesID, deploymentID) {
+		t.Fatal("the created Agent is not only in the person's default space")
 	}
 	if message, _ := output["message"].(string); strings.Contains(message, "request_connection") {
 		t.Fatalf("message = %q", message)
@@ -588,7 +585,7 @@ func TestAgentBuilderUpdateAgentRefusals(t *testing.T) {
 func TestAgentBuilderListAgents(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	if _, err := f.spaces.EnsureMemberHasSpace(ctx, f.scope, SpaceMemberAgent, "researcher"); err != nil {
+	if _, err := f.spaces.EnsureMemberHasSpace(ctx, f.scope, agentBuilderApprover.ID, SpaceMemberAgent, "researcher"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := f.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: f.scope, SpaceID: f.salesID, Type: SpaceMemberAgent, MemberID: "researcher"}); err != nil {

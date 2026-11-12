@@ -207,6 +207,11 @@ func (s *PostgresStore) ListConversations(ctx context.Context, filter Conversati
 		args = append(args, filter.SpaceID)
 		placeholder++
 	}
+	if filter.SpaceIDs != nil {
+		query += fmt.Sprintf(` AND space_id = ANY($%d)`, placeholder)
+		args = append(args, pq.Array(filter.SpaceIDs))
+		placeholder++
+	}
 	if len(filter.Statuses) > 0 {
 		statuses := make([]string, len(filter.Statuses))
 		for index, status := range filter.Statuses {

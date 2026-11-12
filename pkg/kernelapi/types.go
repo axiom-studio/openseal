@@ -33,7 +33,7 @@ const (
 	ChannelsCapabilityID                       = "channels"
 	ChannelsCapabilityVersion                  = "4"
 	TeamDefinitionsCapabilityID                = "team-definitions"
-	TeamDefinitionsCapabilityVersion           = "4"
+	TeamDefinitionsCapabilityVersion           = "5"
 	WorkforceExecutionTargetsCapabilityID      = "workforce-execution-targets"
 	WorkforceExecutionTargetsCapabilityVersion = "1"
 	WorkforceBundlesCapabilityID               = "workforce-bundles"

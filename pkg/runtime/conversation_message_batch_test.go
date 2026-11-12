@@ -67,6 +67,7 @@ func channelMessageBatchStores(t *testing.T, test func(*testing.T, KernelStore))
 
 func channelMessageBatchConversation(t testing.TB, store ConversationStore, scope Scope, id string) *Conversation {
 	t.Helper()
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(context.Background(), CreateConversationRequest{
 		ID: id, Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Batch visibility", IdempotencyKey: id,
 	})

@@ -58,6 +58,7 @@ func TestConversationOriginFilter(t *testing.T) {
 			scope := Scope{Kind: "tenant", ID: "origin-filter"}
 			builder := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
 			other := ObjectiveOwner{Type: OwnerTypeAgent, ID: "helper"}
+			seedTestSpace(t, store.(SpaceStore), scope)
 			create := func(key string, owner ObjectiveOwner, origin *ConversationReference) {
 				t.Helper()
 				if _, _, err := service.CreateConversation(ctx, CreateConversationRequest{

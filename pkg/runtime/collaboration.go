@@ -89,7 +89,6 @@ const (
 type AgentRequestCandidate struct {
 	AgentDeploymentID  string   `json:"agentDeploymentId"`
 	RosterAssignmentID string   `json:"rosterAssignmentId"`
-	RoleID             string   `json:"roleId"`
 	RequiredSkillIDs   []string `json:"requiredSkillIds,omitempty"`
 	CapacityLimit      int      `json:"capacityLimit"`
 	ActiveRuns         int      `json:"activeRuns"`
@@ -327,7 +326,7 @@ func validateAgentRequestCoordination(request *AgentRequest) error {
 	seenCandidates := make(map[string]struct{}, len(request.Candidates))
 	for _, candidate := range request.Candidates {
 		if strings.TrimSpace(candidate.AgentDeploymentID) == "" || strings.TrimSpace(candidate.RosterAssignmentID) == "" ||
-			strings.TrimSpace(candidate.RoleID) == "" || candidate.CapacityLimit < 1 || candidate.ActiveRuns < 0 ||
+			candidate.CapacityLimit < 1 || candidate.ActiveRuns < 0 ||
 			candidate.AvailableSlots < 0 || candidate.AvailableSlots != max(0, candidate.CapacityLimit-candidate.ActiveRuns) {
 			return errors.New("Team work offer candidate has invalid identity or capacity evidence")
 		}
@@ -1949,28 +1948,10 @@ func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context,
 	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
 		return nil, fmt.Errorf("%w: recipient Team deployment is not active", ErrAgentRequestAssignment)
 	}
-	definitions, ok := s.teams.(agentRequestTeamDefinitionStore)
-	if !ok {
-		return nil, fmt.Errorf("%w: recipient Team definition is unavailable", ErrAgentRequestAssignment)
-	}
-	definition, err := definitions.GetTeamDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
-	if err != nil && !errors.Is(err, kernelteam.ErrDefinitionNotFound) {
-		return nil, err
-	}
-	roles := make(map[string]kernelteam.RoleSlot)
-	if definition != nil {
-		for _, role := range definition.Roles {
-			roles[role.ID] = role
-		}
-	}
 	agents, hasAgentCatalog := s.store.(collaborationAgentStore)
 	candidates := make([]AgentRequestCandidate, 0, len(deployment.Roster))
 	for _, assignment := range deployment.Roster {
-		role := roles[assignment.RoleID]
-		if role.ID == "" {
-			role = kernelteam.RoleSlot{ID: assignment.RoleID}
-		}
-		if request.SemanticRole != "" && assignment.RoleID != request.SemanticRole {
+		if request.SemanticRole != "" && assignment.ID != request.SemanticRole {
 			continue
 		}
 		limit := 1
@@ -1980,20 +1961,17 @@ func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context,
 				return nil, getErr
 			}
 			if agentDeployment == nil {
-				if len(role.RequiredDefinitionIDs) > 0 || len(role.RequiredSkillIDs) > 0 {
-					return nil, fmt.Errorf("%w: Agent authority catalog cannot verify role %q", ErrAgentRequestAssignment, role.ID)
+				if len(assignment.RequiredSkillIDs) > 0 {
+					return nil, fmt.Errorf("%w: Agent authority catalog cannot verify member %q", ErrAgentRequestAssignment, assignment.ID)
 				}
 			} else if agentDeployment.RolloutStatus != kernelagent.RolloutActive {
 				continue
 			} else {
-				if len(role.RequiredDefinitionIDs) > 0 && !containsTrimmedString(role.RequiredDefinitionIDs, agentDeployment.DefinitionID) {
-					continue
-				}
 				agentDefinition, getErr := agents.GetDefinition(ctx, agentDeployment.DefinitionID, agentDeployment.ActiveVersion)
 				if getErr != nil {
 					return nil, getErr
 				}
-				if agentDefinition == nil || !agentDefinitionProvidesSkills(agentDefinition, role.RequiredSkillIDs) {
+				if agentDefinition == nil || !agentDefinitionProvidesSkills(agentDefinition, assignment.RequiredSkillIDs) {
 					continue
 				}
 				limit = agentDeployment.Capacity.MaxConcurrentRuns
@@ -2001,8 +1979,8 @@ func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context,
 					limit = *agentDeployment.Restrictions.MaxConcurrentRuns
 				}
 			}
-		} else if len(role.RequiredDefinitionIDs) > 0 || len(role.RequiredSkillIDs) > 0 {
-			return nil, fmt.Errorf("%w: Agent authority catalog is required to evaluate role %q", ErrAgentRequestAssignment, role.ID)
+		} else if len(assignment.RequiredSkillIDs) > 0 {
+			return nil, fmt.Errorf("%w: Agent authority catalog is required to evaluate member %q", ErrAgentRequestAssignment, assignment.ID)
 		}
 		runs, listErr := s.runs.ListAgentRuns(ctx, AgentRunFilter{Scope: request.Scope, AssignedAgentID: assignment.AgentDeploymentID, Limit: 500})
 		if listErr != nil {
@@ -2019,8 +1997,8 @@ func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context,
 			available = 0
 		}
 		candidates = append(candidates, AgentRequestCandidate{
-			AgentDeploymentID: assignment.AgentDeploymentID, RosterAssignmentID: assignment.ID, RoleID: assignment.RoleID,
-			RequiredSkillIDs: append([]string(nil), role.RequiredSkillIDs...), CapacityLimit: limit, ActiveRuns: active, AvailableSlots: available,
+			AgentDeploymentID: assignment.AgentDeploymentID, RosterAssignmentID: assignment.ID,
+			RequiredSkillIDs: append([]string(nil), assignment.RequiredSkillIDs...), CapacityLimit: limit, ActiveRuns: active, AvailableSlots: available,
 		})
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].AgentDeploymentID < candidates[j].AgentDeploymentID })
@@ -2047,15 +2025,6 @@ func agentDefinitionProvidesSkills(definition *kernelagent.AgentDefinition, requ
 		}
 	}
 	return true
-}
-
-func containsTrimmedString(values []string, wanted string) bool {
-	for _, value := range values {
-		if strings.TrimSpace(value) == strings.TrimSpace(wanted) {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *CollaborationService) SubmitAgentRequestBid(ctx context.Context, req SubmitAgentRequestBidRequest) (*AgentRequestResult, error) {
@@ -2132,7 +2101,7 @@ func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, req
 	}
 	eligible := make([]kernelteam.RosterAssignment, 0, len(deployment.Roster))
 	for _, assignment := range deployment.Roster {
-		if request.SemanticRole == "" || assignment.RoleID == request.SemanticRole {
+		if request.SemanticRole == "" || assignment.ID == request.SemanticRole {
 			eligible = append(eligible, assignment)
 		}
 	}

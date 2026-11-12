@@ -15,32 +15,21 @@ import (
 
 var versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$`)
 
-type RoleSlot struct {
-	ID                    string                   `json:"id"`
-	DisplayName           string                   `json:"displayName"`
-	Purpose               string                   `json:"purpose"`
-	MinimumMembers        int                      `json:"minimumMembers,omitempty"`
-	MaximumMembers        int                      `json:"maximumMembers,omitempty"`
-	RequiredSkillIDs      []string                 `json:"requiredSkillIds,omitempty"`
-	RequiredDefinitionIDs []string                 `json:"requiredDefinitionIds,omitempty"`
-	ChannelParticipation  RoleChannelParticipation `json:"channelParticipation,omitempty"`
-}
-
-type RoleChannelParticipation string
+// ChannelParticipation is whether a roster member answers in the Team channel.
+type ChannelParticipation string
 
 const (
-	RoleChannelActive      RoleChannelParticipation = "active"
-	RoleChannelObserveOnly RoleChannelParticipation = "observe_only"
-	RoleChannelDisabled    RoleChannelParticipation = "disabled"
+	ChannelActive      ChannelParticipation = "active"
+	ChannelObserveOnly ChannelParticipation = "observe_only"
+	ChannelDisabled    ChannelParticipation = "disabled"
 )
 
 // RoutingPolicy is the lead's view of who answers what in the Team channel.
 // A message nobody addressed goes to one member chosen by the host's router;
-// Notes (free text, e.g. "Maya owns pricing, Otto owns press") and the lead
-// role feed that router and the members' agent cards.
+// Notes (free text, e.g. "Maya owns pricing, Otto owns press") feed that
+// router and the members' agent cards.
 type RoutingPolicy struct {
-	Notes      string `json:"notes,omitempty"`
-	LeadRoleID string `json:"leadRoleId,omitempty"`
+	Notes string `json:"notes,omitempty"`
 }
 
 // MaximumRoutingNotesBytes bounds the routing notes a router prompt carries.
@@ -58,12 +47,11 @@ type DelegationPolicy struct {
 
 type ApprovalPolicy struct {
 	MaximumRisk        capability.RiskLevel `json:"maximumRisk"`
-	ApproverRoleIDs    []string             `json:"approverRoleIds,omitempty"`
 	ApproverPrincipals []string             `json:"approverPrincipals,omitempty"`
 }
 
-// Definition is immutable Team behavior. Roster assignments and active
-// versions belong to Deployment so the same Team design remains portable.
+// Definition is immutable Team behavior. The members and the active version
+// belong to Deployment so the same Team design remains portable.
 type Definition struct {
 	// AuthoringKey is a stable form reference separate from the resource identity.
 	AuthoringKey        string                          `json:"authoringKey,omitempty"`
@@ -72,7 +60,6 @@ type Definition struct {
 	DisplayName         string                          `json:"displayName"`
 	Purpose             string                          `json:"purpose"`
 	OperatingPrinciples []string                        `json:"operatingPrinciples,omitempty"`
-	Roles               []RoleSlot                      `json:"roles"`
 	Routing             RoutingPolicy                   `json:"routing,omitempty"`
 	Delegation          DelegationPolicy                `json:"delegation,omitempty"`
 	SharedContext       workforce.SharedContextPolicy   `json:"sharedContext,omitempty"`
@@ -90,8 +77,8 @@ func (d *Definition) Validate() error {
 		return errors.New("team definition is required")
 	}
 	if strings.TrimSpace(d.ID) == "" || !versionPattern.MatchString(strings.TrimSpace(d.Version)) ||
-		strings.TrimSpace(d.DisplayName) == "" || strings.TrimSpace(d.Purpose) == "" || len(d.Roles) == 0 {
-		return errors.New("team definition id, valid version, display name, purpose, and roles are required")
+		strings.TrimSpace(d.DisplayName) == "" || strings.TrimSpace(d.Purpose) == "" {
+		return errors.New("team definition id, valid version, display name, and purpose are required")
 	}
 	if len(d.Routing.Notes) > MaximumRoutingNotesBytes ||
 		d.Delegation.MaximumDepth < 0 || d.Delegation.MaximumConcurrent < 0 || d.Delegation.CompletionReviewQuorum < 0 ||
@@ -104,30 +91,12 @@ func (d *Definition) Validate() error {
 	if d.Amendments.RequiresApproval && len(d.Amendments.ApproverPrincipals) == 0 {
 		return errors.New("team definition amendment approval requires eligible principals")
 	}
-	roles := make(map[string]bool, len(d.Roles))
-	for _, role := range d.Roles {
-		id := strings.TrimSpace(role.ID)
-		if id == "" || strings.TrimSpace(role.DisplayName) == "" || strings.TrimSpace(role.Purpose) == "" ||
-			role.MinimumMembers < 0 || role.MaximumMembers < 0 || role.MaximumMembers > 0 && role.MaximumMembers < role.MinimumMembers ||
-			!validRoleChannelParticipation(role.ChannelParticipation) || roles[id] {
-			return errors.New("team roles require unique ids, names, purposes, and valid member bounds")
-		}
-		roles[id] = true
-	}
-	if lead := strings.TrimSpace(d.Routing.LeadRoleID); lead != d.Routing.LeadRoleID || lead != "" && !roles[lead] {
-		return errors.New("team routing lead must reference a declared role")
-	}
-	for _, roleID := range d.Approvals.ApproverRoleIDs {
-		if !roles[strings.TrimSpace(roleID)] {
-			return errors.New("team approval roles must reference declared roles")
-		}
-	}
 	return nil
 }
 
-func validRoleChannelParticipation(value RoleChannelParticipation) bool {
+func validChannelParticipation(value ChannelParticipation) bool {
 	switch value {
-	case "", RoleChannelActive, RoleChannelObserveOnly, RoleChannelDisabled:
+	case "", ChannelActive, ChannelObserveOnly, ChannelDisabled:
 		return true
 	default:
 		return false

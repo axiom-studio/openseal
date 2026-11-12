@@ -32,6 +32,7 @@ func newReplyGuardFixture(t *testing.T, store KernelStore) *replyGuardFixture {
 		t.Fatalf("%T is not a ConversationStore", store)
 	}
 	f := &replyGuardFixture{loopStoreFixture: newLoopStoreFixture(t, store), conversations: conversations}
+	seedTestSpace(t, store.(SpaceStore), f.scope)
 	conversation, _, err := NewConversationService(conversations).CreateConversation(f.ctx, CreateConversationRequest{
 		ID: "chat-" + uuid.NewString()[:8], Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
 		Title: "Reply guard", IdempotencyKey: "reply-guard-" + uuid.NewString()[:8],

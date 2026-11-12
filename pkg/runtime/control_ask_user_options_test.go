@@ -221,7 +221,9 @@ func TestAgentBuilderConversationOriginValidates(t *testing.T) {
 	if err := (ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: "k"}).Validate(); err != nil {
 		t.Fatal(err)
 	}
-	service := NewConversationService(newTestKernelStore(t))
+	store := newTestKernelStore(t)
+	seedTestSpace(t, store, Scope{Kind: "organization", ID: "builder"})
+	service := NewConversationService(store)
 	origin := &ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: "k"}
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: Scope{Kind: "organization", ID: "builder"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "builder-agent"},

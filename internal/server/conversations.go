@@ -36,7 +36,7 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	key := requestIdempotencyKey(r, payload.IdempotencyKey)
 	conversation, replayed, err := service.CreateConversation(r.Context(), runtime.CreateConversationRequest{
 		ID: payload.ID, Scope: payload.Scope, Owner: payload.Owner, Title: payload.Title, Origin: payload.Origin,
-		SpaceID: payload.SpaceID, IdempotencyKey: key,
+		SpaceID: payload.SpaceID, CreatedBy: localBuilderRequester.ID, IdempotencyKey: key,
 	})
 	if err != nil {
 		s.respondConversationError(w, err)
@@ -592,7 +592,8 @@ func (s *Server) respondConversationError(w http.ResponseWriter, err error) {
 		errors.Is(err, runtime.ErrParticipationRoundNotFound), errors.Is(err, runtime.ErrSpaceNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, runtime.ErrMessageConflict), errors.Is(err, runtime.ErrRevisionConflict),
-		errors.Is(err, runtime.ErrConversationCursorConflict), errors.Is(err, runtime.ErrConversationPresenceConflict):
+		errors.Is(err, runtime.ErrConversationCursorConflict), errors.Is(err, runtime.ErrConversationPresenceConflict),
+		errors.Is(err, runtime.ErrNoDefaultSpace):
 		s.respondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, runtime.ErrInvalidConversation), errors.Is(err, runtime.ErrInvalidScope), errors.Is(err, runtime.ErrInvalidOwner):
 		s.respondError(w, http.StatusBadRequest, err.Error())

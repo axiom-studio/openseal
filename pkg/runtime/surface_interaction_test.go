@@ -69,6 +69,7 @@ func newSurfaceInteractionFixture(t *testing.T, store KernelStore) surfaceIntera
 	conversations := NewConversationService(store.(ConversationStore))
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 	conversations.now = func() time.Time { now = now.Add(time.Second); return now }
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "family"}, Title: "Trip", IdempotencyKey: "trip",
 	})

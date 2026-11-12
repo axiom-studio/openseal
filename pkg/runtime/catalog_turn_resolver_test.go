@@ -663,15 +663,12 @@ func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.
 		teamDeployment: &kernelteam.Deployment{
 			ID: "release-team", Scope: current.Scope, DefinitionID: "release-team", ActiveVersion: "1",
 			Status: kernelteam.DeploymentActive, Roster: []kernelteam.RosterAssignment{
-				{ID: "lead", RoleID: "lead", AgentDeploymentID: current.ID},
-				{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: reviewer.ID},
+				{ID: "lead", AgentDeploymentID: current.ID},
+				{ID: "reviewer", AgentDeploymentID: reviewer.ID},
 			},
 		},
 		teamDefinition: &kernelteam.Definition{
-			ID: "release-team", Version: "1", Roles: []kernelteam.RoleSlot{
-				{ID: "lead", DisplayName: "Lead", Purpose: "Coordinate releases"},
-				{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review releases"},
-			},
+			ID: "release-team", Version: "1",
 		},
 		activations: map[string]*skill.ActivationSnapshot{
 			current.ID:     {SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID},
@@ -776,11 +773,10 @@ func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRun
 		definition: &kernelagent.AgentDefinition{ID: "reviewer", Version: "1", Purpose: "Review", SystemPrompt: "Review carefully.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, AllowedSkillIDs: []string{"openseal.teams"}}},
 		teamDeployment: &kernelteam.Deployment{
 			ID: "review-team", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "review-team", ActiveVersion: "1",
-			Status: kernelteam.DeploymentActive, Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer-agent"}},
+			Status: kernelteam.DeploymentActive, Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "reviewer", AgentDeploymentID: "reviewer-agent"}},
 		},
 		teamDefinition: &kernelteam.Definition{
 			ID: "review-team", Version: "1", Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
-			Roles: []kernelteam.RoleSlot{{ID: "reviewer"}},
 		},
 		activations: map[string]*skill.ActivationSnapshot{
 			"reviewer-agent": {SnapshotID: "agent-snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "reviewer-agent", Skills: []skill.ActivatedSkill{{

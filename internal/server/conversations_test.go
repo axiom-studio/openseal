@@ -13,6 +13,7 @@ import (
 
 func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
+	home := seedSpace(t, store, runtime.Scope{Kind: "tenant", ID: "one"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	createBody := `{
 		"scope":{"kind":"tenant","id":"one"},
@@ -26,6 +27,9 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	var conversation runtime.Conversation
 	if err := json.NewDecoder(created.Body).Decode(&conversation); err != nil {
 		t.Fatal(err)
+	}
+	if conversation.SpaceID != home.ID {
+		t.Fatalf("conversation space = %q, want the local operator's %q", conversation.SpaceID, home.ID)
 	}
 	replayed := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", createBody, "release-v1")
 	if replayed.Code != http.StatusOK {
@@ -158,6 +162,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 
 func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
+	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
 	body := `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"Evidence"}`
@@ -207,7 +212,9 @@ func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
 }
 
 func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) {
-	server := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
+	store := runtimetest.NewKernelStore(t)
+	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, localOperatorID)
+	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"Evidence"}`, "lifecycle")
 	var conversation runtime.Conversation
@@ -269,7 +276,9 @@ func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) 
 }
 
 func TestDesktopReadPositionsBindLocalReaderAndPreserveMonotonicHistory(t *testing.T) {
-	server := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
+	store := runtimetest.NewKernelStore(t)
+	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, localOperatorID)
+	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"Reading evidence"}`, "read-channel")
 	var channel runtime.Conversation
@@ -308,5 +317,51 @@ func TestDesktopReadPositionsBindLocalReaderAndPreserveMonotonicHistory(t *testi
 	caps := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	if !strings.Contains(caps.Body.String(), `"receipts"`) {
 		t.Fatal("durable receipts not advertised")
+	}
+}
+
+// The server creates no space: a conversation made with no space goes to the
+// local operator's default space, and with no such space it is refused.
+func TestConversationWithNoSpaceUsesTheLocalOperatorsDefaultSpace(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	body := func(title string) string {
+		return `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"` + title + `"}`
+	}
+
+	store := runtimetest.NewKernelStore(t)
+	// Another owner's default space is older and first by position.
+	seedSpace(t, store, scope, "someone-else")
+	home := seedSpace(t, store, scope, localOperatorID)
+	if !home.IsDefault || home.OwnerID != localOperatorID {
+		t.Fatalf("home = %+v", home)
+	}
+	server := NewServer(store, zap.NewNop().Sugar())
+	for _, title := range []string{"First", "Second"} {
+		created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", body(title), "create-"+title)
+		var conversation runtime.Conversation
+		if err := json.NewDecoder(created.Body).Decode(&conversation); err != nil || created.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d, %v", title, created.Code, err)
+		}
+		if conversation.SpaceID != home.ID {
+			t.Fatalf("%s is in space %q, want the local operator's %q", title, conversation.SpaceID, home.ID)
+		}
+	}
+	if spaces, err := runtime.NewSpaceService(store).ListSpaces(t.Context(), scope); err != nil || len(spaces) != 2 {
+		t.Fatalf("spaces after the creates = %+v, err = %v", spaces, err)
+	}
+
+	// No space for the local operator: nothing is created, not even a space.
+	bare := runtimetest.NewKernelStore(t)
+	seedSpace(t, bare, scope, "someone-else")
+	refused := performAgentRunRequest(t, NewServer(bare, zap.NewNop().Sugar()).Handler(), http.MethodPost, "/api/v1/conversations", body("Nowhere"), "create-nowhere")
+	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), runtime.ErrNoDefaultSpace.Error()) {
+		t.Fatalf("create with no space: %d %s", refused.Code, refused.Body.String())
+	}
+	conversations, err := runtime.NewConversationService(bare).ListConversations(t.Context(), runtime.ConversationFilter{Scope: scope})
+	if err != nil || len(conversations) != 0 {
+		t.Fatalf("conversations after a refused create = %+v, err = %v", conversations, err)
+	}
+	if spaces, err := runtime.NewSpaceService(bare).ListSpaces(t.Context(), scope); err != nil || len(spaces) != 1 {
+		t.Fatalf("spaces after a refused create = %+v, err = %v", spaces, err)
 	}
 }

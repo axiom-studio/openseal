@@ -37,6 +37,7 @@ func conversationTaskAdmissionRecord(t *testing.T, store conversationTaskAdmissi
 		t.Fatal(err)
 	}
 	if conversation == nil {
+		seedTestSpace(t, store.(SpaceStore), task.Scope)
 		conversation, _, err = store.CreateConversation(t.Context(), &Conversation{
 			ID: task.ConversationID, Scope: task.Scope, Owner: task.Owner, Title: "Task admission",
 			Status: ConversationStatusActive, Revision: 1, CreatedAt: task.CreatedAt, UpdatedAt: task.CreatedAt,

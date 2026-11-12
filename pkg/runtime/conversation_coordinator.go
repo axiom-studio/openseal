@@ -407,9 +407,6 @@ func lastAgentWithUser(messages []*ChannelMessage, user ConversationParticipant,
 	return ""
 }
 
-// DefaultTeamLeadRoleID is the lead role when a Team names none.
-const DefaultTeamLeadRoleID = "lead"
-
 type conversationTeamMember struct {
 	name, role string
 	owns       []string
@@ -432,7 +429,7 @@ type conversationAgentCatalog interface {
 }
 
 // loadConversationTeamRoster reads the Team's routing notes, lead and member
-// names, roles and owned topics from the kernel store. It is best effort: a
+// names, purposes and owned topics from the kernel store. It is best effort: a
 // store without Team records yields an empty roster, never an error, because
 // membership itself comes from the host's participant source.
 func loadConversationTeamRoster(ctx context.Context, store ConversationStore, conversation *Conversation) conversationTeamRoster {
@@ -451,17 +448,9 @@ func loadConversationTeamRoster(ctx context.Context, store ConversationStore, co
 		return roster
 	}
 	roster.notes = strings.TrimSpace(definition.Routing.Notes)
-	roles := make(map[string]string, len(definition.Roles))
-	for _, role := range definition.Roles {
-		roles[role.ID] = role.DisplayName
-	}
-	leadRole := definition.Routing.LeadRoleID
-	if leadRole == "" {
-		leadRole = DefaultTeamLeadRoleID
-	}
 	agents, _ := store.(conversationAgentCatalog)
 	for _, assignment := range deployment.Roster {
-		member := conversationTeamMember{name: strings.TrimSpace(assignment.DisplayName), role: roles[assignment.RoleID], owns: append([]string(nil), assignment.Owns...)}
+		member := conversationTeamMember{name: strings.TrimSpace(assignment.DisplayName), role: strings.TrimSpace(assignment.Purpose), owns: append([]string(nil), assignment.Owns...)}
 		if member.name == "" && agents != nil {
 			if agent, err := agents.GetDeployment(ctx, scope, assignment.AgentDeploymentID); err == nil && agent != nil {
 				member.name = strings.TrimSpace(agent.DisplayName)
@@ -473,7 +462,7 @@ func loadConversationTeamRoster(ctx context.Context, store ConversationStore, co
 			}
 		}
 		roster.members[assignment.AgentDeploymentID] = member
-		if roster.lead == "" && assignment.RoleID == leadRole {
+		if roster.lead == "" && assignment.Lead {
 			roster.lead = assignment.AgentDeploymentID
 		}
 	}

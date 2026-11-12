@@ -13,6 +13,7 @@ func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 	store := newTestKernelStore(t)
 	service := NewConversationService(store)
 	scope := Scope{Kind: "local", ID: "default"}
+	seedTestSpace(t, store, scope)
 	channel, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, Title: "Research", IdempotencyKey: "archive"})
 	if err != nil {
 		t.Fatal(err)

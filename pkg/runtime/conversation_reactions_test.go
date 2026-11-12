@@ -43,6 +43,7 @@ func testConversationReactions(t *testing.T, store ConversationStore) {
 	projector := &recordingReactionProjector{}
 	service.SetReactionProjector(projector)
 	scope := Scope{Kind: "tenant", ID: "one"}
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}, Title: "Launch", IdempotencyKey: "launch",
 	})

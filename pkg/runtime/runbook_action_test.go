@@ -63,6 +63,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: objective.Title,
 		Origin:         &ConversationReference{Kind: ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision},
@@ -158,6 +159,7 @@ func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *test
 	if err := store.UpdateRunbookActivation(ctx, activation, expectedRevision); err != nil {
 		t.Fatal(err)
 	}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: objective.Title,
 		Origin: &ConversationReference{Kind: ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision}, IdempotencyKey: "objective-channel-exhausted",
@@ -212,6 +214,7 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: objective.Title,
 		Origin: &ConversationReference{Kind: ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision}, IdempotencyKey: "objective-channel",

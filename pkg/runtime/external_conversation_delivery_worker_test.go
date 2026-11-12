@@ -339,6 +339,7 @@ func externalConversationEndpointFixtureOwnedBy(
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: provider}
+	seedTestSpace(t, store.(SpaceStore), scope)
 	deploymentID := owner.ID
 	handler := ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: deploymentID}
 	if owner.Type == OwnerTypeTeam {

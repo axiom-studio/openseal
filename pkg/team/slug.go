@@ -2,10 +2,10 @@ package team
 
 import "strings"
 
-// RoleSlug turns a member's display name into the base of a role id:
+// MemberSlug turns a member's display name into the base of a roster id:
 // lowercase letters and digits joined by single dashes, at most 48
 // characters, or "member" when nothing is left.
-func RoleSlug(name string) string {
+func MemberSlug(name string) string {
 	var out strings.Builder
 	dash := false
 	for _, char := range strings.ToLower(name) {

@@ -26,7 +26,6 @@ func main() {
 	ctx := context.Background()
 	_, err = registry.RegisterDefinition(ctx, &team.Definition{
 		ID: "ui-team", Version: "1", DisplayName: "Synthetic review team", Purpose: "Inspect a durable team catalog entry.",
-		Roles:               []team.RoleSlot{{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Check the evidence."}},
 		Approvals:           team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 		OperatingPrinciples: []string{"Report uncertainty clearly."},
 	})

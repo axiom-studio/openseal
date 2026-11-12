@@ -12,7 +12,7 @@ import type { Team } from "./TeamBrowser";
 
 type Assignment = Team["deployment"]["roster"][number];
 type Draft = {
-  version: 1;
+  version: 2;
   revision: number;
   base: Assignment[];
   roster: Assignment[];
@@ -26,11 +26,20 @@ type Merge = {
   conflicts: Conflict[];
   choices: Record<string, "mine" | "saved">;
 };
+const fields = (a?: Assignment) =>
+  a && [
+    a.id,
+    a.agentDeploymentId,
+    a.displayName || "",
+    a.purpose || "",
+    a.channelParticipation || "",
+    a.requiredSkillIds || [],
+    !!a.approver,
+    !!a.lead,
+    a.owns || [],
+  ];
 const equal = (a?: Assignment, b?: Assignment) =>
-  a?.id === b?.id &&
-  a?.roleId === b?.roleId &&
-  a?.agentDeploymentId === b?.agentDeploymentId &&
-  (a?.displayName || "") === (b?.displayName || "");
+  JSON.stringify(fields(a)) === JSON.stringify(fields(b));
 const sameRoster = (a: Assignment[], b: Assignment[]) =>
   a.length === b.length &&
   a.every((item) =>
@@ -60,7 +69,7 @@ function reconcile(
 }
 function fresh(team: Team): Draft {
   return {
-    version: 1,
+    version: 2,
     revision: team.deployment.revision,
     base: team.deployment.roster,
     roster: team.deployment.roster,
@@ -76,13 +85,12 @@ function restore(key: string, team: Team): Draft {
       items.every(
         (item) =>
           typeof item?.id === "string" &&
-          typeof item.roleId === "string" &&
           typeof item.agentDeploymentId === "string" &&
           (item.displayName === undefined ||
             typeof item.displayName === "string"),
       );
     if (
-      value?.version === 1 &&
+      value?.version === 2 &&
       Number.isSafeInteger(value.revision) &&
       value.revision > 0 &&
       typeof value.reason === "string" &&
@@ -96,15 +104,9 @@ function restore(key: string, team: Team): Draft {
   }
   return fresh(team);
 }
-function qualifies(agent: Agent, role: Team["definition"]["roles"][number]) {
-  return (
-    (!role.requiredDefinitionIds?.length ||
-      role.requiredDefinitionIds.includes(
-        agent.definition.id || agent.deployment.definitionId || "",
-      )) &&
-    (role.requiredSkillIds || []).every((id) =>
-      agent.definition.skillRequirements?.some((skill) => skill.skillId === id),
-    )
+function qualifies(agent: Agent, member?: Assignment) {
+  return (member?.requiredSkillIds || []).every((id) =>
+    agent.definition.skillRequirements?.some((skill) => skill.skillId === id),
   );
 }
 
@@ -192,42 +194,29 @@ export default function TeamRoster({
   };
   const describe = (assignment?: Assignment) =>
     assignment
-      ? `${agentName(assignment.agentDeploymentId)} → ${team.definition.roles.find((role) => role.id === assignment.roleId)?.displayName || assignment.roleId}${assignment.displayName ? ` (${assignment.displayName})` : ""}`
+      ? `${agentName(assignment.agentDeploymentId)}${assignment.displayName ? ` (${assignment.displayName})` : ""}`
       : "No assignment";
   const problems: string[] = [];
-  for (const role of team.definition.roles) {
-    const members = draft.roster.filter((item) => item.roleId === role.id);
-    if (members.length < (role.minimumMembers || 0))
+  for (const member of draft.roster) {
+    const agent = agents.find(
+      (item) => item.deployment.id === member.agentDeploymentId,
+    );
+    if (!agent || !qualifies(agent, member))
       problems.push(
-        `${role.displayName} needs at least ${role.minimumMembers} member(s).`,
+        `${agentName(member.agentDeploymentId)} no longer meets the requirements for ${member.displayName || "this member"}.`,
       );
-    if (role.maximumMembers && members.length > role.maximumMembers)
-      problems.push(
-        `${role.displayName} allows at most ${role.maximumMembers} member(s).`,
-      );
-    for (const member of members) {
-      const agent = agents.find(
-        (item) => item.deployment.id === member.agentDeploymentId,
-      );
-      if (!agent || !qualifies(agent, role))
-        problems.push(
-          `${agentName(member.agentDeploymentId)} no longer meets the requirements for ${role.displayName}.`,
-        );
-    }
   }
   if (
     new Set(draft.roster.map((item) => item.agentDeploymentId)).size !==
     draft.roster.length
   )
-    problems.push("Each agent can be assigned to only one role in this team.");
-  if (
-    draft.roster.some(
-      (item) => !team.definition.roles.some((role) => role.id === item.roleId),
-    )
-  )
-    problems.push(
-      "Some draft assignments refer to roles that no longer exist. Remove them before saving.",
-    );
+    problems.push("Each agent can be only one member of this team.");
+  const available = agents.filter(
+    (agent) =>
+      !draft.roster.some(
+        (item) => item.agentDeploymentId === agent.deployment.id,
+      ),
+  );
   const differences = [
     ...new Set([...draft.base, ...draft.roster].map((item) => item.id)),
   ].filter(
@@ -393,11 +382,11 @@ export default function TeamRoster({
       {open && (
         <div>
           <h3 ref={heading} tabIndex={-1}>
-            Edit role assignments
+            Edit members
           </h3>
           <p>
-            Choose installed agents that meet each role’s requirements. Each
-            agent can occupy one role. Changing membership does not activate
+            Choose installed agents that meet each member’s requirements. Each
+            agent can be one member. Changing membership does not activate
             agents or cancel running work.
           </p>
           <p className="muted">
@@ -494,176 +483,128 @@ export default function TeamRoster({
             </div>
           )}
           <fieldset disabled={busy || !allowed || !!merge}>
-            <legend className="sr-only">Draft role assignments</legend>
-            {team.definition.roles.map((role) => {
-              const members = draft.roster.filter(
-                (item) => item.roleId === role.id,
-              );
-              const eligible = agents.filter((agent) => qualifies(agent, role));
-              const available = eligible.filter(
-                (agent) =>
-                  !draft.roster.some(
-                    (item) => item.agentDeploymentId === agent.deployment.id,
-                  ),
+            <legend className="sr-only">Draft members</legend>
+            {draft.roster.map((member, index) => {
+              const label = `member ${index + 1}`;
+              const eligible = agents.filter((agent) =>
+                qualifies(agent, member),
               );
               return (
                 <section
                   className="team-role"
-                  key={role.id}
-                  aria-label={`Edit ${role.displayName}`}
+                  key={member.id}
+                  aria-label={`Edit ${label}`}
                 >
-                  <h4>{role.displayName}</h4>
-                  <p>{role.purpose}</p>
-                  <p className="muted">
-                    Minimum {role.minimumMembers || 0} ·{" "}
-                    {role.maximumMembers
-                      ? `Maximum ${role.maximumMembers}`
-                      : "No maximum specified"}
-                  </p>
-                  {!!role.requiredSkillIds?.length && (
-                    <p>Required skills: {role.requiredSkillIds.join(", ")}</p>
+                  <h4>
+                    {member.displayName || agentName(member.agentDeploymentId)}
+                  </h4>
+                  {member.purpose && <p>{member.purpose}</p>}
+                  {!!member.requiredSkillIds?.length && (
+                    <p>Required skills: {member.requiredSkillIds.join(", ")}</p>
                   )}
-                  {!!role.requiredDefinitionIds?.length && (
-                    <p className="muted">
-                      This role accepts only its required agent definitions.
-                    </p>
-                  )}
-                  {members.map((member, index) => (
-                    <div className="roster-assignment" key={member.id}>
-                      <label>
-                        Agent for {role.displayName} {index + 1}
-                        <select
-                          aria-label={`Agent for ${role.displayName} ${index + 1}`}
-                          value={member.agentDeploymentId}
-                          onChange={(event) =>
-                            changeRoster(
-                              draft.roster.map((item) =>
-                                item.id === member.id
-                                  ? {
-                                      ...item,
-                                      agentDeploymentId: event.target.value,
-                                      displayName: "",
-                                    }
-                                  : item,
-                              ),
-                            )
-                          }
-                        >
-                          {!eligible.some(
-                            (agent) =>
-                              agent.deployment.id === member.agentDeploymentId,
-                          ) && (
-                            <option value={member.agentDeploymentId}>
-                              {agentName(member.agentDeploymentId)} (unavailable
-                              or no longer eligible)
-                            </option>
-                          )}
-                          {eligible
-                            .filter(
-                              (agent) =>
-                                agent.deployment.id ===
-                                  member.agentDeploymentId ||
-                                !draft.roster.some(
-                                  (item) =>
-                                    item.agentDeploymentId ===
-                                    agent.deployment.id,
-                                ),
-                            )
-                            .map((agent) => (
-                              <option
-                                key={agent.deployment.id}
-                                value={agent.deployment.id}
-                              >
-                                {agentName(agent.deployment.id)} ·{" "}
-                                {agent.deployment.rolloutStatus}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                      <label>
-                        Name in team for {role.displayName} {index + 1}
-                        <input
-                          value={member.displayName || ""}
-                          maxLength={100}
-                          placeholder="Optional name within this team"
-                          onChange={(event) =>
-                            changeRoster(
-                              draft.roster.map((item) =>
-                                item.id === member.id
-                                  ? { ...item, displayName: event.target.value }
-                                  : item,
-                              ),
-                            )
-                          }
-                        />
-                      </label>
-                      <button
-                        className="button"
-                        type="button"
-                        onClick={() =>
+                  <div className="roster-assignment">
+                    <label>
+                      Agent for {label}
+                      <select
+                        aria-label={`Agent for ${label}`}
+                        value={member.agentDeploymentId}
+                        onChange={(event) =>
                           changeRoster(
-                            draft.roster.filter(
-                              (item) => item.id !== member.id,
+                            draft.roster.map((item) =>
+                              item.id === member.id
+                                ? {
+                                    ...item,
+                                    agentDeploymentId: event.target.value,
+                                  }
+                                : item,
                             ),
                           )
                         }
                       >
-                        Remove {agentName(member.agentDeploymentId)}
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    className="button"
-                    type="button"
-                    disabled={
-                      !available.length ||
-                      (!!role.maximumMembers &&
-                        members.length >= role.maximumMembers)
-                    }
-                    onClick={() =>
-                      changeRoster([
-                        ...draft.roster,
-                        {
-                          id: crypto.randomUUID(),
-                          roleId: role.id,
-                          agentDeploymentId: available[0].deployment.id,
-                        },
-                      ])
-                    }
-                  >
-                    Add member to {role.displayName}
-                  </button>
-                  {!available.length && (
-                    <p className="muted">
-                      No other eligible agents are available for this role.
-                    </p>
-                  )}
+                        {!eligible.some(
+                          (agent) =>
+                            agent.deployment.id === member.agentDeploymentId,
+                        ) && (
+                          <option value={member.agentDeploymentId}>
+                            {agentName(member.agentDeploymentId)} (unavailable
+                            or no longer eligible)
+                          </option>
+                        )}
+                        {eligible
+                          .filter(
+                            (agent) =>
+                              agent.deployment.id ===
+                                member.agentDeploymentId ||
+                              !draft.roster.some(
+                                (item) =>
+                                  item.agentDeploymentId ===
+                                  agent.deployment.id,
+                              ),
+                          )
+                          .map((agent) => (
+                            <option
+                              key={agent.deployment.id}
+                              value={agent.deployment.id}
+                            >
+                              {agentName(agent.deployment.id)} ·{" "}
+                              {agent.deployment.rolloutStatus}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label>
+                      Name in team for {label}
+                      <input
+                        value={member.displayName || ""}
+                        maxLength={100}
+                        placeholder="Optional name within this team"
+                        onChange={(event) =>
+                          changeRoster(
+                            draft.roster.map((item) =>
+                              item.id === member.id
+                                ? { ...item, displayName: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() =>
+                        changeRoster(
+                          draft.roster.filter((item) => item.id !== member.id),
+                        )
+                      }
+                    >
+                      Remove {agentName(member.agentDeploymentId)}
+                    </button>
+                  </div>
                 </section>
               );
             })}
-            {draft.roster
-              .filter(
-                (item) =>
-                  !team.definition.roles.some(
-                    (role) => role.id === item.roleId,
-                  ),
-              )
-              .map((item) => (
-                <p key={item.id}>
-                  {describe(item)}{" "}
-                  <button
-                    type="button"
-                    className="button"
-                    onClick={() =>
-                      changeRoster(
-                        draft.roster.filter((other) => other.id !== item.id),
-                      )
-                    }
-                  >
-                    Remove obsolete assignment
-                  </button>
-                </p>
-              ))}
+            <button
+              className="button"
+              type="button"
+              disabled={!available.length}
+              onClick={() =>
+                changeRoster([
+                  ...draft.roster,
+                  {
+                    id: crypto.randomUUID(),
+                    agentDeploymentId: available[0].deployment.id,
+                  },
+                ])
+              }
+            >
+              Add member
+            </button>
+            {!available.length && (
+              <p className="muted">
+                No other eligible agents are available for this team.
+              </p>
+            )}
             {!!problems.length && (
               <ul className="error-text" aria-label="Roster requirements">
                 {problems.map((problem) => (
@@ -706,7 +647,7 @@ export default function TeamRoster({
                 checked={reviewed}
                 onChange={(event) => setReviewed(event.target.checked)}
               />
-              I reviewed the role assignments and changes above.
+              I reviewed the members and changes above.
             </label>
             <button
               className="button primary"

@@ -18,6 +18,7 @@ func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.
 	store := runtimetest.NewKernelStore(t)
 	service := runtime.NewConversationService(store)
 	scope := runtime.Scope{Kind: "local", ID: "default"}
+	seedSpace(t, store, scope, "")
 	channel, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +74,7 @@ func TestChannelPostDispatchRunsAfterDesktopAuth(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
 	service := runtime.NewConversationService(store)
 	scope := runtime.Scope{Kind: "local", ID: "default"}
+	seedSpace(t, store, scope, "")
 	channel, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)

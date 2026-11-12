@@ -158,6 +158,7 @@ func settledWorkerTaskFixture(t *testing.T, store *SQLiteStore) (*AgentRun, *Age
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "worker-task"}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
 	})

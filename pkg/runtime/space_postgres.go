@@ -8,6 +8,7 @@ import (
 	"time"
 
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/lib/pq"
 )
 
 const spacesMigrationVersion int64 = 67
@@ -15,9 +16,11 @@ const spacesMigrationVersion int64 = 67
 var _ SpaceStore = (*PostgresStore)(nil)
 
 // migrateSpaces creates spaces and their members, then backfills in one step:
-// every scope seen in Agent or Team deployments or conversations gets its
-// Default space, every deployment becomes a Default member, every
-// conversation moves to Default, and conversations.space_id becomes NOT NULL.
+// every scope seen in Agent or Team deployments or conversations gets one
+// space named Default, every deployment becomes its member, every
+// conversation moves to it, and conversations.space_id becomes NOT NULL.
+// Migration 85 made default spaces per owner; nothing after this backfill
+// creates a space on its own.
 func (s *PostgresStore) migrateSpaces(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, spacesMigrationVersion)
 	if err != nil || applied {
@@ -43,7 +46,7 @@ func (s *PostgresStore) migrateSpaces(ctx context.Context, tx *sql.Tx) error {
 		`CREATE INDEX IF NOT EXISTS space_members_member_idx ON ` + members + ` (scope_kind, scope_id, member_type, member_id)`,
 		`ALTER TABLE ` + conversations + ` ADD COLUMN IF NOT EXISTS space_id TEXT`,
 		`INSERT INTO ` + spaces + ` (scope_kind, scope_id, id, name, look, position, is_default, created_by, created_at, updated_at)
-			SELECT scope_kind, scope_id, ` + defaultID + `, '` + DefaultSpaceName + `', '` + string(DefaultSpaceLook) + `', 0, TRUE, 'system', now(), now()
+			SELECT scope_kind, scope_id, ` + defaultID + `, 'Default', 'tidepool', 0, TRUE, 'system', now(), now()
 			FROM (
 				SELECT scope_kind, scope_id FROM ` + s.table("agent_deployments") + `
 				UNION SELECT scope_kind, scope_id FROM ` + s.table("team_deployments") + `
@@ -98,20 +101,15 @@ func (s *PostgresStore) spacesLock(ctx context.Context, tx *sql.Tx, scope Scope)
 	return err
 }
 
-func (s *PostgresStore) ensurePostgresDefaultSpaceTx(ctx context.Context, tx *sql.Tx, scope Scope, now time.Time) (*Space, bool, error) {
-	space := newDefaultSpace(scope, now)
-	result, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("spaces")+` (`+postgresSpaceColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`, space.ID, scope.Kind, scope.ID, space.Name, space.Look,
-		space.Position, space.IsDefault, space.Access, space.OwnerID, space.CreatedAt, space.UpdatedAt)
-	if err != nil {
-		return nil, false, err
+// postgresDefaultSpace returns the owner's default space, or
+// ErrNoDefaultSpace.
+func (s *PostgresStore) postgresDefaultSpace(ctx context.Context, queryer postgresConversationQueryer, scope Scope, ownerID string) (*Space, error) {
+	space, err := scanPostgresSpace(queryer.QueryRowContext(ctx, `SELECT `+postgresSpaceColumns+` FROM `+s.table("spaces")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND owner_id = $3 AND is_default`, scope.Kind, scope.ID, ownerID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNoDefaultSpace
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return nil, false, err
-	}
-	stored, err := s.getPostgresSpace(ctx, tx, scope, space.ID)
-	return stored, affected == 1, err
+	return space, err
 }
 
 func (s *PostgresStore) getPostgresSpace(ctx context.Context, queryer postgresConversationQueryer, scope Scope, spaceID string) (*Space, error) {
@@ -141,20 +139,11 @@ func (s *PostgresStore) listPostgresSpaces(ctx context.Context, queryer postgres
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) EnsureDefaultSpace(ctx context.Context, scope Scope, now time.Time) (*Space, bool, error) {
+func (s *PostgresStore) DefaultSpace(ctx context.Context, scope Scope, ownerID string) (*Space, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, false, err
-	}
-	defer tx.Rollback()
-	space, created, err := s.ensurePostgresDefaultSpaceTx(ctx, tx, scope, now)
-	if err != nil {
-		return nil, false, err
-	}
-	return space, created, tx.Commit()
+	return s.postgresDefaultSpace(ctx, s.db, scope, ownerID)
 }
 
 func (s *PostgresStore) CreateSpace(ctx context.Context, space *Space) (*Space, error) {
@@ -170,9 +159,10 @@ func (s *PostgresStore) CreateSpace(ctx context.Context, space *Space) (*Space, 
 		return nil, err
 	}
 	created := cloneSpace(space)
-	created.IsDefault = false
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM `+s.table("spaces")+`
-		WHERE scope_kind = $1 AND scope_id = $2`, space.Scope.Kind, space.Scope.ID).Scan(&created.Position); err != nil {
+	// The scope lock above makes the owner's first space their only default.
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0), NOT COALESCE(BOOL_OR(is_default AND owner_id = $3), FALSE)
+		FROM `+s.table("spaces")+` WHERE scope_kind = $1 AND scope_id = $2`,
+		space.Scope.Kind, space.Scope.ID, space.OwnerID).Scan(&created.Position, &created.IsDefault); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("spaces")+` (`+postgresSpaceColumns+`)
@@ -260,7 +250,7 @@ func (s *PostgresStore) DeleteSpace(ctx context.Context, scope Scope, spaceID st
 	if space.IsDefault {
 		return ErrDefaultSpaceProtected
 	}
-	defaultSpace, _, err := s.ensurePostgresDefaultSpaceTx(ctx, tx, scope, now)
+	defaultSpace, err := s.postgresDefaultSpace(ctx, tx, scope, space.OwnerID)
 	if err != nil {
 		return err
 	}
@@ -270,7 +260,8 @@ func (s *PostgresStore) DeleteSpace(ctx context.Context, scope Scope, spaceID st
 		WHERE scope_kind = $2 AND scope_id = $3 AND space_id = $4`, defaultSpace.ID, scope.Kind, scope.ID, spaceID); err != nil {
 		return err
 	}
-	// Members found only in the deleted space join Default at its end.
+	// Members found only in the deleted space join the owner's default space
+	// at its end.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+members+` (scope_kind, scope_id, space_id, member_type, member_id, position, added_at)
 		SELECT m.scope_kind, m.scope_id, $1, m.member_type, m.member_id,
 			(SELECT COALESCE(MAX(position) + 1, 0) FROM `+members+` WHERE scope_kind = $2 AND scope_id = $3 AND space_id = $1)
@@ -400,11 +391,6 @@ func (s *PostgresStore) DeleteSpaceAgentWithRosters(ctx context.Context, scope S
 		return err
 	}
 	for _, change := range changes {
-		if change.Definition != nil {
-			if err := s.createTeamDefinition(ctx, tx, change.Definition); err != nil {
-				return err
-			}
-		}
 		if err := s.updateTeamDeploymentTx(ctx, tx, change.Deployment, change.ExpectedRevision, change.Activation); err != nil {
 			return err
 		}
@@ -415,8 +401,9 @@ func (s *PostgresStore) DeleteSpaceAgentWithRosters(ctx context.Context, scope S
 	return tx.Commit()
 }
 
-// resolvePostgresConversationSpaceTx fills an empty SpaceID with the owner's
-// first space by position, else Default, and verifies an explicit one.
+// resolvePostgresConversationSpaceTx verifies an explicit SpaceID. It fills
+// an empty one with the owner deployment's first space by position, else the
+// default space of the person who created the conversation.
 func (s *PostgresStore) resolvePostgresConversationSpaceTx(ctx context.Context, tx *sql.Tx, conversation *Conversation) error {
 	scope := conversation.Scope
 	if conversation.SpaceID != "" {
@@ -430,9 +417,9 @@ func (s *PostgresStore) resolvePostgresConversationSpaceTx(ctx context.Context, 
 		ORDER BY sp.position, sp.created_at, sp.id LIMIT 1`, scope.Kind, scope.ID, string(conversation.Owner.Type),
 		strings.TrimSpace(conversation.Owner.ID)).Scan(&spaceID)
 	if errors.Is(err, sql.ErrNoRows) {
-		defaultSpace, _, ensureErr := s.ensurePostgresDefaultSpaceTx(ctx, tx, scope, conversation.CreatedAt)
-		if ensureErr != nil {
-			return ensureErr
+		defaultSpace, defaultErr := s.postgresDefaultSpace(ctx, tx, scope, conversation.CreatedBy)
+		if defaultErr != nil {
+			return defaultErr
 		}
 		spaceID, err = defaultSpace.ID, nil
 	}
@@ -443,7 +430,7 @@ func (s *PostgresStore) resolvePostgresConversationSpaceTx(ctx context.Context, 
 	return nil
 }
 
-func (s *PostgresStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {
+func (s *PostgresStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, ownerID string, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -459,7 +446,7 @@ func (s *PostgresStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, m
 		scope.Kind, scope.ID, memberType, memberID).Scan(&placed); err != nil || placed {
 		return nil, err
 	}
-	defaultSpace, _, err := s.ensurePostgresDefaultSpaceTx(ctx, tx, scope, now)
+	defaultSpace, err := s.postgresDefaultSpace(ctx, tx, scope, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -482,6 +469,88 @@ func (s *PostgresStore) SetSpaceAccess(ctx context.Context, scope Scope, spaceID
 		return nil, ErrSpaceNotFound
 	}
 	return space, err
+}
+
+func (s *PostgresStore) SetSpaceOwner(ctx context.Context, scope Scope, spaceID, ownerID string, now time.Time) (*Space, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := s.spacesLock(ctx, tx, scope); err != nil {
+		return nil, err
+	}
+	space, err := s.getPostgresSpace(ctx, tx, scope, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.setPostgresSpaceOwnerTx(ctx, tx, space, ownerID, now); err != nil {
+		return nil, err
+	}
+	if space, err = s.getPostgresSpace(ctx, tx, scope, spaceID); err != nil {
+		return nil, err
+	}
+	return space, tx.Commit()
+}
+
+// setPostgresSpaceOwnerTx hands the space to ownerID. Both owners give up
+// their default, the space changes hands, and each owner's oldest space
+// becomes their default again.
+func (s *PostgresStore) setPostgresSpaceOwnerTx(ctx context.Context, tx *sql.Tx, space *Space, ownerID string, now time.Time) error {
+	spaces, scope := s.table("spaces"), space.Scope
+	if _, err := tx.ExecContext(ctx, `UPDATE `+spaces+` SET is_default = FALSE
+		WHERE scope_kind = $1 AND scope_id = $2 AND owner_id IN ($3, $4) AND is_default`, scope.Kind, scope.ID, space.OwnerID, ownerID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE `+spaces+` SET owner_id = $1, updated_at = $2
+		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5`, ownerID, now, scope.Kind, scope.ID, space.ID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, markOwnerDefaultSpaces(spaces, "TRUE")+` AND s.scope_kind = $1 AND s.scope_id = $2`, scope.Kind, scope.ID)
+	return err
+}
+
+func (s *PostgresStore) SetSpaceAccessState(ctx context.Context, scope Scope, spaceID string, state SpaceAccessState, now time.Time) (*Space, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := s.spacesLock(ctx, tx, scope); err != nil {
+		return nil, err
+	}
+	space, err := s.getPostgresSpace(ctx, tx, scope, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	if state.OwnerID != "" && state.OwnerID != space.OwnerID {
+		if err := s.setPostgresSpaceOwnerTx(ctx, tx, space, state.OwnerID, now); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("spaces")+` SET access = $1, updated_at = $2
+		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5`, state.Access, now, scope.Kind, scope.ID, spaceID); err != nil {
+		return nil, err
+	}
+	people := s.table("space_people")
+	keep := make([]string, 0, len(state.People))
+	for _, person := range state.People {
+		keep = append(keep, person.UserID)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM `+people+` WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3
+		AND NOT (user_id = ANY($4::text[]))`, scope.Kind, scope.ID, spaceID, pq.Array(keep)); err != nil {
+		return nil, err
+	}
+	for _, person := range state.People {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO `+people+` (scope_kind, scope_id, `+postgresSpacePersonColumns+`)
+			VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, scope.Kind, scope.ID, spaceID, person.UserID, person.AddedBy, person.AddedAt); err != nil {
+			return nil, err
+		}
+	}
+	if space, err = s.getPostgresSpace(ctx, tx, scope, spaceID); err != nil {
+		return nil, err
+	}
+	return space, tx.Commit()
 }
 
 const postgresSpacePersonColumns = `space_id, user_id, added_by, added_at`

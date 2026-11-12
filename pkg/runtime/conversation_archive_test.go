@@ -26,6 +26,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 			service := NewConversationService(store.(ConversationStore))
 			ctx := context.Background()
 			scope := Scope{Kind: "tenant", ID: "archive"}
+			seedTestSpace(t, store.(SpaceStore), scope)
 			start := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
 			request := ImportConversationArchiveRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
@@ -91,7 +92,9 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 }
 
 func TestConversationArchiveImportRejectsUnknownReplyAndDuplicateRecords(t *testing.T) {
-	service := NewConversationService(newTestKernelStore(t))
+	store := newTestKernelStore(t)
+	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "archive"})
+	service := NewConversationService(store)
 	base := ImportConversationArchiveRequest{
 		Scope: Scope{Kind: "tenant", ID: "archive"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 		Title: "Imported history", Source: ConversationArchiveSource{System: "source", ResourceType: "chat", ResourceID: "1"},

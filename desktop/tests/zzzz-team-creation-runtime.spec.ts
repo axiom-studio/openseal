@@ -395,14 +395,13 @@ test("real daemon builds a reviewed team in a builder chat", async ({
     expect(audit.reason).toBe(`Owner reviewed resume for ${NAME}.`);
     expect(audit.actorId).toBe("local-operator");
 
-    // The team's roles are its members; swap the researcher for a paused
-    // substitute of the same definition.
-    const researchRole = installed.definition.roles.find(
-      (role: any) => role.displayName === "Team researcher",
+    // Swap the researcher member for a paused substitute of the same
+    // definition.
+    const researcherIndex = updated.roster.findIndex(
+      (member: any) => member.displayName === "Team researcher",
     );
-    const original = updated.roster.find(
-      (member: any) => member.roleId === researchRole.id,
-    );
+    const original = updated.roster[researcherIndex];
+    const researcher = `member ${researcherIndex + 1}`;
     execFileSync(
       "go",
       [
@@ -427,16 +426,16 @@ test("real daemon builds a reviewed team in a builder chat", async ({
       .getByRole("button", { name: "Edit roster", exact: true })
       .click();
     await page
-      .getByLabel("Agent for Team researcher 1", { exact: true })
+      .getByLabel(`Agent for ${researcher}`, { exact: true })
       .selectOption("ui-roster-substitute");
     await page
-      .getByLabel("Name in team for Team researcher 1", { exact: true })
+      .getByLabel(`Name in team for ${researcher}`, { exact: true })
       .fill("Evidence lead");
     await page
       .getByLabel("Reason for roster change", { exact: true })
       .fill("Assign the research substitute after owner review.");
     await page
-      .getByRole("checkbox", { name: "I reviewed the role assignments" })
+      .getByRole("checkbox", { name: "I reviewed the members" })
       .check();
     await page
       .getByRole("button", { name: "Save roster", exact: true })

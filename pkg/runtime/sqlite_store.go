@@ -227,6 +227,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateAgentBuilderDraftsSQLite(db); err != nil {
 		return err
 	}
+	if err := migrateTeamMembersSQLite(db); err != nil {
+		return err
+	}
 	return migrateRemoveKernelProjectsSQLite(db)
 }
 

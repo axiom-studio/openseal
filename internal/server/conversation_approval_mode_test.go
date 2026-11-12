@@ -14,6 +14,7 @@ import (
 
 func TestConversationApprovalModeAPI(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
+	seedSpace(t, store, runtime.Scope{Kind: "tenant", ID: "one"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations",
 		`{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"agent","id":"assistant"},"title":"Chat"}`, "chat")

@@ -53,7 +53,6 @@ async function setup(page: Page, receipts = true, projection?: () => object) {
             definition: {
               displayName: "Research team",
               purpose: "Review evidence together.",
-              roles: [],
             },
           },
         ],

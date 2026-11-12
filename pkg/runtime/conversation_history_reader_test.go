@@ -12,8 +12,10 @@ import (
 )
 
 func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
-	service := NewConversationService(newTestKernelStore(t))
+	store := newTestKernelStore(t)
+	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "one"}
+	seedTestSpace(t, store, scope)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: owner.ID}}
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "history", IdempotencyKey: "history"})

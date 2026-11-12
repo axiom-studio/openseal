@@ -66,7 +66,7 @@ Every objective names an owner, and an owner is always one of two kinds.
 | `type` | `agent` or `team` |
 | `id` | Non-empty identifier string |
 
-Both kinds own work identically. What differs is internal structure: a Team additionally carries semantic roles, a roster, a policy, and its own Skill bindings. See [Agents and Teams](agents-and-teams.md).
+Both kinds own work identically. What differs is internal structure: a Team additionally carries a roster of member Agents, a policy, and its own Skill bindings. See [Agents and Teams](agents-and-teams.md).
 
 ## The Durable Record
 

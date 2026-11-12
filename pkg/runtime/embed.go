@@ -77,9 +77,13 @@ type EmbedInstallation struct {
 	AllowedOrigins []string                `json:"allowedOrigins"`
 	Identity       EmbedIdentityPolicy     `json:"identity"`
 	Permissions    EmbedPermissionPolicy   `json:"permissions"`
-	Revision       int64                   `json:"revision"`
-	CreatedAt      time.Time               `json:"createdAt"`
-	UpdatedAt      time.Time               `json:"updatedAt"`
+	// CreatedBy is the person who created the installation, when the host
+	// names one. Its chats go to their default space while the Agent is in
+	// no space.
+	CreatedBy string    `json:"createdBy,omitempty"`
+	Revision  int64     `json:"revision"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func (i *EmbedInstallation) Validate() error {
@@ -210,6 +214,8 @@ type CreateEmbedInstallationRequest struct {
 	AllowedOrigins []string
 	Identity       EmbedIdentityPolicy
 	Permissions    EmbedPermissionPolicy
+	// CreatedBy is the person creating the installation.
+	CreatedBy string
 }
 
 type UpdateEmbedInstallationRequest struct {
@@ -259,7 +265,7 @@ func (s *EmbedSessionService) CreateInstallation(ctx context.Context, req Create
 	installation := &EmbedInstallation{
 		ID: strings.TrimSpace(req.ID), Scope: req.Scope, DeploymentID: strings.TrimSpace(req.DeploymentID), Name: strings.TrimSpace(req.Name),
 		PublicRoute: route, Status: EmbedInstallationActive, AllowedOrigins: normalizeEmbedOrigins(req.AllowedOrigins),
-		Identity: req.Identity, Permissions: req.Permissions, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Identity: req.Identity, Permissions: req.Permissions, CreatedBy: strings.TrimSpace(req.CreatedBy), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if installation.ID == "" {
 		installation.ID = s.newID()
@@ -351,6 +357,7 @@ func (s *EmbedSessionService) OpenSession(ctx context.Context, req OpenEmbedSess
 	if _, _, err := s.conversations.CreateConversation(ctx, CreateConversationRequest{
 		ID: session.ConversationID, Scope: session.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: installation.DeploymentID},
 		Title: "Embedded chat", Origin: &ConversationReference{Kind: ConversationReferenceEmbedSession, ID: session.ID},
+		CreatedBy:      installation.CreatedBy,
 		IdempotencyKey: "embed-session:" + session.ID,
 	}); err != nil {
 		return nil, err

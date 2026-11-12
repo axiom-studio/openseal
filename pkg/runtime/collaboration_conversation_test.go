@@ -60,19 +60,19 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
 			Roster: []kernelteam.RosterAssignment{
-				{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer-agent"},
-				{ID: "specialist", RoleID: "specialist", AgentDeploymentID: "specialist-agent"},
+				{ID: "reviewer", AgentDeploymentID: "reviewer-agent", Approver: true},
+				{ID: "specialist", AgentDeploymentID: "specialist-agent"},
 			},
 		},
 		definition: &kernelteam.Definition{
 			ID: "release-team", Version: "1",
-			Approvals: kernelteam.ApprovalPolicy{ApproverRoleIDs: []string{"reviewer"}},
 			Delegation: kernelteam.DelegationPolicy{
 				MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,
 				RequireAcceptance: true, RequireCompletionReview: true,
 			},
 		},
 	}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"},
 		Title: "Release coordination", IdempotencyKey: "release-coordination",
@@ -185,6 +185,7 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "escalation-projection"}
 	store := newTestKernelStore(t)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"},
 		Title: "Incident coordination", IdempotencyKey: "incident-coordination",

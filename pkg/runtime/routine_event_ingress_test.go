@@ -52,6 +52,7 @@ func routineConnectionFixture(t *testing.T, h *routineEventHarness, provider str
 	}
 	// The routine's chat lives in the endpoint's scope.
 	h.scope = endpoint.Scope
+	seedTestSpace(h.t, h.store, h.scope)
 	h.conversation, h.message = h.chat(provider + " routines")
 	return catalog, endpoint
 }

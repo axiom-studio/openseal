@@ -30,6 +30,7 @@ func conversationContinuationFixture(t *testing.T, store conversationContinuatio
 	scope := Scope{Kind: "tenant", ID: "continuation"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "continuation-agent"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Continuation", IdempotencyKey: "continuation"})
 	if err != nil {
 		t.Fatal(err)

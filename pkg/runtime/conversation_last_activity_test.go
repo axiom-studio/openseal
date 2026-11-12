@@ -15,6 +15,8 @@ func TestLastConversationActivityMatchesTheOwnerList(t *testing.T) {
 			ctx := context.Background()
 			service := NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "last-activity"}
+			seedTestSpace(t, store.(SpaceStore), scope)
+			seedTestSpace(t, store.(SpaceStore), Scope{Kind: "tenant", ID: "elsewhere"})
 			person := ConversationParticipant{Type: ConversationParticipantUser, ID: "ana"}
 			create := func(scope Scope, ownerType OwnerType, ownerID, key string, post bool) *Conversation {
 				t.Helper()

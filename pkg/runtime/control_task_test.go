@@ -69,6 +69,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "start-task-" + uuid.NewString()[:8]}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "start-task-chat",
 	})

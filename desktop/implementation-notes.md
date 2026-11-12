@@ -64,9 +64,9 @@ the same idempotency key without duplicating resources.
 
 Open **Teams** from navigation, the command menu, or Ctrl/Cmd+5 to inspect the
 scoped team catalog when available; status mutations require update capability. Teams sort by name; search locally
-across names, purposes, and role names and filter by Active, Draft, Paused, or
-Archived status. Expand a team to inspect version/revision, roster, roles, member
-bounds, required skills, and operating principles. Team deployment status does
+across names, purposes, and member names and filter by Active, Draft, Paused, or
+Archived status. Expand a team to inspect version/revision, its members with their
+purposes and required skills, and operating principles. Team deployment status does
 not imply member availability. Available agent records link to their inspector;
 missing members retain an explicit unavailable-details label.
 
@@ -126,7 +126,7 @@ In Channel settings, **Enable team replies** opts this channel into automatic
 model-backed contributions for new messages. Enabling skips existing history;
 disabling and re-enabling establishes a new boundary. Up to eight eligible team
 members can review a message and propose a relevant reply or silence. Inactive
-agents and observe-only/disabled roles do not reply. The workspace provider is
+agents and observe-only/disabled members do not reply. The workspace provider is
 used and calls may incur charges. Explicit Team work remains a separate workflow;
 the reply adapter has no external-action executor or general tool access.
 
@@ -443,12 +443,12 @@ scope remain unfinished; the comp gate remains open.
 
 ## Edit a team roster
 
-Expand a team and choose **Edit roster**. Select installed agents meeting each
-role's exact required definitions and all required skills, add/remove assignments,
-and optionally set a name used within the team. Role minimum/maximum counts and
-one role per agent are enforced in the editor; paused/inactive agents remain
-eligible when their definition/skills qualify and their status is explicit.
-Replacing an agent preserves the assignment ID. Membership changes neither
+Expand a team and choose **Edit roster**. Each member is a row: select an installed
+agent that declares all of the member's required skills, add/remove members, and
+optionally set the member's name within the team. One member per agent is enforced
+in the editor; paused/inactive agents remain eligible when their skills qualify and
+their status is explicit. Replacing an agent preserves the member ID and keeps its
+purpose, channel participation, approver and lead flags. Membership changes neither
 activate agents nor cancel running work; the kernel remains authoritative.
 
 Review the before/after list, supply a reason, and check the review consent before
@@ -516,10 +516,9 @@ That mode is saved in the version-1 draft. Submission prefixes the request with
 `Create one team.` and prepares one team with new agents for review; it does not
 install immediately.
 
-Review roles and assignments, member bounds, required definitions/skills, role
-skill permissions, approval boundaries, shared context, delegation, coordination,
+Review members, required skills, member skill permissions, approval boundaries, shared context, delegation, coordination,
 operating principles, and objective templates. Proposed agent instructions appear
-below the team. Missing roles/approval boundaries or unmatched assignments block
+below the team. Missing members/approval boundaries or unmatched members block
 approval and installation in the interface; kernel validation remains authoritative.
 Continue through installation checks, the explicit reviewed checkbox, approval,
 and installation. The receipt offers **View teams** and member inspection.

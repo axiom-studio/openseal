@@ -68,7 +68,11 @@ type Conversation struct {
 	Owner ObjectiveOwner `json:"owner"`
 	// SpaceID is the space the conversation lives in. Stores resolve an empty
 	// value on create; every stored conversation has one.
-	SpaceID       string                     `json:"spaceId"`
+	SpaceID string `json:"spaceId"`
+	// CreatedBy is the person behind the call that created the conversation,
+	// when there is one. A conversation created without a SpaceID whose owner
+	// is in no space goes to this person's default space.
+	CreatedBy     string                     `json:"createdBy,omitempty"`
 	Title         string                     `json:"title"`
 	Origin        *ConversationReference     `json:"origin,omitempty"`
 	Status        ConversationStatus         `json:"status"`

@@ -43,7 +43,7 @@ func createInboxRequest(t *testing.T, store AgentRequestInboxStore, policy Agent
 	created, err := NewCollaborationService(store).CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "requester"},
 		Recipient: recipient, SourceRunID: source.ID, Goal: "Review the launch evidence",
-		Instructions: "Check the evidence before accepting.", SemanticRole: "reviewer",
+		Instructions:     "Check the evidence before accepting.",
 		SharedContext:    map[string]interface{}{"evidenceRef": "artifact:launch"},
 		AcceptancePolicy: policy, IdempotencyKey: "review-launch",
 	})
@@ -387,7 +387,7 @@ func TestAgentRequestInboxRecoversPreauthorizedDelegationWithoutReview(t *testin
 	}
 }
 
-func TestAgentRequestInboxUsesDeterministicTeamRoleAndAcceptancePolicy(t *testing.T) {
+func TestAgentRequestInboxUsesDeterministicTeamMemberAndAcceptancePolicy(t *testing.T) {
 	for _, requireAcceptance := range []bool{false, true} {
 		t.Run(fmt.Sprintf("review-%t", requireAcceptance), func(t *testing.T) {
 			scope := Scope{Kind: "tenant", ID: "inbox"}
@@ -397,8 +397,8 @@ func TestAgentRequestInboxUsesDeterministicTeamRoleAndAcceptancePolicy(t *testin
 					ID: "marketing", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 					DefinitionID: "marketing", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
 					Roster: []kernelteam.RosterAssignment{
-						{ID: "z", RoleID: "reviewer", AgentDeploymentID: "z-agent"},
-						{ID: "a", RoleID: "reviewer", AgentDeploymentID: "a-agent"},
+						{ID: "z", AgentDeploymentID: "z-agent"},
+						{ID: "a", AgentDeploymentID: "a-agent"},
 					},
 				},
 				definition: &kernelteam.Definition{

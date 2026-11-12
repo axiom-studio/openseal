@@ -17,11 +17,22 @@ const (
 	DeploymentArchived DeploymentStatus = "archived"
 )
 
+// RosterAssignment is one member of a Team: an Agent deployment, what it does
+// on the Team and whether it answers in the Team channel.
 type RosterAssignment struct {
-	ID                string `json:"id"`
-	RoleID            string `json:"roleId"`
-	AgentDeploymentID string `json:"agentDeploymentId"`
-	DisplayName       string `json:"displayName,omitempty"`
+	ID                   string               `json:"id"`
+	AgentDeploymentID    string               `json:"agentDeploymentId"`
+	DisplayName          string               `json:"displayName,omitempty"`
+	Purpose              string               `json:"purpose,omitempty"`
+	ChannelParticipation ChannelParticipation `json:"channelParticipation,omitempty"`
+	// RequiredSkillIDs are Skills the member's Agent definition must declare
+	// for the member to stay on the roster and take delegated work.
+	RequiredSkillIDs []string `json:"requiredSkillIds,omitempty"`
+	// Approver marks a member who may review other members' work. When no
+	// member is marked, every member may.
+	Approver bool `json:"approver,omitempty"`
+	// Lead marks the member a message goes to when the router picks nobody.
+	Lead bool `json:"lead,omitempty"`
 	// Owns lists the topics this member answers in the Team channel ("press
 	// list", "pricing"). The router prefers a topic's owner.
 	Owns []string `json:"owns,omitempty"`
@@ -57,17 +68,16 @@ func (d *Deployment) Validate(definition *Definition) error {
 		d.DefinitionID != definition.ID || d.ActiveVersion != definition.Version || d.Revision < 1 || !validDeploymentStatus(d.Status) {
 		return errors.New("team deployment identity, scope, active definition, status, and revision are required")
 	}
-	roles := make(map[string]RoleSlot, len(definition.Roles))
-	counts := make(map[string]int, len(definition.Roles))
-	for _, role := range definition.Roles {
-		roles[role.ID] = role
+	// An archived Team keeps whatever roster it had.
+	if len(d.Roster) == 0 && d.Status != DeploymentArchived {
+		return ErrRosterMinimum
 	}
 	assignments := make(map[string]bool, len(d.Roster))
 	agents := make(map[string]bool, len(d.Roster))
 	for _, assignment := range d.Roster {
 		if strings.TrimSpace(assignment.ID) == "" || strings.TrimSpace(assignment.AgentDeploymentID) == "" ||
-			roles[assignment.RoleID].ID == "" || assignments[assignment.ID] || agents[assignment.AgentDeploymentID] {
-			return errors.New("team roster assignments require unique ids, agents, and declared roles")
+			!validChannelParticipation(assignment.ChannelParticipation) || assignments[assignment.ID] || agents[assignment.AgentDeploymentID] {
+			return errors.New("team roster members require unique ids and agents, and a valid channel participation")
 		}
 		if len(assignment.Owns) > MaximumOwnedTopics {
 			return errors.New("team roster member owns too many topics")
@@ -79,12 +89,6 @@ func (d *Deployment) Validate(definition *Definition) error {
 		}
 		assignments[assignment.ID] = true
 		agents[assignment.AgentDeploymentID] = true
-		counts[assignment.RoleID]++
-	}
-	for id, role := range roles {
-		if counts[id] < role.MinimumMembers || role.MaximumMembers > 0 && counts[id] > role.MaximumMembers {
-			return errors.New("team roster does not satisfy role member bounds")
-		}
 	}
 	if d.Restrictions.MaximumConcurrency < 0 || d.Restrictions.MaximumRisk != "" && !validRisk(d.Restrictions.MaximumRisk) {
 		return errors.New("team deployment restrictions are invalid")

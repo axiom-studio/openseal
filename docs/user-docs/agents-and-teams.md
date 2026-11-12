@@ -1,6 +1,6 @@
 # Agents and Teams
 
-An Agent is a versioned definition plus a durable deployment. A Team is the same, with semantic roles, a roster, a policy, and its own Skill bindings on top. Both are owners: both can hold objectives and produce Runs.
+An Agent is a versioned definition plus a durable deployment. A Team is the same, with a roster of member Agents, a policy, and its own Skill bindings on top. Both are owners: both can hold objectives and produce Runs.
 
 ## Definitions and Deployments
 
@@ -39,12 +39,11 @@ Agent deployments carry a direct rollback operation in addition to the amendment
 
 ## Teams
 
-Teams are modeled exactly as Agents are — definitions, deployments, activations, and the same four-step amendment sequence — with four additional structures.
+Teams are modeled exactly as Agents are — definitions, deployments, activations, and the same four-step amendment sequence — with three additional structures.
 
 | Property | Description |
 |---|---|
-| Semantic roles | Named roles the Team's work is organized around |
-| Roster | Assignments binding members to roles |
+| Roster | The member Agents, each with a name, a purpose, and its channel participation |
 | Policy | The Team's own governance settings |
 | Skill bindings | Grants held by the Team, distinct from any individual Agent's |
 

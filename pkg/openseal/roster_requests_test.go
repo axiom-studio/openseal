@@ -22,6 +22,7 @@ func TestRequestsAreListedByTheConversationUmbrella(t *testing.T) {
 	}
 	t.Cleanup(func() { engine.Close() })
 	scope := runtime.Scope{Kind: "tenant", ID: "roster"}
+	seedSpace(t, engine, scope, "operator")
 	catalogScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: "helper", Version: "1", DisplayName: "Helper", Purpose: "Help", SystemPrompt: "Help.",
@@ -40,15 +41,14 @@ func TestRequestsAreListedByTheConversationUmbrella(t *testing.T) {
 	}
 	team, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: "crew", Version: "1", DisplayName: "Crew", Purpose: "Work together",
-		Roles:     []TeamRoleSlot{{ID: "helper", DisplayName: "Helper", Purpose: "Help", MinimumMembers: 1}},
-		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"helper"}},
+		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := engine.CreateTeamDeployment(ctx, &TeamDeployment{
 		ID: "crew-one", Scope: catalogScope, DefinitionID: team.ID, ActiveVersion: team.Version, Status: TeamDeploymentActive,
-		Roster: []TeamRosterAssignment{{ID: "helper", RoleID: "helper", AgentDeploymentID: "member"}},
+		Roster: []TeamRosterAssignment{{ID: "helper", AgentDeploymentID: "member"}},
 	}, "user", "operator", "create"); err != nil {
 		t.Fatal(err)
 	}

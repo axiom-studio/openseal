@@ -19,6 +19,7 @@ func newConversationActorFixture(t *testing.T, scope Scope, agentID string) *con
 	t.Helper()
 	store := newTestKernelStore(t)
 	service := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID},
 		Title: "Shared organization conversation", IdempotencyKey: "shared-conversation",

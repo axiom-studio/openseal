@@ -22,6 +22,7 @@ func TestPublicEngineComposesFirstClassAgentAndTeamDeployments(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := capability.ScopeReference{Kind: "workspace", ID: "local"}
+	seedSpace(t, engine, Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	agentDeployment, _, err := engine.CreateAgentDeployment(ctx, &AgentDeployment{
 		ID: "researcher-one", Scope: scope, DefinitionID: agentDefinition.ID, ActiveVersion: agentDefinition.Version,
 		RolloutStatus: AgentRolloutActive, Environment: "local", Capacity: AgentDeploymentCapacity{MaxConcurrentRuns: 1},
@@ -31,8 +32,7 @@ func TestPublicEngineComposesFirstClassAgentAndTeamDeployments(t *testing.T) {
 	}
 	teamDefinition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: "research-team", Version: "1", DisplayName: "Research Team", Purpose: "Produce evidence-backed findings",
-		Roles:     []TeamRoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1}},
-		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
+		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestPublicEngineComposesFirstClassAgentAndTeamDeployments(t *testing.T) {
 	teamDeployment, activation, err := engine.CreateTeamDeployment(ctx, &TeamDeployment{
 		ID: "research-team-one", Scope: scope, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version,
 		Status: TeamDeploymentActive,
-		Roster: []TeamRosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+		Roster: []TeamRosterAssignment{{ID: "researcher", AgentDeploymentID: agentDeployment.ID}},
 	}, "user", "operator", "initial composition")
 	if err != nil || activation.ToVersion != "1" || teamDeployment.Roster[0].AgentDeploymentID != agentDeployment.ID {
 		t.Fatalf("Team deployment = %#v, activation = %#v, err = %v", teamDeployment, activation, err)
@@ -68,6 +68,7 @@ func TestPublicEngineProjectsEveryTeamBindingToEachMember(t *testing.T) {
 		}
 	}
 	scope := SkillScope{Kind: "tenant", ID: "one"}
+	seedSpace(t, engine, Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	agentMaximumRisk := SkillRiskExternal
 	agentDefinition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate portfolios", SystemPrompt: "Operate safely.",
@@ -87,17 +88,14 @@ func TestPublicEngineProjectsEveryTeamBindingToEachMember(t *testing.T) {
 	}
 	teamDefinition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: "operations", Version: "1", DisplayName: "Operations", Purpose: "Operate portfolios",
-		Roles: []TeamRoleSlot{{
-			ID: "operator", DisplayName: "Operator", Purpose: "Operate portfolios", MinimumMembers: 1,
-		}},
-		Approvals: TeamApprovalPolicy{MaximumRisk: SkillRiskExternal, ApproverRoleIDs: []string{"operator"}},
+		Approvals: TeamApprovalPolicy{MaximumRisk: SkillRiskExternal},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	teamDeployment, _, err := engine.CreateTeamDeployment(ctx, &TeamDeployment{
 		ID: "operations-one", Scope: scope, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version, Status: TeamDeploymentActive,
-		Roster:       []TeamRosterAssignment{{ID: "operator", RoleID: "operator", AgentDeploymentID: agentDeployment.ID}},
+		Roster:       []TeamRosterAssignment{{ID: "operator", AgentDeploymentID: agentDeployment.ID}},
 		Restrictions: TeamDeploymentRestrictions{AllowedSkillIDs: []string{"portfolio", "email"}, MaximumRisk: SkillRiskExternal},
 	}, "user", "operator", "create operations Team")
 	if err != nil {
@@ -140,7 +138,7 @@ func TestTeamManagementOptionOwnsValidationAndDispatcherComposition(t *testing.T
 	if len(engine.actionValidators) != 2 || len(engine.actionPoolSpecs) != 1 {
 		t.Fatalf("Team action wiring validators=%d workers=%d", len(engine.actionValidators), len(engine.actionPoolSpecs))
 	}
-	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*TeamRoleActionDispatcher); !ok {
+	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*TeamMemberActionDispatcher); !ok {
 		t.Fatalf("Team dispatcher was not composed over the guarded host fallback: %T", engine.actionPoolSpecs[0].dispatcher)
 	}
 	result, err := engine.actionPoolSpecs[0].dispatcher.DispatchAction(context.Background(), ActionDispatchInput{})

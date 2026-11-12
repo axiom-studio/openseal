@@ -211,6 +211,10 @@ func (s *SQLiteStore) ListConversations(ctx context.Context, filter Conversation
 		query += ` AND space_id = ?`
 		args = append(args, filter.SpaceID)
 	}
+	if filter.SpaceIDs != nil && len(filter.SpaceIDs) == 0 {
+		query += ` AND 0`
+	}
+	query, args = appendSQLiteActivityStrings(query, args, "space_id", filter.SpaceIDs)
 	statuses := make([]string, 0, len(filter.Statuses))
 	for _, status := range filter.Statuses {
 		statuses = append(statuses, string(status))

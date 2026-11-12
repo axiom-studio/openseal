@@ -4,7 +4,7 @@ New authoring-created Agent and Team definitions and their default deployments u
 
 `authoringKey` is a stable form reference on a definition, separate from `id` and `displayName`. Projection and refinement use that key to preserve the same resource when its behavior or display name changes. New roots always allocate new IDs even when the model selects the same role key. Existing-resource amendments retain their identities. Placement edits inherit omitted deployment identities, so replaying the same edit does not allocate another deployment.
 
-The candidate, semantic keys, and deployment placement are persisted together in the existing Change Set transaction. Idempotency replay returns that snapshot; a failed generation that never committed has no published identity. References in assignments, Team role requirements, conversation owners and handlers, and Runbook delegation are rewritten as one graph.
+The candidate, semantic keys, and deployment placement are persisted together in the existing Change Set transaction. Idempotency replay returns that snapshot; a failed generation that never committed has no published identity. References in assignments, Team member requirements, conversation owners and handlers, and Runbook delegation are rewritten as one graph.
 
 This is a compatible transition for new resources, not a destructive rewrite of historical identities. Previously published definitions, deployment IDs, audit records, and links remain valid. Legacy semantic projection remains supported. A bulk historical rekey requires a separately governed migration of all immutable digests and cross-resource references; changing stored primary keys alone is not supported.
 

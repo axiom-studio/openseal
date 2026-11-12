@@ -35,10 +35,10 @@ func NewDesktopConversationParticipants(catalog DesktopConversationCatalog, scop
 	return &DesktopConversationParticipants{catalog: catalog, scope: scope, maximum: maximum}, nil
 }
 
-// ResolveConversationParticipants rechecks status, membership, role eligibility,
-// and exact active definitions on every round. Observe-only and disabled roles
+// ResolveConversationParticipants rechecks status, membership, participation,
+// and exact active definitions on every round. Observe-only and disabled members
 // never invoke a model. Inactive Agents are excluded; broken canonical identities
-// or unsatisfied role requirements fail closed instead of inventing a roster.
+// or unsatisfied member requirements fail closed instead of inventing a roster.
 func (s *DesktopConversationParticipants) ResolveConversationParticipants(ctx context.Context, query runtime.ConversationParticipantQuery) ([]runtime.ConversationParticipantBinding, error) {
 	members, err := s.resolve(ctx, query)
 	if err != nil {
@@ -54,7 +54,6 @@ func (s *DesktopConversationParticipants) ResolveConversationParticipants(ctx co
 type desktopConversationMember struct {
 	binding        runtime.ConversationParticipantBinding
 	definition     *agent.AgentDefinition
-	role           team.RoleSlot
 	teamDefinition *team.Definition
 }
 
@@ -81,14 +80,9 @@ func (s *DesktopConversationParticipants) resolve(ctx context.Context, query run
 	if definition == nil || definition.Validate() != nil || deployment.Validate(definition) != nil {
 		return nil, errors.New("the participation team has an invalid active definition or roster")
 	}
-	roles := make(map[string]team.RoleSlot, len(definition.Roles))
-	for _, role := range definition.Roles {
-		roles[role.ID] = role
-	}
 	members := make([]desktopConversationMember, 0, len(deployment.Roster))
 	for _, assignment := range deployment.Roster {
-		role := roles[assignment.RoleID]
-		if role.ChannelParticipation == team.RoleChannelObserveOnly || role.ChannelParticipation == team.RoleChannelDisabled {
+		if assignment.ChannelParticipation == team.ChannelObserveOnly || assignment.ChannelParticipation == team.ChannelDisabled {
 			continue
 		}
 		member, err := s.catalog.GetAgentDeployment(ctx, scope, assignment.AgentDeploymentID)
@@ -111,19 +105,16 @@ func (s *DesktopConversationParticipants) resolve(ctx context.Context, query run
 		if agentDefinition == nil || agentDefinition.ID != member.DefinitionID || agentDefinition.Version != member.ActiveVersion || agentDefinition.Validate() != nil {
 			return nil, errors.New("a participation agent has an invalid active definition")
 		}
-		if len(role.RequiredDefinitionIDs) > 0 && !slices.Contains(role.RequiredDefinitionIDs, agentDefinition.ID) {
-			return nil, errors.New("a participation agent no longer satisfies its role definition requirement")
-		}
-		for _, required := range role.RequiredSkillIDs {
+		for _, required := range assignment.RequiredSkillIDs {
 			if !slices.ContainsFunc(agentDefinition.SkillRequirements, func(skill agent.SkillRequirement) bool { return skill.SkillID == required }) {
-				return nil, errors.New("a participation agent no longer satisfies its role skill requirement")
+				return nil, errors.New("a participation agent no longer satisfies its member skill requirement")
 			}
 		}
-		binding := runtime.ConversationParticipantBinding{Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: member.ID}, SemanticRoles: []string{role.ID}}
+		binding := runtime.ConversationParticipantBinding{Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: member.ID}, SemanticRoles: []string{assignment.ID}}
 		if err := binding.Validate(); err != nil {
 			return nil, err
 		}
-		members = append(members, desktopConversationMember{binding: binding, definition: agentDefinition, role: role, teamDefinition: definition})
+		members = append(members, desktopConversationMember{binding: binding, definition: agentDefinition, teamDefinition: definition})
 		if len(members) > s.maximum {
 			return nil, errors.New("the team exceeds the desktop channel participation limit")
 		}

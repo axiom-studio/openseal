@@ -20,6 +20,7 @@ func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore,
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "safe-task-failure"}
 	service := NewConversationService(store)
+	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Private task", IdempotencyKey: "failure-thread"})
 	if err != nil {
 		t.Fatal(err)

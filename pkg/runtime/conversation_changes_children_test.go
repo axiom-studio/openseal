@@ -63,6 +63,7 @@ func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 			}
 			scope := Scope{Kind: "tenant", ID: "one"}
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}
+			seedTestSpace(t, store.(SpaceStore), scope)
 			conversation, _, err := NewConversationService(store.(ConversationStore)).CreateConversation(t.Context(), CreateConversationRequest{
 				Scope: scope, Owner: owner, Title: "Draft report", IdempotencyKey: "report-chat",
 			})

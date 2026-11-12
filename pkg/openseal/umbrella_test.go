@@ -27,8 +27,7 @@ func umbrellaFixture(t *testing.T, engine *Engine) {
 	}
 	if _, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: "crew", Version: "1", DisplayName: "Crew", Purpose: "Work together",
-		Roles:     []TeamRoleSlot{{ID: "member", DisplayName: "Member", Purpose: "Help", MinimumMembers: 1}},
-		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"member"}},
+		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +44,7 @@ func createUmbrellaAgent(engine *Engine, scope capability.ScopeReference, id str
 func createUmbrellaTeam(engine *Engine, scope capability.ScopeReference, id, memberID string) error {
 	_, _, err := engine.CreateTeamDeployment(context.Background(), &TeamDeployment{
 		ID: id, Scope: scope, DefinitionID: "crew", ActiveVersion: "1", Status: TeamDeploymentActive,
-		Roster: []TeamRosterAssignment{{ID: "member", RoleID: "member", AgentDeploymentID: memberID}},
+		Roster: []TeamRosterAssignment{{ID: "member", AgentDeploymentID: memberID}},
 	}, "user", "operator", "test")
 	return err
 }
@@ -55,6 +54,7 @@ func assertDeploymentIDNamespace(t *testing.T, engine *Engine) {
 	ctx := context.Background()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	umbrellaFixture(t, engine)
+	seedSpace(t, engine, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	if err := createUmbrellaAgent(engine, scope, "shared"); err != nil {
 		t.Fatal(err)
 	}
@@ -147,6 +147,7 @@ func ensureTestAgent(t *testing.T, engine *Engine, scope capability.ScopeReferen
 	if owner, err := engine.ResolveUmbrella(ctx, scope, id); err == nil {
 		return owner
 	}
+	seedSpace(t, engine, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	definition := "test-agent-" + id
 	if _, err := engine.GetAgentDefinition(ctx, definition, "1"); err != nil {
 		if _, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
@@ -179,6 +180,7 @@ func teamRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *E
 	scope := Scope{Kind: "tenant", ID: "one"}
 	skillScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	umbrellaFixture(t, engine)
+	seedSpace(t, engine, scope, "operator")
 	for _, id := range []string{"member", "other"} {
 		if err := createUmbrellaAgent(engine, skillScope, id); err != nil {
 			t.Fatal(err)
@@ -236,7 +238,7 @@ func TestTeamRequestDoesNotResumeAfterTheMemberLeft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	team.Roster = []TeamRosterAssignment{{ID: "member", RoleID: "member", AgentDeploymentID: "other"}}
+	team.Roster = []TeamRosterAssignment{{ID: "member", AgentDeploymentID: "other"}}
 	if _, _, err := engine.UpdateTeamDeployment(ctx, team, team.Revision, "user", "operator", "replace member"); err != nil {
 		t.Fatal(err)
 	}

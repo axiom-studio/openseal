@@ -126,11 +126,11 @@ func (v *TeamSkillActionValidator) ValidateActionProposal(ctx context.Context, i
 	return nil, nil
 }
 
-// TeamSkillActionDispatcher revalidates Team membership and role authority at
-// the final execution boundary. Approval is intentionally not a permanent
-// capability grant: an Agent removed from the roster, a paused Team, or a
-// narrowed role must stop an already-approved call before any external tool is
-// invoked.
+// TeamSkillActionDispatcher revalidates Team membership and authority at the
+// final execution boundary. Approval is intentionally not a permanent
+// capability grant: an Agent removed from the roster, a paused Team, or
+// narrowed authority must stop an already-approved call before any external
+// tool is invoked.
 type TeamSkillActionDispatcher struct {
 	validator *TeamSkillActionValidator
 	next      ActionDispatcher

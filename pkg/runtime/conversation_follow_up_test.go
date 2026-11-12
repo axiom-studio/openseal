@@ -17,6 +17,7 @@ func newConversationFollowUpFixture(t *testing.T) *conversationFollowUpFixture {
 	t.Helper()
 	store := newTestKernelStore(t)
 	service := NewConversationService(store)
+	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "follow-ups"})
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: Scope{Kind: "tenant", ID: "follow-ups"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"},
 		Title: "Shopping assistant", IdempotencyKey: "follow-up-channel",

@@ -73,9 +73,9 @@ func (c childTeamCatalog) GetTeamDeployment(_ context.Context, scope capability.
 	return &kernelteam.Deployment{
 		ID: childTeam, Scope: c.scope, DefinitionID: childTeam, ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
 		Roster: []kernelteam.RosterAssignment{
-			{ID: "coordinator", RoleID: "coordinator", AgentDeploymentID: loopFixtureAgent},
-			{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: childReviewer},
-			{ID: "specialist", RoleID: "specialist", AgentDeploymentID: childScout},
+			{ID: "coordinator", AgentDeploymentID: loopFixtureAgent},
+			{ID: "reviewer", AgentDeploymentID: childReviewer, Approver: true},
+			{ID: "specialist", AgentDeploymentID: childScout},
 		},
 	}, nil
 }
@@ -86,7 +86,6 @@ func (c childTeamCatalog) GetTeamDefinition(_ context.Context, id, version strin
 	}
 	return &kernelteam.Definition{
 		ID: childTeam, Version: "1",
-		Approvals: kernelteam.ApprovalPolicy{ApproverRoleIDs: []string{"reviewer"}},
 		Delegation: kernelteam.DelegationPolicy{
 			MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,
 			RequireAcceptance: true, RequireCompletionReview: true,

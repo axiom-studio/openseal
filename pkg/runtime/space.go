@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -17,31 +15,29 @@ import (
 )
 
 // A Space groups a scope's agents, teams and conversations under a name and a
-// look. Every scope has exactly one Default space; it is created on demand,
-// cannot be deleted, and receives the conversations of deleted spaces.
+// look. Nothing creates a space but CreateSpace. The first space an owner
+// creates in a scope is that owner's default space: it cannot be deleted and
+// receives the conversations of the other spaces the owner deletes.
 var (
 	ErrSpaceNotFound         = errors.New("space not found")
 	ErrInvalidSpace          = errors.New("invalid space")
-	ErrDefaultSpaceProtected = errors.New("the Default space cannot be deleted")
+	ErrDefaultSpaceProtected = errors.New("a default space cannot be deleted")
+	// ErrNoDefaultSpace reports that the owner has no default space in the
+	// scope: they have not created a space there yet.
+	ErrNoDefaultSpace = errors.New("this owner has no default space")
 	// ErrTeamAgentOutsideSpace refuses a Team roster Agent that is not in
 	// every space the Team is in.
 	ErrTeamAgentOutsideSpace = errors.New("a team's agents must be in its space")
-	// ErrSpaceAgentNeededByTeam refuses taking an Agent out of a space when a
-	// Team in that space cannot lose it.
-	ErrSpaceAgentNeededByTeam = errors.New("a team in this space needs the agent")
 )
 
-const (
-	DefaultSpaceName  = "Default"
-	maxSpaceNameRunes = 60
-)
+const maxSpaceNameRunes = 60
 
 // SpaceLook names a space's theme. The looks themselves live in the client,
 // so the runtime only checks the name is a short lowercase slug; a client
 // that doesn't know a look shows its default.
 type SpaceLook string
 
-// DefaultSpaceLook is the look the Default space starts with.
+// DefaultSpaceLook is the look a host can give a space made without one.
 const DefaultSpaceLook SpaceLook = "tidepool"
 
 var spaceLookPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
@@ -61,19 +57,19 @@ func (a SpaceAccess) Valid() bool {
 	return a == SpaceAccessOwner || a == SpaceAccessInvited || a == SpaceAccessEveryone
 }
 
-// DefaultSpaceOwner owns every scope's Default space. It is no person, so
-// nobody edits the Default space as its owner.
-const DefaultSpaceOwner = "system"
-
 type Space struct {
-	ID        string      `json:"id"`
-	Scope     Scope       `json:"scope"`
-	Name      string      `json:"name"`
-	Look      SpaceLook   `json:"look"`
-	Position  int         `json:"position"`
+	ID       string    `json:"id"`
+	Scope    Scope     `json:"scope"`
+	Name     string    `json:"name"`
+	Look     SpaceLook `json:"look"`
+	Position int       `json:"position"`
+	// IsDefault marks the owner's default space in the scope: the first one
+	// they created. The store sets it; an owner has at most one per scope.
 	IsDefault bool        `json:"isDefault"`
 	Access    SpaceAccess `json:"access"`
-	// OwnerID is the principal id of the person who owns the space.
+	// OwnerID is the principal id of the person who owns the space. A
+	// single-user host may leave it empty; the empty owner is an owner like
+	// any other.
 	OwnerID   string    `json:"ownerId"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -171,16 +167,25 @@ type SpacePatch struct {
 }
 
 // SpaceStore persists spaces and their members. Stores also resolve a
-// conversation's space on create when the caller leaves it empty: the owner's
-// first space by space position, else the scope's Default space.
+// conversation's space on create when the caller leaves it empty: the owner
+// deployment's first space by space position, else the default space of the
+// person who created the conversation, else ErrNoDefaultSpace.
 type SpaceStore interface {
-	EnsureDefaultSpace(ctx context.Context, scope Scope, now time.Time) (*Space, bool, error)
+	// CreateSpace stores the space at the end of the scope. In the same
+	// transaction it becomes its owner's default space when that owner has
+	// none in the scope; the caller's IsDefault is ignored.
 	CreateSpace(ctx context.Context, space *Space) (*Space, error)
+	// DefaultSpace returns the owner's default space in the scope, or
+	// ErrNoDefaultSpace.
+	DefaultSpace(ctx context.Context, scope Scope, ownerID string) (*Space, error)
 	GetSpace(ctx context.Context, scope Scope, spaceID string) (*Space, error)
 	ListSpaces(ctx context.Context, scope Scope) ([]*Space, error)
 	UpdateSpace(ctx context.Context, scope Scope, spaceID string, patch SpacePatch, now time.Time) (*Space, error)
-	// DeleteSpace moves the space's conversations to Default, drops its
-	// members and people, and adds any deployment left in no space to Default.
+	// DeleteSpace moves the space's conversations, and the members that are
+	// in no other space, to the default space of the deleted space's owner,
+	// then drops the space with its members and people. A default space
+	// returns ErrDefaultSpaceProtected; an owner without a default space
+	// returns ErrNoDefaultSpace. Either way nothing changes.
 	DeleteSpace(ctx context.Context, scope Scope, spaceID string, now time.Time) error
 	ListSpaceMembers(ctx context.Context, scope Scope, spaceID string) ([]*SpaceMember, error)
 	// PutSpaceMember is idempotent: an existing member is returned unchanged.
@@ -188,12 +193,20 @@ type SpaceStore interface {
 	PutSpaceMember(ctx context.Context, scope Scope, member *SpaceMember, with ...*SpaceMember) (*SpaceMember, bool, error)
 	DeleteSpaceMember(ctx context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error
 	// EnsureMemberHasSpace adds a deployment that is in no space to the
-	// scope's Default space, creating Default when needed. It returns the
-	// new membership, or nil when the deployment already had a space.
-	EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error)
+	// owner's default space. It returns the new membership, nil when the
+	// deployment already had a space, or ErrNoDefaultSpace when the owner
+	// has no default space.
+	EnsureMemberHasSpace(ctx context.Context, scope Scope, ownerID string, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error)
 	// ListScopeSpaceMembers returns every space membership of the scope.
 	ListScopeSpaceMembers(ctx context.Context, scope Scope) ([]*SpaceMember, error)
 	SetSpaceAccess(ctx context.Context, scope Scope, spaceID string, access SpaceAccess, now time.Time) (*Space, error)
+	// SetSpaceOwner hands the space to ownerID. In the same transaction the
+	// default space of the owner it left and of the owner it joined becomes
+	// the oldest space each of them owns.
+	SetSpaceOwner(ctx context.Context, scope Scope, spaceID, ownerID string, now time.Time) (*Space, error)
+	// SetSpaceAccessState writes the space's whole access in one
+	// transaction. An owner change is SetSpaceOwner's, defaults included.
+	SetSpaceAccessState(ctx context.Context, scope Scope, spaceID string, state SpaceAccessState, now time.Time) (*Space, error)
 	// PutSpacePerson is idempotent: an existing person is returned unchanged.
 	PutSpacePerson(ctx context.Context, scope Scope, person *SpacePerson) (*SpacePerson, bool, error)
 	DeleteSpacePerson(ctx context.Context, scope Scope, spaceID, userID string) error
@@ -217,6 +230,27 @@ type CreateSpaceRequest struct {
 	Name    string
 	Look    SpaceLook
 	OwnerID string
+}
+
+// SpaceAccessState is the whole of who may see a space. An empty OwnerID
+// leaves the owner as it is. People becomes the space's whole list of
+// people: those already on it keep when and by whom they were added.
+type SpaceAccessState struct {
+	OwnerID string
+	Access  SpaceAccess
+	People  []*SpacePerson
+}
+
+// SetSpaceAccessStateRequest is the whole of who may see a space: its owner,
+// its access and the people added to it. An empty OwnerID leaves the owner as
+// it is, for an owner the host cannot name yet.
+type SetSpaceAccessStateRequest struct {
+	Scope   Scope
+	SpaceID string
+	OwnerID string
+	Access  SpaceAccess
+	People  []string
+	AddedBy string
 }
 
 type AddSpacePersonRequest struct {
@@ -246,10 +280,42 @@ type DeleteSpaceMemberRequest struct {
 	SpaceID  string
 	Type     SpaceMemberType
 	MemberID string
-	// ActorType and ActorID sign the Team roster updates that removing an
-	// Agent makes.
+	// ActorType and ActorID sign the Team updates that removing an Agent
+	// makes.
 	ActorType string
 	ActorID   string
+	// ConfirmTeams accepts what removing an Agent does to the Teams in the
+	// space that list it; without it such a removal changes nothing and
+	// returns *SpaceAgentRemovalNeedsConfirmation.
+	ConfirmTeams bool
+}
+
+type SpaceTeamOutcome string
+
+const (
+	// SpaceTeamLeaves: the Agent leaves the Team's roster.
+	SpaceTeamLeaves SpaceTeamOutcome = "leaves"
+	// SpaceTeamArchived: the Team cannot lose the Agent and is archived.
+	SpaceTeamArchived SpaceTeamOutcome = "archived"
+)
+
+// SpaceAgentRemovalTeam is what taking an Agent out of a space does to one
+// Team there. Remaining counts the roster without the Agent.
+type SpaceAgentRemovalTeam struct {
+	ID          string           `json:"id"`
+	DisplayName string           `json:"displayName"`
+	Outcome     SpaceTeamOutcome `json:"outcome"`
+	Remaining   int              `json:"remaining"`
+}
+
+// SpaceAgentRemovalNeedsConfirmation is the error of an unconfirmed removal
+// that would change Teams. Nothing was changed.
+type SpaceAgentRemovalNeedsConfirmation struct {
+	Teams []SpaceAgentRemovalTeam
+}
+
+func (e *SpaceAgentRemovalNeedsConfirmation) Error() string {
+	return fmt.Sprintf("removing the agent changes %d team(s) in this space and needs confirmation", len(e.Teams))
 }
 
 type SpaceService struct {
@@ -277,25 +343,21 @@ func (s *SpaceService) UseTeams(teams *kernelteam.Registry) error {
 	return nil
 }
 
-// ListSpaces ensures the scope's Default space and returns every space by
-// position.
+// ListSpaces returns every space of the scope by position. It creates none.
 func (s *SpaceService) ListSpaces(ctx context.Context, scope Scope) ([]*Space, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, err
-	}
-	if _, _, err := s.store.EnsureDefaultSpace(ctx, scope, s.now().UTC()); err != nil {
 		return nil, err
 	}
 	return s.store.ListSpaces(ctx, scope)
 }
 
-// EnsureDefaultSpace returns the scope's Default space and whether this call
-// created it.
-func (s *SpaceService) EnsureDefaultSpace(ctx context.Context, scope Scope) (*Space, bool, error) {
+// DefaultSpace returns the owner's default space in the scope: the first
+// space they created there. An owner with no space gets ErrNoDefaultSpace.
+func (s *SpaceService) DefaultSpace(ctx context.Context, scope Scope, ownerID string) (*Space, error) {
 	if err := scope.Validate(); err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	return s.store.EnsureDefaultSpace(ctx, scope, s.now().UTC())
+	return s.store.DefaultSpace(ctx, scope, strings.TrimSpace(ownerID))
 }
 
 func (s *SpaceService) GetSpace(ctx context.Context, scope Scope, spaceID string) (*Space, error) {
@@ -305,6 +367,8 @@ func (s *SpaceService) GetSpace(ctx context.Context, scope Scope, spaceID string
 	return s.store.GetSpace(ctx, scope, strings.TrimSpace(spaceID))
 }
 
+// CreateSpace creates the owner's space. Their first space in the scope is
+// their default space.
 func (s *SpaceService) CreateSpace(ctx context.Context, req CreateSpaceRequest) (*Space, error) {
 	now := s.now().UTC()
 	space := &Space{
@@ -312,9 +376,6 @@ func (s *SpaceService) CreateSpace(ctx context.Context, req CreateSpaceRequest) 
 		Access: SpaceAccessOwner, OwnerID: strings.TrimSpace(req.OwnerID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := space.Validate(); err != nil {
-		return nil, err
-	}
-	if _, _, err := s.store.EnsureDefaultSpace(ctx, req.Scope, now); err != nil {
 		return nil, err
 	}
 	return s.store.CreateSpace(ctx, space)
@@ -341,13 +402,27 @@ func (s *SpaceService) UpdateSpace(ctx context.Context, req UpdateSpaceRequest) 
 	return s.store.UpdateSpace(ctx, req.Scope, strings.TrimSpace(req.SpaceID), patch, s.now().UTC())
 }
 
+// DeleteSpace deletes a space that is not a default space. Its conversations,
+// and the Agents and Teams that are in no other space, move to the default
+// space of its owner.
 func (s *SpaceService) DeleteSpace(ctx context.Context, scope Scope, spaceID string) error {
 	if err := scope.Validate(); err != nil {
 		return err
 	}
 	spaceID = strings.TrimSpace(spaceID)
 	var teams []string
+	var target *Space
 	if s.teams != nil {
+		space, err := s.store.GetSpace(ctx, scope, spaceID)
+		if err != nil {
+			return err
+		}
+		if space.IsDefault {
+			return ErrDefaultSpaceProtected
+		}
+		if target, err = s.store.DefaultSpace(ctx, scope, space.OwnerID); err != nil {
+			return err
+		}
 		members, err := s.store.ListSpaceMembers(ctx, scope, spaceID)
 		if err != nil {
 			return err
@@ -361,9 +436,9 @@ func (s *SpaceService) DeleteSpace(ctx context.Context, scope Scope, spaceID str
 	if err := s.store.DeleteSpace(ctx, scope, spaceID, s.now().UTC()); err != nil || len(teams) == 0 {
 		return err
 	}
-	// A Team that fell back to Default brings its Agents there, like a Team
-	// added to any space.
-	defaultID := DefaultSpaceID(scope)
+	// A Team that moved to the owner's default space brings its Agents there,
+	// like a Team added to any space.
+	defaultID := target.ID
 	members, err := s.store.ListSpaceMembers(ctx, scope, defaultID)
 	if err != nil {
 		return err
@@ -418,9 +493,10 @@ func (s *SpaceService) PutSpaceMember(ctx context.Context, req PutSpaceMemberReq
 }
 
 // DeleteSpaceMember takes the member out of the space. An Agent also leaves
-// the rosters of the Teams in that space: the Team registry prepares each
-// roster update and the store commits them with the removal. When a Team
-// cannot lose the Agent, nothing changes and the error names the Team.
+// the rosters of the Teams in that space, and a Team that cannot lose it is
+// archived: the Team registry prepares each update and the store commits them
+// with the removal. That needs req.ConfirmTeams; without it nothing changes
+// and the error is a *SpaceAgentRemovalNeedsConfirmation listing the Teams.
 func (s *SpaceService) DeleteSpaceMember(ctx context.Context, req DeleteSpaceMemberRequest) error {
 	if err := req.Scope.Validate(); err != nil {
 		return err
@@ -429,62 +505,74 @@ func (s *SpaceService) DeleteSpaceMember(ctx context.Context, req DeleteSpaceMem
 		return fmt.Errorf("%w: member type must be agent or team", ErrInvalidSpace)
 	}
 	spaceID, memberID := strings.TrimSpace(req.SpaceID), strings.TrimSpace(req.MemberID)
-	var changes []*kernelteam.RosterChange
-	if req.Type == SpaceMemberAgent && s.teams != nil {
-		var err error
-		if changes, err = s.agentRemovalRosterChanges(ctx, req.Scope, spaceID, memberID, req.ActorType, req.ActorID); err != nil {
-			return err
-		}
+	if req.Type != SpaceMemberAgent || s.teams == nil {
+		return s.store.DeleteSpaceMember(ctx, req.Scope, spaceID, req.Type, memberID)
+	}
+	teams, changes, err := s.agentRemovalTeamChanges(ctx, req.Scope, spaceID, memberID, req.ActorType, req.ActorID)
+	if err != nil {
+		return err
 	}
 	if len(changes) == 0 {
 		return s.store.DeleteSpaceMember(ctx, req.Scope, spaceID, req.Type, memberID)
 	}
+	if !req.ConfirmTeams {
+		return &SpaceAgentRemovalNeedsConfirmation{Teams: teams}
+	}
 	return s.rosters.DeleteSpaceAgentWithRosters(ctx, req.Scope, spaceID, memberID, changes)
 }
 
-// agentRemovalRosterChanges prepares the roster update of every Team in the
-// space that lists the Agent. An Agent that is not in the space changes none.
-func (s *SpaceService) agentRemovalRosterChanges(ctx context.Context, scope Scope, spaceID, agentID, actorType, actorID string) ([]*kernelteam.RosterChange, error) {
+// agentRemovalTeamChanges prepares the update of every Team in the space that
+// lists the Agent: its roster without the Agent or, when that would break the
+// Team's minimum, the same archiving update a retire makes. An Agent that is
+// not in the space changes none.
+func (s *SpaceService) agentRemovalTeamChanges(ctx context.Context, scope Scope, spaceID, agentID, actorType, actorID string) ([]SpaceAgentRemovalTeam, []*kernelteam.RosterChange, error) {
 	members, err := s.store.ListSpaceMembers(ctx, scope, spaceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !slices.ContainsFunc(members, func(member *SpaceMember) bool { return member.Type == SpaceMemberAgent && member.ID == agentID }) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	space, err := s.store.GetSpace(ctx, scope, spaceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	reason := fmt.Sprintf("Agent %s left the space %s", agentID, space.Name)
+	var teams []SpaceAgentRemovalTeam
 	var changes []*kernelteam.RosterChange
 	for _, member := range members {
 		if member.Type != SpaceMemberTeam {
 			continue
 		}
-		change, err := s.teams.PrepareAgentRemoval(ctx, agentBuilderScope(scope), member.ID, agentID, actorType, actorID,
-			fmt.Sprintf("Agent %s left the space %s", agentID, space.Name))
-		switch {
-		case errors.Is(err, kernelteam.ErrRosterMinimum):
-			return nil, fmt.Errorf("%w: removing agent %q from space %q would leave team %s invalid: %v",
-				ErrSpaceAgentNeededByTeam, agentID, space.Name, s.teamLabel(ctx, scope, member.ID), err)
-		case errors.Is(err, kernelteam.ErrDeploymentNotFound):
-		case err != nil:
-			return nil, err
-		case change != nil:
-			changes = append(changes, change)
+		team, err := s.teams.GetDeployment(ctx, agentBuilderScope(scope), member.ID)
+		if errors.Is(err, kernelteam.ErrDeploymentNotFound) {
+			continue
 		}
-	}
-	return changes, nil
-}
-
-// teamLabel is `"name" (id)` for an error message, or the quoted id alone.
-func (s *SpaceService) teamLabel(ctx context.Context, scope Scope, teamID string) string {
-	if team, err := s.teams.GetDeployment(ctx, agentBuilderScope(scope), teamID); err == nil {
-		if definition, err := s.teams.GetDefinition(ctx, team.DefinitionID, team.ActiveVersion); err == nil {
-			return fmt.Sprintf("%q (%s)", definition.DisplayName, teamID)
+		if err != nil {
+			return nil, nil, err
 		}
+		outcome := SpaceTeamLeaves
+		change, err := s.teams.PrepareAgentRemoval(ctx, agentBuilderScope(scope), team.ID, agentID, actorType, actorID, reason)
+		if errors.Is(err, kernelteam.ErrRosterMinimum) {
+			outcome = SpaceTeamArchived
+			archived := *team
+			archived.Status = kernelteam.DeploymentArchived
+			change, err = s.teams.PrepareDeploymentUpdate(ctx, &archived, team.Revision, actorType, actorID, reason)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if change == nil {
+			continue
+		}
+		definition, err := s.teams.GetDefinition(ctx, team.DefinitionID, team.ActiveVersion)
+		if err != nil {
+			return nil, nil, err
+		}
+		teams = append(teams, SpaceAgentRemovalTeam{ID: team.ID, DisplayName: definition.DisplayName, Outcome: outcome, Remaining: len(team.Roster) - 1})
+		changes = append(changes, change)
 	}
-	return fmt.Sprintf("%q", teamID)
+	return teams, changes, nil
 }
 
 // CheckSpaceAgents refuses Agents that are not members of the space.
@@ -533,10 +621,11 @@ func agentsInSpace(space *Space, members []*SpaceMember, agentIDs []string) erro
 	return nil
 }
 
-// EnsureMemberHasSpace places a newly created Agent or Team deployment in
-// Default unless it already belongs to a space, so no deployment is left in
-// no space.
-func (s *SpaceService) EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string) (*SpaceMember, error) {
+// EnsureMemberHasSpace places an Agent or Team deployment that is in no space
+// in the default space of ownerID, the person who created it. It returns nil
+// when the deployment already has a space and ErrNoDefaultSpace when that
+// person has no default space; the deployment then stays in no space.
+func (s *SpaceService) EnsureMemberHasSpace(ctx context.Context, scope Scope, ownerID string, memberType SpaceMemberType, memberID string) (*SpaceMember, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -544,7 +633,7 @@ func (s *SpaceService) EnsureMemberHasSpace(ctx context.Context, scope Scope, me
 	if !memberType.Valid() || !validOpaqueIdentifier(memberID, 128) {
 		return nil, fmt.Errorf("%w: member type and id are invalid", ErrInvalidSpace)
 	}
-	return s.store.EnsureMemberHasSpace(ctx, scope, memberType, memberID, s.now().UTC())
+	return s.store.EnsureMemberHasSpace(ctx, scope, strings.TrimSpace(ownerID), memberType, memberID, s.now().UTC())
 }
 
 // ListScopeSpaceMembers returns every space membership of the scope in one
@@ -566,6 +655,47 @@ func (s *SpaceService) SetSpaceAccess(ctx context.Context, scope Scope, spaceID 
 		return nil, fmt.Errorf("%w: access must be owner, invited or everyone", ErrInvalidSpace)
 	}
 	return s.store.SetSpaceAccess(ctx, scope, strings.TrimSpace(spaceID), access, s.now().UTC())
+}
+
+// SetSpaceOwner hands the space to another owner; the host must have verified
+// they belong to the scope. Each of the two owners then has the oldest space
+// they own as their default space.
+func (s *SpaceService) SetSpaceOwner(ctx context.Context, scope Scope, spaceID, ownerID string) (*Space, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	ownerID = strings.TrimSpace(ownerID)
+	if len(ownerID) > 128 {
+		return nil, fmt.Errorf("%w: owner is invalid", ErrInvalidSpace)
+	}
+	return s.store.SetSpaceOwner(ctx, scope, strings.TrimSpace(spaceID), ownerID, s.now().UTC())
+}
+
+// SetSpaceAccessState replaces the space's owner, access and people in one
+// write; the host must have verified the people belong to the scope. A new
+// owner moves defaults as SetSpaceOwner does. Repeating it changes nothing.
+func (s *SpaceService) SetSpaceAccessState(ctx context.Context, req SetSpaceAccessStateRequest) (*Space, error) {
+	if err := req.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	if !req.Access.Valid() {
+		return nil, fmt.Errorf("%w: access must be owner, invited or everyone", ErrInvalidSpace)
+	}
+	ownerID, spaceID, now := strings.TrimSpace(req.OwnerID), strings.TrimSpace(req.SpaceID), s.now().UTC()
+	if ownerID != "" && !validOpaqueIdentifier(ownerID, 128) {
+		return nil, fmt.Errorf("%w: owner must be a person's id", ErrInvalidSpace)
+	}
+	state := SpaceAccessState{OwnerID: ownerID, Access: req.Access, People: make([]*SpacePerson, 0, len(req.People))}
+	for _, userID := range req.People {
+		person := &SpacePerson{SpaceID: spaceID, UserID: strings.TrimSpace(userID), AddedBy: strings.TrimSpace(req.AddedBy), AddedAt: now}
+		if err := person.Validate(); err != nil {
+			return nil, err
+		}
+		if !slices.ContainsFunc(state.People, func(existing *SpacePerson) bool { return existing.UserID == person.UserID }) {
+			state.People = append(state.People, person)
+		}
+	}
+	return s.store.SetSpaceAccessState(ctx, req.Scope, spaceID, state, now)
 }
 
 // AddSpacePerson adds a person to the space; the host must have verified
@@ -636,20 +766,6 @@ func (s *SpaceService) CanManageSpace(ctx context.Context, scope Scope, spaceID,
 		return false, err
 	}
 	return slices.Contains(visible, strings.TrimSpace(spaceID)), nil
-}
-
-// DefaultSpaceID is the deterministic id of a scope's Default space. The
-// PostgreSQL backfill computes the same value with md5().
-func DefaultSpaceID(scope Scope) string {
-	digest := md5.Sum([]byte(scope.Kind + ":" + scope.ID))
-	return "default-" + hex.EncodeToString(digest[:])
-}
-
-func newDefaultSpace(scope Scope, now time.Time) *Space {
-	return &Space{
-		ID: DefaultSpaceID(scope), Scope: scope, Name: DefaultSpaceName, Look: DefaultSpaceLook,
-		Position: 0, IsDefault: true, Access: SpaceAccessEveryone, OwnerID: DefaultSpaceOwner, CreatedAt: now, UpdatedAt: now,
-	}
 }
 
 func cloneSpace(space *Space) *Space {

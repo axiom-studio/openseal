@@ -65,15 +65,15 @@ portable bundle and digest.
 
 ## Teams
 
-A **Team definition** describes semantic roles, coordination, delegation,
-approval policy, shared context, objective templates, evaluation criteria, and
-amendment policy. A **Team deployment** owns a roster that assigns Agent
-deployments to those roles.
+A **Team definition** describes routing, delegation, approval policy, shared
+context, objective templates, evaluation criteria, and amendment policy. A
+**Team deployment** owns the roster: the member Agent deployments, each with
+its name, purpose, channel participation, and whether it leads or approves.
 
-Roles express responsibility and channel participation. They do not implicitly
-grant credentials or approval authority. A Team can own its own Skill bindings;
-the runtime still dispatches work through an assigned roster Agent and checks
-both Team role authority and the Agent's exact bound authority.
+A member's purpose and participation express responsibility. They do not
+implicitly grant credentials. A Team can own its own Skill bindings; the
+runtime still dispatches work through a roster Agent and checks both the Team's
+authority and the Agent's exact bound authority.
 
 Team definitions also follow a governed amendment lifecycle. Runtime Team
 management actions are ordinary typed Skills when enabled by an embedding host,
@@ -226,7 +226,7 @@ requests are reconciled through recipient policy. Ordinary Turn delegation
 places the requesting Run in `waiting_for_agent` and creates a small,
 decision-only Run for the recipient Agent; only explicitly preauthorized policy
 skips that review. A Team request deterministically selects one eligible roster
-Agent under the active Team role and delegation policy. That Agent can accept,
+Agent under the active Team roster and delegation policy. That Agent can accept,
 reject, or ask one concrete clarification question. Rejection resumes the
 requester with the durable reason. A clarification question also resumes it;
 the requester can answer through the same request, wait again, and receive a

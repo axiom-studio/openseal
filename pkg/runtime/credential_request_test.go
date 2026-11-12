@@ -215,6 +215,7 @@ func TestRepeatedRefusedSetupIsNotRetriedInTheSameRun(t *testing.T) {
 func mustConversationChanges(t *testing.T, ctx context.Context, store *SQLiteStore, scope Scope) (*ConversationChangeSet, error) {
 	t.Helper()
 	now := time.Now().UTC()
+	seedTestSpace(t, store, scope)
 	if _, _, err := store.CreateConversation(ctx, &Conversation{ID: "chat", Scope: scope, Title: "Amazon order", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Status: ConversationStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now}, "chat-key"); err != nil {
 		return nil, err
 	}
@@ -241,7 +242,7 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.CreateTeamDeployment(ctx, &kernelteam.Deployment{ID: crew.ID, Scope: deploymentScope, Status: kernelteam.DeploymentActive,
-		Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "agent", RoleID: "member", AgentDeploymentID: "agent"}}}, activation(crew.ID, 1)); err != nil {
+		Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "agent", AgentDeploymentID: "agent"}}}, activation(crew.ID, 1)); err != nil {
 		t.Fatal(err)
 	}
 	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: crew, AssignedAgentID: "agent",
@@ -272,7 +273,7 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	parked := assertRunNotParkedByCall(t, f)
 	// A member removed from the Team can no longer act under it.
 	team, _ := store.GetTeamDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, crew.ID)
-	team.Roster, team.Revision = []kernelteam.RosterAssignment{{ID: "other", RoleID: "member", AgentDeploymentID: "other"}}, 2
+	team.Roster, team.Revision = []kernelteam.RosterAssignment{{ID: "other", AgentDeploymentID: "other"}}, 2
 	if err := store.UpdateTeamDeployment(ctx, team, 1, activation(crew.ID, 2)); err != nil {
 		t.Fatal(err)
 	}

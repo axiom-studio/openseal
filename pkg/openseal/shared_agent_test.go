@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -28,11 +27,12 @@ func TestSharedAgentEngineInstallsAndExports(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	home := seedSpace(t, engine, scope, "person-2")
 	request := SharedAgentInstallRequest{
 		Scope: scope, ActingUserID: "person-2", IdempotencyKey: "adoption-1",
 		Source:  SharedAgentSource{ShareID: "sa1", Version: 1},
 		Profile: SharedAgentProfile{DisplayName: "Scout", Purpose: "Find things.", SystemPrompt: "Find things on the web."},
-		SpaceID: runtime.DefaultSpaceID(scope), ExpectedMaximumRisk: skill.RiskLevelRead,
+		SpaceID: home.ID, ExpectedMaximumRisk: skill.RiskLevelRead,
 		Grants: []SharedAgentSkill{{SkillID: "acme.search", SkillVersion: "1.0.0", AllowedActions: []string{"search"}}},
 	}
 	plan, err := engine.PlanSharedAgentInstall(ctx, request)

@@ -37,6 +37,7 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			ctx := context.Background()
 			scope := Scope{Kind: "tenant", ID: "cross-surface"}
 			now := time.Date(2026, 7, 23, 8, 30, 0, 0, time.UTC)
+			seedTestSpace(t, store.(SpaceStore), scope)
 			conversation, _, err := NewConversationService(conversationStore).CreateConversation(ctx, CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-gtm"},
 				Title: "Launch coordination", IdempotencyKey: "launch-coordination",

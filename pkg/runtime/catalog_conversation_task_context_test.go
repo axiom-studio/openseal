@@ -68,6 +68,7 @@ func catalogTaskPageFixture(t *testing.T, count int) (*SQLiteStore, *Conversatio
 	scope := Scope{Kind: "tenant", ID: "task-sql"}
 	conversation := &Conversation{ID: "conversation", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"},
 		Title: "Shared tasks", Status: ConversationStatusActive, Revision: 1, CreatedAt: base, UpdatedAt: base}
+	seedTestSpace(t, store, scope)
 	if _, _, err := store.CreateConversation(t.Context(), conversation, "catalog-task-page"); err != nil {
 		t.Fatal(err)
 	}

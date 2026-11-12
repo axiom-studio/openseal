@@ -39,8 +39,8 @@ func controlAuthorityTeamCatalog(scope Scope) *resolverCatalog {
 		teamDeployment: &kernelteam.Deployment{
 			ID: "team", Scope: ref, DefinitionID: "team", ActiveVersion: "1", Status: kernelteam.DeploymentActive,
 			Roster: []kernelteam.RosterAssignment{
-				{ID: "lead", RoleID: "lead", AgentDeploymentID: "lead"},
-				{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer"},
+				{ID: "lead", AgentDeploymentID: "lead"},
+				{ID: "reviewer", AgentDeploymentID: "reviewer"},
 			},
 		},
 	}
@@ -68,6 +68,7 @@ func claimedForegroundChatRun(t *testing.T, store *SQLiteStore) *AgentRun {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "control-authority"}
 	conversations := NewConversationService(store)
+	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "control-authority-chat",
 	})

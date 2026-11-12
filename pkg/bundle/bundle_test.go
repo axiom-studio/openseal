@@ -93,7 +93,7 @@ func TestWorkforceBundleExportRemovesSourcePlacementAndRequiresClosedSelection(t
 			Key: "team", Definition: artifact.Teams[0].Definition,
 			Deployment: &team.Deployment{
 				ID: "team:source", Scope: capability.ScopeReference{Kind: "tenant", ID: "source"}, DefinitionID: artifact.Teams[0].Definition.ID,
-				ActiveVersion: artifact.Teams[0].Definition.Version, Roster: []team.RosterAssignment{{ID: "member", RoleID: "researcher", AgentDeploymentID: "agent:not-selected"}},
+				ActiveVersion: artifact.Teams[0].Definition.Version, Roster: []team.RosterAssignment{{ID: "member", AgentDeploymentID: "agent:not-selected"}},
 				Status: team.DeploymentActive, Revision: 1, CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC(),
 			},
 		}},
@@ -187,6 +187,20 @@ func TestWorkforceBundlePreviewCompileAndAtomicImportRoundTrip(t *testing.T) {
 	if firstPlan.Teams[0].Deployment.Roster[0].AgentDeploymentID != "agent:target-researcher" || firstPlan.Runbooks[0].ObjectiveID != "objective:target-research" {
 		t.Fatalf("portable references were not resolved to target identities: %#v %#v", firstPlan.Teams[0], firstPlan.Runbooks[0])
 	}
+	// The member keeps what it does on the Team across the bundle.
+	if member := firstPlan.Teams[0].Deployment.Roster[0]; member.ID != "primary" || member.DisplayName != "Researcher" || member.Purpose != "Gather evidence" ||
+		member.ChannelParticipation != team.ChannelActive || !member.Approver || !member.Lead {
+		t.Fatalf("installed member = %#v", member)
+	}
+	encoded, err := EncodeYAML(artifact)
+	if err != nil || strings.Contains(string(encoded), "roleId") || strings.Contains(string(encoded), "roles:") {
+		t.Fatalf("bundle still carries role slots: %s, %v", encoded, err)
+	}
+	artifact.Compatibility.FormatRevision = 1
+	if err := artifact.Validate(); err == nil || !strings.Contains(err.Error(), "format revision 1 (Team role slots) is no longer supported") {
+		t.Fatalf("role-slot bundle revision: %v", err)
+	}
+	artifact.Compatibility.FormatRevision = FormatRevision
 
 	store := &memoryInstallationStore{}
 	receipt, err := Install(context.Background(), store, request)
@@ -318,12 +332,14 @@ func representativeBundle(t *testing.T) *Bundle {
 	}
 	teamDefinition := &team.Definition{
 		ID: "research-team", Version: "1.0.0", DisplayName: "Research Team", Purpose: "Produce reviewed research",
-		Roles:     []team.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1, MaximumMembers: 1, ChannelParticipation: team.RoleChannelActive}},
 		Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}
 	teamDeployment := &team.Deployment{
 		ID: "team:source-research", Scope: deployment.Scope, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version,
-		Roster: []team.RosterAssignment{{ID: "primary", RoleID: "researcher", AgentDeploymentID: deployment.ID}},
+		Roster: []team.RosterAssignment{{
+			ID: "primary", AgentDeploymentID: deployment.ID, DisplayName: "Researcher", Purpose: "Gather evidence",
+			ChannelParticipation: team.ChannelActive, Approver: true, Lead: true,
+		}},
 		Status: team.DeploymentActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	objective := &runtime.Objective{
@@ -338,7 +354,7 @@ func representativeBundle(t *testing.T) *Bundle {
 	}
 	result, err := Export(ExportRequest{
 		Metadata:      Metadata{ID: "research-workforce", Version: "1.0.0", DisplayName: "Research Workforce"},
-		Compatibility: Compatibility{FormatRevision: 1, RequiredCapabilities: []CapabilityRequirement{{ID: "agent-runs", Version: 2}, {ID: "objectives", Version: 1}}},
+		Compatibility: Compatibility{FormatRevision: FormatRevision, RequiredCapabilities: []CapabilityRequirement{{ID: "agent-runs", Version: 2}, {ID: "objectives", Version: 1}}},
 		Agents: []AgentExport{{Key: "researcher", Request: agent.BundleExportRequest{
 			Definition: definition, Deployment: deployment,
 			Metadata: agent.BundleMetadata{ID: "researcher", Version: "1.0.0", DisplayName: "Researcher"},

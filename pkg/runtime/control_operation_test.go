@@ -321,6 +321,7 @@ func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
 	var trigger *ChannelMessage
 	var conversation *Conversation
 	c := newOperationCall(t, store, func(scope Scope, req *CreateAgentRunRequest) {
+		seedTestSpace(t, store, scope)
 		created, _, err := service.CreateConversation(context.Background(), CreateConversationRequest{
 			Scope: scope, Owner: req.Owner, Title: "Agent work", IdempotencyKey: "op-channel",
 		})

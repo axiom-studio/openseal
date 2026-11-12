@@ -2,6 +2,7 @@ package team
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,10 +19,10 @@ func TestCompileManifestBuildsPortableTeamWithCalmDefaults(t *testing.T) {
 			ID: "market-research", Version: "1.0.0", DisplayName: "Market Research",
 			Description: "Discover evidence-backed customer needs",
 		},
-		Spec: ManifestSpec{Roles: []ManifestRoleSlot{{
-			ID: "researcher", DisplayName: "Researcher", Purpose: "Collect evidence",
-			MinimumMembers: 1, MaximumMembers: 2, RequiredDefinitionIDs: []string{"researcher"},
-		}}},
+		Spec: ManifestSpec{Members: []ManifestMember{
+			{ID: "researcher", DisplayName: "Researcher", Purpose: "Collect evidence", AgentDefinitionID: "researcher", Approver: true, Lead: true},
+			{ID: "observer", DisplayName: "Observer", Purpose: "Watch", AgentDefinitionID: "observer", ChannelParticipation: ChannelObserveOnly},
+		}},
 	}
 	definition, err := CompileManifest(manifest, "catalog-market-research", workforce.DefinitionProvenance{
 		Source: "marketplace", Reference: "listing:42", CreatedBy: "service:installer",
@@ -33,13 +34,54 @@ func TestCompileManifestBuildsPortableTeamWithCalmDefaults(t *testing.T) {
 		!definition.Delegation.RequireAcceptance || !definition.Delegation.RequireCompletionReview ||
 		definition.SharedContext.Retention != 7*24*time.Hour || definition.SharedContext.MaximumBytes != 1<<20 ||
 		!definition.SharedContext.AllowMemberRead || !definition.SharedContext.AllowMemberWrite ||
-		definition.Approvals.MaximumRisk != capability.RiskLevelRead ||
-		definition.Roles[0].ChannelParticipation != RoleChannelActive {
+		definition.Approvals.MaximumRisk != capability.RiskLevelRead {
 		t.Fatalf("compiled definition=%#v", definition)
 	}
-	manifest.Spec.Roles[0].RequiredDefinitionIDs[0] = "mutated"
-	if definition.Roles[0].RequiredDefinitionIDs[0] != "researcher" {
-		t.Fatal("compiled definition aliases mutable manifest state")
+	roster, err := ManifestRoster(manifest, map[string]string{"researcher": "agent-1", "observer": "agent-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roster) != 2 || !reflect.DeepEqual(roster[0], RosterAssignment{
+		ID: "researcher", AgentDeploymentID: "agent-1", DisplayName: "Researcher", Purpose: "Collect evidence",
+		ChannelParticipation: ChannelActive, Approver: true, Lead: true,
+	}) || roster[1].ChannelParticipation != ChannelObserveOnly || roster[1].AgentDeploymentID != "agent-2" {
+		t.Fatalf("roster=%#v", roster)
+	}
+	if _, err := ManifestRoster(manifest, map[string]string{"researcher": "agent-1"}); err == nil {
+		t.Fatal("a member without an Agent deployment was accepted")
+	}
+}
+
+func TestCompileManifestRefusesTheRoleSlotVersion(t *testing.T) {
+	data := []byte(`apiVersion: openseal.dev/team/v1alpha1
+kind: Team
+metadata:
+  id: research
+  version: 1.0.0
+  displayName: Research
+spec:
+  members:
+    - id: researcher
+      displayName: Researcher
+      purpose: Collect evidence
+      agentDefinitionId: researcher
+`)
+	manifest, err := DecodeManifestYAML(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompileManifest(manifest, "", workforce.DefinitionProvenance{}); err == nil ||
+		!strings.Contains(err.Error(), "v1alpha1") || !strings.Contains(err.Error(), "spec.members") {
+		t.Fatalf("role-slot manifest version: %v", err)
+	}
+	roles := strings.Replace(strings.Replace(string(data), "v1alpha1", "v1alpha2", 1), "  members:", "  roles:", 1)
+	if _, err := DecodeManifestYAML([]byte(roles)); err == nil || !strings.Contains(err.Error(), "roles") {
+		t.Fatalf("spec.roles was accepted: %v", err)
+	}
+	manifest.APIVersion = ManifestAPIVersion
+	manifest.Spec.Members = nil
+	if _, err := CompileManifest(manifest, "", workforce.DefinitionProvenance{}); err == nil {
+		t.Fatal("a manifest without members was accepted")
 	}
 }
 
@@ -50,11 +92,11 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 		APIVersion: ManifestAPIVersion, Kind: ManifestKind,
 		Metadata: ManifestMetadata{ID: "review", Version: "2.0.0", DisplayName: "Review"},
 		Spec: ManifestSpec{
-			Roles: []ManifestRoleSlot{{
-				ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review",
-				ChannelParticipation: RoleChannelObserveOnly,
+			Members: []ManifestMember{{
+				ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review", AgentDefinitionID: "reviewer",
+				ChannelParticipation: ChannelObserveOnly,
 			}},
-			Routing: RoutingPolicy{Notes: "  Reviewer owns release notes  ", LeadRoleID: "reviewer"},
+			Routing: RoutingPolicy{Notes: "  Reviewer owns release notes  "},
 			Delegation: ManifestDelegationPolicy{
 				MaximumDepth: 5, MaximumConcurrent: 8, AllowPeerDelegation: &yes,
 				RequireAcceptance: &no, RequireCompletionReview: &no,
@@ -69,7 +111,7 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if definition.Routing.Notes != "Reviewer owns release notes" || definition.Routing.LeadRoleID != "reviewer" || !definition.Delegation.AllowPeerDelegation ||
+	if definition.Routing.Notes != "Reviewer owns release notes" || !definition.Delegation.AllowPeerDelegation ||
 		definition.Delegation.RequireAcceptance || definition.Delegation.RequireCompletionReview ||
 		definition.SharedContext.AllowMemberWrite || definition.SharedContext.Retention != 24*time.Hour {
 		t.Fatalf("explicit policy was not preserved: %#v", definition)
@@ -77,19 +119,18 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 }
 
 func TestDecodeManifestYAMLIsStrictAndExcludesPlacement(t *testing.T) {
-	data := []byte(`apiVersion: openseal.dev/team/v1alpha1
+	data := []byte(`apiVersion: openseal.dev/team/v1alpha2
 kind: Team
 metadata:
   id: research
   version: 1.0.0
   displayName: Research
 spec:
-  roles:
+  members:
     - id: researcher
       displayName: Researcher
       purpose: Collect evidence
-      minimumMembers: 1
-      requiredDefinitionIds: [researcher]
+      agentDefinitionId: researcher
   sharedContext:
     retention: 48h
 `)
@@ -97,7 +138,7 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Metadata.ID != "research" || manifest.Spec.Roles[0].RequiredDefinitionIDs[0] != "researcher" {
+	if manifest.Metadata.ID != "research" || manifest.Spec.Members[0].AgentDefinitionID != "researcher" {
 		t.Fatalf("manifest=%#v", manifest)
 	}
 	for _, field := range []string{"roster", "credentials", "environment", "deploymentId"} {
@@ -125,8 +166,8 @@ func TestCompileManifestRejectsInvalidRetentionAndIdentity(t *testing.T) {
 	base := &Manifest{
 		APIVersion: ManifestAPIVersion, Kind: ManifestKind,
 		Metadata: ManifestMetadata{ID: "research", Version: "1.0.0", DisplayName: "Research"},
-		Spec: ManifestSpec{Roles: []ManifestRoleSlot{{
-			ID: "researcher", DisplayName: "Researcher", Purpose: "Research",
+		Spec: ManifestSpec{Members: []ManifestMember{{
+			ID: "researcher", DisplayName: "Researcher", Purpose: "Research", AgentDefinitionID: "researcher",
 		}}},
 	}
 	base.Spec.SharedContext.Retention = "forever"

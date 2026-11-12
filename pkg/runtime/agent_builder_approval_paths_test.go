@@ -254,7 +254,7 @@ func TestAgentBuilderApprovalPathsOtherCardsUnchanged(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		others := map[string]map[string]interface{}{
 			"plain":       {"skillId": "github", "action": "push"},
-			"team role":   {"skillId": "openseal.teams", "action": TeamActionUpdateRole, "resourceType": "team", "operation": TeamActionUpdateRole},
+			"team member": {"skillId": "openseal.teams", "action": TeamActionUpdateMember, "resourceType": "team", "operation": TeamActionUpdateMember},
 			"agent other": {"skillId": AgentManagementSkillID, "action": "propose_amendment", "resourceType": "agent", "operation": "propose_amendment"},
 		}
 		for name, card := range others {

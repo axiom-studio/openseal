@@ -111,6 +111,7 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 	activationService := NewRunbookActivationService(store)
 	activationService.now = func() time.Time { return now }
+	seedTestSpace(t, store, scope)
 	activation, err := activationService.Create(ctx, CreateRunbookActivationRequest{
 		ID: "daily-review", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "rowan",
 		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "daily", MaximumConcurrent: 2,
@@ -191,7 +192,8 @@ func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
 		Channel: "work", Title: "Work",
 		Milestones: []runbook.ReportingMilestone{runbook.ReportingStarted, runbook.ReportingCompleted},
 	}
-	channel, startKey, err := prepareRunReporting(ctx, store, scope, owner, policy, run.ID, run.Context)
+	seedTestSpace(t, store, scope)
+	channel, startKey, err := prepareRunReporting(ctx, store, scope, owner, policy, "", run.ID, run.Context)
 	if err != nil {
 		t.Fatal(err)
 	}

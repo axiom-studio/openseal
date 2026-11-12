@@ -298,6 +298,7 @@ func approvalModeConversation(t *testing.T, store *SQLiteStore) *Conversation {
 
 func approvalModeConversationWithKey(t *testing.T, store *SQLiteStore, key string) *Conversation {
 	t.Helper()
+	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "one"})
 	conversation, _, err := NewConversationService(store).CreateConversation(context.Background(), CreateConversationRequest{
 		Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat " + key, IdempotencyKey: key,
 	})
@@ -429,6 +430,7 @@ func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testin
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "one"}
+	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})
@@ -478,6 +480,7 @@ func TestApprovalModeChangeAppearsInConversationChangeFeed(t *testing.T) {
 		RunActivityStore
 	}{"sqlite": mustSQLiteApprovalModeStore(t)} {
 		t.Run(name, func(t *testing.T) {
+			seedTestSpace(t, store.(SpaceStore), Scope{Kind: "tenant", ID: "one"})
 			conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
 				Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 			})

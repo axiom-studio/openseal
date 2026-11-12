@@ -27,6 +27,7 @@ func TestConversationRunsAreScopedFilteredBeforePaging(t *testing.T) {
 			scope := runtime.Scope{Kind: "local", ID: "default"}
 			owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research"}
 			channels := runtime.NewConversationService(store.(runtime.ConversationStore))
+			seedSpace(t, store.(runtime.SpaceStore), scope, "")
 			channel, _, err := channels.CreateConversation(t.Context(), runtime.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Evidence", IdempotencyKey: "evidence"})
 			if err != nil {
 				t.Fatal(err)

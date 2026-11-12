@@ -72,7 +72,6 @@ async function setup(page: Page, available = true) {
             definition: {
               displayName: "Evidence team",
               purpose: "Make decisions with traceable evidence.",
-              roles: [],
             },
           },
         ],

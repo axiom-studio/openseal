@@ -66,6 +66,7 @@ func TestAgentBuilderEngineEnsuresControlConversation(t *testing.T) {
 	}
 	t.Cleanup(func() { engine.Close() })
 	reference := skill.ScopeReference{Kind: "tenant", ID: "one"}
+	home := seedSpace(t, engine, runtime.Scope{Kind: reference.Kind, ID: reference.ID}, "person")
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: "helper-definition", Version: "1.0.0", DisplayName: "Helper", Purpose: "Help", SystemPrompt: "Help.",
 		Authority: AgentAuthorityPolicy{MaximumRisk: skill.RiskLevelRead, MaxConcurrentRuns: 1},
@@ -85,7 +86,7 @@ func TestAgentBuilderEngineEnsuresControlConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := engine.EnsureAgentControlConversation(ctx, deployment)
-	if err != nil || second.ID != first.ID || first.Origin == nil || first.Origin.Kind != runtime.ConversationReferenceAgentControl {
+	if err != nil || second.ID != first.ID || first.Origin == nil || first.Origin.Kind != runtime.ConversationReferenceAgentControl || first.SpaceID != home.ID {
 		t.Fatalf("control conversation = %#v then %#v, %v", first, second, err)
 	}
 }
@@ -137,7 +138,8 @@ func TestAgentBuilderStartConversationOriginSpaceAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	home, _, err := engine.EnsureDefaultSpace(ctx, scope)
+	// With no space named, the chat is in the requester's default space.
+	home, err := engine.DefaultSpace(ctx, scope, requester.ID)
 	if err != nil || personal.Conversation.SpaceID != home.ID || personal.Conversation.Title != "New team" || personal.Message.BuilderParameters.Kind != runtime.AgentBuilderKindTeam {
 		t.Fatalf("personal = %#v, %v", personal.Conversation, err)
 	}
@@ -169,6 +171,8 @@ func TestAgentBuilderListDraftsKeepsRequesterActiveConversations(t *testing.T) {
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	ana := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
 	bo := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "bo"}
+	// Each requester's drafts start in their own default space.
+	homes := map[string]string{ana.ID: seedSpace(t, engine, scope, ana.ID).ID, bo.ID: seedSpace(t, engine, scope, bo.ID).ID}
 	start := func(requester runtime.ConversationParticipant, key, name string) *runtime.Conversation {
 		t.Helper()
 		result, err := engine.StartAgentBuilderConversation(ctx, StartAgentBuilderRequest{
@@ -176,6 +180,9 @@ func TestAgentBuilderListDraftsKeepsRequesterActiveConversations(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if result.Conversation.SpaceID != homes[requester.ID] {
+			t.Fatalf("%s's draft is in space %s, want %s", requester.ID, result.Conversation.SpaceID, homes[requester.ID])
 		}
 		return result.Conversation
 	}
@@ -193,7 +200,7 @@ func TestAgentBuilderListDraftsKeepsRequesterActiveConversations(t *testing.T) {
 	}
 	// A plain chat with the builder is not a builder conversation.
 	if _, _, err := engine.CreateConversation(ctx, runtime.CreateConversationRequest{
-		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: AgentBuilderDeploymentID}, Title: "Chat", IdempotencyKey: "chat",
+		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: AgentBuilderDeploymentID}, Title: "Chat", CreatedBy: ana.ID, IdempotencyKey: "chat",
 	}); err != nil {
 		t.Fatal(err)
 	}

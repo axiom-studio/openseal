@@ -227,7 +227,7 @@ sequenceDiagram
 
 The model never receives resolved secret values. A host dispatcher is guarded
 at the final external boundary as well as when the call is admitted. Team-owned actions
-also validate the Team role grant and assigned Agent authority.
+also validate the Team skill grant and assigned Agent authority.
 
 ## Collaboration
 
@@ -360,9 +360,9 @@ a step replayed after a crash is not charged twice.
 ### Desktop participation host adapters
 
 `internal/daemon.DesktopConversationParticipants` resolves the current local Team
-roster and its exact active definition. It excludes observe-only/disabled roles
+roster and its exact active definition. It excludes observe-only/disabled members
 and inactive Agents, rejects pending Team activation, checks Agent definitions
-against role requirements, and enforces the participant limit. Definition and
+against member requirements, and enforces the participant limit. Definition and
 scope mismatches fail closed. Deployment-specific model credentials are rejected
 because this desktop adapter uses the workspace provider; no credential is
 transferred through the participant binding.

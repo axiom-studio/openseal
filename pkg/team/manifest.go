@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,8 +16,10 @@ import (
 )
 
 const (
-	ManifestAPIVersion = "openseal.dev/team/v1alpha1"
-	ManifestKind       = "Team"
+	ManifestAPIVersion = "openseal.dev/team/v1alpha2"
+	// retiredManifestAPIVersion described a Team as role slots.
+	retiredManifestAPIVersion = "openseal.dev/team/v1alpha1"
+	ManifestKind              = "Team"
 )
 
 const (
@@ -27,9 +30,10 @@ const (
 var manifestIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 
 // Manifest is the portable, product-neutral Team artifact. It contains
-// immutable collaboration behavior and semantic roster requirements. Scope,
-// Agent deployment assignments, credentials, capacity, and rollout state are
-// deliberately supplied by the installing host.
+// immutable collaboration behavior and the members by portable Agent
+// definition. Scope, the Agent deployments the members become, credentials,
+// capacity, and rollout state are deliberately supplied by the installing
+// host.
 type Manifest struct {
 	APIVersion string           `json:"apiVersion" yaml:"apiVersion"`
 	Kind       string           `json:"kind" yaml:"kind"`
@@ -49,7 +53,7 @@ type ManifestMetadata struct {
 
 type ManifestSpec struct {
 	OperatingPrinciples []string                        `json:"operatingPrinciples,omitempty" yaml:"operatingPrinciples,omitempty"`
-	Roles               []ManifestRoleSlot              `json:"roles" yaml:"roles"`
+	Members             []ManifestMember                `json:"members" yaml:"members"`
 	Routing             RoutingPolicy                   `json:"routing,omitempty" yaml:"routing,omitempty"`
 	Delegation          ManifestDelegationPolicy        `json:"delegation,omitempty" yaml:"delegation,omitempty"`
 	SharedContext       ManifestSharedContextPolicy     `json:"sharedContext,omitempty" yaml:"sharedContext,omitempty"`
@@ -59,15 +63,18 @@ type ManifestSpec struct {
 	Amendments          workforce.AmendmentPolicy       `json:"amendments,omitempty" yaml:"amendments,omitempty"`
 }
 
-type ManifestRoleSlot struct {
-	ID                    string                   `json:"id" yaml:"id"`
-	DisplayName           string                   `json:"displayName" yaml:"displayName"`
-	Purpose               string                   `json:"purpose" yaml:"purpose"`
-	MinimumMembers        int                      `json:"minimumMembers,omitempty" yaml:"minimumMembers,omitempty"`
-	MaximumMembers        int                      `json:"maximumMembers,omitempty" yaml:"maximumMembers,omitempty"`
-	RequiredSkillIDs      []string                 `json:"requiredSkillIds,omitempty" yaml:"requiredSkillIds,omitempty"`
-	RequiredDefinitionIDs []string                 `json:"requiredDefinitionIds,omitempty" yaml:"requiredDefinitionIds,omitempty"`
-	ChannelParticipation  RoleChannelParticipation `json:"channelParticipation,omitempty" yaml:"channelParticipation,omitempty"`
+// ManifestMember is one member of the Team. AgentDefinitionID is a portable
+// reference the installing host resolves to an Agent it deploys or already
+// runs.
+type ManifestMember struct {
+	ID                   string               `json:"id" yaml:"id"`
+	DisplayName          string               `json:"displayName" yaml:"displayName"`
+	Purpose              string               `json:"purpose" yaml:"purpose"`
+	AgentDefinitionID    string               `json:"agentDefinitionId" yaml:"agentDefinitionId"`
+	ChannelParticipation ChannelParticipation `json:"channelParticipation,omitempty" yaml:"channelParticipation,omitempty"`
+	RequiredSkillIDs     []string             `json:"requiredSkillIds,omitempty" yaml:"requiredSkillIds,omitempty"`
+	Approver             bool                 `json:"approver,omitempty" yaml:"approver,omitempty"`
+	Lead                 bool                 `json:"lead,omitempty" yaml:"lead,omitempty"`
 }
 
 type ManifestDelegationPolicy struct {
@@ -123,8 +130,14 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance workfor
 		return nil, fmt.Errorf("decode team manifest: %w", err)
 	}
 	manifest = &portable
+	if manifest.APIVersion == retiredManifestAPIVersion {
+		return nil, fmt.Errorf("team manifest apiVersion %s (role slots) is no longer supported; list the Team's members under spec.members and use %s", retiredManifestAPIVersion, ManifestAPIVersion)
+	}
 	if manifest.APIVersion != ManifestAPIVersion || manifest.Kind != ManifestKind {
 		return nil, errors.New("team manifest apiVersion or kind is unsupported")
+	}
+	if err = validateManifestMembers(manifest.Spec.Members); err != nil {
+		return nil, err
 	}
 	metadata := manifest.Metadata
 	metadata.ID = strings.TrimSpace(metadata.ID)
@@ -174,22 +187,9 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance workfor
 	if approvals.MaximumRisk == "" {
 		approvals.MaximumRisk = capability.RiskLevelRead
 	}
-	roles := make([]RoleSlot, len(manifest.Spec.Roles))
-	for index, portableRole := range manifest.Spec.Roles {
-		participation := portableRole.ChannelParticipation
-		if participation == "" {
-			participation = RoleChannelActive
-		}
-		roles[index] = RoleSlot{
-			ID: portableRole.ID, DisplayName: portableRole.DisplayName, Purpose: portableRole.Purpose,
-			MinimumMembers: portableRole.MinimumMembers, MaximumMembers: portableRole.MaximumMembers,
-			RequiredSkillIDs: portableRole.RequiredSkillIDs, RequiredDefinitionIDs: portableRole.RequiredDefinitionIDs,
-			ChannelParticipation: participation,
-		}
-	}
 	definition := &Definition{
 		ID: definitionID, Version: metadata.Version, DisplayName: metadata.DisplayName, Purpose: purpose,
-		OperatingPrinciples: manifest.Spec.OperatingPrinciples, Roles: roles, Routing: manifest.Spec.Routing,
+		OperatingPrinciples: manifest.Spec.OperatingPrinciples, Routing: manifest.Spec.Routing,
 		Delegation: delegation,
 		SharedContext: workforce.SharedContextPolicy{
 			Retention: retention, MaximumBytes: maximumBytes,
@@ -219,18 +219,52 @@ func canonicalizeManifestDefinition(candidate *Definition) {
 	candidate.DisplayName = strings.TrimSpace(candidate.DisplayName)
 	candidate.Purpose = strings.TrimSpace(candidate.Purpose)
 	candidate.OperatingPrinciples = normalizedStrings(candidate.OperatingPrinciples)
-	candidate.Approvals.ApproverRoleIDs = normalizedStrings(candidate.Approvals.ApproverRoleIDs)
 	candidate.Approvals.ApproverPrincipals = normalizedStrings(candidate.Approvals.ApproverPrincipals)
 	candidate.Amendments.AllowedFields = normalizedStrings(candidate.Amendments.AllowedFields)
 	candidate.Amendments.ApproverPrincipals = normalizedStrings(candidate.Amendments.ApproverPrincipals)
 	candidate.Routing.Notes = strings.TrimSpace(candidate.Routing.Notes)
-	candidate.Routing.LeadRoleID = strings.TrimSpace(candidate.Routing.LeadRoleID)
-	for index := range candidate.Roles {
-		role := &candidate.Roles[index]
-		role.ID = strings.TrimSpace(role.ID)
-		role.DisplayName = strings.TrimSpace(role.DisplayName)
-		role.Purpose = strings.TrimSpace(role.Purpose)
-		role.RequiredSkillIDs = normalizedStrings(role.RequiredSkillIDs)
-		role.RequiredDefinitionIDs = normalizedStrings(role.RequiredDefinitionIDs)
+}
+
+func validateManifestMembers(members []ManifestMember) error {
+	if len(members) == 0 {
+		return errors.New("team manifest requires at least one member")
 	}
+	seen := make(map[string]bool, len(members))
+	for _, member := range members {
+		id := strings.TrimSpace(member.ID)
+		if id == "" || id != member.ID || seen[id] || strings.TrimSpace(member.DisplayName) == "" || strings.TrimSpace(member.Purpose) == "" ||
+			strings.TrimSpace(member.AgentDefinitionID) == "" || !validChannelParticipation(member.ChannelParticipation) {
+			return errors.New("team manifest members require unique ids, a name, a purpose, an Agent definition, and a valid channel participation")
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+// ManifestRoster returns the manifest's members as roster assignments. agents
+// maps each member id to the Agent deployment the host placed for it.
+func ManifestRoster(manifest *Manifest, agents map[string]string) ([]RosterAssignment, error) {
+	if manifest == nil {
+		return nil, errors.New("team manifest is required")
+	}
+	if err := validateManifestMembers(manifest.Spec.Members); err != nil {
+		return nil, err
+	}
+	roster := make([]RosterAssignment, 0, len(manifest.Spec.Members))
+	for _, member := range manifest.Spec.Members {
+		agentID := strings.TrimSpace(agents[member.ID])
+		if agentID == "" {
+			return nil, fmt.Errorf("team manifest member %q has no Agent deployment", member.ID)
+		}
+		participation := member.ChannelParticipation
+		if participation == "" {
+			participation = ChannelActive
+		}
+		roster = append(roster, RosterAssignment{
+			ID: member.ID, AgentDeploymentID: agentID, DisplayName: strings.TrimSpace(member.DisplayName), Purpose: strings.TrimSpace(member.Purpose),
+			ChannelParticipation: participation, RequiredSkillIDs: slices.Clone(member.RequiredSkillIDs),
+			Approver: member.Approver, Lead: member.Lead,
+		})
+	}
+	return roster, nil
 }

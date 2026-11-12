@@ -1007,7 +1007,7 @@ export default function App() {
                       composerMode === "agent"
                         ? "What would you like a hand with?"
                         : composerMode === "team"
-                          ? "What should your team achieve, and which roles does it need?"
+                          ? "What should your team achieve, and which members does it need?"
                           : "What should your agent accomplish?"
                     }
                     maxLength={16000}

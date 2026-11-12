@@ -21,9 +21,9 @@ flowchart LR
 ## Work offers and assignment
 
 When the recipient is a Team, request creation snapshots every eligible roster
-candidate. Eligibility comes from the requested semantic role, the role's exact
-Agent-definition and Skill requirements, active deployment state, and current
-Run capacity. The snapshot contains no credentials.
+candidate. Eligibility comes from the requested member (a semantic role names
+one roster member by id; without one every member is a candidate), the member's
+Skill requirements, active deployment state, and current Run capacity. The snapshot contains no credentials.
 
 Eligible Agents submit an explicit `accept` or `decline` bid with an idempotency
 key. Assignment is deterministic: accepted candidates with available capacity
@@ -58,7 +58,7 @@ of truth even when no participant needs to speak.
 
 ## Safety and recovery invariants
 
-- Team role grants and Agent authority are both narrowing boundaries.
+- Team skill grants and Agent authority are both narrowing boundaries.
 - Shared request context and artifacts cannot contain credentials.
 - Budgets are allocated to the child Run and cannot exceed the source Run.
 - Request, source Run, child Run, dependency resolution, and activity changes

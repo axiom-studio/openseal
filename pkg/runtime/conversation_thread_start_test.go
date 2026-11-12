@@ -24,6 +24,7 @@ func forConversationThreadStartStores(t *testing.T, test func(*testing.T, conver
 
 func conversationThreadStartConversation(t *testing.T, store ConversationStore) *Conversation {
 	t.Helper()
+	seedTestSpace(t, store.(SpaceStore), Scope{Kind: "tenant", ID: "thread-start"})
 	conversation, _, err := NewConversationService(store).CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: Scope{Kind: "tenant", ID: "thread-start"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 		Title: "Thread start contracts", IdempotencyKey: "thread-start",

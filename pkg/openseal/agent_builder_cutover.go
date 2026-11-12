@@ -164,7 +164,8 @@ func (e *Engine) agentBuilderPresent(ctx context.Context, scope Scope) (bool, er
 }
 
 // agentBuilderCutoverSpace is the space of the first existing deployment the
-// draft's placement names, else "" (the builder's space or Personal).
+// draft's placement names, else "" (the builder's space, else the default
+// space of the person who started the draft).
 func (e *Engine) agentBuilderCutoverSpace(ctx context.Context, draft AgentBuilderCutoverDraft) (string, error) {
 	if e.spaces == nil || e.agents == nil || len(draft.Placement.AgentDeploymentIDs) == 0 {
 		return "", nil

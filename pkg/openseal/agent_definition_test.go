@@ -79,6 +79,7 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 		}
 	}
 	scope := SkillScope{Kind: "tenant", ID: "one"}
+	home := seedSpace(t, engine, Scope{Kind: scope.Kind, ID: scope.ID}, "admin")
 	deployment, _, err := engine.CreateAgentDeployment(ctx, &AgentDeployment{
 		ID: "marketing-prod:live", Scope: scope, DefinitionID: "marketer", ActiveVersion: "1.0.0",
 		RolloutStatus: AgentRolloutActive, Environment: "production", Capacity: AgentDeploymentCapacity{MaxConcurrentRuns: 2},
@@ -89,7 +90,7 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	controlChannels, err := engine.ListConversations(ctx, ConversationFilter{
 		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID},
 	})
-	if err != nil || len(controlChannels) != 1 {
+	if err != nil || len(controlChannels) != 1 || controlChannels[0].SpaceID != home.ID {
 		t.Fatalf("Agent control channel = %#v, %v", controlChannels, err)
 	}
 	channelsByOrigin := make(map[ConversationReferenceKind]*Conversation, len(controlChannels))

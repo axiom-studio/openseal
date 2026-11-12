@@ -46,12 +46,14 @@ func (h *agentBuilderTestHost) PrepareAgentModel(context.Context, AgentModelRequ
 func (h *agentBuilderTestHost) AfterAgentCreated(context.Context, AgentCreated) {}
 
 type agentBuilderFixture struct {
-	scope     Scope
-	agents    *kernelagent.Registry
-	teams     *kernelteam.Registry
-	catalog   *skill.Catalog
-	spaces    *SpaceService
-	salesID   string
+	scope   Scope
+	agents  *kernelagent.Registry
+	teams   *kernelteam.Registry
+	catalog *skill.Catalog
+	spaces  *SpaceService
+	salesID string
+	// homeID is the default space of the person the fixture's run acts for.
+	homeID    string
 	run       *AgentRun
 	host      *agentBuilderTestHost
 	validator *AgentBuilderActionValidator
@@ -99,10 +101,6 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	teams := kernelteam.NewRegistry(agents)
 	teamDefinition, err := teams.RegisterDefinition(ctx, &kernelteam.Definition{
 		ID: "ops-team-definition", Version: "1", DisplayName: "Ops  Crew", Purpose: "Run operations",
-		Roles: []kernelteam.RoleSlot{{
-			ID: "researcher-0", DisplayName: "Researcher", Purpose: "Research", MinimumMembers: 1, MaximumMembers: 1,
-			RequiredDefinitionIDs: []string{"researcher-definition"}, ChannelParticipation: kernelteam.RoleChannelActive,
-		}},
 		Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
 	})
 	if err != nil {
@@ -111,7 +109,7 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	if _, _, err := teams.CreateDeployment(ctx, &kernelteam.Deployment{
 		ID: "ops-team", Scope: reference, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version,
 		Status: kernelteam.DeploymentActive,
-		Roster: []kernelteam.RosterAssignment{{ID: "researcher-0", RoleID: "researcher-0", AgentDeploymentID: "researcher"}},
+		Roster: []kernelteam.RosterAssignment{{ID: "researcher-0", AgentDeploymentID: "researcher"}},
 	}, "user", "operator", "fixture"); err != nil {
 		t.Fatal(err)
 	}
@@ -171,15 +169,12 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	}
 
 	spaces := NewSpaceService(newTestKernelStore(t))
-	sales, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Sales", Look: DefaultSpaceLook, OwnerID: "operator"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	salesID, homeID := seedAgentBuilderSpaces(t, spaces, scope)
 	fixture := &agentBuilderFixture{
-		scope: scope, agents: agents, teams: teams, catalog: catalog, spaces: spaces, salesID: sales.ID,
+		scope: scope, agents: agents, teams: teams, catalog: catalog, spaces: spaces, salesID: salesID, homeID: homeID,
 		run: &AgentRun{
 			ID: "builder-run", Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
-			AssignedAgentID: "finn", Source: RunSourceChat,
+			AssignedAgentID: "finn", ActingUser: agentBuilderApprover.ID, Source: RunSourceChat,
 		},
 	}
 	var host AgentBuilderHost
@@ -192,6 +187,22 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 		t.Fatal(err)
 	}
 	return fixture
+}
+
+// seedAgentBuilderSpaces creates Sales, owned by an operator, and Home, the
+// default space of the person the builder run acts for.
+func seedAgentBuilderSpaces(t *testing.T, spaces *SpaceService, scope Scope) (salesID, homeID string) {
+	t.Helper()
+	ctx := context.Background()
+	sales, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Sales", Look: DefaultSpaceLook, OwnerID: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Home", Look: DefaultSpaceLook, OwnerID: agentBuilderApprover.ID})
+	if err != nil || !home.IsDefault {
+		t.Fatalf("home = %+v, err = %v", home, err)
+	}
+	return sales.ID, home.ID
 }
 
 func (f *agentBuilderFixture) bound(t *testing.T, action string) *skill.BoundAction {
@@ -291,7 +302,7 @@ func TestAgentBuilderCreateResolvesSpaceToPersonal(t *testing.T) {
 		t.Fatal(err)
 	}
 	space, _ := preview["space"].(map[string]interface{})
-	if space["id"] != DefaultSpaceID(fixture.scope) || space["name"] != DefaultSpaceName {
+	if space["id"] != fixture.homeID || space["name"] != "Home" {
 		t.Fatalf("space = %#v", space)
 	}
 	if model, _ := preview["model"].(map[string]interface{}); model["id"] != "" {
