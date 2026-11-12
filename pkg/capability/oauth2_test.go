@@ -29,6 +29,23 @@ func TestNormalizeOAuth2RequirementProducesStableLeastPrivilegeContract(t *testi
 	}
 }
 
+func TestNormalizeOAuth2RequirementAllowsNoScopes(t *testing.T) {
+	requirement, err := NormalizeOAuth2Requirement(&OAuth2Requirement{Provider: "mcp", Subject: OAuth2SubjectUser, Resource: "https://api.example.com/mcp"})
+	if err != nil {
+		t.Fatalf("requirement without scopes: %v", err)
+	}
+	if requirement.Scopes == nil || len(requirement.Scopes) != 0 {
+		t.Fatalf("scopes = %#v, want empty non-nil", requirement.Scopes)
+	}
+	grant := &OAuth2GrantSummary{Provider: "mcp", Subject: OAuth2SubjectUser, Resource: "https://api.example.com/mcp"}
+	if !OAuth2GrantSatisfies(requirement, grant) {
+		t.Fatal("a grant without scopes should satisfy a requirement without scopes")
+	}
+	if _, err = NormalizeOAuth2Requirement(&OAuth2Requirement{Provider: "mcp", Subject: OAuth2SubjectUser, Scopes: []string{" "}}); err == nil {
+		t.Fatal("a blank scope should be rejected")
+	}
+}
+
 func TestOAuth2GrantSatisfiesExactIdentityAndScopeSuperset(t *testing.T) {
 	requirement := &OAuth2Requirement{
 		Provider: "slack", Subject: OAuth2SubjectInstallation,

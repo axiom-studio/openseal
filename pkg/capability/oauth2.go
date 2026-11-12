@@ -104,8 +104,10 @@ func normalizeOAuth2Fields(provider string, subject OAuth2Subject, scopes []stri
 	default:
 		return "", "", nil, "", errors.New("OAuth 2 subject must be installation or user")
 	}
-	if len(scopes) == 0 || len(scopes) > 128 {
-		return "", "", nil, "", errors.New("OAuth 2 authorization requires between 1 and 128 scopes")
+	// No scopes is valid: a server that lists none (MCP servers often don't)
+	// is authorized without a scope parameter and grants its default access.
+	if len(scopes) > 128 {
+		return "", "", nil, "", errors.New("OAuth 2 authorization allows at most 128 scopes")
 	}
 	normalizedScopes := make([]string, 0, len(scopes))
 	seen := make(map[string]struct{}, len(scopes))
@@ -119,9 +121,6 @@ func normalizeOAuth2Fields(provider string, subject OAuth2Subject, scopes []stri
 		}
 		seen[scope] = struct{}{}
 		normalizedScopes = append(normalizedScopes, scope)
-	}
-	if len(normalizedScopes) == 0 {
-		return "", "", nil, "", errors.New("OAuth 2 authorization requires at least one scope")
 	}
 	sort.Strings(normalizedScopes)
 	if resource != "" && !validOAuth2Text(resource, 1024) {
