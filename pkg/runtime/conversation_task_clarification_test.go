@@ -2,26 +2,19 @@ package runtime
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control/controltest"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-type conversationTaskClarificationStore interface {
-	KernelStore
-	ConversationStore
-	ConversationTaskStore
-}
-
 type conversationTaskClarificationFixture struct {
-	store        conversationTaskClarificationStore
+	store        controltest.Store
 	service      *runtimeconversation.ConversationService
 	scheduler    *conversationrun.ConversationRunScheduler
 	conversation *Conversation
@@ -32,19 +25,7 @@ type conversationTaskClarificationFixture struct {
 	asked        string
 }
 
-func forConversationTaskClarificationStores(t *testing.T, test func(*testing.T, conversationTaskClarificationStore)) {
-	t.Helper()
-	t.Run("sqlite", func(t *testing.T) {
-		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "task-clarification.db"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = store.Close() })
-		test(t, store)
-	})
-}
-
-func newConversationTaskClarificationFixture(t *testing.T, store conversationTaskClarificationStore, threaded bool) *conversationTaskClarificationFixture {
+func newConversationTaskClarificationFixture(t *testing.T, store controltest.Store, threaded bool) *conversationTaskClarificationFixture {
 	t.Helper()
 	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), Scope{Kind: "organization", ID: "task-clarification"})
@@ -92,12 +73,12 @@ func newConversationTaskClarificationFixture(t *testing.T, store conversationTas
 // ask parks the independent task's work Run on an ask_user call.
 func (f *conversationTaskClarificationFixture) ask(t *testing.T, question string) {
 	t.Helper()
-	claimed := claimAskUserRun(t, f.store, f.work, "task-worker")
-	parked, call := askUserParked(t, f.store, claimed, "task-worker", question)
-	if parked.Status != AgentRunStatusWaitingForEvent || parked.LastAppliedTurn != call.step.Sequence {
+	claimed := controltest.ClaimRun(t, f.store, f.work, "task-worker")
+	parked, call := controltest.AskUserParked(t, f.store, claimed, "task-worker", question)
+	if parked.Status != AgentRunStatusWaitingForEvent || parked.LastAppliedTurn != call.Step.Sequence {
 		t.Fatalf("park independent task clarification: %#v", parked)
 	}
-	f.work, f.questionTurn, f.asked = parked, call.step, question
+	f.work, f.questionTurn, f.asked = parked, call.Step, question
 }
 
 func (f *conversationTaskClarificationFixture) resetScheduler(t *testing.T) {
@@ -253,7 +234,7 @@ func TestConversationTaskClarificationRoundTrip(t *testing.T) {
 		{name: "explicit answer after cancellation", threaded: true, status: AgentRunStatusCanceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
+			controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
 				f := newConversationTaskClarificationFixture(t, store, tc.threaded)
 				question := f.question(t)
 				f.resetScheduler(t)
@@ -348,7 +329,7 @@ func (f *conversationTaskClarificationFixture) assertWorkUnchanged(t *testing.T,
 func TestConversationTaskClarificationRejectsExplicitAnswersOutsideAuthority(t *testing.T) {
 	for _, reason := range []string{"other actor", "other thread", "canceled task"} {
 		t.Run(reason, func(t *testing.T) {
-			forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
+			controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
 				f := newConversationTaskClarificationFixture(t, store, true)
 				question := f.question(t)
 				request := runtimeconversation.PostChannelMessageRequest{
@@ -384,7 +365,7 @@ func TestConversationTaskClarificationRejectsExplicitAnswersOutsideAuthority(t *
 }
 
 func TestConversationTaskClarificationOriginRequiresCanonicalProvenance(t *testing.T) {
-	forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
+	controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
 		f := newConversationTaskClarificationFixture(t, store, false)
 		source, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(t.Context(), store, store, f.work)
 		if err != nil || source == nil || source.ID != f.source.ID || source.Status != AgentRunStatusCompleted ||
@@ -420,7 +401,7 @@ func TestConversationTaskClarificationOriginRequiresCanonicalProvenance(t *testi
 }
 
 func TestConversationTaskClarificationReplayDoesNotAnswerLaterQuestion(t *testing.T) {
-	forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
+	controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
 		f := newConversationTaskClarificationFixture(t, store, true)
 		firstQuestion := f.question(t)
 		firstAnswer := f.post(t, runtimeconversation.PostChannelMessageRequest{
@@ -481,7 +462,7 @@ func TestConversationTaskClarificationReplayDoesNotAnswerLaterQuestion(t *testin
 }
 
 func TestConversationTaskGenericInterventionDoesNotMintAnswerReceipt(t *testing.T) {
-	forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
+	controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
 		f := newConversationTaskClarificationFixture(t, store, true)
 		result, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
 			Scope: f.task.Scope, RunID: f.work.ID, ExpectedRevision: f.work.Revision, Kind: agentrun.AgentRunCommandIntervene,
