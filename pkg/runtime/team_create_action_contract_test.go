@@ -20,7 +20,7 @@ func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	if definition.Version != "2.2.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}
-	action, ok := definition.Actions[runtimeaction.TeamActionCreateTeam]
+	action, ok := definition.Actions[models.TeamActionCreateTeam]
 	if !ok || action.Risk != skill.RiskLevelWrite || action.Review != skill.ActionReviewAlways || action.Idempotency != skill.IdempotencyRequired {
 		t.Fatalf("create_team = %#v", action)
 	}
@@ -62,13 +62,13 @@ func teamCreateGetsBuilderCard(t *testing.T, definition *skill.Definition) bool 
 	}
 	if err := fixture.Catalog.Bind(ctx, &skill.Binding{
 		ID: "bundled:teams", Revision: 1, Scope: skill.ScopeReference{Kind: fixture.Scope.Kind, ID: fixture.Scope.ID}, DeploymentID: "finn",
-		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{runtimeaction.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
+		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{models.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(runtimeaction.ProposeActionRequest{
 		Scope: fixture.Scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
-		SkillID: definition.ID, SkillVersion: definition.Version, Action: runtimeaction.TeamActionCreateTeam,
+		SkillID: definition.ID, SkillVersion: definition.Version, Action: models.TeamActionCreateTeam,
 		Arguments: teamCreateArgumentsFor(""), Summary: "Review the team",
 	}, "create-team"))
 	if err != nil {

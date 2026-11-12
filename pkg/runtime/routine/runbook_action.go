@@ -36,12 +36,12 @@ func RunbookManagementSkill() *skill.Definition {
 		Name: "Routines", Description: "Create routines that run on a schedule or when something happens, list them, start them now, pause, resume or cancel them. Work uses the current Agent's tools and reports back to the chat it was created in.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: RunbookManagementEndpoint},
 		Actions: map[string]skill.Action{
-			action.RunbookActionCreateTask: scheduledTaskCreateAction(),
+			models.RunbookActionCreateTask: scheduledTaskCreateAction(),
 			RunbookActionEventSources:      routineEventSourcesAction(),
 			RunbookActionSendTestEvent:     routineTestEventAction(),
-			action.RunbookActionSetScript:  scheduledTaskSetScriptAction(),
-			action.RunbookActionList:       scheduledTaskListAction(),
-			action.RunbookActionSetStatus:  scheduledTaskStatusAction(),
+			models.RunbookActionSetScript:  scheduledTaskSetScriptAction(),
+			models.RunbookActionList:       scheduledTaskListAction(),
+			models.RunbookActionSetStatus:  scheduledTaskStatusAction(),
 			RunbookActionStart: {
 				Name:        RunbookActionStart,
 				Description: "Start one reviewed Runbook now. Active activations and automatically exhausted scheduled activations remain callable on demand. Omit activationId when the current Objective channel has exactly one callable Runbook; otherwise use an activation ID from the conversation context.",
@@ -188,7 +188,7 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 		return nil, false, nil
 	}
 	arguments := maps.Clone(input.Arguments)
-	if input.Bound.Action.Name == action.RunbookActionCreateTask {
+	if input.Bound.Action.Name == models.RunbookActionCreateTask {
 		if err := resolveRoutineBriefArguments(ctx, v.grantCatalog, v.ownerAddresses, input.Run, arguments, scheduledTaskCreatesEventRoutine(arguments)); err != nil {
 			return nil, true, err
 		}
@@ -197,7 +197,7 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 		}
 		return arguments, true, nil
 	}
-	if input.Bound.Action.Name == action.RunbookActionSetScript {
+	if input.Bound.Action.Name == models.RunbookActionSetScript {
 		if v == nil || v.store == nil || input.Run == nil {
 			return nil, true, errors.New("Runbook action validator is not configured")
 		}
@@ -206,7 +206,7 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 		}
 		return arguments, true, nil
 	}
-	if input.Bound.Action.Name == action.RunbookActionList || input.Bound.Action.Name == RunbookActionEventSources || input.Bound.Action.Name == RunbookActionSendTestEvent {
+	if input.Bound.Action.Name == models.RunbookActionList || input.Bound.Action.Name == RunbookActionEventSources || input.Bound.Action.Name == RunbookActionSendTestEvent {
 		return arguments, true, nil
 	}
 	if id, _ := arguments["activationId"].(string); strings.TrimSpace(id) != "" {
@@ -274,7 +274,7 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 		return nil, errors.New("Runbook action validator is not configured")
 	}
 	switch input.Bound.Action.Name {
-	case action.RunbookActionCreateTask, action.RunbookActionList, action.RunbookActionSetStatus, action.RunbookActionSetScript, RunbookActionEventSources, RunbookActionSendTestEvent:
+	case models.RunbookActionCreateTask, models.RunbookActionList, models.RunbookActionSetStatus, models.RunbookActionSetScript, RunbookActionEventSources, RunbookActionSendTestEvent:
 		return validateScheduledTaskAction(ctx, v.store, v.chatFiles, v.routineTeams, v.events, input)
 	case RunbookActionStart:
 		args, activation, objective, err := resolveRunbookStart(ctx, v.store, input.Run, input.Arguments)
@@ -359,7 +359,7 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input agen
 		return nil, errors.New("Runbook action dispatcher is not configured")
 	}
 	switch input.Bound.Action.Name {
-	case action.RunbookActionCreateTask, action.RunbookActionList, action.RunbookActionSetStatus, action.RunbookActionSetScript, RunbookActionEventSources, RunbookActionSendTestEvent:
+	case models.RunbookActionCreateTask, models.RunbookActionList, models.RunbookActionSetStatus, models.RunbookActionSetScript, RunbookActionEventSources, RunbookActionSendTestEvent:
 		return dispatchScheduledTaskAction(ctx, d.store, d.chatFiles, d.routineTeams, d.events, input)
 	}
 	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
@@ -547,6 +547,6 @@ func isRunbookAction(bound *skill.BoundAction) bool {
 
 // runbookManagementActions are every action of openseal.runbooks.
 var runbookManagementActions = []string{
-	action.RunbookActionCreateTask, RunbookActionEventSources, RunbookActionSendTestEvent, action.RunbookActionSetScript,
-	action.RunbookActionList, action.RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule,
+	models.RunbookActionCreateTask, RunbookActionEventSources, RunbookActionSendTestEvent, models.RunbookActionSetScript,
+	models.RunbookActionList, models.RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule,
 }

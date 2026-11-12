@@ -9,7 +9,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
@@ -19,7 +18,7 @@ import (
 func TestCreateTaskEventTriggerResolves(t *testing.T) {
 	f := routinetest.NewEventRoutine(t, true)
 	args := f.WithEvent(f.SlackEvent("C1"))
-	preview, err := f.Validate(t, f.Run, action.RunbookActionCreateTask, args)
+	preview, err := f.Validate(t, f.Run, models.RunbookActionCreateTask, args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +30,7 @@ func TestCreateTaskEventTriggerResolves(t *testing.T) {
 		event["when"] != "When someone posts in #support (Acme Slack)" || event["whoCanTrigger"] != "anyone who posts in #support" || event["webhook"] != false {
 		t.Fatalf("event preview=%#v", event)
 	}
-	result, err := f.Dispatch(t, f.Run, action.RunbookActionCreateTask, args, "create-slack-routine")
+	result, err := f.Dispatch(t, f.Run, models.RunbookActionCreateTask, args, "create-slack-routine")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +49,7 @@ func TestCreateTaskEventTriggerResolves(t *testing.T) {
 		t.Fatalf("preview %#v differs from the stored routine %#v", event, stored)
 	}
 	// Replaying the approved call converges on the same routine.
-	again, err := f.Dispatch(t, f.Run, action.RunbookActionCreateTask, args, "create-slack-routine")
+	again, err := f.Dispatch(t, f.Run, models.RunbookActionCreateTask, args, "create-slack-routine")
 	if err != nil || again["activation"].(*models.RunbookActivation).ID != activation.ID {
 		t.Fatalf("replay=%#v, %v", again, err)
 	}
@@ -62,7 +61,7 @@ func TestCreateTaskEventTriggerResolves(t *testing.T) {
 
 	gmail := f.WithEvent(map[string]interface{}{"kind": "gmail.message", "source": models.RoutineGoogleSourceRef("user", "g-user"), "maximumOccurrences": float64(1), "maxPerHour": float64(5),
 		"filter": []interface{}{map[string]interface{}{"field": "from", "op": "glob", "value": "*@acme.com"}}})
-	preview, err = f.Validate(t, f.Run, action.RunbookActionCreateTask, gmail)
+	preview, err = f.Validate(t, f.Run, models.RunbookActionCreateTask, gmail)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,12 +89,12 @@ func TestCreateTaskRejectsUnknownSource(t *testing.T) {
 		"webhook source":       {"kind": "webhook", "source": "hook:hk_" + strings.Repeat("a", 26)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := f.Validate(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(event)); err == nil {
+			if _, err := f.Validate(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(event)); err == nil {
 				t.Fatal("unknown source accepted")
 			}
 		})
 	}
-	if _, err := f.Validate(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "github.event", "source": f.GitHubRef})); err != nil {
+	if _, err := f.Validate(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "github.event", "source": f.GitHubRef})); err != nil {
 		t.Fatalf("listed GitHub source refused: %v", err)
 	}
 }
@@ -107,17 +106,17 @@ func TestCreateTaskGoogleNeedsOwnSignIn(t *testing.T) {
 		"calendar needs sign-in": {"kind": "calendar.event", "source": models.RoutineGoogleSourceRef("user", "g-user"), "calendar": map[string]interface{}{"on": "created"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := f.Validate(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(event)); err == nil {
+			if _, err := f.Validate(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(event)); err == nil {
 				t.Fatal("Google source accepted")
 			}
 		})
 	}
 	other := models.CloneAgentRun(f.Run)
 	other.ActingUser = "other"
-	if _, err := f.Validate(t, other, action.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "gmail.message", "source": models.RoutineGoogleSourceRef("user", "g-user")})); err == nil {
+	if _, err := f.Validate(t, other, models.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "gmail.message", "source": models.RoutineGoogleSourceRef("user", "g-user")})); err == nil {
 		t.Fatal("another person used this person's Gmail")
 	}
-	result, err := f.Dispatch(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "gmail.message", "source": models.RoutineGoogleSourceRef("user", "g-user")}), "create-gmail")
+	result, err := f.Dispatch(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "gmail.message", "source": models.RoutineGoogleSourceRef("user", "g-user")}), "create-gmail")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,14 +128,14 @@ func TestCreateTaskGoogleNeedsOwnSignIn(t *testing.T) {
 func TestCreateTaskWebhookCreatesHook(t *testing.T) {
 	f := routinetest.NewEventRoutine(t, true)
 	args := f.WithEvent(map[string]interface{}{"kind": "webhook", "source": "new"})
-	preview, err := f.Validate(t, f.Run, action.RunbookActionCreateTask, args)
+	preview, err := f.Validate(t, f.Run, models.RunbookActionCreateTask, args)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if event := preview["event"].(map[string]interface{}); event["webhook"] != true || event["when"] != "When a request arrives at this routine's address" {
 		t.Fatalf("webhook preview=%#v", event)
 	}
-	result, err := f.Dispatch(t, f.Run, action.RunbookActionCreateTask, args, "create-webhook")
+	result, err := f.Dispatch(t, f.Run, models.RunbookActionCreateTask, args, "create-webhook")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,12 +148,12 @@ func TestCreateTaskWebhookCreatesHook(t *testing.T) {
 	if err != nil || hook == nil || hook.ActivationID != activation.ID || hook.Scope != f.Run.Scope || hook.PathTokenEnabled {
 		t.Fatalf("hook=%#v, %v", hook, err)
 	}
-	if _, err := f.Dispatch(t, f.Run, action.RunbookActionCreateTask, args, "create-webhook"); err != nil {
+	if _, err := f.Dispatch(t, f.Run, models.RunbookActionCreateTask, args, "create-webhook"); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 
 	noHooks := routinetest.NewEventRoutine(t, false)
-	if _, err := noHooks.Validate(t, noHooks.Run, action.RunbookActionCreateTask, noHooks.WithEvent(map[string]interface{}{"kind": "webhook", "source": "new"})); !errors.Is(err, routine.ErrHooksUnavailable) {
+	if _, err := noHooks.Validate(t, noHooks.Run, models.RunbookActionCreateTask, noHooks.WithEvent(map[string]interface{}{"kind": "webhook", "source": "new"})); !errors.Is(err, routine.ErrHooksUnavailable) {
 		t.Fatalf("webhook without hooks: %v", err)
 	}
 }
@@ -164,11 +163,11 @@ func TestCreateTaskEventNeedsActingUser(t *testing.T) {
 	run := models.CloneAgentRun(f.Run)
 	run.ActingUser = ""
 	for _, event := range []map[string]interface{}{f.SlackEvent("C1"), {"kind": "webhook", "source": "new"}} {
-		if _, err := f.Validate(t, run, action.RunbookActionCreateTask, f.WithEvent(event)); err == nil || !strings.Contains(err.Error(), "signed-in person") {
+		if _, err := f.Validate(t, run, models.RunbookActionCreateTask, f.WithEvent(event)); err == nil || !strings.Contains(err.Error(), "signed-in person") {
 			t.Fatalf("event routine without a person: %v", err)
 		}
 	}
-	if _, err := f.Validate(t, run, action.RunbookActionCreateTask, f.Args); err != nil {
+	if _, err := f.Validate(t, run, models.RunbookActionCreateTask, f.Args); err != nil {
 		t.Fatalf("schedule routine without a person: %v", err)
 	}
 }
@@ -183,19 +182,19 @@ func TestCreateTaskSlackNeedsEndpointChannel(t *testing.T) {
 		"negated channel":    {"kind": "slack.message", "source": f.SlackRef, "filter": []interface{}{map[string]interface{}{"field": "channel", "op": "equals", "value": "C1", "not": true}}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := f.Validate(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(event)); err == nil {
+			if _, err := f.Validate(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(event)); err == nil {
 				t.Fatal("channel outside the umbrella's endpoints accepted")
 			}
 		})
 	}
-	if _, err := f.Validate(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(f.SlackEvent("c1"))); err != nil {
+	if _, err := f.Validate(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(f.SlackEvent("c1"))); err != nil {
 		t.Fatalf("endpoint channel refused: %v", err)
 	}
 }
 
 func TestSendTestEventOffers(t *testing.T) {
 	f := routinetest.NewEventRoutine(t, true)
-	created, err := f.Dispatch(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "webhook", "source": "new"}), "create-webhook")
+	created, err := f.Dispatch(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "webhook", "source": "new"}), "create-webhook")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +222,7 @@ func TestSendTestEventOffers(t *testing.T) {
 	if _, err := f.Validate(t, f.Run, routine.RunbookActionSendTestEvent, large); err == nil {
 		t.Fatal("oversized test payload accepted")
 	}
-	schedule, err := f.Dispatch(t, f.Run, action.RunbookActionCreateTask, f.Args, "create-schedule")
+	schedule, err := f.Dispatch(t, f.Run, models.RunbookActionCreateTask, f.Args, "create-schedule")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +233,7 @@ func TestSendTestEventOffers(t *testing.T) {
 
 func TestSendTestEventRejectsNonCreator(t *testing.T) {
 	f := routinetest.NewEventRoutine(t, true)
-	created, err := f.Dispatch(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "webhook", "source": "new"}), "create-webhook")
+	created, err := f.Dispatch(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "webhook", "source": "new"}), "create-webhook")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +265,7 @@ func resumeRefusedWith(t *testing.T, err error, reason models.RoutinePausedReaso
 
 func TestResumeEventRoutineRechecksSource(t *testing.T) {
 	f := routinetest.NewEventRoutine(t, true)
-	created, err := f.Dispatch(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(f.SlackEvent("C1")), "create-slack")
+	created, err := f.Dispatch(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(f.SlackEvent("C1")), "create-slack")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +290,7 @@ func TestResumeEventRoutineRechecksSource(t *testing.T) {
 		t.Fatalf("resume with the channel back = %#v, %v", resumed, err)
 	}
 
-	created, err = f.Dispatch(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "gmail.message", "source": models.RoutineGoogleSourceRef("user", "g-user")}), "create-gmail")
+	created, err = f.Dispatch(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "gmail.message", "source": models.RoutineGoogleSourceRef("user", "g-user")}), "create-gmail")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +314,7 @@ func TestResumeEventRoutineRechecksSource(t *testing.T) {
 	}
 
 	// A webhook routine has no outside source to check.
-	created, err = f.Dispatch(t, f.Run, action.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "webhook", "source": "new"}), "create-webhook")
+	created, err = f.Dispatch(t, f.Run, models.RunbookActionCreateTask, f.WithEvent(map[string]interface{}{"kind": "webhook", "source": "new"}), "create-webhook")
 	if err != nil {
 		t.Fatal(err)
 	}

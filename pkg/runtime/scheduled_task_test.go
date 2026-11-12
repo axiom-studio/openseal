@@ -245,7 +245,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 					if err := catalog.ValidateInput(t.Context(), bound, candidate); err == nil {
 						t.Fatal("invalid occurrence limit accepted by the tool contract")
 					}
-					if _, err := coordinator.Propose(t.Context(), action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: action.RunbookActionCreateTask, Arguments: candidate, IdempotencyKey: value.name, Summary: "Create recurring research"}); err == nil {
+					if _, err := coordinator.Propose(t.Context(), action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: models.RunbookActionCreateTask, Arguments: candidate, IdempotencyKey: value.name, Summary: "Create recurring research"}); err == nil {
 						t.Fatal("invalid occurrence limit persisted")
 					}
 				})
@@ -278,7 +278,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 	store := kerneltest.NewStore(t)
 	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 	a := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*models.RunbookActivation)
-	statusBound, err := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, action.RunbookActionSetStatus)
+	statusBound, err := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, models.RunbookActionSetStatus)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 	if active.Status != models.RunbookActivationActive {
 		t.Fatal("resume failed")
 	}
-	listBound, _ := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, action.RunbookActionList)
+	listBound, _ := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, models.RunbookActionList)
 	listed := dispatchTaskForTest(t, store, run, listBound, map[string]interface{}{}, "list")
 	if len(listed["activations"].([]*models.RunbookActivation)) != 1 {
 		t.Fatal("list failed")
@@ -348,7 +348,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 			coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 				return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
 			}), []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
-			result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: action.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
+			result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: models.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -364,7 +364,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 			binding.MaximumRisk = skill.RiskLevelRead
 			binding.Revision++
 			if err := catalog.Bind(t.Context(), &binding); err == nil {
-				if _, err := catalog.Resolve(t.Context(), binding.Scope, binding.DeploymentID, binding.SkillID, binding.SkillVersion, action.RunbookActionCreateTask); err == nil {
+				if _, err := catalog.Resolve(t.Context(), binding.Scope, binding.DeploymentID, binding.SkillID, binding.SkillVersion, models.RunbookActionCreateTask); err == nil {
 					t.Fatal("read-only binding allowed schedule creation")
 				}
 			}
@@ -387,7 +387,7 @@ func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
 	policy := action.NewDefaultActionPolicy()
 	policy.Approvers = []models.ApprovalPrincipal{{Type: "role", ID: "operator"}}
 	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
-	result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: action.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "requester-routine", Summary: "Create recurring research", Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
+	result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: models.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "requester-routine", Summary: "Create recurring research", Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 	if err != nil {
 		t.Fatal(err)
 	}

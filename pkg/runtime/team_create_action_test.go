@@ -13,7 +13,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -70,13 +69,13 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 	for _, binding := range []*skill.Binding{
 		{
 			ID: "bundled:teams", Revision: 1, Scope: skillScope, DeploymentID: "finn",
-			SkillID: models.TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
-			AllowedActions: []string{action.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
+			SkillID: models.TeamManagementSkillID, SkillVersion: models.TeamManagementSkillVersion,
+			AllowedActions: []string{models.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
 		},
 		{
 			ID: "bundled:teams", Revision: 1, Scope: skillScope, DeploymentID: "researcher",
-			SkillID: models.TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
-			AllowedActions: []string{action.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
+			SkillID: models.TeamManagementSkillID, SkillVersion: models.TeamManagementSkillVersion,
+			AllowedActions: []string{models.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
 		},
 	} {
 		if err := base.Catalog.Bind(ctx, binding); err != nil {
@@ -106,7 +105,7 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 func (f *teamCreateFixture) teamBound(t *testing.T, deploymentID string) *skill.BoundAction {
 	t.Helper()
 	bound, err := f.Catalog.Resolve(context.Background(), skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}, deploymentID,
-		models.TeamManagementSkillID, action.TeamManagementSkillVersion, action.TeamActionCreateTeam)
+		models.TeamManagementSkillID, models.TeamManagementSkillVersion, models.TeamActionCreateTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +136,7 @@ func (f *teamCreateFixture) executeTeam(t *testing.T, callID string, arguments m
 	t.Helper()
 	call := &models.ActionCall{
 		ID: callID, Scope: f.Scope, RunID: f.Run.ID, DeploymentID: "finn", SkillID: models.TeamManagementSkillID,
-		SkillVersion: action.TeamManagementSkillVersion, Action: action.TeamActionCreateTeam, Arguments: arguments,
+		SkillVersion: models.TeamManagementSkillVersion, Action: models.TeamActionCreateTeam, Arguments: arguments,
 		ApprovalID: "approval-" + callID,
 	}
 	decider := approver
@@ -290,7 +289,7 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 	if !strings.HasPrefix(teamID, "team-launch-crew-") || len(teamID) != len("team-launch-crew-")+8 {
 		t.Fatalf("team id = %q", teamID)
 	}
-	if output["resourceType"] != "team" || output["operation"] != action.TeamActionCreateTeam || output["replayed"] != false ||
+	if output["resourceType"] != "team" || output["operation"] != models.TeamActionCreateTeam || output["replayed"] != false ||
 		output["deploymentId"] != teamID || output["displayName"] != "Launch Crew" {
 		t.Fatalf("output = %#v", output)
 	}

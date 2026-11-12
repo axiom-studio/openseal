@@ -76,7 +76,7 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published190SHA256 {
 		t.Fatalf("published 1.9.0 definition changed: got %s", got)
 	}
-	for _, action := range []string{runtimeaction.RunbookActionCreateTask, routine.RunbookActionEventSources, routine.RunbookActionSendTestEvent, runtimeaction.RunbookActionSetScript, runtimeaction.RunbookActionList, runtimeaction.RunbookActionSetStatus, routine.RunbookActionStart, routine.RunbookActionReplaceSchedule} {
+	for _, action := range []string{models.RunbookActionCreateTask, routine.RunbookActionEventSources, routine.RunbookActionSendTestEvent, models.RunbookActionSetScript, models.RunbookActionList, models.RunbookActionSetStatus, routine.RunbookActionStart, routine.RunbookActionReplaceSchedule} {
 		if _, ok := current.Actions[action]; !ok {
 			t.Fatalf("1.9.0 lacks %s", action)
 		}
@@ -84,11 +84,11 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if len(current.Actions) != 8 || current.Name != "Routines" {
 		t.Fatalf("definition=%s with %d actions", current.Name, len(current.Actions))
 	}
-	create := current.Actions[runtimeaction.RunbookActionCreateTask]
+	create := current.Actions[models.RunbookActionCreateTask]
 	if _, ok := create.InputSchema["properties"].(map[string]interface{})["script"]; !ok || !strings.Contains(create.Description, "test it in this chat's sandbox with run_command") {
 		t.Fatalf("create_task contract=%s", create.Description)
 	}
-	if setScript, ok := current.Actions[runtimeaction.RunbookActionSetScript]; !ok || !setScript.AlwaysReview() {
+	if setScript, ok := current.Actions[models.RunbookActionSetScript]; !ok || !setScript.AlwaysReview() {
 		t.Fatal("set_script must always be reviewed")
 	}
 	if !strings.Contains(workspace.ChatSandboxDescription, "a routine can run that exact script") {
@@ -102,7 +102,7 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 // Creating and re-pinning a script routine both always ask, in every mode.
 func TestRoutineScriptChangesAlwaysNeedApproval(t *testing.T) {
 	definition := routine.RunbookManagementSkill()
-	for _, action := range []string{runtimeaction.RunbookActionCreateTask, runtimeaction.RunbookActionSetScript} {
+	for _, action := range []string{models.RunbookActionCreateTask, models.RunbookActionSetScript} {
 		decision, err := runtimeaction.NewDefaultActionPolicy().EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{
 			Run:   &models.AgentRun{ID: "run", Scope: models.Scope{Kind: "tenant", ID: "one"}},
 			Bound: &skill.BoundAction{Definition: definition, Binding: &skill.Binding{ID: "routines"}, Action: definition.Actions[action]}, ApprovalMode: models.ConversationApprovalSkip,

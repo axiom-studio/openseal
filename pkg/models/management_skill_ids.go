@@ -13,6 +13,10 @@ const (
 
 const (
 	RunbookManagementSkillID = "openseal.runbooks"
+	RunbookActionCreateTask  = "create_task"
+	RunbookActionList        = "list"
+	RunbookActionSetStatus   = "set_status"
+	RunbookActionSetScript   = "set_script"
 )
 
 const (
@@ -20,5 +24,10 @@ const (
 )
 
 const (
-	TeamManagementSkillID = "openseal.teams"
+	TeamManagementSkillID      = "openseal.teams"
+	TeamManagementSkillVersion = "2.2.0"
+	TeamActionUpdateMember     = "update_member"
+	TeamActionUpdateProfile    = "update_profile"
+	TeamActionCreateTeam       = "create_team"
+	TeamManagementEndpoint     = "kernel://teams"
 )

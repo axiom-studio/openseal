@@ -10,7 +10,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -23,7 +22,7 @@ import (
 // before update_member (2.1.0) and before create_team (2.0.0) keep matching
 // it until the host reconcile upgrades them.
 func IsSupportedTeamManagementSkillVersion(version string) bool {
-	return version == action.TeamManagementSkillVersion || version == "2.1.0" || version == "2.0.0"
+	return version == models.TeamManagementSkillVersion || version == "2.1.0" || version == "2.0.0"
 }
 
 // TeamManagementSkill exposes bounded Team behavior changes to the current
@@ -32,13 +31,13 @@ func IsSupportedTeamManagementSkillVersion(version string) bool {
 // kernel derives both from the durable Run and active Team.
 func TeamManagementSkill() *skill.Definition {
 	return &skill.Definition{
-		ID: models.TeamManagementSkillID, Version: action.TeamManagementSkillVersion,
+		ID: models.TeamManagementSkillID, Version: models.TeamManagementSkillVersion,
 		Name: "Teams", Description: "Create Teams from existing Agents, and propose governed changes to the current Team's profile and its members' behavior.",
-		Transport: skill.TransportReference{Kind: "kernel", Endpoint: action.TeamManagementEndpoint},
+		Transport: skill.TransportReference{Kind: "kernel", Endpoint: models.TeamManagementEndpoint},
 		Actions: map[string]skill.Action{
-			action.TeamActionCreateTeam: agentbuilder.CreateTeamAction(),
-			action.TeamActionUpdateProfile: {
-				Name:        action.TeamActionUpdateProfile,
+			models.TeamActionCreateTeam: agentbuilder.CreateTeamAction(),
+			models.TeamActionUpdateProfile: {
+				Name:        models.TeamActionUpdateProfile,
 				Description: "Change the current Team's name or description when the user asks the Team to rename or describe itself. Supply only the changed fields; each replaces the current value in full. The user approves the change before it applies.",
 				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
@@ -59,15 +58,15 @@ func TeamManagementSkill() *skill.Definition {
 					"type": "object", "additionalProperties": false,
 					"properties": map[string]interface{}{
 						"resourceType": map[string]interface{}{"type": "string", "const": "team"},
-						"operation":    map[string]interface{}{"type": "string", "const": action.TeamActionUpdateProfile},
+						"operation":    map[string]interface{}{"type": "string", "const": models.TeamActionUpdateProfile},
 						"deployment":   map[string]interface{}{"type": "object"},
 						"definition":   map[string]interface{}{"type": "object"},
 					},
 					"required": []interface{}{"resourceType", "operation", "deployment", "definition"},
 				},
 			},
-			action.TeamActionUpdateMember: {
-				Name:        action.TeamActionUpdateMember,
+			models.TeamActionUpdateMember: {
+				Name:        models.TeamActionUpdateMember,
 				Description: "Propose changing one Team member's channel participation or purpose. memberId is the member's roster id. The kernel applies the change to the Team roster after required approval.",
 				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
@@ -87,7 +86,7 @@ func TeamManagementSkill() *skill.Definition {
 					"type": "object", "additionalProperties": false,
 					"properties": map[string]interface{}{
 						"resourceType": map[string]interface{}{"type": "string", "const": "team"},
-						"operation":    map[string]interface{}{"type": "string", "const": action.TeamActionUpdateMember},
+						"operation":    map[string]interface{}{"type": "string", "const": models.TeamActionUpdateMember},
 						"replayed":     map[string]interface{}{"type": "boolean"},
 						"deployment":   map[string]interface{}{"type": "object"},
 						"activation":   map[string]interface{}{"type": "object"},
@@ -137,7 +136,7 @@ func (v *TeamMemberActionValidator) ValidateActionProposal(ctx context.Context, 
 		return nil, errors.New("team member update requires at least one changed field")
 	}
 	return map[string]interface{}{
-		"resourceType": "team", "operation": action.TeamActionUpdateMember,
+		"resourceType": "team", "operation": models.TeamActionUpdateMember,
 		"deploymentId": deployment.ID, "expectedDeploymentRevision": deployment.Revision,
 		"memberId": member.ID, "memberName": member.DisplayName,
 		"current": map[string]interface{}{"purpose": member.Purpose, "channelParticipation": member.ChannelParticipation},
@@ -337,7 +336,7 @@ func (d *TeamMemberActionDispatcher) replayedResult(ctx context.Context, call *m
 
 func teamMemberActionResult(deployment *kernelteam.Deployment, activation *workforce.DefinitionActivation, replayed bool) map[string]interface{} {
 	result := map[string]interface{}{
-		"resourceType": "team", "operation": action.TeamActionUpdateMember, "replayed": replayed, "deployment": deployment,
+		"resourceType": "team", "operation": models.TeamActionUpdateMember, "replayed": replayed, "deployment": deployment,
 	}
 	if activation != nil {
 		result["activation"] = activation
@@ -347,5 +346,5 @@ func teamMemberActionResult(deployment *kernelteam.Deployment, activation *workf
 
 func isTeamMemberAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == models.TeamManagementSkillID &&
-		bound.Definition.Version == action.TeamManagementSkillVersion && bound.Action.Name == action.TeamActionUpdateMember
+		bound.Definition.Version == models.TeamManagementSkillVersion && bound.Action.Name == models.TeamActionUpdateMember
 }

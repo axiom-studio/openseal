@@ -7,7 +7,6 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
@@ -71,11 +70,11 @@ func ScheduledTask(t *testing.T, store models.KernelStore, runbookDefinitions ..
 	if err := catalog.Register(ctx, def); err != nil {
 		t.Fatal(err)
 	}
-	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: owner.ID, SkillID: def.ID, SkillVersion: def.Version, AllowedActions: []string{action.RunbookActionCreateTask, action.RunbookActionList, action.RunbookActionSetStatus, routine.RunbookActionStart, routine.RunbookActionReplaceSchedule, routine.RunbookActionEventSources, routine.RunbookActionSendTestEvent}, MaximumRisk: skill.RiskLevelWrite}
+	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: owner.ID, SkillID: def.ID, SkillVersion: def.Version, AllowedActions: []string{models.RunbookActionCreateTask, models.RunbookActionList, models.RunbookActionSetStatus, routine.RunbookActionStart, routine.RunbookActionReplaceSchedule, routine.RunbookActionEventSources, routine.RunbookActionSendTestEvent}, MaximumRisk: skill.RiskLevelWrite}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	bound, err := catalog.Resolve(ctx, binding.Scope, owner.ID, def.ID, def.Version, action.RunbookActionCreateTask)
+	bound, err := catalog.Resolve(ctx, binding.Scope, owner.ID, def.ID, def.Version, models.RunbookActionCreateTask)
 	if err != nil {
 		t.Fatal(err)
 	}

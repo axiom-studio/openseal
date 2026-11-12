@@ -9,7 +9,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -80,8 +79,8 @@ func builderBindings(scope skill.ScopeReference) []*skill.Binding {
 		},
 		{
 			ID: "bundled:teams", Scope: scope, DeploymentID: conversationrun.AgentBuilderDeploymentID,
-			SkillID: models.TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
-			AllowedActions: []string{action.TeamActionCreateTeam},
+			SkillID: models.TeamManagementSkillID, SkillVersion: models.TeamManagementSkillVersion,
+			AllowedActions: []string{models.TeamActionCreateTeam},
 			MaximumRisk:    skill.RiskLevelWrite,
 		},
 		{

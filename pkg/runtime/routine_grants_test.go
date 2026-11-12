@@ -117,13 +117,13 @@ func (f *routineGrantFixtureState) createRoutine(t *testing.T, grants ...map[str
 
 func TestCreateTaskAlwaysAsksForItsBriefInEveryMode(t *testing.T) {
 	f := routineGrantFixture(t)
-	if action := routine.RunbookManagementSkill().Actions[runtimeaction.RunbookActionCreateTask]; !action.AlwaysReview() {
+	if action := routine.RunbookManagementSkill().Actions[models.RunbookActionCreateTask]; !action.AlwaysReview() {
 		t.Fatalf("create_task review = %q, want always", action.Review)
 	}
 	policy := runtimeaction.NewDefaultActionPolicy()
 	policy.ApprovalTimeout = models.ApprovalTimeoutApprove
 	definition := routine.RunbookManagementSkill()
-	bound := &skill.BoundAction{Definition: definition, Binding: f.bound.Binding, Action: definition.Actions[runtimeaction.RunbookActionCreateTask]}
+	bound := &skill.BoundAction{Definition: definition, Binding: f.bound.Binding, Action: definition.Actions[models.RunbookActionCreateTask]}
 	for _, mode := range []models.ConversationApprovalMode{"", models.ConversationApprovalManual, models.ConversationApprovalAuto, models.ConversationApprovalSkip} {
 		decision, err := policy.EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &models.RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
 		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.ApprovalTimeout != models.ApprovalTimeoutExpire {
@@ -190,7 +190,7 @@ func TestApprovedBriefGrantsArePersistedOnTheRoutine(t *testing.T) {
 	f := routineGrantFixture(t)
 	activation, preview := f.createRoutine(t, map[string]interface{}{"action": "mail.search"}, map[string]interface{}{"action": "mail.send", "label": "Email you the summary", "toOwnerOnly": true})
 	brief, _ := preview["brief"].(map[string]interface{})
-	if preview["operation"] != runtimeaction.RunbookActionCreateTask || brief["summary"] != "Every morning at 8, reads the forecast and emails you a summary." || brief["deliverTo"] != "kev@example.com, from your Gmail" || len(brief["grants"].([]interface{})) != 2 {
+	if preview["operation"] != models.RunbookActionCreateTask || brief["summary"] != "Every morning at 8, reads the forecast and emails you a summary." || brief["deliverTo"] != "kev@example.com, from your Gmail" || len(brief["grants"].([]interface{})) != 2 {
 		t.Fatalf("approval preview = %#v", preview)
 	}
 	want := []models.RoutineGrant{{Action: "mail.search", Label: "Search the web"}, {Action: "mail.send", Label: "Email you the summary", ToOwnerOnly: true}}

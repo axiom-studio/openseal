@@ -9,7 +9,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
@@ -184,7 +183,7 @@ func (f *EventRoutine) SetRoutineStatus(t *testing.T, activationID string, statu
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.Dispatch(t, f.Run, action.RunbookActionSetStatus, map[string]interface{}{
+	result, err := f.Dispatch(t, f.Run, models.RunbookActionSetStatus, map[string]interface{}{
 		"activationId": activationID, "expectedRevision": float64(current.Revision), "status": string(status), "reason": "test",
 	}, callID)
 	if err != nil {

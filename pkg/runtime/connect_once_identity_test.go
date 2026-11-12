@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
@@ -167,7 +166,7 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	statusBound, err := catalog.Resolve(ctx, bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, action.RunbookActionSetStatus)
+	statusBound, err := catalog.Resolve(ctx, bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, models.RunbookActionSetStatus)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +193,7 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 
 	files.write(conversationID, "scripts/weekly.py", routineScriptDigestOf("b"))
 	current, _ := store.GetRunbookActivation(ctx, run.Scope, activation.ID)
-	repinBound := &skill.BoundAction{Definition: bound.Definition, Binding: bound.Binding, Action: routine.RunbookManagementSkill().Actions[action.RunbookActionSetScript]}
+	repinBound := &skill.BoundAction{Definition: bound.Definition, Binding: bound.Binding, Action: routine.RunbookManagementSkill().Actions[models.RunbookActionSetScript]}
 	repin, _, err := validator.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{Run: run, Bound: repinBound, Arguments: map[string]interface{}{"activationId": activation.ID, "expectedRevision": float64(current.Revision)}})
 	if err != nil {
 		t.Fatal(err)

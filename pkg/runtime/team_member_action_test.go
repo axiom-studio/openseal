@@ -58,7 +58,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	}
 	proposal, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: owner.ID,
-		SkillID: models.TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion, Action: action.TeamActionUpdateMember,
+		SkillID: models.TeamManagementSkillID, SkillVersion: models.TeamManagementSkillVersion, Action: models.TeamActionUpdateMember,
 		Arguments: arguments, IdempotencyKey: "message-42:enable-ux-reviewer", Summary: "Let the UX Reviewer speak",
 	}, "enable-ux-reviewer"))
 	if err != nil {
@@ -69,7 +69,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	}
 	preview := proposal.Approval.ProposedAction
 	changes, _ := preview["changes"].(map[string]interface{})
-	if preview["resourceType"] != "team" || preview["operation"] != action.TeamActionUpdateMember ||
+	if preview["resourceType"] != "team" || preview["operation"] != models.TeamActionUpdateMember ||
 		preview["memberName"] != "UX Reviewer" || fmt.Sprint(changes["channelParticipation"]) != string(kernelteam.ChannelActive) {
 		t.Fatalf("typed Team diff = %#v", preview)
 	}
@@ -109,7 +109,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	if amendments, err := teams.ListAmendments(ctx, reference, owner.ID); err != nil || len(amendments) != 0 {
 		t.Fatalf("amendments = %#v, %v", amendments, err)
 	}
-	bound, err := catalog.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, models.TeamManagementSkillID, action.TeamManagementSkillVersion, action.TeamActionUpdateMember)
+	bound, err := catalog.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, models.TeamManagementSkillID, models.TeamManagementSkillVersion, models.TeamActionUpdateMember)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestTeamMemberActionRejectsStaleForeignAndPolicyForbiddenChangesBeforeAppro
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	teams, agentDeploymentID := teamMemberActionRegistry(t, ctx, scope)
 	validator, _ := collaboration.NewTeamMemberActionValidator(teams)
-	bound := &skill.BoundAction{Definition: collaboration.TeamManagementSkill(), Action: collaboration.TeamManagementSkill().Actions[action.TeamActionUpdateMember]}
+	bound := &skill.BoundAction{Definition: collaboration.TeamManagementSkill(), Action: collaboration.TeamManagementSkill().Actions[models.TeamActionUpdateMember]}
 
 	for name, testCase := range map[string]struct {
 		run       *models.AgentRun
@@ -233,8 +233,8 @@ func teamMemberActionCatalog(t *testing.T, ctx context.Context, scope models.Sco
 	}
 	if err := catalog.Bind(ctx, &skill.Binding{
 		ID: "teams", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID,
-		SkillID: models.TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
-		AllowedActions: []string{action.TeamActionUpdateMember}, MaximumRisk: skill.RiskLevelWrite,
+		SkillID: models.TeamManagementSkillID, SkillVersion: models.TeamManagementSkillVersion,
+		AllowedActions: []string{models.TeamActionUpdateMember}, MaximumRisk: skill.RiskLevelWrite,
 	}); err != nil {
 		t.Fatal(err)
 	}

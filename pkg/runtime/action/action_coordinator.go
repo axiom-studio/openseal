@@ -547,7 +547,7 @@ func isAgentBuilderApprovalAction(bound *skill.BoundAction) bool {
 	case models.AgentManagementSkillID:
 		return bound.Action.Name == models.AgentActionCreateAgent || bound.Action.Name == models.AgentActionUpdateAgent
 	case models.TeamManagementSkillID:
-		return bound.Action.Name == TeamActionCreateTeam
+		return bound.Action.Name == models.TeamActionCreateTeam
 	}
 	return false
 }
@@ -556,7 +556,7 @@ func isAgentBuilderApprovalAction(bound *skill.BoundAction) bool {
 // it runs: the actions whose brief is always shown before they take effect.
 func isRoutineBriefAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == models.RunbookManagementSkillID &&
-		(bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionSetScript)
+		(bound.Action.Name == models.RunbookActionCreateTask || bound.Action.Name == models.RunbookActionSetScript)
 }
 
 // newApprovalCheckpoint puts call in review and returns its pending approval.

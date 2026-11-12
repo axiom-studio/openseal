@@ -8,7 +8,6 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
@@ -78,11 +77,11 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
 	}
-	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "researcher", SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{action.RunbookActionCreateTask}, MaximumRisk: skill.RiskLevelWrite}
+	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "researcher", SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{models.RunbookActionCreateTask}, MaximumRisk: skill.RiskLevelWrite}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	bound, err := catalog.Resolve(ctx, binding.Scope, "researcher", definition.ID, definition.Version, action.RunbookActionCreateTask)
+	bound, err := catalog.Resolve(ctx, binding.Scope, "researcher", definition.ID, definition.Version, models.RunbookActionCreateTask)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -304,7 +303,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 		prompt.AgentInstructions = append(prompt.AgentInstructions, "Delegated execution instructions: "+strings.TrimSpace(delegated))
 	}
 	for _, action := range actions {
-		if action.SkillID == models.RunbookManagementSkillID && action.Action == runtimeaction.RunbookActionCreateTask {
+		if action.SkillID == models.RunbookManagementSkillID && action.Action == models.RunbookActionCreateTask {
 			prompt.AgentInstructions = append(prompt.AgentInstructions, routine.RoutineTimezoneInstruction, routine.RoutineDeliveryInstruction)
 			if instruction := routine.BindingToolGrantInstruction(actions); instruction != "" {
 				prompt.AgentInstructions = append(prompt.AgentInstructions, instruction)

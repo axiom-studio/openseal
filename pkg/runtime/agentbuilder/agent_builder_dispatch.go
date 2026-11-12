@@ -11,7 +11,6 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -93,7 +92,7 @@ func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input
 		return d.updateAgent(ctx, input, run)
 	case models.AgentActionTryAgent:
 		return d.tryAgent(ctx, input, run)
-	case action.TeamActionCreateTeam:
+	case models.TeamActionCreateTeam:
 		return d.createTeam(ctx, input, run)
 	}
 	return nil, errors.New("unsupported agent builder action")

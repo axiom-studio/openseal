@@ -40,7 +40,7 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	}
 	// Creating a routine always shows its brief, in every approval mode, and
 	// so does making it run a new version of its script.
-	if input.Bound.Definition.ID == models.RunbookManagementSkillID && (action.Name == RunbookActionCreateTask || action.Name == RunbookActionSetScript) {
+	if input.Bound.Definition.ID == models.RunbookManagementSkillID && (action.Name == models.RunbookActionCreateTask || action.Name == models.RunbookActionSetScript) {
 		decision, err := p.requireApproval("a routine's brief is always approved before it is created")
 		if decision.ApprovalTimeout == models.ApprovalTimeoutApprove {
 			decision.ApprovalTimeout = models.ApprovalTimeoutExpire

@@ -11,7 +11,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
-	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -60,7 +59,7 @@ func assertBuilderBindings(t *testing.T, engine *opensealkernel.Engine) map[stri
 		actions []string
 	}{
 		"bundled:agents":       {models.AgentManagementSkillVersion, []string{"create_agent", "list_agents", "try_agent", "update_agent"}},
-		"bundled:teams":        {action.TeamManagementSkillVersion, []string{"create_team"}},
+		"bundled:teams":        {models.TeamManagementSkillVersion, []string{"create_team"}},
 		"bundled:skills@1.7.0": {"1.7.0", []string{"disable_binding", "discover", "request_connection", "request_setup", "upsert_binding"}},
 	}
 	if len(byID) != len(want) {
