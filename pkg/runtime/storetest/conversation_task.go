@@ -1,7 +1,3 @@
-// Package storetest holds test support shared by the SQL stores: fixtures
-// built only through the store interfaces in pkg/models, and the bodies of
-// suites each backend runs against itself. It never opens a store; the caller
-// passes one in.
 package storetest
 
 import (
