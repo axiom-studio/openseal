@@ -24,16 +24,34 @@ func (a fixtureNoteAppender) AppendAgentSessionEntries(_ context.Context, req Ap
 	return &AppendAgentSessionEntriesResult{Entries: out}, nil
 }
 
-// ensureNote runs the producer's capabilities-note check for one step.
+// fixtureNoteSessions is a render fixture as a model step producer's
+// session store.
+type fixtureNoteSessions struct{ fixtureNoteAppender }
+
+func (s fixtureNoteSessions) LoadAgentSessionPath(context.Context, Scope, string) (*AgentSessionPath, error) {
+	return s.f.path(), nil
+}
+
+func (s fixtureNoteSessions) GetActionCall(context.Context, Scope, string) (*ActionCall, error) {
+	return nil, nil
+}
+
+// ensureNote produces one model step, which first appends the capabilities
+// note the step's path needs, and reports whether it appended one.
 func (f *prepareFixture) ensureNote(step string) bool {
 	f.t.Helper()
-	path := f.render.path()
-	in := StepInput{Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: StepModeNormal}
-	appended, err := ensureCapabilityNote(context.Background(), fixtureNoteAppender{f.render}, in, path, f.preparer.CapabilityListing(in), f.render.entries[0].CreatedAt)
+	host := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult { return progressAckResult(req, "Done.") }}
+	producer, err := NewModelStepProducer(host, f.preparer, fixtureNoteSessions{fixtureNoteAppender{f.render}})
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	return appended
+	before := len(f.capabilityNotes())
+	path := f.render.path()
+	in := StepInput{Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: StepModeNormal}
+	if _, err := producer.Produce(context.Background(), in); err != nil {
+		f.t.Fatal(err)
+	}
+	return len(f.capabilityNotes()) > before
 }
 
 func (f *prepareFixture) capabilityNotes() []*SessionEntry {

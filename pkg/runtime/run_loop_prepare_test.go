@@ -40,7 +40,7 @@ type prepareFixture struct {
 }
 
 func newPrepareFixture(t *testing.T, authority ControlAuthority) *prepareFixture {
-	registry, _ := fakeControlRegistry()
+	registry, _ := fakeLoopControls()
 	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are Finn.", "Purpose: help the team."},
 		SkillPrompts: []HostedSkillPrompt{

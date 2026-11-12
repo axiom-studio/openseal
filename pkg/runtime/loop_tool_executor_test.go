@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -37,15 +36,15 @@ type toolExecFixture struct {
 // fakeLoopControls fakes every control tool of the run loop, except the
 // tools in real, which keep the handler given there.
 func fakeLoopControls(real ...controlTool) (controlRegistry, map[ControlToolName]*fakeControlHandler) {
+	registry := newControlRegistry(real...)
 	fakes := map[ControlToolName]*fakeControlHandler{}
-	tools := append([]controlTool(nil), real...)
 	for name := range loopControlRegistry() {
-		if !slices.ContainsFunc(real, func(tool controlTool) bool { return tool.name == name }) {
+		if _, ok := registry[name]; !ok {
 			fakes[name] = &fakeControlHandler{}
-			tools = append(tools, newControlTool(name, fakes[name]))
+			registry[name] = fakes[name]
 		}
 	}
-	return newControlRegistry(tools...), fakes
+	return registry, fakes
 }
 
 // newToolExecFixture fakes the control tools, except the tools in real.
