@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -24,7 +25,7 @@ type latestSetupTestFixture struct {
 	store      *sqlite.Store
 	catalog    *skill.Catalog
 	run        *models.AgentRun
-	dispatcher *SkillBindingActionDispatcher
+	dispatcher *runtime.SkillBindingActionDispatcher
 	source     string
 	candidates []skill.DiscoveryCandidate
 	locations  []latestSetupTestLocation
@@ -47,7 +48,7 @@ func newLatestSetupTestFixture(t *testing.T, source string) *latestSetupTestFixt
 		return &skill.DiscoveryPage{Items: f.candidates}, nil
 	})
 	var err error
-	f.dispatcher, err = NewSkillBindingActionDispatcher(f.store, f.catalog, nil, provider)
+	f.dispatcher, err = runtime.NewSkillBindingActionDispatcher(f.store, f.catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func (f *latestSetupTestFixture) snapshotBindings(t *testing.T) [][]*skill.Bindi
 func (f *latestSetupTestFixture) request(t *testing.T, callID string, args map[string]interface{}) (*models.SkillSetupRequest, map[string]interface{}, error) {
 	t.Helper()
 	before := f.snapshotBindings(t)
-	result, err := f.dispatcher.requestSkillSetup(f.ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: callID, Scope: f.scope, RunID: f.run.ID}, Arguments: args}, f.run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
+	result, err := f.dispatcher.RequestSkillSetup(f.ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: callID, Scope: f.scope, RunID: f.run.ID}, Arguments: args}, f.run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 	if after := f.snapshotBindings(t); !reflect.DeepEqual(before, after) {
 		t.Fatalf("setup changed account authority:\nbefore %#v\nafter %#v", before, after)
 	}

@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -37,7 +38,7 @@ func setupUpgradeFixture() (*models.SkillSetupRequest, *skill.Binding) {
 func TestSkillSetupUpgradeRebaseRequiresCanonicalProofAndFreshConfiguration(t *testing.T) {
 	r, b := setupUpgradeFixture()
 	before := models.CloneSkillSetupRequest(r)
-	rebased, err := RebaseSkillSetupRequestAfterBindingUpgrade(r, 3, b)
+	rebased, err := runtime.RebaseSkillSetupRequestAfterBindingUpgrade(r, 3, b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,7 @@ func TestSkillSetupUpgradeRejectsUnprovedOrForeignTransitions(t *testing.T) {
 			case "unchanged":
 				b.Revision = 7
 			}
-			if _, err := RebaseSkillSetupRequestAfterBindingUpgrade(r, expected, b); err == nil {
+			if _, err := runtime.RebaseSkillSetupRequestAfterBindingUpgrade(r, expected, b); err == nil {
 				t.Fatal("unproved upgrade accepted")
 			}
 		})
@@ -105,7 +106,7 @@ func TestSkillSetupUpgradeRebaseAcceptsDurableChainAndOrdinaryRevisionChanges(t 
 	r.SkillVersion, b.SkillVersion, b.Revision = "1.2.0", "1.2.0", 11
 	b.Lifecycle = append(b.Lifecycle, skill.BindingLifecycleEntry{Revision: 9, Action: skill.BindingLifecycleUpdated},
 		setupUpgradeProof("1.1.0", "1.2.0", 10), skill.BindingLifecycleEntry{Revision: 11, Action: skill.BindingLifecycleUpdated})
-	rebased, err := RebaseSkillSetupRequestAfterBindingUpgrade(r, 3, b)
+	rebased, err := runtime.RebaseSkillSetupRequestAfterBindingUpgrade(r, 3, b)
 	if err != nil || rebased.BindingRevision != 11 || rebased.BindingVersion != "1.2.0" {
 		t.Fatalf("chain: %#v %v", rebased, err)
 	}
@@ -118,12 +119,12 @@ func TestSkillSetupValidationDiagnosticsAreSafeAndMatchUnicodeSchema(t *testing.
 		t.Fatalf("valid Unicode reason rejected: %v", err)
 	}
 	args := map[string]interface{}{"kind": "configure", "skillId": "connector", "skillVersion": "latest", "reason": r.Reason}
-	if _, err := decodeSkillSetupArguments(args); err != nil {
+	if _, err := runtime.DecodeSkillSetupArguments(args); err != nil {
 		t.Fatal(err)
 	}
 	r.Reason += "海"
 	args["reason"] = r.Reason
-	for _, err := range []error{r.Validate(), func() error { _, err := decodeSkillSetupArguments(args); return err }()} {
+	for _, err := range []error{r.Validate(), func() error { _, err := runtime.DecodeSkillSetupArguments(args); return err }()} {
 		var diagnostic *models.SkillSetupValidationError
 		if !errors.Is(err, models.ErrInvalidSkillSetup) || !errors.As(err, &diagnostic) || diagnostic.Field != "reason" || strings.Contains(err.Error(), "海") {
 			t.Fatalf("unsafe or opaque diagnostic: %v", err)

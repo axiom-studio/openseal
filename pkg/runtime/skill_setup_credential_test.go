@@ -1,10 +1,11 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -29,7 +30,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 			provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 				return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessUnavailable, Compatibility: tc.checks}}}, nil
 			})
-			dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+			dispatcher, err := runtime.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -37,7 +38,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 			run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 			before, _ := catalog.ListBindings(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "agent")
 			if tc.allowed {
-				_, invalidErr := dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "invalid-action", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect", "requiredActions": []interface{}{"binding_configuration"}}}, run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
+				_, invalidErr := dispatcher.RequestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "invalid-action", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect", "requiredActions": []interface{}{"binding_configuration"}}}, run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 				if invalidErr == nil {
 					t.Fatal("configuration requirement accepted as an action")
 				}
@@ -47,7 +48,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 				}
 			}
 
-			result, err := dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect the requested integration"}}, run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
+			result, err := dispatcher.RequestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect the requested integration"}}, run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 			if (err == nil) != tc.allowed {
 				t.Fatalf("allowed=%v result=%v err=%v", tc.allowed, result, err)
 			}

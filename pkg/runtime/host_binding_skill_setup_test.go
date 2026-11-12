@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -33,18 +34,18 @@ func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 			{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable},
 		}}, nil
 	})
-	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := runtime.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
 	setup := func(callID, skillID string, run *models.AgentRun) (map[string]interface{}, error) {
-		return dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: callID, Scope: scope, RunID: run.ID},
+		return dispatcher.RequestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: callID, Scope: scope, RunID: run.ID},
 			Arguments: map[string]interface{}{"kind": "configure", "skillId": skillID, "skillVersion": "latest", "reason": "File a ticket"}}, run, "agent", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"})
 	}
 	_, err = setup("call-linear", "linear", run)
-	var refusal *interactionRequestRefusal
-	if !errors.As(err, &refusal) || !strings.Contains(refusal.message, "Linear is already connected") ||
-		!strings.Contains(refusal.message, "mcp.linear.create_issue") || !strings.Contains(refusal.message, "mcp.linear.search") {
+	var refusal *runtime.InteractionRequestRefusal
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.Error(), "Linear is already connected") ||
+		!strings.Contains(refusal.Error(), "mcp.linear.create_issue") || !strings.Contains(refusal.Error(), "mcp.linear.search") {
 		t.Fatalf("setup of a connected service = %v", err)
 	}
 	if requests, _ := store.ListSkillSetupRequests(ctx, scope, "agent", "chat"); len(requests) != 0 {
@@ -67,7 +68,7 @@ func TestServiceKey(t *testing.T) {
 		"Linear": "linear", "linear-mcp": "linear", "skill-linear": "linear", "neondatabase/mcp-server-neon": "neondatabase-neon",
 		"Google Drive": "google-drive", "MCP Server": "",
 	} {
-		if got := serviceKey(value); got != want {
+		if got := runtime.ServiceKey(value); got != want {
 			t.Fatalf("serviceKey(%q) = %q, want %q", value, got, want)
 		}
 	}

@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -33,7 +34,7 @@ func TestSetupListReportsSavedBindingAccessWithoutCredentials(t *testing.T) {
 		if err := store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
 			t.Fatal(err)
 		}
-		d, err := NewSkillBindingActionDispatcher(store, catalog, nil)
+		d, err := runtime.NewSkillBindingActionDispatcher(store, catalog, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -42,11 +43,11 @@ func TestSetupListReportsSavedBindingAccessWithoutCredentials(t *testing.T) {
 		for _, missing := range []string{models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey} {
 			unproved := models.CloneAgentRun(run)
 			delete(unproved.Context, missing)
-			if result, err := d.listSkillSetupRequests(ctx, unproved, r.DeploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: r.DeploymentID}); err == nil || result != nil {
+			if result, err := d.ListSkillSetupRequests(ctx, unproved, r.DeploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: r.DeploymentID}); err == nil || result != nil {
 				t.Fatalf("setup access escaped an incomplete conversation origin (%s): %#v %v", missing, result, err)
 			}
 		}
-		result, err := d.listSkillSetupRequests(ctx, run, r.DeploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: r.DeploymentID})
+		result, err := d.ListSkillSetupRequests(ctx, run, r.DeploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: r.DeploymentID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +75,7 @@ func TestSetupListReportsSavedBindingAccessWithoutCredentials(t *testing.T) {
 		if err := store.SaveSkillSetupRequest(ctx, mismatched, 0); err != nil {
 			t.Fatal(err)
 		}
-		result, err = d.listSkillSetupRequests(ctx, run, r.DeploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: r.DeploymentID})
+		result, err = d.ListSkillSetupRequests(ctx, run, r.DeploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: r.DeploymentID})
 		if err != nil {
 			t.Fatal(err)
 		}
