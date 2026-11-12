@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -24,8 +25,8 @@ type SignedActionCredentialLease struct {
 
 type CreateActionCredentialLeaseRequest struct {
 	TenantID         string
-	Call             *ActionCall
-	Run              *AgentRun
+	Call             *models.ActionCall
+	Run              *models.AgentRun
 	CredentialFields map[string][]string
 	Transport        string
 	Issuer           string
@@ -39,29 +40,29 @@ type CreateActionCredentialLeaseRequest struct {
 // and currently claimed ActionCall. Credential workers supply Transport from
 // the already resolved BoundAction; callers cannot substitute Skill, binding,
 // owner, or Agent identity.
-func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*ActionCredentialLease, error) {
+func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*models.ActionCredentialLease, error) {
 	call, run := request.Call, request.Run
-	if call == nil || run == nil || call.Status != ActionCallStatusRunning || strings.TrimSpace(call.LeaseOwner) == "" || call.LeaseExpiresAt == nil {
-		return nil, fmt.Errorf("%w: a running, claimed ActionCall and its Run are required", ErrActionCredentialLeaseInvalid)
+	if call == nil || run == nil || call.Status != models.ActionCallStatusRunning || strings.TrimSpace(call.LeaseOwner) == "" || call.LeaseExpiresAt == nil {
+		return nil, fmt.Errorf("%w: a running, claimed ActionCall and its Run are required", models.ErrActionCredentialLeaseInvalid)
 	}
 	if call.Scope != run.Scope || call.RunID != run.ID || strings.TrimSpace(run.AssignedAgentID) == "" {
-		return nil, fmt.Errorf("%w: ActionCall and Run authority do not match", ErrActionCredentialLeaseMismatch)
+		return nil, fmt.Errorf("%w: ActionCall and Run authority do not match", models.ErrActionCredentialLeaseMismatch)
 	}
-	issuedAt, expiresAt := canonicalLeaseTime(request.IssuedAt), canonicalLeaseTime(request.ExpiresAt)
-	actionExpiry := canonicalLeaseTime(*call.LeaseExpiresAt)
+	issuedAt, expiresAt := models.CanonicalLeaseTime(request.IssuedAt), models.CanonicalLeaseTime(request.ExpiresAt)
+	actionExpiry := models.CanonicalLeaseTime(*call.LeaseExpiresAt)
 	if expiresAt.After(actionExpiry) {
-		return nil, fmt.Errorf("%w: credential expiry exceeds the durable action lease", ErrActionCredentialLeaseInvalid)
+		return nil, fmt.Errorf("%w: credential expiry exceeds the durable action lease", models.ErrActionCredentialLeaseInvalid)
 	}
-	credentials, err := actionCredentialFields(call.CredentialRefs, request.CredentialFields)
+	credentials, err := models.ActionCredentialFieldReferences(call.CredentialRefs, request.CredentialFields)
 	if err != nil {
 		return nil, err
 	}
-	actionLease := ActionLeaseIdentity{
+	actionLease := models.ActionLeaseIdentity{
 		ActionCallRevision: call.Revision, Attempt: call.Attempt, WorkerID: strings.TrimSpace(call.LeaseOwner), ExpiresAt: actionExpiry,
 	}
-	actionLease.ID = computeActionLeaseIdentity(call.Scope, call.ID, call.RunID, actionLease)
-	lease := &ActionCredentialLease{
-		Version: ActionCredentialLeaseVersion, TenantID: strings.TrimSpace(request.TenantID), Scope: call.Scope,
+	actionLease.ID = models.ComputeActionLeaseIdentity(call.Scope, call.ID, call.RunID, actionLease)
+	lease := &models.ActionCredentialLease{
+		Version: models.ActionCredentialLeaseVersion, TenantID: strings.TrimSpace(request.TenantID), Scope: call.Scope,
 		RunID: call.RunID, ActionCallID: call.ID, ActionLease: actionLease,
 		SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: call.Action, Transport: strings.TrimSpace(request.Transport),
 		BindingOwnerID: call.DeploymentID, BindingID: call.BindingID, BindingRevision: call.BindingRevision,
