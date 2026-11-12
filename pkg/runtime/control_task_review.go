@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -83,15 +84,15 @@ func taskCompletionReviewCheck(ctx context.Context, x *ControlExecutor, cc agent
 // nil when the Run is not reviewed: not task work, a fork child of task work
 // (it carries the task hint but is not the task's work Run and finishes its
 // own partial goal), or a continuation task (the conversation owns it).
-func (x *ControlExecutor) reviewedConversationTask(ctx context.Context, cc agentrun.ControlContext) (*ConversationTask, error) {
+func (x *ControlExecutor) reviewedConversationTask(ctx context.Context, cc agentrun.ControlContext) (*models.ConversationTask, error) {
 	if !backgroundTaskRun(cc.Run) {
 		return nil, nil
 	}
-	taskID, _ := cc.Run.Context[ConversationTaskContextKey].(string)
+	taskID, _ := cc.Run.Context[models.ConversationTaskContextKey].(string)
 	if strings.TrimSpace(taskID) == "" {
 		return nil, nil
 	}
-	tasks, ok := x.Portfolio.(ConversationTaskStore)
+	tasks, ok := x.Portfolio.(models.ConversationTaskStore)
 	if !ok {
 		return nil, errors.New("control executor portfolio is not a conversation task store; the task completion review needs the task")
 	}
@@ -99,7 +100,7 @@ func (x *ControlExecutor) reviewedConversationTask(ctx context.Context, cc agent
 	if err != nil {
 		return nil, err
 	}
-	if task == nil || task.ID != taskID || task.Mode == ConversationTaskModeContinuation {
+	if task == nil || task.ID != taskID || task.Mode == models.ConversationTaskModeContinuation {
 		return nil, nil
 	}
 	return task, nil
@@ -108,7 +109,7 @@ func (x *ControlExecutor) reviewedConversationTask(ctx context.Context, cc agent
 // reviewTaskCompletion runs the review call: one tool-free, sessionless model
 // call (Purpose acknowledgement: in-memory entries, no step row, no session
 // entry) with the review instructions as its only system text.
-func (x *ControlExecutor) reviewTaskCompletion(ctx context.Context, cc agentrun.ControlContext, task *ConversationTask, candidate string) (bool, string, error) {
+func (x *ControlExecutor) reviewTaskCompletion(ctx context.Context, cc agentrun.ControlContext, task *models.ConversationTask, candidate string) (bool, string, error) {
 	if cc.Binding == nil || cc.Binding.Host == nil {
 		return false, "", errors.New("task completion review needs the binding's step host")
 	}
@@ -147,7 +148,7 @@ func (x *ControlExecutor) reviewTaskCompletion(ctx context.Context, cc agentrun.
 	return true, "", nil
 }
 
-func decodeTaskReviewVerdict(req ModelStepRequest, result ModelStepResult) (taskReviewVerdict, string) {
+func decodeTaskReviewVerdict(req models.ModelStepRequest, result models.ModelStepResult) (taskReviewVerdict, string) {
 	if err := modelstep.ValidateModelStepResult(req, result); err != nil {
 		return taskReviewVerdict{}, err.Error()
 	}
@@ -176,10 +177,10 @@ func decodeTaskReviewVerdict(req ModelStepRequest, result ModelStepResult) (task
 // taskReviewInput is the goal (the task's full accepted goal, not the Run's
 // display goal), the candidate and this Run's terminal tool results (newest
 // taskReviewMaxToolResults, oldest first, each at most 2 KiB).
-func (x *ControlExecutor) taskReviewInput(ctx context.Context, cc agentrun.ControlContext, task *ConversationTask, candidate string) (taskReviewInput, error) {
-	entries, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
+func (x *ControlExecutor) taskReviewInput(ctx context.Context, cc agentrun.ControlContext, task *models.ConversationTask, candidate string) (taskReviewInput, error) {
+	entries, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID,
-		States:     []ToolEntryState{ToolEntryCompleted, ToolEntryError, ToolEntryInterrupted},
+		States:     []models.ToolEntryState{models.ToolEntryCompleted, models.ToolEntryError, models.ToolEntryInterrupted},
 		Descending: true, Limit: taskReviewMaxToolResults + 1,
 	})
 	if err != nil {
@@ -188,24 +189,24 @@ func (x *ControlExecutor) taskReviewInput(ctx context.Context, cc agentrun.Contr
 	results := make([]taskReviewToolResult, 0, len(entries))
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
-		if entry == nil || entry.Tool == nil || entry.Tool.Name == string(ControlToolFinalAnswer) ||
+		if entry == nil || entry.Tool == nil || entry.Tool.Name == string(models.ControlToolFinalAnswer) ||
 			cc.Entry != nil && entry.ID == cc.Entry.ID {
 			continue
 		}
 		status, content := string(entry.State), ""
 		if entry.Tool.Result != nil {
 			status = string(entry.Tool.Result.Status)
-			content = toolOutputPreviewText(entry.Tool.Result.Content)
+			content = models.ToolOutputPreviewText(entry.Tool.Result.Content)
 		}
-		results = append(results, taskReviewToolResult{Tool: entry.Tool.Name, Status: status, Content: cutUTF8(content, taskReviewMaxToolResultBytes)})
+		results = append(results, taskReviewToolResult{Tool: entry.Tool.Name, Status: status, Content: models.TruncateUTF8(content, taskReviewMaxToolResultBytes)})
 	}
 	if len(results) > taskReviewMaxToolResults {
 		results = results[len(results)-taskReviewMaxToolResults:]
 	}
-	return taskReviewInput{Goal: task.Goal, CandidateAnswer: cutUTF8(candidate, taskReviewMaxCandidateBytes), ToolResults: results}, nil
+	return taskReviewInput{Goal: task.Goal, CandidateAnswer: models.TruncateUTF8(candidate, taskReviewMaxCandidateBytes), ToolResults: results}, nil
 }
 
-func (x *ControlExecutor) taskReviewRequest(cc agentrun.ControlContext, payload string) ModelStepRequest {
+func (x *ControlExecutor) taskReviewRequest(cc agentrun.ControlContext, payload string) models.ModelStepRequest {
 	anchor := "plain:"
 	if cc.Step != nil {
 		anchor += cc.Step.ID
@@ -213,21 +214,21 @@ func (x *ControlExecutor) taskReviewRequest(cc agentrun.ControlContext, payload 
 	if cc.Entry != nil {
 		anchor = cc.Entry.ID
 	}
-	stepID := "task-review-" + hashString(cc.Run.ID + "\x00" + anchor)[:16]
+	stepID := "task-review-" + models.SHA256DigestString(cc.Run.ID + "\x00" + anchor)[:16]
 	binding := cc.Binding
 	agentID := binding.DeploymentID
 	if agentID == "" {
 		agentID = cc.Run.AssignedAgentID
 	}
-	return ModelStepRequest{
-		APIVersion: ModelStepAPIVersion, Purpose: ModelStepPurposeAcknowledgement,
+	return models.ModelStepRequest{
+		APIVersion: models.ModelStepAPIVersion, Purpose: models.ModelStepPurposeAcknowledgement,
 		Scope: cc.Run.Scope, RunID: cc.Run.ID, StepID: stepID,
 		AgentID: agentID, DefinitionID: binding.DefinitionID, DefinitionVersion: binding.DefinitionVersion,
 		ModelCredential: bindingModelCredential(binding), Model: binding.Model,
-		System: ModelStepSystem{AgentInstructions: []string{taskCompletionReviewInstructions}},
-		Entries: []SessionEntryView{{
-			ID: stepID + "-input", Sequence: 1, Type: SessionEntryUser, CreatedAt: x.now(),
-			User: &UserEntryView{Content: []ContentPart{{Type: ContentPartText, Text: payload}}},
+		System: models.ModelStepSystem{AgentInstructions: []string{taskCompletionReviewInstructions}},
+		Entries: []models.SessionEntryView{{
+			ID: stepID + "-input", Sequence: 1, Type: models.SessionEntryUser, CreatedAt: x.now(),
+			User: &models.UserEntryView{Content: []models.ContentPart{{Type: models.ContentPartText, Text: payload}}},
 		}},
 	}
 }

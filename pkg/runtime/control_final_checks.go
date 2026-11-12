@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -150,20 +151,20 @@ func (x *ControlExecutor) finalEvidenceCorpus(ctx context.Context, cc agentrun.C
 			continue
 		}
 		switch entry.Type {
-		case SessionEntryUser:
+		case models.SessionEntryUser:
 			if entry.User != nil {
 				writeContentParts(&b, entry.User.Content)
 			}
-		case SessionEntryTool:
-			if entry.Tool == nil || entry.Tool.Name == string(ControlToolFinalAnswer) {
+		case models.SessionEntryTool:
+			if entry.Tool == nil || entry.Tool.Name == string(models.ControlToolFinalAnswer) {
 				continue
 			}
 			writeJSONText(&b, entry.Tool.Arguments)
 			if entry.Tool.Result != nil {
 				writeContentParts(&b, entry.Tool.Result.Content)
 			}
-		case SessionEntryNote:
-			if entry.Note != nil && entry.Note.Kind != NoteFinalRejection {
+		case models.SessionEntryNote:
+			if entry.Note != nil && entry.Note.Kind != models.NoteFinalRejection {
 				b.WriteString(entry.Note.Text)
 				b.WriteByte('\n')
 			}
@@ -172,7 +173,7 @@ func (x *ControlExecutor) finalEvidenceCorpus(ctx context.Context, cc agentrun.C
 	return b.String(), nil
 }
 
-func writeContentParts(b *strings.Builder, parts []ContentPart) {
+func writeContentParts(b *strings.Builder, parts []models.ContentPart) {
 	for _, part := range parts {
 		writeJSONText(b, part.Value)
 		for _, text := range []string{part.Text, part.URI, part.Path, part.Note} {
@@ -232,7 +233,7 @@ func writeStringLeaves(b *strings.Builder, value interface{}) {
 }
 
 // controlSessionPath is the step's session path: cc.Path, else loaded.
-func (x *ControlExecutor) controlSessionPath(ctx context.Context, cc agentrun.ControlContext) (*AgentSessionPath, error) {
+func (x *ControlExecutor) controlSessionPath(ctx context.Context, cc agentrun.ControlContext) (*models.AgentSessionPath, error) {
 	if cc.Path != nil {
 		return cc.Path, nil
 	}
@@ -254,15 +255,15 @@ func (x *ControlExecutor) runHasExternalReceipt(ctx context.Context, cc agentrun
 		return false, errors.New("control executor portfolio is not an action store; the external claim check needs the Run's calls")
 	}
 	for offset := 0; ; offset += loopActionCallPageSize {
-		page, err := actions.ListActionCalls(ctx, ActionFilter{
-			Scope: cc.Run.Scope, RunID: cc.Run.ID, Status: []ActionCallStatus{ActionCallStatusSucceeded},
+		page, err := actions.ListActionCalls(ctx, models.ActionFilter{
+			Scope: cc.Run.Scope, RunID: cc.Run.ID, Status: []models.ActionCallStatus{models.ActionCallStatusSucceeded},
 			Limit: loopActionCallPageSize, Offset: offset,
 		})
 		if err != nil {
 			return false, fmt.Errorf("load the run's action calls: %w", err)
 		}
 		for _, call := range page {
-			if call != nil && call.RunID == cc.Run.ID && call.Status == ActionCallStatusSucceeded &&
+			if call != nil && call.RunID == cc.Run.ID && call.Status == models.ActionCallStatusSucceeded &&
 				strings.TrimSpace(call.ExternalOperationDigest) != "" {
 				return true, nil
 			}
@@ -358,5 +359,5 @@ func negatedBefore(words []string, i int) bool {
 const loopActionCallPageSize = 200
 
 type loopActionCallLister interface {
-	ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error)
+	ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error)
 }

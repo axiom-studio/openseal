@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -27,11 +28,11 @@ func (startTaskHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 			"type": "object", "additionalProperties": false, "required": []interface{}{"goal", "acknowledgment"},
 			"properties": map[string]interface{}{
 				"goal": map[string]interface{}{
-					"type": "string", "minLength": 1, "maxLength": maximumStartTaskGoalBytes,
+					"type": "string", "minLength": 1, "maxLength": models.MaximumStartTaskGoalBytes,
 					"description": "Self-contained work requested by the user, with the requested result and only non-secret supplied context.",
 				},
 				"acknowledgment": map[string]interface{}{
-					"type": "string", "minLength": 1, "maxLength": maximumStartTaskAcknowledgmentBytes,
+					"type": "string", "minLength": 1, "maxLength": models.MaximumStartTaskAcknowledgmentBytes,
 					"description": "One brief natural sentence in your persona acknowledging the work. It is posted only after the task is saved and is your whole reply to this message.",
 				},
 			},
@@ -40,35 +41,35 @@ func (startTaskHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 }
 
 func (startTaskHandler) Decode(raw json.RawMessage) (interface{}, error) {
-	args, err := parseStartTaskArgs(raw)
+	args, err := models.ParseStartTaskArgs(raw)
 	if err != nil {
 		return nil, err
 	}
 	return args, nil
 }
 
-func startTaskRejected(message string) *ToolResult {
-	return controlErrorResult(ToolResultRefused, "task_rejected", message, nil)
+func startTaskRejected(message string) *models.ToolResult {
+	return controlErrorResult(models.ToolResultRefused, "task_rejected", message, nil)
 }
 
-func startTaskNewMessage() *ToolResult {
-	return controlErrorResult(ToolResultRefused, "new_message",
+func startTaskNewMessage() *models.ToolResult {
+	return controlErrorResult(models.ToolResultRefused, "new_message",
 		"A new message arrived before the task started; read it and decide again.", nil)
 }
 
 func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
-	args := cc.Arguments.(*startTaskArgs)
+	args := cc.Arguments.(*models.StartTaskArgs)
 	// Rule 1 (§7.2): the only tool call of its assistant entry. The loop
 	// refuses mixed entries before the inline phase; this keeps a resumed
 	// or directly settled entry to the same rule.
 	if cc.Assistant == nil || cc.Assistant.Assistant == nil || len(cc.Assistant.Assistant.ToolCalls) != 1 {
-		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, controlTaskNotAloneCode,
+		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, controlTaskNotAloneCode,
 			"Call conversation_start_task alone; other work belongs inside the task.", nil))
 	}
 	if x.Tasks == nil {
 		return x.refuse(ctx, cc, startTaskRejected("Background tasks are not available here; answer in this conversation instead."))
 	}
-	if err := validateConversationTaskStartAuthority(cc.Run, cc.Authority.TaskStart); err != nil {
+	if err := models.ValidateConversationTaskStartAuthority(cc.Run, cc.Authority.TaskStart); err != nil {
 		return x.refuse(ctx, cc, startTaskRejected("A background task cannot be started from this conversation; answer here instead."))
 	}
 	run := cc.Run
@@ -84,28 +85,28 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 		result, err := x.Tasks.Start(ctx, conversationrun.StartConversationTaskRequest{
 			Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: cc.WorkerID,
 			TurnID: cc.Step.ID, ToolEntryID: cc.Entry.ID, AssignedAgentID: cc.Authority.AgentID,
-			TaskKey: startTaskKey(cc.Entry.ID), Goal: args.Goal, Acknowledgment: args.Acknowledgment,
+			TaskKey: models.StartTaskKey(cc.Entry.ID), Goal: args.Goal, Acknowledgment: args.Acknowledgment,
 			Budget: modelstep.ControlTaskBudget(budget),
 		})
 		switch {
 		case err == nil:
 			return x.startTaskResult(ctx, cc, result)
-		case errors.Is(err, ErrSteeringArrived):
+		case errors.Is(err, models.ErrSteeringArrived):
 			return x.refuse(ctx, cc, startTaskNewMessage())
-		case errors.Is(err, ErrRevisionConflict) && attempt == 0:
+		case errors.Is(err, models.ErrRevisionConflict) && attempt == 0:
 			// One reload retry (§3.2 rule 5): another write moved the Run
 			// revision under the claim (a heartbeat, a steering append).
 			reloaded, getErr := x.Portfolio.GetAgentRun(ctx, run.Scope, run.ID)
 			if getErr != nil {
 				return ControlResult{}, getErr
 			}
-			if reloaded == nil || reloaded.Status != AgentRunStatusRunning || reloaded.LeaseOwner != cc.WorkerID {
-				return ControlResult{}, ErrLeaseLost
+			if reloaded == nil || reloaded.Status != models.AgentRunStatusRunning || reloaded.LeaseOwner != cc.WorkerID {
+				return ControlResult{}, models.ErrLeaseLost
 			}
 			run = reloaded
 			cc.Run = reloaded
 			continue
-		case errors.Is(err, ErrInvalidConversationTask), errors.Is(err, ErrConversationTaskConflict):
+		case errors.Is(err, models.ErrInvalidConversationTask), errors.Is(err, models.ErrConversationTaskConflict):
 			return x.refuse(ctx, cc, startTaskRejected("The task could not be started: "+err.Error()+". Answer in this conversation instead."))
 		default:
 			return ControlResult{}, err
@@ -117,15 +118,15 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 // independent task ended the source Run in its transaction. A replayed
 // continuation means this Run was already promoted to background work: the
 // redundant call gets an error result and the Run continues as that work.
-func (x *ControlExecutor) startTaskResult(ctx context.Context, cc agentrun.ControlContext, result *ConversationTaskResult) (ControlResult, error) {
+func (x *ControlExecutor) startTaskResult(ctx context.Context, cc agentrun.ControlContext, result *models.ConversationTaskResult) (ControlResult, error) {
 	if result == nil || result.Task == nil {
 		return ControlResult{}, errors.New("conversation task admission returned no task")
 	}
-	if result.Task.Mode == ConversationTaskModeContinuation {
-		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "already_background",
+	if result.Task.Mode == models.ConversationTaskModeContinuation {
+		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "already_background",
 			"This conversation already continues as a background task; keep working on it here.", map[string]interface{}{"taskId": result.Task.ID}))
 	}
-	if result.SourceRun == nil || result.SourceRun.Status != AgentRunStatusCompleted {
+	if result.SourceRun == nil || result.SourceRun.Status != models.AgentRunStatusCompleted {
 		return ControlResult{}, errors.New("conversation task admission returned no committed source completion")
 	}
 	entry, err := x.Sessions.GetSessionEntry(ctx, cc.Run.Scope, cc.Entry.ID)

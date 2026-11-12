@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -15,16 +17,16 @@ func progressFixture(t *testing.T, calls ...agentrun.LoopToolCall) *controlFixtu
 	t.Helper()
 	f := newControlFixture(t, calls)
 	registry := controlRegistry{}
-	registry.register(ControlToolReportProgress, reportProgressHandler{})
+	registry.register(models.ControlToolReportProgress, reportProgressHandler{})
 	f.exec.handlers = registry
-	f.exec.Activity = NewRunActivityService(f.store, f.store)
+	f.exec.Activity = activity.NewRunActivityService(f.store, f.store)
 	return f
 }
 
 func progressSpec(t *testing.T, authority agentrun.ControlAuthority) ControlToolSpec {
 	t.Helper()
 	for _, spec := range builtinControlSpecs(authority) {
-		if spec.Name == ControlToolReportProgress {
+		if spec.Name == models.ControlToolReportProgress {
 			return spec
 		}
 	}
@@ -33,16 +35,16 @@ func progressSpec(t *testing.T, authority agentrun.ControlAuthority) ControlTool
 }
 
 func progressCall(id, args string) agentrun.LoopToolCall {
-	return agentrun.LoopToolCall{ID: id, Name: string(ControlToolReportProgress), Arguments: json.RawMessage(args)}
+	return agentrun.LoopToolCall{ID: id, Name: string(models.ControlToolReportProgress), Arguments: json.RawMessage(args)}
 }
 
-func (f *controlFixture) progressEvents() []*ActivityEvent {
+func (f *controlFixture) progressEvents() []*models.ActivityEvent {
 	f.t.Helper()
-	events, err := f.store.ListActivity(f.ctx, ActivityFilter{Scope: f.run.Scope, RunID: f.run.ID, Limit: 500})
+	events, err := f.store.ListActivity(f.ctx, models.ActivityFilter{Scope: f.run.Scope, RunID: f.run.ID, Limit: 500})
 	if err != nil {
 		f.t.Fatalf("list activity: %v", err)
 	}
-	var out []*ActivityEvent
+	var out []*models.ActivityEvent
 	for _, event := range events {
 		if event.EventType == "turn.commentary" || event.EventType == "turn.progress" {
 			out = append(out, event)
@@ -53,11 +55,11 @@ func (f *controlFixture) progressEvents() []*ActivityEvent {
 
 func requirePosted(t *testing.T, result ControlResult) {
 	t.Helper()
-	if result.Kind != ControlContinue || result.Entry == nil || result.Entry.State != ToolEntryCompleted {
+	if result.Kind != ControlContinue || result.Entry == nil || result.Entry.State != models.ToolEntryCompleted {
 		t.Fatalf("result = %#v", result)
 	}
 	tr := result.Entry.Tool.Result
-	if tr == nil || tr.IsError || tr.Status != ToolResultSucceeded || len(tr.Content) != 1 || string(tr.Content[0].Value) != `{"status":"posted"}` {
+	if tr == nil || tr.IsError || tr.Status != models.ToolResultSucceeded || len(tr.Content) != 1 || string(tr.Content[0].Value) != `{"status":"posted"}` {
 		t.Fatalf("tool result = %#v", tr)
 	}
 }
@@ -94,7 +96,7 @@ func TestReportProgressEmitsCommentary(t *testing.T) {
 	}
 	first, second := events[0], events[1]
 	if first.EventType != "turn.commentary" || first.Summary != "Checking the Q3 invoices now." ||
-		first.TurnID != f.step.ID || first.AgentID != "agent-1" || first.Visibility != ActivityVisibilityScope ||
+		first.TurnID != f.step.ID || first.AgentID != "agent-1" || first.Visibility != models.ActivityVisibilityScope ||
 		first.Actor.ID != controlTestWorker || first.Payload["entryId"] != f.entries["default"].ID {
 		t.Fatalf("commentary event = %#v", first)
 	}
@@ -106,10 +108,10 @@ func TestReportProgressEmitsCommentary(t *testing.T) {
 		if err != nil {
 			t.Fatalf("inline %s: %v", id, err)
 		}
-		if result.Entry.State != ToolEntryError {
+		if result.Entry.State != models.ToolEntryError {
 			t.Fatalf("%s result = %#v", id, result)
 		}
-		requireControlError(t, f.stored(id).Tool.Result, ToolResultFailed, "tool_arguments_invalid")
+		requireControlError(t, f.stored(id).Tool.Result, models.ToolResultFailed, "tool_arguments_invalid")
 	}
 	if len(f.progressEvents()) != 2 {
 		t.Fatal("an invalid call published an event")
@@ -117,7 +119,7 @@ func TestReportProgressEmitsCommentary(t *testing.T) {
 	// Not offered without the authority.
 	other := progressFixture(t, progressCall("p", `{"summary":"hi"}`))
 	result, err = other.exec.Inline(other.ctx, other.context("p", agentrun.ControlAuthority{}))
-	if err != nil || result.Entry.State != ToolEntryError || len(other.progressEvents()) != 0 {
+	if err != nil || result.Entry.State != models.ToolEntryError || len(other.progressEvents()) != 0 {
 		t.Fatalf("unoffered = %#v, %v", result, err)
 	}
 }
@@ -168,10 +170,10 @@ func TestReportProgressRejectsRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("again: %v", err)
 	}
-	if result.Kind != ControlContinue || result.Entry.State != ToolEntryError {
+	if result.Kind != ControlContinue || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("repeat result = %#v", result)
 	}
-	value := requireControlError(t, f.stored("again").Tool.Result, ToolResultRefused, reportProgressRepeatCode)
+	value := requireControlError(t, f.stored("again").Tool.Result, models.ToolResultRefused, reportProgressRepeatCode)
 	if !strings.HasPrefix(value["message"].(string), "Already reported") {
 		t.Fatalf("message = %v", value["message"])
 	}

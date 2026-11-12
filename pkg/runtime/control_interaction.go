@@ -47,8 +47,8 @@ func (reactControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*reactControlArgs)
 	reaction := runtimeconversation.TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji}
-	if !validOpaqueIdentifier(reaction.MessageID, 256) || ValidateReactionEmoji(reaction.Emoji) != nil {
-		return x.refuse(ctx, cc, controlErrorResult(ToolResultFailed, "reaction_invalid",
+	if !models.IsValidOpaqueIdentifier(reaction.MessageID, 256) || models.ValidateReactionEmoji(reaction.Emoji) != nil {
+		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultFailed, "reaction_invalid",
 			"Use one emoji and a message id from this conversation.", nil))
 	}
 	done, err := completedRunReactionEntries(ctx, x.Sessions, cc.Run)
@@ -56,28 +56,28 @@ func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agent
 		return ControlResult{}, err
 	}
 	if len(done) >= runtimeconversation.MaximumTurnReactions {
-		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "reaction_limit",
+		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "reaction_limit",
 			fmt.Sprintf("This reply already added %d reactions, the most one reply may add.", runtimeconversation.MaximumTurnReactions), nil))
 	}
 	if err := x.addRunReaction(ctx, cc.Run, reaction); err != nil {
-		if errors.Is(err, ErrLeaseLost) {
+		if errors.Is(err, models.ErrLeaseLost) {
 			return ControlResult{}, err
 		}
-		return x.refuse(ctx, cc, controlErrorResult(ToolResultFailed, "reaction_failed",
+		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultFailed, "reaction_failed",
 			"The reaction could not be added: "+err.Error()+".", nil))
 	}
-	return x.complete(ctx, cc, controlJSONResult(ToolResultSucceeded, map[string]interface{}{
+	return x.complete(ctx, cc, models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{
 		"status": "added", "messageId": reaction.MessageID, "emoji": reaction.Emoji,
 	}), nil)
 }
 
 // addRunReaction adds the reaction as the Agent answering in the Run's
 // conversation, on a message that Agent can see.
-func (x *ControlExecutor) addRunReaction(ctx context.Context, run *AgentRun, reaction runtimeconversation.TurnReaction) error {
+func (x *ControlExecutor) addRunReaction(ctx context.Context, run *models.AgentRun, reaction runtimeconversation.TurnReaction) error {
 	if x.Conversations == nil {
 		return errors.New("conversations are not configured")
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	if strings.TrimSpace(conversationID) == "" {
 		return errors.New("this Run has no conversation")
 	}
@@ -91,27 +91,27 @@ func (x *ControlExecutor) addRunReaction(ctx context.Context, run *AgentRun, rea
 	}
 	_, err = x.Conversations.AddMessageReaction(ctx, runtimeconversation.MessageReactionRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, MessageID: reaction.MessageID, Emoji: reaction.Emoji,
-		Actor: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID},
+		Actor: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: agentID},
 	})
 	return err
 }
 
 // completedRunReactionEntries lists the Run's completed react entries in
 // session order.
-func completedRunReactionEntries(ctx context.Context, sessions AgentSessionStore, run *AgentRun) ([]*SessionEntry, error) {
+func completedRunReactionEntries(ctx context.Context, sessions models.AgentSessionStore, run *models.AgentRun) ([]*models.SessionEntry, error) {
 	if sessions == nil || run == nil {
 		return nil, errors.New("reactions need the session store and the Run")
 	}
-	return sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, ToolNames: []string{string(ControlToolReact)},
-		States: []ToolEntryState{ToolEntryCompleted}, Limit: maxSessionEntryListLimit,
+	return sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, ToolNames: []string{string(models.ControlToolReact)},
+		States: []models.ToolEntryState{models.ToolEntryCompleted}, Limit: models.MaxSessionEntryListLimit,
 	})
 }
 
 // RunReactions returns the reactions this Run added through react, in call
 // order. The conversation final-answer sink uses it for reactions-only
 // replies (reactionEcho).
-func RunReactions(ctx context.Context, sessions AgentSessionStore, run *AgentRun) ([]runtimeconversation.TurnReaction, error) {
+func RunReactions(ctx context.Context, sessions models.AgentSessionStore, run *models.AgentRun) ([]runtimeconversation.TurnReaction, error) {
 	entries, err := completedRunReactionEntries(ctx, sessions, run)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func RunReactions(ctx context.Context, sessions AgentSessionStore, run *AgentRun
 	reactions := make([]runtimeconversation.TurnReaction, 0, len(entries))
 	for _, entry := range entries {
 		var args reactControlArgs
-		if err := decodeControlArguments(entry.Tool.Arguments, &args); err != nil {
+		if err := models.DecodeControlArguments(entry.Tool.Arguments, &args); err != nil {
 			return nil, fmt.Errorf("decode react entry %s: %w", entry.ID, err)
 		}
 		reactions = append(reactions, runtimeconversation.TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji})
@@ -170,8 +170,8 @@ func (waitControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 func (waitControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*waitControlArgs)
 	wakeAt := x.now().Add(time.Duration(args.Seconds) * time.Second)
-	entry, err := x.transitionControlEntry(ctx, cc, ToolEntryAwaitingEvent,
-		&ToolEntryWait{Reason: "timer"}, nil, &ControlEntryMeta{WakeAt: &wakeAt})
+	entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryAwaitingEvent,
+		&models.ToolEntryWait{Reason: "timer"}, nil, &ControlEntryMeta{WakeAt: &wakeAt})
 	if err != nil {
 		return ControlResult{}, err
 	}
@@ -205,7 +205,7 @@ func (waitControlHandler) Resume(ctx context.Context, x *ControlExecutor, cc age
 		// keep sleeping until the timer.
 		return ControlResume{Resolved: false, Park: waitPark(cc.Entry.ID, wakeAt)}, nil
 	}
-	result, err := x.complete(ctx, cc, controlJSONResult(ToolResultSucceeded, value), nil)
+	result, err := x.complete(ctx, cc, models.ControlJSONResult(models.ToolResultSucceeded, value), nil)
 	if err != nil {
 		return ControlResume{}, err
 	}
@@ -215,8 +215,8 @@ func (waitControlHandler) Resume(ctx context.Context, x *ControlExecutor, cc age
 func waitPark(entryID string, wakeAt time.Time) *agentrun.LoopPark {
 	at := wakeAt
 	return &agentrun.LoopPark{
-		Status:  AgentRunStatusSleeping,
-		Wake:    &WakeCondition{Type: "timer", WakeAt: &at, Reference: entryID},
+		Status:  models.AgentRunStatusSleeping,
+		Wake:    &models.WakeCondition{Type: "timer", WakeAt: &at, Reference: entryID},
 		Summary: "Waiting until " + at.Format(time.RFC3339),
 	}
 }

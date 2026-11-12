@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -44,7 +45,7 @@ type governedToolView struct {
 // newest last. Calls a compaction summarized come first (in the compaction's
 // order), so a rate limit or pending form outlives compaction. Entries of other
 // Runs in the session, open entries and host tools (no call row) are skipped.
-func governedToolViews(path *AgentSessionPath, runID string, calls map[string]*ActionCall) []governedToolView {
+func governedToolViews(path *models.AgentSessionPath, runID string, calls map[string]*models.ActionCall) []governedToolView {
 	if path == nil || runID == "" || len(calls) == 0 {
 		return nil
 	}
@@ -52,7 +53,7 @@ func governedToolViews(path *AgentSessionPath, runID string, calls map[string]*A
 	seen := map[string]bool{}
 	add := func(id string) {
 		call := calls[id]
-		if id == "" || seen[id] || call == nil || call.ID != id || call.RunID != runID || call.Origin != ActionOriginLoop {
+		if id == "" || seen[id] || call == nil || call.ID != id || call.RunID != runID || call.Origin != models.ActionOriginLoop {
 			return
 		}
 		seen[id] = true
@@ -64,8 +65,8 @@ func governedToolViews(path *AgentSessionPath, runID string, calls map[string]*A
 		}
 	}
 	for _, entry := range path.Entries {
-		if entry == nil || entry.Type != SessionEntryTool || entry.RunID != runID ||
-			entry.State != ToolEntryCompleted && entry.State != ToolEntryError {
+		if entry == nil || entry.Type != models.SessionEntryTool || entry.RunID != runID ||
+			entry.State != models.ToolEntryCompleted && entry.State != models.ToolEntryError {
 			continue
 		}
 		add(entry.ActionCallID)
@@ -76,13 +77,13 @@ func governedToolViews(path *AgentSessionPath, runID string, calls map[string]*A
 // governedToolViewOf classifies only typed execution evidence, never text from
 // a tool or model: FailureKind and ErrorDetails come from re-validating the
 // persisted error through skillerror, as the old action history did.
-func governedToolViewOf(call *ActionCall) governedToolView {
+func governedToolViewOf(call *models.ActionCall) governedToolView {
 	view := governedToolView{
 		SkillID: call.SkillID, Action: call.Action, Status: string(call.Status),
 		ErrorCode: call.ErrorCode, ActionCallID: call.ID, RunID: call.RunID,
 		Result: call.Output,
 	}
-	if call.Status == ActionCallStatusFailed {
+	if call.Status == models.ActionCallStatusFailed {
 		if failure := skillerror.NewActionError(call.ErrorCode, "", call.ErrorDetails); failure != nil {
 			view.ErrorCode, view.FailureKind = failure.Code(), failure.Code()
 			view.ErrorDetails = map[string]interface{}{}
@@ -96,7 +97,7 @@ func governedToolViewOf(call *ActionCall) governedToolView {
 
 // loadGovernedToolViews reads the Run's terminal calls once and joins them with
 // the path (governedToolViews).
-func loadGovernedToolViews(ctx context.Context, store ActionStore, scope Scope, path *AgentSessionPath, runID string) ([]governedToolView, error) {
+func loadGovernedToolViews(ctx context.Context, store models.ActionStore, scope models.Scope, path *models.AgentSessionPath, runID string) ([]governedToolView, error) {
 	if store == nil || path == nil || runID == "" {
 		return nil, nil
 	}
@@ -104,7 +105,7 @@ func loadGovernedToolViews(ctx context.Context, store ActionStore, scope Scope, 
 	if err != nil {
 		return nil, err
 	}
-	calls := make(map[string]*ActionCall, len(listed))
+	calls := make(map[string]*models.ActionCall, len(listed))
 	for _, call := range listed {
 		if call != nil {
 			calls[call.ID] = call
@@ -122,7 +123,7 @@ func browserSourceRateLimited(views []governedToolView) bool {
 		if view.SkillID != lightpandaBrowserSkillID {
 			continue
 		}
-		if view.Status == string(ActionCallStatusSucceeded) {
+		if view.Status == string(models.ActionCallStatusSucceeded) {
 			return false
 		}
 		if limited, relevant := typedSourceFailure(view); relevant {
@@ -134,7 +135,7 @@ func browserSourceRateLimited(views []governedToolView) bool {
 
 func typedSourceFailure(view governedToolView) (limited, relevant bool) {
 	code := view.ErrorCode
-	if view.Status != string(ActionCallStatusFailed) || !strings.HasPrefix(code, "source_") ||
+	if view.Status != string(models.ActionCallStatusFailed) || !strings.HasPrefix(code, "source_") ||
 		view.FailureKind != code || view.ErrorDetails["failureKind"] != code {
 		return false, false
 	}
@@ -156,16 +157,16 @@ func typedSourceFailure(view governedToolView) (limited, relevant bool) {
 // is never changed (prefix cache); the call is refused with an is_error result
 // instead, and the governed executor moves the entry to error and records the
 // refusal activity (D11).
-func refuseLiveBrowserWhileRateLimited(views []governedToolView, actionName string) (*ToolResult, bool) {
+func refuseLiveBrowserWhileRateLimited(views []governedToolView, actionName string) (*models.ToolResult, bool) {
 	if !strings.HasPrefix(actionName, liveBrowserActionPrefix) || !browserSourceRateLimited(views) {
 		return nil, false
 	}
 	value, _ := json.Marshal(map[string]interface{}{
-		"status": string(ToolResultRefused), "code": liveBrowserRateLimitedCode, "error": liveBrowserRateLimitedError,
+		"status": string(models.ToolResultRefused), "code": liveBrowserRateLimitedCode, "error": liveBrowserRateLimitedError,
 	})
-	return &ToolResult{
-		Status: ToolResultRefused, IsError: true,
-		Content: []ContentPart{{Type: ContentPartJSON, Value: value}},
+	return &models.ToolResult{
+		Status: models.ToolResultRefused, IsError: true,
+		Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: value}},
 	}, true
 }
 
@@ -175,7 +176,7 @@ func refuseLiveBrowserWhileRateLimited(views []governedToolView, actionName stri
 func browserAwaitsUserReply(views []governedToolView) bool {
 	for index := len(views) - 1; index >= 0; index-- {
 		view := views[index]
-		if view.SkillID != liveBrowserSkillID || view.Status != string(ActionCallStatusSucceeded) {
+		if view.SkillID != liveBrowserSkillID || view.Status != string(models.ActionCallStatusSucceeded) {
 			continue
 		}
 		for _, field := range []string{"status", "paymentChallenge"} {
@@ -197,8 +198,8 @@ func browserAwaitsUserReply(views []governedToolView) bool {
 // lands in the same wave, so this file does not declare them.
 type finalAnswerParkPlan struct {
 	Deliver bool // post the answer first (OTP question), then park
-	Status  AgentRunStatus
-	Wake    *WakeCondition
+	Status  models.AgentRunStatus
+	Wake    *models.WakeCondition
 	Summary string
 }
 
@@ -212,31 +213,31 @@ type finalAnswerParkPlan struct {
 //     or an in-app approval, posts the answer (the question) and parks on the
 //     person's reply; the browser stays open because the Run is not terminal.
 //     An empty answer completes normally.
-func finalAnswerPark(run *AgentRun, views []governedToolView, canAskConversation bool, answer string, interventions []AgentRunIntervention) *finalAnswerParkPlan {
+func finalAnswerPark(run *models.AgentRun, views []governedToolView, canAskConversation bool, answer string, interventions []models.AgentRunIntervention) *finalAnswerParkPlan {
 	if run == nil {
 		return nil
 	}
 	if backgroundTaskRun(run) {
 		if id := pendingSkillSetupID(run, views, interventions); id != "" {
 			return &finalAnswerParkPlan{
-				Status: AgentRunStatusWaitingForEvent, Summary: skillSetupWaitSummary,
-				Wake: &WakeCondition{Type: conversationrun.ConversationTaskSkillSetupWakeType, Reference: id},
+				Status: models.AgentRunStatusWaitingForEvent, Summary: skillSetupWaitSummary,
+				Wake: &models.WakeCondition{Type: conversationrun.ConversationTaskSkillSetupWakeType, Reference: id},
 			}
 		}
 	}
 	answer = strings.TrimSpace(answer)
 	if canAskConversation && answer != "" && browserAwaitsUserReply(views) {
 		return &finalAnswerParkPlan{
-			Deliver: true, Status: AgentRunStatusWaitingForEvent, Summary: answer,
-			Wake: &WakeCondition{Type: "user_message"},
+			Deliver: true, Status: models.AgentRunStatusWaitingForEvent, Summary: answer,
+			Wake: &models.WakeCondition{Type: "user_message"},
 		}
 	}
 	return nil
 }
 
 // backgroundTaskRun is an independent conversation task's work Run.
-func backgroundTaskRun(run *AgentRun) bool {
-	return run != nil && run.Kind == RunKindAgentWork && run.Context[ConversationTaskContextKey] != nil
+func backgroundTaskRun(run *models.AgentRun) bool {
+	return run != nil && run.Kind == models.RunKindAgentWork && run.Context[models.ConversationTaskContextKey] != nil
 }
 
 // pendingSkillSetupID: the newest successful openseal.skills request_setup
@@ -244,13 +245,13 @@ func backgroundTaskRun(run *AgentRun) bool {
 // item is pending for this Run and is not superseded by a kernel-authored
 // SkillSetupResolution intervention with matching scope, runId, requestId and
 // actionCallId and status resolved|dismissed. Model text never clears it.
-func pendingSkillSetupID(run *AgentRun, views []governedToolView, interventions []AgentRunIntervention) string {
+func pendingSkillSetupID(run *models.AgentRun, views []governedToolView, interventions []models.AgentRunIntervention) string {
 	if run == nil {
 		return ""
 	}
 	for index := len(views) - 1; index >= 0; index-- {
 		view := views[index]
-		if view.SkillID != SkillManagementSkillID || view.Status != string(ActionCallStatusSucceeded) ||
+		if view.SkillID != models.SkillManagementSkillID || view.Status != string(models.ActionCallStatusSucceeded) ||
 			view.Action != agentrun.SkillActionRequestSetup && view.Action != skillbinding.SkillActionListSetupRequests {
 			continue
 		}
@@ -259,7 +260,7 @@ func pendingSkillSetupID(run *AgentRun, views []governedToolView, interventions 
 	return ""
 }
 
-func pendingSetupIn(run *AgentRun, view governedToolView, interventions []AgentRunIntervention) string {
+func pendingSetupIn(run *models.AgentRun, view governedToolView, interventions []models.AgentRunIntervention) string {
 	pending := func(value interface{}) string {
 		item, ok := value.(map[string]interface{})
 		if !ok {
@@ -304,10 +305,10 @@ func SkillSetupPendingSourceKey(runID, requestID string) string {
 // (background task Runs park at the final answer instead). The tool list never
 // changes; the final answer then completes the Run normally. It returns nil
 // when no note is due. The note is idempotent by SourceKey.
-func pendingSkillSetupNote(run *AgentRun, sessionID string, entry *SessionEntry, call *ActionCall, interventions []AgentRunIntervention) *SessionEntry {
+func pendingSkillSetupNote(run *models.AgentRun, sessionID string, entry *models.SessionEntry, call *models.ActionCall, interventions []models.AgentRunIntervention) *models.SessionEntry {
 	if run == nil || backgroundTaskRun(run) || sessionID == "" || entry == nil || call == nil ||
-		entry.Type != SessionEntryTool || entry.ActionCallID == "" || entry.ActionCallID != call.ID ||
-		call.RunID != run.ID || call.SkillID != SkillManagementSkillID || call.Status != ActionCallStatusSucceeded {
+		entry.Type != models.SessionEntryTool || entry.ActionCallID == "" || entry.ActionCallID != call.ID ||
+		call.RunID != run.ID || call.SkillID != models.SkillManagementSkillID || call.Status != models.ActionCallStatusSucceeded {
 		return nil
 	}
 	id := pendingSetupIn(run, governedToolViewOf(call), interventions)
@@ -316,9 +317,9 @@ func pendingSkillSetupNote(run *AgentRun, sessionID string, entry *SessionEntry,
 	}
 	key := SkillSetupPendingSourceKey(run.ID, id)
 	data, _ := json.Marshal(map[string]string{"requestId": id, "actionCallId": call.ID})
-	return &SessionEntry{
-		ID: SessionEntryID(sessionID, key), Scope: run.Scope, SessionID: sessionID,
-		RunID: run.ID, StepID: entry.StepID, Step: entry.Step, Type: SessionEntryNote, SourceKey: key,
-		Note: &NoteEntry{Kind: NoteSetupPending, Text: skillSetupPendingNote, Data: data},
+	return &models.SessionEntry{
+		ID: models.SessionEntryID(sessionID, key), Scope: run.Scope, SessionID: sessionID,
+		RunID: run.ID, StepID: entry.StepID, Step: entry.Step, Type: models.SessionEntryNote, SourceKey: key,
+		Note: &models.NoteEntry{Kind: models.NoteSetupPending, Text: skillSetupPendingNote, Data: data},
 	}
 }

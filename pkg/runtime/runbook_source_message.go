@@ -5,11 +5,13 @@ import (
 	"errors"
 	"maps"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type runbookMessageReader interface {
-	GetConversation(context.Context, Scope, string) (*Conversation, error)
-	GetChannelMessage(context.Context, Scope, string, string) (*ChannelMessage, error)
+	GetConversation(context.Context, models.Scope, string) (*models.Conversation, error)
+	GetChannelMessage(context.Context, models.Scope, string, string) (*models.ChannelMessage, error)
 }
 
 func forwardRunbookInvocation(invocation map[string]interface{}, sameAgent bool) map[string]interface{} {
@@ -22,11 +24,11 @@ func forwardRunbookInvocation(invocation map[string]interface{}, sameAgent bool)
 
 // Preserve only the exact invocation, not the whole conversation or model
 // checkpoint. It is task context, never evidence of permission or approval.
-func runbookSourceMessage(ctx context.Context, reader runbookMessageReader, run *AgentRun) (map[string]interface{}, error) {
-	if run.Kind != RunKindConversation {
+func runbookSourceMessage(ctx context.Context, reader runbookMessageReader, run *models.AgentRun) (map[string]interface{}, error) {
+	if run.Kind != models.RunKindConversation {
 		return nil, nil
 	}
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	if triggerID == "" {
 		return nil, nil
 	}
@@ -35,7 +37,7 @@ func runbookSourceMessage(ctx context.Context, reader runbookMessageReader, run 
 	}
 	// A threaded reply's concurrency key is "<conversation>:thread:<root>"; the
 	// conversation is the Run's own context, as everywhere else.
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	conversation, err := reader.GetConversation(ctx, run.Scope, strings.TrimSpace(conversationID))
 	if err != nil || conversation == nil || conversation.Scope != run.Scope || conversation.Owner != run.Owner {
 		return nil, errors.New("runbook invocation conversation is unavailable")

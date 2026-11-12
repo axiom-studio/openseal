@@ -35,17 +35,17 @@ func (askUserHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 			"type": "object", "additionalProperties": false, "required": []interface{}{"question"},
 			"properties": map[string]interface{}{
 				"question": map[string]interface{}{
-					"type": "string", "minLength": 1, "maxLength": maximumAskUserQuestionBytes,
+					"type": "string", "minLength": 1, "maxLength": models.MaximumAskUserQuestionBytes,
 					"description": "One concrete question for the person who asked. Their answer is information, not approval.",
 				},
 				"options": map[string]interface{}{
-					"type": "array", "minItems": minimumAskUserOptions, "maxItems": maximumAskUserOptions,
+					"type": "array", "minItems": models.MinimumAskUserOptions, "maxItems": models.MaximumAskUserOptions,
 					"description": "Choices the person can pick from, when the answer is a choice.",
 					"items": map[string]interface{}{
 						"type": "object", "additionalProperties": false, "required": []interface{}{"label"},
 						"properties": map[string]interface{}{
-							"label":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumAskUserOptionLabelBytes},
-							"description": map[string]interface{}{"type": "string", "maxLength": maximumAskUserOptionDescriptionBytes},
+							"label":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": models.MaximumAskUserOptionLabelBytes},
+							"description": map[string]interface{}{"type": "string", "maxLength": models.MaximumAskUserOptionDescriptionBytes},
 						},
 					},
 				},
@@ -57,7 +57,7 @@ func (askUserHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 }
 
 func (askUserHandler) Decode(raw json.RawMessage) (interface{}, error) {
-	args, err := parseAskUserArgs(raw)
+	args, err := models.ParseAskUserArgs(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -66,8 +66,8 @@ func (askUserHandler) Decode(raw json.RawMessage) (interface{}, error) {
 
 func askUserPark(entryID string) *agentrun.LoopPark {
 	return &agentrun.LoopPark{
-		Status:  AgentRunStatusWaitingForEvent,
-		Wake:    &WakeCondition{Type: "user_message", Reference: entryID},
+		Status:  models.AgentRunStatusWaitingForEvent,
+		Wake:    &models.WakeCondition{Type: "user_message", Reference: entryID},
 		Summary: askUserParkSummary,
 	}
 }
@@ -84,12 +84,12 @@ func (x *ControlExecutor) conversationService() *runtimeconversation.Conversatio
 
 // askUserOrigin resolves the conversation the Run may ask in: its canonical
 // origin, answered by this Run's own Agent. nil conversation = cannot ask.
-func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *AgentRun) (*Conversation, *ChannelMessage, error) {
+func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *models.AgentRun) (*models.Conversation, *models.ChannelMessage, error) {
 	if x.Portfolio == nil {
 		return nil, nil, nil
 	}
-	var conversation *Conversation
-	var trigger *ChannelMessage
+	var conversation *models.Conversation
+	var trigger *models.ChannelMessage
 	var err error
 	switch {
 	case x.Reporting != nil:
@@ -110,25 +110,25 @@ func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *AgentRun) (*Co
 }
 
 func (askUserHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
-	args := cc.Arguments.(*askUserArgs)
+	args := cc.Arguments.(*models.AskUserArgs)
 	conversation, trigger, err := x.askUserOrigin(ctx, cc.Run)
 	if err != nil {
 		return ControlResult{}, err
 	}
 	if conversation == nil {
-		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "cannot_post",
+		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "cannot_post",
 			"There is no conversation this work can ask in; continue with what you have.", nil))
 	}
 	if prior, answer, err := x.askUserAnsweredBefore(ctx, cc, args.Question); err != nil {
 		return ControlResult{}, err
 	} else if prior != nil {
-		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "already_asked",
+		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "already_asked",
 			fmt.Sprintf("You asked this at step %d; the answer was: %s", prior.Step, answer), nil))
 	}
 	key := runtimeconversation.ConversationClarificationKey(cc.Run.ID, cc.Entry.ID)
-	meta := &ControlEntryMeta{Kind: ControlToolAskUser, QuestionMessageID: stableConversationID(cc.Run.Scope, key, "message")}
-	entry, err := x.transitionControlEntry(ctx, cc, ToolEntryAwaitingEvent,
-		&ToolEntryWait{EventWaitID: cc.Entry.ID, Reason: askUserWaitReason}, nil, meta)
+	meta := &ControlEntryMeta{Kind: models.ControlToolAskUser, QuestionMessageID: models.StableConversationID(cc.Run.Scope, key, "message")}
+	entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryAwaitingEvent,
+		&models.ToolEntryWait{EventWaitID: cc.Entry.ID, Reason: askUserWaitReason}, nil, meta)
 	if err != nil {
 		return ControlResult{}, err
 	}
@@ -140,17 +140,17 @@ func (askUserHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.C
 
 // askUserAnsweredBefore finds an earlier answered ask_user entry of this Run
 // with the same question, and its answer.
-func (x *ControlExecutor) askUserAnsweredBefore(ctx context.Context, cc agentrun.ControlContext, question string) (*SessionEntry, string, error) {
-	entries, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
+func (x *ControlExecutor) askUserAnsweredBefore(ctx context.Context, cc agentrun.ControlContext, question string) (*models.SessionEntry, string, error) {
+	entries, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID,
-		ToolNames: []string{string(ControlToolAskUser)}, States: []ToolEntryState{ToolEntryCompleted},
-		Limit: maxSessionEntryListLimit,
+		ToolNames: []string{string(models.ControlToolAskUser)}, States: []models.ToolEntryState{models.ToolEntryCompleted},
+		Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
 		return nil, "", err
 	}
 	for _, entry := range entries {
-		if entry.ID == cc.Entry.ID || askUserQuestion(entry) != question {
+		if entry.ID == cc.Entry.ID || models.AskUserEntryQuestion(entry) != question {
 			continue
 		}
 		if answer, ok := askUserResultAnswer(entry); ok {
@@ -160,12 +160,12 @@ func (x *ControlExecutor) askUserAnsweredBefore(ctx context.Context, cc agentrun
 	return nil, "", nil
 }
 
-func askUserResultAnswer(entry *SessionEntry) (string, bool) {
+func askUserResultAnswer(entry *models.SessionEntry) (string, bool) {
 	if entry.Tool == nil || entry.Tool.Result == nil {
 		return "", false
 	}
 	for _, part := range entry.Tool.Result.Content {
-		if part.Type != ContentPartJSON {
+		if part.Type != models.ContentPartJSON {
 			continue
 		}
 		var value struct {
@@ -181,7 +181,7 @@ func askUserResultAnswer(entry *SessionEntry) (string, bool) {
 
 // postAskUserQuestion posts the question idempotently. A conversation that
 // keeps moving is left to the question reconciler after 3 attempts.
-func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *AgentRun, conversation *Conversation, trigger *ChannelMessage, args *askUserArgs, key string) error {
+func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, trigger *models.ChannelMessage, args *models.AskUserArgs, key string) error {
 	service := x.conversationService()
 	if service == nil {
 		return errors.New("ask_user: no conversation service")
@@ -192,7 +192,7 @@ func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *AgentRun
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, ErrRevisionConflict) {
+		if !errors.Is(err, models.ErrRevisionConflict) {
 			return err
 		}
 		current, err = service.GetConversation(ctx, run.Scope, conversation.ID)
@@ -208,20 +208,20 @@ func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *AgentRun
 // re-parks; the question is re-posted idempotently first, which also covers a
 // crash between the entry transition and the post.
 func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
-	if cc.Entry.State != ToolEntryAwaitingEvent {
+	if cc.Entry.State != models.ToolEntryAwaitingEvent {
 		return ControlResume{}, fmt.Errorf("%w: ask_user resume of %s in state %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
 	}
-	args := cc.Arguments.(*askUserArgs)
+	args := cc.Arguments.(*models.AskUserArgs)
 	key := runtimeconversation.ConversationClarificationKey(cc.Run.ID, cc.Entry.ID)
-	if answer := askUserAnswer(cc.Run, cc.Entry, stableConversationID(cc.Run.Scope, key, "message")); answer != nil {
+	if answer := askUserAnswer(cc.Run, cc.Entry, models.StableConversationID(cc.Run.Scope, key, "message")); answer != nil {
 		value := map[string]interface{}{
 			"status": "answered", "answer": truncateControlText(answer.AnswerContent, cc.Run.ID), "messageId": answer.AnswerMessageID,
 		}
 		if len(args.Options) > 0 {
 			value["selectedOptions"] = args.SelectedLabels(answer.SelectedOptionIDs)
 		}
-		result := controlJSONResult(ToolResultSucceeded, value)
-		entry, err := x.transitionControlEntry(ctx, cc, ToolEntryCompleted, nil, result, nil)
+		result := models.ControlJSONResult(models.ToolResultSucceeded, value)
+		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryCompleted, nil, result, nil)
 		if err != nil {
 			return ControlResume{}, err
 		}
@@ -234,7 +234,7 @@ func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentru
 	if conversation == nil {
 		// The conversation went away while the question was open: nobody can
 		// answer it now.
-		entry, err := x.transitionControlEntry(ctx, cc, ToolEntryError, nil, controlErrorResult(ToolResultFailed, "cannot_post",
+		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil, controlErrorResult(models.ToolResultFailed, "cannot_post",
 			"The conversation can no longer be asked; continue with what you have.", nil), nil)
 		if err != nil {
 			return ControlResume{}, err
@@ -248,7 +248,7 @@ func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentru
 }
 
 // askUserAnswer returns the accepted answer receipt of an ask_user entry.
-func askUserAnswer(run *AgentRun, entry *SessionEntry, questionMessageID string) *ConversationAnswerReceipt {
+func askUserAnswer(run *models.AgentRun, entry *models.SessionEntry, questionMessageID string) *models.ConversationAnswerReceipt {
 	for i := range run.PendingInterventions {
 		answer := run.PendingInterventions[i].ConversationAnswer
 		if answer != nil && answer.RunID == run.ID && answer.QuestionTurnID == entry.StepID &&

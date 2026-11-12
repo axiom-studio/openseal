@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -83,7 +84,7 @@ type finalAnswerCall struct {
 // decode does not see the Run).
 func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	var fields map[string]json.RawMessage
-	if err := decodeControlArguments(raw, &fields); err != nil {
+	if err := models.DecodeControlArguments(raw, &fields); err != nil {
 		return nil, err
 	}
 	if fields == nil {
@@ -106,7 +107,7 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := decodeControlArguments(encoded, &call.Args); err != nil {
+	if err := models.DecodeControlArguments(encoded, &call.Args); err != nil {
 		return nil, err
 	}
 	return call, nil
@@ -236,7 +237,7 @@ func finalAnswerDescription(a agentrun.ControlAuthority) string {
 
 // finalOutputFieldNames are the publisher's extension properties offered on
 // this Run (kernel names excluded).
-func finalOutputFieldNames(run *AgentRun, publisher agentrun.FinalOutputPublisher) map[string]interface{} {
+func finalOutputFieldNames(run *models.AgentRun, publisher agentrun.FinalOutputPublisher) map[string]interface{} {
 	if publisher == nil || run == nil {
 		return nil
 	}
@@ -257,15 +258,15 @@ func finalOutputFieldNames(run *AgentRun, publisher agentrun.FinalOutputPublishe
 // properties of run to the turn_final_answer tool in tools (prep-2 calls it on
 // the ControlModelStepTools list). They are never required. Other tools and the
 // input slice are left unchanged.
-func WithFinalOutputProperties(tools []ModelStepTool, run *AgentRun, publisher agentrun.FinalOutputPublisher) []ModelStepTool {
+func WithFinalOutputProperties(tools []models.ModelStepTool, run *models.AgentRun, publisher agentrun.FinalOutputPublisher) []models.ModelStepTool {
 	extra := finalOutputFieldNames(run, publisher)
 	if len(extra) == 0 {
 		return tools
 	}
-	out := make([]ModelStepTool, len(tools))
+	out := make([]models.ModelStepTool, len(tools))
 	copy(out, tools)
 	for i, tool := range out {
-		if tool.Name != string(ControlToolFinalAnswer) {
+		if tool.Name != string(models.ControlToolFinalAnswer) {
 			continue
 		}
 		schema := maps.Clone(tool.InputSchema)
@@ -352,7 +353,7 @@ type finalAnswerDraft struct {
 	ReactionsOnly   bool
 	Visual          *presentation.Visual
 	VisualRejection string
-	SkillSelections []HostedSkillSelection
+	SkillSelections []models.HostedSkillSelection
 	Output          map[string]interface{}
 }
 
@@ -539,16 +540,16 @@ func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]inte
 // A ref cited twice counts once, and a ref that names no Skill prompt loaded in
 // this Run is left out: the citations are bookkeeping about the answer, and
 // refusing them throws away a whole written answer to have it written again.
-func finalSkillSelections(applied, offered []string) ([]HostedSkillSelection, *finalAnswerRejection) {
+func finalSkillSelections(applied, offered []string) ([]models.HostedSkillSelection, *finalAnswerRejection) {
 	cited := make(map[string]bool, len(applied))
 	for _, ref := range applied {
 		cited[ref] = true
 	}
-	selections := make([]HostedSkillSelection, 0, len(offered))
+	selections := make([]models.HostedSkillSelection, 0, len(offered))
 	for _, ref := range offered {
-		selection := HostedSkillSelection{SkillRef: ref, Disposition: HostedSkillNotApplied, Summary: "Not used in this answer."}
+		selection := models.HostedSkillSelection{SkillRef: ref, Disposition: models.HostedSkillNotApplied, Summary: "Not used in this answer."}
 		if cited[ref] {
-			selection.Disposition, selection.Summary = HostedSkillApplied, "Used in this answer."
+			selection.Disposition, selection.Summary = models.HostedSkillApplied, "Used in this answer."
 			delete(cited, ref)
 		}
 		selections = append(selections, selection)
@@ -560,7 +561,7 @@ func finalSkillSelections(applied, offered []string) ([]HostedSkillSelection, *f
 // ControlEntryMeta.ErrorCode), or for plain text a final_rejection note. A
 // rejection with a Failure then fails the Run.
 func (x *ControlExecutor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft, r *finalAnswerRejection) (ControlResult, error) {
-	var recorded *SessionEntry
+	var recorded *models.SessionEntry
 	if d.PlainText {
 		note, err := x.appendFinalRejectionNote(ctx, cc, r.Code, r.Message)
 		if err != nil {
@@ -568,8 +569,8 @@ func (x *ControlExecutor) rejectFinal(ctx context.Context, cc agentrun.ControlCo
 		}
 		recorded = note
 	} else {
-		entry, err := x.transitionControlEntry(ctx, cc, ToolEntryError, nil,
-			controlErrorResult(ToolResultFailed, r.Code, r.Message, r.Extra), &ControlEntryMeta{ErrorCode: r.Code})
+		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil,
+			controlErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &ControlEntryMeta{ErrorCode: r.Code})
 		if err != nil {
 			return ControlResult{}, err
 		}
@@ -588,7 +589,7 @@ type finalRejectionNoteData struct {
 
 // appendFinalRejectionNote appends the step's final_rejection note (one per
 // step: id and SourceKey final-rejection:<stepId>).
-func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc agentrun.ControlContext, code, message string) (*SessionEntry, error) {
+func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc agentrun.ControlContext, code, message string) (*models.SessionEntry, error) {
 	sessionID := cc.Run.SessionID
 	if cc.Session != nil {
 		sessionID = cc.Session.ID
@@ -600,17 +601,17 @@ func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc agent
 	if err != nil {
 		return nil, err
 	}
-	key := FinalRejectionEntryKey(cc.Step.ID)
-	note := &SessionEntry{
-		ID: SessionEntryID(sessionID, key), Scope: cc.Run.Scope, SessionID: sessionID, RunID: cc.Run.ID,
-		StepID: cc.Step.ID, Step: cc.Step.Sequence, Type: SessionEntryNote, SourceKey: key,
-		Note: &NoteEntry{Kind: NoteFinalRejection, Text: message, Data: data},
+	key := models.FinalRejectionEntryKey(cc.Step.ID)
+	note := &models.SessionEntry{
+		ID: models.SessionEntryID(sessionID, key), Scope: cc.Run.Scope, SessionID: sessionID, RunID: cc.Run.ID,
+		StepID: cc.Step.ID, Step: cc.Step.Sequence, Type: models.SessionEntryNote, SourceKey: key,
+		Note: &models.NoteEntry{Kind: models.NoteFinalRejection, Text: message, Data: data},
 	}
 	now := x.now()
 	lease := cc.LeaseGuard(now)
-	appended, err := x.Sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+	appended, err := x.Sessions.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: cc.Run.Scope, SessionID: sessionID, RunID: cc.Run.ID, Lease: &lease,
-		Entries: []*SessionEntry{note}, Now: now,
+		Entries: []*models.SessionEntry{note}, Now: now,
 	})
 	if err != nil {
 		return nil, err
@@ -628,8 +629,8 @@ func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc agent
 // "second time" rules.
 func (x *ControlExecutor) priorFinalErrorCodes(ctx context.Context, cc agentrun.ControlContext) (map[string]int, error) {
 	counts := map[string]int{}
-	tools, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: cc.Run.Scope, RunID: cc.Run.ID, ToolNames: []string{string(ControlToolFinalAnswer)}, Limit: maxSessionEntryListLimit,
+	tools, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: cc.Run.Scope, RunID: cc.Run.ID, ToolNames: []string{string(models.ControlToolFinalAnswer)}, Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
 		return nil, err
@@ -646,8 +647,8 @@ func (x *ControlExecutor) priorFinalErrorCodes(ctx context.Context, cc agentrun.
 			counts[meta.ErrorCode]++
 		}
 	}
-	notes, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: cc.Run.Scope, RunID: cc.Run.ID, NoteKinds: []NoteKind{NoteFinalRejection}, Limit: maxSessionEntryListLimit,
+	notes, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: cc.Run.Scope, RunID: cc.Run.ID, NoteKinds: []models.NoteKind{models.NoteFinalRejection}, Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
 		return nil, err
@@ -670,9 +671,9 @@ func (x *ControlExecutor) priorFinalErrorCodes(ctx context.Context, cc agentrun.
 
 // runReacted: a react call of this Run completed (reactions-only reply).
 func (x *ControlExecutor) runReacted(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
-	entries, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: cc.Run.Scope, RunID: cc.Run.ID, ToolNames: []string{string(ControlToolReact)},
-		States: []ToolEntryState{ToolEntryCompleted}, Limit: 1,
+	entries, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: cc.Run.Scope, RunID: cc.Run.ID, ToolNames: []string{string(models.ControlToolReact)},
+		States: []models.ToolEntryState{models.ToolEntryCompleted}, Limit: 1,
 	})
 	if err != nil {
 		return false, err
@@ -682,8 +683,8 @@ func (x *ControlExecutor) runReacted(ctx context.Context, cc agentrun.ControlCon
 
 // runChangedSomethingStatuses are the action call states in which the call
 // ran: compensation undoes a change that still happened.
-var runChangedSomethingStatuses = []ActionCallStatus{
-	ActionCallStatusSucceeded, ActionCallStatusCompensating, ActionCallStatusCompensated,
+var runChangedSomethingStatuses = []models.ActionCallStatus{
+	models.ActionCallStatusSucceeded, models.ActionCallStatusCompensating, models.ActionCallStatusCompensated,
 }
 
 // runChangedSomething reports whether the Run, or any Run under the same
@@ -691,7 +692,7 @@ var runChangedSomethingStatuses = []ActionCallStatus{
 // is not none or read, granted or approved. It runs only for a silent routine
 // final, never on a step.
 func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
-	actions, ok := x.Portfolio.(ActionStore)
+	actions, ok := x.Portfolio.(models.ActionStore)
 	if !ok {
 		return false, errors.New("control executor portfolio is not an action store; a silent routine final needs the Run's calls")
 	}
@@ -702,7 +703,7 @@ func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc agentrun.C
 	}
 	runIDs := []string{cc.Run.ID}
 	for offset := 0; ; offset += pageSize {
-		runs, err := x.Portfolio.ListAgentRuns(ctx, AgentRunFilter{Scope: cc.Run.Scope, RootRunID: rootID, Limit: pageSize, Offset: offset})
+		runs, err := x.Portfolio.ListAgentRuns(ctx, models.AgentRunFilter{Scope: cc.Run.Scope, RootRunID: rootID, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return false, err
 		}
@@ -717,7 +718,7 @@ func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc agentrun.C
 	}
 	for _, runID := range runIDs {
 		for offset := 0; ; offset += pageSize {
-			calls, err := actions.ListActionCalls(ctx, ActionFilter{
+			calls, err := actions.ListActionCalls(ctx, models.ActionFilter{
 				Scope: cc.Run.Scope, RunID: runID, Status: runChangedSomethingStatuses, Limit: pageSize, Offset: offset,
 			})
 			if err != nil {
@@ -763,7 +764,7 @@ func (x *ControlExecutor) finalPark(ctx context.Context, cc agentrun.ControlCont
 	if !governed {
 		return nil, nil
 	}
-	actions, ok := x.Portfolio.(ActionStore)
+	actions, ok := x.Portfolio.(models.ActionStore)
 	if !ok {
 		return nil, errors.New("control executor portfolio is not an action store; the final answer park needs the Run's calls")
 	}
@@ -806,15 +807,15 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.Contro
 	if cc.Run == nil || cc.Step == nil {
 		return ControlResult{}, errors.New("plain-text final needs its Run and step")
 	}
-	if cc.Run.Status != AgentRunStatusRunning || cc.WorkerID == "" || cc.Run.LeaseOwner != cc.WorkerID {
-		return ControlResult{}, ErrLeaseLost
+	if cc.Run.Status != models.AgentRunStatusRunning || cc.WorkerID == "" || cc.Run.LeaseOwner != cc.WorkerID {
+		return ControlResult{}, models.ErrLeaseLost
 	}
 	if cc.Assistant != nil && cc.Assistant.Assistant != nil && len(cc.Assistant.Assistant.ToolCalls) > 0 {
 		return ControlResult{}, errors.New("plain-text final on an assistant entry with tool calls")
 	}
 	cc.Entry = nil
 	mode := cc.Authority.EffectiveFinalMode()
-	finalOffered := modelstep.ControlToolOffered(ControlToolFinalAnswer, cc.Authority)
+	finalOffered := modelstep.ControlToolOffered(models.ControlToolFinalAnswer, cc.Authority)
 	trimmed := strings.TrimSpace(text)
 	// 1. Repair: the text is the tool's arguments as one JSON object (kernel
 	// fields only: extension fields need a tool entry to be published from).
@@ -870,18 +871,18 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.Contro
 
 // finalToolRequired names the final tool a plain reply cannot replace in
 // mode ("" when plain text is a final answer).
-func finalToolRequired(mode agentrun.FinalAnswerMode) ControlToolName {
+func finalToolRequired(mode agentrun.FinalAnswerMode) models.ControlToolName {
 	switch mode {
 	case agentrun.FinalModeDecision:
-		return ControlToolRequestDecision
+		return models.ControlToolRequestDecision
 	case agentrun.FinalModeReview:
-		return ControlToolCompletionReview
+		return models.ControlToolCompletionReview
 	}
 	return ""
 }
 
-func (r controlRegistry) finalToolRequiredFields(tool ControlToolName, a agentrun.ControlAuthority) string {
-	if tool == ControlToolFinalAnswer {
+func (r controlRegistry) finalToolRequiredFields(tool models.ControlToolName, a agentrun.ControlAuthority) string {
+	if tool == models.ControlToolFinalAnswer {
 		return strings.Join(finalRequiredFields(a), ", ")
 	}
 	h, ok := r[tool]
@@ -901,7 +902,7 @@ func (r controlRegistry) finalToolRequiredFields(tool ControlToolName, a agentru
 // FinalOutputPublicationFor returns the publish request for the host
 // extension fields of an accepted turn_final_answer (SPEC §3.3 step 4), or nil
 // when the call carried none. entry is the final tool entry.
-func FinalOutputPublicationFor(run *AgentRun, answer agentrun.FinalAnswer, entry *SessionEntry, publisher agentrun.FinalOutputPublisher) (*agentrun.FinalOutputPublication, error) {
+func FinalOutputPublicationFor(run *models.AgentRun, answer agentrun.FinalAnswer, entry *models.SessionEntry, publisher agentrun.FinalOutputPublisher) (*agentrun.FinalOutputPublication, error) {
 	if publisher == nil || answer.ToolEntryID == "" {
 		return nil, nil
 	}

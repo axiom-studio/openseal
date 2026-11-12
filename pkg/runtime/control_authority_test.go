@@ -7,6 +7,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -31,7 +32,7 @@ func offeredControlTools(a agentrun.ControlAuthority) []string {
 
 // controlAuthorityTeamCatalog is a Team whose roster holds the current Agent
 // (lead) and one delegation target (reviewer).
-func controlAuthorityTeamCatalog(scope Scope) *resolverCatalog {
+func controlAuthorityTeamCatalog(scope models.Scope) *resolverCatalog {
 	ref := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	lead := &kernelagent.AgentDeployment{ID: "lead", Scope: ref, DefinitionID: "lead-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}
 	reviewer := &kernelagent.AgentDeployment{ID: "reviewer", Scope: ref, DefinitionID: "reviewer-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}
@@ -52,10 +53,10 @@ func controlAuthorityTeamCatalog(scope Scope) *resolverCatalog {
 	}
 }
 
-func controlAuthorityTeamRun(scope Scope, context map[string]interface{}) *AgentRun {
-	return &AgentRun{
-		ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
-		AssignedAgentID: "lead", Goal: "Coordinate a release", Source: RunSourceManual, Context: context,
+func controlAuthorityTeamRun(scope models.Scope, context map[string]interface{}) *models.AgentRun {
+	return &models.AgentRun{
+		ID: "run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"},
+		AssignedAgentID: "lead", Goal: "Coordinate a release", Source: models.RunSourceManual, Context: context,
 	}
 }
 
@@ -70,25 +71,25 @@ func resolveControlAuthorityForTest(t *testing.T, in ControlAuthorityInput) agen
 
 // claimedForegroundChatRun schedules and claims the foreground conversation
 // Run for one user message in an Agent's chat.
-func claimedForegroundChatRun(t *testing.T, store *sqlite.Store) *AgentRun {
+func claimedForegroundChatRun(t *testing.T, store *sqlite.Store) *models.AgentRun {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "control-authority"}
+	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	conversations := conversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "control-authority-chat",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "control-authority-chat",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion,
+	message := conversationruntest.PostMessage(t, conversations, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion,
 		"Review the release in the background", "control-authority-message")
 	scheduled, _, err := conversationruntest.NewScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
 	if err != nil || scheduled == nil || scheduled.Run == nil {
 		t.Fatalf("schedule foreground: %#v %v", scheduled, err)
 	}
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
-		Scope: scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{
+		Scope: scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
 		t.Fatalf("claim foreground: %#v %v", claimed, err)
@@ -96,13 +97,13 @@ func claimedForegroundChatRun(t *testing.T, store *sqlite.Store) *AgentRun {
 	return claimed
 }
 
-func chatAuthorityInput(store *sqlite.Store, run *AgentRun) ControlAuthorityInput {
+func chatAuthorityInput(store *sqlite.Store, run *models.AgentRun) ControlAuthorityInput {
 	return ControlAuthorityInput{
 		Run: run, DeploymentID: "agent", ConversationTasks: store, Runs: store, Conversations: store,
 	}
 }
 
-func assertOnlyFinalTool(t *testing.T, authority agentrun.ControlAuthority, mode agentrun.FinalAnswerMode, tool ControlToolName) {
+func assertOnlyFinalTool(t *testing.T, authority agentrun.ControlAuthority, mode agentrun.FinalAnswerMode, tool models.ControlToolName) {
 	t.Helper()
 	if authority.FinalMode != mode {
 		t.Fatalf("final mode = %q, want %q", authority.FinalMode, mode)
@@ -117,27 +118,27 @@ func assertOnlyFinalTool(t *testing.T, authority agentrun.ControlAuthority, mode
 }
 
 func TestDecisionRunOffersOnlyDecisionTool(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "control-authority"}
+	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	run := controlAuthorityTeamRun(scope, map[string]interface{}{agentrun.AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request"}})
 	authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{
 		Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
 		SkillPromptRefs: []string{"skill:prompt"}, Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
-	assertOnlyFinalTool(t, authority, agentrun.FinalModeDecision, ControlToolRequestDecision)
+	assertOnlyFinalTool(t, authority, agentrun.FinalModeDecision, models.ControlToolRequestDecision)
 }
 
 func TestReviewRunOffersOnlyReviewTool(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "control-authority"}
+	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	run := controlAuthorityTeamRun(scope, map[string]interface{}{agentrun.AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"}})
 	authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{
 		Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
 		SkillPromptRefs: []string{"skill:prompt"}, Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
-	assertOnlyFinalTool(t, authority, agentrun.FinalModeReview, ControlToolCompletionReview)
+	assertOnlyFinalTool(t, authority, agentrun.FinalModeReview, models.ControlToolCompletionReview)
 }
 
 func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "control-authority"}
+	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	catalog := controlAuthorityTeamCatalog(scope)
 
 	// The same Team Run outside a task may fork to and delegate to the reviewer.
@@ -150,7 +151,7 @@ func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
 	}
 
 	worker := resolveControlAuthorityForTest(t, ControlAuthorityInput{
-		Run: controlAuthorityTeamRun(scope, map[string]interface{}{ConversationTaskContextKey: "task-1"}), DeploymentID: "lead", Catalog: catalog,
+		Run: controlAuthorityTeamRun(scope, map[string]interface{}{models.ConversationTaskContextKey: "task-1"}), DeploymentID: "lead", Catalog: catalog,
 		Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
 	if !worker.ForkAllowed || len(worker.ForkTargets) != 0 || len(worker.DelegateTargets) != 0 || !worker.TaskWork {
@@ -166,16 +167,16 @@ func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
 }
 
 func TestForkChildCannotFork(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "control-authority"}
+	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	run := controlAuthorityTeamRun(scope, map[string]interface{}{})
-	run.Source = RunSourceFork
+	run.Source = models.RunSourceFork
 	run.ParentRunID = "parent"
 	authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope)})
 	if authority.ForkAllowed || len(authority.ForkTargets) != 0 {
 		t.Fatalf("fork child may fork: %#v", authority)
 	}
 	for _, name := range offeredControlTools(authority) {
-		if name == string(ControlToolFork) {
+		if name == string(models.ControlToolFork) {
 			t.Fatal("control_fork offered to a fork child")
 		}
 	}
@@ -193,17 +194,17 @@ func TestVoiceCallDisablesTaskStart(t *testing.T) {
 	if typed.TaskStart == nil || !typed.TaskStart.CanStart || typed.VoiceCallStarted {
 		t.Fatalf("typed chat task authority = %#v", typed.TaskStart)
 	}
-	if !slices.Contains(offeredControlTools(typed), string(ControlToolStartTask)) {
+	if !slices.Contains(offeredControlTools(typed), string(models.ControlToolStartTask)) {
 		t.Fatalf("typed chat offered = %v", offeredControlTools(typed))
 	}
 
-	voice := cloneAgentRun(run)
+	voice := models.CloneAgentRun(run)
 	voice.Context["voiceCallStarted"] = true
 	spoken := resolveControlAuthorityForTest(t, chatAuthorityInput(store, voice))
 	if !spoken.VoiceCallStarted || spoken.TaskStart == nil || spoken.TaskStart.CanStart {
 		t.Fatalf("voice call task authority = %#v voice=%v", spoken.TaskStart, spoken.VoiceCallStarted)
 	}
-	if slices.Contains(offeredControlTools(spoken), string(ControlToolStartTask)) {
+	if slices.Contains(offeredControlTools(spoken), string(models.ControlToolStartTask)) {
 		t.Fatalf("voice call offered = %v", offeredControlTools(spoken))
 	}
 }
@@ -216,7 +217,7 @@ func TestChatReplyCannotWait(t *testing.T) {
 		t.Fatal("a chat reply may wait")
 	}
 	// The answering Agent of the chat may react, ask the user and broadcast.
-	if !chat.CanReact || !chat.CanAskUser || !chat.BroadcastAllowed || chat.ApprovalMode != DefaultConversationApprovalMode || chat.ExternalChannelReply {
+	if !chat.CanReact || !chat.CanAskUser || !chat.BroadcastAllowed || chat.ApprovalMode != models.DefaultConversationApprovalMode || chat.ExternalChannelReply {
 		t.Fatalf("chat authority = %#v", chat)
 	}
 	got := offeredControlTools(chat)
@@ -233,7 +234,7 @@ func TestChatReplyCannotWait(t *testing.T) {
 	}
 
 	background := resolveControlAuthorityForTest(t, ControlAuthorityInput{
-		Run:          &AgentRun{ID: "routine", Scope: run.Scope, Kind: RunKindAgentWork, Owner: run.Owner, AssignedAgentID: "agent", Context: map[string]interface{}{}},
+		Run:          &models.AgentRun{ID: "routine", Scope: run.Scope, Kind: models.RunKindAgentWork, Owner: run.Owner, AssignedAgentID: "agent", Context: map[string]interface{}{}},
 		DeploymentID: "agent", Runs: store, Conversations: store, ConversationTasks: store,
 	})
 	if !background.CanWait || background.CanReact || background.CanAskUser || background.BroadcastAllowed {
@@ -242,7 +243,7 @@ func TestChatReplyCannotWait(t *testing.T) {
 }
 
 func TestControlAuthorityFinalModesAndDeterministicRuns(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "control-authority"}
+	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	for name, tc := range map[string]struct {
 		context map[string]interface{}
 		mode    agentrun.FinalAnswerMode

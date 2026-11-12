@@ -9,13 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 type askUserTestStore interface {
-	KernelStore
-	ConversationStore
+	models.KernelStore
+	models.ConversationStore
 }
 
 // askUserCall is one claimed Run with a finished, applied step whose assistant
@@ -23,16 +25,16 @@ type askUserTestStore interface {
 type askUserCall struct {
 	store   askUserTestStore
 	worker  string
-	run     *AgentRun // the claimed Run, LastAppliedTurn = the step
-	session *AgentSession
-	step    *AgentTurn
-	entry   *SessionEntry
+	run     *models.AgentRun // the claimed Run, LastAppliedTurn = the step
+	session *models.AgentSession
+	step    *models.AgentTurn
+	entry   *models.SessionEntry
 	exec    *ControlExecutor
 }
 
-func askUserSessions(t *testing.T, store askUserTestStore) AgentSessionStore {
+func askUserSessions(t *testing.T, store askUserTestStore) models.AgentSessionStore {
 	t.Helper()
-	sessions, ok := store.(AgentSessionStore)
+	sessions, ok := store.(models.AgentSessionStore)
 	if !ok {
 		t.Fatalf("%T is not a session store", store)
 	}
@@ -40,22 +42,22 @@ func askUserSessions(t *testing.T, store askUserTestStore) AgentSessionStore {
 }
 
 // newAskUserCall records an ask_user call on claimed, a Run leased by worker.
-func newAskUserCall(t *testing.T, store askUserTestStore, claimed *AgentRun, worker, question string) *askUserCall {
+func newAskUserCall(t *testing.T, store askUserTestStore, claimed *models.AgentRun, worker, question string) *askUserCall {
 	t.Helper()
 	arguments, _ := json.Marshal(map[string]string{"question": question})
 	return newAskUserCallWithArguments(t, store, claimed, worker, arguments)
 }
 
 // newAskUserCallWithArguments records an ask_user call with raw arguments.
-func newAskUserCallWithArguments(t *testing.T, store askUserTestStore, claimed *AgentRun, worker string, arguments json.RawMessage) *askUserCall {
+func newAskUserCallWithArguments(t *testing.T, store askUserTestStore, claimed *models.AgentRun, worker string, arguments json.RawMessage) *askUserCall {
 	t.Helper()
 	ctx := t.Context()
 	now := time.Now().UTC()
 	sessions := askUserSessions(t, store)
-	lease := AgentRunLeaseGuard{WorkerID: worker, Now: now}
-	var session *AgentSession
+	lease := models.AgentRunLeaseGuard{WorkerID: worker, Now: now}
+	var session *models.AgentSession
 	if claimed.SessionID == "" {
-		opened, err := sessions.CreateRunAgentSession(ctx, CreateRunAgentSessionRequest{
+		opened, err := sessions.CreateRunAgentSession(ctx, models.CreateRunAgentSessionRequest{
 			Scope: claimed.Scope, OwnerRunID: claimed.ID, AgentID: claimed.AssignedAgentID, Lease: lease, Now: now,
 		})
 		if err != nil {
@@ -68,21 +70,21 @@ func newAskUserCallWithArguments(t *testing.T, store askUserTestStore, claimed *
 	sequence := claimed.LastAppliedTurn + 1
 	stepID := fmt.Sprintf("%s-step-%d", claimed.ID, sequence)
 	callID := fmt.Sprintf("call-%d", sequence)
-	assistant := &SessionEntry{
-		ID: SessionEntryID(session.ID, AssistantEntryKey(stepID)), RunID: claimed.ID, StepID: stepID, Step: sequence,
-		Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-			Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,
-			ToolCalls: []ModelToolCall{{ID: callID, Name: string(ControlToolAskUser), Arguments: arguments}},
+	assistant := &models.SessionEntry{
+		ID: models.SessionEntryID(session.ID, models.AssistantEntryKey(stepID)), RunID: claimed.ID, StepID: stepID, Step: sequence,
+		Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+			Provider: models.ModelStepProviderAnthropic, Model: "claude-x", StopReason: models.ModelStopToolCalls,
+			ToolCalls: []models.ModelToolCall{{ID: callID, Name: string(models.ControlToolAskUser), Arguments: arguments}},
 		},
 	}
-	tool := &SessionEntry{
-		ID: SessionEntryID(session.ID, ToolEntryKey(stepID, callID)), RunID: claimed.ID, StepID: stepID, Step: sequence,
-		Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: callID,
-		Tool: &ToolEntry{Name: string(ControlToolAskUser), Arguments: arguments, SideEffect: ToolSideEffectWrite},
+	tool := &models.SessionEntry{
+		ID: models.SessionEntryID(session.ID, models.ToolEntryKey(stepID, callID)), RunID: claimed.ID, StepID: stepID, Step: sequence,
+		Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: callID,
+		Tool: &models.ToolEntry{Name: string(models.ControlToolAskUser), Arguments: arguments, SideEffect: models.ToolSideEffectWrite},
 	}
-	appended, err := sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+	appended, err := sessions.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: claimed.Scope, SessionID: session.ID, RunID: claimed.ID, Lease: &lease,
-		Entries: []*SessionEntry{assistant, tool}, Now: now,
+		Entries: []*models.SessionEntry{assistant, tool}, Now: now,
 	})
 	if err != nil {
 		t.Fatalf("append ask_user step: %v", err)
@@ -94,7 +96,7 @@ func newAskUserCallWithArguments(t *testing.T, store askUserTestStore, claimed *
 	run.LastAppliedTurn = sequence // FinishTurn + applyStep, as the loop does before settle
 	return &askUserCall{
 		store: store, worker: worker, run: run, session: session,
-		step:  &AgentTurn{ID: stepID, RunID: run.ID, Sequence: sequence, Status: AgentTurnStatusCompleted},
+		step:  &models.AgentTurn{ID: stepID, RunID: run.ID, Sequence: sequence, Status: models.AgentTurnStatusCompleted},
 		entry: appended.Entries[1],
 		exec:  &ControlExecutor{Portfolio: store, Sessions: sessions, Conversations: conversation.NewConversationService(store)},
 	}
@@ -102,26 +104,26 @@ func newAskUserCallWithArguments(t *testing.T, store askUserTestStore, claimed *
 
 // openAskUserSession gets the Run's bound session, opening a conversation
 // lane session on its first claim.
-func openAskUserSession(t *testing.T, sessions AgentSessionStore, run *AgentRun, lease AgentRunLeaseGuard) *AgentSession {
+func openAskUserSession(t *testing.T, sessions models.AgentSessionStore, run *models.AgentRun, lease models.AgentRunLeaseGuard) *models.AgentSession {
 	t.Helper()
 	session, err := sessions.GetAgentSession(t.Context(), run.Scope, run.SessionID)
 	if err == nil {
 		return session
 	}
-	if !errors.Is(err, ErrAgentSessionNotFound) {
+	if !errors.Is(err, models.ErrAgentSessionNotFound) {
 		t.Fatalf("get session: %v", err)
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	thread, _ := run.Context["threadRootMessageId"].(string)
 	for _, root := range []string{"", thread} {
-		opened, err := sessions.OpenConversationAgentSession(t.Context(), OpenConversationAgentSessionRequest{
+		opened, err := sessions.OpenConversationAgentSession(t.Context(), models.OpenConversationAgentSessionRequest{
 			Scope: run.Scope, ConversationID: conversationID, ThreadRootID: root, AgentID: run.AssignedAgentID,
 			RunID: run.ID, Lease: lease, Now: lease.Now,
 		})
 		if err == nil {
 			return opened.Session
 		}
-		if !errors.Is(err, ErrSessionMoved) {
+		if !errors.Is(err, models.ErrSessionMoved) {
 			t.Fatalf("open conversation session: %v", err)
 		}
 	}
@@ -149,13 +151,13 @@ func (c *askUserCall) settle(t *testing.T) ControlResult {
 }
 
 // park applies the settle's park the way the loop does.
-func (c *askUserCall) park(t *testing.T, park *agentrun.LoopPark) *AgentRun {
+func (c *askUserCall) park(t *testing.T, park *agentrun.LoopPark) *models.AgentRun {
 	t.Helper()
 	current, err := c.store.GetAgentRun(t.Context(), c.run.Scope, c.run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	parked, _, err := NewRunActivityService(c.store, c.store).TransitionRun(t.Context(), c.run.Scope, c.run.ID, RunTransitionRequest{
+	parked, _, err := activity.NewRunActivityService(c.store, c.store).TransitionRun(t.Context(), c.run.Scope, c.run.ID, activity.RunTransitionRequest{
 		ExpectedRevision: current.Revision, Status: park.Status, WakeCondition: park.Wake, LeaseOwner: c.worker,
 		AppliedTurn: c.step.Sequence, EventType: "run.waiting_for_user", Summary: park.Summary,
 	})
@@ -166,7 +168,7 @@ func (c *askUserCall) park(t *testing.T, park *agentrun.LoopPark) *AgentRun {
 }
 
 // askUserParked settles an ask_user call of a claimed Run and parks it.
-func askUserParked(t *testing.T, store askUserTestStore, claimed *AgentRun, worker, question string) (*AgentRun, *askUserCall) {
+func askUserParked(t *testing.T, store askUserTestStore, claimed *models.AgentRun, worker, question string) (*models.AgentRun, *askUserCall) {
 	t.Helper()
 	call := newAskUserCall(t, store, claimed, worker, question)
 	result := call.settle(t)
@@ -177,7 +179,7 @@ func askUserParked(t *testing.T, store askUserTestStore, claimed *AgentRun, work
 }
 
 // resume claims the Run again and resumes the ask_user entry.
-func (c *askUserCall) resume(t *testing.T) (ControlResume, *AgentRun) {
+func (c *askUserCall) resume(t *testing.T) (ControlResume, *models.AgentRun) {
 	t.Helper()
 	claimed := claimAskUserRun(t, c.store, c.run, c.worker)
 	entry, err := askUserSessions(t, c.store).GetSessionEntry(t.Context(), claimed.Scope, c.entry.ID)
@@ -195,9 +197,9 @@ func (c *askUserCall) resume(t *testing.T) (ControlResume, *AgentRun) {
 	return resumed, claimed
 }
 
-func claimAskUserRun(t *testing.T, store askUserTestStore, run *AgentRun, worker string) *AgentRun {
+func claimAskUserRun(t *testing.T, store askUserTestStore, run *models.AgentRun, worker string) *models.AgentRun {
 	t.Helper()
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{
 		Scope: run.Scope, Kind: run.Kind, WorkerID: worker, Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
@@ -206,7 +208,7 @@ func claimAskUserRun(t *testing.T, store askUserTestStore, run *AgentRun, worker
 	return claimed
 }
 
-func askUserResultValue(t *testing.T, entry *SessionEntry) map[string]interface{} {
+func askUserResultValue(t *testing.T, entry *models.SessionEntry) map[string]interface{} {
 	t.Helper()
 	if entry == nil || entry.Tool == nil || entry.Tool.Result == nil || len(entry.Tool.Result.Content) != 1 {
 		t.Fatalf("entry has no result: %#v", entry)
@@ -234,27 +236,27 @@ func TestAskUserPostsQuestionAndParks(t *testing.T) {
 		f := claimedForegroundRun(t, store)
 		call := newAskUserCall(t, store, f.run, "foreground-worker", "  "+askUserTestQuestion+"  ")
 		result := call.settle(t)
-		if result.Kind != ControlParked || result.Park.Status != AgentRunStatusWaitingForEvent ||
+		if result.Kind != ControlParked || result.Park.Status != models.AgentRunStatusWaitingForEvent ||
 			result.Park.Wake.Type != "user_message" || result.Park.Wake.Reference != call.entry.ID {
 			t.Fatalf("park = %#v", result)
 		}
-		if call.entry.State != ToolEntryAwaitingEvent || call.entry.Tool.Wait == nil || call.entry.Tool.Wait.EventWaitID != call.entry.ID {
+		if call.entry.State != models.ToolEntryAwaitingEvent || call.entry.Tool.Wait == nil || call.entry.Tool.Wait.EventWaitID != call.entry.ID {
 			t.Fatalf("entry = %#v", call.entry)
 		}
 		key := "conversation-clarification:" + f.run.ID + ":" + call.entry.ID
 		meta, err := DecodeControlEntryMeta(call.entry)
-		if err != nil || meta == nil || meta.Kind != ControlToolAskUser || meta.QuestionMessageID != stableConversationID(f.run.Scope, key, "message") {
+		if err != nil || meta == nil || meta.Kind != models.ControlToolAskUser || meta.QuestionMessageID != models.StableConversationID(f.run.Scope, key, "message") {
 			t.Fatalf("meta = %#v %v", meta, err)
 		}
 		question, err := store.FindChannelMessageByIdempotencyKey(t.Context(), f.run.Scope, f.conversation.ID, key)
 		if err != nil || question == nil || question.ID != meta.QuestionMessageID || question.Content != askUserTestQuestion ||
-			question.Intent != MessageIntentQuestion || !question.RequiresResponse || question.ReplyToMessageID != f.trigger.ID ||
-			question.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: f.run.AssignedAgentID}) ||
-			len(question.References) != 1 || question.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: f.run.ID}) {
+			question.Intent != models.MessageIntentQuestion || !question.RequiresResponse || question.ReplyToMessageID != f.trigger.ID ||
+			question.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: f.run.AssignedAgentID}) ||
+			len(question.References) != 1 || question.References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRun, ID: f.run.ID}) {
 			t.Fatalf("question = %#v %v", question, err)
 		}
 		parked := call.park(t, result.Park)
-		if parked.Status != AgentRunStatusWaitingForEvent || parked.WakeCondition == nil || parked.WakeCondition.Type != "user_message" ||
+		if parked.Status != models.AgentRunStatusWaitingForEvent || parked.WakeCondition == nil || parked.WakeCondition.Type != "user_message" ||
 			parked.WakeCondition.Reference != call.entry.ID || parkedQuestionKey(parked) != key {
 			t.Fatalf("parked run is not a question wait: %#v", parked)
 		}
@@ -262,7 +264,7 @@ func TestAskUserPostsQuestionAndParks(t *testing.T) {
 		if _, err := f.scheduler.ReconcileScope(t.Context(), f.run.Scope); err != nil {
 			t.Fatal(err)
 		}
-		messages, _ := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: f.run.Scope, ConversationID: f.conversation.ID, Limit: 100})
+		messages, _ := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: f.run.Scope, ConversationID: f.conversation.ID, Limit: 100})
 		if len(messages) != 2 {
 			t.Fatalf("messages = %d, want trigger + question", len(messages))
 		}
@@ -276,8 +278,8 @@ func TestAskUserResumeWithoutAnswerRepostsAndReparks(t *testing.T) {
 	// Crash after the entry transition, before the post and the park: the
 	// next claim resumes the awaiting entry.
 	cc := call.context()
-	cc.Arguments = &askUserArgs{Question: askUserTestQuestion}
-	entry, err := call.exec.transitionControlEntry(t.Context(), cc, ToolEntryAwaitingEvent, &ToolEntryWait{EventWaitID: call.entry.ID, Reason: askUserWaitReason}, nil, nil)
+	cc.Arguments = &models.AskUserArgs{Question: askUserTestQuestion}
+	entry, err := call.exec.transitionControlEntry(t.Context(), cc, models.ToolEntryAwaitingEvent, &models.ToolEntryWait{EventWaitID: call.entry.ID, Reason: askUserWaitReason}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,12 +298,12 @@ func TestAskUserResumeWithoutAnswerRepostsAndReparks(t *testing.T) {
 // conflictingQuestionStore makes every question post lose the conversation
 // revision race.
 type conflictingQuestionStore struct {
-	ConversationStore
+	models.ConversationStore
 }
 
-func (s conflictingQuestionStore) CommitChannelMessage(ctx context.Context, record ChannelMessageCommitRecord) (*ChannelMessageCommitResult, error) {
+func (s conflictingQuestionStore) CommitChannelMessage(ctx context.Context, record models.ChannelMessageCommitRecord) (*models.ChannelMessageCommitResult, error) {
 	if strings.HasPrefix(record.Message.IdempotencyKey, "conversation-clarification:") {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	return s.ConversationStore.CommitChannelMessage(ctx, record)
 }
@@ -324,7 +326,7 @@ func TestAskUserQuestionReconcilerRepostsFromEntry(t *testing.T) {
 			t.Fatal("question text leaked into Run output")
 		}
 		question := f.question(t)
-		if question.Content != askUserTestQuestion || question.ID != stableConversationID(f.run.Scope, key, "message") {
+		if question.Content != askUserTestQuestion || question.ID != models.StableConversationID(f.run.Scope, key, "message") {
 			t.Fatalf("reconciled question = %#v", question)
 		}
 	})
@@ -336,15 +338,15 @@ func TestAskUserAnswerFromOtherActorIgnored(t *testing.T) {
 	parked, call := askUserParked(t, store, f.run, "foreground-worker", askUserTestQuestion)
 	f.run = parked
 	question := f.question(t)
-	foreign := f.post(t, conversation.PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "someone-else"},
-		Intent: MessageIntentAnswer, Content: "Use the admin page.", ResolvesMessageID: question.ID, IdempotencyKey: "foreign-answer"})
+	foreign := f.post(t, conversation.PostChannelMessageRequest{Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "someone-else"},
+		Intent: models.MessageIntentAnswer, Content: "Use the admin page.", ResolvesMessageID: question.ID, IdempotencyKey: "foreign-answer"})
 	// An explicit reply to the question is a clarification attempt, but a
 	// foreign actor's answer wakes nothing and starts nothing.
 	if result, _, err := f.scheduler.ScheduleMessage(t.Context(), f.run.Scope, f.conversation.ID, foreign.ID); err != nil || result != nil {
 		t.Fatalf("foreign answer accepted: %#v %v", result, err)
 	}
 	current := f.current(t)
-	if current.Status != AgentRunStatusWaitingForEvent || len(current.PendingInterventions) != 0 {
+	if current.Status != models.AgentRunStatusWaitingForEvent || len(current.PendingInterventions) != 0 {
 		t.Fatalf("foreign answer woke the Run: %#v", current)
 	}
 	if answer := askUserAnswer(current, call.entry, question.ID); answer != nil {
@@ -353,14 +355,14 @@ func TestAskUserAnswerFromOtherActorIgnored(t *testing.T) {
 }
 
 func TestAskUserWithoutConversationIsRefused(t *testing.T) {
-	f := newControlFixture(t, []agentrun.LoopToolCall{{ID: "ask", Name: string(ControlToolAskUser), Arguments: json.RawMessage(`{"question":"Which one?"}`)}})
+	f := newControlFixture(t, []agentrun.LoopToolCall{{ID: "ask", Name: string(models.ControlToolAskUser), Arguments: json.RawMessage(`{"question":"Which one?"}`)}})
 	f.exec.handlers = nil // the real registry
 	f.exec.Reporting = f.store
 	result, err := f.exec.Settle(f.ctx, f.context("ask", agentrun.ControlAuthority{CanAskUser: true}))
-	if err != nil || result.Kind != ControlContinue || result.Entry.State != ToolEntryError {
+	if err != nil || result.Kind != ControlContinue || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("settle = %#v %v", result, err)
 	}
-	requireControlError(t, result.Entry.Tool.Result, ToolResultRefused, "cannot_post")
+	requireControlError(t, result.Entry.Tool.Result, models.ToolResultRefused, "cannot_post")
 }
 
 func TestAskUserArgumentsAreValidated(t *testing.T) {
@@ -370,7 +372,7 @@ func TestAskUserArgumentsAreValidated(t *testing.T) {
 		}
 	}
 	value, err := (askUserHandler{}).Decode(json.RawMessage(`{"question":"  Which one?  "}`))
-	if err != nil || value.(*askUserArgs).Question != "Which one?" {
+	if err != nil || value.(*models.AskUserArgs).Question != "Which one?" {
 		t.Fatalf("decode = %#v %v", value, err)
 	}
 }

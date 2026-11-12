@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -13,8 +14,8 @@ import (
 // conversation that holds one user message.
 type interactionFixture struct {
 	*controlFixture
-	conversation *Conversation
-	message      *ChannelMessage
+	conversation *models.Conversation
+	message      *models.ChannelMessage
 	clock        time.Time
 }
 
@@ -31,14 +32,14 @@ func newInteractionFixture(t *testing.T, calls []agentrun.LoopToolCall) *interac
 	}
 	posted, err := conversations.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "maya"},
-		ID:     reactTestMessageID, Intent: MessageIntentQuestion, Content: "Ship it?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "maya"},
+		ID:     reactTestMessageID, Intent: models.MessageIntentQuestion, Content: "Ship it?", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		IdempotencyKey: "ship",
 	})
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	f.run.Context = map[string]interface{}{conversationRunContextConversationID: conversation.ID}
+	f.run.Context = map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID}
 	fx := &interactionFixture{controlFixture: f, conversation: conversation, message: posted.Message, clock: f.now}
 	f.exec.Conversations = conversations
 	f.exec.handlers = nil // the real handlers
@@ -48,10 +49,10 @@ func newInteractionFixture(t *testing.T, calls []agentrun.LoopToolCall) *interac
 
 func reactCall(id, messageID, emoji string) agentrun.LoopToolCall {
 	raw, _ := json.Marshal(map[string]string{"messageId": messageID, "emoji": emoji})
-	return agentrun.LoopToolCall{ID: id, Name: string(ControlToolReact), Arguments: raw}
+	return agentrun.LoopToolCall{ID: id, Name: string(models.ControlToolReact), Arguments: raw}
 }
 
-func controlResultValue(t *testing.T, entry *SessionEntry) map[string]interface{} {
+func controlResultValue(t *testing.T, entry *models.SessionEntry) map[string]interface{} {
 	t.Helper()
 	if entry == nil || entry.Tool == nil || entry.Tool.Result == nil || len(entry.Tool.Result.Content) != 1 {
 		t.Fatalf("entry has no single-part result: %#v", entry)
@@ -76,7 +77,7 @@ func TestReactAddsReactionAsAnsweringAgent(t *testing.T) {
 		t.Fatalf("inline = %#v, %v", result, err)
 	}
 	stored := f.stored("r1")
-	if stored.State != ToolEntryCompleted {
+	if stored.State != models.ToolEntryCompleted {
 		t.Fatalf("state = %s", stored.State)
 	}
 	value := controlResultValue(t, stored)
@@ -87,7 +88,7 @@ func TestReactAddsReactionAsAnsweringAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ConversationParticipant{Type: ConversationParticipantAgent, ID: f.run.AssignedAgentID}
+	want := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: f.run.AssignedAgentID}
 	if len(read.Reactions) != 1 || read.Reactions[0].Emoji != "👀" || len(read.Reactions[0].Actors) != 1 || read.Reactions[0].Actors[0] != want {
 		t.Fatalf("reactions = %+v", read.Reactions)
 	}
@@ -104,7 +105,7 @@ func TestReactInvalidOrUnknownMessageIsError(t *testing.T) {
 			t.Fatalf("%s: %v", callID, err)
 		}
 		stored := f.stored(callID)
-		if stored.State != ToolEntryError || !stored.Tool.Result.IsError || controlResultValue(t, stored)["error"] != code {
+		if stored.State != models.ToolEntryError || !stored.Tool.Result.IsError || controlResultValue(t, stored)["error"] != code {
 			t.Fatalf("%s: state %s result %v", callID, stored.State, controlResultValue(t, stored))
 		}
 	}
@@ -124,12 +125,12 @@ func TestReactFourthInRunRefused(t *testing.T) {
 		}
 	}
 	for i := 0; i < 3; i++ {
-		if state := f.stored("r" + string(rune('1'+i))).State; state != ToolEntryCompleted {
+		if state := f.stored("r" + string(rune('1'+i))).State; state != models.ToolEntryCompleted {
 			t.Fatalf("reaction %d state = %s", i+1, state)
 		}
 	}
 	fourth := f.stored("r4")
-	if fourth.State != ToolEntryError || controlResultValue(t, fourth)["error"] != "reaction_limit" {
+	if fourth.State != models.ToolEntryError || controlResultValue(t, fourth)["error"] != "reaction_limit" {
 		t.Fatalf("fourth = %s %v", fourth.State, controlResultValue(t, fourth))
 	}
 	read, err := f.exec.Conversations.GetChannelMessage(f.ctx, f.run.Scope, f.conversation.ID, f.message.ID)
@@ -143,7 +144,7 @@ func TestReactOnlyReplyPostsNoMessage(t *testing.T) {
 	if _, err := f.exec.Inline(f.ctx, f.context("r1", reactAuthority)); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := f.exec.Conversations.ListChannelMessages(f.ctx, ChannelMessageFilter{Scope: f.run.Scope, ConversationID: f.conversation.ID})
+	messages, err := f.exec.Conversations.ListChannelMessages(f.ctx, models.ChannelMessageFilter{Scope: f.run.Scope, ConversationID: f.conversation.ID})
 	if err != nil || len(messages) != 1 {
 		t.Fatalf("messages = %d, %v", len(messages), err)
 	}
@@ -170,7 +171,7 @@ func TestReactNotOfferedOutsideConversation(t *testing.T) {
 
 func waitCall(id string, seconds int) agentrun.LoopToolCall {
 	raw, _ := json.Marshal(map[string]int{"seconds": seconds})
-	return agentrun.LoopToolCall{ID: id, Name: string(ControlToolWait), Arguments: raw}
+	return agentrun.LoopToolCall{ID: id, Name: string(models.ControlToolWait), Arguments: raw}
 }
 
 var waitAuthority = agentrun.ControlAuthority{CanWait: true}
@@ -190,13 +191,13 @@ func TestWaitSleepsAndResumesElapsed(t *testing.T) {
 	result := f.settleWait(t, "w")
 	wakeAt := f.clock.Add(90 * time.Second)
 	if result.Kind != ControlParked || result.Park == nil || result.Park.Committed ||
-		result.Park.Status != AgentRunStatusSleeping || result.Park.Wake == nil || result.Park.Wake.Type != "timer" ||
+		result.Park.Status != models.AgentRunStatusSleeping || result.Park.Wake == nil || result.Park.Wake.Type != "timer" ||
 		result.Park.Wake.WakeAt == nil || !result.Park.Wake.WakeAt.Equal(wakeAt) || result.Park.Wake.Reference != f.entries["w"].ID {
 		t.Fatalf("park = %#v", result.Park)
 	}
 	stored := f.entries["w"]
 	meta, err := DecodeControlEntryMeta(stored)
-	if err != nil || stored.State != ToolEntryAwaitingEvent || meta == nil || meta.Kind != ControlToolWait || meta.WakeAt == nil || !meta.WakeAt.Equal(wakeAt) {
+	if err != nil || stored.State != models.ToolEntryAwaitingEvent || meta == nil || meta.Kind != models.ControlToolWait || meta.WakeAt == nil || !meta.WakeAt.Equal(wakeAt) {
 		t.Fatalf("entry = %s %+v, %v", stored.State, meta, err)
 	}
 
@@ -214,7 +215,7 @@ func TestWaitSleepsAndResumesElapsed(t *testing.T) {
 	}
 	done := f.stored("w")
 	value := controlResultValue(t, done)
-	if done.State != ToolEntryCompleted || value["status"] != "elapsed" || value["waitedSeconds"] != float64(92) {
+	if done.State != models.ToolEntryCompleted || value["status"] != "elapsed" || value["waitedSeconds"] != float64(92) {
 		t.Fatalf("result = %s %v", done.State, value)
 	}
 }
@@ -223,7 +224,7 @@ func TestWaitWokenEarlyBySteering(t *testing.T) {
 	f := newInteractionFixture(t, []agentrun.LoopToolCall{waitCall("w", 600)})
 	f.settleWait(t, "w")
 	f.clock = f.clock.Add(100 * time.Second)
-	f.run.PendingInterventions = append(f.run.PendingInterventions, AgentRunIntervention{
+	f.run.PendingInterventions = append(f.run.PendingInterventions, models.AgentRunIntervention{
 		ID: "steer-1", Instruction: "Actually, check now.", CreatedAt: f.clock,
 	})
 	resumed, err := f.exec.Resume(f.ctx, f.context("w", waitAuthority))
@@ -232,7 +233,7 @@ func TestWaitWokenEarlyBySteering(t *testing.T) {
 	}
 	done := f.stored("w")
 	value := controlResultValue(t, done)
-	if done.State != ToolEntryCompleted || value["status"] != "woken_early" || value["reason"] != "new_message" || value["remainingSeconds"] != float64(500) {
+	if done.State != models.ToolEntryCompleted || value["status"] != "woken_early" || value["reason"] != "new_message" || value["remainingSeconds"] != float64(500) {
 		t.Fatalf("result = %s %v", done.State, value)
 	}
 }

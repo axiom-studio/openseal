@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -34,46 +37,46 @@ type operationCall struct {
 	t         *testing.T
 	ctx       context.Context
 	store     forkTestStore
-	sessions  AgentSessionStore
-	scope     Scope
-	run       *AgentRun
-	session   *AgentSession
-	step      *AgentTurn
-	assistant *SessionEntry
-	entry     *SessionEntry
+	sessions  models.AgentSessionStore
+	scope     models.Scope
+	run       *models.AgentRun
+	session   *models.AgentSession
+	step      *models.AgentTurn
+	assistant *models.SessionEntry
+	entry     *models.SessionEntry
 	exec      *ControlExecutor
 	authority agentrun.ControlAuthority
 }
 
-func newOperationCall(t *testing.T, store forkTestStore, setup func(scope Scope, req *CreateAgentRunRequest)) *operationCall {
+func newOperationCall(t *testing.T, store forkTestStore, setup func(scope models.Scope, req *models.CreateAgentRunRequest)) *operationCall {
 	t.Helper()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "op-" + uuid.NewString()[:8]}
-	req := CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a",
-		Goal: "engage the account", Source: RunSourceObjective, Context: map[string]interface{}{"projectId": "p1"},
+	scope := models.Scope{Kind: "tenant", ID: "op-" + uuid.NewString()[:8]}
+	req := models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a",
+		Goal: "engage the account", Source: models.RunSourceObjective, Context: map[string]interface{}{"projectId": "p1"},
 	}
 	if setup != nil {
 		setup(scope, &req)
 	}
-	created, err := NewPortfolioService(store).CreateAgentRun(ctx, req)
+	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: operationTestWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: operationTestWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != created.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	opened, err := store.CreateRunAgentSession(ctx, CreateRunAgentSessionRequest{
+	opened, err := store.CreateRunAgentSession(ctx, models.CreateRunAgentSessionRequest{
 		Scope: scope, OwnerRunID: claimed.ID, AgentID: claimed.AssignedAgentID,
-		Lease: AgentRunLeaseGuard{WorkerID: operationTestWorker, Now: now}, Now: now,
+		Lease: models.AgentRunLeaseGuard{WorkerID: operationTestWorker, Now: now}, Now: now,
 	})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	var reporting ConversationStore
-	if conversations, ok := store.(ConversationStore); ok {
+	var reporting models.ConversationStore
+	if conversations, ok := store.(models.ConversationStore); ok {
 		reporting = conversations
 	}
 	forks := agentrun.NewRunForkCoordinator(store)
@@ -92,24 +95,24 @@ func newOperationCall(t *testing.T, store forkTestStore, setup func(scope Scope,
 func (c *operationCall) addCall(n int64, arguments string) {
 	c.t.Helper()
 	now := time.Now().UTC()
-	lease := AgentRunLeaseGuard{WorkerID: operationTestWorker, Now: now}
+	lease := models.AgentRunLeaseGuard{WorkerID: operationTestWorker, Now: now}
 	stepID := fmt.Sprintf("%s-step-%d", c.run.ID, n)
 	callID := fmt.Sprintf("call-op-%d", n)
 	raw := json.RawMessage(arguments)
-	assistant := &SessionEntry{
-		ID: SessionEntryID(c.session.ID, AssistantEntryKey(stepID)), RunID: c.run.ID, StepID: stepID, Step: n,
-		Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-			Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,
-			ToolCalls: []ModelToolCall{{ID: callID, Name: string(ControlToolRunOperation), Arguments: raw}},
+	assistant := &models.SessionEntry{
+		ID: models.SessionEntryID(c.session.ID, models.AssistantEntryKey(stepID)), RunID: c.run.ID, StepID: stepID, Step: n,
+		Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+			Provider: models.ModelStepProviderAnthropic, Model: "claude-x", StopReason: models.ModelStopToolCalls,
+			ToolCalls: []models.ModelToolCall{{ID: callID, Name: string(models.ControlToolRunOperation), Arguments: raw}},
 		},
 	}
-	tool := &SessionEntry{
-		ID: SessionEntryID(c.session.ID, ToolEntryKey(stepID, callID)), RunID: c.run.ID, StepID: stepID, Step: n,
-		Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: callID,
-		Tool: &ToolEntry{Name: string(ControlToolRunOperation), Arguments: raw, SideEffect: ToolSideEffectWrite},
+	tool := &models.SessionEntry{
+		ID: models.SessionEntryID(c.session.ID, models.ToolEntryKey(stepID, callID)), RunID: c.run.ID, StepID: stepID, Step: n,
+		Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: callID,
+		Tool: &models.ToolEntry{Name: string(models.ControlToolRunOperation), Arguments: raw, SideEffect: models.ToolSideEffectWrite},
 	}
-	appended, err := c.sessions.AppendAgentSessionEntries(c.ctx, AppendAgentSessionEntriesRequest{
-		Scope: c.scope, SessionID: c.session.ID, RunID: c.run.ID, Lease: &lease, Entries: []*SessionEntry{assistant, tool}, Now: now,
+	appended, err := c.sessions.AppendAgentSessionEntries(c.ctx, models.AppendAgentSessionEntriesRequest{
+		Scope: c.scope, SessionID: c.session.ID, RunID: c.run.ID, Lease: &lease, Entries: []*models.SessionEntry{assistant, tool}, Now: now,
 	})
 	if err != nil {
 		c.t.Fatalf("append operation step: %v", err)
@@ -117,7 +120,7 @@ func (c *operationCall) addCall(n int64, arguments string) {
 	c.run = c.getRun(c.run.ID)
 	c.run.LastAppliedTurn = n
 	c.assistant, c.entry = appended.Entries[0], appended.Entries[1]
-	c.step = &AgentTurn{ID: stepID, RunID: c.run.ID, Sequence: n, Status: AgentTurnStatusCompleted}
+	c.step = &models.AgentTurn{ID: stepID, RunID: c.run.ID, Sequence: n, Status: models.AgentTurnStatusCompleted}
 }
 
 func (c *operationCall) context() agentrun.ControlContext {
@@ -139,7 +142,7 @@ func (c *operationCall) settle() ControlResult {
 	return result
 }
 
-func (c *operationCall) getRun(id string) *AgentRun {
+func (c *operationCall) getRun(id string) *models.AgentRun {
 	c.t.Helper()
 	run, err := c.store.GetAgentRun(c.ctx, c.scope, id)
 	if err != nil {
@@ -163,36 +166,36 @@ func (c *operationCall) meta() *ControlEntryMeta {
 
 // finishChild ends the operation child with status and output, then resolves
 // its edge as the worker that finished it would.
-func (c *operationCall) finishChild(id string, status AgentRunStatus, output map[string]interface{}, failure string) {
+func (c *operationCall) finishChild(id string, status models.AgentRunStatus, output map[string]interface{}, failure string) {
 	c.t.Helper()
 	const worker = "operation-child-worker"
 	child := c.getRun(id)
-	for i := 0; child.Status == AgentRunStatusQueued; i++ {
+	for i := 0; child.Status == models.AgentRunStatusQueued; i++ {
 		if i > 10 {
 			c.t.Fatalf("child %s was never claimed", id)
 		}
-		if _, err := c.store.ClaimNextAgentRun(c.ctx, AgentRunClaim{
+		if _, err := c.store.ClaimNextAgentRun(c.ctx, models.AgentRunClaim{
 			Scope: c.scope, WorkerID: worker, Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
 		}); err != nil {
 			c.t.Fatalf("claim child: %v", err)
 		}
 		child = c.getRun(id)
 	}
-	done, _, err := NewRunActivityService(c.store, c.store).TransitionRun(c.ctx, c.scope, id, RunTransitionRequest{
+	done, _, err := activity.NewRunActivityService(c.store, c.store).TransitionRun(c.ctx, c.scope, id, activity.RunTransitionRequest{
 		ExpectedRevision: child.Revision, Status: status, LeaseOwner: worker, Output: output, Error: failure,
-		Actor: ActivityActor{Type: "worker", ID: worker},
+		Actor: models.ActivityActor{Type: "worker", ID: worker},
 	})
 	if err != nil {
 		c.t.Fatalf("finish child %s: %v", id, err)
 	}
-	if _, err := c.exec.Forks.CompleteChild(c.ctx, done, ActivityActor{Type: "worker", ID: worker}); err != nil {
+	if _, err := c.exec.Forks.CompleteChild(c.ctx, done, models.ActivityActor{Type: "worker", ID: worker}); err != nil {
 		c.t.Fatalf("complete child %s: %v", id, err)
 	}
 }
 
 func (c *operationCall) reclaim() {
 	c.t.Helper()
-	claimed, err := c.store.ClaimNextAgentRun(c.ctx, AgentRunClaim{
+	claimed, err := c.store.ClaimNextAgentRun(c.ctx, models.AgentRunClaim{
 		Scope: c.scope, WorkerID: operationTestWorker, Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != c.run.ID {
@@ -224,14 +227,14 @@ func (c *operationCall) startOperation(n int64, arguments string) string {
 	c.addCall(n, arguments)
 	result := c.settle()
 	if result.Kind != ControlParked || result.Park == nil || !result.Park.Committed ||
-		result.Park.Status != AgentRunStatusWaitingForDependency {
+		result.Park.Status != models.AgentRunStatusWaitingForDependency {
 		c.t.Fatalf("settle = %#v: %s", result, controlResultText(c.entry.Tool.Result))
 	}
 	meta := c.meta()
-	if meta.Kind != ControlToolRunOperation || meta.ForkID != "op-"+c.entry.ID || len(meta.ChildRunIDs) != 1 {
+	if meta.Kind != models.ControlToolRunOperation || meta.ForkID != "op-"+c.entry.ID || len(meta.ChildRunIDs) != 1 {
 		c.t.Fatalf("meta = %#v", meta)
 	}
-	if c.entry.State != ToolEntryAwaitingChild {
+	if c.entry.State != models.ToolEntryAwaitingChild {
 		c.t.Fatalf("entry state = %s", c.entry.State)
 	}
 	return meta.ChildRunIDs[0]
@@ -253,14 +256,14 @@ func TestRunOperationValidatesInputSchema(t *testing.T) {
 			c := newOperationCall(t, store, nil)
 			c.addCall(int64(i+1), tc.arguments)
 			result := c.settle()
-			if result.Kind != ControlContinue || c.entry.State != ToolEntryError {
+			if result.Kind != ControlContinue || c.entry.State != models.ToolEntryError {
 				t.Fatalf("%s: result = %#v, entry %s", tc.name, result, c.entry.State)
 			}
 			value, _ := forkResult(t, c.entry)
 			if value["error"] != tc.code {
 				t.Fatalf("%s: error = %v, want %s", tc.name, value["error"], tc.code)
 			}
-			children, err := store.ListAgentRuns(c.ctx, AgentRunFilter{Scope: c.scope, ParentRunID: c.run.ID})
+			children, err := store.ListAgentRuns(c.ctx, models.AgentRunFilter{Scope: c.scope, ParentRunID: c.run.ID})
 			if err != nil || len(children) != 0 {
 				t.Fatalf("%s: children = %d, %v", tc.name, len(children), err)
 			}
@@ -271,7 +274,7 @@ func TestRunOperationValidatesInputSchema(t *testing.T) {
 func TestRunOperationRecursiveInvocationRefused(t *testing.T) {
 	forkStores(t, func(t *testing.T, store forkTestStore) {
 		// The Run is itself an invocation of the same definition and version.
-		c := newOperationCall(t, store, func(_ Scope, req *CreateAgentRunRequest) {
+		c := newOperationCall(t, store, func(_ models.Scope, req *models.CreateAgentRunRequest) {
 			req.Context["runbookDefinitionId"] = operationTestEngage.DefinitionID
 			req.Context["runbookDefinitionVersion"] = operationTestEngage.DefinitionVersion
 			req.Context["runbookEntrypoint"] = operationTestEngage.Entrypoint
@@ -279,10 +282,10 @@ func TestRunOperationRecursiveInvocationRefused(t *testing.T) {
 		c.addCall(1, `{"entrypoint":"engage-now","arguments":{"account":"acme"}}`)
 		c.settle()
 		value, _ := forkResult(t, c.entry)
-		if c.entry.State != ToolEntryError || value["error"] != operationRecursiveCode {
+		if c.entry.State != models.ToolEntryError || value["error"] != operationRecursiveCode {
 			t.Fatalf("entry %s result = %v", c.entry.State, value)
 		}
-		if got := c.getRun(c.run.ID); got.Status != AgentRunStatusRunning {
+		if got := c.getRun(c.run.ID); got.Status != models.AgentRunStatusRunning {
 			t.Fatalf("source status = %s", got.Status)
 		}
 	})
@@ -293,7 +296,7 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 		c := newOperationCall(t, store, nil)
 		first := c.startOperation(1, `{"entrypoint":"engage-now","arguments":{"account":"acme"}}`)
 		child := c.getRun(first)
-		if child.ParentRunID != c.run.ID || child.Entrypoint != "engage-now" || child.Kind != RunKindAgentWork ||
+		if child.ParentRunID != c.run.ID || child.Entrypoint != "engage-now" || child.Kind != models.RunKindAgentWork ||
 			child.Goal != "Run Engage accounts" || child.SessionID != "" {
 			t.Fatalf("child = %#v", child)
 		}
@@ -302,10 +305,10 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 			child.Context["runbookDefinitionId"] != "def-engage" || child.Context["runbookDefinitionVersion"] != "3" {
 			t.Fatalf("child context = %#v", child.Context)
 		}
-		if got := c.getRun(c.run.ID); got.Status != AgentRunStatusWaitingForDependency {
+		if got := c.getRun(c.run.ID); got.Status != models.AgentRunStatusWaitingForDependency {
 			t.Fatalf("source status = %s", got.Status)
 		}
-		c.finishChild(first, AgentRunStatusCompleted, map[string]interface{}{"summary": "Engaged acme."}, "")
+		c.finishChild(first, models.AgentRunStatusCompleted, map[string]interface{}{"summary": "Engaged acme."}, "")
 		c.reclaim()
 		if resumed := c.resume(); !resumed.Resolved {
 			t.Fatalf("resume = %#v", resumed)
@@ -314,7 +317,7 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 		if second == first {
 			t.Fatalf("second operation reused child %s", first)
 		}
-		children, err := store.ListAgentRuns(c.ctx, AgentRunFilter{Scope: c.scope, ParentRunID: c.run.ID})
+		children, err := store.ListAgentRuns(c.ctx, models.AgentRunFilter{Scope: c.scope, ParentRunID: c.run.ID})
 		if err != nil || len(children) != 2 {
 			t.Fatalf("children = %d, %v", len(children), err)
 		}
@@ -324,9 +327,9 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
 	store := newTestKernelStore(t)
 	service := runtimeconversation.NewConversationService(store)
-	var trigger *ChannelMessage
-	var conversation *Conversation
-	c := newOperationCall(t, store, func(scope Scope, req *CreateAgentRunRequest) {
+	var trigger *models.ChannelMessage
+	var conversation *models.Conversation
+	c := newOperationCall(t, store, func(scope models.Scope, req *models.CreateAgentRunRequest) {
 		seedTestSpace(t, store, scope)
 		created, _, err := service.CreateConversation(context.Background(), runtimeconversation.CreateConversationRequest{
 			Scope: scope, Owner: req.Owner, Title: "Agent work", IdempotencyKey: "op-channel",
@@ -335,28 +338,28 @@ func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
 			t.Fatal(err)
 		}
 		conversation = created
-		trigger = conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Engage acme and globex.", "engage")
-		req.Kind = RunKindConversation
-		req.Context[conversationRunContextConversationID] = conversation.ID
-		req.Context[conversationRunContextTriggerID] = trigger.ID
+		trigger = conversationruntest.PostMessage(t, service, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Engage acme and globex.", "engage")
+		req.Kind = models.RunKindConversation
+		req.Context[models.ConversationRunConversationIDContextKey] = conversation.ID
+		req.Context[models.ConversationRunTriggerIDContextKey] = trigger.ID
 	})
 	first := c.startOperation(1, `{"entrypoint":"engage-now","arguments":{"account":"acme"}}`)
 	invocation, _ := c.getRun(first).Context[agentrun.RunbookInvocationContextKey].(map[string]interface{})
 	if source, _ := invocation["sourceMessage"].(map[string]interface{}); source["messageId"] != trigger.ID {
 		t.Fatalf("invocation = %#v", invocation)
 	}
-	c.finishChild(first, AgentRunStatusCompleted, map[string]interface{}{"summary": "Engaged acme."}, "")
+	c.finishChild(first, models.AgentRunStatusCompleted, map[string]interface{}{"summary": "Engaged acme."}, "")
 	c.reclaim()
 	c.resume()
 	second := c.startOperation(2, `{"entrypoint":"engage-now","arguments":{"account":"globex"}}`)
 	// Projecting the same child again (a crash replay) posts nothing more.
 	c.exec.projectOperationStart(c.ctx, c.getRun(c.run.ID), "Run Engage accounts", second)
 
-	messages, err := service.ListChannelMessages(c.ctx, ChannelMessageFilter{Scope: c.scope, ConversationID: conversation.ID})
+	messages, err := service.ListChannelMessages(c.ctx, models.ChannelMessageFilter{Scope: c.scope, ConversationID: conversation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var started []*ChannelMessage
+	var started []*models.ChannelMessage
 	for _, message := range messages {
 		if strings.HasPrefix(message.Content, "Started: ") {
 			started = append(started, message)
@@ -367,9 +370,9 @@ func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
 	}
 	for i, want := range []string{first, second} {
 		message := started[i]
-		if message.Content != "Started: Run Engage accounts" || message.Intent != MessageIntentUpdate ||
+		if message.Content != "Started: Run Engage accounts" || message.Intent != models.MessageIntentUpdate ||
 			message.ReplyToMessageID != trigger.ID || len(message.References) != 1 ||
-			message.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: want}) {
+			message.References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRun, ID: want}) {
 			t.Fatalf("started message %d = %#v", i, message)
 		}
 	}
@@ -379,12 +382,12 @@ func TestRunOperationResultIsSavedOperationOutput(t *testing.T) {
 	forkStores(t, func(t *testing.T, store forkTestStore) {
 		c := newOperationCall(t, store, nil)
 		childID := c.startOperation(1, `{"entrypoint":"engage-now","arguments":{"account":"acme"}}`)
-		c.finishChild(childID, AgentRunStatusCompleted, map[string]interface{}{
+		c.finishChild(childID, models.AgentRunStatusCompleted, map[string]interface{}{
 			"summary": "Engaged acme.", "receipt": "internal-only",
 		}, "")
 		c.reclaim()
 		resumed := c.resume()
-		if !resumed.Resolved || c.entry.State != ToolEntryCompleted || c.entry.Tool.Result.IsError {
+		if !resumed.Resolved || c.entry.State != models.ToolEntryCompleted || c.entry.Tool.Result.IsError {
 			t.Fatalf("resume = %#v entry %s", resumed, c.entry.State)
 		}
 		value, raw := forkResult(t, c.entry)
@@ -396,15 +399,15 @@ func TestRunOperationResultIsSavedOperationOutput(t *testing.T) {
 		// A failed operation is an is_error result with no output.
 		failed := newOperationCall(t, store, nil)
 		failedID := failed.startOperation(1, `{"entrypoint":"engage-now","arguments":{"account":"acme"}}`)
-		failed.finishChild(failedID, AgentRunStatusFailed, map[string]interface{}{"summary": "partial"}, "step 2 failed")
+		failed.finishChild(failedID, models.AgentRunStatusFailed, map[string]interface{}{"summary": "partial"}, "step 2 failed")
 		failed.reclaim()
 		failed.resume()
 		value, raw = forkResult(t, failed.entry)
-		if failed.entry.State != ToolEntryError || !failed.entry.Tool.Result.IsError ||
+		if failed.entry.State != models.ToolEntryError || !failed.entry.Tool.Result.IsError ||
 			value["status"] != "failed" || value["output"] != "" || value["error"] != "step 2 failed" {
 			t.Fatalf("failed result = %s (entry %s)", raw, failed.entry.State)
 		}
-		if got := failed.getRun(failed.run.ID); got.Status != AgentRunStatusRunning {
+		if got := failed.getRun(failed.run.ID); got.Status != models.AgentRunStatusRunning {
 			t.Fatalf("source after failed operation = %s", got.Status)
 		}
 	})
@@ -417,17 +420,17 @@ func TestRunOperationResumeWhileChildRunsReparks(t *testing.T) {
 		// Force the source back to running under the lease to resume early,
 		// as a claim of a spuriously woken Run would.
 		source := c.getRun(c.run.ID)
-		if source.Status != AgentRunStatusWaitingForDependency {
+		if source.Status != models.AgentRunStatusWaitingForDependency {
 			t.Fatalf("source = %s", source.Status)
 		}
 		c.run = source
-		c.run.Status = AgentRunStatusRunning
+		c.run.Status = models.AgentRunStatusRunning
 		c.run.LeaseOwner = operationTestWorker
 		resumed, err := c.exec.Resume(c.ctx, c.context())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resumed.Resolved || resumed.Park == nil || resumed.Park.Status != AgentRunStatusWaitingForDependency ||
+		if resumed.Resolved || resumed.Park == nil || resumed.Park.Status != models.AgentRunStatusWaitingForDependency ||
 			resumed.Park.Wake == nil || resumed.Park.Wake.Reference != c.meta().GroupID {
 			t.Fatalf("resume = %#v", resumed)
 		}
@@ -440,7 +443,7 @@ func TestRunOperationsListedInCapabilitiesNoteInOrder(t *testing.T) {
 	specs := builtinControlSpecs(authority)
 	var spec *ControlToolSpec
 	for i := range specs {
-		if specs[i].Name == ControlToolRunOperation {
+		if specs[i].Name == models.ControlToolRunOperation {
 			spec = &specs[i]
 		}
 	}
@@ -457,7 +460,7 @@ func TestRunOperationsListedInCapabilitiesNoteInOrder(t *testing.T) {
 		t.Fatalf("run_operation lists its operations: %v %s", entrypoint, spec.Description)
 	}
 	for _, s := range builtinControlSpecs(agentrun.ControlAuthority{}) {
-		if s.Name == ControlToolRunOperation {
+		if s.Name == models.ControlToolRunOperation {
 			t.Fatal("run_operation offered with no operations")
 		}
 	}

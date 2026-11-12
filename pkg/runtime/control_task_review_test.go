@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -13,24 +14,24 @@ import (
 // taskReviewHost answers review calls with scripted texts, in order.
 type taskReviewHost struct {
 	replies  []string
-	requests []ModelStepRequest
+	requests []models.ModelStepRequest
 }
 
-func (h *taskReviewHost) ExecuteModelStep(_ context.Context, req ModelStepRequest) (ModelStepResult, error) {
+func (h *taskReviewHost) ExecuteModelStep(_ context.Context, req models.ModelStepRequest) (models.ModelStepResult, error) {
 	h.requests = append(h.requests, req)
 	text := `{"decision":"approve","reason":"default"}`
 	if len(h.replies) > 0 {
 		text, h.replies = h.replies[0], h.replies[1:]
 	}
-	return ModelStepResult{
-		APIVersion: ModelStepAPIVersion, StepID: req.StepID,
-		Assistant: AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopEnd, Text: text},
-		Model:     ModelStepModelInfo{Provider: ModelStepProviderAnthropic, Model: "claude-x"},
+	return models.ModelStepResult{
+		APIVersion: models.ModelStepAPIVersion, StepID: req.StepID,
+		Assistant: models.AssistantEntry{Provider: models.ModelStepProviderAnthropic, Model: "claude-x", StopReason: models.ModelStopEnd, Text: text},
+		Model:     models.ModelStepModelInfo{Provider: models.ModelStepProviderAnthropic, Model: "claude-x"},
 	}, nil
 }
 
-func (h *taskReviewHost) ExecuteHostTool(context.Context, HostToolRequest) (HostToolResult, error) {
-	return HostToolResult{}, nil
+func (h *taskReviewHost) ExecuteHostTool(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
+	return models.HostToolResult{}, nil
 }
 
 const taskReviewGoal = "Compile the full list of open invoices with totals."
@@ -40,10 +41,10 @@ const taskReviewGoal = "Compile the full list of open invoices with totals."
 func newTaskReviewFixture(t *testing.T, calls ...agentrun.LoopToolCall) *controlFixture {
 	t.Helper()
 	f := newFinalFixture(t, calls...)
-	f.run.Kind = RunKindAgentWork
-	f.run.Context = map[string]interface{}{ConversationTaskContextKey: "task-1"}
-	task := &ConversationTask{
-		ID: "task-1", Mode: ConversationTaskModeIndependent, Scope: f.run.Scope, Owner: f.run.Owner,
+	f.run.Kind = models.RunKindAgentWork
+	f.run.Context = map[string]interface{}{models.ConversationTaskContextKey: "task-1"}
+	task := &models.ConversationTask{
+		ID: "task-1", Mode: models.ConversationTaskModeIndependent, Scope: f.run.Scope, Owner: f.run.Owner,
 		ConversationID: "conv-1", SourceMessageID: "msg-1", ThreadRootID: "msg-1", SourceRunID: "source-run",
 		TargetAgentID: "agent-1", WorkRunID: f.run.ID, TaskKey: "key-1", Goal: taskReviewGoal, CreatedAt: f.now,
 	}
@@ -67,10 +68,10 @@ func TestTaskReviewApproveDelivers(t *testing.T) {
 		finalCall("final", `{"answer":"Invoices: A 10, B 20. Total 30."}`))
 	// A finished tool call of this Run is review evidence.
 	lookup := f.entries["lookup"]
-	if _, err := f.store.TransitionToolEntry(f.ctx, ToolEntryTransitionRequest{
-		Scope: f.run.Scope, EntryID: lookup.ID, RunID: f.run.ID, Lease: AgentRunLeaseGuard{WorkerID: controlTestWorker, Now: f.now},
-		From: ToolEntryPending, To: ToolEntryCompleted, Now: f.now,
-		Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: "A 10\nB 20\n" + strings.Repeat("x", 4096)}}},
+	if _, err := f.store.TransitionToolEntry(f.ctx, models.ToolEntryTransitionRequest{
+		Scope: f.run.Scope, EntryID: lookup.ID, RunID: f.run.ID, Lease: models.AgentRunLeaseGuard{WorkerID: controlTestWorker, Now: f.now},
+		From: models.ToolEntryPending, To: models.ToolEntryCompleted, Now: f.now,
+		Result: &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: "A 10\nB 20\n" + strings.Repeat("x", 4096)}}},
 	}); err != nil {
 		t.Fatalf("complete lookup: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestTaskReviewApproveDelivers(t *testing.T) {
 		t.Fatalf("review calls = %d", len(host.requests))
 	}
 	req := host.requests[0]
-	if req.Purpose != ModelStepPurposeAcknowledgement || len(req.Tools) != 0 || req.SessionID != "" || req.Validate() != nil ||
+	if req.Purpose != models.ModelStepPurposeAcknowledgement || len(req.Tools) != 0 || req.SessionID != "" || req.Validate() != nil ||
 		len(req.System.AgentInstructions) != 1 || req.System.AgentInstructions[0] != taskCompletionReviewInstructions {
 		t.Fatalf("request = %#v", req)
 	}
@@ -92,7 +93,7 @@ func TestTaskReviewApproveDelivers(t *testing.T) {
 		t.Fatalf("input: %v", err)
 	}
 	if input.Goal != taskReviewGoal || input.CandidateAnswer != final.Answer || len(input.ToolResults) != 1 ||
-		input.ToolResults[0].Tool != "invoices_list" || input.ToolResults[0].Status != string(ToolResultSucceeded) ||
+		input.ToolResults[0].Tool != "invoices_list" || input.ToolResults[0].Status != string(models.ToolResultSucceeded) ||
 		len(input.ToolResults[0].Content) > taskReviewMaxToolResultBytes || !strings.HasPrefix(input.ToolResults[0].Content, "A 10\nB 20") {
 		t.Fatalf("input = %#v", input)
 	}
@@ -112,7 +113,7 @@ func TestTaskReviewReviseOnceThenRejectFails(t *testing.T) {
 	result := f.settleReviewed("second", host)
 	if result.Kind != ControlFailed || result.Failure == nil || result.Failure.Code != taskCompletionRejectedCode ||
 		result.Failure.Kind != conversation.RunFailureKindTaskCompletion || !strings.Contains(result.Failure.Message, "still a plan") ||
-		result.Entry == nil || result.Entry.State != ToolEntryError {
+		result.Entry == nil || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("second = %#v", result)
 	}
 	meta, err := DecodeControlEntryMeta(f.stored("second"))
@@ -144,8 +145,8 @@ func TestTaskReviewSkipsRunsThatAreNotTaskWork(t *testing.T) {
 	requireFinal(t, f.settleReviewed("final", host))
 	// A fork child of task work carries the hint but is not the task's work Run.
 	g := newFinalFixture(t, finalCall("final", `{"answer":"part done"}`))
-	g.run.Kind = RunKindAgentWork
-	g.run.Context = map[string]interface{}{ConversationTaskContextKey: "task-1"}
+	g.run.Kind = models.RunKindAgentWork
+	g.run.Context = map[string]interface{}{models.ConversationTaskContextKey: "task-1"}
 	requireFinal(t, g.settleReviewed("final", host))
 	if len(host.requests) != 0 {
 		t.Fatalf("review calls = %d", len(host.requests))

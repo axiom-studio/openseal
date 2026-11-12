@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -22,16 +23,16 @@ import (
 type ControlAuthorityInput struct {
 	// Run is the canonical Run being claimed (a conversation Run keeps its
 	// conversation kind; it is never lowered to Agent work here).
-	Run *AgentRun
+	Run *models.AgentRun
 	// DeploymentID is the Agent deployment that speaks for the Run.
 	DeploymentID      string
 	Catalog           conversationrun.AgentTurnCatalog
 	Scope             skill.ScopeReference // zero = Run.Scope
 	SkillPromptRefs   []string
 	Operations        []agentrun.HostedRunbookOperation // binding.RunbookOperations
-	ConversationTasks ConversationTaskKernelStore
-	Runs              PortfolioStore
-	Conversations     ConversationStore
+	ConversationTasks models.ConversationTaskKernelStore
+	Runs              models.PortfolioStore
+	Conversations     models.ConversationStore
 	// Deterministic marks runbook/capability runners: no model
 	// control tools are offered (kernel-origin calls are preauthorized).
 	Deterministic bool
@@ -49,7 +50,7 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 		return agentrun.ControlAuthority{}, errors.New("control authority requires the speaking Agent deployment")
 	}
 	authority := agentrun.ControlAuthority{AgentID: agentID, FinalMode: controlFinalMode(run),
-		RoutineOccurrence: conversationrun.RoutineOccurrenceRun(run) && run.Kind != RunKindConversation}
+		RoutineOccurrence: conversationrun.RoutineOccurrenceRun(run) && run.Kind != models.RunKindConversation}
 	if in.Deterministic {
 		return authority, nil
 	}
@@ -62,15 +63,15 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 	if scope.Kind == "" && scope.ID == "" {
 		scope = skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
 	}
-	taskWork := run.Kind == RunKindAgentWork && run.Context[ConversationTaskContextKey] != nil
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	taskWork := run.Kind == models.RunKindAgentWork && run.Context[models.ConversationTaskContextKey] != nil
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	chatReply := strings.TrimSpace(conversationID) != "" && strings.TrimSpace(triggerID) != ""
 	voiceCall := run.Context["voiceCallStarted"] == true
 
 	authority.SkillPromptRefs = append([]string(nil), in.SkillPromptRefs...)
 	authority.VisualAllowed = mode == agentrun.FinalModeDefault
-	authority.BroadcastAllowed = run.Kind == RunKindConversation
+	authority.BroadcastAllowed = run.Kind == models.RunKindConversation
 	authority.TaskWork = taskWork
 	authority.CanReportProgress = true
 	authority.CanWait = !chatReply
@@ -83,7 +84,7 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 	}
 	// No nested model forks (DI-15). Targets exclude the current Agent, so a
 	// task worker, which may fork only itself, gets none (self only).
-	authority.ForkAllowed = run.Source != RunSourceFork
+	authority.ForkAllowed = run.Source != models.RunSourceFork
 	if authority.ForkAllowed && !taskWork {
 		authority.ForkTargets = targets
 	}
@@ -97,13 +98,13 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 	}
 	if tasks != nil {
 		// The task snapshots stay visible; only the start right is withdrawn.
-		if tasks.CanStart && (voiceCall || validateConversationTaskStartAuthority(run, tasks) != nil) {
+		if tasks.CanStart && (voiceCall || models.ValidateConversationTaskStartAuthority(run, tasks) != nil) {
 			tasks.CanStart = false
 		}
 		authority.TaskStart = tasks
 	}
 
-	authority.CanReact = run.Kind == RunKindConversation && chatReply && run.AssignedAgentID == agentID
+	authority.CanReact = run.Kind == models.RunKindConversation && chatReply && run.AssignedAgentID == agentID
 	if in.Runs != nil && in.Conversations != nil {
 		_, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(ctx, in.Runs, in.Conversations, run)
 		if err != nil {
@@ -111,7 +112,7 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 		}
 		authority.CanAskUser = conversation != nil && trigger != nil && run.AssignedAgentID == agentID &&
 			run.AssignedAgentID == runtimeconversation.ConversationRunAgentID(conversation, run)
-		authority.ExternalChannelReply = externalChannelContext(conversation)
+		authority.ExternalChannelReply = models.IsExternalChannelConversation(conversation)
 		_, authority.ApprovalMode, err = action.RunConversationApprovalMode(ctx, in.Runs, in.Conversations, run)
 		if err != nil {
 			return agentrun.ControlAuthority{}, fmt.Errorf("resolve conversation approval mode: %w", err)
@@ -120,7 +121,7 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 	return authority, nil
 }
 
-func controlFinalMode(run *AgentRun) agentrun.FinalAnswerMode {
+func controlFinalMode(run *models.AgentRun) agentrun.FinalAnswerMode {
 	if _, ok := run.Context[agentrun.AgentRequestInboxContextKey]; ok {
 		return agentrun.FinalModeDecision
 	}
@@ -137,10 +138,10 @@ func resolveHostedAgentTargets(
 	ctx context.Context,
 	catalog conversationrun.AgentTurnCatalog,
 	scope skill.ScopeReference,
-	run *AgentRun,
+	run *models.AgentRun,
 	currentDeploymentID string,
 ) ([]agentrun.HostedAgentTarget, error) {
-	if run == nil || run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.Owner.ID) == "" {
+	if run == nil || run.Owner.Type != models.OwnerTypeTeam || strings.TrimSpace(run.Owner.ID) == "" {
 		return nil, nil
 	}
 	teamCatalog, ok := catalog.(skillbinding.TeamSkillAuthorityCatalog)

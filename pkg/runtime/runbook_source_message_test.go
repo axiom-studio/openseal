@@ -3,28 +3,30 @@ package runtime
 import (
 	"context"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type invocationMessageFixture struct {
-	conversation *Conversation
-	message      *ChannelMessage
+	conversation *models.Conversation
+	message      *models.ChannelMessage
 }
 
-func (f invocationMessageFixture) GetConversation(_ context.Context, _ Scope, id string) (*Conversation, error) {
+func (f invocationMessageFixture) GetConversation(_ context.Context, _ models.Scope, id string) (*models.Conversation, error) {
 	if f.conversation == nil || f.conversation.ID != id {
-		return nil, ErrConversationNotFound
+		return nil, models.ErrConversationNotFound
 	}
 	return f.conversation, nil
 }
-func (f invocationMessageFixture) GetChannelMessage(context.Context, Scope, string, string) (*ChannelMessage, error) {
+func (f invocationMessageFixture) GetChannelMessage(context.Context, models.Scope, string, string) (*models.ChannelMessage, error) {
 	return f.message, nil
 }
 
 func TestRunbookSourceMessagePreservesExactScopedInvocation(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "7"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
-	run := &AgentRun{Kind: RunKindConversation, Scope: scope, Owner: owner, ConcurrencyKey: "chat", Context: map[string]interface{}{conversationRunContextConversationID: "chat", conversationRunContextTriggerID: "message"}}
-	f := invocationMessageFixture{&Conversation{ID: "chat", Scope: scope, Owner: owner}, &ChannelMessage{ID: "message", Scope: scope, ConversationID: "chat", Content: "Read https://example.org/report and summarize it", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "23"}}}
+	scope := models.Scope{Kind: "tenant", ID: "7"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
+	run := &models.AgentRun{Kind: models.RunKindConversation, Scope: scope, Owner: owner, ConcurrencyKey: "chat", Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: "chat", models.ConversationRunTriggerIDContextKey: "message"}}
+	f := invocationMessageFixture{&models.Conversation{ID: "chat", Scope: scope, Owner: owner}, &models.ChannelMessage{ID: "message", Scope: scope, ConversationID: "chat", Content: "Read https://example.org/report and summarize it", Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "23"}}}
 	got, err := runbookSourceMessage(t.Context(), f, run)
 	if err != nil || got["content"] != f.message.Content || got["messageId"] != "message" {
 		t.Fatalf("source=%#v err=%v", got, err)

@@ -95,7 +95,7 @@ func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc age
 		return ControlResult{}, err
 	}
 	if repeated {
-		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, reportProgressRepeatCode,
+		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, reportProgressRepeatCode,
 			"Already reported. Add a new finding or keep working.", nil))
 	}
 	if x.Activity == nil {
@@ -105,13 +105,13 @@ func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc age
 	if destination == reportProgressDestinationActivity {
 		eventType = "turn.progress"
 	}
-	event := &ActivityEvent{
+	event := &models.ActivityEvent{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID,
-		AgentID: strings.TrimSpace(cc.Run.AssignedAgentID), TeamID: teamIDForRun(cc.Run),
-		EventType: eventType, Severity: ActivitySeverityInfo, Summary: summary,
-		Actor:      ActivityActor{Type: "worker", ID: cc.WorkerID},
+		AgentID: strings.TrimSpace(cc.Run.AssignedAgentID), TeamID: models.TeamIDForRun(cc.Run),
+		EventType: eventType, Severity: models.ActivitySeverityInfo, Summary: summary,
+		Actor:      models.ActivityActor{Type: "worker", ID: cc.WorkerID},
 		Payload:    map[string]interface{}{"entryId": cc.Entry.ID},
-		Visibility: ActivityVisibilityScope,
+		Visibility: models.ActivityVisibilityScope,
 		CreatedAt:  x.now(),
 	}
 	if cc.Step != nil {
@@ -120,16 +120,16 @@ func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc age
 	if _, err := x.Activity.AppendActivity(ctx, event); err != nil {
 		return ControlResult{}, err
 	}
-	return x.complete(ctx, cc, controlJSONResult(ToolResultSucceeded, map[string]interface{}{"status": "posted"}), nil)
+	return x.complete(ctx, cc, models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{"status": "posted"}), nil)
 }
 
 // progressAlreadyReported reports whether an earlier completed
 // turn_report_progress entry of the Run carried the same summary.
 func (x *ControlExecutor) progressAlreadyReported(ctx context.Context, cc agentrun.ControlContext, summary string) (bool, error) {
-	entries, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
+	entries, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID,
-		ToolNames: []string{string(ControlToolReportProgress)}, States: []ToolEntryState{ToolEntryCompleted},
-		Limit: maxSessionEntryListLimit,
+		ToolNames: []string{string(models.ControlToolReportProgress)}, States: []models.ToolEntryState{models.ToolEntryCompleted},
+		Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
 		return false, err
@@ -139,7 +139,7 @@ func (x *ControlExecutor) progressAlreadyReported(ctx context.Context, cc agentr
 			continue
 		}
 		var earlier reportProgressArgs
-		if decodeControlArguments(entry.Tool.Arguments, &earlier) != nil {
+		if models.DecodeControlArguments(entry.Tool.Arguments, &earlier) != nil {
 			continue
 		}
 		if strings.TrimSpace(earlier.Summary) == summary {

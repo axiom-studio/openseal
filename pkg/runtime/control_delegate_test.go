@@ -9,16 +9,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/google/uuid"
 )
 
 type delegateTestStore interface {
-	KernelStore
-	CollaborationKernelStore
-	AgentSessionStore
+	models.KernelStore
+	models.CollaborationKernelStore
+	models.AgentSessionStore
 }
 
 const delegateWorker = "worker-delegate"
@@ -32,30 +35,30 @@ type delegateFixture struct {
 	store   delegateTestStore
 	collab  *collaboration.CollaborationService
 	exec    *ControlExecutor
-	scope   Scope
-	run     *AgentRun
-	session *AgentSession
-	step    *AgentTurn
-	entry   *SessionEntry
+	scope   models.Scope
+	run     *models.AgentRun
+	session *models.AgentSession
+	step    *models.AgentTurn
+	entry   *models.SessionEntry
 }
 
-func newDelegateFixture(t *testing.T, store delegateTestStore, mutate func(*CreateAgentRunRequest)) *delegateFixture {
+func newDelegateFixture(t *testing.T, store delegateTestStore, mutate func(*models.CreateAgentRunRequest)) *delegateFixture {
 	t.Helper()
-	return newDelegateFixtureIn(t, store, Scope{Kind: "tenant", ID: "delegate-" + uuid.NewString()[:8]}, mutate)
+	return newDelegateFixtureIn(t, store, models.Scope{Kind: "tenant", ID: "delegate-" + uuid.NewString()[:8]}, mutate)
 }
 
 // newDelegateFixtureIn creates and claims a source Run in scope; no other Run
 // of scope may be queued.
-func newDelegateFixtureIn(t *testing.T, store delegateTestStore, scope Scope, mutate func(*CreateAgentRunRequest)) *delegateFixture {
+func newDelegateFixtureIn(t *testing.T, store delegateTestStore, scope models.Scope, mutate func(*models.CreateAgentRunRequest)) *delegateFixture {
 	t.Helper()
-	req := CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "manager"}, AssignedAgentID: "manager",
-		Goal: "Ship the release", Source: RunSourceManual,
+	req := models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "manager"}, AssignedAgentID: "manager",
+		Goal: "Ship the release", Source: models.RunSourceManual,
 	}
 	if mutate != nil {
 		mutate(&req)
 	}
-	created, err := NewPortfolioService(store).CreateAgentRun(t.Context(), req)
+	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), req)
 	if err != nil {
 		t.Fatalf("create source: %v", err)
 	}
@@ -68,7 +71,7 @@ func newDelegateFixtureIn(t *testing.T, store delegateTestStore, scope Scope, mu
 	if f.run.ID != created.ID {
 		t.Fatalf("claimed %s, want %s", f.run.ID, created.ID)
 	}
-	opened, err := store.CreateRunAgentSession(t.Context(), CreateRunAgentSessionRequest{
+	opened, err := store.CreateRunAgentSession(t.Context(), models.CreateRunAgentSessionRequest{
 		Scope: scope, OwnerRunID: f.run.ID, AgentID: "manager", Lease: f.lease(), Now: time.Now().UTC(),
 	})
 	if err != nil {
@@ -79,11 +82,11 @@ func newDelegateFixtureIn(t *testing.T, store delegateTestStore, scope Scope, mu
 	return f
 }
 
-func (f *delegateFixture) lease() AgentRunLeaseGuard {
-	return AgentRunLeaseGuard{WorkerID: delegateWorker, Now: time.Now().UTC()}
+func (f *delegateFixture) lease() models.AgentRunLeaseGuard {
+	return models.AgentRunLeaseGuard{WorkerID: delegateWorker, Now: time.Now().UTC()}
 }
 
-func (f *delegateFixture) reload() *AgentRun {
+func (f *delegateFixture) reload() *models.AgentRun {
 	f.t.Helper()
 	run, err := f.store.GetAgentRun(f.t.Context(), f.scope, f.run.ID)
 	if err != nil {
@@ -95,7 +98,7 @@ func (f *delegateFixture) reload() *AgentRun {
 // claim claims the source Run (it must be queued).
 func (f *delegateFixture) claim() {
 	f.t.Helper()
-	claimed, err := f.store.ClaimNextAgentRun(f.t.Context(), AgentRunClaim{
+	claimed, err := f.store.ClaimNextAgentRun(f.t.Context(), models.AgentRunClaim{
 		Scope: f.scope, WorkerID: delegateWorker, Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil {
@@ -109,7 +112,7 @@ func (f *delegateFixture) claim() {
 
 // call appends a finished, applied step whose assistant entry calls tool
 // with arguments (one pending tool entry).
-func (f *delegateFixture) call(tool ControlToolName, arguments interface{}) {
+func (f *delegateFixture) call(tool models.ControlToolName, arguments interface{}) {
 	f.t.Helper()
 	sequence := f.run.LastAppliedTurn + 1
 	if f.step != nil && f.step.Sequence >= sequence {
@@ -118,29 +121,29 @@ func (f *delegateFixture) call(tool ControlToolName, arguments interface{}) {
 	stepID := fmt.Sprintf("%s-step-%d", f.run.ID, sequence)
 	callID := fmt.Sprintf("call-%d", sequence)
 	raw, _ := json.Marshal(arguments)
-	assistant := &SessionEntry{
-		ID: SessionEntryID(f.session.ID, AssistantEntryKey(stepID)), RunID: f.run.ID, StepID: stepID, Step: sequence,
-		Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-			Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,
-			ToolCalls: []ModelToolCall{{ID: callID, Name: string(tool), Arguments: raw}},
+	assistant := &models.SessionEntry{
+		ID: models.SessionEntryID(f.session.ID, models.AssistantEntryKey(stepID)), RunID: f.run.ID, StepID: stepID, Step: sequence,
+		Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+			Provider: models.ModelStepProviderAnthropic, Model: "claude-x", StopReason: models.ModelStopToolCalls,
+			ToolCalls: []models.ModelToolCall{{ID: callID, Name: string(tool), Arguments: raw}},
 		},
 	}
-	entry := &SessionEntry{
-		ID: SessionEntryID(f.session.ID, ToolEntryKey(stepID, callID)), RunID: f.run.ID, StepID: stepID, Step: sequence,
-		Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: callID,
-		Tool: &ToolEntry{Name: string(tool), Arguments: raw, SideEffect: ToolSideEffectWrite},
+	entry := &models.SessionEntry{
+		ID: models.SessionEntryID(f.session.ID, models.ToolEntryKey(stepID, callID)), RunID: f.run.ID, StepID: stepID, Step: sequence,
+		Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: callID,
+		Tool: &models.ToolEntry{Name: string(tool), Arguments: raw, SideEffect: models.ToolSideEffectWrite},
 	}
 	lease := f.lease()
-	appended, err := f.store.AppendAgentSessionEntries(f.t.Context(), AppendAgentSessionEntriesRequest{
+	appended, err := f.store.AppendAgentSessionEntries(f.t.Context(), models.AppendAgentSessionEntriesRequest{
 		Scope: f.scope, SessionID: f.session.ID, RunID: f.run.ID, Lease: &lease,
-		Entries: []*SessionEntry{assistant, entry}, Now: lease.Now,
+		Entries: []*models.SessionEntry{assistant, entry}, Now: lease.Now,
 	})
 	if err != nil {
 		f.t.Fatalf("append step: %v", err)
 	}
 	f.run = f.reload()
 	f.run.LastAppliedTurn = sequence
-	f.step = &AgentTurn{ID: stepID, RunID: f.run.ID, Sequence: sequence, Status: AgentTurnStatusCompleted}
+	f.step = &models.AgentTurn{ID: stepID, RunID: f.run.ID, Sequence: sequence, Status: models.AgentTurnStatusCompleted}
 	f.entry = appended.Entries[1]
 }
 
@@ -168,9 +171,9 @@ func (f *delegateFixture) mustSettle() ControlResult {
 	return result
 }
 
-func (f *delegateFixture) delegate() (ControlResult, *AgentRequest) {
+func (f *delegateFixture) delegate() (ControlResult, *models.AgentRequest) {
 	f.t.Helper()
-	f.call(ControlToolDelegate, map[string]interface{}{
+	f.call(models.ControlToolDelegate, map[string]interface{}{
 		"agentId": "specialist", "goal": "Analyze the release", "context": map[string]interface{}{"release": "2026.07"},
 	})
 	result := f.mustSettle()
@@ -180,16 +183,16 @@ func (f *delegateFixture) delegate() (ControlResult, *AgentRequest) {
 	return result, f.onlyRequest()
 }
 
-func (f *delegateFixture) requests() []*AgentRequest {
+func (f *delegateFixture) requests() []*models.AgentRequest {
 	f.t.Helper()
-	requests, err := f.store.ListAgentRequests(f.t.Context(), AgentRequestFilter{Scope: f.scope, SourceRunID: f.run.ID, Limit: 10})
+	requests, err := f.store.ListAgentRequests(f.t.Context(), models.AgentRequestFilter{Scope: f.scope, SourceRunID: f.run.ID, Limit: 10})
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	return requests
 }
 
-func (f *delegateFixture) onlyRequest() *AgentRequest {
+func (f *delegateFixture) onlyRequest() *models.AgentRequest {
 	f.t.Helper()
 	requests := f.requests()
 	if len(requests) != 1 {
@@ -198,7 +201,7 @@ func (f *delegateFixture) onlyRequest() *AgentRequest {
 	return requests[0]
 }
 
-func (f *delegateFixture) request(id string) *AgentRequest {
+func (f *delegateFixture) request(id string) *models.AgentRequest {
 	f.t.Helper()
 	request, err := f.collab.GetAgentRequest(f.t.Context(), f.scope, id)
 	if err != nil {
@@ -207,7 +210,7 @@ func (f *delegateFixture) request(id string) *AgentRequest {
 	return request
 }
 
-func (f *delegateFixture) currentEntry() *SessionEntry {
+func (f *delegateFixture) currentEntry() *models.SessionEntry {
 	f.t.Helper()
 	entry, err := f.store.GetSessionEntry(f.t.Context(), f.scope, f.entry.ID)
 	if err != nil {
@@ -231,20 +234,20 @@ func (f *delegateFixture) respond(id string, decision collaboration.AgentRequest
 }
 
 // finishChild accepts request id and ends its child Run with status/output.
-func (f *delegateFixture) finishChild(id string, status AgentRunStatus, output map[string]interface{}, failure string) {
+func (f *delegateFixture) finishChild(id string, status models.AgentRunStatus, output map[string]interface{}, failure string) {
 	f.t.Helper()
 	accepted := f.respond(id, collaboration.AgentRequestDecisionAccept, "On it.")
-	activity := NewRunActivityService(f.store, f.store)
-	running, _, err := activity.TransitionRun(f.t.Context(), f.scope, accepted.Child.ID, RunTransitionRequest{
-		ExpectedRevision: accepted.Child.Revision, Status: AgentRunStatusRunning, Summary: "started",
-		Actor: ActivityActor{Type: "worker", ID: "child-worker"},
+	activity := runtimeactivity.NewRunActivityService(f.store, f.store)
+	running, _, err := activity.TransitionRun(f.t.Context(), f.scope, accepted.Child.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: accepted.Child.Revision, Status: models.AgentRunStatusRunning, Summary: "started",
+		Actor: models.ActivityActor{Type: "worker", ID: "child-worker"},
 	})
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	ended, _, err := activity.TransitionRun(f.t.Context(), f.scope, accepted.Child.ID, RunTransitionRequest{
+	ended, _, err := activity.TransitionRun(f.t.Context(), f.scope, accepted.Child.ID, runtimeactivity.RunTransitionRequest{
 		ExpectedRevision: running.Revision, Status: status, Output: output, Error: failure, Summary: "ended",
-		Actor: ActivityActor{Type: "worker", ID: "child-worker"},
+		Actor: models.ActivityActor{Type: "worker", ID: "child-worker"},
 	})
 	if err != nil {
 		f.t.Fatal(err)
@@ -257,7 +260,7 @@ func (f *delegateFixture) finishChild(id string, status AgentRunStatus, output m
 // resume claims the re-queued source and resumes the current entry.
 func (f *delegateFixture) resume() ControlResume {
 	f.t.Helper()
-	if run := f.reload(); run.Status != AgentRunStatusQueued {
+	if run := f.reload(); run.Status != models.AgentRunStatusQueued {
 		f.t.Fatalf("source = %s, want queued", run.Status)
 	}
 	f.claim()
@@ -272,7 +275,7 @@ func (f *delegateFixture) resume() ControlResume {
 	return resumed
 }
 
-func delegateResult(t *testing.T, entry *SessionEntry) map[string]interface{} {
+func delegateResult(t *testing.T, entry *models.SessionEntry) map[string]interface{} {
 	t.Helper()
 	if entry == nil || entry.Tool == nil || entry.Tool.Result == nil || len(entry.Tool.Result.Content) != 1 {
 		t.Fatalf("entry has no result: %#v", entry)
@@ -287,8 +290,8 @@ func delegateResult(t *testing.T, entry *SessionEntry) map[string]interface{} {
 func TestDelegateParksWaitingForAgentDecision(t *testing.T) {
 	f := newDelegateFixture(t, newTestKernelStore(t), nil)
 	result, request := f.delegate()
-	if request.Recipient != (CollaborationParty{Type: OwnerTypeAgent, ID: "specialist"}) || request.Status != AgentRequestStatusPending ||
-		request.AcceptancePolicy != AgentRequestAcceptanceRecipientReview || request.Goal != "Analyze the release" ||
+	if request.Recipient != (models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "specialist"}) || request.Status != models.AgentRequestStatusPending ||
+		request.AcceptancePolicy != models.AgentRequestAcceptanceRecipientReview || request.Goal != "Analyze the release" ||
 		request.SharedContext["release"] != "2026.07" || request.SharedContext[agentrun.DelegationModeContextKey] != "reason" ||
 		len(request.ChildCheckpoint) != 0 || request.IdempotencyKey != delegationIdempotencyKey(f.run.ID, "delegate-"+f.entry.ID) {
 		t.Fatalf("request = %#v", request)
@@ -297,19 +300,19 @@ func TestDelegateParksWaitingForAgentDecision(t *testing.T) {
 		t.Fatalf("request id %s, want %s", request.ID, want)
 	}
 	source := f.reload()
-	if source.Status != AgentRunStatusWaitingForAgent || source.WakeCondition == nil ||
+	if source.Status != models.AgentRunStatusWaitingForAgent || source.WakeCondition == nil ||
 		source.WakeCondition.Type != "agent_request_decision" || source.WakeCondition.Reference != request.ID || source.LeaseOwner != "" {
 		t.Fatalf("source = %s %#v", source.Status, source.WakeCondition)
 	}
-	if result.Park.Status != AgentRunStatusWaitingForAgent || result.Park.Wake.Reference != request.ID || result.Run == nil {
+	if result.Park.Status != models.AgentRunStatusWaitingForAgent || result.Park.Wake.Reference != request.ID || result.Run == nil {
 		t.Fatalf("park = %#v", result.Park)
 	}
 	entry := f.currentEntry()
-	if entry.State != ToolEntryAwaitingChild || entry.Tool.Wait == nil || entry.Tool.Wait.AgentRequestID != request.ID {
+	if entry.State != models.ToolEntryAwaitingChild || entry.Tool.Wait == nil || entry.Tool.Wait.AgentRequestID != request.ID {
 		t.Fatalf("entry = %s %#v", entry.State, entry.Tool.Wait)
 	}
 	meta, err := DecodeControlEntryMeta(entry)
-	if err != nil || meta.Kind != ControlToolDelegate || meta.RequestID != request.ID {
+	if err != nil || meta.Kind != models.ControlToolDelegate || meta.RequestID != request.ID {
 		t.Fatalf("meta = %#v %v", meta, err)
 	}
 }
@@ -317,14 +320,14 @@ func TestDelegateParksWaitingForAgentDecision(t *testing.T) {
 func TestDelegateCompletedResultCarriesAnswerAndArtifacts(t *testing.T) {
 	f := newDelegateFixture(t, newTestKernelStore(t), nil)
 	_, request := f.delegate()
-	f.finishChild(request.ID, AgentRunStatusCompleted, map[string]interface{}{
+	f.finishChild(request.ID, models.AgentRunStatusCompleted, map[string]interface{}{
 		"report": "Ship it: no blockers found.", "summary": "Release analysed",
 	}, "")
 	resumed := f.resume()
 	if !resumed.Resolved || resumed.Result.Kind != ControlContinue {
 		t.Fatalf("resume = %#v", resumed)
 	}
-	if f.entry.State != ToolEntryCompleted || f.entry.Tool.Result.IsError {
+	if f.entry.State != models.ToolEntryCompleted || f.entry.Tool.Result.IsError {
 		t.Fatalf("entry = %s %#v", f.entry.State, f.entry.Tool.Result)
 	}
 	value := delegateResult(t, f.entry)
@@ -343,7 +346,7 @@ func TestDelegateClarificationThenReplyParksAgain(t *testing.T) {
 	_, request := f.delegate()
 	f.respond(request.ID, collaboration.AgentRequestDecisionRequestClarification, "Which region?")
 	resumed := f.resume()
-	if !resumed.Resolved || f.entry.State != ToolEntryCompleted || f.entry.Tool.Result.IsError {
+	if !resumed.Resolved || f.entry.State != models.ToolEntryCompleted || f.entry.Tool.Result.IsError {
 		t.Fatalf("resume = %#v entry %s", resumed, f.entry.State)
 	}
 	value := delegateResult(t, f.entry)
@@ -351,26 +354,26 @@ func TestDelegateClarificationThenReplyParksAgain(t *testing.T) {
 		t.Fatalf("result = %#v", value)
 	}
 
-	f.call(ControlToolDelegateReply, map[string]interface{}{"requestId": request.ID, "answer": "EU only."})
+	f.call(models.ControlToolDelegateReply, map[string]interface{}{"requestId": request.ID, "answer": "EU only."})
 	result := f.mustSettle()
-	if result.Kind != ControlParked || !result.Park.Committed || result.Park.Status != AgentRunStatusWaitingForAgent {
+	if result.Kind != ControlParked || !result.Park.Committed || result.Park.Status != models.AgentRunStatusWaitingForAgent {
 		t.Fatalf("reply = %#v", result)
 	}
 	answered := f.request(request.ID)
-	if answered.Status != AgentRequestStatusPending || answered.Response != "EU only." {
+	if answered.Status != models.AgentRequestStatusPending || answered.Response != "EU only." {
 		t.Fatalf("request = %s %q", answered.Status, answered.Response)
 	}
-	if source := f.reload(); source.Status != AgentRunStatusWaitingForAgent || source.WakeCondition.Reference != request.ID {
+	if source := f.reload(); source.Status != models.AgentRunStatusWaitingForAgent || source.WakeCondition.Reference != request.ID {
 		t.Fatalf("source = %s %#v", source.Status, source.WakeCondition)
 	}
-	if entry := f.currentEntry(); entry.State != ToolEntryAwaitingChild || entry.Tool.Wait.AgentRequestID != request.ID {
+	if entry := f.currentEntry(); entry.State != models.ToolEntryAwaitingChild || entry.Tool.Wait.AgentRequestID != request.ID {
 		t.Fatalf("reply entry = %s", entry.State)
 	}
 	if len(f.requests()) != 1 {
 		t.Fatal("reply created a second request")
 	}
 
-	f.finishChild(request.ID, AgentRunStatusCompleted, map[string]interface{}{"summary": "EU analysed"}, "")
+	f.finishChild(request.ID, models.AgentRunStatusCompleted, map[string]interface{}{"summary": "EU analysed"}, "")
 	if resumed := f.resume(); !resumed.Resolved || delegateResult(t, f.entry)["answer"] != "EU analysed" {
 		t.Fatalf("reply resume = %#v %#v", resumed, f.entry.Tool.Result)
 	}
@@ -381,7 +384,7 @@ func TestDelegateReplyCrashBeforeAnswerAnswersOnResume(t *testing.T) {
 	_, request := f.delegate()
 	f.respond(request.ID, collaboration.AgentRequestDecisionRequestClarification, "Which region?")
 	f.resume()
-	f.call(ControlToolDelegateReply, map[string]interface{}{"requestId": request.ID, "answer": "EU only."})
+	f.call(models.ControlToolDelegateReply, map[string]interface{}{"requestId": request.ID, "answer": "EU only."})
 	// Crash after the entry moved, before the answer was recorded.
 	asked := f.request(request.ID)
 	if _, err := f.exec.awaitDelegation(t.Context(), f.context(), asked.ID, asked.Revision); err != nil {
@@ -395,7 +398,7 @@ func TestDelegateReplyCrashBeforeAnswerAnswersOnResume(t *testing.T) {
 	if resumed.Resolved || resumed.Park == nil || !resumed.Park.Committed {
 		t.Fatalf("resume = %#v", resumed)
 	}
-	if answered := f.request(request.ID); answered.Status != AgentRequestStatusPending || answered.Response != "EU only." {
+	if answered := f.request(request.ID); answered.Status != models.AgentRequestStatusPending || answered.Response != "EU only." {
 		t.Fatalf("request = %s %q", answered.Status, answered.Response)
 	}
 }
@@ -405,7 +408,7 @@ func TestDelegateRejectedIsErrorResult(t *testing.T) {
 	_, request := f.delegate()
 	f.respond(request.ID, collaboration.AgentRequestDecisionReject, "Out of scope for me.")
 	resumed := f.resume()
-	if !resumed.Resolved || f.entry.State != ToolEntryError || !f.entry.Tool.Result.IsError {
+	if !resumed.Resolved || f.entry.State != models.ToolEntryError || !f.entry.Tool.Result.IsError {
 		t.Fatalf("resume = %#v entry %s", resumed, f.entry.State)
 	}
 	if value := delegateResult(t, f.entry); value["status"] != "rejected" || value["reason"] != "Out of scope for me." {
@@ -416,9 +419,9 @@ func TestDelegateRejectedIsErrorResult(t *testing.T) {
 func TestDelegateFailedLeavesNoFinalFailureCheckpoint(t *testing.T) {
 	f := newDelegateFixture(t, newTestKernelStore(t), nil)
 	_, request := f.delegate()
-	f.finishChild(request.ID, AgentRunStatusFailed, nil, "provider exhausted retries")
+	f.finishChild(request.ID, models.AgentRunStatusFailed, nil, "provider exhausted retries")
 	source := f.reload()
-	if source.Status != AgentRunStatusQueued {
+	if source.Status != models.AgentRunStatusQueued {
 		t.Fatalf("source = %s", source.Status)
 	}
 	for key := range source.Checkpoint {
@@ -427,7 +430,7 @@ func TestDelegateFailedLeavesNoFinalFailureCheckpoint(t *testing.T) {
 		}
 	}
 	resumed := f.resume()
-	if !resumed.Resolved || f.entry.State != ToolEntryError {
+	if !resumed.Resolved || f.entry.State != models.ToolEntryError {
 		t.Fatalf("resume = %#v entry %s", resumed, f.entry.State)
 	}
 	if value := delegateResult(t, f.entry); value["status"] != "failed" || value["reason"] != "provider exhausted retries" {
@@ -436,14 +439,14 @@ func TestDelegateFailedLeavesNoFinalFailureCheckpoint(t *testing.T) {
 }
 
 func TestDelegateFromRunbookOriginIsPreauthorized(t *testing.T) {
-	f := newDelegateFixture(t, newTestKernelStore(t), func(req *CreateAgentRunRequest) {
+	f := newDelegateFixture(t, newTestKernelStore(t), func(req *models.CreateAgentRunRequest) {
 		req.Context = map[string]interface{}{
 			"runbookDefinitionId": "hourly-scan", "runbookDefinitionVersion": "2.0.2", "runbookActivationId": "activation-one",
 		}
 	})
 	_, request := f.delegate()
 	origin, _ := request.SharedContext["triggerInput"].(map[string]interface{})
-	if request.AcceptancePolicy != AgentRequestAcceptancePreauthorized || origin["runbookDefinitionId"] != "hourly-scan" ||
+	if request.AcceptancePolicy != models.AgentRequestAcceptancePreauthorized || origin["runbookDefinitionId"] != "hourly-scan" ||
 		origin["runbookActivationId"] != "activation-one" {
 		t.Fatalf("request = %#v", request)
 	}
@@ -457,18 +460,18 @@ func TestReplyToForeignRequestIsRefused(t *testing.T) {
 	other.claim() // the other source runs again; it is not queued
 
 	f := newDelegateFixtureIn(t, store, other.scope, nil) // same tenant, another source Run
-	f.call(ControlToolDelegateReply, map[string]interface{}{"requestId": foreign.ID, "answer": "EU only."})
+	f.call(models.ControlToolDelegateReply, map[string]interface{}{"requestId": foreign.ID, "answer": "EU only."})
 	result := f.mustSettle()
-	if result.Kind != ControlContinue || f.entry.State != ToolEntryError {
+	if result.Kind != ControlContinue || f.entry.State != models.ToolEntryError {
 		t.Fatalf("reply = %#v", result)
 	}
 	if value := delegateResult(t, f.entry); value["error"] != controlRequestNotAwaitingCode {
 		t.Fatalf("result = %#v", value)
 	}
-	if request := other.request(foreign.ID); request.Status != AgentRequestStatusClarificationRequested || request.Response != "Which region?" {
+	if request := other.request(foreign.ID); request.Status != models.AgentRequestStatusClarificationRequested || request.Response != "Which region?" {
 		t.Fatalf("foreign request changed: %s %q", request.Status, request.Response)
 	}
-	if run := f.reload(); run.Status != AgentRunStatusRunning {
+	if run := f.reload(); run.Status != models.AgentRunStatusRunning {
 		t.Fatalf("source = %s", run.Status)
 	}
 }
@@ -478,9 +481,9 @@ func TestDelegateReplyToUnaskedRequestIsRefused(t *testing.T) {
 	_, request := f.delegate()
 	f.respond(request.ID, collaboration.AgentRequestDecisionReject, "No.")
 	f.resume()
-	f.call(ControlToolDelegateReply, map[string]interface{}{"requestId": request.ID, "answer": "EU only."})
+	f.call(models.ControlToolDelegateReply, map[string]interface{}{"requestId": request.ID, "answer": "EU only."})
 	f.mustSettle()
-	if value := delegateResult(t, f.entry); f.entry.State != ToolEntryError || value["error"] != controlRequestNotAwaitingCode ||
+	if value := delegateResult(t, f.entry); f.entry.State != models.ToolEntryError || value["error"] != controlRequestNotAwaitingCode ||
 		value["message"] != "Request "+request.ID+" is rejected." {
 		t.Fatalf("result = %s %#v", f.entry.State, value)
 	}
@@ -488,9 +491,9 @@ func TestDelegateReplyToUnaskedRequestIsRefused(t *testing.T) {
 
 func TestDelegateUnknownAgentIsRefused(t *testing.T) {
 	f := newDelegateFixture(t, newTestKernelStore(t), nil)
-	f.call(ControlToolDelegate, map[string]interface{}{"agentId": "stranger", "goal": "Do it"})
+	f.call(models.ControlToolDelegate, map[string]interface{}{"agentId": "stranger", "goal": "Do it"})
 	f.mustSettle()
-	if value := delegateResult(t, f.entry); f.entry.State != ToolEntryError || value["error"] != controlDelegationRejectedCode {
+	if value := delegateResult(t, f.entry); f.entry.State != models.ToolEntryError || value["error"] != controlDelegationRejectedCode {
 		t.Fatalf("result = %s %#v", f.entry.State, value)
 	}
 	if len(f.requests()) != 0 {
@@ -500,37 +503,37 @@ func TestDelegateUnknownAgentIsRefused(t *testing.T) {
 
 func TestDelegateNewMessageRefusesWithoutRequest(t *testing.T) {
 	f := newDelegateFixture(t, newTestKernelStore(t), nil)
-	f.call(ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
+	f.call(models.ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
 	// A message arrives after the loop read the Run.
 	current := f.reload()
-	next := cloneAgentRun(current)
-	next.PendingInterventions = append(next.PendingInterventions, AgentRunIntervention{
-		ID: "i1", Actor: ActivityActor{Type: "user", ID: "u1"}, Instruction: "use the EU numbers", CreatedAt: time.Now().UTC(),
+	next := models.CloneAgentRun(current)
+	next.PendingInterventions = append(next.PendingInterventions, models.AgentRunIntervention{
+		ID: "i1", Actor: models.ActivityActor{Type: "user", ID: "u1"}, Instruction: "use the EU numbers", CreatedAt: time.Now().UTC(),
 	})
 	next.Revision++
-	if _, err := f.store.UpdateAgentRunWithEvent(t.Context(), next, current.Revision, &ActivityEvent{
-		ID: uuid.NewString(), Scope: f.scope, EventType: "run.intervention_added", Severity: ActivitySeverityInfo,
-		RunID: current.ID, Actor: ActivityActor{Type: "user", ID: "u1"}, Summary: "guidance", Visibility: ActivityVisibilityScope,
+	if _, err := f.store.UpdateAgentRunWithEvent(t.Context(), next, current.Revision, &models.ActivityEvent{
+		ID: uuid.NewString(), Scope: f.scope, EventType: "run.intervention_added", Severity: models.ActivitySeverityInfo,
+		RunID: current.ID, Actor: models.ActivityActor{Type: "user", ID: "u1"}, Summary: "guidance", Visibility: models.ActivityVisibilityScope,
 		CreatedAt: time.Now().UTC(),
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	result := f.mustSettle()
-	if result.Kind != ControlContinue || f.entry.State != ToolEntryError || delegateResult(t, f.entry)["error"] != controlNewMessageCode {
+	if result.Kind != ControlContinue || f.entry.State != models.ToolEntryError || delegateResult(t, f.entry)["error"] != controlNewMessageCode {
 		t.Fatalf("result = %#v entry %s", result, f.entry.State)
 	}
 	if len(f.requests()) != 0 {
 		t.Fatal("request was created")
 	}
-	if run := f.reload(); run.Status != AgentRunStatusRunning {
+	if run := f.reload(); run.Status != models.AgentRunStatusRunning {
 		t.Fatalf("source = %s", run.Status)
 	}
 }
 
 func TestDelegateBoundedSourceFundsMinimumChild(t *testing.T) {
 	const childMinimumTurns = 8 // the Turns every child is funded with at least
-	f := newDelegateFixture(t, newTestKernelStore(t), func(req *CreateAgentRunRequest) {
-		req.Budget = &BudgetPolicy{MaxTurns: 64}
+	f := newDelegateFixture(t, newTestKernelStore(t), func(req *models.CreateAgentRunRequest) {
+		req.Budget = &models.BudgetPolicy{MaxTurns: 64}
 	})
 	_, request := f.delegate()
 	if request.BudgetAllocation == nil || request.BudgetAllocation.MaxTurns != childMinimumTurns {
@@ -539,12 +542,12 @@ func TestDelegateBoundedSourceFundsMinimumChild(t *testing.T) {
 }
 
 func TestDelegateInsufficientBudgetIsToolError(t *testing.T) {
-	f := newDelegateFixture(t, newTestKernelStore(t), func(req *CreateAgentRunRequest) {
-		req.Budget = &BudgetPolicy{MaxTurns: 4}
+	f := newDelegateFixture(t, newTestKernelStore(t), func(req *models.CreateAgentRunRequest) {
+		req.Budget = &models.BudgetPolicy{MaxTurns: 4}
 	})
-	f.call(ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
+	f.call(models.ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
 	f.mustSettle()
-	if value := delegateResult(t, f.entry); f.entry.State != ToolEntryError || value["error"] != modelstep.ControlBudgetErrorCode {
+	if value := delegateResult(t, f.entry); f.entry.State != models.ToolEntryError || value["error"] != modelstep.ControlBudgetErrorCode {
 		t.Fatalf("result = %s %#v", f.entry.State, value)
 	}
 	if len(f.requests()) != 0 {
@@ -562,7 +565,7 @@ type crashingCreateStore struct {
 
 var errDelegateCrash = errors.New("simulated crash")
 
-func (s *crashingCreateStore) CreateAgentRequest(ctx context.Context, record AgentRequestCreateRecord) (*ActivityEvent, error) {
+func (s *crashingCreateStore) CreateAgentRequest(ctx context.Context, record models.AgentRequestCreateRecord) (*models.ActivityEvent, error) {
 	if s.crashed {
 		return s.delegateTestStore.CreateAgentRequest(ctx, record)
 	}
@@ -588,11 +591,11 @@ func TestDelegateCrashBeforeRequestResettlesOnce(t *testing.T) {
 			t.Run("BeforeCommit", func(t *testing.T) {
 				store := &crashingCreateStore{delegateTestStore: backend.open(t)}
 				f := newDelegateFixture(t, store, nil)
-				f.call(ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
+				f.call(models.ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
 				if _, err := f.settle(); !errors.Is(err, errDelegateCrash) {
 					t.Fatalf("first settle = %v, want the crash", err)
 				}
-				if entry := f.currentEntry(); entry.State != ToolEntryPending {
+				if entry := f.currentEntry(); entry.State != models.ToolEntryPending {
 					t.Fatalf("entry after crash = %s", entry.State)
 				}
 				if len(f.requests()) != 0 {
@@ -607,27 +610,27 @@ func TestDelegateCrashBeforeRequestResettlesOnce(t *testing.T) {
 					t.Fatalf("re-settle = %#v", result)
 				}
 				request := f.onlyRequest()
-				if entry := f.currentEntry(); entry.State != ToolEntryAwaitingChild || entry.Tool.Wait.AgentRequestID != request.ID {
+				if entry := f.currentEntry(); entry.State != models.ToolEntryAwaitingChild || entry.Tool.Wait.AgentRequestID != request.ID {
 					t.Fatalf("entry = %s", entry.State)
 				}
-				if source := f.reload(); source.Status != AgentRunStatusWaitingForAgent || source.WakeCondition.Reference != request.ID {
+				if source := f.reload(); source.Status != models.AgentRunStatusWaitingForAgent || source.WakeCondition.Reference != request.ID {
 					t.Fatalf("source = %s", source.Status)
 				}
 			})
 			t.Run("AfterCommit", func(t *testing.T) {
 				store := &crashingCreateStore{delegateTestStore: backend.open(t), afterCommit: true}
 				f := newDelegateFixture(t, store, nil)
-				f.call(ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
+				f.call(models.ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
 				if _, err := f.settle(); !errors.Is(err, errDelegateCrash) {
 					t.Fatalf("first settle = %v, want the crash", err)
 				}
 				request := f.onlyRequest()
-				if entry := f.currentEntry(); entry.State != ToolEntryAwaitingChild {
+				if entry := f.currentEntry(); entry.State != models.ToolEntryAwaitingChild {
 					t.Fatalf("entry = %s", entry.State)
 				}
 				// The recipient rejects; the resumed claim resumes (no re-settle).
 				f.respond(request.ID, collaboration.AgentRequestDecisionReject, "No capacity.")
-				if resumed := f.resume(); !resumed.Resolved || f.entry.State != ToolEntryError {
+				if resumed := f.resume(); !resumed.Resolved || f.entry.State != models.ToolEntryError {
 					t.Fatalf("resume = %#v entry %s", resumed, f.entry.State)
 				}
 				if len(f.requests()) != 1 {

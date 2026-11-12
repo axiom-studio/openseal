@@ -43,7 +43,7 @@ type forkBranchArgs struct {
 
 type forkArgs struct {
 	Branches []forkBranchArgs `json:"branches"`
-	Mode     FanInMode        `json:"mode,omitempty"`
+	Mode     models.FanInMode `json:"mode,omitempty"`
 }
 
 // ForkSpec is one fan-out, after argument parsing. Model calls build it from
@@ -51,12 +51,12 @@ type forkArgs struct {
 // run_operation build it themselves and call ControlExecutor.Fork.
 type ForkSpec struct {
 	ForkID   string
-	Policy   RunDependencyPolicy
+	Policy   models.RunDependencyPolicy
 	Branches []agentrun.RunForkBranch // Checkpoint may be non-empty only for ControlOriginKernel
 	// SourceCheckpoint is the source's checkpoint while it waits (kernel
 	// origin only); model calls keep the Run's checkpoint unchanged.
 	SourceCheckpoint map[string]interface{}
-	ChildKind        RunKind // model origin: RunKindAgentWork
+	ChildKind        models.RunKind // model origin: RunKindAgentWork
 	// NoSessionForks keeps every child on a fresh session even when it runs
 	// as the source Agent (deterministic children: run_operation).
 	NoSessionForks bool
@@ -92,7 +92,7 @@ func (forkHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
 					},
 				},
 				"mode": map[string]interface{}{
-					"type": "string", "enum": []interface{}{string(FanInModeAll), string(FanInModeAny)},
+					"type": "string", "enum": []interface{}{string(models.FanInModeAll), string(models.FanInModeAny)},
 					"description": "all: wait for every branch (default). any: first success wins; the rest are canceled.",
 				},
 			},
@@ -122,8 +122,8 @@ func (forkHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	}
 	switch args.Mode {
 	case "":
-		args.Mode = FanInModeAll
-	case FanInModeAll, FanInModeAny:
+		args.Mode = models.FanInModeAll
+	case models.FanInModeAll, models.FanInModeAny:
 	default:
 		return nil, fmt.Errorf("mode must be all or any, got %q", args.Mode)
 	}
@@ -136,13 +136,13 @@ func (forkHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.Cont
 	for i, arg := range args.Branches {
 		id := fmt.Sprintf("branch-%d", i+1)
 		if err := validateForkBranchContext(arg.Context); err != nil {
-			return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "context_invalid",
+			return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "context_invalid",
 				fmt.Sprintf("Branch %d context is not allowed: %v.", i+1, err), nil))
 		}
 		agentID := ""
 		if arg.AgentID != "" && arg.AgentID != cc.Run.AssignedAgentID {
 			if !forkTargetEligible(arg.AgentID, cc.Authority.ForkTargets) {
-				return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "agent_not_eligible",
+				return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "agent_not_eligible",
 					fmt.Sprintf("Branch %d names an Agent you cannot run a branch as; omit agentId to run it as yourself.", i+1),
 					map[string]interface{}{"agentId": arg.AgentID}))
 			}
@@ -161,7 +161,7 @@ func (forkHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.Cont
 	if err != nil {
 		var insufficient *modelstep.ControlBudgetInsufficientError
 		if errors.As(err, &insufficient) {
-			return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, insufficient.Code(), insufficient.Message(), nil))
+			return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, insufficient.Code(), insufficient.Message(), nil))
 		}
 		return ControlResult{}, err
 	}
@@ -170,9 +170,9 @@ func (forkHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.Cont
 	}
 	return x.Fork(ctx, cc, ForkSpec{
 		ForkID:    "fork-" + cc.Entry.ID,
-		Policy:    RunDependencyPolicy{Mode: args.Mode, FailureMode: DependencyFailureFailFast},
+		Policy:    models.RunDependencyPolicy{Mode: args.Mode, FailureMode: models.DependencyFailureFailFast},
 		Branches:  branches,
-		ChildKind: RunKindAgentWork,
+		ChildKind: models.RunKindAgentWork,
 	})
 }
 
@@ -188,7 +188,7 @@ func forkTargetEligible(agentID string, targets []agentrun.HostedAgentTarget) bo
 // validateForkBranchContext: branch data is credential-free and never sets a
 // kernel key.
 func validateForkBranchContext(context map[string]interface{}) error {
-	if err := ValidateCredentialFreeContext(context); err != nil {
+	if err := models.ValidateCredentialFreeContext(context); err != nil {
 		return err
 	}
 	for key := range context {
@@ -244,7 +244,7 @@ func (x *ControlExecutor) Fork(ctx context.Context, cc agentrun.ControlContext, 
 	}
 	meta := ControlEntryMeta{Kind: cc.ToolName(), ForkID: spec.ForkID, GroupID: groupID, ChildRunIDs: childIDs}
 	if meta.Kind == "" {
-		meta.Kind = ControlToolFork
+		meta.Kind = models.ControlToolFork
 	}
 	control, err := json.Marshal(&meta)
 	if err != nil {
@@ -257,27 +257,27 @@ func (x *ControlExecutor) Fork(ctx context.Context, cc agentrun.ControlContext, 
 			return ControlResult{}, err
 		}
 		if current == nil {
-			return ControlResult{}, ErrRunNotFound
+			return ControlResult{}, models.ErrRunNotFound
 		}
-		if current.Status != AgentRunStatusRunning || current.LeaseOwner != cc.WorkerID {
-			return ControlResult{}, ErrLeaseLost
+		if current.Status != models.AgentRunStatusRunning || current.LeaseOwner != cc.WorkerID {
+			return ControlResult{}, models.ErrLeaseLost
 		}
 		var required *int
 		if model {
 			count := len(run.PendingInterventions)
 			if len(current.PendingInterventions) != count {
-				return x.forkRefuse(ctx, cc, controlErrorResult(ToolResultRefused, forkNewMessageCode, forkNewMessageMessage, nil))
+				return x.forkRefuse(ctx, cc, controlErrorResult(models.ToolResultRefused, forkNewMessageCode, forkNewMessageMessage, nil))
 			}
 			required = &count
 		}
 		now := x.now()
-		var transition *ToolEntryTransitionRequest
+		var transition *models.ToolEntryTransitionRequest
 		if entry != nil {
-			transition = &ToolEntryTransitionRequest{
+			transition = &models.ToolEntryTransitionRequest{
 				Scope: run.Scope, EntryID: entry.ID, RunID: run.ID, Lease: cc.LeaseGuard(now),
-				From: entry.State, ExpectedRevision: entry.Revision, To: ToolEntryAwaitingChild,
-				Wait:   &ToolEntryWait{GroupID: groupID, ChildRunIDs: append([]string(nil), childIDs...)},
-				Kernel: &ToolEntryKernelPatch{Control: control}, Now: now,
+				From: entry.State, ExpectedRevision: entry.Revision, To: models.ToolEntryAwaitingChild,
+				Wait:   &models.ToolEntryWait{GroupID: groupID, ChildRunIDs: append([]string(nil), childIDs...)},
+				Kernel: &models.ToolEntryKernelPatch{Control: control}, Now: now,
 			}
 		}
 		created, err := x.Forks.Create(ctx, agentrun.CreateRunForkRequest{
@@ -285,16 +285,16 @@ func (x *ControlExecutor) Fork(ctx context.Context, cc agentrun.ControlContext, 
 			ForkID: spec.ForkID, Policy: spec.Policy, Branches: spec.Branches, ContinuationCheckpoint: checkpoint,
 			ChildKind: spec.ChildKind, SessionForks: sessionForks,
 			ToolTransition: transition, RequireInterventionCount: required,
-			Actor: ActivityActor{Type: "worker", ID: cc.WorkerID},
+			Actor: models.ActivityActor{Type: "worker", ID: cc.WorkerID},
 		})
 		switch {
 		case err == nil:
 			return x.forkParked(ctx, cc, created, groupID, len(childIDs))
-		case errors.Is(err, ErrSteeringArrived):
-			return x.forkRefuse(ctx, cc, controlErrorResult(ToolResultRefused, forkNewMessageCode, forkNewMessageMessage, nil))
-		case attempt == 0 && errors.Is(err, ErrRevisionConflict):
+		case errors.Is(err, models.ErrSteeringArrived):
+			return x.forkRefuse(ctx, cc, controlErrorResult(models.ToolResultRefused, forkNewMessageCode, forkNewMessageMessage, nil))
+		case attempt == 0 && errors.Is(err, models.ErrRevisionConflict):
 			continue
-		case attempt == 0 && errors.Is(err, ErrToolEntryStateConflict) && entry != nil:
+		case attempt == 0 && errors.Is(err, models.ErrToolEntryStateConflict) && entry != nil:
 			reread, getErr := x.Sessions.GetSessionEntry(ctx, run.Scope, entry.ID)
 			if getErr != nil {
 				return ControlResult{}, getErr
@@ -307,7 +307,7 @@ func (x *ControlExecutor) Fork(ctx context.Context, cc agentrun.ControlContext, 
 		case forkAbortsClaim(err):
 			return ControlResult{}, err
 		default:
-			return x.forkRefuse(ctx, cc, controlErrorResult(ToolResultRefused, forkRejectedCode, err.Error(), nil))
+			return x.forkRefuse(ctx, cc, controlErrorResult(models.ToolResultRefused, forkRejectedCode, err.Error(), nil))
 		}
 	}
 }
@@ -316,7 +316,7 @@ func (x *ControlExecutor) Fork(ctx context.Context, cc agentrun.ControlContext, 
 // errors abort the claim (rule 5); the next claim's resume settles again.
 func forkAbortsClaim(err error) bool {
 	for _, target := range []error{
-		ErrLeaseLost, ErrRevisionConflict, ErrSessionMoved, ErrToolEntryStateConflict, ErrRunNotFound,
+		models.ErrLeaseLost, models.ErrRevisionConflict, models.ErrSessionMoved, models.ErrToolEntryStateConflict, models.ErrRunNotFound,
 		context.Canceled, context.DeadlineExceeded,
 	} {
 		if errors.Is(err, target) {
@@ -328,7 +328,7 @@ func forkAbortsClaim(err error) bool {
 
 // forkRefuse ends the call with an is_error result. A kernel call without a
 // tool entry gets the refusal as a Go error.
-func (x *ControlExecutor) forkRefuse(ctx context.Context, cc agentrun.ControlContext, result *ToolResult) (ControlResult, error) {
+func (x *ControlExecutor) forkRefuse(ctx context.Context, cc agentrun.ControlContext, result *models.ToolResult) (ControlResult, error) {
 	if cc.Entry == nil {
 		return ControlResult{}, fmt.Errorf("fork refused: %s", controlResultText(result))
 	}
@@ -336,8 +336,8 @@ func (x *ControlExecutor) forkRefuse(ctx context.Context, cc agentrun.ControlCon
 }
 
 func (x *ControlExecutor) forkParked(ctx context.Context, cc agentrun.ControlContext, created *agentrun.RunForkResult, groupID string, children int) (ControlResult, error) {
-	var entry *SessionEntry
-	var source *AgentRun
+	var entry *models.SessionEntry
+	var source *models.AgentRun
 	if created != nil && created.DependencyGroup != nil {
 		entry, source = created.DependencyGroup.ToolEntry, created.DependencyGroup.Source
 	}
@@ -348,13 +348,13 @@ func (x *ControlExecutor) forkParked(ctx context.Context, cc agentrun.ControlCon
 		}
 		entry = reread
 	}
-	if entry != nil && entry.State != ToolEntryAwaitingChild {
-		return ControlResult{}, fmt.Errorf("%w: fork entry %s is %s after the group was created", ErrToolEntryStateConflict, entry.ID, entry.State)
+	if entry != nil && entry.State != models.ToolEntryAwaitingChild {
+		return ControlResult{}, fmt.Errorf("%w: fork entry %s is %s after the group was created", models.ErrToolEntryStateConflict, entry.ID, entry.State)
 	}
 	return ControlResult{
 		Kind: ControlParked, Run: source, Entry: entry,
 		Park: &agentrun.LoopPark{
-			Status: AgentRunStatusWaitingForDependency, Wake: &WakeCondition{Type: "run_dependencies", Reference: groupID},
+			Status: models.AgentRunStatusWaitingForDependency, Wake: &models.WakeCondition{Type: "run_dependencies", Reference: groupID},
 			Summary: fmt.Sprintf("Waiting for %d forked branches", children), Committed: true,
 		},
 	}, nil
@@ -381,23 +381,23 @@ func (x *ControlExecutor) resumeFork(ctx context.Context, cc agentrun.ControlCon
 	if groupID == "" && cc.Entry.Tool.Wait != nil {
 		groupID = cc.Entry.Tool.Wait.GroupID
 	}
-	var group *RunDependencyGroup
+	var group *models.RunDependencyGroup
 	if groupID != "" {
 		group, err = x.Forks.DependencyGroup(ctx, cc.Run.Scope, groupID)
-		if err != nil && !errors.Is(err, ErrDependencyGroupNotFound) {
+		if err != nil && !errors.Is(err, models.ErrDependencyGroupNotFound) {
 			return ControlResume{}, err
 		}
 	}
 	if group == nil {
 		// The group is created with the entry's transition, so this is a
 		// store the kernel can no longer read; tell the model plainly.
-		result, err := x.complete(ctx, cc, controlErrorResult(ToolResultFailed, forkLostCode,
+		result, err := x.complete(ctx, cc, controlErrorResult(models.ToolResultFailed, forkLostCode,
 			"The forked work can no longer be found; start it again if it is still needed.", nil), nil)
 		return ControlResume{Resolved: true, Result: result}, err
 	}
-	if group.Status == RunDependencyGroupWaiting || group.Status == RunDependencyGroupOpen {
+	if group.Status == models.RunDependencyGroupWaiting || group.Status == models.RunDependencyGroupOpen {
 		return ControlResume{Park: &agentrun.LoopPark{
-			Status: AgentRunStatusWaitingForDependency, Wake: &WakeCondition{Type: "run_dependencies", Reference: group.ID},
+			Status: models.AgentRunStatusWaitingForDependency, Wake: &models.WakeCondition{Type: "run_dependencies", Reference: group.ID},
 			Summary: "Waiting for forked branches",
 		}}, nil
 	}
@@ -409,21 +409,21 @@ func (x *ControlExecutor) resumeFork(ctx context.Context, cc agentrun.ControlCon
 	if err != nil {
 		return ControlResume{}, err
 	}
-	status := ToolResultSucceeded
+	status := models.ToolResultSucceeded
 	switch group.Status {
-	case RunDependencyGroupFailed:
-		status = ToolResultFailed
-	case RunDependencyGroupCanceled:
-		status = ToolResultCanceled
+	case models.RunDependencyGroupFailed:
+		status = models.ToolResultFailed
+	case models.RunDependencyGroupCanceled:
+		status = models.ToolResultCanceled
 	}
-	result, err := x.complete(ctx, cc, controlJSONResult(status, value), nil)
+	result, err := x.complete(ctx, cc, models.ControlJSONResult(status, value), nil)
 	return ControlResume{Resolved: true, Result: result}, err
 }
 
 // forkResultValue is the model-visible result of a resolved group. It holds
 // each child's answer, never its checkpoint.
-func (x *ControlExecutor) forkResultValue(ctx context.Context, source *AgentRun, group *RunDependencyGroup, edges []*RunDependency, meta *ControlEntryMeta) (map[string]interface{}, error) {
-	byTarget := make(map[string]*RunDependency, len(edges))
+func (x *ControlExecutor) forkResultValue(ctx context.Context, source *models.AgentRun, group *models.RunDependencyGroup, edges []*models.RunDependency, meta *ControlEntryMeta) (map[string]interface{}, error) {
+	byTarget := make(map[string]*models.RunDependency, len(edges))
 	order := make([]string, 0, len(edges))
 	for _, edge := range edges {
 		byTarget[edge.TargetRunID] = edge
@@ -439,14 +439,14 @@ func (x *ControlExecutor) forkResultValue(ctx context.Context, source *AgentRun,
 	for _, childID := range order {
 		edge := byTarget[childID]
 		if edge == nil {
-			return nil, fmt.Errorf("%w: fork child %s has no edge in group %s", ErrInvalidRunDependency, childID, group.ID)
+			return nil, fmt.Errorf("%w: fork child %s has no edge in group %s", models.ErrInvalidRunDependency, childID, group.ID)
 		}
 		child, err := x.Portfolio.GetAgentRun(ctx, source.Scope, childID)
 		if err != nil {
 			return nil, err
 		}
 		if child == nil {
-			return nil, ErrRunNotFound
+			return nil, models.ErrRunNotFound
 		}
 		branch := map[string]interface{}{
 			"branch": edge.ID, "goal": truncateControlText(child.Goal, child.ID), "runId": child.ID,
@@ -478,16 +478,16 @@ func (x *ControlExecutor) forkResultValue(ctx context.Context, source *AgentRun,
 }
 
 // controlResultText is the message of an is_error control result.
-func controlResultText(result *ToolResult) string {
+func controlResultText(result *models.ToolResult) string {
 	if result == nil {
 		return ""
 	}
 	for _, part := range result.Content {
 		var value struct{ Error, Message string }
-		if part.Type == ContentPartJSON && json.Unmarshal(part.Value, &value) == nil {
+		if part.Type == models.ContentPartJSON && json.Unmarshal(part.Value, &value) == nil {
 			return value.Error + ": " + value.Message
 		}
-		if part.Type == ContentPartText {
+		if part.Type == models.ContentPartText {
 			return part.Text
 		}
 	}

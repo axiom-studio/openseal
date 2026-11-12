@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -20,10 +22,10 @@ import (
 )
 
 type startTaskTestStore interface {
-	ConversationTaskKernelStore
-	AgentSessionStore
-	RunCommandStore
-	AgentRunScheduleStore
+	models.ConversationTaskKernelStore
+	models.AgentSessionStore
+	models.RunCommandStore
+	models.AgentRunScheduleStore
 }
 
 // forStartTaskStores runs test on SQLite.
@@ -51,39 +53,39 @@ const (
 type startTaskFixture struct {
 	t            *testing.T
 	store        startTaskTestStore
-	run          *AgentRun
-	step         *AgentTurn
-	session      *AgentSession
-	user         *SessionEntry
-	assistant    *SessionEntry
-	entries      map[string]*SessionEntry // by call id
-	conversation *Conversation
-	message      *ChannelMessage
+	run          *models.AgentRun
+	step         *models.AgentTurn
+	session      *models.AgentSession
+	user         *models.SessionEntry
+	assistant    *models.SessionEntry
+	entries      map[string]*models.SessionEntry // by call id
+	conversation *models.Conversation
+	message      *models.ChannelMessage
 	exec         *ControlExecutor
 	authority    agentrun.ControlAuthority
 }
 
-func startTaskCall(id, goal, ack string) ModelToolCall {
+func startTaskCall(id, goal, ack string) models.ModelToolCall {
 	raw, _ := json.Marshal(map[string]string{"goal": goal, "acknowledgment": ack})
-	return ModelToolCall{ID: id, Name: string(ControlToolStartTask), Arguments: raw}
+	return models.ModelToolCall{ID: id, Name: string(models.ControlToolStartTask), Arguments: raw}
 }
 
-func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelToolCall) *startTaskFixture {
+func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...models.ModelToolCall) *startTaskFixture {
 	t.Helper()
 	if len(calls) == 0 {
-		calls = []ModelToolCall{startTaskCall("call-task", startTaskTestGoal, startTaskTestAck)}
+		calls = []models.ModelToolCall{startTaskCall("call-task", startTaskTestGoal, startTaskTestAck)}
 	}
 	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: "start-task-" + uuid.NewString()[:8]}
+	scope := models.Scope{Kind: "tenant", ID: "start-task-" + uuid.NewString()[:8]}
 	conversations := conversation.NewConversationService(store)
-	seedTestSpace(t, store.(SpaceStore), scope)
+	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "start-task-chat",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "start-task-chat",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion,
+	message := conversationruntest.PostMessage(t, conversations, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion,
 		"Review the release in the background", "start-task-message")
 	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
@@ -94,45 +96,45 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 		t.Fatalf("schedule foreground: %#v %v", scheduled, err)
 	}
 	now := time.Now().UTC()
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
-		Scope: scope, Kind: RunKindConversation, WorkerID: startTaskTestWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute,
+	run, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{
+		Scope: scope, Kind: models.RunKindConversation, WorkerID: startTaskTestWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute,
 	})
 	if err != nil || run == nil || run.ID != scheduled.Run.ID {
 		t.Fatalf("claim foreground: %#v %v", run, err)
 	}
-	lease := AgentRunLeaseGuard{WorkerID: startTaskTestWorker, Now: now}
+	lease := models.AgentRunLeaseGuard{WorkerID: startTaskTestWorker, Now: now}
 	thread, _ := run.Context["threadRootMessageId"].(string)
-	if _, err := store.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{Scope: scope, ConversationID: conversation.ID,
+	if _, err := store.OpenConversationAgentSession(ctx, models.OpenConversationAgentSessionRequest{Scope: scope, ConversationID: conversation.ID,
 		ThreadRootID: thread, AgentID: run.AssignedAgentID, RunID: run.ID, Lease: lease, Now: now}); err != nil {
 		t.Fatalf("open lane session: %v", err)
 	}
-	turns := NewAgentTurnService(store, store)
-	step, err := turns.BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: run.ID, SessionID: run.SessionID,
-		Producer: StepProducerModel, WorkerID: startTaskTestWorker, LeaseDuration: time.Hour})
+	turns := activity.NewAgentTurnService(store, store)
+	step, err := turns.BeginTurn(ctx, activity.BeginAgentTurnRequest{Scope: scope, RunID: run.ID, SessionID: run.SessionID,
+		Producer: models.StepProducerModel, WorkerID: startTaskTestWorker, LeaseDuration: time.Hour})
 	if err != nil {
 		t.Fatalf("begin step: %v", err)
 	}
 	sessionID := run.SessionID
-	user := &SessionEntry{ID: SessionEntryID(sessionID, "message:"+message.ID), RunID: run.ID, Type: SessionEntryUser,
-		SourceKey: "message:" + message.ID, User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: message.Sender.ID},
-			Content: []ContentPart{storetest.TextPart(message.Content)}, MessageID: message.ID}}
-	assistant := &SessionEntry{ID: SessionEntryID(sessionID, AssistantEntryKey(step.ID)), RunID: run.ID, StepID: step.ID, Step: step.Sequence,
-		Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x",
-			StopReason: ModelStopToolCalls, ToolCalls: calls}}
-	batch := []*SessionEntry{assistant}
+	user := &models.SessionEntry{ID: models.SessionEntryID(sessionID, "message:"+message.ID), RunID: run.ID, Type: models.SessionEntryUser,
+		SourceKey: "message:" + message.ID, User: &models.UserEntry{Origin: models.UserEntryChannelMessage, Author: models.SessionAuthor{Type: "user", ID: message.Sender.ID},
+			Content: []models.ContentPart{storetest.TextPart(message.Content)}, MessageID: message.ID}}
+	assistant := &models.SessionEntry{ID: models.SessionEntryID(sessionID, models.AssistantEntryKey(step.ID)), RunID: run.ID, StepID: step.ID, Step: step.Sequence,
+		Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{Provider: models.ModelStepProviderAnthropic, Model: "claude-x",
+			StopReason: models.ModelStopToolCalls, ToolCalls: calls}}
+	batch := []*models.SessionEntry{assistant}
 	for _, call := range calls {
-		batch = append(batch, &SessionEntry{ID: SessionEntryID(sessionID, ToolEntryKey(step.ID, call.ID)), RunID: run.ID, StepID: step.ID,
-			Step: step.Sequence, Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: call.ID,
-			Tool: &ToolEntry{Name: call.Name, Arguments: call.Arguments, SideEffect: ToolSideEffectWrite}})
+		batch = append(batch, &models.SessionEntry{ID: models.SessionEntryID(sessionID, models.ToolEntryKey(step.ID, call.ID)), RunID: run.ID, StepID: step.ID,
+			Step: step.Sequence, Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: call.ID,
+			Tool: &models.ToolEntry{Name: call.Name, Arguments: call.Arguments, SideEffect: models.ToolSideEffectWrite}})
 	}
-	for _, entries := range [][]*SessionEntry{{user}, batch} {
-		if _, err := store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{Scope: scope, SessionID: sessionID,
+	for _, entries := range [][]*models.SessionEntry{{user}, batch} {
+		if _, err := store.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{Scope: scope, SessionID: sessionID,
 			RunID: run.ID, Lease: &lease, Entries: entries, Now: now}); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
-	step, err = turns.FinishTurn(ctx, scope, step.ID, FinishAgentTurnRequest{ExpectedRevision: step.Revision,
-		Status: AgentTurnStatusCompleted, WorkerID: startTaskTestWorker})
+	step, err = turns.FinishTurn(ctx, scope, step.ID, activity.FinishAgentTurnRequest{ExpectedRevision: step.Revision,
+		Status: models.AgentTurnStatusCompleted, WorkerID: startTaskTestWorker})
 	if err != nil {
 		t.Fatalf("finish step: %v", err)
 	}
@@ -148,7 +150,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 		t.Fatal(err)
 	}
 	f := &startTaskFixture{t: t, store: store, run: run, step: step, conversation: conversation, message: message,
-		entries: map[string]*SessionEntry{}}
+		entries: map[string]*models.SessionEntry{}}
 	if f.session, err = store.GetAgentSession(ctx, scope, sessionID); err != nil {
 		t.Fatal(err)
 	}
@@ -157,12 +159,12 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 		f.entries[entry.ToolCallID] = f.storedEntry(entry.ID)
 	}
 	f.authority = agentrun.ControlAuthority{AgentID: run.AssignedAgentID,
-		TaskStart: &HostedConversationTaskContext{ConversationID: conversation.ID, ThreadRootID: thread, CanStart: true}}
+		TaskStart: &models.HostedConversationTaskContext{ConversationID: conversation.ID, ThreadRootID: thread, CanStart: true}}
 	f.exec = &ControlExecutor{Portfolio: store, Sessions: store, Tasks: conversationrun.NewConversationTaskService(store)}
 	return f
 }
 
-func (f *startTaskFixture) storedEntry(id string) *SessionEntry {
+func (f *startTaskFixture) storedEntry(id string) *models.SessionEntry {
 	f.t.Helper()
 	entry, err := f.store.GetSessionEntry(f.t.Context(), f.run.Scope, id)
 	if err != nil {
@@ -190,18 +192,18 @@ func (f *startTaskFixture) settle(callID string) ControlResult {
 // request is the admission the settle of callID makes.
 func (f *startTaskFixture) request(callID string) conversationrun.StartConversationTaskRequest {
 	entry := f.entries[callID]
-	args := startTaskArguments(entry)
+	args := models.StartTaskEntryArgs(entry)
 	if args == nil {
 		f.t.Fatalf("entry %s has no start_task arguments", entry.ID)
 	}
 	return conversationrun.StartConversationTaskRequest{Scope: f.run.Scope, SourceRunID: f.run.ID, ExpectedSourceRevision: f.run.Revision,
 		WorkerID: startTaskTestWorker, TurnID: f.step.ID, ToolEntryID: entry.ID, AssignedAgentID: f.run.AssignedAgentID,
-		TaskKey: startTaskKey(entry.ID), Goal: args.Goal, Acknowledgment: args.Acknowledgment, Budget: &BudgetPolicy{}}
+		TaskKey: models.StartTaskKey(entry.ID), Goal: args.Goal, Acknowledgment: args.Acknowledgment, Budget: &models.BudgetPolicy{}}
 }
 
-func (f *startTaskFixture) tasks() []*ConversationTaskResult {
+func (f *startTaskFixture) tasks() []*models.ConversationTaskResult {
 	f.t.Helper()
-	tasks, err := f.store.ListConversationTasks(f.t.Context(), ConversationTaskFilter{Scope: f.run.Scope, Owner: f.run.Owner,
+	tasks, err := f.store.ListConversationTasks(f.t.Context(), models.ConversationTaskFilter{Scope: f.run.Scope, Owner: f.run.Owner,
 		ConversationID: f.conversation.ID, Limit: 10})
 	if err != nil {
 		f.t.Fatal(err)
@@ -215,7 +217,7 @@ func (f *startTaskFixture) assertNotStarted(callID string) {
 		f.t.Fatalf("tasks = %#v", tasks)
 	}
 	source, err := f.store.GetAgentRun(f.t.Context(), f.run.Scope, f.run.ID)
-	if err != nil || source.Status != AgentRunStatusRunning || len(source.Output) != 0 {
+	if err != nil || source.Status != models.AgentRunStatusRunning || len(source.Output) != 0 {
 		f.t.Fatalf("source = %#v, %v", source, err)
 	}
 }
@@ -224,7 +226,7 @@ func TestStartTaskCompletesForegroundWithAcknowledgmentAtomically(t *testing.T) 
 	forStartTaskStores(t, func(t *testing.T, store startTaskTestStore) {
 		f := newStartTaskFixture(t, store)
 		result := f.settle("call-task")
-		if result.Kind != ControlEnded || result.Run == nil || result.Run.Status != AgentRunStatusCompleted {
+		if result.Kind != ControlEnded || result.Run == nil || result.Run.Status != models.AgentRunStatusCompleted {
 			t.Fatalf("result = %#v", result)
 		}
 		source, err := store.GetAgentRun(t.Context(), f.run.Scope, f.run.ID)
@@ -236,21 +238,21 @@ func TestStartTaskCompletesForegroundWithAcknowledgmentAtomically(t *testing.T) 
 			t.Fatalf("tasks = %#v", tasks)
 		}
 		task, work := tasks[0].Task, tasks[0].WorkRun
-		if source.Status != AgentRunStatusCompleted || source.Output["summary"] != startTaskTestAck || source.LeaseOwner != "" ||
+		if source.Status != models.AgentRunStatusCompleted || source.Output["summary"] != startTaskTestAck || source.LeaseOwner != "" ||
 			source.Output["conversationTaskWorkRunId"] != work.ID || source.Revision != f.run.Revision+1 {
 			t.Fatalf("source = %#v", source)
 		}
-		if work.Kind != RunKindAgentWork || work.Status != AgentRunStatusQueued || work.Goal != startTaskTestGoal ||
+		if work.Kind != models.RunKindAgentWork || work.Status != models.AgentRunStatusQueued || work.Goal != startTaskTestGoal ||
 			work.ParentRunID != "" || work.RootRunID != work.ID || task.Acknowledgment != startTaskTestAck {
 			t.Fatalf("work = %#v task = %#v", work, task)
 		}
 		entry := f.storedEntry(f.entries["call-task"].ID)
 		value := controlResultValue(t, entry)
-		if entry.State != ToolEntryCompleted || entry.Tool.Result.IsError || value["status"] != "started" ||
+		if entry.State != models.ToolEntryCompleted || entry.Tool.Result.IsError || value["status"] != "started" ||
 			value["taskId"] != task.ID || value["workRunId"] != work.ID || value["acknowledgment"] != startTaskTestAck {
 			t.Fatalf("entry = %#v value = %v", entry, value)
 		}
-		if result.Entry == nil || result.Entry.State != ToolEntryCompleted {
+		if result.Entry == nil || result.Entry.State != models.ToolEntryCompleted {
 			t.Fatalf("result entry = %#v", result.Entry)
 		}
 	})
@@ -271,7 +273,7 @@ func TestStartTaskProvenanceSourceTurnIsStepAndLastApplied(t *testing.T) {
 		task.SourceMessageID != f.message.ID || task.AuthenticatedActor != f.message.Sender || task.Validate() != nil {
 		t.Fatalf("task provenance = %#v", task)
 	}
-	events, err := f.store.ListActivity(t.Context(), ActivityFilter{Scope: f.run.Scope, RunID: f.run.ID, EventTypes: []string{"conversation.task_started"}})
+	events, err := f.store.ListActivity(t.Context(), models.ActivityFilter{Scope: f.run.Scope, RunID: f.run.ID, EventTypes: []string{"conversation.task_started"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,20 +313,20 @@ func TestStartTaskProvenanceSourceTurnIsStepAndLastApplied(t *testing.T) {
 	current.Revision++
 	updateConversationTaskSQLRun(t, g.store, current, current.Revision-1)
 	g.run = current
-	if _, err := g.exec.Tasks.Start(t.Context(), g.request("call-task")); !errors.Is(err, ErrInvalidConversationTask) {
+	if _, err := g.exec.Tasks.Start(t.Context(), g.request("call-task")); !errors.Is(err, models.ErrInvalidConversationTask) {
 		t.Fatalf("start from a step that is not last applied = %v", err)
 	}
 }
 
 func TestStartTaskRefusedWhenSteeringUnconsumed(t *testing.T) {
-	steer := func(t *testing.T, f *startTaskFixture) *AgentRun {
+	steer := func(t *testing.T, f *startTaskFixture) *models.AgentRun {
 		current, err := f.store.GetAgentRun(t.Context(), f.run.Scope, f.run.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		now := time.Now().UTC()
-		current.PendingInterventions = append(current.PendingInterventions, AgentRunIntervention{ID: "steer-1",
-			Actor: ActivityActor{Type: "user", ID: "sender-user"}, Instruction: "Actually, only the security fixes.", CreatedAt: now})
+		current.PendingInterventions = append(current.PendingInterventions, models.AgentRunIntervention{ID: "steer-1",
+			Actor: models.ActivityActor{Type: "user", ID: "sender-user"}, Instruction: "Actually, only the security fixes.", CreatedAt: now})
 		current.UpdatedAt = now
 		current.Revision++
 		updateConversationTaskSQLRun(t, f.store, current, current.Revision-1)
@@ -338,7 +340,7 @@ func TestStartTaskRefusedWhenSteeringUnconsumed(t *testing.T) {
 		}
 		entry := f.storedEntry(f.entries["call-task"].ID)
 		value := controlResultValue(t, entry)
-		if entry.State != ToolEntryError || value["error"] != "new_message" {
+		if entry.State != models.ToolEntryError || value["error"] != "new_message" {
 			t.Fatalf("entry = %#v value = %v", entry, value)
 		}
 		f.assertNotStarted("call-task")
@@ -355,7 +357,7 @@ func TestStartTaskRefusedWhenSteeringUnconsumed(t *testing.T) {
 		stale := f.run
 		steered := steer(t, f)
 		cc := f.context("call-task")
-		cc.Run = cloneAgentRun(stale)
+		cc.Run = models.CloneAgentRun(stale)
 		cc.Run.Revision = steered.Revision // the settle saw the current revision, not the message
 		result, err := f.exec.Settle(t.Context(), cc)
 		if err != nil {
@@ -371,7 +373,7 @@ func TestStartTaskReplayAfterCrashReturnsSameTask(t *testing.T) {
 		req := f.request("call-task")
 		req.Budget = modelstep.ControlTaskBudget(nil)
 		var wg sync.WaitGroup
-		results := make(chan *ConversationTaskResult, 6)
+		results := make(chan *models.ConversationTaskResult, 6)
 		errs := make(chan error, 6)
 		for range 6 {
 			wg.Add(1)
@@ -390,7 +392,7 @@ func TestStartTaskReplayAfterCrashReturnsSameTask(t *testing.T) {
 				t.Fatalf("concurrent start: %v", err)
 			}
 		}
-		var first *ConversationTaskResult
+		var first *models.ConversationTaskResult
 		fresh := 0
 		for result := range results {
 			if first == nil {
@@ -411,25 +413,25 @@ func TestStartTaskReplayAfterCrashReturnsSameTask(t *testing.T) {
 		// The settle's response was lost: the same admission again returns
 		// the committed task and writes nothing.
 		again, err := f.exec.Tasks.Start(t.Context(), req)
-		if err != nil || !again.Replayed || again.Task.ID != first.Task.ID || again.SourceRun.Status != AgentRunStatusCompleted {
+		if err != nil || !again.Replayed || again.Task.ID != first.Task.ID || again.SourceRun.Status != models.AgentRunStatusCompleted {
 			t.Fatalf("replay = %#v, %v", again, err)
 		}
-		if after := f.storedEntry(entry.ID); after.Revision != entry.Revision || after.State != ToolEntryCompleted {
+		if after := f.storedEntry(entry.ID); after.Revision != entry.Revision || after.State != models.ToolEntryCompleted {
 			t.Fatalf("entry after replay = %#v", after)
 		}
 		// A changed request under the same key is a conflict.
 		req.Goal = "A different request with the same key"
-		if _, err := f.exec.Tasks.Start(t.Context(), req); !errors.Is(err, ErrConversationTaskConflict) {
+		if _, err := f.exec.Tasks.Start(t.Context(), req); !errors.Is(err, models.ErrConversationTaskConflict) {
 			t.Fatalf("mutated replay = %v", err)
 		}
 	})
 }
 
 func TestStartTaskNotAloneIsRefused(t *testing.T) {
-	calls := []ModelToolCall{startTaskCall("call-task", startTaskTestGoal, startTaskTestAck),
-		{ID: "call-react", Name: string(ControlToolReact), Arguments: json.RawMessage(`{"messageId":"m","emoji":"eyes"}`)}}
+	calls := []models.ModelToolCall{startTaskCall("call-task", startTaskTestGoal, startTaskTestAck),
+		{ID: "call-react", Name: string(models.ControlToolReact), Arguments: json.RawMessage(`{"messageId":"m","emoji":"eyes"}`)}}
 	refusals := controlCallRefusals(calls, agentrun.ControlAuthority{CanReact: true,
-		TaskStart: &HostedConversationTaskContext{ConversationID: "c", CanStart: true}})
+		TaskStart: &models.HostedConversationTaskContext{ConversationID: "c", CanStart: true}})
 	if refusals["call-task"] == nil || refusals["call-react"] != nil {
 		t.Fatalf("refusals = %#v", refusals)
 	}
@@ -438,7 +440,7 @@ func TestStartTaskNotAloneIsRefused(t *testing.T) {
 	result := f.settle("call-task")
 	entry := f.storedEntry(f.entries["call-task"].ID)
 	value := controlResultValue(t, entry)
-	if result.Kind != ControlContinue || entry.State != ToolEntryError || value["error"] != controlTaskNotAloneCode ||
+	if result.Kind != ControlContinue || entry.State != models.ToolEntryError || value["error"] != controlTaskNotAloneCode ||
 		value["message"] != "Call conversation_start_task alone; other work belongs inside the task." {
 		t.Fatalf("result = %#v value = %v", result, value)
 	}
@@ -454,7 +456,7 @@ func TestTaskWorkRunSessionForksBeforeStartDecision(t *testing.T) {
 			t.Fatalf("tasks = %#v", tasks)
 		}
 		work := tasks[0].WorkRun
-		if work.SessionID != RunAgentSessionID(work.Scope, work.ID) {
+		if work.SessionID != models.RunAgentSessionID(work.Scope, work.ID) {
 			t.Fatalf("work session id = %q", work.SessionID)
 		}
 		session, err := store.GetAgentSession(t.Context(), work.Scope, work.SessionID)
@@ -468,12 +470,12 @@ func TestTaskWorkRunSessionForksBeforeStartDecision(t *testing.T) {
 			t.Fatalf("work path = %#v, %v", path, err)
 		}
 		seed := path.Entries[1]
-		if seed.Type != SessionEntryUser || seed.User == nil || seed.User.Origin != UserEntryGoal || seed.User.GoalKind != "task" ||
+		if seed.Type != models.SessionEntryUser || seed.User == nil || seed.User.Origin != models.UserEntryGoal || seed.User.GoalKind != "task" ||
 			!strings.Contains(seed.User.Content[0].Text, startTaskTestGoal) {
 			t.Fatalf("seed = %#v", seed)
 		}
 		for _, entry := range path.Entries {
-			if entry.Type == SessionEntryAssistant || entry.Type == SessionEntryTool {
+			if entry.Type == models.SessionEntryAssistant || entry.Type == models.SessionEntryTool {
 				t.Fatalf("work path shows the start decision: %#v", entry)
 			}
 		}
@@ -491,29 +493,29 @@ func TestOldTaskWithoutToolEntryStillValidates(t *testing.T) {
 	if err != nil || strings.Contains(string(raw), "sourceToolEntryId") {
 		t.Fatalf("old task payload = %s, %v", raw, err)
 	}
-	var decoded ConversationTask
+	var decoded models.ConversationTask
 	if err := json.Unmarshal(raw, &decoded); err != nil || decoded.Validate() != nil || decoded.RequestDigest != task.RequestDigest {
 		t.Fatalf("decoded old task = %#v, %v", decoded, err)
 	}
-	if err := validateConversationTaskCreateRecord(record); err != nil {
+	if err := models.ValidateConversationTaskCreateRecord(record); err != nil {
 		t.Fatalf("old record = %v", err)
 	}
-	if !ConversationTaskMatchesWorkRun(task, record.WorkRun) {
+	if !models.ConversationTaskMatchesWorkRun(task, record.WorkRun) {
 		t.Fatal("old task no longer matches its work Run")
 	}
 	// Admission itself only starts tasks from a tool entry.
 	if _, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationrun.StartConversationTaskRequest{Scope: task.Scope, SourceRunID: task.SourceRunID,
 		ExpectedSourceRevision: 1, WorkerID: record.WorkerID, TurnID: task.SourceTurnID, AssignedAgentID: task.TargetAgentID,
-		TaskKey: task.TaskKey, Goal: task.Goal, Acknowledgment: task.Acknowledgment}); !errors.Is(err, ErrInvalidConversationTask) {
+		TaskKey: task.TaskKey, Goal: task.Goal, Acknowledgment: task.Acknowledgment}); !errors.Is(err, models.ErrInvalidConversationTask) {
 		t.Fatalf("start without a tool entry = %v", err)
 	}
 }
 
 func TestStartTaskSpecAndArguments(t *testing.T) {
-	authority := agentrun.ControlAuthority{TaskStart: &HostedConversationTaskContext{ConversationID: "c", CanStart: true}}
+	authority := agentrun.ControlAuthority{TaskStart: &models.HostedConversationTaskContext{ConversationID: "c", CanStart: true}}
 	var spec *ControlToolSpec
 	for _, s := range builtinControlSpecs(authority) {
-		if s.Name == ControlToolStartTask {
+		if s.Name == models.ControlToolStartTask {
 			s := s
 			spec = &s
 		}
@@ -528,7 +530,7 @@ func TestStartTaskSpecAndArguments(t *testing.T) {
 	voice := authority
 	voice.VoiceCallStarted = true
 	for _, s := range builtinControlSpecs(voice) {
-		if s.Name == ControlToolStartTask {
+		if s.Name == models.ControlToolStartTask {
 			t.Fatal("start_task offered in a voice call")
 		}
 	}
@@ -543,7 +545,7 @@ func TestStartTaskSpecAndArguments(t *testing.T) {
 		}
 	}
 	value, err := (startTaskHandler{}).Decode(json.RawMessage(`{"goal":" g ","acknowledgment":" a "}`))
-	if err != nil || value.(*startTaskArgs).Goal != "g" || value.(*startTaskArgs).Acknowledgment != "a" {
+	if err != nil || value.(*models.StartTaskArgs).Goal != "g" || value.(*models.StartTaskArgs).Acknowledgment != "a" {
 		t.Fatalf("decode = %#v, %v", value, err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -88,10 +89,10 @@ func TestApprovalClaimOnceThenFailsRun(t *testing.T) {
 	}
 	result := f.settleFinal("second", agentrun.ControlAuthority{})
 	if result.Kind != ControlFailed || result.Failure == nil || result.Failure.Code != finalUnverifiedApprovalCode ||
-		result.Failure.Kind != conversation.RunFailureKindExecution || result.Entry == nil || result.Entry.State != ToolEntryError {
+		result.Failure.Kind != conversation.RunFailureKindExecution || result.Entry == nil || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("second = %#v", result)
 	}
-	requireControlError(t, f.stored("second").Tool.Result, ToolResultFailed, finalUnverifiedApprovalCode)
+	requireControlError(t, f.stored("second").Tool.Result, models.ToolResultFailed, finalUnverifiedApprovalCode)
 	// The plain-text path counts the same way.
 	g := newFinalFixture(t)
 	requireRejectionNote(t, g.plain("step-2", 2, agentrun.ControlAuthority{}, "Pending approval from your admin."), "step-2", finalApprovalClaimCode)
