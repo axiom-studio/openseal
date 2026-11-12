@@ -81,7 +81,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 }
 
 func TestActivityFeedRequiresSelectorAndRejectsInvalidCursor(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := newActivityTestStore(t)
 	service := NewRunActivityService(store, store)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	if _, err := service.ListActivityFeed(context.Background(), ActivityFeedRequest{Scope: scope}); err == nil {
@@ -96,7 +96,7 @@ func TestActivityFeedRequiresSelectorAndRejectsInvalidCursor(t *testing.T) {
 }
 
 func TestExistingRunActivityStreamKeepsSequenceCursor(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := newActivityTestStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
 	if err := store.CreateAgentRun(context.Background(), activityFeedRun("run", scope, "agent", now)); err != nil {
@@ -126,4 +126,17 @@ func activityFeedRun(id string, scope models.Scope, agentID string, now time.Tim
 		AssignedAgentID: agentID, Goal: "work", Source: models.RunSourceManual, Status: models.AgentRunStatusQueued,
 		AvailableAt: now, QueueEnteredAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+}
+
+// newActivityTestStore returns an empty in-memory kernel store that is closed
+// when the test ends. It copies runtime's newTestKernelStore so this file does
+// not depend on runtime's test helpers and can live with the activity code.
+func newActivityTestStore(t testing.TB) *sqlite.Store {
+	t.Helper()
+	store, err := sqlite.NewInMemorySQLiteStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
 }
