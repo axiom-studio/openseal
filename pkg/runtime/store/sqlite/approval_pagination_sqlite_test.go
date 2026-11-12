@@ -8,8 +8,7 @@ import (
 )
 
 // Store test: the SQLite store's approval page order, seeded with the SQLite
-// row fixtures, so this file moves to store/sqlite with action_sqlite.go and
-// sqlite_fixture_test.go (U2.9).
+// row fixtures of sqlite_fixture_test.go.
 
 func TestApprovalPaginationUsesIDToBreakTimestampTies(t *testing.T) {
 	store := newTestKernelStore(t)

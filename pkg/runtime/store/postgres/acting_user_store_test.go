@@ -11,8 +11,8 @@ import (
 )
 
 // Store test: the Postgres store keeps a Run's ActingUser fixed, also in its
-// own in-transaction update. The SQLite half of this test is in runtime's
-// acting_user_store_sqlite_test.go until that store moves too.
+// own in-transaction update. The SQLite half of this test is in
+// store/sqlite.
 
 // TestAgentRunActingUserIsImmutable runs the acting-user contract on the
 // Postgres store and checks its in-transaction Run update too.

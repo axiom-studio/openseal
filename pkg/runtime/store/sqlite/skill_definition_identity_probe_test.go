@@ -13,8 +13,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// SQLite store test: it moves to store/sqlite in U2.9. The contract it runs
-// is in skill_definition_identity_probe_contract_test.go (storetest).
+// Store test: the SQLite store's skill definition identity probe. The
+// contract it runs is storetest's skill_definition_identity_probe_contract.go.
 
 func TestSkillDefinitionIdentityProbeIsLiveExactAndIsolated(t *testing.T) {
 	for _, fixture := range []struct {

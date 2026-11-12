@@ -11,9 +11,7 @@ import (
 )
 
 // Store tests: the SQLite store's skill runtime usage projections, their
-// legacy migrations and query plans, so this file moves to store/sqlite with
-// skill_runtime_usage_sqlite.go, skill_upgrade_drain_migration_sqlite.go and
-// run_skill_dependency_migration_sqlite.go (U2.9).
+// legacy migrations and query plans.
 
 func TestSkillUpgradeDrainQueriesUseIndexedMetadataWithoutPayloads(t *testing.T) {
 	store, err := NewSQLiteStore(t.TempDir() + "/metadata.db")

@@ -10,8 +10,9 @@ import (
 )
 
 // newTestKernelStore returns an empty in-memory kernel store that is closed
-// when the test ends. runtimetest.NewKernelStore is its copy for other
-// packages (importing runtimetest here would be a cycle); change both.
+// when the test ends. runtimetest.NewKernelStore and store/sqlite's test
+// opener are its copies for other packages (importing runtimetest here
+// would be a cycle); change all three.
 func newTestKernelStore(t testing.TB) *sqlite.SQLiteStore {
 	t.Helper()
 	store, err := sqlite.NewInMemorySQLiteStore()

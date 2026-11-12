@@ -8,8 +8,7 @@ import (
 )
 
 // Store test: which loop calls the SQLite store's claim selects, seeded with
-// the SQLite row fixtures, so this file moves to store/sqlite with
-// action_sqlite.go and sqlite_fixture_test.go (U2.9).
+// the SQLite row fixtures of sqlite_fixture_test.go.
 
 func TestClaimSelectsLoopCalls(t *testing.T) {
 	now := time.Now().UTC()

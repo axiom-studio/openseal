@@ -8,8 +8,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-// Store test: the SQLite store keeps a Run's ActingUser fixed. It moves to
-// store/sqlite in U2.9; the Postgres half is in store/postgres.
+// Store test: the SQLite store keeps a Run's ActingUser fixed. The Postgres
+// half of this test is in store/postgres.
 
 // TestAgentRunActingUserIsImmutable runs the acting-user contract on the
 // SQLite store.

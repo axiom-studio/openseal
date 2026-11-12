@@ -12,8 +12,7 @@ import (
 )
 
 // Store test: the SQLite store's lease clock resolution
-// (canonicalSQLiteLeaseTime), so this file moves to store/sqlite with
-// action_credential_lease_sqlite.go (U2.9).
+// (canonicalSQLiteLeaseTime) and its expiry check.
 
 func TestSQLiteActionCredentialLeaseClockResolutionAndExpiry(t *testing.T) {
 	t.Run("canonicalizes sub-millisecond issuance", func(t *testing.T) {
