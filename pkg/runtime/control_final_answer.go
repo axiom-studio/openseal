@@ -512,7 +512,7 @@ func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]inte
 	}
 	output := map[string]interface{}{conversationrun.FinalOutputSummaryKey: strings.TrimSpace(d.Args.Answer)}
 	if report := strings.TrimSpace(d.Args.Report); report != "" {
-		output[finalOutputReportKey] = report
+		output[FinalOutputReportKey] = report
 	}
 	if d.Args.BroadcastToChannel {
 		output[agentrun.FinalOutputBroadcastKey] = true

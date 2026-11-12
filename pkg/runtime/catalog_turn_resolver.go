@@ -130,7 +130,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 		return nil, ErrAcceptedRunExecution
 	}
 	r := &loopBindingResolution{config: config, catalog: catalog, run: run, scope: scope, deployment: deployment, definition: definition}
-	if trial, ok, trialErr := agentTrialContextForRun(run); trialErr != nil {
+	if trial, ok, trialErr := AgentTrialContextForRun(run); trialErr != nil {
 		return nil, trialErr
 	} else if ok {
 		// A try_agent trial speaks as the drafted profile under the

@@ -454,7 +454,7 @@ func (x *ControlExecutor) forkResultValue(ctx context.Context, source *AgentRun,
 		if child.AssignedAgentID != source.AssignedAgentID {
 			branch["agentId"] = child.AssignedAgentID
 		}
-		if answer := forkChildAnswer(child); answer != "" {
+		if answer := ChildRunAnswer(child); answer != "" {
 			branch["answer"] = truncateControlText(answer, child.ID)
 		}
 		if len(edge.Artifacts) > 0 {

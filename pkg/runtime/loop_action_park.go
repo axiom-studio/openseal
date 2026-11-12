@@ -80,7 +80,7 @@ func (p *governedParker) governedCardWait(ctx context.Context, run *AgentRun, ca
 		if request := skillbinding.PendingConnectAppRequestFromAction(ctx, p.setups, call); request != nil {
 			return &WakeCondition{Type: skillbinding.ConnectAppWakeType, Reference: request.ID}, "Waiting for the user to connect " + request.SkillName, nil
 		}
-		if isAgentTrialCall(call) {
+		if IsAgentTrialCall(call) {
 			return p.agentTrialWait(ctx, call)
 		}
 	case ActionCallStatusFailed:

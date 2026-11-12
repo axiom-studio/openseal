@@ -35,7 +35,8 @@ const (
 	maxTeamMemberIDCharacters = 128
 )
 
-func teamCreateTeamAction() skill.Action {
+// CreateTeamAction is the create_team action of the Team management skill.
+func CreateTeamAction() skill.Action {
 	return skill.Action{
 		Name:        action.TeamActionCreateTeam,
 		Description: "Create a Team from two or more existing Agents, after the person reviews it. Use openseal.agents.list_agents for the exact Agent ids; you cannot be a member. Choose a short, distinctive name that no current Agent or Team uses.",

@@ -409,7 +409,7 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 	if wake != nil {
 		return governedCardOutcome(call.ToolCallID, current, wake, summary), nil
 	}
-	if isAgentTrialCall(current) {
+	if IsAgentTrialCall(current) {
 		// The trial's reply is the tool result, not the started-trial output.
 		output, err := x.agentTrialOutput(ctx, run, current, settled)
 		if err != nil {

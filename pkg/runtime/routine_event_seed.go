@@ -429,7 +429,7 @@ func cutJSONEscaped(s string, budget int) string {
 // has no goal.
 func loopRunSessionSeed(run *AgentRun) (*SessionEntry, error) {
 	if _, trial := run.Context[AgentTrialContextKey]; trial {
-		return agentTrialSessionSeed(run)
+		return AgentTrialSessionSeed(run)
 	}
 	seed, err := agentrun.ControlChildSeed(run)
 	if err != nil || seed != nil {

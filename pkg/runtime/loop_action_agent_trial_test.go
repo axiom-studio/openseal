@@ -42,7 +42,7 @@ func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
 
 func TestAgentTrialFinalizerDeliversReceiptAndQueuesParent(t *testing.T) {
 	f := newAgentTrialFinalizerFixture(t, AgentRunStatusWaitingForEvent)
-	child := f.endChild(t, AgentRunStatusCompleted, map[string]interface{}{finalOutputReportKey: "I would apologise and refund."}, "")
+	child := f.endChild(t, AgentRunStatusCompleted, map[string]interface{}{FinalOutputReportKey: "I would apologise and refund."}, "")
 	var woken []Scope
 	nextCalls := 0
 	next := agentrun.RunTerminalFinalizerFunc(func(context.Context, *AgentRun) error { nextCalls++; return nil })
@@ -96,7 +96,7 @@ func TestAgentTrialResumeRendersFailure(t *testing.T) {
 func TestAgentTrialResumeReadsMissedChild(t *testing.T) {
 	f := newAgentTrialFinalizerFixture(t, AgentRunStatusRunning)
 	const replyLimit = 8 << 10 // the trial reply bound
-	f.endChild(t, AgentRunStatusCompleted, map[string]interface{}{finalOutputReportKey: strings.Repeat("a", replyLimit+100)}, "")
+	f.endChild(t, AgentRunStatusCompleted, map[string]interface{}{FinalOutputReportKey: strings.Repeat("a", replyLimit+100)}, "")
 	outcome := settleAgentTrialCall(t, f, f.parent, nil, time.Now())
 	output := agentTrialResultOutput(t, outcome)
 	reply, _ := output["reply"].(string)
@@ -108,7 +108,7 @@ func TestAgentTrialResumeReadsMissedChild(t *testing.T) {
 func TestAgentTrialTimerWakeCancelsRunningChild(t *testing.T) {
 	f := newAgentTrialFinalizerFixture(t, AgentRunStatusWaitingForEvent)
 	ctx := context.Background()
-	deadline := agentTrialDeadline(f.child)
+	deadline := AgentTrialDeadline(f.child)
 
 	// The timer wakes the waiting parent only at the deadline.
 	wakes := agentrun.NewAgentRunWakeService(f.store, f.store)

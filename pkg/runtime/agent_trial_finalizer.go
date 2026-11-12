@@ -47,7 +47,7 @@ func (f *AgentTrialFinalizer) settleAgentTrial(ctx context.Context, child *model
 	if f == nil || f.store == nil || child == nil || !models.IsTerminalAgentRunStatus(child.Status) {
 		return nil
 	}
-	trial, ok, err := agentTrialContextForRun(child)
+	trial, ok, err := AgentTrialContextForRun(child)
 	if err != nil || !ok {
 		return err
 	}
@@ -56,7 +56,7 @@ func (f *AgentTrialFinalizer) settleAgentTrial(ctx context.Context, child *model
 	}
 	interventionID := agentTrialInterventionPrefix + child.ID
 	for attempt := 0; attempt < 4; attempt++ {
-		parent, err := getAgentTrialChild(ctx, f.store, child.Scope, trial.ParentRunID)
+		parent, err := AgentTrialChild(ctx, f.store, child.Scope, trial.ParentRunID)
 		if err != nil {
 			return err
 		}
@@ -69,7 +69,7 @@ func (f *AgentTrialFinalizer) settleAgentTrial(ctx context.Context, child *model
 			return nil
 		}
 		now := f.now().UTC()
-		receipt := agentTrialReceiptFromRun(child, now)
+		receipt := AgentTrialReceiptFromRun(child, now)
 		status, wake := models.AgentRunStatusQueued, (*models.WakeCondition)(nil)
 		if !waiting {
 			status, wake = parent.Status, parent.WakeCondition

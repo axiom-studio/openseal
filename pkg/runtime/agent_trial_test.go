@@ -111,7 +111,7 @@ func TestAgentTrialStartsChildWithoutDefinition(t *testing.T) {
 	if child.Context[AgentTrialModelContextKey] != "gpt-6-luna" {
 		t.Fatalf("child model = %#v", child.Context)
 	}
-	trial, ok, err := agentTrialContextForRun(child)
+	trial, ok, err := AgentTrialContextForRun(child)
 	if err != nil || !ok || trial.ParentRunID != f.run.ID || trial.ActionCallID != "trial-call" ||
 		trial.Profile.SystemPrompt != "Read new support mail and sort it by urgency." || trial.Profile.DisplayName != "Inbox Triage" ||
 		trial.Profile.Personality != "Friendly" || !slices.Equal(trial.Profile.OperatingPrinciples, []string{"Flag anything legal."}) ||
@@ -159,7 +159,7 @@ func newAgentTrialFinalizerFixture(t *testing.T, parentStatus models.AgentRunSta
 	parent := mustAgentRun(t, f.store, f.scope, f.run.ID)
 	parent.Status = parentStatus
 	if parentStatus == models.AgentRunStatusWaitingForEvent {
-		deadline := agentTrialDeadline(child)
+		deadline := AgentTrialDeadline(child)
 		parent.WakeCondition = &models.WakeCondition{Type: agentrun.AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}
 	}
 	putAgentTrialRun(t, f.store.Store, parent)
@@ -185,7 +185,7 @@ func TestAgentTrialFinalizerHeldParentKeepsStatus(t *testing.T) {
 	if parent.Status != models.AgentRunStatusRunning || parent.Revision != f.parent.Revision+1 {
 		t.Fatalf("parent = %s rev %d (was %d)", parent.Status, parent.Revision, f.parent.Revision)
 	}
-	receipt := agentTrialReceiptFor(f.call.ID, child.ID, parent.PendingInterventions)
+	receipt := AgentTrialReceiptFor(f.call.ID, child.ID, parent.PendingInterventions)
 	if receipt == nil || receipt.Status != AgentTrialStatusFailed || receipt.FailureMessage != "model unavailable" {
 		t.Fatalf("receipt = %#v", receipt)
 	}
