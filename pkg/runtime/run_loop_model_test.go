@@ -76,7 +76,7 @@ type modelProducerFixture struct {
 	preparer *modelProducerTestPreparer
 	store    *modelProducerTestStore
 	producer *ModelStepProducer
-	render   *renderFixture
+	render   *RenderFixture
 	in       agentrun.StepInput
 }
 
@@ -84,7 +84,7 @@ func newModelProducerFixture(t *testing.T) *modelProducerFixture {
 	t.Helper()
 	f := &modelProducerFixture{
 		host:   &modelProducerTestHost{},
-		render: newRenderFixture(t, "lane"),
+		render: NewRenderFixture(t, "lane"),
 	}
 	prepared := validModelStepRequest()
 	// The preparer's identity is overwritten; the producer owns it.
@@ -93,13 +93,13 @@ func newModelProducerFixture(t *testing.T) *modelProducerFixture {
 	prepared.Entries = nil
 	f.preparer = &modelProducerTestPreparer{req: prepared}
 
-	f.render.user("run-1", "old request")
-	f.render.assistant("run-1", "step-0", "c0")
-	f.render.tool("run-1", "step-0", "c0", ToolEntryCompleted)
-	kept := f.render.user("run-1", "recent request")
-	f.render.compaction("run-1", kept.ID)
-	f.render.note("run-1", "Run context")
-	f.store = &modelProducerTestStore{path: f.render.path()}
+	f.render.User("run-1", "old request")
+	f.render.Assistant("run-1", "step-0", "c0")
+	f.render.Tool("run-1", "step-0", "c0", ToolEntryCompleted)
+	kept := f.render.User("run-1", "recent request")
+	f.render.Compaction("run-1", kept.ID)
+	f.render.Note("run-1", "Run context")
+	f.store = &modelProducerTestStore{path: f.render.Path()}
 
 	producer, err := NewModelStepProducer(f.host, f.preparer, f.store)
 	if err != nil {
@@ -151,7 +151,7 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 	// Entries are the path rendered from the latest compaction.
 	if len(req.Entries) != 3 || req.Entries[0].Type != SessionEntryCompaction ||
 		req.Entries[1].Type != SessionEntryUser || req.Entries[2].Type != SessionEntryNote {
-		t.Fatalf("entries = %v", renderIDs(req.Entries))
+		t.Fatalf("entries = %v", RenderIDs(req.Entries))
 	}
 	// Unbounded: the preparer's (catalog) cap stays, 0 here; no preview observer.
 	if req.MaxOutputTokens != 0 || req.Stream.AnswerPreview {

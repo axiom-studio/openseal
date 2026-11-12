@@ -15,12 +15,12 @@ import (
 // between Runs only append to what the model already saw.
 
 // fixtureNoteAppender appends capabilities notes to a render fixture.
-type fixtureNoteAppender struct{ f *renderFixture }
+type fixtureNoteAppender struct{ f *RenderFixture }
 
 func (a fixtureNoteAppender) AppendAgentSessionEntries(_ context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
 	var out []*SessionEntry
 	for _, entry := range req.Entries {
-		out = append(out, a.f.add(entry))
+		out = append(out, a.f.Add(entry))
 	}
 	return &AppendAgentSessionEntriesResult{Entries: out}, nil
 }
@@ -30,7 +30,7 @@ func (a fixtureNoteAppender) AppendAgentSessionEntries(_ context.Context, req Ap
 type fixtureNoteSessions struct{ fixtureNoteAppender }
 
 func (s fixtureNoteSessions) LoadAgentSessionPath(context.Context, Scope, string) (*AgentSessionPath, error) {
-	return s.f.path(), nil
+	return s.f.Path(), nil
 }
 
 func (s fixtureNoteSessions) GetActionCall(context.Context, Scope, string) (*ActionCall, error) {
@@ -47,7 +47,7 @@ func (f *prepareFixture) ensureNote(step string) bool {
 		f.t.Fatal(err)
 	}
 	before := len(f.capabilityNotes())
-	path := f.render.path()
+	path := f.render.Path()
 	in := agentrun.StepInput{Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: agentrun.StepModeNormal}
 	if _, err := producer.Produce(context.Background(), in); err != nil {
 		f.t.Fatal(err)
@@ -57,7 +57,7 @@ func (f *prepareFixture) ensureNote(step string) bool {
 
 func (f *prepareFixture) capabilityNotes() []*SessionEntry {
 	var notes []*SessionEntry
-	for _, entry := range f.render.entries {
+	for _, entry := range f.render.Entries {
 		if entry.Note != nil && entry.Note.Kind == NoteCapabilities {
 			notes = append(notes, entry)
 		}
@@ -126,12 +126,12 @@ func testSkillConnectStable(t *testing.T, small bool) {
 	if !f.ensureNote("step-1") {
 		t.Fatal("the first step has no capabilities note")
 	}
-	f.render.assistant("run-1", "step-1")
+	f.render.Assistant("run-1", "step-1")
 	first := f.prepare("step-2")
 
 	// Between Runs the user connects Slack: two actions and a prompt.
 	f.run = &AgentRun{ID: "run-2", Scope: testSessionScope, AssignedAgentID: "agent-1"}
-	f.render.user("run-2", "post the launch notes to slack")
+	f.render.User("run-2", "post the launch notes to slack")
 	f.preparer.config.SkillPrompts = append(f.preparer.config.SkillPrompts,
 		HostedSkillPrompt{SkillID: "skill-slack", Version: "1", Reference: "skill-slack@1", Name: "Slack", Instructions: "Slack rules."})
 	for _, name := range []string{"slack.post", "slack.read"} {
@@ -186,9 +186,9 @@ func TestCapabilityNoteOnceAndAfterCompaction(t *testing.T) {
 	}
 
 	// A compaction that summarizes the note: the next step lists everything again.
-	f.render.assistant("run-1", "step-2")
-	kept := f.render.user("run-1", "and the budget?")
-	f.render.compaction("run-1", kept.ID)
+	f.render.Assistant("run-1", "step-2")
+	kept := f.render.User("run-1", "and the budget?")
+	f.render.Compaction("run-1", kept.ID)
 	if !f.ensureNote("step-3") {
 		t.Fatal("no note after the compaction summarized it")
 	}
@@ -258,8 +258,8 @@ func TestSurfacedToolDefinitionFrozen(t *testing.T) {
 }
 
 func TestLoadDescriptionModeIndependent(t *testing.T) {
-	listed := NewCapabilitySet(capabilityCatalogFixture(), nil, CapabilitySetConfig{})
-	searching := NewCapabilitySet(capabilityCatalogFixture(), nil, CapabilitySetConfig{CatalogBytes: 200})
+	listed := NewCapabilitySet(CapabilityCatalogFixture(), nil, CapabilitySetConfig{})
+	searching := NewCapabilitySet(CapabilityCatalogFixture(), nil, CapabilitySetConfig{CatalogBytes: 200})
 	if listed.Searching() || !searching.Searching() {
 		t.Fatal("fixtures must cover both modes")
 	}
@@ -281,7 +281,7 @@ func TestLoadDescriptionModeIndependent(t *testing.T) {
 
 func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
 	x := newToolExecFixture(t, agentrun.ControlAuthority{})
-	x.binding.ModelActions = capabilityCatalogFixture().Actions
+	x.binding.ModelActions = CapabilityCatalogFixture().Actions
 	step := x.step("step-1", AgentTurnStatusRunning, toolCall("call-load", LoadCapabilitiesTool, `{"ids":["action:notion.op2"]}`))
 	if _, err := x.binding.Tools.ExecuteStepTools(x.ctx, x.input(step)); err != nil {
 		t.Fatal(err)

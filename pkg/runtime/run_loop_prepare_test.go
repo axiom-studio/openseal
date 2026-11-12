@@ -37,7 +37,7 @@ type prepareFixture struct {
 	preparer *catalogModelStepPreparer
 	binding  *agentrun.TurnRunnerBinding
 	run      *AgentRun
-	render   *renderFixture
+	render   *RenderFixture
 }
 
 func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepareFixture {
@@ -62,15 +62,15 @@ func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepa
 			},
 		},
 		run:    &AgentRun{ID: "run-1", Scope: testSessionScope, AssignedAgentID: "agent-1"},
-		render: newRenderFixture(t, "chat"),
+		render: NewRenderFixture(t, "chat"),
 	}
-	f.render.user("run-1", "find the launch notes")
+	f.render.User("run-1", "find the launch notes")
 	return f
 }
 
 func (f *prepareFixture) prepare(step string) ModelStepRequest {
 	f.t.Helper()
-	path := f.render.path()
+	path := f.render.Path()
 	req, err := f.preparer.PrepareModelStep(context.Background(), agentrun.StepInput{
 		Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path,
 		Binding: f.binding, Mode: agentrun.StepModeNormal,
@@ -130,8 +130,8 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 
 	// A later step over a longer path (a read call and its result) sends the
 	// same system and tools byte for byte.
-	f.render.assistant("run-1", "step-1", "c1")
-	f.render.tool("run-1", "step-1", "c1", ToolEntryCompleted)
+	f.render.Assistant("run-1", "step-1", "c1")
+	f.render.Tool("run-1", "step-1", "c1", ToolEntryCompleted)
 	second := f.prepare("step-2")
 	a, _ := json.Marshal([]interface{}{first.System, first.Tools})
 	b, _ := json.Marshal([]interface{}{second.System, second.Tools})
@@ -193,13 +193,13 @@ func TestPrepareLoadAppendsTools(t *testing.T) {
 func (f *prepareFixture) addLoad(step, call string, ids ...string) *SessionEntry {
 	f.t.Helper()
 	arguments, _ := json.Marshal(map[string]interface{}{"ids": ids})
-	f.render.add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
+	f.render.Add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
 		Provider: ModelStepProviderAnthropic, Model: "claude-test", StopReason: ModelStopToolCalls,
 		ToolCalls: []ModelToolCall{{ID: call, Name: LoadCapabilitiesTool, Arguments: arguments}},
 	}})
-	set := f.preparer.CapabilitySet(agentrun.StepInput{Run: f.run, Binding: f.binding, Path: f.render.path()})
+	set := f.preparer.CapabilitySet(agentrun.StepInput{Run: f.run, Binding: f.binding, Path: f.render.Path()})
 	patch := loadKernelPatch(set, f.binding.ModelActions, ids)
-	return f.render.add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryTool, State: ToolEntryCompleted, ToolCallID: call, Tool: &ToolEntry{
+	return f.render.Add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryTool, State: ToolEntryCompleted, ToolCallID: call, Tool: &ToolEntry{
 		Name: LoadCapabilitiesTool, Arguments: arguments, SideEffect: ToolSideEffectNone,
 		SurfacedTools: patch.SurfacedTools, LoadedInstructions: patch.LoadedInstructions,
 		Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: `{"status":"loaded"}`}}},
@@ -271,7 +271,7 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	}
 
 	// Explaining a failure sends no tools.
-	path := f.render.path()
+	path := f.render.Path()
 	explain, err := f.preparer.PrepareModelStep(context.Background(), agentrun.StepInput{
 		Run: f.run, Step: &AgentTurn{ID: "step-2", RunID: f.run.ID}, Session: path.Session, Path: path,
 		Binding: f.binding, Mode: agentrun.StepModeExplainFailure,

@@ -818,7 +818,7 @@ func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
 			t.Fatalf("%s changes with its targets", name)
 		}
 	}
-	items := capabilityNoteLines(controlTargetItems(more))
+	items := CapabilityNoteLines(controlTargetItems(more))
 	for _, want := range []string{"- agent-2: Ada", "- agent-3: Bo", "- audit — Audit. Input schema:"} {
 		if !strings.Contains(items, want) {
 			t.Fatalf("targets missing %q from the note: %s", want, items)

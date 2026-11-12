@@ -444,7 +444,7 @@ func TestRunOperationsListedInCapabilitiesNoteInOrder(t *testing.T) {
 	}
 	engage := `- engage-now — Engage accounts: Send the reviewed engagement sequence. Input schema: {"additionalProperties":false,"properties":{"account":{"type":"string"}},"required":["account"],"type":"object"}`
 	report := `- report — Weekly report: Summarize the week. Input schema: {"type":"object"}`
-	if listed := capabilityNoteLines(controlTargetItems(authority)); !strings.Contains(listed, engage+"\n"+report) {
+	if listed := CapabilityNoteLines(controlTargetItems(authority)); !strings.Contains(listed, engage+"\n"+report) {
 		t.Fatalf("note lines = %s", listed)
 	}
 	entrypoint := spec.InputSchema["properties"].(map[string]interface{})["entrypoint"].(map[string]interface{})

@@ -197,7 +197,7 @@ func loopRoutineScriptFixture(t *testing.T) *loopRoutineScript {
 // returns the terminal tool entry the loop records from the outcome.
 func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int64, arguments map[string]interface{}, reply map[string]interface{}) *SessionEntry {
 	t.Helper()
-	answer := hostReplyError(errors.New("connection reset"))
+	answer := HostReplyError(errors.New("connection reset"))
 	if reply != nil {
 		answer = func(_ context.Context, request HostToolRequest) (HostToolResult, error) {
 			result := map[string]interface{}{}
@@ -211,12 +211,12 @@ func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int6
 			if result[workspace.ExpectedDigestArgument] == false {
 				delete(result, workspace.ExpectedDigestArgument)
 			}
-			return hostReplyJSON(result, false)(context.Background(), request)
+			return HostReplyJSON(result, false)(context.Background(), request)
 		}
 	}
-	dispatcher := NewHostToolDispatcher(&fakeHostToolHost{replies: []func(context.Context, HostToolRequest) (HostToolResult, error){answer}},
+	dispatcher := NewHostToolDispatcher(&FakeHostToolHost{Replies: []func(context.Context, HostToolRequest) (HostToolResult, error){answer}},
 		runtimeaction.NewActionCoordinator(nil, nil, nil, nil, nil), nil)
-	call := hostToolCallFixture(t, workspace.OperationRunCommand, arguments)
+	call := HostToolCallFixture(t, workspace.OperationRunCommand, arguments)
 	call.ToolEntryID = fmt.Sprintf("ent_%d", sequence)
 	call.CommandPins = routine.CommandPins()
 	outcome, ok := dispatcher.Run(context.Background(), call)

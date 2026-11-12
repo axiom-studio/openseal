@@ -10,14 +10,14 @@ import (
 func TestCompactionCarriesSurfacedTools(t *testing.T) {
 	f := newPrepareFixture(t, fullPrepareAuthority())
 	early := f.addLoad("step-1", "c1", "action:notion.fetch")
-	f.render.user("run-1", "and gmail")
+	f.render.User("run-1", "and gmail")
 	late := f.addLoad("step-2", "c2", "action:gmail.read")
 	before := f.prepare("step-3")
 
 	// Summarize up to the second load: the first load's tool is carried.
 	kept := late.ID
-	f.render.add(&SessionEntry{RunID: "run-1", Type: SessionEntryCompaction, Compaction: &CompactionEntry{
-		Summary: "Earlier work.", FirstKeptEntryID: f.render.entries[len(f.render.entries)-3].ID, TokensBefore: 9000,
+	f.render.Add(&SessionEntry{RunID: "run-1", Type: SessionEntryCompaction, Compaction: &CompactionEntry{
+		Summary: "Earlier work.", FirstKeptEntryID: f.render.Entries[len(f.render.Entries)-3].ID, TokensBefore: 9000,
 		CarriedTools: early.Tool.SurfacedTools,
 		Provider:     "anthropic", Model: "claude-test", Trigger: CompactionTriggerThreshold,
 	}})
@@ -38,7 +38,7 @@ func TestCompactionCarriesSurfacedTools(t *testing.T) {
 	if mustJSON(t, got[0].InputSchema) != mustJSON(t, loadedTools(before)[0].InputSchema) {
 		t.Fatal("the carried definition changed")
 	}
-	set := f.preparer.CapabilitySet(agentrun.StepInput{Run: f.run, Binding: f.binding, Path: f.render.path()})
+	set := f.preparer.CapabilitySet(agentrun.StepInput{Run: f.run, Binding: f.binding, Path: f.render.Path()})
 	if !set.Loaded("action:notion.fetch") {
 		t.Fatal("a carried tool is not callable")
 	}
