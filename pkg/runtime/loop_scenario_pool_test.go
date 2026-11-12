@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // poolFixturePool is a worker pool over the loop fixture's store whose
@@ -21,12 +23,11 @@ func poolFixturePool(t *testing.T, f *loopFixture, maxSteps int) *AgentRunWorker
 	t.Helper()
 	pool, err := NewAgentRunWorkerPool(f.store, TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 		return f.binding(run), nil
-	}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease})
+	}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease}, models.WithClock(f.clock.Now))
 	if err != nil {
 		t.Fatal(err)
 	}
 	pool.SetActionCoordinator(f.actions)
-	pool.loop.config.Now = f.clock.Now
 	if maxSteps > 0 {
 		pool.loop.config.MaxStepsPerClaim = maxSteps
 	}
@@ -69,12 +70,11 @@ func TestLoopPoolClaimsAndRunsToRest(t *testing.T) {
 		pool, err := NewAgentRunWorkerPool(f.store, TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 			resolved.Add(1)
 			return f.binding(run), nil
-		}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease})
+		}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease}, models.WithClock(f.clock.Now))
 		if err != nil {
 			t.Fatal(err)
 		}
 		pool.SetActionCoordinator(f.actions)
-		pool.loop.config.Now = f.clock.Now
 		run := f.startRun(RunKindAgentWork, "Check two issues")
 
 		done := poolClaim(t, f, pool, run.ID)
