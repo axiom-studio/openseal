@@ -1,11 +1,12 @@
-// Re-exports of declarations moved to github.com/axiom-studio/openseal/pkg/runtime/collaboration,
-// kept so that importers of github.com/axiom-studio/openseal/pkg/runtime continue to compile.
+// Temporary compatibility for the pkg/runtime split. New code imports
+// pkg/runtime/collaboration. Remove once in-flight branches have landed.
+//
+// Exported declarations of pkg/runtime/collaboration, kept so that importers
+// of pkg/runtime continue to compile.
 
 package runtime
 
 import (
-	"context"
-
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
@@ -17,12 +18,6 @@ const AgentRequestDecisionOutputKey = collaboration.AgentRequestDecisionOutputKe
 
 const AgentRequestCompletionReviewOutputKey = collaboration.AgentRequestCompletionReviewOutputKey
 
-const AgentRequestDecisionSystemInstruction = collaboration.AgentRequestDecisionSystemInstruction
-
-const AgentRequestCompletionReviewSystemInstruction = collaboration.AgentRequestCompletionReviewSystemInstruction
-
-const AcceptedAgentRequestExecutionSystemInstruction = collaboration.AcceptedAgentRequestExecutionSystemInstruction
-
 type AgentRequestInboxReconcileResult = collaboration.AgentRequestInboxReconcileResult
 
 type AgentRequestInboxReconciler = collaboration.AgentRequestInboxReconciler
@@ -30,16 +25,6 @@ type AgentRequestInboxReconciler = collaboration.AgentRequestInboxReconciler
 // NewAgentRequestInboxReconciler forwards to collaboration.NewAgentRequestInboxReconciler.
 func NewAgentRequestInboxReconciler(store models.AgentRequestInboxStore, opts ...models.ServiceOption) (*collaboration.AgentRequestInboxReconciler, error) {
 	return collaboration.NewAgentRequestInboxReconciler(store, opts...)
-}
-
-// ParseAgentRequestDecisionOutput forwards to collaboration.ParseAgentRequestDecisionOutput.
-func ParseAgentRequestDecisionOutput(output map[string]interface{}) (collaboration.AgentRequestDecision, string, error) {
-	return collaboration.ParseAgentRequestDecisionOutput(output)
-}
-
-// ParseAgentRequestCompletionReviewOutput forwards to collaboration.ParseAgentRequestCompletionReviewOutput.
-func ParseAgentRequestCompletionReviewOutput(output map[string]interface{}) (bool, string, error) {
-	return collaboration.ParseAgentRequestCompletionReviewOutput(output)
 }
 
 var ErrAgentRequestUnauthorized = collaboration.ErrAgentRequestUnauthorized
@@ -84,16 +69,6 @@ func CanStartAgentRequestFromRun(run *models.AgentRun) bool {
 	return collaboration.CanStartAgentRequestFromRun(run)
 }
 
-// ValidateTaskDelegationSource forwards to collaboration.ValidateTaskDelegationSource.
-func ValidateTaskDelegationSource(ctx context.Context, store models.PortfolioStore, source *models.AgentRun) error {
-	return collaboration.ValidateTaskDelegationSource(ctx, store, source)
-}
-
-// StableCollaborationID forwards to collaboration.StableCollaborationID.
-func StableCollaborationID(scope models.Scope, key, suffix string) string {
-	return collaboration.StableCollaborationID(scope, key, suffix)
-}
-
 type AgentRequestConversationProjector = collaboration.AgentRequestConversationProjector
 
 // NewAgentRequestConversationProjector forwards to collaboration.NewAgentRequestConversationProjector.
@@ -105,11 +80,6 @@ func NewAgentRequestConversationProjector(store interface {
 }
 
 type RoutineTeamCatalog = collaboration.RoutineTeamCatalog
-
-// NewRoutineTeamRoster forwards to collaboration.NewRoutineTeamRoster.
-func NewRoutineTeamRoster(teams collaboration.RoutineTeamCatalog) models.TeamRosterReader {
-	return collaboration.NewRoutineTeamRoster(teams)
-}
 
 // IsSupportedTeamManagementSkillVersion forwards to collaboration.IsSupportedTeamManagementSkillVersion.
 func IsSupportedTeamManagementSkillVersion(version string) bool {
