@@ -75,8 +75,8 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 				t.Fatalf("%s trigger = %q", name, chatLoopEntryText(entry))
 			}
 		}
-		if strings.Contains(chatStepText(directBinding, []*SessionEntry{directNote}), teamChannelRules) ||
-			!strings.Contains(chatStepText(memberBinding, []*SessionEntry{memberNote}), teamChannelRules) {
+		if strings.Contains(chatStepText(directBinding, []*SessionEntry{directNote}), teamMemberRules) ||
+			!strings.Contains(chatStepText(memberBinding, []*SessionEntry{memberNote}), teamMemberRules) {
 			t.Fatal("Team rules reached the 1:1 step or missed the member step")
 		}
 		answers := team.agentMessages()
@@ -85,3 +85,11 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 		}
 	})
 }
+
+// teamMemberRules is the Team channel section a member's step gets with its
+// roster. The test spells it out to pin the text the model sees.
+const teamMemberRules = "You are one member of this Team channel and answer under your own name. " +
+	"Answer the current message yourself; do not speak for teammates. " +
+	"To bring a teammate in, end your answer with a one-line @Name mention and the exact ask; that teammate is then asked to answer. " +
+	"Never @mention teammates just to agree, thank or acknowledge. " +
+	"Prefer a reaction (👀 picked up, ✅ done, 👍 agree) over a filler message."
