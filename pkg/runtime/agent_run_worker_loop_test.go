@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -18,15 +20,15 @@ type workerLoopProducer struct {
 	wakeIn time.Duration
 }
 
-func (*workerLoopProducer) Kind() StepProducerKind { return StepProducerDeterministic }
+func (*workerLoopProducer) Kind() models.StepProducerKind { return models.StepProducerDeterministic }
 
 func (p *workerLoopProducer) Produce(_ context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	call := int(p.calls.Add(1))
 	if call <= p.steps {
 		due := time.Now().Add(p.wakeIn)
 		return agentrun.StepOutput{Park: &agentrun.LoopPark{
-			Status: AgentRunStatusSleeping, Summary: "Waiting for the next step",
-			Wake: &WakeCondition{Type: "timer", WakeAt: &due, Reference: "next-step"},
+			Status: models.AgentRunStatusSleeping, Summary: "Waiting for the next step",
+			Wake: &models.WakeCondition{Type: "timer", WakeAt: &due, Reference: "next-step"},
 		}}, nil
 	}
 	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Answer: "Work complete", Output: map[string]interface{}{"winner": "agent", "sequence": float64(in.Step.Sequence)}}}, nil
@@ -34,13 +36,13 @@ func (p *workerLoopProducer) Produce(_ context.Context, in agentrun.StepInput) (
 
 func workerLoopStores() []struct {
 	name  string
-	store func(*testing.T) KernelStore
+	store func(*testing.T) models.KernelStore
 } {
 	return []struct {
 		name  string
-		store func(*testing.T) KernelStore
+		store func(*testing.T) models.KernelStore
 	}{
-		{name: "sqlite", store: func(t *testing.T) KernelStore {
+		{name: "sqlite", store: func(t *testing.T) models.KernelStore {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "workers.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -51,7 +53,7 @@ func workerLoopStores() []struct {
 	}
 }
 
-func waitForRunStatus(t *testing.T, store KernelStore, scope Scope, runID string, status AgentRunStatus) *AgentRun {
+func waitForRunStatus(t *testing.T, store models.KernelStore, scope models.Scope, runID string, status models.AgentRunStatus) *models.AgentRun {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -77,17 +79,17 @@ func TestAgentRunWorkerDrivesRunLoopAcrossClaims(t *testing.T) {
 			store := test.store(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			scope := Scope{Kind: "local", ID: "test"}
-			run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-				Goal: "sleep once, then finish", Source: RunSourceObjective,
+			scope := models.Scope{Kind: "local", ID: "test"}
+			run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+				Goal: "sleep once, then finish", Source: models.RunSourceObjective,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			producer := &workerLoopProducer{steps: 1, wakeIn: 40 * time.Millisecond}
 			var resolved atomic.Int32
-			resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+			resolver := TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 				resolved.Add(1)
 				return &agentrun.TurnRunnerBinding{
 					DefinitionID: "test-agent", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
@@ -103,18 +105,18 @@ func TestAgentRunWorkerDrivesRunLoopAcrossClaims(t *testing.T) {
 			}
 			pool.Start(ctx)
 			defer pool.Stop()
-			completed := waitForRunStatus(t, store, scope, run.ID, AgentRunStatusCompleted)
+			completed := waitForRunStatus(t, store, scope, run.ID, models.AgentRunStatusCompleted)
 			if completed.LastAppliedTurn != 2 || completed.Output["winner"] != "agent" || completed.Output["sequence"] != float64(2) {
 				t.Fatalf("completed Run = %#v", completed)
 			}
 			if producer.calls.Load() != 2 || resolved.Load() != 2 {
 				t.Fatalf("producer calls = %d, resolutions = %d; want one step per claim", producer.calls.Load(), resolved.Load())
 			}
-			turns, err := store.ListAgentTurns(ctx, AgentTurnFilter{Scope: scope, RunID: run.ID})
+			turns, err := store.ListAgentTurns(ctx, models.AgentTurnFilter{Scope: scope, RunID: run.ID})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(turns) != 2 || turns[0].Status != AgentTurnStatusCompleted || turns[1].Status != AgentTurnStatusCompleted {
+			if len(turns) != 2 || turns[0].Status != models.AgentTurnStatusCompleted || turns[1].Status != models.AgentTurnStatusCompleted {
 				t.Fatalf("step rows = %#v", turns)
 			}
 		})
@@ -125,15 +127,15 @@ func TestAgentRunWorkerDrivesRunLoopAcrossClaims(t *testing.T) {
 func TestAgentRunWorkerFailsRunWithoutStepProducer(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "local", ID: "test"}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "nothing to run", Source: RunSourceObjective,
+	scope := models.Scope{Kind: "local", ID: "test"}
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "nothing to run", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	resolver := TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return &agentrun.TurnRunnerBinding{DefinitionID: "test-agent", DefinitionVersion: "1"}, nil
 	})
 	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{Scope: scope, AssignedAgentID: "agent", LeaseDuration: time.Second})
@@ -149,7 +151,7 @@ func TestAgentRunWorkerFailsRunWithoutStepProducer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Status != AgentRunStatusFailed || failed.Error != "turn runner resolver returned no step producer" {
+	if failed.Status != models.AgentRunStatusFailed || failed.Error != "turn runner resolver returned no step producer" {
 		t.Fatalf("Run = %s %q", failed.Status, failed.Error)
 	}
 }

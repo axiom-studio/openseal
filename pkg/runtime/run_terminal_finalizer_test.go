@@ -8,8 +8,10 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -21,14 +23,14 @@ import (
 type terminalFinalizerStore struct {
 	*sqlite.Store
 	actions         actionCallRecords
-	activityFilters []ActivityFilter
+	activityFilters []models.ActivityFilter
 }
 
-func (s *terminalFinalizerStore) ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error) {
+func (s *terminalFinalizerStore) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	return s.actions.ListActionCalls(ctx, filter)
 }
 
-func (s *terminalFinalizerStore) ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error) {
+func (s *terminalFinalizerStore) ListActivity(ctx context.Context, filter models.ActivityFilter) ([]*models.ActivityEvent, error) {
 	s.activityFilters = append(s.activityFilters, filter)
 	return s.Store.ListActivity(ctx, filter)
 }
@@ -37,7 +39,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 	ctx := context.Background()
 	store := &terminalFinalizerStore{Store: newTestKernelStore(t)}
 	catalog := skill.NewCatalog()
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{
 		ID: "session", Version: "1.0.0", Name: "Session",
 		Transport: skill.TransportReference{Kind: "test"},
@@ -67,36 +69,36 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 31, 8, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "use session", Source: RunSourceObjective,
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "use session", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.actions.put(&ActionCall{
+	store.actions.put(&models.ActionCall{
 		ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "binding", BindingRevision: 1,
-		SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded,
+		SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: models.ActionCallStatusSucceeded,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Arguments: map[string]interface{}{},
 		Output: map[string]interface{}{"sessionId": "agent-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	})
-	store.actions.put(&ActionCall{
+	store.actions.put(&models.ActionCall{
 		ID: "reuse-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "binding", BindingRevision: 1,
-		SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded,
+		SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: models.ActionCallStatusSucceeded,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Arguments: map[string]interface{}{},
 		Output: map[string]interface{}{"sessionId": "agent-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now,
 		Revision: 1, CreatedAt: now.Add(time.Millisecond), UpdatedAt: now.Add(time.Millisecond),
 	})
-	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
-	terminal, _, err := activity.TransitionRun(ctx, scope, claimed.ID, RunTransitionRequest{
-		ExpectedRevision: claimed.Revision, Status: AgentRunStatusCompleted, LeaseOwner: "worker",
-		Summary: "done", Actor: ActivityActor{Type: "worker", ID: "worker"},
+	activity := runtimeactivity.NewRunActivityService(store, store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
+	terminal, _, err := activity.TransitionRun(ctx, scope, claimed.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: claimed.Revision, Status: models.AgentRunStatusCompleted, LeaseOwner: "worker",
+		Summary: "done", Actor: models.ActivityActor{Type: "worker", ID: "worker"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +129,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 			t.Fatalf("terminal finalizer activity filter = %#v", filter)
 		}
 	}
-	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{"run.resources_released"}, Limit: 10})
+	events, err := store.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{"run.resources_released"}, Limit: 10})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("cleanup events = %#v, %v", events, err)
 	}
@@ -137,7 +139,7 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 	ctx := context.Background()
 	store := &terminalFinalizerStore{Store: newTestKernelStore(t)}
 	catalog := skill.NewCatalog()
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{
 		ID: "session", Version: "1.0.0", Name: "Session", Transport: skill.TransportReference{Kind: "test"},
 		Actions: map[string]skill.Action{
@@ -168,11 +170,11 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 31, 19, 0, 0, 0, time.UTC)
-	run := &AgentRun{ID: "historical", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "cleanup", Source: RunSourceObjective, Status: AgentRunStatusCanceled, CreatedAt: now, UpdatedAt: now}
-	if err := store.CreateAgentRun(ctx, cloneAgentRun(run)); err != nil {
+	run := &models.AgentRun{ID: "historical", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "cleanup", Source: models.RunSourceObjective, Status: models.AgentRunStatusCanceled, CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateAgentRun(ctx, models.CloneAgentRun(run)); err != nil {
 		t.Fatal(err)
 	}
-	store.actions.put(&ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now})
+	store.actions.put(&models.ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: models.ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	dispatches := 0
 	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
@@ -187,7 +189,7 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 	if dispatches != 0 {
 		t.Fatalf("stale finalizer dispatched %d times", dispatches)
 	}
-	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{"run.resources_release_quarantined"}, Limit: 10})
+	events, err := store.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{"run.resources_release_quarantined"}, Limit: 10})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("quarantine events = %#v, %v", events, err)
 	}
@@ -199,13 +201,13 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	start := time.Date(2026, 7, 31, 8, 0, 0, 0, time.UTC)
 	for index := range 205 {
-		run := &AgentRun{
+		run := &models.AgentRun{
 			ID: fmt.Sprintf("run-%03d", index), Scope: scope,
-			Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-			Goal: "terminal cleanup", Source: RunSourceObjective, Status: AgentRunStatusCompleted,
+			Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+			Goal: "terminal cleanup", Source: models.RunSourceObjective, Status: models.AgentRunStatusCompleted,
 			CreatedAt: start.Add(time.Duration(index) * time.Second),
 			UpdatedAt: start.Add(time.Duration(index) * time.Second),
 		}
@@ -218,7 +220,7 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 	pool := &AgentRunWorkerPool{
 		config:    AgentRunWorkerConfig{Scope: scope},
 		portfolio: store, now: time.Now,
-		runFinalizer: agentrun.RunTerminalFinalizerFunc(func(_ context.Context, run *AgentRun) error {
+		runFinalizer: agentrun.RunTerminalFinalizerFunc(func(_ context.Context, run *models.AgentRun) error {
 			if seen[run.ID] {
 				return nil
 			}
@@ -230,10 +232,10 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 	}
 	pool.lastFinalizationScan = time.Time{}
 	pool.reconcileTerminalRunFinalizers(ctx)
-	newest := &AgentRun{
+	newest := &models.AgentRun{
 		ID: "run-205", Scope: scope,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "newly terminal cleanup", Source: RunSourceObjective, Status: AgentRunStatusCanceled,
+		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "newly terminal cleanup", Source: models.RunSourceObjective, Status: models.AgentRunStatusCanceled,
 		CreatedAt: start.Add(205 * time.Second), UpdatedAt: start.Add(205 * time.Second),
 	}
 	if err := store.CreateAgentRun(ctx, newest); err != nil {
@@ -258,27 +260,27 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "canceled-child"}
-	portfolio := NewPortfolioService(store)
-	parent, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "scheduler"}, AssignedAgentID: "scheduler",
-		Goal: "run scheduled delegated work", Source: RunSourceSchedule,
+	scope := models.Scope{Kind: "tenant", ID: "canceled-child"}
+	portfolio := portfolio.NewPortfolioService(store)
+	parent, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "scheduler"}, AssignedAgentID: "scheduler",
+		Goal: "run scheduled delegated work", Source: models.RunSourceSchedule,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	collaboration := runtimecollaboration.NewCollaborationService(store)
 	created, err := collaboration.CreateAgentRequest(ctx, runtimecollaboration.CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: parent.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "scheduler"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "worker"}, Goal: "perform delegated work",
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: parent.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "scheduler"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "worker"}, Goal: "perform delegated work",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	accepted, err := collaboration.RespondAgentRequest(ctx, runtimecollaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: runtimecollaboration.AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "worker"},
+		Decision: runtimecollaboration.AgentRequestDecisionAccept, Principal: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "worker"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -302,8 +304,8 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if canceled.Run.Status != AgentRunStatusCanceled || request.Status != AgentRequestStatusCanceled ||
-		resolvedParent.Status == AgentRunStatusWaitingForDependency {
+	if canceled.Run.Status != models.AgentRunStatusCanceled || request.Status != models.AgentRequestStatusCanceled ||
+		resolvedParent.Status == models.AgentRunStatusWaitingForDependency {
 		t.Fatalf("canceled=%s request=%s parent=%s", canceled.Run.Status, request.Status, resolvedParent.Status)
 	}
 	// Reconciliation is replay-safe after the request and parent are resolved.
@@ -314,31 +316,31 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 func TestTerminalRunReconciliationCancelsOrphanedDescendantsAfterRestart(t *testing.T) {
 	ctx := t.Context()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "terminal-cascade"}
+	scope := models.Scope{Kind: "tenant", ID: "terminal-cascade"}
 	service := agentrun.NewRunCommandService(store)
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
-	parentResult, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "parent", Source: RunSourceSchedule,
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
+	parentResult, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "parent", Source: models.RunSourceSchedule,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	childResult, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
+	childResult, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, ParentRunID: parentResult.Run.ID, Owner: owner, AssignedAgentID: owner.ID,
-		Goal: "child", Source: RunSourceHandoff,
+		Goal: "child", Source: models.RunSourceHandoff,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
-	running, _, err := activity.TransitionRun(ctx, scope, parentResult.Run.ID, RunTransitionRequest{
-		ExpectedRevision: parentResult.Run.Revision, Status: AgentRunStatusRunning,
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, scope, parentResult.Run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: parentResult.Run.Revision, Status: models.AgentRunStatusRunning,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, _, err := activity.TransitionRun(ctx, scope, running.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed, Error: "worker stopped",
+	failed, _, err := activity.TransitionRun(ctx, scope, running.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusFailed, Error: "worker stopped",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -355,7 +357,7 @@ func TestTerminalRunReconciliationCancelsOrphanedDescendantsAfterRestart(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if child.Status != AgentRunStatusCanceled || child.CompletedAt == nil {
+	if child.Status != models.AgentRunStatusCanceled || child.CompletedAt == nil {
 		t.Fatalf("orphaned child was not canceled during reconciliation: %#v", child)
 	}
 	pool.finalizeTerminalRun(ctx, failed)

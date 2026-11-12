@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
@@ -17,12 +18,12 @@ import (
 
 func TestAgentRunWorkerDependencyRepairPreservesTypedJoinAny(t *testing.T) {
 	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-		fixture := newDependencyRetirementFixtureWithPolicy(t, store, Scope{Kind: "tenant", ID: uuid.NewString()}, RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureWait})
+		fixture := newDependencyRetirementFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 		finishOwnedDependencyRepairChild(t, fixture, "alpha")
 		pool := newDependencyRepairTestPool(t, store, fixture.scope)
 		pool.reconcileForkChildren(t.Context())
 		after := fixture.snapshot(t)
-		if after.group.Status != RunDependencyGroupSatisfied || after.source.Status != AgentRunStatusQueued || after.children["beta"].Status != AgentRunStatusCanceled {
+		if after.group.Status != models.RunDependencyGroupSatisfied || after.source.Status != models.AgentRunStatusQueued || after.children["beta"].Status != models.AgentRunStatusCanceled {
 			t.Fatalf("indexed repair lost typed join_any policy: group=%s source=%s beta=%s", after.group.Status, after.source.Status, after.children["beta"].Status)
 		}
 		fixture.assertWaitingWork(t, 0)
@@ -31,28 +32,28 @@ func TestAgentRunWorkerDependencyRepairPreservesTypedJoinAny(t *testing.T) {
 
 func TestAgentRunWorkerFinalizerRecoversWinnerCommitBeforeLoserCancellation(t *testing.T) {
 	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-		fixture := newDependencyRetirementFixtureWithPolicy(t, store, Scope{Kind: "tenant", ID: uuid.NewString()}, RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureWait})
+		fixture := newDependencyRetirementFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 		winner := finishOwnedDependencyRepairChild(t, fixture, "alpha")
 		// Persist only fan-in to represent the durable state after a process
 		// exits between winner publication and owned-loser cancellation.
 		published, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.request(t))
-		if err != nil || published.Group.Status != RunDependencyGroupSatisfied || published.Source.Status != AgentRunStatusQueued {
+		if err != nil || published.Group.Status != models.RunDependencyGroupSatisfied || published.Source.Status != models.AgentRunStatusQueued {
 			t.Fatalf("winner publication = %#v, %v", published, err)
 		}
 		before := fixture.snapshot(t)
-		if before.children["beta"].Status == AgentRunStatusCanceled {
+		if before.children["beta"].Status == models.AgentRunStatusCanceled {
 			t.Fatal("fixture did not preserve the crash window")
 		}
 		fixture.assertWaitingWork(t, 0)
 		restarted := newDependencyRepairTestPool(t, store, fixture.scope)
 		restarted.reconcileTerminalRunFinalizers(t.Context())
 		after := fixture.snapshot(t)
-		if after.children["beta"].Status != AgentRunStatusCanceled || after.source.Status != before.source.Status ||
+		if after.children["beta"].Status != models.AgentRunStatusCanceled || after.source.Status != before.source.Status ||
 			after.source.LastWakeSignalID != before.source.LastWakeSignalID || after.source.AvailableAt != before.source.AvailableAt ||
 			after.source.QueueEnteredAt != before.source.QueueEnteredAt || !reflect.DeepEqual(before.source.Checkpoint, after.source.Checkpoint) {
 			t.Fatalf("bounded terminal repair did not recover owned cleanup without rewaking the source: beta=%s source=%s", after.children["beta"].Status, after.source.Status)
 		}
-		if _, err := agentrun.NewRunForkCoordinator(store).CompleteChild(t.Context(), winner, ActivityActor{Type: "worker", ID: "restarted-worker"}); err != nil {
+		if _, err := agentrun.NewRunForkCoordinator(store).CompleteChild(t.Context(), winner, models.ActivityActor{Type: "worker", ID: "restarted-worker"}); err != nil {
 			t.Fatal(err)
 		}
 		fixture.assertSnapshot(t, after)
@@ -61,26 +62,26 @@ func TestAgentRunWorkerFinalizerRecoversWinnerCommitBeforeLoserCancellation(t *t
 
 func TestAgentRunWorkerTerminalSourceFinalizerRecoversRemainingOwnedChild(t *testing.T) {
 	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-		fixture := newDependencyRetirementFixtureWithPolicy(t, store, Scope{Kind: "tenant", ID: uuid.NewString()}, RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureWait})
+		fixture := newDependencyRetirementFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 		winner := finishOwnedDependencyRepairChild(t, fixture, "alpha")
 		if _, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.request(t)); err != nil {
 			t.Fatal(err)
 		}
-		fixture.terminateSource(t, AgentRunStatusCompleted)
+		fixture.terminateSource(t, models.AgentRunStatusCompleted)
 		before := fixture.snapshot(t)
-		if before.children["beta"].Status != AgentRunStatusRunning {
+		if before.children["beta"].Status != models.AgentRunStatusRunning {
 			t.Fatal("fixture did not preserve the unresolved cleanup window")
 		}
 		restarted := newDependencyRepairTestPool(t, store, fixture.scope)
 		restarted.reconcileTerminalRunFinalizers(t.Context())
 		after := fixture.snapshot(t)
-		if after.children["beta"].Status != AgentRunStatusCanceled || !reflect.DeepEqual(before.source, after.source) || !reflect.DeepEqual(winner, after.children["alpha"]) {
+		if after.children["beta"].Status != models.AgentRunStatusCanceled || !reflect.DeepEqual(before.source, after.source) || !reflect.DeepEqual(winner, after.children["alpha"]) {
 			t.Fatalf("terminal source repair did not cascade owned cleanup: beta=%s", after.children["beta"].Status)
 		}
 	})
 }
 
-func finishOwnedDependencyRepairChild(t *testing.T, fixture *dependencyRetirementFixture, branch string) *AgentRun {
+func finishOwnedDependencyRepairChild(t *testing.T, fixture *dependencyRetirementFixture, branch string) *models.AgentRun {
 	t.Helper()
 	child, err := fixture.store.GetAgentRun(t.Context(), fixture.scope, fixture.childIDs[branch])
 	if err != nil || child == nil {
@@ -89,12 +90,12 @@ func finishOwnedDependencyRepairChild(t *testing.T, fixture *dependencyRetiremen
 	checkpoint := maps.Clone(child.Checkpoint)
 	checkpoint["branch"] = branch
 	checkpoint["committed"] = "terminal"
-	service := NewRunActivityService(fixture.store, fixture.store, models.WithClock(func() time.Time { return fixture.now.Add(4 * time.Second) }))
-	if _, _, err := service.TransitionRun(t.Context(), fixture.scope, child.ID, RunTransitionRequest{
-		ExpectedRevision: child.Revision, Status: AgentRunStatusCompleted,
-		Actor: ActivityActor{Type: "worker", ID: "child-worker"}, LeaseOwner: "child-worker",
+	service := activity.NewRunActivityService(fixture.store, fixture.store, models.WithClock(func() time.Time { return fixture.now.Add(4 * time.Second) }))
+	if _, _, err := service.TransitionRun(t.Context(), fixture.scope, child.ID, activity.RunTransitionRequest{
+		ExpectedRevision: child.Revision, Status: models.AgentRunStatusCompleted,
+		Actor: models.ActivityActor{Type: "worker", ID: "child-worker"}, LeaseOwner: "child-worker",
 		Checkpoint: checkpoint, Output: map[string]interface{}{"message": "actual " + branch + " result"},
-		BudgetUsageDelta: &BudgetUsage{Turns: 1},
+		BudgetUsageDelta: &models.BudgetUsage{Turns: 1},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -107,14 +108,14 @@ func finishOwnedDependencyRepairChild(t *testing.T, fixture *dependencyRetiremen
 
 func TestAgentRunWorkerDependencyRetirementLeavesIndependentTargetsUntouched(t *testing.T) {
 	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-		fixture := newDependencyRetirementFixtureWithPolicy(t, store, Scope{Kind: "tenant", ID: uuid.NewString()}, RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureWait})
-		fixture.finishChild(t, "alpha", AgentRunStatusCompleted)
-		fixture.terminateSource(t, AgentRunStatusCanceled)
+		fixture := newDependencyRetirementFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
+		fixture.finishChild(t, "alpha", models.AgentRunStatusCompleted)
+		fixture.terminateSource(t, models.AgentRunStatusCanceled)
 		before := fixture.snapshot(t)
 		pool := newDependencyRepairTestPool(t, store, fixture.scope)
 		pool.reconcileForkChildren(t.Context())
 		after := fixture.snapshot(t)
-		if after.group.Status != RunDependencyGroupCanceled || !reflect.DeepEqual(before.source, after.source) || !reflect.DeepEqual(before.children, after.children) {
+		if after.group.Status != models.RunDependencyGroupCanceled || !reflect.DeepEqual(before.source, after.source) || !reflect.DeepEqual(before.children, after.children) {
 			t.Fatalf("retirement changed independently progressing targets: %#v", after)
 		}
 	})
@@ -126,19 +127,19 @@ type dependencyRepairReadCountingStore struct {
 	runLists atomic.Int64
 }
 
-func (s *dependencyRepairReadCountingStore) GetAgentRun(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
+func (s *dependencyRepairReadCountingStore) GetAgentRun(ctx context.Context, scope models.Scope, id string) (*models.AgentRun, error) {
 	s.runReads.Add(1)
 	return s.Store.GetAgentRun(ctx, scope, id)
 }
 
-func (s *dependencyRepairReadCountingStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+func (s *dependencyRepairReadCountingStore) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	s.runLists.Add(1)
 	return s.Store.ListAgentRuns(ctx, filter)
 }
 
 func TestAgentRunWorkerIdleDependencyMetadataDoesNotHydrateRunsOrHistory(t *testing.T) {
 	store := &dependencyRepairReadCountingStore{Store: newTestKernelStore(t)}
-	fixture := newDependencyRetirementFixtureWithPolicy(t, store.Store, Scope{Kind: "tenant", ID: uuid.NewString()}, RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureWait})
+	fixture := newDependencyRetirementFixtureWithPolicy(t, store.Store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 	pool := newDependencyRepairTestPool(t, store, fixture.scope)
 	for range 5 {
 		pool.reconcileForkChildren(t.Context())
@@ -149,9 +150,9 @@ func TestAgentRunWorkerIdleDependencyMetadataDoesNotHydrateRunsOrHistory(t *test
 	fixture.assertWaitingWork(t, 1)
 }
 
-func newDependencyRepairTestPool(t *testing.T, store KernelStore, scope Scope) *AgentRunWorkerPool {
+func newDependencyRepairTestPool(t *testing.T, store models.KernelStore, scope models.Scope) *AgentRunWorkerPool {
 	t.Helper()
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("reconciliation must not resolve provider authority")
 	}), nil, AgentRunWorkerConfig{Scope: scope})
 	if err != nil {

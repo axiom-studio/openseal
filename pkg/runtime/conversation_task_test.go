@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -20,7 +22,7 @@ func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 	service := conversationrun.NewConversationTaskService(store)
 	req := conversationruntest.TaskStartRequest(t, store, source, turn)
 	var wg sync.WaitGroup
-	results := make(chan *ConversationTaskResult, 8)
+	results := make(chan *models.ConversationTaskResult, 8)
 	errs := make(chan error, 8)
 	for range 8 {
 		wg.Add(1)
@@ -39,7 +41,7 @@ func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var accepted *ConversationTaskResult
+	var accepted *models.ConversationTaskResult
 	for result := range results {
 		if accepted == nil {
 			accepted = result
@@ -52,19 +54,19 @@ func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 		t.Fatal("task did not retain canonical source provenance")
 	}
 	work := accepted.WorkRun
-	if work.ParentRunID != "" || work.RootRunID != work.ID || work.Kind != RunKindAgentWork || work.ConcurrencyKey != "task:"+accepted.Task.ID || work.Context["voiceCallStarted"] != nil {
+	if work.ParentRunID != "" || work.RootRunID != work.ID || work.Kind != models.RunKindAgentWork || work.ConcurrencyKey != "task:"+accepted.Task.ID || work.Context["voiceCallStarted"] != nil {
 		t.Fatalf("work retained foreground ownership: %#v", work)
 	}
 	current, err := store.GetAgentRun(t.Context(), source.Scope, source.ID)
-	if err != nil || current.Status != AgentRunStatusCompleted || current.Output["summary"] != req.Acknowledgment {
+	if err != nil || current.Status != models.AgentRunStatusCompleted || current.Output["summary"] != req.Acknowledgment {
 		t.Fatalf("source acknowledgment was not atomically completed: %#v %v", current, err)
 	}
-	tasks, err := service.List(t.Context(), ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, AuthenticatedActor: trigger.Sender, Limit: 10})
+	tasks, err := service.List(t.Context(), models.ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, AuthenticatedActor: trigger.Sender, Limit: 10})
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("replay created duplicate tasks: %#v %v", tasks, err)
 	}
 	req.Goal = "A different request with the same key"
-	if _, err := service.Start(t.Context(), req); !errors.Is(err, ErrConversationTaskConflict) {
+	if _, err := service.Start(t.Context(), req); !errors.Is(err, models.ErrConversationTaskConflict) {
 		t.Fatalf("request mutation was accepted: %v", err)
 	}
 	for _, mutate := range []func(*conversationrun.GetConversationTaskRequest){func(r *conversationrun.GetConversationTaskRequest) { r.Scope.ID = "foreign" }, func(r *conversationrun.GetConversationTaskRequest) { r.AuthenticatedActor.ID = "foreign" }, func(r *conversationrun.GetConversationTaskRequest) { r.ThreadRootID = "foreign" }} {
@@ -82,7 +84,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 			store := newTestKernelStore(t)
 			source, turn, conversation, _ := settledWorkerTaskFixture(t, store)
 			if cancel {
-				_, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: source.Scope, RunID: source.ID, ExpectedRevision: source.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "sender-user"}, Summary: "Cancel pending foreground"})
+				_, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: source.Scope, RunID: source.ID, ExpectedRevision: source.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: "sender-user"}, Summary: "Cancel pending foreground"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -92,7 +94,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 			if _, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn)); err == nil {
 				t.Fatal("non-current source admitted work")
 			}
-			tasks, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 10})
+			tasks, err := store.ListConversationTasks(t.Context(), models.ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 10})
 			if err != nil || len(tasks) != 0 {
 				t.Fatal("rejected source left independent work")
 			}
@@ -104,8 +106,8 @@ func TestConversationTaskTransfersOnlyRemainingSourceBudget(t *testing.T) {
 	store := newTestKernelStore(t)
 	source, turn, _, _ := settledWorkerTaskFixture(t, store)
 	previous := source.Revision
-	source.Budget = &BudgetPolicy{MaxAttempts: 10, MaxTurns: 10, MaxInputTokens: 60000, MaxOutputTokens: 40000, MaxTotalTokens: 100000, MaxCostMicros: 1000000, MaxDurationMS: 600000, MaxActions: 10}
-	source.BudgetUsage = BudgetUsage{Attempts: 1, Turns: 1, InputTokens: 1000, OutputTokens: 100, CostMicros: 1000, DurationMS: 1000, Actions: 1}
+	source.Budget = &models.BudgetPolicy{MaxAttempts: 10, MaxTurns: 10, MaxInputTokens: 60000, MaxOutputTokens: 40000, MaxTotalTokens: 100000, MaxCostMicros: 1000000, MaxDurationMS: 600000, MaxActions: 10}
+	source.BudgetUsage = models.BudgetUsage{Attempts: 1, Turns: 1, InputTokens: 1000, OutputTokens: 100, CostMicros: 1000, DurationMS: 1000, Actions: 1}
 	deadline := time.Now().Add(time.Hour)
 	source.Deadline = &deadline
 	source.Revision++
@@ -138,28 +140,28 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 		t.Run(map[bool]string{false: "directed question", true: "private thread"}[threaded], func(t *testing.T) {
 			store := newTestKernelStore(t)
 			service := runtimeconversation.NewConversationService(store)
-			scope := Scope{Kind: "tenant", ID: "private-task"}
+			scope := models.Scope{Kind: "tenant", ID: "private-task"}
 			seedTestSpace(t, store, scope)
-			conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Private question", IdempotencyKey: "private-task"})
+			conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Private question", IdempotencyKey: "private-task"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			actor := ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}
-			target := ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent"}
+			actor := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requester"}
+			target := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent"}
 			root := ""
 			if threaded {
-				parent, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: MessageIntentQuestion, Content: "Private call thread", Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{target}}, IdempotencyKey: "private-root"})
+				parent, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: models.MessageIntentQuestion, Content: "Private call thread", Audience: models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{target}}, IdempotencyKey: "private-root"})
 				if err != nil {
 					t.Fatal(err)
 				}
 				conversation = parent.Conversation
 				root = parent.Message.ID
 			}
-			audience := ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{target}}
+			audience := models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{target}}
 			if threaded {
-				audience = ConversationAudience{Kind: ConversationAudienceChannel}
+				audience = models.ConversationAudience{Kind: models.ConversationAudienceChannel}
 			}
-			posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: MessageIntentQuestion, Content: "Review the release", Audience: audience, ReplyToMessageID: root, RequiresResponse: true, IdempotencyKey: "work"})
+			posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: models.MessageIntentQuestion, Content: "Review the release", Audience: audience, ReplyToMessageID: root, RequiresResponse: true, IdempotencyKey: "work"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -167,7 +169,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			source, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+			source, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 			if err != nil || source == nil {
 				t.Fatalf("claim: %#v %v", source, err)
 			}
@@ -185,14 +187,14 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, accepted.SourceRun); err != nil {
 				t.Fatal(err)
 			}
-			messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 100})
+			messages, err := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 100})
 			if err != nil {
 				t.Fatal(err)
 			}
 			count := 0
 			last := int64(0)
 			for _, message := range messages {
-				if message.Intent != MessageIntentAnswer {
+				if message.Intent != models.MessageIntentAnswer {
 					continue
 				}
 				count++
@@ -203,12 +205,12 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 				if message.ReplyToMessageID != posted.Message.ID || message.BroadcastToChannel == threaded {
 					t.Fatalf("task widened explicit thread delivery: %#v", message)
 				}
-				for _, reader := range []ConversationParticipant{actor, target} {
-					if _, err := service.GetVisibleChannelMessage(t.Context(), scope, conversation.ID, message.ID, ConversationViewer{Participant: reader}); err != nil {
+				for _, reader := range []models.ConversationParticipant{actor, target} {
+					if _, err := service.GetVisibleChannelMessage(t.Context(), scope, conversation.ID, message.ID, models.ConversationViewer{Participant: reader}); err != nil {
 						t.Fatalf("original reader lost reply access: %v", err)
 					}
 				}
-				if _, err := service.GetVisibleChannelMessage(t.Context(), scope, conversation.ID, message.ID, ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "stranger"}}); !errors.Is(err, ErrChannelMessageNotFound) {
+				if _, err := service.GetVisibleChannelMessage(t.Context(), scope, conversation.ID, message.ID, models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "stranger"}}); !errors.Is(err, models.ErrChannelMessageNotFound) {
 					t.Fatalf("private source widened report visibility: %v", err)
 				}
 			}
@@ -226,19 +228,19 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	held, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: source.Scope, Kind: RunKindAgentWork, WorkerID: "background", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 4})
+	held, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: source.Scope, Kind: models.RunKindAgentWork, WorkerID: "background", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 4})
 	if err != nil || held == nil || held.ID != first.WorkRun.ID {
 		t.Fatalf("hold background: %#v %v", held, err)
 	}
 	conversations := runtimeconversation.NewConversationService(store)
 	scheduler := conversationruntest.NewScheduler(t, store)
-	post := func(key, content string) *AgentRun {
+	post := func(key, content string) *models.AgentRun {
 		t.Helper()
 		current, e := conversations.GetConversation(t.Context(), source.Scope, conversation.ID)
 		if e != nil {
 			t.Fatal(e)
 		}
-		message := conversationruntest.PostMessage(t, conversations, current, ConversationParticipantUser, MessageIntentQuestion, content, key)
+		message := conversationruntest.PostMessage(t, conversations, current, models.ConversationParticipantUser, models.MessageIntentQuestion, content, key)
 		scheduled, _, e := scheduler.ScheduleMessage(t.Context(), source.Scope, conversation.ID, message.ID)
 		if e != nil {
 			t.Fatal(e)
@@ -246,23 +248,23 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 		return scheduled.Run
 	}
 	status := post("status", "How is the release review going?")
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: source.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 4})
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: source.Scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 4})
 	if err != nil || claimed == nil || claimed.ID != status.ID {
 		t.Fatalf("status could not enter foreground: %#v %v", claimed, err)
 	}
 	// The status answer itself is a chat loop step (conversation_loop_test.go);
 	// here it only has to finish without touching the background work.
-	if _, _, err := NewRunActivityService(store, store).TransitionRun(t.Context(), claimed.Scope, claimed.ID, RunTransitionRequest{
-		ExpectedRevision: claimed.Revision, Status: AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "Your release review is still running."},
+	if _, _, err := activity.NewRunActivityService(store, store).TransitionRun(t.Context(), claimed.Scope, claimed.ID, activity.RunTransitionRequest{
+		ExpectedRevision: claimed.Revision, Status: models.AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "Your release review is still running."},
 	}); err != nil {
 		t.Fatalf("normal foreground status failed: %v", err)
 	}
 	still, err := store.GetAgentRun(t.Context(), held.Scope, held.ID)
-	if err != nil || still.Status != AgentRunStatusRunning || still.LeaseOwner != "background" {
+	if err != nil || still.Status != models.AgentRunStatusRunning || still.LeaseOwner != "background" {
 		t.Fatalf("status interrupted background: %#v %v", still, err)
 	}
 	secondSource := post("another-task", "Independently review the documentation too.")
-	claimed, err = store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: source.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 4})
+	claimed, err = store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: source.Scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 4})
 	if err != nil || claimed == nil || claimed.ID != secondSource.ID {
 		t.Fatalf("second task source claim: %#v %v", claimed, err)
 	}
@@ -277,7 +279,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	}
 	cancelSource := post("cancel-task", "Stop only the documentation review.")
 	definition := agentrun.RunManagementSkill()
-	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: "agent"}, Action: definition.Actions[RunActionCancel]}
+	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: "agent"}, Action: definition.Actions[models.RunActionCancel]}
 	validator, _ := agentrun.NewRunActionValidator(store)
 	args, _, err := validator.ResolveActionProposalArguments(t.Context(), agentrun.ActionProposalValidationInput{Run: cancelSource, Bound: bound, Arguments: map[string]interface{}{"runId": second.WorkRun.ID, "reason": "User requested cancellation"}})
 	if err != nil {
@@ -287,15 +289,15 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 		t.Fatal(err)
 	}
 	dispatcher, _ := agentrun.NewRunActionDispatcher(store, nil)
-	if _, err := dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: cancelSource, Bound: bound, Call: &ActionCall{Scope: source.Scope, Arguments: args}}); err != nil {
+	if _, err := dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: cancelSource, Bound: bound, Call: &models.ActionCall{Scope: source.Scope, Arguments: args}}); err != nil {
 		t.Fatal(err)
 	}
 	cancelled, _ := store.GetAgentRun(t.Context(), source.Scope, second.WorkRun.ID)
 	still, _ = store.GetAgentRun(t.Context(), source.Scope, held.ID)
-	if cancelled.Status != AgentRunStatusCanceled || still.Status != AgentRunStatusRunning {
+	if cancelled.Status != models.AgentRunStatusCanceled || still.Status != models.AgentRunStatusRunning {
 		t.Fatal("governed cancellation affected unrelated work")
 	}
-	terminal, _, err := NewRunActivityService(store, store).TransitionRun(t.Context(), held.Scope, held.ID, RunTransitionRequest{ExpectedRevision: still.Revision, Status: AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "The release review found two fixes."}})
+	terminal, _, err := activity.NewRunActivityService(store, store).TransitionRun(t.Context(), held.Scope, held.ID, activity.RunTransitionRequest{ExpectedRevision: still.Revision, Status: models.AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "The release review found two fixes."}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +307,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, terminal); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: source.Scope, ConversationID: conversation.ID, Limit: 100})
+	messages, err := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: source.Scope, ConversationID: conversation.ID, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +324,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 				t.Fatal("duplicate final result")
 			}
 			resultSequence = message.Sequence
-			if message.ReplyToMessageID != trigger.ID || message.ThreadRootID != trigger.ID || len(message.References) != 2 || message.References[1].Kind != ConversationReferenceTask || message.References[1].ID != first.Task.ID {
+			if message.ReplyToMessageID != trigger.ID || message.ThreadRootID != trigger.ID || len(message.References) != 2 || message.References[1].Kind != models.ConversationReferenceTask || message.References[1].ID != first.Task.ID {
 				t.Fatalf("final lost canonical task/thread identity: %#v", message)
 			}
 		}
@@ -338,7 +340,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if _, err := worker.ProcessBatch(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	messagesAfter, _ := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: source.Scope, ConversationID: conversation.ID, Limit: 100})
+	messagesAfter, _ := store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: source.Scope, ConversationID: conversation.ID, Limit: 100})
 	count := 0
 	for _, message := range messagesAfter {
 		if message.Content == "The release review found two fixes." {

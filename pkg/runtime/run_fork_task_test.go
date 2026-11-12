@@ -6,15 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func claimedForkTaskFixture(t *testing.T) (*sqlite.Store, *AgentRun, *ConversationTaskResult) {
+func claimedForkTaskFixture(t *testing.T) (*sqlite.Store, *models.AgentRun, *models.ConversationTaskResult) {
 	t.Helper()
 	store := newTestKernelStore(t)
 	foreground, turn, _, _ := settledWorkerTaskFixture(t, store)
@@ -28,8 +30,8 @@ func claimedForkTaskFixture(t *testing.T) (*sqlite.Store, *AgentRun, *Conversati
 	root.Plan = map[string]interface{}{"research": "canonical-plan"}
 	root.Revision++
 	storetest.UpdateRun(t, store, root, root.Revision-1)
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
-		Scope: accepted.Task.Scope, Kind: RunKindAgentWork, AssignedAgentID: accepted.Task.TargetAgentID,
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{
+		Scope: accepted.Task.Scope, Kind: models.RunKindAgentWork, AssignedAgentID: accepted.Task.TargetAgentID,
 		WorkerID: "fork-worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != accepted.WorkRun.ID {
@@ -38,30 +40,30 @@ func claimedForkTaskFixture(t *testing.T) (*sqlite.Store, *AgentRun, *Conversati
 	return store, claimed, accepted
 }
 
-func taskForkRequest(source *AgentRun, branches ...agentrun.RunForkBranch) agentrun.CreateRunForkRequest {
+func taskForkRequest(source *models.AgentRun, branches ...agentrun.RunForkBranch) agentrun.CreateRunForkRequest {
 	return agentrun.CreateRunForkRequest{
 		Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 		WorkerID: source.LeaseOwner, ForkID: "task-research",
-		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast}, Branches: branches,
+		Policy: models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast}, Branches: branches,
 	}
 }
 
 func TestRunForkTaskSameAgentInheritsCanonicalContext(t *testing.T) {
 	store, source, accepted := claimedForkTaskFixture(t)
 	result, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(source,
-		agentrun.RunForkBranch{ID: "omitted", Goal: "Research omitted target", Context: map[string]interface{}{"release": "omitted-release"}, Budget: &BudgetPolicy{}},
-		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research explicit same target", Context: map[string]interface{}{"release": "same-release"}, Budget: &BudgetPolicy{}},
+		agentrun.RunForkBranch{ID: "omitted", Goal: "Research omitted target", Context: map[string]interface{}{"release": "omitted-release"}, Budget: &models.BudgetPolicy{}},
+		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research explicit same target", Context: map[string]interface{}{"release": "same-release"}, Budget: &models.BudgetPolicy{}},
 	))
 	if err != nil || result == nil || len(result.Children) != 2 {
 		t.Fatalf("create task fork: %#v %v", result, err)
 	}
 	for _, child := range result.Children {
-		if child.ParentRunID != source.ID || child.RootRunID != source.ID || child.Source != RunSourceFork {
+		if child.ParentRunID != source.ID || child.RootRunID != source.ID || child.Source != models.RunSourceFork {
 			t.Fatalf("task fork lost owned lineage: %#v", child)
 		}
 		if child.AssignedAgentID == source.AssignedAgentID {
-			for _, key := range []string{ConversationTaskContextKey, conversationRunContextConversationID, conversationRunContextTriggerID,
-				"threadRootMessageId", runReportingContextRootRunID, runReportingContextMilestones, "privateBrief"} {
+			for _, key := range []string{models.ConversationTaskContextKey, models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey,
+				"threadRootMessageId", models.RunReportingRootRunIDContextKey, models.RunReportingMilestonesContextKey, "privateBrief"} {
 				if !reflect.DeepEqual(child.Context[key], source.Context[key]) {
 					t.Fatalf("same-agent task fork lost %s: %#v", key, child.Context)
 				}
@@ -74,12 +76,12 @@ func TestRunForkTaskSameAgentInheritsCanonicalContext(t *testing.T) {
 		}
 	}
 	for range 2 {
-		child, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
-			Scope: source.Scope, Kind: RunKindAgentWork, AssignedAgentID: source.AssignedAgentID,
+		child, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{
+			Scope: source.Scope, Kind: models.RunKindAgentWork, AssignedAgentID: source.AssignedAgentID,
 			WorkerID: "task-child-worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 			MaxActiveForAgent: 4, ConversationTaskForegroundReserve: 1,
 		})
-		if err != nil || child == nil || child.ParentRunID != source.ID || child.Context[ConversationTaskContextKey] != accepted.Task.ID {
+		if err != nil || child == nil || child.ParentRunID != source.ID || child.Context[models.ConversationTaskContextKey] != accepted.Task.ID {
 			t.Fatalf("verified task child was not admitted: %#v %v", child, err)
 		}
 	}
@@ -88,14 +90,14 @@ func TestRunForkTaskSameAgentInheritsCanonicalContext(t *testing.T) {
 func TestRunForkTaskRejectsForeignTargetBeforeCommittingDependencies(t *testing.T) {
 	store, source, accepted := claimedForkTaskFixture(t)
 	req := taskForkRequest(source,
-		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research same target", Budget: &BudgetPolicy{}},
-		agentrun.RunForkBranch{ID: "foreign", AssignedAgentID: "other-agent", Goal: "Research foreign target", Context: map[string]interface{}{ConversationTaskContextKey: accepted.Task.ID}, Budget: &BudgetPolicy{}},
+		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research same target", Budget: &models.BudgetPolicy{}},
+		agentrun.RunForkBranch{ID: "foreign", AssignedAgentID: "other-agent", Goal: "Research foreign target", Context: map[string]interface{}{models.ConversationTaskContextKey: accepted.Task.ID}, Budget: &models.BudgetPolicy{}},
 	)
 	result, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), req)
-	if !errors.Is(err, ErrInvalidConversationTask) || result != nil {
+	if !errors.Is(err, models.ErrInvalidConversationTask) || result != nil {
 		t.Fatalf("foreign task fork was accepted: %#v %v", result, err)
 	}
-	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, ParentRunID: source.ID, Limit: 10})
+	children, err := store.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: source.Scope, ParentRunID: source.ID, Limit: 10})
 	if err != nil || len(children) != 0 {
 		t.Fatalf("rejected foreign task fork persisted children: %#v %v", children, err)
 	}
@@ -104,7 +106,7 @@ func TestRunForkTaskRejectsForeignTargetBeforeCommittingDependencies(t *testing.
 		t.Fatalf("rejected foreign task fork persisted dependency group: %#v %v", group, err)
 	}
 	current, err := store.GetAgentRun(t.Context(), source.Scope, source.ID)
-	if err != nil || current.Status != AgentRunStatusRunning || current.Revision != source.Revision {
+	if err != nil || current.Status != models.AgentRunStatusRunning || current.Revision != source.Revision {
 		t.Fatalf("rejected foreign task fork suspended source: %#v %v", current, err)
 	}
 }
@@ -115,25 +117,25 @@ func TestTaskWorkRejectsDelegationBeforeRequestOrGroupCommit(t *testing.T) {
 			t.Run(target+map[bool]string{false: "/singular", true: "/grouped"}[grouped], func(t *testing.T) {
 				store, source, _ := claimedForkTaskFixture(t)
 				service := collaboration.NewCollaborationService(store)
-				requester := CollaborationParty{Type: source.Owner.Type, ID: source.Owner.ID}
-				recipient := CollaborationParty{Type: OwnerTypeAgent, ID: target}
+				requester := models.CollaborationParty{Type: source.Owner.Type, ID: source.Owner.ID}
+				recipient := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: target}
 				var err error
 				if grouped {
 					_, err = service.CreateAgentRequestGroup(t.Context(), collaboration.CreateAgentRequestGroupRequest{
 						Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision, Requester: requester,
-						Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast}, IdempotencyKey: "task-delegation-group",
-						Requests: []collaboration.AgentRequestGroupSpec{{Kind: AgentRequestKindRequest, Recipient: recipient, Goal: "Review", BudgetAllocation: &BudgetPolicy{}}},
+						Policy: models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast}, IdempotencyKey: "task-delegation-group",
+						Requests: []collaboration.AgentRequestGroupSpec{{Kind: models.AgentRequestKindRequest, Recipient: recipient, Goal: "Review", BudgetAllocation: &models.BudgetPolicy{}}},
 					})
 				} else {
 					_, err = service.CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
-						Scope: source.Scope, SourceRunID: source.ID, Kind: AgentRequestKindRequest, Requester: requester, Recipient: recipient,
-						Goal: "Review", BudgetAllocation: &BudgetPolicy{}, IdempotencyKey: "task-delegation",
+						Scope: source.Scope, SourceRunID: source.ID, Kind: models.AgentRequestKindRequest, Requester: requester, Recipient: recipient,
+						Goal: "Review", BudgetAllocation: &models.BudgetPolicy{}, IdempotencyKey: "task-delegation",
 					})
 				}
-				if !errors.Is(err, ErrInvalidConversationTask) {
+				if !errors.Is(err, models.ErrInvalidConversationTask) {
 					t.Fatalf("task delegation was accepted: %v", err)
 				}
-				requests, err := store.ListAgentRequests(t.Context(), AgentRequestFilter{Scope: source.Scope, SourceRunID: source.ID, Limit: 10})
+				requests, err := store.ListAgentRequests(t.Context(), models.AgentRequestFilter{Scope: source.Scope, SourceRunID: source.ID, Limit: 10})
 				if err != nil || len(requests) != 0 {
 					t.Fatalf("rejected task delegation persisted requests: %#v %v", requests, err)
 				}
@@ -141,9 +143,9 @@ func TestTaskWorkRejectsDelegationBeforeRequestOrGroupCommit(t *testing.T) {
 				if err != nil || group != nil {
 					t.Fatalf("rejected task delegation persisted dependencies: %#v %v", group, err)
 				}
-				children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, ParentRunID: source.ID, Limit: 10})
+				children, err := store.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: source.Scope, ParentRunID: source.ID, Limit: 10})
 				current, sourceErr := store.GetAgentRun(t.Context(), source.Scope, source.ID)
-				if err != nil || len(children) != 0 || sourceErr != nil || current.Status != AgentRunStatusRunning || current.Revision != source.Revision {
+				if err != nil || len(children) != 0 || sourceErr != nil || current.Status != models.AgentRunStatusRunning || current.Revision != source.Revision {
 					t.Fatalf("rejected task delegation changed source/children: source=%#v children=%#v errors=%v %v", current, children, err, sourceErr)
 				}
 			})
@@ -153,18 +155,18 @@ func TestTaskWorkRejectsDelegationBeforeRequestOrGroupCommit(t *testing.T) {
 
 func TestRunForkTaskRejectsBranchProvenanceReplacement(t *testing.T) {
 	store, source, _ := claimedForkTaskFixture(t)
-	for _, key := range []string{ConversationTaskContextKey, conversationRunContextConversationID, conversationRunContextTriggerID,
-		"threadRootMessageId", runReportingContextRootRunID, runReportingContextMilestones} {
+	for _, key := range []string{models.ConversationTaskContextKey, models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey,
+		"threadRootMessageId", models.RunReportingRootRunIDContextKey, models.RunReportingMilestonesContextKey} {
 		t.Run(key, func(t *testing.T) {
 			_, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(source,
-				agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research", Context: map[string]interface{}{key: "forged"}, Budget: &BudgetPolicy{}},
+				agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research", Context: map[string]interface{}{key: "forged"}, Budget: &models.BudgetPolicy{}},
 			))
-			if !errors.Is(err, ErrInvalidConversationTask) {
+			if !errors.Is(err, models.ErrInvalidConversationTask) {
 				t.Fatalf("task provenance replacement was accepted: %v", err)
 			}
 		})
 	}
-	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, ParentRunID: source.ID, Limit: 10})
+	children, err := store.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: source.Scope, ParentRunID: source.ID, Limit: 10})
 	if err != nil || len(children) != 0 {
 		t.Fatalf("rejected task fork persisted children: %#v %v", children, err)
 	}
@@ -172,14 +174,14 @@ func TestRunForkTaskRejectsBranchProvenanceReplacement(t *testing.T) {
 
 func TestRunForkTaskRejectsContextOnlySelfRoot(t *testing.T) {
 	store := newTestKernelStore(t)
-	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: Scope{Kind: "tenant", ID: "forged-task-fork"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
-		AssignedAgentID: "agent", Goal: "Forged task source", Context: map[string]interface{}{ConversationTaskContextKey: "forged-task"},
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: models.Scope{Kind: "tenant", ID: "forged-task-fork"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
+		AssignedAgentID: "agent", Goal: "Forged task source", Context: map[string]interface{}{models.ConversationTaskContextKey: "forged-task"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{
 		Scope: source.Scope, WorkerID: "fork-worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil {
@@ -191,7 +193,7 @@ func TestRunForkTaskRejectsContextOnlySelfRoot(t *testing.T) {
 	if !errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 		t.Fatalf("context-only task hint became authority: %v", err)
 	}
-	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, ParentRunID: source.ID, Limit: 10})
+	children, err := store.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: source.Scope, ParentRunID: source.ID, Limit: 10})
 	if err != nil || len(children) != 0 {
 		t.Fatalf("forged task created children: %#v %v", children, err)
 	}
@@ -200,7 +202,7 @@ func TestRunForkTaskRejectsContextOnlySelfRoot(t *testing.T) {
 func TestRunForkTaskSourceCascadeIsIndependentAndWorkCascadeOwnsChildren(t *testing.T) {
 	store, source, accepted := claimedForkTaskFixture(t)
 	result, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(source,
-		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research", Budget: &BudgetPolicy{}},
+		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research", Budget: &models.BudgetPolicy{}},
 	))
 	if err != nil {
 		t.Fatal(err)
@@ -210,21 +212,21 @@ func TestRunForkTaskSourceCascadeIsIndependentAndWorkCascadeOwnsChildren(t *test
 		t.Fatal(err)
 	}
 	root, err := store.GetAgentRun(t.Context(), source.Scope, source.ID)
-	if err != nil || root.Status != AgentRunStatusWaitingForDependency || root.ParentRunID != "" || root.RootRunID != root.ID {
+	if err != nil || root.Status != models.AgentRunStatusWaitingForDependency || root.ParentRunID != "" || root.RootRunID != root.ID {
 		t.Fatalf("source completion canceled independent task: %#v %v", root, err)
 	}
 	child, err := store.GetAgentRun(t.Context(), source.Scope, result.Children[0].ID)
-	if err != nil || child.Status != AgentRunStatusQueued {
+	if err != nil || child.Status != models.AgentRunStatusQueued {
 		t.Fatalf("source completion canceled task fork: %#v %v", child, err)
 	}
 	if _, err := commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
 		Scope: source.Scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: agentrun.AgentRunCommandCancel,
-		Actor: ActivityActor{Type: "user", ID: accepted.Task.AuthenticatedActor.ID}, Summary: "Stop the task",
+		Actor: models.ActivityActor{Type: "user", ID: accepted.Task.AuthenticatedActor.ID}, Summary: "Stop the task",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	child, err = store.GetAgentRun(t.Context(), source.Scope, child.ID)
-	if err != nil || child.Status != AgentRunStatusCanceled {
+	if err != nil || child.Status != models.AgentRunStatusCanceled {
 		t.Fatalf("task cancellation did not own its fork: %#v %v", child, err)
 	}
 }

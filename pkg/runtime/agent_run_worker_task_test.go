@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -33,7 +35,7 @@ type workerTaskProducer struct {
 	reply workerTaskStep
 }
 
-func (*workerTaskProducer) Kind() StepProducerKind { return StepProducerModel }
+func (*workerTaskProducer) Kind() models.StepProducerKind { return models.StepProducerModel }
 
 func (p *workerTaskProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	p.mu.Lock()
@@ -53,16 +55,16 @@ func (p *workerTaskProducer) count() int {
 // conversation_start_task, with the call id the task fixtures key entries by.
 func startTaskStep(goal, ack string) agentrun.StepOutput {
 	args, _ := json.Marshal(map[string]string{"goal": goal, "acknowledgment": ack})
-	return agentrun.StepOutput{ModelProvider: "fake", Model: "deterministic", Assistant: &AssistantEntry{
-		Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,
-		ToolCalls: []ModelToolCall{{ID: conversationruntest.TaskStartCallID, Name: string(ControlToolStartTask), Arguments: args}},
+	return agentrun.StepOutput{ModelProvider: "fake", Model: "deterministic", Assistant: &models.AssistantEntry{
+		Provider: models.ModelStepProviderAnthropic, Model: "claude-x", StopReason: models.ModelStopToolCalls,
+		ToolCalls: []models.ModelToolCall{{ID: conversationruntest.TaskStartCallID, Name: string(models.ControlToolStartTask), Arguments: args}},
 	}}
 }
 
 // answerStep is a model step that answers in plain text.
 func answerStep(text string) agentrun.StepOutput {
-	return agentrun.StepOutput{ModelProvider: "fake", Model: "deterministic", Assistant: &AssistantEntry{
-		Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopEnd, Text: text,
+	return agentrun.StepOutput{ModelProvider: "fake", Model: "deterministic", Assistant: &models.AssistantEntry{
+		Provider: models.ModelStepProviderAnthropic, Model: "claude-x", StopReason: models.ModelStopEnd, Text: text,
 	}}
 }
 
@@ -70,9 +72,9 @@ func answerStep(text string) agentrun.StepOutput {
 // binding does for the parts these tests need: the lane session (seeded with
 // the trigger message), the control authority and the claim tool executor,
 // whose control executor admits tasks through tasks.
-func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTaskKernelStore, producer agentrun.StepProducer) TurnRunnerResolverFunc {
+func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks models.ConversationTaskKernelStore, producer agentrun.StepProducer) TurnRunnerResolverFunc {
 	t.Helper()
-	activity := NewRunActivityService(store, store)
+	activity := activity.NewRunActivityService(store, store)
 	control := &runtimecontrol.ControlExecutor{
 		Portfolio: store, Sessions: store, Activity: activity, Conversations: conversation.NewConversationService(store),
 		Reporting: store, Tasks: conversationrun.NewConversationTaskService(tasks),
@@ -81,7 +83,7 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTas
 	if err != nil {
 		t.Fatal(err)
 	}
-	return func(ctx context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	return func(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		session, err := openWorkerTaskSession(ctx, store, run)
 		if err != nil {
 			return nil, err
@@ -102,47 +104,47 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTas
 
 // openWorkerTaskSession opens the chat Run's lane session and appends the
 // trigger message once (the conversation catch-up's part).
-func openWorkerTaskSession(ctx context.Context, store *sqlite.Store, run *AgentRun) (*AgentSession, error) {
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+func openWorkerTaskSession(ctx context.Context, store *sqlite.Store, run *models.AgentRun) (*models.AgentSession, error) {
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 	thread, _ := run.Context["threadRootMessageId"].(string)
 	now := time.Now().UTC()
-	lease := AgentRunLeaseGuard{WorkerID: run.LeaseOwner, Now: now}
-	opened, err := store.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{
+	lease := models.AgentRunLeaseGuard{WorkerID: run.LeaseOwner, Now: now}
+	opened, err := store.OpenConversationAgentSession(ctx, models.OpenConversationAgentSessionRequest{
 		Scope: run.Scope, ConversationID: conversationID, ThreadRootID: thread, AgentID: run.AssignedAgentID, RunID: run.ID, Lease: lease, Now: now,
 	})
 	if err != nil {
 		return nil, err
 	}
 	session := opened.Session
-	userID := SessionEntryID(session.ID, "message:"+triggerID)
-	if existing, err := optionalSessionEntry(store.GetSessionEntry(ctx, run.Scope, userID)); err != nil || existing != nil {
+	userID := models.SessionEntryID(session.ID, "message:"+triggerID)
+	if existing, err := models.OptionalSessionEntry(store.GetSessionEntry(ctx, run.Scope, userID)); err != nil || existing != nil {
 		return session, err
 	}
 	message, err := store.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
 	if err != nil {
 		return nil, err
 	}
-	user := &SessionEntry{ID: userID, RunID: run.ID, Type: SessionEntryUser, SourceKey: "message:" + triggerID,
-		User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: message.Sender.ID},
-			Content: []ContentPart{storetest.TextPart(message.Content)}, MessageID: triggerID}}
-	if _, err := store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
-		Scope: run.Scope, SessionID: session.ID, RunID: run.ID, Lease: &lease, Entries: []*SessionEntry{user}, Now: now,
+	user := &models.SessionEntry{ID: userID, RunID: run.ID, Type: models.SessionEntryUser, SourceKey: "message:" + triggerID,
+		User: &models.UserEntry{Origin: models.UserEntryChannelMessage, Author: models.SessionAuthor{Type: "user", ID: message.Sender.ID},
+			Content: []models.ContentPart{storetest.TextPart(message.Content)}, MessageID: triggerID}}
+	if _, err := store.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
+		Scope: run.Scope, SessionID: session.ID, RunID: run.ID, Lease: &lease, Entries: []*models.SessionEntry{user}, Now: now,
 	}); err != nil {
 		return nil, err
 	}
 	return store.GetAgentSession(ctx, run.Scope, session.ID)
 }
 
-func workerTaskPool(t *testing.T, store *sqlite.Store, scope Scope, producer agentrun.StepProducer) *AgentRunWorkerPool {
+func workerTaskPool(t *testing.T, store *sqlite.Store, scope models.Scope, producer agentrun.StepProducer) *AgentRunWorkerPool {
 	t.Helper()
 	return workerTaskPoolWith(t, store, scope, workerTaskResolver(t, store, store, producer))
 }
 
-func workerTaskPoolWith(t *testing.T, store *sqlite.Store, scope Scope, resolver conversation.TurnRunnerResolver) *AgentRunWorkerPool {
+func workerTaskPoolWith(t *testing.T, store *sqlite.Store, scope models.Scope, resolver conversation.TurnRunnerResolver) *AgentRunWorkerPool {
 	t.Helper()
 	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
-		Scope: scope, Kind: RunKindConversation, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute,
+		Scope: scope, Kind: models.RunKindConversation, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -154,8 +156,8 @@ func workerTaskPoolWith(t *testing.T, store *sqlite.Store, scope Scope, resolver
 // commit: the worker died after its step was applied, before the settle.
 type admissionLostTaskStore struct{ *sqlite.Store }
 
-func (s *admissionLostTaskStore) CreateConversationTask(context.Context, ConversationTaskCreateRecord) (*ConversationTaskResult, error) {
-	return nil, ErrLeaseLost
+func (s *admissionLostTaskStore) CreateConversationTask(context.Context, models.ConversationTaskCreateRecord) (*models.ConversationTaskResult, error) {
+	return nil, models.ErrLeaseLost
 }
 
 // settledWorkerTaskFixture drives a chat Run through the worker's run loop to
@@ -163,25 +165,25 @@ func (s *admissionLostTaskStore) CreateConversationTask(context.Context, Convers
 // applied, and stops before admission: the Run is running, leased by
 // "worker", its last step completed and applied, and the tool entry
 // pending. Callers admit the task themselves (conversationruntest.TaskStartRequest).
-func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
+func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*models.AgentRun, *models.AgentTurn, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "worker-task"}
+	scope := models.Scope{Kind: "tenant", ID: "worker-task"}
 	conversations := conversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion,
+	message := conversationruntest.PostMessage(t, conversations, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion,
 		"Review the release in the background", "task-user-message")
 	scheduled, _, err := conversationruntest.NewScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
 	if err != nil || scheduled == nil || scheduled.Run == nil {
 		t.Fatalf("schedule foreground: %#v %v", scheduled, err)
 	}
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
-		Scope: scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{
+		Scope: scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
 		t.Fatalf("claim foreground: %#v %v", claimed, err)
@@ -197,15 +199,15 @@ func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *Ag
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.Status != AgentRunStatusRunning || source.LeaseOwner != "worker" || len(source.Output) != 0 || source.LastAppliedTurn != 1 || producer.count() != 1 {
+	if source.Status != models.AgentRunStatusRunning || source.LeaseOwner != "worker" || len(source.Output) != 0 || source.LastAppliedTurn != 1 || producer.count() != 1 {
 		t.Fatalf("source Run after the start_task step: %#v (model calls %d)", source, producer.count())
 	}
-	turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: source.ID})
-	if err != nil || len(turns) != 1 || turns[0].Status != AgentTurnStatusCompleted || turns[0].Sequence != source.LastAppliedTurn {
+	turns, err := store.ListAgentTurns(t.Context(), models.AgentTurnFilter{Scope: scope, RunID: source.ID})
+	if err != nil || len(turns) != 1 || turns[0].Status != models.AgentTurnStatusCompleted || turns[0].Sequence != source.LastAppliedTurn {
 		t.Fatalf("start_task step row: %#v %v", turns, err)
 	}
-	entry, err := store.GetSessionEntry(t.Context(), scope, SessionEntryID(source.SessionID, ToolEntryKey(turns[0].ID, conversationruntest.TaskStartCallID)))
-	if err != nil || entry == nil || entry.State != ToolEntryPending || entry.StepID != turns[0].ID {
+	entry, err := store.GetSessionEntry(t.Context(), scope, models.SessionEntryID(source.SessionID, models.ToolEntryKey(turns[0].ID, conversationruntest.TaskStartCallID)))
+	if err != nil || entry == nil || entry.State != models.ToolEntryPending || entry.StepID != turns[0].ID {
 		t.Fatalf("start_task tool entry: %#v %v", entry, err)
 	}
 	return source, turns[0], conversation, message
@@ -231,7 +233,7 @@ func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
 	}}
 	pool := workerTaskPool(t, store, source.Scope, producer)
 	claimed, err := pool.scheduler.ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{
-		Scope: source.Scope, Kind: RunKindConversation, WorkerID: "worker-2", LeaseDuration: time.Minute,
+		Scope: source.Scope, Kind: models.RunKindConversation, WorkerID: "worker-2", LeaseDuration: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != source.ID {
 		t.Fatalf("reclaim source: %#v %v", claimed, err)
@@ -239,26 +241,26 @@ func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
 	pool.executeClaim(t.Context(), "worker-2", claimed)
 
 	finished, err := store.GetAgentRun(t.Context(), source.Scope, source.ID)
-	if err != nil || finished.Status != AgentRunStatusCompleted || finished.LastAppliedTurn != 1 || producer.count() != 0 {
+	if err != nil || finished.Status != models.AgentRunStatusCompleted || finished.LastAppliedTurn != 1 || producer.count() != 0 {
 		t.Fatalf("resumed source: %#v model=%d %v", finished, producer.count(), err)
 	}
 	// The next claim's step settles the open call in its resume phase; it
 	// records no model output of its own.
-	assistants, err := store.ListAgentSessionEntries(t.Context(), SessionEntryFilter{
-		Scope: source.Scope, RunID: source.ID, Types: []SessionEntryType{SessionEntryAssistant}, Limit: 10,
+	assistants, err := store.ListAgentSessionEntries(t.Context(), models.SessionEntryFilter{
+		Scope: source.Scope, RunID: source.ID, Types: []models.SessionEntryType{models.SessionEntryAssistant}, Limit: 10,
 	})
 	if err != nil || len(assistants) != 1 || assistants[0].StepID != step.ID {
 		t.Fatalf("resume called the model again: %#v %v", assistants, err)
 	}
-	entry, err := store.GetSessionEntry(t.Context(), source.Scope, SessionEntryID(source.SessionID, ToolEntryKey(step.ID, conversationruntest.TaskStartCallID)))
-	if err != nil || entry == nil || entry.State != ToolEntryCompleted {
+	entry, err := store.GetSessionEntry(t.Context(), source.Scope, models.SessionEntryID(source.SessionID, models.ToolEntryKey(step.ID, conversationruntest.TaskStartCallID)))
+	if err != nil || entry == nil || entry.State != models.ToolEntryCompleted {
 		t.Fatalf("start_task entry after resume: %#v %v", entry, err)
 	}
-	tasks, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 10})
+	tasks, err := store.ListConversationTasks(t.Context(), models.ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 10})
 	if err != nil || len(tasks) != 1 || tasks[0].Task.SourceToolEntryID != entry.ID || tasks[0].Task.SourceRunID != source.ID {
 		t.Fatalf("admitted tasks: %#v %v", tasks, err)
 	}
-	work, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, Kind: RunKindAgentWork})
+	work, err := store.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: source.Scope, Kind: models.RunKindAgentWork})
 	if err != nil || len(work) != 1 {
 		t.Fatalf("task work Runs: %#v %v", work, err)
 	}
@@ -266,7 +268,7 @@ func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
 
 // expireRunLease moves the Run's lease into the past so another worker can
 // claim it (the first worker is gone).
-func expireRunLease(t *testing.T, store *sqlite.Store, run *AgentRun) {
+func expireRunLease(t *testing.T, store *sqlite.Store, run *models.AgentRun) {
 	t.Helper()
 	current := getStoredRun(t, store, run.Scope, run.ID)
 	past := time.Now().UTC().Add(-time.Second)
