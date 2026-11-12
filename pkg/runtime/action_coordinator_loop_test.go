@@ -549,10 +549,3 @@ func TestLoopProposePersonCredentialApproverIsActingUser(t *testing.T) {
 	}
 	assertLoopRunUntouched(t, store, run)
 }
-
-// proposalValidatorFunc adapts a function to ActionProposalValidator.
-type proposalValidatorFunc func(context.Context, agentrun.ActionProposalValidationInput) (map[string]interface{}, error)
-
-func (f proposalValidatorFunc) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
-	return f(ctx, input)
-}

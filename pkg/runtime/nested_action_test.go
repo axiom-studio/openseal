@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,7 +11,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -29,35 +26,6 @@ type nestedActionFixture struct {
 	clock       func() time.Time // the coordinator's clock
 	binding     *agentrun.TurnRunnerBinding
 	closeTurn   func()
-}
-
-func nestedActionStores(t *testing.T) []struct {
-	name string
-	open func(*testing.T) models.KernelStore
-} {
-	stores := []struct {
-		name string
-		open func(*testing.T) models.KernelStore
-	}{
-		{name: "sqlite", open: func(t *testing.T) models.KernelStore {
-			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "nested.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = store.Close() })
-			return store
-		}},
-	}
-	if dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN"); dsn != "" {
-		stores = append(stores, struct {
-			name string
-			open func(*testing.T) models.KernelStore
-		}{name: "postgres", open: func(t *testing.T) models.KernelStore {
-			store, _ := openTestPostgresStore(t, "openseal_nested_")
-			return store
-		}})
-	}
-	return stores
 }
 
 // newNestedActionFixture opens a running Run whose step is running and

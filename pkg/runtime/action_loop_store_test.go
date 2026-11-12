@@ -3,11 +3,16 @@ package runtime
 import (
 	"context"
 	"errors"
+	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -451,4 +456,108 @@ func TestLoopApprovalResolutionWithoutRunIsValid(t *testing.T) {
 			t.Fatalf("resolution without a Run update changed the Run: %#v", after)
 		}
 	})
+}
+
+var loopApprover = models.ApprovalPrincipal{Type: "user", ID: "user"}
+
+type loopApprovalOptions struct {
+	reserveBudget bool
+	timeout       models.ApprovalTimeoutDecision
+	alwaysReview  bool
+}
+
+// proposeLoopApproval commits a write loop call of step-1 waiting on its
+// approval, with the Run unchanged unless the call reserves budget.
+func (f *loopStoreFixture) proposeLoopApproval(id string, opts loopApprovalOptions) (*models.ActionCall, *models.ApprovalCheckpoint) {
+	f.t.Helper()
+	call := f.loopCall(id)
+	call.Action, call.Risk, call.SideEffect = "push", skill.RiskLevelExternal, skill.SideEffectExternal
+	call.Status, call.ApprovalID = models.ActionCallStatusWaitingApproval, "approval-"+id
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	call.SemanticDigest = models.ComputeActionSemanticDigest(call)
+	proposed := map[string]interface{}{"skillId": call.SkillID, "action": call.Action, "arguments": maps.Clone(call.Arguments)}
+	if opts.alwaysReview {
+		proposed["review"] = "always"
+	}
+	approval := &models.ApprovalCheckpoint{
+		ID: call.ApprovalID, Scope: f.scope, RunID: f.run.ID, ActionCallID: call.ID, Status: models.ApprovalStatusPending,
+		Risk: skill.RiskLevelExternal, Summary: "Push the fix to the release branch", ProposedAction: proposed,
+		EligibleApprovers: []models.ApprovalPrincipal{loopApprover}, TimeoutDecision: opts.timeout,
+		ExpiresAt: f.now.Add(time.Hour), Revision: 1, CreatedAt: f.now, UpdatedAt: f.now,
+	}
+	proposal := f.proposal(call)
+	proposal.Approval = approval
+	if opts.reserveBudget {
+		current := f.currentRun()
+		reserved := models.CloneAgentRun(current)
+		if err := models.ReserveRunBudget(reserved, models.BudgetReservation{ID: agentrun.ActionBudgetReservationID(call.ID), Usage: models.BudgetUsage{Actions: 1}, CreatedAt: f.now}); err != nil {
+			f.t.Fatal(err)
+		}
+		reserved.Revision++
+		proposal.Run, proposal.ExpectedRunRevision = reserved, current.Revision
+	}
+	result, err := f.store.CreateActionProposal(f.ctx, proposal)
+	if err != nil || !result.Created {
+		f.t.Fatalf("propose %s = %#v, %v", id, result, err)
+	}
+	f.run = f.currentRun()
+	return result.Call, result.Approval
+}
+
+// parkOn moves the running Run to waiting_for_approval on approvalID, as the
+// loop's step-end park does.
+func (f *loopStoreFixture) parkOn(approvalID string) {
+	f.t.Helper()
+	current := f.currentRun()
+	parked := models.CloneAgentRun(current)
+	parked.Status = models.AgentRunStatusWaitingForApproval
+	parked.WakeCondition = &models.WakeCondition{Type: "approval", Reference: approvalID}
+	parked.LeaseOwner, parked.LeaseExpiresAt = "", nil
+	parked.Revision++
+	parked.UpdatedAt = f.now
+	if _, err := f.store.UpdateAgentRunWithEvent(f.ctx, parked, current.Revision, f.event("park-"+uuid.NewString()[:8], "run.waiting"), nil); err != nil {
+		f.t.Fatalf("park on %s: %v", approvalID, err)
+	}
+	f.run = f.currentRun()
+}
+
+func (f *loopStoreFixture) approvalCoordinator(at time.Time) *ApprovalCoordinator {
+	coordinator := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return at }))
+	return coordinator
+}
+
+func (f *loopStoreFixture) decide(coordinator *ApprovalCoordinator, approval *models.ApprovalCheckpoint, decision models.ApprovalDecision, reason string) (*models.ApprovalResolutionResult, error) {
+	return coordinator.Resolve(f.ctx, ResolveApprovalRequest{
+		Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
+		DecisionID: "decision-" + approval.ID, Decision: decision, Principal: loopApprover, Reason: reason,
+	})
+}
+
+func nestedActionStores(t *testing.T) []struct {
+	name string
+	open func(*testing.T) models.KernelStore
+} {
+	stores := []struct {
+		name string
+		open func(*testing.T) models.KernelStore
+	}{
+		{name: "sqlite", open: func(t *testing.T) models.KernelStore {
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "nested.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			return store
+		}},
+	}
+	if dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN"); dsn != "" {
+		stores = append(stores, struct {
+			name string
+			open func(*testing.T) models.KernelStore
+		}{name: "postgres", open: func(t *testing.T) models.KernelStore {
+			store, _ := openTestPostgresStore(t, "openseal_nested_")
+			return store
+		}})
+	}
+	return stores
 }

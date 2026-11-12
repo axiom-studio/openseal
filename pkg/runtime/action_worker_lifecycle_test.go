@@ -2,22 +2,15 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
-	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
-	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestActionWorkerLifecyclePreservesCompletedDispatchAcrossRunChanges(t *testing.T) {
@@ -211,113 +204,6 @@ func TestActionWorkerLifecycleBoundsPersistenceConflicts(t *testing.T) {
 	})
 }
 
-func forActionLifecycleStores(t *testing.T, test func(*testing.T, models.KernelStore)) {
-	t.Helper()
-	forActionLifecycleBackends(t, func(t *testing.T, store models.KernelStore, _ actionLifecycleBackend) { test(t, store) })
-}
-
-// actionLifecycleBackend is the database behind one lifecycle store as the
-// test owns it: its own connection and table names for rows no store method
-// writes, and reopen, which opens the store again on the same data as a
-// restart would.
-type actionLifecycleBackend struct {
-	postgres bool
-	db       *sql.DB
-	table    func(name string) string
-	reopen   func(*testing.T) models.KernelStore
-}
-
-// forActionLifecycleBackends runs test on SQLite, and on Postgres when
-// OPENSEAL_TEST_POSTGRES_DSN is set.
-func forActionLifecycleBackends(t *testing.T, test func(*testing.T, models.KernelStore, actionLifecycleBackend)) {
-	t.Helper()
-	for _, testCase := range []struct {
-		name string
-		open func(*testing.T) (models.KernelStore, actionLifecycleBackend)
-	}{
-		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, actionLifecycleBackend) {
-			path := filepath.Join(t.TempDir(), "action-lifecycle.db")
-			store, err := sqlite.NewSQLiteStore(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = store.Close() })
-			return store, actionLifecycleBackend{db: openTestSQLiteDB(t, path), table: func(name string) string { return name }, reopen: func(t *testing.T) models.KernelStore {
-				if err := store.Close(); err != nil {
-					t.Fatal(err)
-				}
-				reopened, err := sqlite.NewSQLiteStore(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = reopened.Close() })
-				return reopened
-			}}
-		}},
-		{name: "postgres", open: func(t *testing.T) (models.KernelStore, actionLifecycleBackend) {
-			pgSchema := storetest.NewPostgresSchema(t, "openseal_action_lifecycle_")
-			dsn := pgSchema.DSN
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-			defer cancel()
-			store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
-				_ = store.Close()
-			})
-			return store, actionLifecycleBackend{postgres: true, db: pgSchema.DB, table: pgSchema.Table, reopen: func(t *testing.T) models.KernelStore {
-				return openPostgresStoreOn(t, pgSchema)
-			}}
-		}},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			store, backend := testCase.open(t)
-			test(t, store, backend)
-		})
-	}
-}
-
-func getActionLifecycleRun(t *testing.T, store models.KernelStore, call *models.ActionCall) *models.AgentRun {
-	t.Helper()
-	run, err := store.GetAgentRun(t.Context(), call.Scope, call.RunID)
-	if err != nil || run == nil {
-		t.Fatalf("get parent Run = %#v, %v", run, err)
-	}
-	return run
-}
-
-func transitionActionLifecycleRun(t *testing.T, store models.KernelStore, call *models.ActionCall, status models.AgentRunStatus, wake *models.WakeCondition, now time.Time) *models.AgentRun {
-	t.Helper()
-	run := getActionLifecycleRun(t, store, call)
-	service := activity.NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
-	updated, _, err := service.TransitionRun(t.Context(), call.Scope, call.RunID, activity.RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: status, WakeCondition: wake,
-		Actor: models.ActivityActor{Type: "user", ID: "alice"}, Summary: "Update the current workstream",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return updated
-}
-
-func mutateActionLifecycleRun(t *testing.T, store models.KernelStore, call *models.ActionCall, now time.Time, mutate func(*models.AgentRun)) *models.AgentRun {
-	t.Helper()
-	run := getActionLifecycleRun(t, store, call)
-	expected := run.Revision
-	mutate(run)
-	run.Revision++
-	run.UpdatedAt = now
-	event := actionLifecycleEvent(call, fmt.Sprintf("lifecycle-mutation-%d", run.Revision), "run.updated", now)
-	if _, err := store.UpdateAgentRunWithEvent(t.Context(), run, expected, event, nil); err != nil {
-		t.Fatal(err)
-	}
-	return run
-}
-
 func assertActionLifecycleTerminalEvents(t *testing.T, store models.KernelStore, call *models.ActionCall, status models.ActionCallStatus, actions int64) {
 	t.Helper()
 	events, err := store.ListActivity(t.Context(), models.ActivityFilter{Scope: call.Scope, RunID: call.RunID, Limit: 100})
@@ -337,33 +223,6 @@ func assertActionLifecycleTerminalEvents(t *testing.T, store models.KernelStore,
 	if terminal != 1 {
 		t.Fatalf("expected one durable terminal activity, found %d: %#v", terminal, events)
 	}
-}
-
-func assertActionLifecycleUnclaimable(t *testing.T, store models.KernelStore, call *models.ActionCall, now time.Time) {
-	t.Helper()
-	claimed, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: call.Scope, WorkerID: "later-worker", Now: now, LeaseDuration: time.Minute})
-	if err != nil || claimed != nil {
-		t.Fatalf("terminal action was eligible again: %#v, %v", claimed, err)
-	}
-}
-
-func actionLifecycleEvent(call *models.ActionCall, id, eventType string, now time.Time) *models.ActivityEvent {
-	return &models.ActivityEvent{
-		ID: id, Scope: call.Scope, RunID: call.RunID, AgentID: call.DeploymentID,
-		EventType: eventType, Severity: models.ActivitySeverityInfo, Summary: "Record action lifecycle state",
-		Actor: models.ActivityActor{Type: "worker", ID: "lifecycle-worker"}, Visibility: models.ActivityVisibilityScope,
-		CreatedAt: now, Payload: map[string]interface{}{"actionCallId": call.ID, "status": call.Status},
-	}
-}
-
-type actionLifecycleCountingCatalog struct {
-	agentrun.ActionExecutionCatalog
-	calls *int
-}
-
-func (c *actionLifecycleCountingCatalog) Resolve(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version, action string, bindings ...skill.BindingReference) (*skill.BoundAction, error) {
-	(*c.calls)++
-	return c.ActionExecutionCatalog.Resolve(ctx, scope, deploymentID, skillID, version, action, bindings...)
 }
 
 type actionLifecycleConflictStore struct {

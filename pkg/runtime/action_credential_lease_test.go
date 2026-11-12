@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"errors"
 	"strings"
 	"sync"
@@ -13,24 +11,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
-
-type testCredentialLeaseSigner struct{ key []byte }
-
-const testActionCredentialLeaseTransport = "reddit_search"
-
-func (s testCredentialLeaseSigner) SignActionCredentialLease(_ context.Context, payload []byte) (models.ActionCredentialLeaseSignature, error) {
-	mac := hmac.New(sha256.New, s.key)
-	_, _ = mac.Write(payload)
-	return models.ActionCredentialLeaseSignature{Algorithm: "hmac-sha256", KeyID: "test-key", Value: mac.Sum(nil)}, nil
-}
-
-func (s testCredentialLeaseSigner) VerifyActionCredentialLease(_ context.Context, payload []byte, signature models.ActionCredentialLeaseSignature) error {
-	expected, _ := s.SignActionCredentialLease(context.Background(), payload)
-	if signature.Algorithm != expected.Algorithm || signature.KeyID != expected.KeyID || !hmac.Equal(signature.Value, expected.Value) {
-		return errors.New("invalid signature")
-	}
-	return nil
-}
 
 type testCredentialLeaseRedeemer struct {
 	mu        sync.Mutex
@@ -331,21 +311,6 @@ func TestActionCredentialLeaseRejectsNonCanonicalOpaqueReferences(t *testing.T) 
 			}
 		})
 	}
-}
-
-func actionCredentialLeaseFixture() (time.Time, *models.ActionCall, *models.AgentRun, map[string][]string) {
-	now := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
-	expires := now.Add(2 * time.Minute)
-	scope := models.Scope{Kind: "tenant", ID: "tenant-7"}
-	call := &models.ActionCall{
-		ID: "action-1", Scope: scope, RunID: "run-1", TurnID: loopProposalStep, DeploymentID: "team-marketing", BindingID: "reddit-binding", BindingRevision: 3,
-		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
-		SkillID: "reddit-research", SkillVersion: "1.2.0", Action: "search", Status: models.ActionCallStatusRunning,
-		CredentialRefs: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "opaque://tenant-7/reddit"}},
-		Attempt:        1, MaxAttempts: 3, LeaseOwner: "runtime-worker-1", LeaseExpiresAt: &expires, Revision: 4,
-	}
-	run := &models.AgentRun{ID: "run-1", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-marketing"}, AssignedAgentID: "agent-researcher"}
-	return now, call, run, map[string][]string{"reddit": {"api.token"}}
 }
 
 func containsAny(value string, needles ...string) bool {

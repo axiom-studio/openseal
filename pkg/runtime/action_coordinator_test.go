@@ -10,8 +10,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
-	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -205,32 +203,6 @@ func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 	}
 }
 
-// loopProposeRequest is req as the loop proposes tool call toolCallID of
-// step-1: loop origin and execution and the per-call idempotency key.
-func loopProposeRequest(req ProposeActionRequest, toolCallID string) ProposeActionRequest {
-	req.Origin, req.Execution = models.ActionOriginLoop, models.ActionExecutionLoop
-	if req.TurnID == "" {
-		req.TurnID = "step-1"
-	}
-	if req.IdempotencyKey == "" {
-		req.IdempotencyKey = "loop:" + req.TurnID + ":" + toolCallID
-	}
-	return req
-}
-
-// assertLoopRunUntouched checks a loop proposal left the Run as claimed:
-// running, same lease, same revision, no wake condition.
-func assertLoopRunUntouched(t *testing.T, store models.PortfolioStore, run *models.AgentRun) {
-	t.Helper()
-	current, err := store.GetAgentRun(context.Background(), run.Scope, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Status != models.AgentRunStatusRunning || current.Revision != run.Revision || current.LeaseOwner != run.LeaseOwner || current.WakeCondition != nil {
-		t.Fatalf("loop proposal changed the Run: %#v", current)
-	}
-}
-
 func externalOperationPolicyCatalog(t *testing.T) (*skill.Catalog, models.Scope) {
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
@@ -246,64 +218,4 @@ func externalOperationPolicyCatalog(t *testing.T) (*skill.Catalog, models.Scope)
 		t.Fatal(err)
 	}
 	return catalog, scope
-}
-
-func governedActionCatalog(t *testing.T) (*skill.Catalog, models.Scope) {
-	t.Helper()
-	ctx := context.Background()
-	scope := models.Scope{Kind: "tenant", ID: "one"}
-	catalog := skill.NewCatalog()
-	definition := &skill.Definition{
-		ID: "release", Version: "1.0.0", Name: "Release", Transport: skill.TransportReference{Kind: "http", Endpoint: "https://release.invalid"},
-		Actions: map[string]skill.Action{"deploy": {
-			Name: "deploy", Description: "Deploy a release", SideEffect: skill.SideEffectExternal, Risk: skill.RiskLevelProduction,
-			InputSchema: map[string]interface{}{
-				"type": "object", "additionalProperties": false,
-				"properties": map[string]interface{}{
-					"environment":     map[string]interface{}{"type": "string"},
-					"credentialField": map[string]interface{}{"type": "string", "enum": []interface{}{"username", "password"}},
-					"apiToken":        map[string]interface{}{"type": "string", "writeOnly": true},
-					"nested":          map[string]interface{}{"type": "object", "properties": map[string]interface{}{"password": map[string]interface{}{"type": "string"}, "region": map[string]interface{}{"type": "string"}}},
-				}, "required": []interface{}{"environment"},
-			},
-			Credentials: []skill.CredentialRequirement{{Name: "token", Kind: "api-token"}},
-			Retry:       skill.ActionRetryPolicy{MaxAttempts: 3}, Idempotency: skill.IdempotencyRequired,
-		}},
-	}
-	if err := catalog.Register(ctx, definition); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.Bind(ctx, &skill.Binding{
-		ID: "release-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "release-agent",
-		SkillID: "release", SkillVersion: "1.0.0", AllowedActions: []string{"deploy"}, MaximumRisk: skill.RiskLevelProduction,
-		Credentials: map[string]skill.CredentialReference{"token": {Kind: "api-token", ID: "release-secret"}}, Revision: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return catalog, scope
-}
-
-func claimedActionRun(t *testing.T, store *sqlite.Store, scope models.Scope, now time.Time, worker string) *models.AgentRun {
-	t.Helper()
-	return claimedOwnedActionRun(t, store, scope, now, worker, models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release-team"})
-}
-
-// claimedOwnedActionRun claims a run of release-agent under owner.
-func claimedOwnedActionRun(t *testing.T, store *sqlite.Store, scope models.Scope, now time.Time, worker string, owner models.ObjectiveOwner) *models.AgentRun {
-	t.Helper()
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := store.ClaimNextAgentRun(context.Background(), models.AgentRunClaim{Scope: scope, WorkerID: worker, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if claimed == nil || claimed.ID != run.ID {
-		t.Fatalf("run was not claimed: %#v", claimed)
-	}
-	return claimed
 }
