@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,6 +17,11 @@ type runStoreContractStore interface {
 type runStoreContractFixture struct {
 	store  runStoreContractStore
 	reopen func() runStoreContractStore
+	// db is the test's own connection to the store's database, for rows no
+	// store method reads or writes; table names a table for SQL on it. Both
+	// stay valid across reopen.
+	db    *sql.DB
+	table func(name string) string
 }
 
 func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContractFixture)) {
@@ -36,7 +42,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 				t.Fatal(err)
 			}
 			return current
-		}})
+		}, db: openTestSQLiteDB(t, path), table: func(name string) string { return name }})
 	})
 	t.Run("postgres", func(t *testing.T) {
 		pgSchema := newTestPostgresSchema(t, "run_store_contract_")
@@ -55,7 +61,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 				t.Fatal(err)
 			}
 			return current
-		}})
+		}, db: pgSchema.db, table: pgSchema.table})
 	})
 }
 
