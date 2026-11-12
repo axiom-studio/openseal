@@ -1,4 +1,4 @@
-package runtime
+package portfolio
 
 import (
 	"context"
@@ -159,7 +159,7 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope models.Sco
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidObjectiveTransition, current.Status, *req.Status)
 	}
 	previousStatus := current.Status
-	applyObjectiveUpdate(current, req)
+	ApplyObjectiveUpdate(current, req)
 	current.UpdatedAt = s.now()
 	current.Revision++
 	if err := current.Validate(); err != nil {
@@ -220,7 +220,7 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req models.Create
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
-	run, err := buildAgentRun(ctx, s.store, req, uuid.NewString(), s.now())
+	run, err := BuildAgentRun(ctx, s.store, req, uuid.NewString(), s.now())
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +230,7 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req models.Create
 	return run, nil
 }
 
-func buildAgentRun(ctx context.Context, store models.PortfolioStore, req models.CreateAgentRunRequest, runID string, now time.Time) (*models.AgentRun, error) {
+func BuildAgentRun(ctx context.Context, store models.PortfolioStore, req models.CreateAgentRunRequest, runID string, now time.Time) (*models.AgentRun, error) {
 	if err := req.Scope.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", models.ErrInvalidAgentRun, err)
 	}
@@ -290,7 +290,7 @@ func buildAgentRun(ctx context.Context, store models.PortfolioStore, req models.
 		ID: runID, Kind: kind, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
 		AssignedAgentID: req.AssignedAgentID, ActingUser: req.ActingUser, Entrypoint: strings.TrimSpace(req.Entrypoint), ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
-		ResourceRequirements: cloneResourceQuantities(req.ResourceRequirements),
+		ResourceRequirements: CloneResourceQuantities(req.ResourceRequirements),
 		Goal:                 req.Goal, Source: source,
 		Status: models.AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: runContext,
@@ -307,7 +307,7 @@ func buildAgentRun(ctx context.Context, store models.PortfolioStore, req models.
 	return run, nil
 }
 
-func cloneResourceQuantities(values map[string]int) map[string]int {
+func CloneResourceQuantities(values map[string]int) map[string]int {
 	if values == nil {
 		return nil
 	}
@@ -375,7 +375,7 @@ func (s *PortfolioService) SummarizeAgentRuns(ctx context.Context, scope models.
 	return store.SummarizeAgentRuns(ctx, scope, owners)
 }
 
-func applyObjectiveUpdate(objective *models.Objective, req UpdateObjectiveRequest) {
+func ApplyObjectiveUpdate(objective *models.Objective, req UpdateObjectiveRequest) {
 	if req.Title != nil {
 		objective.Title = *req.Title
 	}
