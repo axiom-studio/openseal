@@ -48,14 +48,7 @@ func nestedActionStores(t *testing.T) []struct {
 			name string
 			open func(*testing.T) KernelStore
 		}{name: "postgres", open: func(t *testing.T) KernelStore {
-			store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema("openseal_nested_"+uuid.NewString()[:8]))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
-				_ = store.Close()
-			})
+			store, _ := openTestPostgresStore(t, "openseal_nested_")
 			return store
 		}})
 	}

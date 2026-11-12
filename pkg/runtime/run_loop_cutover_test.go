@@ -40,14 +40,7 @@ func cutoverStores() []struct {
 			name string
 			open func(*testing.T) cutoverTestStore
 		}{name: "postgres", open: func(t *testing.T) cutoverTestStore {
-			store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema("openseal_cutover_"+uuid.NewString()[:8]))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
-				_ = store.Close()
-			})
+			store, _ := openTestPostgresStore(t, "openseal_cutover_")
 			return store
 		}})
 	}

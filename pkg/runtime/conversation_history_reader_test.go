@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -112,14 +111,7 @@ func TestConversationHistoryStores(t *testing.T) {
 				if dsn == "" {
 					t.Skip("requires isolated PostgreSQL")
 				}
-				s, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(fmt.Sprintf("chat_history_%d", time.Now().UnixNano())))
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					_, _ = s.db.ExecContext(context.Background(), `DROP SCHEMA `+s.quotedSchema()+` CASCADE`)
-					_ = s.Close()
-				})
+				s, _ := openTestPostgresStore(t, "chat_history_")
 				store = s
 			}
 			testConversationHistory(t, store)

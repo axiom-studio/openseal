@@ -21,8 +21,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // ---------------------------------------------------------------------------
@@ -555,14 +553,7 @@ func kernelStoreMatrix(t *testing.T, prefix string) []kernelStoreCase {
 	}
 	if dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN"); dsn != "" {
 		cases = append(cases, kernelStoreCase{name: "postgres", open: func(t *testing.T) KernelStore {
-			store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(prefix+"_"+uuid.NewString()[:8]))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
-				_ = store.Close()
-			})
+			store, _ := openTestPostgresStore(t, prefix+"_")
 			return store
 		}})
 	}
