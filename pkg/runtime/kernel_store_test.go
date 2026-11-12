@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 )
@@ -28,4 +29,14 @@ func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// getStoredRun reads a Run that the test knows exists.
+func getStoredRun(t testing.TB, store *SQLiteStore, scope Scope, id string) *AgentRun {
+	t.Helper()
+	run, err := store.GetAgentRun(context.Background(), scope, id)
+	if err != nil {
+		t.Fatalf("get run %s: %v", id, err)
+	}
+	return run
 }

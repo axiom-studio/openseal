@@ -160,16 +160,6 @@ func deleteStoredRow(t testing.TB, store *SQLiteStore, table string, scope Scope
 	execStoreSQL(t, store, `DELETE FROM `+table+` WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id)
 }
 
-// getStoredRun reads a Run that the test knows exists.
-func getStoredRun(t testing.TB, store *SQLiteStore, scope Scope, id string) *AgentRun {
-	t.Helper()
-	run, err := store.GetAgentRun(context.Background(), scope, id)
-	if err != nil {
-		t.Fatalf("get run %s: %v", id, err)
-	}
-	return run
-}
-
 // storedRoutineEvent is one row of routine_events. KeepsData reports whether
 // the row still holds the event's payload, summary and fields.
 type storedRoutineEvent struct {
