@@ -402,7 +402,7 @@ func (h *resumeHarness) expectCompleted(exit RunLoopExit, answer string) *models
 }
 
 func TestRunLoopResumeRunningStepWithoutAssistant(t *testing.T) {
-	eachLoopStore(t, "resume-no-assistant", func(t *testing.T, store models.KernelStore) {
+	eachLoopStore(t, "resume_no_assistant", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease, resumeSay("first try"), resumeSay("done"))
 		h.producer.before = func(call int) {
 			if call == 0 {
@@ -427,7 +427,7 @@ func TestRunLoopResumeRunningStepWithoutAssistant(t *testing.T) {
 }
 
 func TestRunLoopRedoModelCallReusesStepRow(t *testing.T) {
-	eachLoopStore(t, "resume-redo", func(t *testing.T, store models.KernelStore) {
+	eachLoopStore(t, "resume_redo", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, &models.BudgetPolicy{MaxTurns: 5}, resumeLease, resumeSay("first try"), resumeSay("done"))
 		h.producer.before = func(call int) {
 			if call == 0 {
@@ -456,7 +456,7 @@ func TestRunLoopRedoModelCallReusesStepRow(t *testing.T) {
 }
 
 func TestRunLoopResumeAfterAssistantBeforeRecord(t *testing.T) {
-	eachLoopStore(t, "resume-before-record", func(t *testing.T, store models.KernelStore) {
+	eachLoopStore(t, "resume_before_record", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease, resumeSay("done"))
 		h.store.beforeRecord = func() { h.store.arm() }
 		h.crashed(h.drive(resumeWorkerA))
@@ -480,7 +480,7 @@ func TestRunLoopResumeAfterAssistantBeforeRecord(t *testing.T) {
 }
 
 func TestRunLoopResumeRunningToolsDelegatesToExecutor(t *testing.T) {
-	eachLoopStore(t, "resume-tools", func(t *testing.T, store models.KernelStore) {
+	eachLoopStore(t, "resume_tools", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease,
 			resumeAct("Looking it up", resumeCall("c1", "lookup", `{"q":"x"}`)), resumeSay("done"))
 		h.tools.beforeExecute = func() error {
@@ -514,7 +514,7 @@ func TestRunLoopResumeRunningToolsDelegatesToExecutor(t *testing.T) {
 }
 
 func TestRunLoopResumeStaleStepLeaseRequeues(t *testing.T) {
-	eachLoopStore(t, "resume-stale-lease", func(t *testing.T, store models.KernelStore) {
+	eachLoopStore(t, "resume_stale_lease", func(t *testing.T, store models.KernelStore) {
 		stepLease := 10 * time.Minute
 		h := newResumeHarness(t, store, nil, stepLease, resumeSay("first try"), resumeSay("done"))
 		h.producer.before = func(call int) {
@@ -550,7 +550,7 @@ func TestRunLoopResumeStaleStepLeaseRequeues(t *testing.T) {
 }
 
 func TestRunLoopResumeAppliesFinishedUnappliedStep(t *testing.T) {
-	eachLoopStore(t, "resume-unapplied", func(t *testing.T, store models.KernelStore) {
+	eachLoopStore(t, "resume_unapplied", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, &models.BudgetPolicy{MaxTurns: 5}, resumeLease,
 			resumeAct("Looking it up", resumeCall("c1", "lookup", `{}`)), resumeSay("done"))
 		h.store.afterFinish = func(turn *models.AgentTurn) {
@@ -590,7 +590,7 @@ func TestRunLoopResumeAppliesFinishedUnappliedStep(t *testing.T) {
 func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
 	finalCall := resumeCall("c1", string(models.ControlToolFinalAnswer), `{"answer":"all done"}`)
 	t.Run("crash before settle", func(t *testing.T) {
-		eachLoopStore(t, "resume-final-settle", func(t *testing.T, store models.KernelStore) {
+		eachLoopStore(t, "resume_final_settle", func(t *testing.T, store models.KernelStore) {
 			h := newResumeHarness(t, store, nil, resumeLease, resumeAct("", finalCall))
 			h.tools.beforeSettle = func() error {
 				h.store.arm()
@@ -613,7 +613,7 @@ func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
 		})
 	})
 	t.Run("crash after the reply was posted", func(t *testing.T) {
-		eachLoopStore(t, "resume-final-posted", func(t *testing.T, store models.KernelStore) {
+		eachLoopStore(t, "resume_final_posted", func(t *testing.T, store models.KernelStore) {
 			h := newResumeHarness(t, store, nil, resumeLease, resumeAct("", finalCall))
 			h.final.afterPost = func() { h.store.arm() }
 			h.crashed(h.drive(resumeWorkerA))
@@ -638,7 +638,7 @@ func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
 // its FinishTurn and its terminal transition: the next claim completes it
 // through the final chain (a replayed delivery), not a new model call.
 func TestRunLoopResumePlainFinalAfterFinish(t *testing.T) {
-	eachLoopStore(t, "resume-plain-final", func(t *testing.T, store models.KernelStore) {
+	eachLoopStore(t, "resume_plain_final", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease, resumeSay("done"))
 		h.store.afterFinish = func(*models.AgentTurn) { h.store.arm() }
 		h.crashed(h.drive(resumeWorkerA))
