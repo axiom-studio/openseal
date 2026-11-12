@@ -128,7 +128,7 @@ func (i *AgentInstaller) ExportSharedAgent(ctx context.Context, scope Scope, dep
 		return nil, err
 	}
 	for _, binding := range bindings {
-		if binding == nil || binding.Disabled || strings.HasPrefix(binding.ID, "bundled:") || routineUngrantableSkills[binding.SkillID] {
+		if binding == nil || binding.Disabled || strings.HasPrefix(binding.ID, "bundled:") || routineUngrantableSkill(binding.SkillID) {
 			continue
 		}
 		shared, refusal, err := i.exportSharedSkill(ctx, binding)
@@ -875,7 +875,7 @@ func (i *AgentInstaller) resolveSharedSkill(ctx context.Context, value SharedAge
 	if resolved.name == "" {
 		resolved.name = value.SkillID
 	}
-	if routineUngrantableSkills[value.SkillID] || value.SkillID == sharedAgentMCPSkillID || value.SkillID == sharedAgentExternalConversationSkillID {
+	if routineUngrantableSkill(value.SkillID) || value.SkillID == sharedAgentMCPSkillID || value.SkillID == sharedAgentExternalConversationSkillID {
 		return resolved, nil
 	}
 	definition, err := sharedSkillDefinition(ctx, i.catalog, value.SkillID, value.SkillVersion, value.SourceIdentity)

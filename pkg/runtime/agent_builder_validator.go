@@ -551,7 +551,7 @@ func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants
 			return nil, fmt.Errorf("Skill %s is listed more than once", grant.SkillID)
 		}
 		seen[grant.SkillID] = true
-		if routineUngrantableSkills[grant.SkillID] {
+		if routineUngrantableSkill(grant.SkillID) {
 			return nil, fmt.Errorf("Skill %s is a built-in management Skill the workspace binds itself; leave it out", grant.SkillID)
 		}
 		if catalog == nil {

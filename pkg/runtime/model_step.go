@@ -206,6 +206,12 @@ var (
 	modelStepSectionIDPattern = regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
 )
 
+// validModelStepToolName reports whether name is a tool name every model
+// provider accepts.
+func validModelStepToolName(name string) bool {
+	return modelStepToolNamePattern.MatchString(name)
+}
+
 func invalidModelStep(format string, args ...interface{}) error {
 	return fmt.Errorf("%w: %s", ErrInvalidModelStepRequest, fmt.Sprintf(format, args...))
 }
@@ -285,7 +291,7 @@ func (r ModelStepRequest) validateTools() error {
 	names := make(map[string]bool, len(r.Tools))
 	lastRank := 0
 	for i, tool := range r.Tools {
-		if !modelStepToolNamePattern.MatchString(tool.Name) {
+		if !validModelStepToolName(tool.Name) {
 			return invalidModelStep("tool %d has invalid name %q", i, tool.Name)
 		}
 		if names[tool.Name] {

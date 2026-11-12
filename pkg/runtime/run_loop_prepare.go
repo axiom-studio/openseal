@@ -323,7 +323,7 @@ func LoopGovernedToolNames(actions []capability.ModelAction) map[string]string {
 			continue
 		}
 		name := governedToolPrefix + strings.ReplaceAll(action.Name, ".", "_")
-		if !modelStepToolNamePattern.MatchString(name) || taken[name] {
+		if !validModelStepToolName(name) || taken[name] {
 			name = hashedGovernedToolName(action.Name)
 		}
 		names[action.Name] = name

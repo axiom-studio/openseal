@@ -61,6 +61,12 @@ var routineUngrantableSkills = map[string]bool{
 	computerSkillID: true,
 }
 
+// routineUngrantableSkill reports whether a routine may never be granted
+// actions of skillID: the management skills and the computer skill.
+func routineUngrantableSkill(skillID string) bool {
+	return routineUngrantableSkills[skillID]
+}
+
 func routineGrantIdentity(skillID, action string) string {
 	return skillID + "." + action
 }
@@ -164,7 +170,7 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 	// routed maps a binding-tools base action to an example tool to grant.
 	routed := map[string]string{}
 	for _, binding := range bindings {
-		if binding == nil || binding.Disabled || routineUngrantableSkills[binding.SkillID] {
+		if binding == nil || binding.Disabled || routineUngrantableSkill(binding.SkillID) {
 			continue
 		}
 		var definition *skill.Definition
@@ -557,7 +563,7 @@ func routineOwner(activation *models.RunbookActivation) (models.ConversationPart
 // never by the base action, and only while that tool still has the fixed
 // arguments (upstream name and pinned hash) the user approved.
 func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routineGrantStore, owners RoutineOwnerAddressResolver, run *models.AgentRun, bound *skill.BoundAction, arguments map[string]interface{}) (*models.RoutineGrant, error) {
-	if bound == nil || bound.Definition == nil || bound.Action.AlwaysReview() || routineUngrantableSkills[bound.Definition.ID] {
+	if bound == nil || bound.Definition == nil || bound.Action.AlwaysReview() || routineUngrantableSkill(bound.Definition.ID) {
 		return nil, nil
 	}
 	activation, err := routineActivationForRun(ctx, runs, store, run)

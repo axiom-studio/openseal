@@ -317,7 +317,7 @@ func TestLoopGovernedToolNamesValidAndUnique(t *testing.T) {
 	seen := map[string]bool{}
 	for _, action := range actions {
 		name := names[action.Name]
-		if !modelStepToolNamePattern.MatchString(name) || seen[name] {
+		if !validModelStepToolName(name) || seen[name] {
 			t.Fatalf("tool name %q for %q is invalid or repeated", name, action.Name)
 		}
 		seen[name] = true
