@@ -374,8 +374,9 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		decision.EligibleApprovers = []ApprovalPrincipal{{Type: "user", ID: run.ActingUser}}
 	}
 	// An agent or team card is decided by the person who asked the builder
-	// for it (D9), whatever role the host policy named.
-	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && (isAgentBuilderApprovalAction(bound) || targeted) {
+	// for it (D9), whatever role the host policy named. So is a routine's
+	// brief: the person who asked for the routine accepts it, in any space.
+	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && (isAgentBuilderApprovalAction(bound) || isRoutineBriefAction(bound) || targeted) {
 		decision.EligibleApprovers = []ApprovalPrincipal{{Type: "user", ID: run.ActingUser}}
 	}
 	if decision.Disposition == ActionDispositionRequireApproval && len(decision.EligibleApprovers) == 0 {
@@ -556,6 +557,13 @@ func isAgentBuilderApprovalAction(bound *skill.BoundAction) bool {
 		return bound.Action.Name == TeamActionCreateTeam
 	}
 	return false
+}
+
+// isRoutineBriefAction reports a routine's creation or a change to the script
+// it runs: the actions whose brief is always shown before they take effect.
+func isRoutineBriefAction(bound *skill.BoundAction) bool {
+	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
+		(bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionSetScript)
 }
 
 // newApprovalCheckpoint puts call in review and returns its pending approval.

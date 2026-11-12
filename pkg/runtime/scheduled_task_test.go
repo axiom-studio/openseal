@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -388,6 +389,32 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 				}
 			}
 		})
+	}
+}
+
+// TestRoutineBriefIsDecidedByTheRequester: a routine's brief names the person
+// who asked for it as its only approver, whatever role the host policy named,
+// so a member accepts their own routine in any space they belong to.
+func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
+	store := newTestKernelStore(t)
+	run, catalog, bound, args := scheduledTaskFixture(t, store)
+	now := time.Now().Add(time.Second)
+	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil {
+		t.Fatalf("claim=%#v,%v", claimed, err)
+	}
+	validator, _ := NewRunbookActionValidator(store)
+	policy := NewDefaultActionPolicy()
+	policy.Approvers = []ApprovalPrincipal{{Type: "role", ID: "operator"}}
+	coordinator := NewActionCoordinator(store, store, catalog, policy, validator)
+	coordinator.now = func() time.Time { return now }
+	result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: RunbookActionCreateTask, Arguments: args, IdempotencyKey: "requester-routine", Summary: "Create recurring research", Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ApprovalPrincipal{{Type: "user", ID: "user"}}
+	if result.Approval == nil || !reflect.DeepEqual(result.Approval.EligibleApprovers, want) {
+		t.Fatalf("approvers = %#v, want %#v", result.Approval, want)
 	}
 }
 
