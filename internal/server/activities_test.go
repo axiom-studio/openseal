@@ -18,7 +18,7 @@ func TestActivityAPIIsCapabilityAdvertisedSelectorBoundedAndDetailedOnRequest(t 
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Monitor governed sources", Source: models.RunSourceSchedule,
 	})
 	if err != nil {

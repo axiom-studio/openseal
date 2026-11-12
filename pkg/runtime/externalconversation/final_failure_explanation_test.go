@@ -149,7 +149,7 @@ func claimedFailureRun(t *testing.T, store models.KernelStore, name string) *mod
 	t.Helper()
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: name + "-" + uuid.NewString()[:8]}
-	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	created, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "Reply", Source: models.RunSourceChat, SessionID: "session-" + name,
 	})

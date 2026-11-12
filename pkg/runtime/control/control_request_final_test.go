@@ -79,7 +79,7 @@ func newRequestFinalFixture(t *testing.T, store *sqlite.Store, run *models.Agent
 	registry := Registry{}
 	registry.register(models.ControlToolRequestDecision, requestDecisionHandler{})
 	registry.register(models.ControlToolCompletionReview, completionReviewHandler{})
-	f.exec = &ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
+	f.exec = &Executor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
 	return f
 }
 
@@ -165,7 +165,7 @@ func TestDecisionToolWritesOutputConsumedByResolveDecisionRun(t *testing.T) {
 	if err != nil || !resolved {
 		t.Fatalf("resolve = %v, %v", resolved, err)
 	}
-	current, err := collaboration.NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	current, err := collaboration.NewService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
 	if err != nil || current.Status != models.AgentRequestStatusRejected || current.Response != "Outside my role." {
 		t.Fatalf("request = %#v, %v", current, err)
 	}
@@ -185,7 +185,7 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Kind != ControlContinue || result.Entry == nil || result.Entry.State != models.ToolEntryError {
+			if result.Kind != Continue || result.Entry == nil || result.Entry.State != models.ToolEntryError {
 				t.Fatalf("result = %#v", result)
 			}
 			stored := f.stored("decide")
@@ -239,14 +239,14 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 			},
 		},
 	}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "coordinator-agent",
 		Goal: "Coordinate a reviewed release", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := collaboration.NewCollaborationService(store)
+	service := collaboration.NewService(store)
 	created, err := service.CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindHandoff,
 		Requester:   models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "release-team"},
@@ -341,7 +341,7 @@ func TestDecisionBudgetIsTwelveSteps(t *testing.T) {
 
 func TestRequestFinalToolSchemas(t *testing.T) {
 	decision := builtinControlSpecs(agentrun.ControlAuthority{FinalMode: agentrun.FinalModeDecision})
-	if len(decision) != 1 || decision[0].Name != models.ControlToolRequestDecision || decision[0].Phase != ControlPhaseSettle {
+	if len(decision) != 1 || decision[0].Name != models.ControlToolRequestDecision || decision[0].Phase != PhaseSettle {
 		t.Fatalf("decision specs = %#v", decision)
 	}
 	properties, required := schemaProperties(t, decision[0].InputSchema)

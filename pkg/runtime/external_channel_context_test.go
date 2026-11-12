@@ -65,7 +65,7 @@ func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
 		if !ok {
 			t.Fatalf("%T has no runbook activations", f.Store)
 		}
-		objective, err := runtimeportfolio.NewPortfolioService(portfolio).CreateObjective(f.Ctx, runtimeportfolio.CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "PRIVATE_OBJECTIVE", Goal: "PRIVATE_OBJECTIVE_SECRET", Status: models.ObjectiveStatusActive})
+		objective, err := runtimeportfolio.NewService(portfolio).CreateObjective(f.Ctx, runtimeportfolio.CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "PRIVATE_OBJECTIVE", Goal: "PRIVATE_OBJECTIVE_SECRET", Status: models.ObjectiveStatusActive})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,7 +89,7 @@ func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
 			return chatStepText(binding, producer.Paths[0])
 		}
 		channel := ask(public, "public-message", "PUBLIC_CHANNEL_QUESTION")
-		if !strings.Contains(channel, "PUBLIC_CHANNEL_QUESTION") || !strings.Contains(channel, conversation.ConversationExternalSourceRules) {
+		if !strings.Contains(channel, "PUBLIC_CHANNEL_QUESTION") || !strings.Contains(channel, conversation.ExternalSourceRules) {
 			t.Fatalf("current channel context missing:\n%s", channel)
 		}
 		for _, secret := range []string{"PRIVATE_DM_SECRET", "PRIVATE_OBJECTIVE_SECRET", "private-workflow"} {
@@ -103,7 +103,7 @@ func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
 				t.Fatalf("personal chat lost its private portfolio context %s:\n%s", want, control)
 			}
 		}
-		if strings.Contains(control, conversation.ConversationExternalSourceRules) || strings.Contains(control, "PRIVATE_DM_SECRET") {
+		if strings.Contains(control, conversation.ExternalSourceRules) || strings.Contains(control, "PRIVATE_DM_SECRET") {
 			t.Fatalf("personal chat got external channel context:\n%s", control)
 		}
 	})

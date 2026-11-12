@@ -50,7 +50,7 @@ type UpdateObjectiveRequest struct {
 	Summary          string
 }
 
-type PortfolioService struct {
+type Service struct {
 	store models.PortfolioStore
 	now   func() time.Time
 }
@@ -60,11 +60,11 @@ type CreateObjectiveResult struct {
 	Created   bool              `json:"created"`
 }
 
-func NewPortfolioService(store models.PortfolioStore, opts ...models.ServiceOption) *PortfolioService {
-	return &PortfolioService{store: store, now: models.ClockFrom(opts)}
+func NewService(store models.PortfolioStore, opts ...models.ServiceOption) *Service {
+	return &Service{store: store, now: models.ClockFrom(opts)}
 }
 
-func (s *PortfolioService) CreateObjective(ctx context.Context, req CreateObjectiveRequest) (*models.Objective, error) {
+func (s *Service) CreateObjective(ctx context.Context, req CreateObjectiveRequest) (*models.Objective, error) {
 	result, err := s.CreateObjectiveIdempotent(ctx, req)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func (s *PortfolioService) CreateObjective(ctx context.Context, req CreateObject
 	return result.Objective, nil
 }
 
-func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req CreateObjectiveRequest) (*CreateObjectiveResult, error) {
+func (s *Service) CreateObjectiveIdempotent(ctx context.Context, req CreateObjectiveRequest) (*CreateObjectiveResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -138,7 +138,7 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 	return &CreateObjectiveResult{Objective: objective, Created: true}, nil
 }
 
-func (s *PortfolioService) UpdateObjective(ctx context.Context, scope models.Scope, objectiveID string, req UpdateObjectiveRequest) (*models.Objective, error) {
+func (s *Service) UpdateObjective(ctx context.Context, scope models.Scope, objectiveID string, req UpdateObjectiveRequest) (*models.Objective, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -189,7 +189,7 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope models.Sco
 	return current, nil
 }
 
-func (s *PortfolioService) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
+func (s *Service) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -206,7 +206,7 @@ func (s *PortfolioService) GetObjective(ctx context.Context, scope models.Scope,
 	return objective, nil
 }
 
-func (s *PortfolioService) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
+func (s *Service) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -216,7 +216,7 @@ func (s *PortfolioService) ListObjectives(ctx context.Context, filter models.Obj
 	return s.store.ListObjectives(ctx, filter)
 }
 
-func (s *PortfolioService) CreateAgentRun(ctx context.Context, req models.CreateAgentRunRequest) (*models.AgentRun, error) {
+func (s *Service) CreateAgentRun(ctx context.Context, req models.CreateAgentRunRequest) (*models.AgentRun, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -318,7 +318,7 @@ func CloneResourceQuantities(values map[string]int) map[string]int {
 	return cloned
 }
 
-func (s *PortfolioService) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
+func (s *Service) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -335,7 +335,7 @@ func (s *PortfolioService) GetAgentRun(ctx context.Context, scope models.Scope, 
 	return run, nil
 }
 
-func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
+func (s *Service) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -356,7 +356,7 @@ func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter models.Agen
 	return s.store.ListAgentRuns(ctx, filter)
 }
 
-func (s *PortfolioService) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
+func (s *Service) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio service is not configured")
 	}

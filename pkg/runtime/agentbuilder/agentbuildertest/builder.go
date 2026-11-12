@@ -19,7 +19,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-// Host is an AgentBuilderHost that records the models it validates and the
+// Host is an agentbuilder.Host that records the models it validates and the
 // changes it authorizes, and refuses the user/Agent pairs in Forbidden.
 type Host struct {
 	Validated []string
@@ -64,7 +64,7 @@ type Fixture struct {
 	HomeID    string
 	Run       *models.AgentRun
 	Host      *Host
-	Validator *agentbuilder.AgentBuilderActionValidator
+	Validator *agentbuilder.ActionValidator
 }
 
 // NewFixture builds the Fixture; withHost gives its validator a Host.
@@ -186,12 +186,12 @@ func NewFixture(t *testing.T, withHost bool) *Fixture {
 			AssignedAgentID: "finn", ActingUser: Approver.ID, Source: models.RunSourceChat,
 		},
 	}
-	var host agentbuilder.AgentBuilderHost
+	var host agentbuilder.Host
 	if withHost {
 		fixture.Host = &Host{}
 		host = fixture.Host
 	}
-	fixture.Validator, err = agentbuilder.NewAgentBuilderActionValidator(agents, teams, catalog, spaces, nil, nil, host)
+	fixture.Validator, err = agentbuilder.NewActionValidator(agents, teams, catalog, spaces, nil, nil, host)
 	if err != nil {
 		t.Fatal(err)
 	}

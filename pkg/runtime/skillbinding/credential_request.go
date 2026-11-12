@@ -72,7 +72,7 @@ func decodeCredentialRequestArguments(arguments map[string]interface{}) (credent
 	return a, nil
 }
 
-func (d *SkillBindingActionDispatcher) requestCredential(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
+func (d *ActionDispatcher) requestCredential(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
 	a, err := decodeCredentialRequestArguments(input.Arguments)
 	if err != nil {
 		return nil, err

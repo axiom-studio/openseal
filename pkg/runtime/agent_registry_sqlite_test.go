@@ -44,7 +44,7 @@ func TestSQLiteAgentDefinitionActivationAdvancesRunbookAtomicallyAndRollsBack(t 
 		t.Fatal(err)
 	}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment.ID}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -309,7 +309,7 @@ func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testi
 		t.Fatal(err)
 	}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment.ID}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(context.Background(), portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(store).CreateObjective(context.Background(), portfolio.CreateObjectiveRequest{
 		Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {

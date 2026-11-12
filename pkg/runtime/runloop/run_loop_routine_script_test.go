@@ -20,7 +20,7 @@ import (
 func routineScriptRun() *models.AgentRun {
 	return &models.AgentRun{ID: "occurrence", Scope: models.Scope{Kind: "tenant", ID: "one"}, AssignedAgentID: "agent", Context: map[string]interface{}{
 		models.ConversationRunConversationIDContextKey: "chat",
-		routine.RoutineScriptContextKey: map[string]interface{}{"path": "scripts/weekly.py", "digest": loopScriptDigest("a"), "filesVersion": float64(2),
+		routine.ScriptContextKey: map[string]interface{}{"path": "scripts/weekly.py", "digest": loopScriptDigest("a"), "filesVersion": float64(2),
 			"command": "python3 scripts/weekly.py", "timeoutSeconds": float64(120)},
 	}}
 }
@@ -59,7 +59,7 @@ func loopRunCommandEntry(t *testing.T, routine *PreparedRoutineScript, sequence 
 		}
 	}
 	dispatcher := modelstep.NewHostToolDispatcher(&modelsteptest.FakeHostToolHost{Replies: []func(context.Context, models.HostToolRequest) (models.HostToolResult, error){answer}},
-		runtimeaction.NewActionCoordinator(nil, nil, nil, nil, nil), nil)
+		runtimeaction.NewCoordinator(nil, nil, nil, nil, nil), nil)
 	call := modelsteptest.HostToolCallFixture(t, workspace.OperationRunCommand, arguments)
 	call.ToolEntryID = fmt.Sprintf("ent_%d", sequence)
 	call.CommandPins = routine.CommandPins()
@@ -86,7 +86,7 @@ func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 		t.Fatalf("nil Run = %#v, %v", routine, err)
 	}
 	invalid := routineScriptRun()
-	invalid.Context[routine.RoutineScriptContextKey] = map[string]interface{}{"path": "scripts/weekly.py", "command": "rm -rf /"}
+	invalid.Context[routine.ScriptContextKey] = map[string]interface{}{"path": "scripts/weekly.py", "command": "rm -rf /"}
 	if _, err := PrepareRoutineScript(invalid, tools); err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("invalid script err = %v", err)
 	}

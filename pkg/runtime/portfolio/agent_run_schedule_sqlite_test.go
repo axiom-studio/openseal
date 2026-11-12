@@ -22,7 +22,7 @@ func TestSQLiteAgentRunClaimsAreAtomicAndRecoverAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "work", Source: models.RunSourceObjective,
@@ -93,7 +93,7 @@ func TestSQLiteAgentRunAttemptBudgetPersistsAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "attempt-budget"}
 	now := time.Now().UTC()
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "restart safely", Source: models.RunSourceObjective, Budget: &models.BudgetPolicy{MaxAttempts: 1, MaxTurns: 3},
@@ -131,7 +131,7 @@ func TestSQLiteAgentRunClaimHonorsAgingCapacityAndScope(t *testing.T) {
 	otherScope := models.Scope{Kind: "tenant", ID: "two"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	portfolioClock := func() time.Time { return now.Add(-10 * time.Minute) }
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return portfolioClock() }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return portfolioClock() }))
 	old, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "old low priority", Source: models.RunSourceObjective, Priority: 1,
@@ -194,7 +194,7 @@ func TestSQLiteAgentRunClaimHonorsConcurrencyKeyAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "conversation-capacity"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	for _, candidate := range []struct {
 		key      string
 		priority int
@@ -256,7 +256,7 @@ func TestSQLiteAgentRunClaimIsolatesKindsAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "kinds"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	agentRun, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "ordinary work",
 	})

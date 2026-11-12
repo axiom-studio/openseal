@@ -124,7 +124,7 @@ func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Contex
 	now := time.Now().UTC().Round(0)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-credential-lease"}
 	const deploymentID = "research-agent"
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, AssignedAgentID: deploymentID,
 		Goal: "Research safely", Source: models.RunSourceManual,
 	})

@@ -36,7 +36,7 @@ func RebaseSkillSetupRequestAfterBindingUpgrade(request *SkillSetupRequest, expe
 
 // ReconcileSkillSetupTask delivers a saved setup result to the exact background
 // task. A handled result must not also schedule a foreground conversation reply.
-func (e *Engine) ReconcileSkillSetupTask(ctx context.Context, scope models.Scope, requestID string) (*agentrun.AgentRunCommandResult, bool, error) {
+func (e *Engine) ReconcileSkillSetupTask(ctx context.Context, scope models.Scope, requestID string) (*agentrun.CommandResult, bool, error) {
 	if e == nil || e.conversationRunScheduler == nil {
 		return nil, false, errors.New("conversation run scheduling is unavailable")
 	}

@@ -14,7 +14,7 @@ import (
 
 func TestActivitySequencesConcurrentAppends(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	activity := runtimeactivity.NewRunActivityService(store, store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
@@ -55,7 +55,7 @@ func TestActivitySequencesConcurrentAppends(t *testing.T) {
 
 func TestRunTransitionPersistsWakeAndTerminalState(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	activity := runtimeactivity.NewRunActivityService(store, store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}

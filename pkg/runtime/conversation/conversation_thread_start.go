@@ -242,7 +242,7 @@ func filterChannelMessageThreadStarts(ctx context.Context, scope models.Scope, c
 	return visible, nil
 }
 
-func (s *ConversationService) threadStartParentLoader(scope models.Scope, conversationID string) channelMessageParentLoader {
+func (s *Service) threadStartParentLoader(scope models.Scope, conversationID string) channelMessageParentLoader {
 	if batch, ok := s.store.(models.ChannelMessageBatchStore); ok {
 		return func(ctx context.Context, ids []string) (map[string]*models.ChannelMessage, error) {
 			return loadChannelMessageBatches(ctx, batch, scope, conversationID, ids)
@@ -261,7 +261,7 @@ func (s *ConversationService) threadStartParentLoader(scope models.Scope, conver
 	}
 }
 
-func (s *ConversationService) validateThreadStartAncestry(ctx context.Context, message *models.ChannelMessage) (bool, error) {
+func (s *Service) validateThreadStartAncestry(ctx context.Context, message *models.ChannelMessage) (bool, error) {
 	proof := newChannelThreadStartProof(message.Scope, message.ConversationID, map[string]*models.ChannelMessage{message.ID: message}, s.threadStartParentLoader(message.Scope, message.ConversationID))
 	if err := proof.preload(ctx, []string{message.ID}, nil); err != nil {
 		return false, err

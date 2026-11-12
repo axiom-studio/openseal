@@ -12,17 +12,17 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// ConversationArchiveSource identifies the immutable source record set used
+// ArchiveSource identifies the immutable source record set used
 // for a one-way import. OpenSeal stores a source reference on every imported
 // message so hosts can remove old execution systems without erasing audit
 // provenance.
-type ConversationArchiveSource struct {
+type ArchiveSource struct {
 	System       string `json:"system"`
 	ResourceType string `json:"resourceType"`
 	ResourceID   string `json:"resourceId"`
 }
 
-func (s ConversationArchiveSource) Validate() error {
+func (s ArchiveSource) Validate() error {
 	if !models.IsValidOpaqueIdentifier(s.System, 80) || !models.IsValidOpaqueIdentifier(s.ResourceType, 80) ||
 		!models.IsValidOpaqueIdentifier(s.ResourceID, 128) {
 		return fmt.Errorf("%w: archive source system, resource type, and resource id are required", models.ErrInvalidConversation)
@@ -30,7 +30,7 @@ func (s ConversationArchiveSource) Validate() error {
 	return nil
 }
 
-func (s ConversationArchiveSource) reference(recordID string) models.ConversationReference {
+func (s ArchiveSource) reference(recordID string) models.ConversationReference {
 	parts := []string{strings.TrimSpace(s.System), strings.TrimSpace(s.ResourceType), strings.TrimSpace(s.ResourceID)}
 	if strings.TrimSpace(recordID) != "" {
 		parts = append(parts, strings.TrimSpace(recordID))
@@ -41,11 +41,11 @@ func (s ConversationArchiveSource) reference(recordID string) models.Conversatio
 	}
 }
 
-// ConversationArchiveMessage is a user-visible collaboration fact selected
+// ArchiveMessage is a user-visible collaboration fact selected
 // by the importing host. Hidden reasoning and procedural tool traces must not
 // be supplied as channel messages; preserve those through governed artifacts
 // or activity records instead.
-type ConversationArchiveMessage struct {
+type ArchiveMessage struct {
 	RecordID           string
 	Sender             models.ConversationParticipant
 	SenderDisplayName  string
@@ -64,12 +64,12 @@ type ImportConversationArchiveRequest struct {
 	Scope          models.Scope
 	Owner          models.ObjectiveOwner
 	Title          string
-	Source         ConversationArchiveSource
-	Messages       []ConversationArchiveMessage
+	Source         ArchiveSource
+	Messages       []ArchiveMessage
 	IdempotencyKey string
 }
 
-type ConversationArchiveImportResult struct {
+type ArchiveImportResult struct {
 	Conversation     *models.Conversation     `json:"conversation"`
 	Messages         []*models.ChannelMessage `json:"messages"`
 	ImportedMessages int                      `json:"importedMessages"`
@@ -80,7 +80,7 @@ type ConversationArchiveImportResult struct {
 // ImportArchive imports a historical channel without scheduling conversation
 // Runs. It is crash-resumable: conversation and message identities derive from
 // the source and every commit is independently idempotent.
-func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConversationArchiveRequest) (*ConversationArchiveImportResult, error) {
+func (s *Service) ImportArchive(ctx context.Context, req ImportConversationArchiveRequest) (*ArchiveImportResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -99,7 +99,7 @@ func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConve
 		return nil, fmt.Errorf("%w: archive title, messages, and idempotency key are required", models.ErrInvalidConversation)
 	}
 
-	messages := append([]ConversationArchiveMessage(nil), req.Messages...)
+	messages := append([]ArchiveMessage(nil), req.Messages...)
 	sort.SliceStable(messages, func(i, j int) bool {
 		if !messages[i].CreatedAt.Equal(messages[j].CreatedAt) {
 			return messages[i].CreatedAt.Before(messages[j].CreatedAt)
@@ -123,7 +123,7 @@ func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConve
 	if err != nil {
 		return nil, err
 	}
-	result := &ConversationArchiveImportResult{Conversation: conversation, Replayed: replayed}
+	result := &ArchiveImportResult{Conversation: conversation, Replayed: replayed}
 	for _, archived := range messages {
 		current, err := s.GetConversation(ctx, req.Scope, conversation.ID)
 		if err != nil {
@@ -197,7 +197,7 @@ func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConve
 	return result, nil
 }
 
-func (s *ConversationService) importArchiveConversation(
+func (s *Service) importArchiveConversation(
 	ctx context.Context,
 	req ImportConversationArchiveRequest,
 	createdAt time.Time,
@@ -224,7 +224,7 @@ func (s *ConversationService) importArchiveConversation(
 	return s.store.CreateConversation(ctx, conversation, key)
 }
 
-func archiveConversationOrigin(source ConversationArchiveSource) *models.ConversationReference {
+func archiveConversationOrigin(source ArchiveSource) *models.ConversationReference {
 	reference := source.reference("")
 	return &reference
 }

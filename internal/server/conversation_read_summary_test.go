@@ -17,7 +17,7 @@ import (
 
 func TestChannelListReadPositionsAreScopedOptionalAndReadOnly(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	local := models.Scope{Kind: "local", ID: "default"}
 	reader := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "local-operator"}
 	seedSpace(t, store, local, "")
@@ -83,7 +83,7 @@ func (s failingReadSummaryStore) GetConversationCursor(context.Context, models.S
 }
 func TestChannelListDoesNotInventUnreadCountsOnCursorFailure(t *testing.T) {
 	store := failingReadSummaryStore{kerneltest.NewStore(t)}
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, "")
 	if _, _, err := service.CreateConversation(context.Background(), conversation.CreateConversationRequest{Scope: models.Scope{Kind: "local", ID: "default"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"}); err != nil {
 		t.Fatal(err)

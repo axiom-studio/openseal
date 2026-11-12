@@ -32,8 +32,8 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	}
 
 	fixed := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	primaryService := runtimeconversation.NewConversationService(primary, models.WithClock(func() time.Time { return fixed }))
-	replicaService := runtimeconversation.NewConversationService(replica, models.WithClock(func() time.Time { return fixed }))
+	primaryService := runtimeconversation.NewService(primary, models.WithClock(func() time.Time { return fixed }))
+	replicaService := runtimeconversation.NewService(replica, models.WithClock(func() time.Time { return fixed }))
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, primary, scope)
 	conversation, _, err := primaryService.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
@@ -74,7 +74,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 			{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "observer"}, Addressed: models.ConversationAddressedEveryone},
 		},
 	}
-	services := []*runtimeconversation.ConversationService{primaryService, replicaService}
+	services := []*runtimeconversation.Service{primaryService, replicaService}
 	var committed atomic.Int32
 	var failed atomic.Int32
 	var wait sync.WaitGroup
@@ -104,7 +104,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	}
 	defer restarted.Close()
 	restartedServiceClock := func() time.Time { return fixed }
-	restartedService := runtimeconversation.NewConversationService(restarted, models.WithClock(func() time.Time { return restartedServiceClock() }))
+	restartedService := runtimeconversation.NewService(restarted, models.WithClock(func() time.Time { return restartedServiceClock() }))
 	restored, err := restartedService.GetConversation(ctx, scope, conversation.ID)
 	if err != nil || restored.Revision != 3 || restored.LastSequence != 1 {
 		t.Fatalf("restored conversation = %#v, err = %v", restored, err)
@@ -133,28 +133,28 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	if err != nil || len(rounds) != 1 || rounds[0].Round.ID != replay.Round.ID || rounds[0].Round.ConversationRevision != 3 {
 		t.Fatalf("rounds = %#v, err = %v", rounds, err)
 	}
-	primaryChanges, err := runtimeconversation.NewConversationChangeService(primary, primary)
+	primaryChanges, err := runtimeconversation.NewChangeService(primary, primary)
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialChanges, err := primaryChanges.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+	initialChanges, err := primaryChanges.ListChanges(ctx, runtimeconversation.ChangeRequest{
 		Scope: scope, ConversationID: conversation.ID, ActiveAt: fixed,
 	})
 	if err != nil || len(initialChanges.Messages) != 1 || len(initialChanges.Rounds) != 1 ||
 		len(initialChanges.Presence) != 1 || initialChanges.Cursor == "" {
 		t.Fatalf("initial PostgreSQL changes = %#v, err = %v", initialChanges, err)
 	}
-	replicaChanges, err := runtimeconversation.NewConversationChangeService(replica, replica)
+	replicaChanges, err := runtimeconversation.NewChangeService(replica, replica)
 	if err != nil {
 		t.Fatal(err)
 	}
-	unchangedChanges, err := replicaChanges.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+	unchangedChanges, err := replicaChanges.ListChanges(ctx, runtimeconversation.ChangeRequest{
 		Scope: scope, ConversationID: conversation.ID, Cursor: initialChanges.Cursor, ActiveAt: fixed,
 	})
 	if err != nil || unchangedChanges.HasChanges {
 		t.Fatalf("replica cursor replay = %#v, err = %v", unchangedChanges, err)
 	}
-	expiredChanges, err := replicaChanges.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+	expiredChanges, err := replicaChanges.ListChanges(ctx, runtimeconversation.ChangeRequest{
 		Scope: scope, ConversationID: conversation.ID, Cursor: initialChanges.Cursor, ActiveAt: fixed.Add(31 * time.Second),
 	})
 	if err != nil || !expiredChanges.HasChanges || len(expiredChanges.Presence) != 0 {
@@ -175,15 +175,15 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	primaryScheduler, err := conversationrun.NewConversationRunScheduler(primary, primary, conversationrun.ConversationRunSchedulerConfig{})
+	primaryScheduler, err := conversationrun.NewScheduler(primary, primary, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	replicaScheduler, err := conversationrun.NewConversationRunScheduler(replica, replica, conversationrun.ConversationRunSchedulerConfig{})
+	replicaScheduler, err := conversationrun.NewScheduler(replica, replica, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	schedulers := []*conversationrun.ConversationRunScheduler{primaryScheduler, replicaScheduler}
+	schedulers := []*conversationrun.Scheduler{primaryScheduler, replicaScheduler}
 	reconcileErrors := make(chan error, len(schedulers))
 	wait = sync.WaitGroup{}
 	for index := range schedulers {
@@ -206,11 +206,11 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		conversationRuns[0].Context[models.ConversationRunTriggerIDContextKey] != recoveryMessage.Message.ID {
 		t.Fatalf("cross-replica reconciled Runs = %#v, err = %v", conversationRuns, err)
 	}
-	restartedChanges, err := runtimeconversation.NewConversationChangeService(restarted, restarted)
+	restartedChanges, err := runtimeconversation.NewChangeService(restarted, restarted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recoveryChanges, err := restartedChanges.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+	recoveryChanges, err := restartedChanges.ListChanges(ctx, runtimeconversation.ChangeRequest{
 		Scope: scope, ConversationID: recoveryConversation.ID, ActiveAt: fixed,
 	})
 	if err != nil || !recoveryChanges.RunsChanged || !recoveryChanges.ActivityChanged ||

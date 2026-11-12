@@ -29,17 +29,17 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
-	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionRequireApproval, Reason: "Skill access requires review",
+	policy := action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{
+			Disposition: action.DispositionRequireApproval, Reason: "Skill access requires review",
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	validator, err := skillbinding.NewSkillBindingActionValidator(catalog, store)
+	validator, err := skillbinding.NewActionValidator(catalog, store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator})
+	coordinator := action.NewCoordinator(store, store, catalog, policy, []action.ProposalValidator{validator})
 	f := actiontest.NewLoopProposalFixture(t, store, skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-upsert"), "worker-upsert", time.Now().UTC())
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	// A person connects the account; the model may only change the rest.
@@ -82,11 +82,11 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		t.Fatalf("typed approval preview = %#v", proposal.Approval.ProposedAction)
 	}
 	f = approveParkedSkillAction(t, ctx, store, f, proposal, "worker-upsert-resumed")
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := action.NewActionWorker(store, catalog, nil, dispatcher)
+	worker := action.NewWorker(store, catalog, nil, dispatcher)
 	executed := f.Execute(worker, proposal.Call.ID)
 	if executed.Call.Status != models.ActionCallStatusSucceeded || executed.Call.Output["operation"] != skillbinding.SkillActionUpsertBinding || executed.Call.Output["replayed"] != false {
 		t.Fatalf("upsert execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
@@ -170,11 +170,11 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 			NextCursor: "page-2",
 		}, nil
 	})
-	validator, err := skillbinding.NewSkillBindingActionValidator(catalog, store)
+	validator, err := skillbinding.NewActionValidator(catalog, store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
+	coordinator := action.NewCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ProposalValidator{validator})
 	f := actiontest.NewLoopProposalFixture(t, store, skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-discover"), "worker-discover", time.Now().UTC())
 	proposal, err := coordinator.Propose(ctx, f.Request(action.ProposeActionRequest{
 		DeploymentID: deploymentID, SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: skillbinding.SkillActionDiscoverBinding,
@@ -189,11 +189,11 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 	if proposal.Approval != nil || proposal.Call.Status != models.ActionCallStatusReady {
 		t.Fatalf("read-only discovery proposal = %#v", proposal)
 	}
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed := f.Execute(action.NewActionWorker(store, catalog, nil, dispatcher), proposal.Call.ID)
+	executed := f.Execute(action.NewWorker(store, catalog, nil, dispatcher), proposal.Call.ID)
 	if executed.Call.Status != models.ActionCallStatusSucceeded || executed.Call.Output["nextCursor"] != "page-2" {
 		t.Fatalf("discovery execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
 	}
@@ -241,7 +241,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent-a")
-	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, kerneltest.NewStore(t))
+	validator, _ := skillbinding.NewActionValidator(catalog, kerneltest.NewStore(t))
 	management := skillbinding.SkillManagementSkill()
 	bound, err := catalog.Resolve(ctx, skillScope, "agent-a", management.ID, management.Version, skillbinding.SkillActionUpsertBinding)
 	if err != nil {
@@ -257,13 +257,13 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 		t.Fatal("management binding from agent-a escalated into agent-b")
 	}
 	store := kerneltest.NewStore(t)
-	durableForeign, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	durableForeign, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: foreignRun.Owner, AssignedAgentID: foreignRun.AssignedAgentID, Goal: "Manage Skills", Source: models.RunSourceChat,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatcher, _ := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil)
+	dispatcher, _ := skillbinding.NewActionDispatcher(store, catalog, nil)
 	if _, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{
 		Call: &models.ActionCall{Scope: scope, RunID: durableForeign.ID, DeploymentID: "agent-a"}, Bound: bound, Arguments: base,
 	}); err == nil {
@@ -386,7 +386,7 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := kerneltest.NewStore(t)
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID},
 		AssignedAgentID: deploymentID, Goal: "Enable Slack conversations", Source: models.RunSourceChat,
 	})
@@ -407,7 +407,7 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 		"allowedActions": []interface{}{}, "enablePrompt": false,
 		"enabledConversationAdapters": []interface{}{"conversations"}, "maximumRisk": "read",
 	}
-	validator, err := skillbinding.NewSkillBindingActionValidator(catalog, store)
+	validator, err := skillbinding.NewActionValidator(catalog, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	if err != nil || preview["resourceType"] != "skill_binding" {
 		t.Fatalf("adapter binding preview = %#v, %v", preview, err)
 	}
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

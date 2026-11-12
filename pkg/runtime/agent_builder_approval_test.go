@@ -18,12 +18,12 @@ import (
 
 // agentBuilderApprovalCoordinator wires the builder fixture to a kernel store
 // with a claimed Finn Run, so proposals take the real coordinator path.
-func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPolicyEvaluator, now time.Time) (*agentbuildertest.Fixture, *sqlite.Store, *models.AgentRun, *runtimeaction.ActionCoordinator) {
+func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.PolicyEvaluator, now time.Time) (*agentbuildertest.Fixture, *sqlite.Store, *models.AgentRun, *runtimeaction.Coordinator) {
 	t.Helper()
 	ctx := context.Background()
 	fixture := agentbuildertest.NewFixture(t, true)
 	store := kerneltest.NewStore(t)
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: fixture.Scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"},
 		AssignedAgentID: "finn", Goal: "Build an inbox helper", Source: models.RunSourceChat,
 	})
@@ -36,7 +36,7 @@ func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPo
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	coordinator := runtimeaction.NewActionCoordinator(store, store, fixture.Catalog, policy, []runtimeaction.ActionProposalValidator{fixture.Validator}, models.WithClock(func() time.Time { return now }))
+	coordinator := runtimeaction.NewCoordinator(store, store, fixture.Catalog, policy, []runtimeaction.ProposalValidator{fixture.Validator}, models.WithClock(func() time.Time { return now }))
 	return fixture, store, claimed, coordinator
 }
 
@@ -51,10 +51,10 @@ func agentBuilderApprovalRequest(fixture *agentbuildertest.Fixture, run *models.
 // generousBuilderPolicy is a host policy that would waive or loosen the card
 // every way it can: skip mode, a routine grant, auto-approve on timeout, a
 // one-hour TTL and an external destination.
-func generousBuilderPolicy() runtimeaction.ActionPolicyEvaluator {
+func generousBuilderPolicy() runtimeaction.PolicyEvaluator {
 	base := runtimeaction.NewDefaultActionPolicy()
 	base.Approvers = []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}
-	return runtimeaction.ActionPolicyEvaluatorFunc(func(ctx context.Context, input runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
+	return runtimeaction.PolicyEvaluatorFunc(func(ctx context.Context, input runtimeaction.PolicyInput) (runtimeaction.PolicyDecision, error) {
 		input.ApprovalMode = models.ConversationApprovalSkip
 		input.RoutineGrant = &models.RoutineGrant{Action: input.Bound.Definition.ID + "." + input.Bound.Action.Name, Label: "Create agents"}
 		decision, err := base.EvaluateAction(ctx, input)
@@ -107,8 +107,8 @@ func TestAgentBuilderApprovalCardPolicy(t *testing.T) {
 }
 
 func TestAgentBuilderApprovalCannotBeAllowedByPolicy(t *testing.T) {
-	allow := runtimeaction.ActionPolicyEvaluatorFunc(func(context.Context, runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
-		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "host allows everything"}, nil
+	allow := runtimeaction.PolicyEvaluatorFunc(func(context.Context, runtimeaction.PolicyInput) (runtimeaction.PolicyDecision, error) {
+		return runtimeaction.PolicyDecision{Disposition: runtimeaction.DispositionAllow, Reason: "host allows everything"}, nil
 	})
 	fixture, store, run, coordinator := agentBuilderApprovalCoordinator(t, allow, time.Now().UTC())
 	create := agentbuildertest.CreateArguments()

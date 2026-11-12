@@ -70,7 +70,7 @@ func decodeSkillSetupArguments(arguments map[string]interface{}) (skillSetupArgu
 // requestSkillSetup saves a setup card in the run's chat (under umbrella)
 // for owner, the Agent or Team the account is saved to: the umbrella, or
 // the Agent a builder names with targetAgentId.
-func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella, owner models.ObjectiveOwner) (map[string]interface{}, error) {
+func (d *ActionDispatcher) requestSkillSetup(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella, owner models.ObjectiveOwner) (map[string]interface{}, error) {
 	a, err := decodeSkillSetupArguments(input.Arguments)
 	if err != nil {
 		return nil, err
@@ -347,7 +347,7 @@ func SkillSetupRequestResult(r *models.SkillSetupRequest) (map[string]interface{
 func skillListSetupRequestsAction() skill.Action {
 	return skill.Action{Name: SkillActionListSetupRequests, Description: "Read the current conversation's durable Skill setup requests and their pending, resolved, or dismissed status. Use this once after the user reports completing setup; resolved means account configuration was saved, not that provider actions were authorized or verified. Inspect bindingAccess.enabledActions before choosing an operation. If discovery declares an action that is not enabled on the saved binding, request setup for that exact action and explain the access needed; do not call this a missing account or missing credential. A pending request needs user input: an independent conversation task should wait with wakeCondition type skill_setup referencing the exact saved request ID; an ordinary foreground reply should finish. Do not poll it. Retry the requested provider operation through its normal authorized action to verify it.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2}, InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "additionalProperties": false}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"requests": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}}, "required": []interface{}{"requests"}, "additionalProperties": false}}
 }
-func (d *SkillBindingActionDispatcher) listSkillSetupRequests(ctx context.Context, run *models.AgentRun, member string, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
+func (d *ActionDispatcher) listSkillSetupRequests(ctx context.Context, run *models.AgentRun, member string, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
 	conversationID, _, err := d.skillSetupConversationOrigin(ctx, run, member, umbrella)
 	if err != nil {
 		return nil, err
@@ -432,7 +432,7 @@ func skillCandidateNeedsConfigurationSetup(candidate *skill.DiscoveryCandidate) 
 // omittedSkillSource returns the only catalog source that supplies skillID, or
 // a refusal naming the choices when several do. No match leaves the identity
 // empty so the usual "not available" refusal applies.
-func (d *SkillBindingActionDispatcher) omittedSkillSource(ctx context.Context, scope models.Scope, deploymentID, skillID string) (string, string, error) {
+func (d *ActionDispatcher) omittedSkillSource(ctx context.Context, scope models.Scope, deploymentID, skillID string) (string, string, error) {
 	sources := map[string]bool{}
 	cursor := ""
 	for pageNumber := 0; pageNumber < 20; pageNumber++ {

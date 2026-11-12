@@ -36,7 +36,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, body = %s", created.Code, created.Body.String())
 	}
-	var createResult agentrun.AgentRunCommandResult
+	var createResult agentrun.CommandResult
 	if err := json.NewDecoder(created.Body).Decode(&createResult); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if replayed.Code != http.StatusOK {
 		t.Fatalf("replay status = %d, body = %s", replayed.Code, replayed.Body.String())
 	}
-	var replayResult agentrun.AgentRunCommandResult
+	var replayResult agentrun.CommandResult
 	if err := json.NewDecoder(replayed.Body).Decode(&replayResult); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if paused.Code != http.StatusOK {
 		t.Fatalf("pause status = %d, body = %s", paused.Code, paused.Body.String())
 	}
-	var pauseResult agentrun.AgentRunCommandResult
+	var pauseResult agentrun.CommandResult
 	if err := json.NewDecoder(paused.Body).Decode(&pauseResult); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestAgentRunAdmissionAPIExplainsObjectiveBackpressureWithoutClaiming(t *tes
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "admission"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
-	portfolio := runtimeportfolio.NewPortfolioService(store)
+	portfolio := runtimeportfolio.NewService(store)
 	objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Serial", Goal: "Run serially", Status: models.ObjectiveStatusActive,
 		ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},

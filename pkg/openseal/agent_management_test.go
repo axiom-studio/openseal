@@ -29,7 +29,7 @@ func TestAgentManagementOptionOwnsDefinitionValidationAndDispatcherComposition(t
 	if len(engine.actionValidators) != 3 || len(engine.actionPoolSpecs) != 1 {
 		t.Fatalf("Agent action wiring validators=%d workers=%d", len(engine.actionValidators), len(engine.actionPoolSpecs))
 	}
-	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*agentbuilder.AgentBuilderActionDispatcher); !ok {
+	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*agentbuilder.ActionDispatcher); !ok {
 		t.Fatalf("Agent dispatcher was not composed over the guarded host fallback: %T", engine.actionPoolSpecs[0].dispatcher)
 	}
 	result, err := engine.actionPoolSpecs[0].dispatcher.DispatchAction(context.Background(), ActionDispatchInput{})

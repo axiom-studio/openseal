@@ -233,7 +233,7 @@ func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input ag
 	if strings.TrimSpace(run.AssignedAgentID) == "" {
 		return nil, errors.New("objective actions require the Run's acting Agent")
 	}
-	service := portfolio.NewPortfolioService(d.store)
+	service := portfolio.NewService(d.store)
 	actor := models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}
 	var objective *models.Objective
 	created := false

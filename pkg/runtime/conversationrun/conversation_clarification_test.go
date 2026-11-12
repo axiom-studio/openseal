@@ -23,8 +23,8 @@ import (
 type clarificationStore = controltest.AskUserStore
 type clarificationFixture struct {
 	store        clarificationStore
-	service      *runtimeconversation.ConversationService
-	scheduler    *conversationrun.ConversationRunScheduler
+	service      *runtimeconversation.Service
+	scheduler    *conversationrun.Scheduler
 	conversation *models.Conversation
 	root, child  *models.AgentRun
 	trigger      *models.ChannelMessage
@@ -34,14 +34,14 @@ func newClarificationFixture(t *testing.T, store clarificationStore, scopeID str
 	t.Helper()
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: scopeID}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "writer"}, Title: "Writing", IdempotencyKey: "writing"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	trigger := conversationruntest.PostMessage(t, service, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Write a 1000 letter blog about a black hole", "request")
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{MessagePageSize: 2})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{MessagePageSize: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func newClarificationFixture(t *testing.T, store clarificationStore, scopeID str
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindAgentWork, Owner: root.Owner, AssignedAgentID: "writer", ParentRunID: root.ID, Goal: "Draft the post", Source: models.RunSourceRequest})
+	child, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindAgentWork, Owner: root.Owner, AssignedAgentID: "writer", ParentRunID: root.ID, Goal: "Draft the post", Source: models.RunSourceRequest})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestConversationClarificationRoundTrip(t *testing.T) {
 				t.Fatalf("question = %#v", q)
 			}
 			// Recreate the scheduler to exercise durable, rather than in-memory, deduplication.
-			f.scheduler, _ = conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+			f.scheduler, _ = conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 			f.question(t)
 			msgs, _ := f.service.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: f.root.Scope, ConversationID: f.conversation.ID})
 			if len(msgs) != 2 {
@@ -130,7 +130,7 @@ func TestConversationClarificationRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.scheduler, _ = conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+			f.scheduler, _ = conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 			again, replayed, err := f.scheduler.ScheduleMessage(t.Context(), f.root.Scope, f.conversation.ID, answer.ID)
 			if err != nil || !replayed || again == nil || again.Run.ID != f.child.ID {
 				t.Fatalf("replay=%#v %v %v", again, replayed, err)
@@ -162,11 +162,11 @@ func TestConversationClarificationRecoversAfterWakeBeforeAcknowledgment(t *testi
 	q := f.question(t)
 	answer := f.answer(t, q.ID)
 	failing := &failingAnswerProjectionStore{ConversationStore: f.store, fail: true}
-	f.scheduler, _ = conversationrun.NewConversationRunScheduler(failing, f.store, conversationrun.ConversationRunSchedulerConfig{})
+	f.scheduler, _ = conversationrun.NewScheduler(failing, f.store, conversationrun.SchedulerConfig{})
 	if _, _, err := f.scheduler.ScheduleMessage(t.Context(), f.root.Scope, f.conversation.ID, answer.ID); err == nil {
 		t.Fatal("expected simulated failure")
 	}
-	f.scheduler, _ = conversationrun.NewConversationRunScheduler(f.store, f.store, conversationrun.ConversationRunSchedulerConfig{})
+	f.scheduler, _ = conversationrun.NewScheduler(f.store, f.store, conversationrun.SchedulerConfig{})
 	result, replayed, err := f.scheduler.ScheduleMessage(t.Context(), f.root.Scope, f.conversation.ID, answer.ID)
 	if err != nil || !replayed || result == nil || result.Run.ID != f.child.ID || len(result.Run.PendingInterventions) != 1 {
 		t.Fatalf("recovered=%#v %v %v", result, replayed, err)
@@ -176,13 +176,13 @@ func TestConversationWorkOriginKeepsOwnerBoundary(t *testing.T) {
 	f := newClarificationFixture(t, kerneltest.NewStore(t), "context")
 	other := models.CloneAgentRun(f.child)
 	other.Owner.ID = "another-agent"
-	_, conversation, _, err := runtimeconversation.ConversationWorkOrigin(t.Context(), f.store, f.store, other)
+	_, conversation, _, err := runtimeconversation.WorkOrigin(t.Context(), f.store, f.store, other)
 	if err != nil || conversation != nil {
 		t.Fatal("other Agent received private conversation")
 	}
 	other = models.CloneAgentRun(f.child)
 	other.Scope.ID = "other-tenant"
-	_, conversation, _, err = runtimeconversation.ConversationWorkOrigin(t.Context(), f.store, f.store, other)
+	_, conversation, _, err = runtimeconversation.WorkOrigin(t.Context(), f.store, f.store, other)
 	if err != nil || conversation != nil {
 		t.Fatal("cross-tenant origin resolved")
 	}

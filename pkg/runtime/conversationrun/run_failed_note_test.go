@@ -23,7 +23,7 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	scope := models.Scope{Kind: "tenant", ID: "run-failed-" + uuid.NewString()[:8]}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {

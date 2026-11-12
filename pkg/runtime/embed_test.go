@@ -51,7 +51,7 @@ func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
 	if first.Session.ID == second.Session.ID || first.Session.ConversationID == second.Session.ConversationID || first.Capability == second.Capability {
 		t.Fatalf("openings shared identity: first=%#v second=%#v", first.Session, second.Session)
 	}
-	conversation, err := runtimeconversation.NewConversationService(store).GetConversation(t.Context(), scope, first.Session.ConversationID)
+	conversation, err := runtimeconversation.NewService(store).GetConversation(t.Context(), scope, first.Session.ConversationID)
 	if err != nil || conversation.Owner != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "support-agent"}) || conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceEmbedSession {
 		t.Fatalf("canonical conversation = %#v, %v", conversation, err)
 	}

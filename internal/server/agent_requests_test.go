@@ -20,7 +20,7 @@ func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 	t.Parallel()
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "local", ID: "workspace"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "Ship a durable feature", Source: models.RunSourceManual,
 	})
@@ -96,7 +96,7 @@ func TestAgentRequestAPIRejectsUnsafeSharedContext(t *testing.T) {
 	t.Parallel()
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "local", ID: "workspace"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "Ship", Source: models.RunSourceManual,
 	})

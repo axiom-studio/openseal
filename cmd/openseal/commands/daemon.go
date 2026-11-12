@@ -172,7 +172,7 @@ Options:
 	if err != nil {
 		sugar.Fatalf("failed to open artifact content store: %v", err)
 	}
-	artifactPublisher := &daemon.TaskArtifactPublisher{Scope: scope, Content: contentStore, Catalog: artifactcatalog.NewArtifactCatalog(store)}
+	artifactPublisher := &daemon.TaskArtifactPublisher{Scope: scope, Content: contentStore, Catalog: artifactcatalog.NewCatalog(store)}
 	contextTokens, err := standaloneContext.ContextTokens(os.Getenv("OPENSEAL_LLM_CONTEXT_TOKENS"))
 	if err != nil {
 		sugar.Fatal(err)
@@ -204,7 +204,7 @@ Options:
 		)
 	}
 	if stepHost != nil {
-		participants := conversation.ConversationParticipantSourceFunc(func(ctx context.Context, query conversation.ConversationParticipantQuery) ([]conversation.ConversationParticipantBinding, error) {
+		participants := conversation.ParticipantSourceFunc(func(ctx context.Context, query conversation.ParticipantQuery) ([]conversation.ParticipantBinding, error) {
 			if kernel == nil {
 				return nil, conversation.ErrConversationCoordinationUnavailable
 			}
@@ -224,12 +224,12 @@ Options:
 		engineOptions = append(engineOptions,
 			opensealkernel.WithConversationCoordinator(participants, router, config),
 			opensealkernel.WithDynamicConversationRuns(opensealkernel.ConversationRunConfig{
-				Scheduler: conversationrun.ConversationRunSchedulerConfig{RequireParticipationOptIn: true, Budget: daemon.DesktopConversationBudget()},
+				Scheduler: conversationrun.SchedulerConfig{RequireParticipationOptIn: true, Budget: daemon.DesktopConversationBudget()},
 				// Each routed member answers in its own agent_work Run through
 				// the same Agent turn as a 1:1 chat.
-				Runner:     conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true, AgentTurns: turnResolver},
+				Runner:     conversationrun.TurnRunnerConfig{RequireParticipationOptIn: true, AgentTurns: turnResolver},
 				Workers:    runworker.DynamicAgentRunWorkerConfig{Kind: models.RunKindConversation, Concurrency: 2, WorkerIDPrefix: "desktop-channel"},
-				Reconciler: conversationrun.ConversationRunReconcilerConfig{Interval: 5 * time.Second},
+				Reconciler: conversationrun.ReconcilerConfig{Interval: 5 * time.Second},
 			}, localScopes),
 		)
 	}
@@ -268,7 +268,7 @@ Options:
 	apiServer.SetBearerToken(os.Getenv("OPENSEAL_API_TOKEN"))
 	if stepHost != nil {
 		apiServer.SetTeamWorkEnabled(true)
-		apiServer.SetAgentRunCreationDispatcher(func(ctx context.Context, request models.CreateAgentRunRequest) (*agentrun.AgentRunCommandResult, error) {
+		apiServer.SetAgentRunCreationDispatcher(func(ctx context.Context, request models.CreateAgentRunRequest) (*agentrun.CommandResult, error) {
 			canonical, err := daemon.DesktopWorkRequest(scope, request)
 			if err != nil {
 				return nil, err
@@ -299,7 +299,7 @@ Options:
 			if err != nil {
 				return err
 			}
-			_, err = source.ResolveConversationParticipants(ctx, conversation.ConversationParticipantQuery{Conversation: channel})
+			_, err = source.ResolveConversationParticipants(ctx, conversation.ParticipantQuery{Conversation: channel})
 			return err
 		}
 		var post func(context.Context, conversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error)

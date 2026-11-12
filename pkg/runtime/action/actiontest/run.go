@@ -27,7 +27,7 @@ func AssertRunUntouched(t *testing.T, store models.PortfolioStore, run *models.A
 // actingUser.
 func ClaimedPersonChatRun(t *testing.T, store *sqlite.Store, scope models.Scope, now time.Time, actingUser string) *models.AgentRun {
 	t.Helper()
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "send mail",
 		Source: models.RunSourceObjective, Kind: models.RunKindConversation, ActingUser: actingUser,
@@ -55,7 +55,7 @@ func ClaimedRun(t *testing.T, store *sqlite.Store, scope models.Scope, now time.
 // ClaimedOwnedRun claims a run of release-agent under owner.
 func ClaimedOwnedRun(t *testing.T, store *sqlite.Store, scope models.Scope, now time.Time, worker string, owner models.ObjectiveOwner) *models.AgentRun {
 	t.Helper()
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,
 	})

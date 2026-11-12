@@ -15,7 +15,7 @@ func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "delegation-budget"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "Ship and announce", Budget: &models.BudgetPolicy{MaxTurns: 10, MaxTotalTokens: 1000, MaxCostMicros: 1_000_000},
@@ -23,7 +23,7 @@ func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := collaboration.NewCollaborationService(store)
+	service := collaboration.NewService(store)
 	request := collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
@@ -66,14 +66,14 @@ func TestGroupedDelegationCannotOverAllocateParentBudget(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "group-budget"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
 		Goal: "Research", Budget: &models.BudgetPolicy{MaxTurns: 10},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = collaboration.NewCollaborationService(store).CreateAgentRequestGroup(ctx, collaboration.CreateAgentRequestGroupRequest{
+	_, err = collaboration.NewService(store).CreateAgentRequestGroup(ctx, collaboration.CreateAgentRequestGroupRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "lead"},
 		Policy:    models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast},

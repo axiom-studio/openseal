@@ -18,7 +18,7 @@ import (
 )
 
 type catalog struct {
-	*artifactcatalog.ArtifactCatalog
+	*artifactcatalog.Catalog
 	store *sqlite.Store
 }
 
@@ -43,7 +43,7 @@ func newTestStore(t *testing.T) (*Store, Chat, Author) {
 	kernel := kerneltest.NewStore(t)
 	chat := Chat{Scope: models.Scope{Kind: "tenant", ID: "1"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}, ConversationID: "c1"}
 	author := Author{Producer: models.ActivityActor{Type: "agent", ID: "finn"}, RunID: "run-1"}
-	return NewStore(catalog{artifactcatalog.NewArtifactCatalog(kernel), kernel}, content), chat, author
+	return NewStore(catalog{artifactcatalog.NewCatalog(kernel), kernel}, content), chat, author
 }
 
 func run(t *testing.T, store *Store, chat Chat, author Author, operation string, args map[string]interface{}) map[string]interface{} {

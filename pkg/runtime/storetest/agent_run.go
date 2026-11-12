@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// QueuedAgentRun is the Run that runtime's PortfolioService.CreateAgentRun
+// QueuedAgentRun is the Run that runtime's portfolio.Service.CreateAgentRun
 // builds for an agent's own work (RunSourceObjective, no objective, no
 // parent) at now. The store suites write it with CreateAgentRun, since
 // storetest cannot import runtime.

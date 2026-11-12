@@ -16,7 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
-type ConversationRunTurnRunnerConfig struct {
+type TurnRunnerConfig struct {
 	RequireParticipationOptIn bool
 	MaximumRetries            int
 	InitialRetryDelay         time.Duration
@@ -54,10 +54,10 @@ type ConversationRunTurnRunnerConfig struct {
 	// most recent first. They reach the Agent as places in its turn context
 	// (at most MaximumConversationPlaces) so it reuses their ids instead of
 	// searching again. Nil leaves them out.
-	Places func(ctx context.Context, run *models.AgentRun) []runtimeconversation.ConversationPlace
+	Places func(ctx context.Context, run *models.AgentRun) []runtimeconversation.Place
 }
 
-func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerConfig, error) {
+func (c TurnRunnerConfig) normalize() (TurnRunnerConfig, error) {
 	if c.InitialRetryDelay == 0 {
 		c.InitialRetryDelay = time.Second
 	}
@@ -66,23 +66,23 @@ func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerC
 	}
 	if c.MaximumRetries < 0 || c.MaximumRetries > 100 || c.InitialRetryDelay <= 0 ||
 		c.MaximumRetryDelay < c.InitialRetryDelay || c.MaximumRetryDelay > time.Hour {
-		return ConversationRunTurnRunnerConfig{}, fmt.Errorf("%w: invalid conversation Run retry configuration", models.ErrInvalidConversation)
+		return TurnRunnerConfig{}, fmt.Errorf("%w: invalid conversation Run retry configuration", models.ErrInvalidConversation)
 	}
 	return c, nil
 }
 
-// ConversationRunTurnRunner binds conversation Runs to the run loop. An Agent
+// TurnRunner binds conversation Runs to the run loop. An Agent
 // channel's Run is the Agent's own loop on its lane session. A Team channel's
 // Run only routes: it records who answers and starts one member Run per
 // responder, and each member answers on its own lane session exactly like a
 // 1:1 chat.
-type ConversationRunTurnRunner struct {
-	conversations *runtimeconversation.ConversationService
+type TurnRunner struct {
+	conversations *runtimeconversation.Service
 	portfolio     models.PortfolioStore
 	runbooks      models.RunbookActivationStore
 	artifacts     models.ArtifactStore
-	coordinator   *runtimeconversation.ConversationCoordinator
-	config        ConversationRunTurnRunnerConfig
+	coordinator   *runtimeconversation.Coordinator
+	config        TurnRunnerConfig
 	agentTurns    runtimeconversation.TurnRunnerResolver
 	runs          *agentrun.RunCommandService
 	// The stores of the conversation loop seams (ConversationLoopStores),
@@ -97,12 +97,12 @@ type ConversationRunTurnRunner struct {
 	runStore          models.RunCommandStore
 }
 
-func NewConversationRunTurnRunner(
+func NewTurnRunner(
 	conversationStore models.ConversationStore,
-	coordinator *runtimeconversation.ConversationCoordinator,
-	config ConversationRunTurnRunnerConfig,
+	coordinator *runtimeconversation.Coordinator,
+	config TurnRunnerConfig,
 	opts ...models.ServiceOption,
-) (*ConversationRunTurnRunner, error) {
+) (*TurnRunner, error) {
 	if conversationStore == nil || coordinator == nil {
 		return nil, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
@@ -110,8 +110,8 @@ func NewConversationRunTurnRunner(
 	if err != nil {
 		return nil, err
 	}
-	runner := &ConversationRunTurnRunner{
-		conversations: runtimeconversation.NewConversationService(conversationStore, opts...), conversationStore: conversationStore, coordinator: coordinator,
+	runner := &TurnRunner{
+		conversations: runtimeconversation.NewService(conversationStore, opts...), conversationStore: conversationStore, coordinator: coordinator,
 		config: normalized, agentTurns: normalized.AgentTurns, now: models.ClockFrom(opts),
 	}
 	if runs, ok := conversationStore.(models.RunCommandStore); ok {
@@ -149,7 +149,7 @@ func conversationRunHasActingAgent(run *models.AgentRun) bool {
 // in its chat: the owner of an Agent's chat, or a current, authorized member
 // of a Team's. Attribution is kernel-owned and rechecked before resolving an
 // Agent model.
-func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context, run *models.AgentRun) error {
+func (r *TurnRunner) conversationRosterMember(ctx context.Context, run *models.AgentRun) error {
 	participant := run.AssignedAgentID
 	if !models.IsValidOpaqueIdentifier(participant, 256) || strings.TrimSpace(participant) != participant {
 		return errors.New("failed action is missing Agent attribution")
@@ -177,7 +177,7 @@ func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context
 	if err != nil {
 		return err
 	}
-	bindings, err := r.coordinator.ResolveParticipants(ctx, runtimeconversation.ConversationParticipantQuery{Conversation: models.CloneConversation(conversation), Trigger: models.CloneChannelMessage(trigger)})
+	bindings, err := r.coordinator.ResolveParticipants(ctx, runtimeconversation.ParticipantQuery{Conversation: models.CloneConversation(conversation), Trigger: models.CloneChannelMessage(trigger)})
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context
 //     conversation seams on top (bindConversationLoop);
 //  5. a Team channel's routing Run gets the routing producer: no session, no
 //     model, one step that starts the member Runs.
-func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+func (r *TurnRunner) ResolveTurnRunner(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 	if r == nil || r.coordinator == nil || r.conversations == nil {
 		return nil, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
@@ -268,7 +268,7 @@ func (p conversationOutputProducer) Produce(context.Context, agentrun.StepInput)
 // Run per responder and completes with their ids. It has no session and makes
 // no tool calls; the members answer in their own lane sessions.
 type teamRoutingStepProducer struct {
-	runner *ConversationRunTurnRunner
+	runner *TurnRunner
 }
 
 func (teamRoutingStepProducer) Kind() models.StepProducerKind {
@@ -296,7 +296,7 @@ func (p teamRoutingStepProducer) Produce(ctx context.Context, in agentrun.StepIn
 	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Status: models.AgentRunStatusCompleted, Output: output}}, nil
 }
 
-func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, triggerID string) (string, models.ConversationViewer, *models.ChannelMessage, error) {
+func (r *TurnRunner) agentConversationTurnContext(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, triggerID string) (string, models.ConversationViewer, *models.ChannelMessage, error) {
 	participantID := run.AssignedAgentID
 	if runtimeconversation.RunExplainingFailure(run) {
 		if err := r.conversationRosterMember(ctx, run); err != nil {
@@ -317,7 +317,7 @@ func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Con
 	return participantID, viewer, trigger, nil
 }
 
-func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, conversation *models.Conversation, triggers ...*models.ChannelMessage) ([]runtimeconversation.AgentConversationActiveRun, error) {
+func (r *TurnRunner) activeConversationRuns(ctx context.Context, conversation *models.Conversation, triggers ...*models.ChannelMessage) ([]runtimeconversation.AgentConversationActiveRun, error) {
 	if r == nil || r.portfolio == nil || conversation == nil {
 		return nil, nil
 	}
@@ -419,7 +419,7 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 	return active, nil
 }
 
-func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
+func (r *TurnRunner) postAgentResponseWithReferences(
 	ctx context.Context,
 	run *models.AgentRun,
 	conversation *models.Conversation,
@@ -523,7 +523,7 @@ func conversationRetryError(cause error) error {
 	return errors.New(publicConversationRetryReason(cause))
 }
 
-func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context, run *models.AgentRun) error {
+func (r *TurnRunner) validateConversationRun(ctx context.Context, run *models.AgentRun) error {
 	if run == nil {
 		return models.ErrInvalidAgentRun
 	}
@@ -544,7 +544,7 @@ func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context,
 	return models.ValidateConversationRun(run)
 }
 
-func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx context.Context, run *models.AgentRun, references []models.ConversationReference) ([]models.ConversationReference, error) {
+func (r *TurnRunner) conversationTaskResponseReferences(ctx context.Context, run *models.AgentRun, references []models.ConversationReference) ([]models.ConversationReference, error) {
 	result := append([]models.ConversationReference(nil), references...)
 	if r.portfolio == nil {
 		return result, nil
@@ -622,7 +622,7 @@ func isAgentBuilderConversation(conversation *models.Conversation) bool {
 
 // Recheck the canonical channel at execution, not just scheduling. A queued Run
 // must not make model calls after opt-out or after a later activation boundary.
-func (r *ConversationRunTurnRunner) participationStopped(ctx context.Context, run *models.AgentRun) (bool, error) {
+func (r *TurnRunner) participationStopped(ctx context.Context, run *models.AgentRun) (bool, error) {
 	if !r.config.RequireParticipationOptIn {
 		return false, nil
 	}
@@ -653,7 +653,7 @@ func participationStoppedOutput() map[string]interface{} {
 
 // SetReactionProjector mirrors reactions Agents add to external
 // conversations.
-func (r *ConversationRunTurnRunner) SetReactionProjector(projector runtimeconversation.MessageReactionProjector) {
+func (r *TurnRunner) SetReactionProjector(projector runtimeconversation.MessageReactionProjector) {
 	if r != nil && r.conversations != nil {
 		r.conversations.SetReactionProjector(projector)
 	}

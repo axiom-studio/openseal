@@ -25,17 +25,17 @@ type credentialAvailabilityBox struct{ checker CredentialAvailabilityChecker }
 
 // SetCredentialAvailabilityChecker installs the host's pre-dispatch
 // credential check on a worker used outside a pool (the inline loop worker).
-func (w *ActionWorker) SetCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
+func (w *Worker) SetCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
 	w.setCredentialAvailabilityChecker(checker)
 }
 
-func (w *ActionWorker) setCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
+func (w *Worker) setCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
 	if w != nil {
 		w.availability.Store(&credentialAvailabilityBox{checker: checker})
 	}
 }
 
-func (w *ActionWorker) credentialAvailabilityChecker() CredentialAvailabilityChecker {
+func (w *Worker) credentialAvailabilityChecker() CredentialAvailabilityChecker {
 	if box := w.availability.Load(); box != nil {
 		return box.checker
 	}
@@ -45,7 +45,7 @@ func (w *ActionWorker) credentialAvailabilityChecker() CredentialAvailabilityChe
 // checkCredentialAvailability is the pre-dispatch gate for an action with
 // credentials. It returns the run's umbrella, or the failure to persist: a
 // plain error, a person_unavailable failure, or a connect_account park.
-func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *models.AgentRun, call *models.ActionCall, bound *skill.BoundAction) (models.ObjectiveOwner, error) {
+func (w *Worker) checkCredentialAvailability(ctx context.Context, run *models.AgentRun, call *models.ActionCall, bound *skill.BoundAction) (models.ObjectiveOwner, error) {
 	umbrella, err := models.RunUmbrella(ctx, w.teams, run)
 	if err != nil {
 		if !errors.Is(err, models.ErrRunUmbrellaUnavailable) {

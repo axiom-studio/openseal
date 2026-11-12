@@ -49,10 +49,10 @@ func (s *idleConversationBenchmarkStore) reportReads(b *testing.B) {
 	b.ReportMetric(float64(s.cursorReads)/float64(b.N), "cursor_reads/op")
 }
 
-func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (*idleConversationBenchmarkStore, *ConversationRunScheduler, models.Scope, []*models.Conversation) {
+func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (*idleConversationBenchmarkStore, *Scheduler, models.Scope, []*models.Conversation) {
 	b.Helper()
 	store := &idleConversationBenchmarkStore{Store: kerneltest.NewStore(b)}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: "idle-scheduler-benchmark"}
 	ctx := b.Context()
 	conversations := make([]*models.Conversation, 0, count)
@@ -94,7 +94,7 @@ func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (
 		}
 		conversations = append(conversations, conversation)
 	}
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{
+	scheduler, err := NewScheduler(store, store, SchedulerConfig{
 		ConversationPageSize: 100, MessagePageSize: 100,
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func BenchmarkConversationSchedulerCaughtUpHistory(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				var result ConversationRunReconcileResult
+				var result ReconcileResult
 				if err := scheduler.reconcileConversation(b.Context(), conversation, &result); err != nil || result.Messages != 0 || result.Scheduled != 0 || result.Replayed != 0 {
 					b.Fatalf("caught-up history reconciliation = %#v, %v", result, err)
 				}

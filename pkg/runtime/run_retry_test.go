@@ -32,7 +32,7 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 			if err != nil || !eligibility.Available || eligibility.Revision != failed.Revision {
 				t.Fatalf("failed reply eligibility = %#v, %v", eligibility, err)
 			}
-			request := agentrun.AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Kind: agentrun.AgentRunCommandRetry, Actor: models.ActivityActor{Type: "user", ID: "user"}}
+			request := agentrun.CommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Kind: agentrun.CommandRetry, Actor: models.ActivityActor{Type: "user", ID: "user"}}
 			result, err := service.CommandAgentRun(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)
@@ -115,7 +115,7 @@ func TestRetryConversationRunRejectsAnAlreadyExplainedProposalFailure(t *testing
 			if err != nil || eligibility.Available || eligibility.Reason != reason {
 				t.Fatalf("answered failure retry eligibility = %#v, %v", eligibility, err)
 			}
-			_, err = service.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision})
+			_, err = service.RetryConversationRun(t.Context(), agentrun.CommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision})
 			if !errors.Is(err, portfolio.ErrInvalidRunCommand) {
 				t.Fatalf("answered proposal failure admitted same-run retry: %v", err)
 			}
@@ -143,7 +143,7 @@ func TestRetryClearsFailureExplanation(t *testing.T) {
 			if failed.FailureExplanation == nil || failed.CreditError == nil {
 				t.Fatalf("fixture lacks its typed failure: %+v %+v", failed.FailureExplanation, failed.CreditError)
 			}
-			result, err := service.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Actor: models.ActivityActor{Type: "user", ID: "user"}})
+			result, err := service.RetryConversationRun(t.Context(), agentrun.CommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Actor: models.ActivityActor{Type: "user", ID: "user"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -190,7 +190,7 @@ func TestRetryConversationRunRejectsUnrecoveredWork(t *testing.T) {
 			case "pending":
 				store.pending = []*models.AgentTurn{{}}
 			}
-			_, err := service.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision})
+			_, err := service.RetryConversationRun(t.Context(), agentrun.CommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision})
 			if !errors.Is(err, portfolio.ErrInvalidRunCommand) {
 				t.Fatalf("unsafe recovery accepted: %v", err)
 			}

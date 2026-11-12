@@ -26,7 +26,7 @@ func BenchmarkSkillRuntimeMaintenanceMetadataTerminalHistory(b *testing.B) {
 			defer store.Close()
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "maintenance-benchmark"}
-			run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Completed historical work", Source: models.RunSourceManual})
+			run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Completed historical work", Source: models.RunSourceManual})
 			if err != nil {
 				b.Fatal(err)
 			}

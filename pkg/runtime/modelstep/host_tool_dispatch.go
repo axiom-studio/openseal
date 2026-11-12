@@ -78,12 +78,12 @@ func (o HostToolOutcome) KernelPatch() (*models.ToolEntryKernelPatch, error) {
 // HostToolDispatcher runs host tool calls of the loop's steps on the step host.
 type HostToolDispatcher struct {
 	host    models.HostToolExecutor
-	actions *action.ActionCoordinator // OpenNestedActionTurn
+	actions *action.Coordinator // OpenNestedActionTurn
 	sleep   func(context.Context, time.Duration) error
 	logger  *zap.SugaredLogger
 }
 
-func NewHostToolDispatcher(host models.HostToolExecutor, actions *action.ActionCoordinator, logger *zap.SugaredLogger) *HostToolDispatcher {
+func NewHostToolDispatcher(host models.HostToolExecutor, actions *action.Coordinator, logger *zap.SugaredLogger) *HostToolDispatcher {
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}

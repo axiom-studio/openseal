@@ -29,13 +29,13 @@ func TestConversationRunsAreScopedFilteredBeforePaging(t *testing.T) {
 			}
 			scope := models.Scope{Kind: "local", ID: "default"}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}
-			channels := conversation.NewConversationService(store.(models.ConversationStore))
+			channels := conversation.NewService(store.(models.ConversationStore))
 			seedSpace(t, store.(models.SpaceStore), scope, "")
 			channel, _, err := channels.CreateConversation(t.Context(), conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Evidence", IdempotencyKey: "evidence"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			portfolio := portfolio.NewPortfolioService(store)
+			portfolio := portfolio.NewService(store)
 			ids := []string{}
 			for _, sample := range []struct {
 				channel string

@@ -29,7 +29,7 @@ type TurnRunnerBinding struct {
 	// step, such as the evidence grounding review, send it. nil on desktop.
 	ModelCredential *capability.CredentialReference
 
-	// RunLoop seams (SPEC §2.4).
+	// runloop.Loop seams (SPEC §2.4).
 	Producer    StepProducer
 	Session     *models.AgentSession // nil only for producers with no tool calls (routing)
 	Preparers   []StepPreparer       // run-start, then conversation

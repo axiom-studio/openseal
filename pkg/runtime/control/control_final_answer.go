@@ -287,18 +287,18 @@ func WithFinalOutputProperties(tools []models.ModelStepTool, run *models.AgentRu
 
 type finalAnswerHandler struct{}
 
-func (finalAnswerHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
-	return ControlToolSpec{Description: finalAnswerDescription(a), InputSchema: finalAnswerSchema(a)}
+func (finalAnswerHandler) Spec(a agentrun.ControlAuthority) ToolSpec {
+	return ToolSpec{Description: finalAnswerDescription(a), InputSchema: finalAnswerSchema(a)}
 }
 
 func (finalAnswerHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return decodeFinalAnswerCall(raw)
 }
 
-func (finalAnswerHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (finalAnswerHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
 	call, ok := cc.Arguments.(*finalAnswerCall)
 	if !ok || call == nil {
-		return ControlResult{}, errors.New("turn_final_answer arguments were not decoded")
+		return Result{}, errors.New("turn_final_answer arguments were not decoded")
 	}
 	if message := checkFinalAnswerFields(call, cc); message != "" {
 		return x.refuse(ctx, cc, controlArgumentsInvalid(message))
@@ -379,7 +379,7 @@ type finalAnswerRejection struct {
 // finalAnswerCheck is one completion check of an accepted final answer.
 type finalAnswerCheck struct {
 	Name  string
-	Check func(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error)
+	Check func(ctx context.Context, x *Executor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error)
 }
 
 // builtinFinalAnswerChecks are the checks every final answer passes, in the
@@ -394,9 +394,9 @@ func builtinFinalAnswerChecks() []finalAnswerCheck {
 }
 
 // acceptFinalAnswer runs the pipeline on a decoded final. It returns
-// ControlFinal with the FinalAnswer (the tool entry stays open; the loop marks
-// it delivered), ControlContinue after a rejection, or ControlFailed.
-func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft) (ControlResult, error) {
+// Final with the FinalAnswer (the tool entry stays open; the loop marks
+// it delivered), Continue after a rejection, or Failed.
+func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft) (Result, error) {
 	mode := cc.Authority.EffectiveFinalMode()
 	answer := strings.TrimSpace(d.Args.Answer)
 	// 2. Silent: a spoken reply or a routine occurrence, with an empty
@@ -415,7 +415,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.Con
 		if routine {
 			changed, err := x.runChangedSomething(ctx, cc)
 			if err != nil {
-				return ControlResult{}, err
+				return Result{}, err
 			}
 			if changed {
 				return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalSilentAfterChangeCode,
@@ -427,7 +427,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.Con
 	if !d.Args.Silent && d.content() == "" {
 		reacted, err := x.runReacted(ctx, cc)
 		if err != nil {
-			return ControlResult{}, err
+			return Result{}, err
 		}
 		if !reacted || d.Args.Visual != nil {
 			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalAnswerEmptyCode,
@@ -449,7 +449,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.Con
 		if _, err := presentation.Validate(ctx, visual.Surface(presentation.StateReady), presentation.ValidateOptions{SkipHostChecks: true}); err != nil {
 			prior, countErr := x.priorFinalErrorCodes(ctx, cc)
 			if countErr != nil {
-				return ControlResult{}, countErr
+				return Result{}, countErr
 			}
 			if prior[finalVisualInvalidCode] == 0 {
 				return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalVisualInvalidCode,
@@ -466,7 +466,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.Con
 	for _, check := range x.finalAnswerChecks() {
 		rejection, err := check.Check(ctx, x, cc, d)
 		if err != nil {
-			return ControlResult{}, fmt.Errorf("final answer check %s: %w", check.Name, err)
+			return Result{}, fmt.Errorf("final answer check %s: %w", check.Name, err)
 		}
 		if rejection != nil {
 			return x.rejectFinal(ctx, cc, d, rejection)
@@ -479,7 +479,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.Con
 			publisher = cc.Binding.FinalOutput
 		}
 		if publisher == nil {
-			return ControlResult{}, errors.New("turn_final_answer has extension fields but the binding has no FinalOutputPublisher")
+			return Result{}, errors.New("turn_final_answer has extension fields but the binding has no FinalOutputPublisher")
 		}
 		if err := publisher.ValidateFinalAnswer(cc.Run, cloneRawFields(d.Extra)); err != nil {
 			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalOutputInvalidCode, Message: err.Error()})
@@ -498,10 +498,10 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.Con
 	// 10. OTP wait or pending setup (section 07 §8).
 	park, err := x.finalPark(ctx, cc, final.Answer)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	final.Park = park
-	return ControlResult{Kind: ControlFinal, Run: cc.Run, Entry: cc.Entry, Final: final}, nil
+	return Result{Kind: Final, Run: cc.Run, Entry: cc.Entry, Final: final}, nil
 }
 
 // output is FinalAnswer.Output (§11.3 RunOutput).
@@ -558,28 +558,28 @@ func finalSkillSelections(applied, offered []string) ([]models.HostedSkillSelect
 }
 
 // rejectFinal records a rejection: the tool entry → error with the code (and
-// ControlEntryMeta.ErrorCode), or for plain text a final_rejection note. A
+// EntryMeta.ErrorCode), or for plain text a final_rejection note. A
 // rejection with a Failure then fails the Run.
-func (x *ControlExecutor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft, r *finalAnswerRejection) (ControlResult, error) {
+func (x *Executor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft, r *finalAnswerRejection) (Result, error) {
 	var recorded *models.SessionEntry
 	if d.PlainText {
 		note, err := x.appendFinalRejectionNote(ctx, cc, r.Code, r.Message)
 		if err != nil {
-			return ControlResult{}, err
+			return Result{}, err
 		}
 		recorded = note
 	} else {
 		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil,
-			ErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &ControlEntryMeta{ErrorCode: r.Code})
+			ErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &EntryMeta{ErrorCode: r.Code})
 		if err != nil {
-			return ControlResult{}, err
+			return Result{}, err
 		}
 		recorded = entry
 	}
 	if r.Failure != nil {
-		return ControlResult{Kind: ControlFailed, Run: cc.Run, Entry: recorded, Failure: r.Failure}, nil
+		return Result{Kind: Failed, Run: cc.Run, Entry: recorded, Failure: r.Failure}, nil
 	}
-	return ControlResult{Kind: ControlContinue, Run: cc.Run, Entry: recorded}, nil
+	return Result{Kind: Continue, Run: cc.Run, Entry: recorded}, nil
 }
 
 // finalRejectionNoteData is the kernel data of a final_rejection note.
@@ -589,7 +589,7 @@ type finalRejectionNoteData struct {
 
 // appendFinalRejectionNote appends the step's final_rejection note (one per
 // step: id and SourceKey final-rejection:<stepId>).
-func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc agentrun.ControlContext, code, message string) (*models.SessionEntry, error) {
+func (x *Executor) appendFinalRejectionNote(ctx context.Context, cc agentrun.ControlContext, code, message string) (*models.SessionEntry, error) {
 	sessionID := cc.Run.SessionID
 	if cc.Session != nil {
 		sessionID = cc.Session.ID
@@ -624,10 +624,10 @@ func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc agent
 }
 
 // priorFinalErrorCodes counts the rejection codes of this Run's earlier final
-// attempts: final tool entries (ControlEntryMeta.ErrorCode) and final_rejection
+// attempts: final tool entries (EntryMeta.ErrorCode) and final_rejection
 // notes. The current entry and the current step's note are not counted. CTL-15/16 use it for their
 // "second time" rules.
-func (x *ControlExecutor) priorFinalErrorCodes(ctx context.Context, cc agentrun.ControlContext) (map[string]int, error) {
+func (x *Executor) priorFinalErrorCodes(ctx context.Context, cc agentrun.ControlContext) (map[string]int, error) {
 	counts := map[string]int{}
 	tools, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID, ToolNames: []string{string(models.ControlToolFinalAnswer)}, Limit: models.MaxSessionEntryListLimit,
@@ -670,7 +670,7 @@ func (x *ControlExecutor) priorFinalErrorCodes(ctx context.Context, cc agentrun.
 }
 
 // runReacted: a react call of this Run completed (reactions-only reply).
-func (x *ControlExecutor) runReacted(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
+func (x *Executor) runReacted(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
 	entries, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID, ToolNames: []string{string(models.ControlToolReact)},
 		States: []models.ToolEntryState{models.ToolEntryCompleted}, Limit: 1,
@@ -691,7 +691,7 @@ var runChangedSomethingStatuses = []models.ActionCallStatus{
 // root (a delegated or forked child), completed an action whose side effect
 // is not none or read, granted or approved. It runs only for a silent routine
 // final, never on a step.
-func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
+func (x *Executor) runChangedSomething(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
 	actions, ok := x.Portfolio.(models.ActionStore)
 	if !ok {
 		return false, errors.New("control executor portfolio is not an action store; a silent routine final needs the Run's calls")
@@ -738,7 +738,7 @@ func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc agentrun.C
 }
 
 // finalPark applies finalAnswerPark to the Run's governed calls on its path.
-func (x *ControlExecutor) finalPark(ctx context.Context, cc agentrun.ControlContext, answer string) (*agentrun.FinalPark, error) {
+func (x *Executor) finalPark(ctx context.Context, cc agentrun.ControlContext, answer string) (*agentrun.FinalPark, error) {
 	path := cc.Path
 	if path == nil {
 		sessionID := cc.Run.SessionID
@@ -793,25 +793,25 @@ func cloneRawFields(fields map[string]json.RawMessage) map[string]json.RawMessag
 // PlainTextFinal handles an assistant entry with no tool calls (SPEC §3.1
 // phase 8). cc.Entry is nil; cc.Assistant is that entry and cc.Step its step
 // (still running). Results:
-//   - ControlFinal: an accepted final (FinalAnswer.PlainText unless the text
+//   - Final: an accepted final (FinalAnswer.PlainText unless the text
 //     was a turn_final_answer JSON object, which is accepted as the tool's
 //     arguments);
-//   - ControlContinue: a final_rejection note was appended (Entry is the
+//   - Continue: a final_rejection note was appended (Entry is the
 //     note, not a tool entry); the loop counts it toward the rejection bound;
-//   - ControlFailed: the 3rd plain reply where a final tool is required, or
+//   - Failed: the 3rd plain reply where a final tool is required, or
 //     the 3rd empty reply.
-func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (ControlResult, error) {
+func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (Result, error) {
 	if x == nil || x.Sessions == nil {
-		return ControlResult{}, errors.New("control executor has no session store")
+		return Result{}, errors.New("control executor has no session store")
 	}
 	if cc.Run == nil || cc.Step == nil {
-		return ControlResult{}, errors.New("plain-text final needs its Run and step")
+		return Result{}, errors.New("plain-text final needs its Run and step")
 	}
 	if cc.Run.Status != models.AgentRunStatusRunning || cc.WorkerID == "" || cc.Run.LeaseOwner != cc.WorkerID {
-		return ControlResult{}, models.ErrLeaseLost
+		return Result{}, models.ErrLeaseLost
 	}
 	if cc.Assistant != nil && cc.Assistant.Assistant != nil && len(cc.Assistant.Assistant.ToolCalls) > 0 {
-		return ControlResult{}, errors.New("plain-text final on an assistant entry with tool calls")
+		return Result{}, errors.New("plain-text final on an assistant entry with tool calls")
 	}
 	cc.Entry = nil
 	mode := cc.Authority.EffectiveFinalMode()
@@ -829,7 +829,7 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.Contro
 	if tool := finalToolRequired(mode); tool != "" {
 		prior, err := x.priorFinalErrorCodes(ctx, cc)
 		if err != nil {
-			return ControlResult{}, err
+			return Result{}, err
 		}
 		message := fmt.Sprintf("Finish with %s (%s); a plain reply is not accepted in this run.", tool, x.registry().finalToolRequiredFields(tool, cc.Authority))
 		rejection := &finalAnswerRejection{Code: finalToolRequiredCode, Message: message}
@@ -848,14 +848,14 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.Contro
 		}
 		reacted, err := x.runReacted(ctx, cc)
 		if err != nil {
-			return ControlResult{}, err
+			return Result{}, err
 		}
 		if reacted {
 			return x.acceptFinalAnswer(ctx, cc, draft)
 		}
 		prior, err := x.priorFinalErrorCodes(ctx, cc)
 		if err != nil {
-			return ControlResult{}, err
+			return Result{}, err
 		}
 		rejection := &finalAnswerRejection{Code: finalEmptyReplyCode,
 			Message: "An empty reply is not an answer. Write the reply, or call turn_final_answer."}

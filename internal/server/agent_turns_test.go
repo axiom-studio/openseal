@@ -21,7 +21,7 @@ func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 	t.Parallel()
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "local", ID: "workspace"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"},
 		AssignedAgentID: "operator", Goal: "Inspect the cluster", Source: models.RunSourceManual,
 	})

@@ -63,7 +63,7 @@ func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
 func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
 	f := newClarificationFixture(t, kerneltest.NewStore(t), "targets")
 	q := f.question(t)
-	other, err := portfolio.NewPortfolioService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: f.root.Scope, Kind: models.RunKindAgentWork, Owner: f.root.Owner, AssignedAgentID: "writer", ParentRunID: f.root.ID, Goal: "Draft the outline", Source: models.RunSourceRequest})
+	other, err := portfolio.NewService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: f.root.Scope, Kind: models.RunKindAgentWork, Owner: f.root.Owner, AssignedAgentID: "writer", ParentRunID: f.root.ID, Goal: "Draft the outline", Source: models.RunSourceRequest})
 	if err != nil {
 		t.Fatal(err)
 	}

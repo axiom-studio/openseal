@@ -18,7 +18,7 @@ import (
 )
 
 // Kernel control tools (section 04 §3). The model calls them like any other
-// tool; the kernel executes them inline, under the claim, inside the RunLoop.
+// tool; the kernel executes them inline, under the claim, inside the runloop.Loop.
 // This file owns the tool names, the advertised order, the phase rules and the
 // dispatcher. Each tool's schema, settle and resume live in its own file;
 // BuiltinTools lists them.
@@ -36,38 +36,38 @@ var controlToolOrder = []models.ControlToolName{
 	models.ControlToolRunbookFork, models.ControlToolRunbookDelegate,
 }
 
-type ControlPhase string
+type Phase string
 
 const (
-	// ControlPhaseInline calls run in the step's normal tool phase.
-	ControlPhaseInline ControlPhase = "inline"
-	// ControlPhaseSettle calls run after the step row is finished and
+	// PhaseInline calls run in the step's normal tool phase.
+	PhaseInline Phase = "inline"
+	// PhaseSettle calls run after the step row is finished and
 	// applied (DI-2). At most one per assistant entry.
-	ControlPhaseSettle ControlPhase = "settle"
+	PhaseSettle Phase = "settle"
 )
 
 // controlToolRule is the static, authority-independent part of a control
 // tool: its phase and whether it must be the only call of its assistant entry.
 type controlToolRule struct {
-	Phase ControlPhase
+	Phase Phase
 	Alone bool
 }
 
 var controlToolRules = map[models.ControlToolName]controlToolRule{
-	models.ControlToolFinalAnswer:      {Phase: ControlPhaseSettle, Alone: true},
-	models.ControlToolRequestDecision:  {Phase: ControlPhaseSettle, Alone: true},
-	models.ControlToolCompletionReview: {Phase: ControlPhaseSettle, Alone: true},
-	models.ControlToolReportProgress:   {Phase: ControlPhaseInline},
-	models.ControlToolWait:             {Phase: ControlPhaseSettle},
-	models.ControlToolAskUser:          {Phase: ControlPhaseSettle},
-	models.ControlToolReact:            {Phase: ControlPhaseInline},
-	models.ControlToolStartTask:        {Phase: ControlPhaseSettle, Alone: true}, // A4
-	models.ControlToolFork:             {Phase: ControlPhaseSettle},
-	models.ControlToolRunOperation:     {Phase: ControlPhaseSettle},
-	models.ControlToolDelegate:         {Phase: ControlPhaseSettle},
-	models.ControlToolDelegateReply:    {Phase: ControlPhaseSettle},
-	models.ControlToolRunbookFork:      {Phase: ControlPhaseSettle, Alone: true},
-	models.ControlToolRunbookDelegate:  {Phase: ControlPhaseSettle, Alone: true},
+	models.ControlToolFinalAnswer:      {Phase: PhaseSettle, Alone: true},
+	models.ControlToolRequestDecision:  {Phase: PhaseSettle, Alone: true},
+	models.ControlToolCompletionReview: {Phase: PhaseSettle, Alone: true},
+	models.ControlToolReportProgress:   {Phase: PhaseInline},
+	models.ControlToolWait:             {Phase: PhaseSettle},
+	models.ControlToolAskUser:          {Phase: PhaseSettle},
+	models.ControlToolReact:            {Phase: PhaseInline},
+	models.ControlToolStartTask:        {Phase: PhaseSettle, Alone: true}, // A4
+	models.ControlToolFork:             {Phase: PhaseSettle},
+	models.ControlToolRunOperation:     {Phase: PhaseSettle},
+	models.ControlToolDelegate:         {Phase: PhaseSettle},
+	models.ControlToolDelegateReply:    {Phase: PhaseSettle},
+	models.ControlToolRunbookFork:      {Phase: PhaseSettle, Alone: true},
+	models.ControlToolRunbookDelegate:  {Phase: PhaseSettle, Alone: true},
 }
 
 // IsControlTool reports whether name is a kernel control tool.
@@ -76,9 +76,9 @@ func IsControlTool(name string) bool {
 	return ok
 }
 
-// ControlToolPhase returns the phase of a control tool; ok is false for any
+// ToolPhase returns the phase of a control tool; ok is false for any
 // other tool.
-func ControlToolPhase(name string) (ControlPhase, bool) {
+func ToolPhase(name string) (Phase, bool) {
 	rule, ok := controlToolRules[models.ControlToolName(name)]
 	return rule.Phase, ok
 }
@@ -87,15 +87,15 @@ func IsFinalTool(name models.ControlToolName) bool {
 	return name == models.ControlToolFinalAnswer || name == models.ControlToolRequestDecision || name == models.ControlToolCompletionReview
 }
 
-type ControlToolSpec struct {
+type ToolSpec struct {
 	Name        models.ControlToolName
 	Description string
 	InputSchema map[string]interface{}
-	Phase       ControlPhase
+	Phase       Phase
 }
 
 // ModelStepTool is the spec as a harness tool of a model step.
-func (s ControlToolSpec) ModelStepTool() models.ModelStepTool {
+func (s ToolSpec) ModelStepTool() models.ModelStepTool {
 	return models.ModelStepTool{
 		Name: string(s.Name), Description: s.Description,
 		InputSchema: maps.Clone(s.InputSchema), Group: models.ModelStepToolHarness,
@@ -105,12 +105,12 @@ func (s ControlToolSpec) ModelStepTool() models.ModelStepTool {
 const ()
 
 const (
-	ControlOriginModel  agentrun.ControlOrigin = "model"
-	ControlOriginKernel agentrun.ControlOrigin = "kernel"
+	OriginModel  agentrun.ControlOrigin = "model"
+	OriginKernel agentrun.ControlOrigin = "kernel"
 )
 
-// NewControlContext builds the context of one control tool entry of a step.
-func NewControlContext(in agentrun.StepToolsInput, entry *models.SessionEntry) agentrun.ControlContext {
+// NewContext builds the context of one control tool entry of a step.
+func NewContext(in agentrun.StepToolsInput, entry *models.SessionEntry) agentrun.ControlContext {
 	cc := agentrun.ControlContext{
 		Run: in.Run, WorkerID: in.WorkerID, Step: in.Step, Session: in.Session, Path: in.Path,
 		Binding: in.Binding, Assistant: in.Assistant, Entry: entry, Origin: controlOriginOf(entry),
@@ -125,14 +125,14 @@ func NewControlContext(in agentrun.StepToolsInput, entry *models.SessionEntry) a
 // calls never do.
 func controlOriginOf(entry *models.SessionEntry) agentrun.ControlOrigin {
 	if entry != nil && entry.Tool != nil && len(entry.Tool.Directive) > 0 {
-		return ControlOriginKernel
+		return OriginKernel
 	}
-	return ControlOriginModel
+	return OriginModel
 }
 
-// ControlEntryMeta is kernel-only metadata stored in ToolEntry.Control. It is
+// EntryMeta is kernel-only metadata stored in ToolEntry.Control. It is
 // never rendered and never projected by any API.
-type ControlEntryMeta struct {
+type EntryMeta struct {
 	Kind              models.ControlToolName `json:"kind"`
 	ForkID            string                 `json:"forkId,omitempty"`
 	GroupID           string                 `json:"groupId,omitempty"`
@@ -147,32 +147,32 @@ type ControlEntryMeta struct {
 
 // DecodeControlEntryMeta reads an entry's kernel control metadata (nil when
 // the entry has none).
-func DecodeControlEntryMeta(entry *models.SessionEntry) (*ControlEntryMeta, error) {
+func DecodeControlEntryMeta(entry *models.SessionEntry) (*EntryMeta, error) {
 	if entry == nil || entry.Tool == nil || len(entry.Tool.Control) == 0 {
 		return nil, nil
 	}
-	var meta ControlEntryMeta
+	var meta EntryMeta
 	if err := json.Unmarshal(entry.Tool.Control, &meta); err != nil {
 		return nil, fmt.Errorf("decode control metadata of tool entry %s: %w", entry.ID, err)
 	}
 	return &meta, nil
 }
 
-type ControlOutcomeKind string
+type OutcomeKind string
 
 const (
-	ControlContinue ControlOutcomeKind = "continue" // tool entry terminal; the loop starts the next step
-	ControlParked   ControlOutcomeKind = "parked"   // Park set; the loop parks (or, Committed, only releases the claim)
-	ControlFinal    ControlOutcomeKind = "final"    // Final set; the loop runs the final path (SPEC §3.3)
-	ControlEnded    ControlOutcomeKind = "ended"    // Run terminal in the tool's own transaction (task start, A4)
-	ControlFailed   ControlOutcomeKind = "failed"   // Failure set; the loop fails the Run (SPEC §3.5)
+	Continue OutcomeKind = "continue" // tool entry terminal; the loop starts the next step
+	Parked   OutcomeKind = "parked"   // Park set; the loop parks (or, Committed, only releases the claim)
+	Final    OutcomeKind = "final"    // Final set; the loop runs the final path (SPEC §3.3)
+	Ended    OutcomeKind = "ended"    // Run terminal in the tool's own transaction (task start, A4)
+	Failed   OutcomeKind = "failed"   // Failure set; the loop fails the Run (SPEC §3.5)
 )
 
-// ControlResult is the outcome of one control call. There is no consumed
+// Result is the outcome of one control call. There is no consumed
 // intervention list: the steering cursor has one owner, consumeSteering
 // (SPEC §3.4).
-type ControlResult struct {
-	Kind    ControlOutcomeKind
+type Result struct {
+	Kind    OutcomeKind
 	Run     *models.AgentRun     // canonical Run after the operation (nil = unchanged)
 	Entry   *models.SessionEntry // the tool entry after the operation
 	Park    *agentrun.LoopPark
@@ -180,28 +180,28 @@ type ControlResult struct {
 	Failure *agentrun.LoopFailure
 }
 
-func (r ControlResult) validate() error {
+func (r Result) validate() error {
 	switch r.Kind {
-	case ControlContinue:
+	case Continue:
 		if r.Entry == nil || !r.Entry.State.Terminal() {
 			return errors.New("control continue result needs a terminal tool entry")
 		}
-	case ControlParked:
+	case Parked:
 		if r.Park == nil {
 			return errors.New("control parked result needs a park")
 		}
 		if err := r.Park.Validate(); err != nil {
 			return err
 		}
-	case ControlFinal:
+	case Final:
 		if r.Final == nil {
 			return errors.New("control final result needs a final answer")
 		}
-	case ControlEnded:
+	case Ended:
 		if r.Run == nil || !models.IsTerminalAgentRunStatus(r.Run.Status) {
 			return errors.New("control ended result needs the terminal Run")
 		}
-	case ControlFailed:
+	case Failed:
 		if r.Failure == nil {
 			return errors.New("control failed result needs a failure")
 		}
@@ -214,11 +214,11 @@ func (r ControlResult) validate() error {
 	return nil
 }
 
-// ControlResume is the outcome of resuming a parked control entry.
-type ControlResume struct {
+// Resume is the outcome of resuming a parked control entry.
+type Resume struct {
 	Resolved bool               // false: still waiting
 	Park     *agentrun.LoopPark // when !Resolved: the park to re-apply
-	Result   ControlResult
+	Result   Result
 }
 
 // Handler implements one control tool. Spec is called only when the
@@ -226,15 +226,15 @@ type ControlResume struct {
 // models.DecodeControlInto); Run is the inline or settle execution, by the
 // tool's phase.
 type Handler interface {
-	Spec(a agentrun.ControlAuthority) ControlToolSpec
+	Spec(a agentrun.ControlAuthority) ToolSpec
 	Decode(raw json.RawMessage) (interface{}, error)
-	Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error)
+	Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error)
 }
 
 // controlResumer is implemented by parking tools (awaiting_child /
 // awaiting_event entries).
 type controlResumer interface {
-	Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error)
+	Resume(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Resume, error)
 }
 
 type Registry map[models.ControlToolName]Handler
@@ -294,8 +294,8 @@ func (r Registry) register(name models.ControlToolName, h Handler) {
 
 // Specs lists the offered tools in the stable order. A tool is offered when
 // the authority allows it and a handler is registered.
-func (r Registry) Specs(a agentrun.ControlAuthority) []ControlToolSpec {
-	var specs []ControlToolSpec
+func (r Registry) Specs(a agentrun.ControlAuthority) []ToolSpec {
+	var specs []ToolSpec
 	for _, name := range controlToolOrder {
 		h, ok := r[name]
 		if !ok || !modelstep.ControlToolOffered(name, a) {
@@ -309,16 +309,16 @@ func (r Registry) Specs(a agentrun.ControlAuthority) []ControlToolSpec {
 	return specs
 }
 
-// ControlExecutor executes control tool entries. Constructed once per worker
+// Executor executes control tool entries. Constructed once per worker
 // pool; the coordinators are used by the tool files.
-type ControlExecutor struct {
+type Executor struct {
 	Portfolio     models.PortfolioStore
 	Sessions      models.AgentSessionStore
 	Activity      *activity.RunActivityService
 	Forks         *agentrun.RunForkCoordinator
-	Collaboration *collaboration.CollaborationService
+	Collaboration *collaboration.Service
 	Tasks         *conversationrun.ConversationTaskService
-	Conversations *conversation.ConversationService
+	Conversations *conversation.Service
 	Reporting     models.ConversationStore // conversationrun.ProjectConversationRunbookStart / runbookSourceMessage
 	Now           func() time.Time
 
@@ -331,7 +331,7 @@ type ControlExecutor struct {
 	finalChecks []finalAnswerCheck
 }
 
-func (x *ControlExecutor) registry() Registry {
+func (x *Executor) registry() Registry {
 	if x.handlers != nil {
 		return x.handlers
 	}
@@ -339,20 +339,20 @@ func (x *ControlExecutor) registry() Registry {
 }
 
 // UseTools makes x run tools when it was built without its own.
-func (x *ControlExecutor) UseTools(tools Registry) {
+func (x *Executor) UseTools(tools Registry) {
 	if x.handlers == nil {
 		x.handlers = tools
 	}
 }
 
-func (x *ControlExecutor) finalAnswerChecks() []finalAnswerCheck {
+func (x *Executor) finalAnswerChecks() []finalAnswerCheck {
 	if x.finalChecks != nil {
 		return x.finalChecks
 	}
 	return builtinFinalAnswerChecks()
 }
 
-func (x *ControlExecutor) now() time.Time {
+func (x *Executor) now() time.Time {
 	if x.Now != nil {
 		return x.Now().UTC()
 	}
@@ -365,8 +365,8 @@ func (x *ControlExecutor) now() time.Time {
 var ErrControlEntryState = errors.New("control tool entry is not in a runnable state")
 
 // Inline executes an inline-phase control call (react, turn_report_progress).
-func (x *ControlExecutor) Inline(ctx context.Context, cc agentrun.ControlContext) (ControlResult, error) {
-	return x.dispatch(ctx, cc, ControlPhaseInline)
+func (x *Executor) Inline(ctx context.Context, cc agentrun.ControlContext) (Result, error) {
+	return x.dispatch(ctx, cc, PhaseInline)
 }
 
 // Settle executes the step's single settle-phase control call, after
@@ -377,35 +377,35 @@ func (x *ControlExecutor) Inline(ctx context.Context, cc agentrun.ControlContext
 // and applied. When ResumeOpenTools settles an entry left open by an earlier
 // step (after a park or a crash after the model call), pass that earlier
 // step, not the claim's current running step.
-func (x *ControlExecutor) Settle(ctx context.Context, cc agentrun.ControlContext) (ControlResult, error) {
-	return x.dispatch(ctx, cc, ControlPhaseSettle)
+func (x *Executor) Settle(ctx context.Context, cc agentrun.ControlContext) (Result, error) {
+	return x.dispatch(ctx, cc, PhaseSettle)
 }
 
-func (x *ControlExecutor) dispatch(ctx context.Context, cc agentrun.ControlContext, phase ControlPhase) (ControlResult, error) {
+func (x *Executor) dispatch(ctx context.Context, cc agentrun.ControlContext, phase Phase) (Result, error) {
 	if err := x.checkContext(cc); err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	name := cc.ToolName()
 	rule, known := controlToolRules[name]
 	if !known {
-		return ControlResult{}, fmt.Errorf("tool %q is not a control tool", name)
+		return Result{}, fmt.Errorf("tool %q is not a control tool", name)
 	}
 	if rule.Phase != phase {
-		return ControlResult{}, fmt.Errorf("control tool %s runs in the %s phase, not %s", name, rule.Phase, phase)
+		return Result{}, fmt.Errorf("control tool %s runs in the %s phase, not %s", name, rule.Phase, phase)
 	}
 	if cc.Entry.State != models.ToolEntryPending && cc.Entry.State != models.ToolEntryRunning {
-		return ControlResult{}, fmt.Errorf("%w: %s is %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
+		return Result{}, fmt.Errorf("%w: %s is %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
 	}
-	if phase == ControlPhaseSettle {
+	if phase == PhaseSettle {
 		if cc.Step == nil || cc.Step.Status != models.AgentTurnStatusCompleted || cc.Step.Sequence > cc.Run.LastAppliedTurn ||
 			cc.Step.ID != cc.Entry.StepID {
-			return ControlResult{}, fmt.Errorf("%w: settle needs the finished and applied step", ErrControlEntryState)
+			return Result{}, fmt.Errorf("%w: settle needs the finished and applied step", ErrControlEntryState)
 		}
 	}
 	h, registered := x.registry()[name]
 	// Rule 1: a tool the claim does not offer. Kernel-origin calls are
 	// preauthorized by their producer.
-	if !registered || (cc.Origin != ControlOriginKernel && !modelstep.ControlToolOffered(name, cc.Authority)) {
+	if !registered || (cc.Origin != OriginKernel && !modelstep.ControlToolOffered(name, cc.Authority)) {
 		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "tool_not_available",
 			"This tool is not available in this conversation.", map[string]interface{}{"tool": string(name)}))
 	}
@@ -420,60 +420,60 @@ func (x *ControlExecutor) dispatch(ctx context.Context, cc agentrun.ControlConte
 	cc.Arguments = args
 	result, err := h.Run(ctx, x, cc)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	if err := result.validate(); err != nil {
-		return ControlResult{}, fmt.Errorf("control tool %s: %w", name, err)
+		return Result{}, fmt.Errorf("control tool %s: %w", name, err)
 	}
 	return result, nil
 }
 
 // Resume turns the awaited outcome of a parked control entry
 // (awaiting_child / awaiting_event) into its tool result.
-func (x *ControlExecutor) Resume(ctx context.Context, cc agentrun.ControlContext) (ControlResume, error) {
+func (x *Executor) Resume(ctx context.Context, cc agentrun.ControlContext) (Resume, error) {
 	if err := x.checkContext(cc); err != nil {
-		return ControlResume{}, err
+		return Resume{}, err
 	}
 	name := cc.ToolName()
 	if !IsControlTool(string(name)) {
-		return ControlResume{}, fmt.Errorf("tool %q is not a control tool", name)
+		return Resume{}, fmt.Errorf("tool %q is not a control tool", name)
 	}
 	if cc.Entry.State != models.ToolEntryAwaitingChild && cc.Entry.State != models.ToolEntryAwaitingEvent {
-		return ControlResume{}, fmt.Errorf("%w: resume of %s in state %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
+		return Resume{}, fmt.Errorf("%w: resume of %s in state %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
 	}
 	h, ok := x.registry()[name]
 	if !ok {
-		return ControlResume{}, fmt.Errorf("control tool %s has no handler", name)
+		return Resume{}, fmt.Errorf("control tool %s has no handler", name)
 	}
 	resumer, ok := h.(controlResumer)
 	if !ok {
-		return ControlResume{}, fmt.Errorf("control tool %s does not park", name)
+		return Resume{}, fmt.Errorf("control tool %s does not park", name)
 	}
 	args, err := h.Decode(cc.Entry.Tool.Arguments)
 	if err != nil {
-		return ControlResume{}, fmt.Errorf("decode arguments of parked control entry %s: %w", cc.Entry.ID, err)
+		return Resume{}, fmt.Errorf("decode arguments of parked control entry %s: %w", cc.Entry.ID, err)
 	}
 	cc.Arguments = args
 	resumed, err := resumer.Resume(ctx, x, cc)
 	if err != nil {
-		return ControlResume{}, err
+		return Resume{}, err
 	}
 	if !resumed.Resolved {
 		if resumed.Park == nil {
-			return ControlResume{}, fmt.Errorf("control tool %s: unresolved resume needs a park", name)
+			return Resume{}, fmt.Errorf("control tool %s: unresolved resume needs a park", name)
 		}
 		if err := resumed.Park.Validate(); err != nil {
-			return ControlResume{}, fmt.Errorf("control tool %s: %w", name, err)
+			return Resume{}, fmt.Errorf("control tool %s: %w", name, err)
 		}
 		return resumed, nil
 	}
 	if err := resumed.Result.validate(); err != nil {
-		return ControlResume{}, fmt.Errorf("control tool %s: %w", name, err)
+		return Resume{}, fmt.Errorf("control tool %s: %w", name, err)
 	}
 	return resumed, nil
 }
 
-func (x *ControlExecutor) checkContext(cc agentrun.ControlContext) error {
+func (x *Executor) checkContext(cc agentrun.ControlContext) error {
 	if x == nil || x.Sessions == nil {
 		return errors.New("control executor has no session store")
 	}
@@ -491,32 +491,32 @@ func (x *ControlExecutor) checkContext(cc agentrun.ControlContext) error {
 }
 
 // refuse ends the entry with an is_error result; the loop continues (D5/D6).
-func (x *ControlExecutor) refuse(ctx context.Context, cc agentrun.ControlContext, result *models.ToolResult) (ControlResult, error) {
+func (x *Executor) refuse(ctx context.Context, cc agentrun.ControlContext, result *models.ToolResult) (Result, error) {
 	entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil, result, nil)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
-	return ControlResult{Kind: ControlContinue, Entry: entry}, nil
+	return Result{Kind: Continue, Entry: entry}, nil
 }
 
 // complete ends the entry with result and returns a continue outcome.
-func (x *ControlExecutor) complete(ctx context.Context, cc agentrun.ControlContext, result *models.ToolResult, meta *ControlEntryMeta) (ControlResult, error) {
+func (x *Executor) complete(ctx context.Context, cc agentrun.ControlContext, result *models.ToolResult, meta *EntryMeta) (Result, error) {
 	to := models.ToolEntryCompleted
 	if result != nil && result.IsError {
 		to = models.ToolEntryError
 	}
 	entry, err := x.transitionControlEntry(ctx, cc, to, nil, result, meta)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
-	return ControlResult{Kind: ControlContinue, Entry: entry}, nil
+	return Result{Kind: Continue, Entry: entry}, nil
 }
 
 // transitionControlEntry moves the call's entry from its current state to
 // to, fenced by the Run lease. A stale revision (the stores report it as
 // ErrToolEntryStateConflict) is retried once after re-reading the entry,
 // while it is still in the state the caller saw.
-func (x *ControlExecutor) transitionControlEntry(ctx context.Context, cc agentrun.ControlContext, to models.ToolEntryState, wait *models.ToolEntryWait, result *models.ToolResult, meta *ControlEntryMeta) (*models.SessionEntry, error) {
+func (x *Executor) transitionControlEntry(ctx context.Context, cc agentrun.ControlContext, to models.ToolEntryState, wait *models.ToolEntryWait, result *models.ToolResult, meta *EntryMeta) (*models.SessionEntry, error) {
 	var kernel *models.ToolEntryKernelPatch
 	if meta != nil {
 		stored := *meta // the handler's value is left as it was
@@ -621,7 +621,7 @@ func controlSettleConflicts(calls []models.ModelToolCall, authority agentrun.Con
 	for i, call := range calls {
 		name := models.ControlToolName(call.Name)
 		rule, ok := controlToolRules[name]
-		if !ok || rule.Phase != ControlPhaseSettle || !modelstep.ControlToolOffered(name, authority) {
+		if !ok || rule.Phase != PhaseSettle || !modelstep.ControlToolOffered(name, authority) {
 			continue
 		}
 		if rule.Alone && len(calls) > 1 {
@@ -643,7 +643,7 @@ func controlSettleEntry(entries []*models.SessionEntry) *models.SessionEntry {
 		if entry == nil || entry.Type != models.SessionEntryTool || entry.Tool == nil || !entry.State.Open() {
 			continue
 		}
-		if phase, ok := ControlToolPhase(entry.Tool.Name); ok && phase == ControlPhaseSettle {
+		if phase, ok := ToolPhase(entry.Tool.Name); ok && phase == PhaseSettle {
 			return entry
 		}
 	}

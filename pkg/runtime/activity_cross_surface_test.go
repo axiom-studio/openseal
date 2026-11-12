@@ -44,14 +44,14 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			scope := models.Scope{Kind: "tenant", ID: "cross-surface"}
 			now := time.Date(2026, 7, 23, 8, 30, 0, 0, time.UTC)
 			seedTestSpace(t, store.(models.SpaceStore), scope)
-			conversation, _, err := runtimeconversation.NewConversationService(conversationStore).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
+			conversation, _, err := runtimeconversation.NewService(conversationStore).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-gtm"},
 				Title: "Launch coordination", IdempotencyKey: "launch-coordination",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+			objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: conversation.Owner, Title: "Launch", Goal: "Publish the approved launch",
 				Status: models.ObjectiveStatusActive, IdempotencyKey: "objective-launch",
 			})
@@ -82,7 +82,7 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 				t.Fatal(err)
 			}
 
-			selectors := map[string]runtimeactivity.ActivityFeedRequest{
+			selectors := map[string]runtimeactivity.FeedRequest{
 				"agent":     {Scope: scope, AgentID: appended.AgentID},
 				"team":      {Scope: scope, TeamID: appended.TeamID},
 				"objective": {Scope: scope, ObjectiveID: appended.ObjectiveID},
@@ -108,11 +108,11 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 				}
 			}
 
-			changes, err := runtimeconversation.NewConversationChangeService(conversationStore, store)
+			changes, err := runtimeconversation.NewChangeService(conversationStore, store)
 			if err != nil {
 				t.Fatal(err)
 			}
-			channel, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+			channel, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, ActiveAt: now,
 			})
 			if err != nil {

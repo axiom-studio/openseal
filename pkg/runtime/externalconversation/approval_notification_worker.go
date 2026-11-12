@@ -18,9 +18,9 @@ import (
 
 type ApprovalNotificationWorker struct {
 	store         models.ApprovalNotificationStore
-	conversations *conversation.ConversationService
-	transport     *ExternalConversationTransportService
-	callbacks     *callback.CallbackRegistry
+	conversations *conversation.Service
+	transport     *TransportService
+	callbacks     *callback.Registry
 	now           func() time.Time
 }
 
@@ -28,13 +28,13 @@ const approvalNotificationPostAttempts = 5
 
 func NewApprovalNotificationWorker(
 	store models.ApprovalNotificationStore,
-	transport *ExternalConversationTransportService,
-	callbackResolver callback.CallbackAdapterResolver,
+	transport *TransportService,
+	callbackResolver callback.AdapterResolver,
 	opts ...models.ServiceOption,
 ) *ApprovalNotificationWorker {
 	return &ApprovalNotificationWorker{
-		store: store, conversations: conversation.NewConversationService(store, opts...), transport: transport,
-		callbacks: callback.NewCallbackRegistry(store, callbackResolver, opts...), now: models.ClockFrom(opts),
+		store: store, conversations: conversation.NewService(store, opts...), transport: transport,
+		callbacks: callback.NewRegistry(store, callbackResolver, opts...), now: models.ClockFrom(opts),
 	}
 }
 
@@ -303,7 +303,7 @@ func (w *ApprovalNotificationWorker) updateTimeoutCard(ctx context.Context, appr
 func enqueueApprovalCardUpdate(
 	ctx context.Context,
 	store models.ApprovalNotificationStore,
-	transport *ExternalConversationTransportService,
+	transport *TransportService,
 	approval *models.ApprovalCheckpoint,
 	call *models.ActionCall,
 	destination models.ApprovalDestination,

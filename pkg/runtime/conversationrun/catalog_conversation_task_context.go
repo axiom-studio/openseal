@@ -113,7 +113,7 @@ func ResolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		}
 	}
 	viewer := models.ConversationViewer{Participant: actor}
-	if _, err := runtimeconversation.NewConversationService(store).GetVisibleChannelMessage(ctx, canonical.Scope, conversation.ID, message.ID, viewer); err != nil {
+	if _, err := runtimeconversation.NewService(store).GetVisibleChannelMessage(ctx, canonical.Scope, conversation.ID, message.ID, viewer); err != nil {
 		if errors.Is(err, models.ErrChannelMessageNotFound) {
 			return nil, nil
 		}
@@ -130,7 +130,7 @@ func ResolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	result.CanStart = foreground && conversation.Status == models.ConversationStatusActive && canonical.Status == models.AgentRunStatusRunning &&
 		canonical.AssignedAgentID != "" && canonical.LeaseOwner != "" && canonical.LeaseExpiresAt != nil && canonical.LeaseExpiresAt.After(time.Now()) && !models.VoiceCallStartedMessage(message)
 	if result.CanStart {
-		onRoster, err := models.AgentOnChatRoster(ctx, models.TeamRosterReaderOf(store), conversation.Scope, conversation.Owner, runtimeconversation.ConversationRunAgentID(conversation, canonical))
+		onRoster, err := models.AgentOnChatRoster(ctx, models.TeamRosterReaderOf(store), conversation.Scope, conversation.Owner, runtimeconversation.RunAgentID(conversation, canonical))
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +149,7 @@ func ResolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	if origin != nil && origin.Mode == models.ConversationTaskModeIndependent && canonical.ID == origin.WorkRunID {
 		rows = append([]*models.ConversationTaskResult{{Task: origin, WorkRun: canonical}}, rows...)
 	}
-	proof, err := runtimeconversation.NewConversationChangeService(store, store)
+	proof, err := runtimeconversation.NewChangeService(store, store)
 	if err != nil {
 		return nil, err
 	}

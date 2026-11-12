@@ -35,7 +35,7 @@ func TestSkillBindingTargetSetupRequestIsOwnedByTheTarget(t *testing.T) {
 		t.Fatalf("builder Run is not resumable by the target's request: %v, %v", resumable, err)
 	}
 	// The card is in the builder's chat and its list.
-	projected, err := (&ConversationChangeService{skillSetups: f.Store.ListSkillSetupRequests}).listConversationSkillSetupRequests(f.Ctx,
+	projected, err := (&ChangeService{skillSetups: f.Store.ListSkillSetupRequests}).listConversationSkillSetupRequests(f.Ctx,
 		&models.Conversation{Scope: f.Scope, ID: "chat-finn", Owner: builder}, nil, nil)
 	if err != nil || len(projected) != 1 || projected[0].ID != request.ID {
 		t.Fatalf("builder chat projection = %#v, %v", projected, err)

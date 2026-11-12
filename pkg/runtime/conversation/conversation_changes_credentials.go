@@ -7,16 +7,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// ConversationCredentialRequest is a credential request as placed in one
+// CredentialRequest is a credential request as placed in one
 // conversation view. ThreadRootMessageID is a projection, never authority.
-type ConversationCredentialRequest struct {
+type CredentialRequest struct {
 	models.CredentialRequest
 	ThreadRootMessageID string `json:"threadRootMessageId,omitempty"`
 }
 
-func (s *ConversationChangeService) listConversationCredentialRequests(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun, viewer *models.ConversationViewer) ([]*ConversationCredentialRequest, error) {
+func (s *ChangeService) listConversationCredentialRequests(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun, viewer *models.ConversationViewer) ([]*CredentialRequest, error) {
 	if s.credentials == nil || conversation == nil {
-		return []*ConversationCredentialRequest{}, nil
+		return []*CredentialRequest{}, nil
 	}
 	stored, err := s.credentials.ListCredentialRequests(ctx, conversation.Scope, conversation.Owner.ID, conversation.ID)
 	if err != nil {
@@ -60,7 +60,7 @@ func (s *ConversationChangeService) listConversationCredentialRequests(ctx conte
 			byRun[run.ID] = run
 		}
 	}
-	result := make([]*ConversationCredentialRequest, 0, len(candidates))
+	result := make([]*CredentialRequest, 0, len(candidates))
 	for _, request := range candidates {
 		trigger := messages[request.TriggerMessageID]
 		if viewer != nil && trigger == nil {
@@ -70,12 +70,12 @@ func (s *ConversationChangeService) listConversationCredentialRequests(ctx conte
 		if thread == "" {
 			thread = models.ExternalConversationThreadRoot(conversation, trigger)
 		}
-		result = append(result, &ConversationCredentialRequest{CredentialRequest: *request, ThreadRootMessageID: thread})
+		result = append(result, &CredentialRequest{CredentialRequest: *request, ThreadRootMessageID: thread})
 	}
 	return result, nil
 }
 
-func conversationCredentialRequestProjectionDigest(requests []*ConversationCredentialRequest) (string, error) {
+func conversationCredentialRequestProjectionDigest(requests []*CredentialRequest) (string, error) {
 	type entry struct {
 		ID       string `json:"id"`
 		Revision int64  `json:"revision"`

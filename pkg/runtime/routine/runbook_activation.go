@@ -188,14 +188,14 @@ type StartRunbookActivationRequest struct {
 // StartRunbookActivation creates one manual Run from the exact reviewed
 // activation. Clients never manufacture the definition pin or execution
 // policy themselves.
-func StartRunbookActivation(ctx context.Context, store models.KernelStore, scope models.Scope, activationID string, request StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error) {
+func StartRunbookActivation(ctx context.Context, store models.KernelStore, scope models.Scope, activationID string, request StartRunbookActivationRequest) (*agentrun.CommandResult, error) {
 	return StartRunbookActivationWithExecutionPreparer(ctx, store, scope, activationID, request, nil)
 }
 
 // StartRunbookActivationWithExecutionPreparer adds the host's authoritative
 // immutable execution snapshot to newly accepted manual work. Delivery replay
 // uses the accepted request before resolving a potentially changed deployment.
-func StartRunbookActivationWithExecutionPreparer(ctx context.Context, store models.KernelStore, scope models.Scope, activationID string, request StartRunbookActivationRequest, preparer models.AcceptedRunExecutionPreparer) (*agentrun.AgentRunCommandResult, error) {
+func StartRunbookActivationWithExecutionPreparer(ctx context.Context, store models.KernelStore, scope models.Scope, activationID string, request StartRunbookActivationRequest, preparer models.AcceptedRunExecutionPreparer) (*agentrun.CommandResult, error) {
 	if store == nil {
 		return nil, errors.New("Runbook activation store is not configured")
 	}
@@ -253,7 +253,7 @@ func startActivationOccurrence(
 	actor models.ActivityActor,
 	visibility models.ActivityVisibility,
 	preparer models.AcceptedRunExecutionPreparer,
-) (*agentrun.AgentRunCommandResult, error) {
+) (*agentrun.CommandResult, error) {
 	contextValues := maps.Clone(activation.Input)
 	if contextValues == nil {
 		contextValues = make(map[string]interface{})
@@ -354,7 +354,7 @@ type RunbookActivationService struct {
 	now func() time.Time
 	// routineSources is the host's Google catalog, which the resume of a
 	// Gmail or Calendar routine checks the creator's sign-in against.
-	routineSources RoutineEventSourceCatalog
+	routineSources EventSourceCatalog
 }
 
 func NewRunbookActivationService(store interface {
@@ -367,7 +367,7 @@ func NewRunbookActivationService(store interface {
 // WithRoutineEventSources sets the host's Google catalog for the source
 // check a resume runs. Without one a Gmail or Calendar routine cannot be
 // resumed (needs_sign_in).
-func (s *RunbookActivationService) WithRoutineEventSources(catalog RoutineEventSourceCatalog) *RunbookActivationService {
+func (s *RunbookActivationService) WithRoutineEventSources(catalog EventSourceCatalog) *RunbookActivationService {
 	s.routineSources = catalog
 	return s
 }

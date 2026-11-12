@@ -28,7 +28,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 				t.Cleanup(func() { _ = disk.Close() })
 				store = disk
 			}
-			service := runtimeconversation.NewConversationService(store)
+			service := runtimeconversation.NewService(store)
 			scope := models.Scope{Kind: "tenant", ID: "initiator"}
 			conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
@@ -59,7 +59,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				service = runtimeconversation.NewConversationService(disk)
+				service = runtimeconversation.NewService(disk)
 			}
 			loaded, err := service.GetChannelMessage(ctx, scope, conversation.ID, posted.Message.ID)
 			if err != nil || loaded.Initiator == nil || loaded.Initiator.Type != models.ConversationParticipantUser || loaded.Initiator.ID != "42" {
@@ -105,7 +105,7 @@ func TestChannelMessagesRejectUntrustedInitiator(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
 			store := kerneltest.NewStore(t)
-			service := runtimeconversation.NewConversationService(store)
+			service := runtimeconversation.NewService(store)
 			scope := models.Scope{Kind: "tenant", ID: "initiator"}
 			conversationtest.SeedSpace(t, store, scope)
 			conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{

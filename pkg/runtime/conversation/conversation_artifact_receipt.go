@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-const ConversationArtifactReceiptService = "openseal.artifact-delivery"
+const ArtifactReceiptService = "openseal.artifact-delivery"
 
 // RunActionArtifactReferences returns the artifact references of run's
 // succeeded governed tool calls, in entry order, deduplicated by (id,

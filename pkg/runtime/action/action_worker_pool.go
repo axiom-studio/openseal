@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type ActionWorkerConfig struct {
+type WorkerConfig struct {
 	Scope          models.Scope
 	Concurrency    int
 	PollInterval   time.Duration
@@ -23,7 +23,7 @@ type ActionWorkerConfig struct {
 	WorkerIDPrefix string
 }
 
-func (c *ActionWorkerConfig) applyDefaults() error {
+func (c *WorkerConfig) applyDefaults() error {
 	if err := c.Scope.Validate(); err != nil {
 		return err
 	}
@@ -45,9 +45,9 @@ func (c *ActionWorkerConfig) applyDefaults() error {
 	return nil
 }
 
-type ActionWorkerPool struct {
-	worker  *ActionWorker
-	config  ActionWorkerConfig
+type WorkerPool struct {
+	worker  *Worker
+	config  WorkerConfig
 	logger  *zap.SugaredLogger
 	wake    chan struct{}
 	mu      sync.Mutex
@@ -63,18 +63,18 @@ type ActionWorkerPool struct {
 	now       func() time.Time
 }
 
-func NewActionWorkerPool(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+func NewWorkerPool(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config WorkerConfig, opts ...models.ServiceOption) (*WorkerPool, error) {
 	return newActionWorkerPool(store, catalog, credentials, nil, dispatcher, logger, config, opts...)
 }
 
-func NewActionCredentialLeaseWorkerPool(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+func NewCredentialLeaseWorkerPool(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, issuer CredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config WorkerConfig, opts ...models.ServiceOption) (*WorkerPool, error) {
 	if issuer == nil {
 		return nil, errors.New("action credential lease issuer is required")
 	}
 	return newActionWorkerPool(store, catalog, nil, issuer, dispatcher, logger, config, opts...)
 }
 
-func newActionWorkerPool(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+func newActionWorkerPool(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, issuer CredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config WorkerConfig, opts ...models.ServiceOption) (*WorkerPool, error) {
 	if store == nil || catalog == nil || dispatcher == nil {
 		return nil, errors.New("action store, catalog, and dispatcher are required")
 	}
@@ -84,18 +84,18 @@ func newActionWorkerPool(store models.KernelStore, catalog agentrun.ActionExecut
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	worker := NewActionWorker(store, catalog, credentials, dispatcher, opts...)
+	worker := NewWorker(store, catalog, credentials, dispatcher, opts...)
 	if issuer != nil {
-		worker = NewActionWorkerWithCredentialLeaseIssuer(store, catalog, issuer, dispatcher, opts...)
+		worker = NewWorkerWithCredentialLeaseIssuer(store, catalog, issuer, dispatcher, opts...)
 	}
-	pool := &ActionWorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1), poll: workqueue.NewWorkerPollSignal(), now: models.ClockFrom(opts)}
+	pool := &WorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1), poll: workqueue.NewWorkerPollSignal(), now: models.ClockFrom(opts)}
 	pool.deadlines, _ = store.(models.ActionDeadlineStore)
 	pool.activity.Touch()
 	worker.onClaim = pool.requestClaim
 	return pool, nil
 }
 
-func (p *ActionWorkerPool) Start(parent context.Context) {
+func (p *WorkerPool) Start(parent context.Context) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.cancel != nil {
@@ -112,7 +112,7 @@ func (p *ActionWorkerPool) Start(parent context.Context) {
 	p.requestClaim()
 }
 
-func (p *ActionWorkerPool) Stop() {
+func (p *WorkerPool) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.cancel != nil {
@@ -122,19 +122,19 @@ func (p *ActionWorkerPool) Stop() {
 	}
 }
 
-func (p *ActionWorkerPool) Wake() {
+func (p *WorkerPool) Wake() {
 	p.activity.Touch()
 	p.poll.Notify()
 	p.requestClaim()
 }
 
-func (p *ActionWorkerPool) WakeScope(scope models.Scope) {
+func (p *WorkerPool) WakeScope(scope models.Scope) {
 	if scope == p.config.Scope {
 		p.Wake()
 	}
 }
 
-func (p *ActionWorkerPool) requestClaim() {
+func (p *WorkerPool) requestClaim() {
 	select {
 	case p.wake <- struct{}{}:
 	default:
@@ -144,17 +144,17 @@ func (p *ActionWorkerPool) requestClaim() {
 // SetWorkSignals lets the pool schedule its next durable deadline into the
 // work queue and sleep until woken while status is healthy. Without it the
 // pool polls.
-func (p *ActionWorkerPool) SetWorkSignals(status *workqueue.WorkSignalStatus) {
+func (p *WorkerPool) SetWorkSignals(status *workqueue.WorkSignalStatus) {
 	p.signals.Store(status)
 }
 
 // queueDriven reports whether idle waits may rely on the work queue.
-func (p *ActionWorkerPool) queueDriven() bool {
+func (p *WorkerPool) queueDriven() bool {
 	return p.deadlines != nil && p.signals.Load().Healthy()
 }
 
 // IdleFor reports how long the pool has neither claimed nor been woken.
-func (p *ActionWorkerPool) IdleFor(now time.Time) time.Duration {
+func (p *WorkerPool) IdleFor(now time.Time) time.Duration {
 	return p.activity.IdleFor(now)
 }
 
@@ -164,7 +164,7 @@ func (p *ActionWorkerPool) IdleFor(now time.Time) time.Duration {
 // execution. While the queue is healthy the loop instead schedules the next
 // retry or lease expiry into the queue after each wake and holds no timer, so
 // an idle scope issues no reads at all.
-func (p *ActionWorkerPool) pollClaims(ctx context.Context) {
+func (p *WorkerPool) pollClaims(ctx context.Context) {
 	defer p.wg.Done()
 	seed := p.config.WorkerIDPrefix + "-poll"
 	failures := 0
@@ -203,17 +203,17 @@ func (p *ActionWorkerPool) pollClaims(ctx context.Context) {
 
 // SetCredentialAvailabilityChecker installs the host's pre-dispatch
 // credential check on the pool's worker. Nil removes it.
-func (p *ActionWorkerPool) SetCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
+func (p *WorkerPool) SetCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
 	if p != nil {
 		p.worker.setCredentialAvailabilityChecker(checker)
 	}
 }
 
-func (p *ActionWorkerPool) SetWorkerLimiter(limiter *workqueue.WorkerLimiter) {
+func (p *WorkerPool) SetWorkerLimiter(limiter *workqueue.WorkerLimiter) {
 	p.limiter.Store(limiter)
 }
 
-func (p *ActionWorkerPool) run(ctx context.Context, workerID string) {
+func (p *WorkerPool) run(ctx context.Context, workerID string) {
 	defer p.wg.Done()
 	consecutiveFailures := 0
 	for {

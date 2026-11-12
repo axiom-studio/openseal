@@ -12,7 +12,7 @@ import (
 )
 
 type agentBuilderParametersFixture struct {
-	service *ConversationService
+	service *Service
 	scope   models.Scope
 	user    models.ConversationParticipant
 }
@@ -22,7 +22,7 @@ func newAgentBuilderParametersFixture(t *testing.T) agentBuilderParametersFixtur
 	store, scope := kerneltest.NewStore(t), models.Scope{Kind: "organization", ID: "builder"}
 	seedTestSpace(t, store, scope)
 	return agentBuilderParametersFixture{
-		service: NewConversationService(store),
+		service: NewService(store),
 		scope:   scope,
 		user:    models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "u_7"},
 	}

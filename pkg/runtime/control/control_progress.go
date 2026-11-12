@@ -35,9 +35,9 @@ type reportProgressArgs struct {
 
 type reportProgressHandler struct{}
 
-func (reportProgressHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
+func (reportProgressHandler) Spec(a agentrun.ControlAuthority) ToolSpec {
 	if a.TaskWork {
-		return ControlToolSpec{
+		return ToolSpec{
 			Description: "Record a concise internal activity-trail note and continue the existing task. Do not send a new public acknowledgment or routine progress commentary.",
 			InputSchema: map[string]interface{}{
 				"type": "object", "additionalProperties": false, "required": []string{"summary"},
@@ -48,7 +48,7 @@ func (reportProgressHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
 			},
 		}
 	}
-	return ControlToolSpec{
+	return ToolSpec{
 		Description: "Send one concise public update to the user and continue working. This does not finish the task or execute an action. Use only observed facts or your immediate intended next step.",
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []string{"summary"},
@@ -67,10 +67,10 @@ func (reportProgressHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[reportProgressArgs](raw)
 }
 
-func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (reportProgressHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
 	args, _ := cc.Arguments.(*reportProgressArgs)
 	if args == nil {
-		return ControlResult{}, errors.New("turn_report_progress: arguments were not decoded")
+		return Result{}, errors.New("turn_report_progress: arguments were not decoded")
 	}
 	summary := strings.TrimSpace(args.Summary)
 	switch {
@@ -92,14 +92,14 @@ func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc age
 	}
 	repeated, err := x.progressAlreadyReported(ctx, cc, summary)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	if repeated {
 		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, reportProgressRepeatCode,
 			"Already reported. Add a new finding or keep working.", nil))
 	}
 	if x.Activity == nil {
-		return ControlResult{}, errors.New("turn_report_progress: control executor has no activity service")
+		return Result{}, errors.New("turn_report_progress: control executor has no activity service")
 	}
 	eventType := "turn.commentary"
 	if destination == reportProgressDestinationActivity {
@@ -118,14 +118,14 @@ func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc age
 		event.TurnID = cc.Step.ID
 	}
 	if _, err := x.Activity.AppendActivity(ctx, event); err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	return x.complete(ctx, cc, models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{"status": "posted"}), nil)
 }
 
 // progressAlreadyReported reports whether an earlier completed
 // turn_report_progress entry of the Run carried the same summary.
-func (x *ControlExecutor) progressAlreadyReported(ctx context.Context, cc agentrun.ControlContext, summary string) (bool, error) {
+func (x *Executor) progressAlreadyReported(ctx context.Context, cc agentrun.ControlContext, summary string) (bool, error) {
 	entries, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID,
 		ToolNames: []string{string(models.ControlToolReportProgress)}, States: []models.ToolEntryState{models.ToolEntryCompleted},

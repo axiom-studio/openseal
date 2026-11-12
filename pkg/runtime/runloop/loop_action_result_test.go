@@ -153,7 +153,7 @@ func TestRenderGovernedResultTable(t *testing.T) {
 			json: `{"error":"The action was reverted.","evidenceRef":"action-call:call-1","status":"failed"}`},
 		{name: "budget exhausted", call: func() *models.ActionCall {
 			c := governedResultCall(models.ActionCallStatusDenied)
-			c.Error = action.ActionBudgetExhaustedReason
+			c.Error = action.BudgetExhaustedReason
 			return c
 		}, state: models.ToolEntryError, status: models.ToolResultDenied,
 			json: `{"evidenceRef":"action-call:call-1","reason":"This run has used its action budget.","status":"denied"}`},
@@ -166,7 +166,7 @@ func TestRenderGovernedResultTable(t *testing.T) {
 	}
 
 	t.Run("proposal rejection", func(t *testing.T) {
-		state, result := renderGovernedRejection(&action.ActionProposalRejection{Code: action.ProposalRejectionToolArgumentsInvalid, Message: "path is required"})
+		state, result := renderGovernedRejection(&action.ProposalRejection{Code: action.ProposalRejectionToolArgumentsInvalid, Message: "path is required"})
 		requireGovernedResult(t, state, result, models.ToolEntryError, models.ToolResultRefused,
 			`{"code":"`+action.ProposalRejectionToolArgumentsInvalid+`","error":"path is required","status":"refused"}`)
 	})

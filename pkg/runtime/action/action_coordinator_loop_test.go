@@ -30,20 +30,20 @@ type loopProposeFixture struct {
 	scope       models.Scope
 	now         time.Time
 	run         *models.AgentRun
-	coordinator *action.ActionCoordinator
+	coordinator *action.Coordinator
 	clock       func() time.Time // the coordinator's clock
-	decision    action.ActionPolicyDecision
+	decision    action.PolicyDecision
 	evaluations int
 }
 
-func newLoopProposeFixture(t *testing.T, store models.KernelStore, mutate func(*models.CreateAgentRunRequest), validators ...action.ActionProposalValidator) *loopProposeFixture {
+func newLoopProposeFixture(t *testing.T, store models.KernelStore, mutate func(*models.CreateAgentRunRequest), validators ...action.ProposalValidator) *loopProposeFixture {
 	t.Helper()
 	catalog, scope := actiontest.GovernedCatalog(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	f := &loopProposeFixture{t: t, ctx: context.Background(), store: store, scope: scope, now: now, decision: action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}}
+	f := &loopProposeFixture{t: t, ctx: context.Background(), store: store, scope: scope, now: now, decision: action.PolicyDecision{Disposition: action.DispositionAllow}}
 	f.run = claimLoopProposeRun(t, store, scope, now, loopProposeWorker, mutate)
 	f.clock = func() time.Time { return now.Add(time.Second) }
-	f.coordinator = action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+	f.coordinator = action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
 		f.evaluations++
 		return f.decision, nil
 	}), validators, models.WithClock(func() time.Time { return f.clock() }))
@@ -54,7 +54,7 @@ func newLoopProposeFixture(t *testing.T, store models.KernelStore, mutate func(*
 // worker under an hour-long lease.
 func claimLoopProposeRun(t *testing.T, store models.KernelStore, scope models.Scope, now time.Time, worker string, mutate func(*models.CreateAgentRunRequest)) *models.AgentRun {
 	t.Helper()
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	req := models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,
 	}
@@ -100,15 +100,15 @@ func (f *loopProposeFixture) calls() []*models.ActionCall {
 
 func (f *loopProposeFixture) requireRejection(err error, code string) {
 	f.t.Helper()
-	var rejection *action.ActionProposalRejection
+	var rejection *action.ProposalRejection
 	if !errors.As(err, &rejection) || rejection.Code != code || rejection.Message == "" || len(rejection.Message) > action.MaximumProposalRejectionMessageBytes {
 		f.t.Fatalf("error = %#v (%v), want rejection %s", err, err, code)
 	}
 }
 
 func (f *loopProposeFixture) requireApproval() {
-	f.decision = action.ActionPolicyDecision{
-		Disposition: action.ActionDispositionRequireApproval, Reason: "deploys need review",
+	f.decision = action.PolicyDecision{
+		Disposition: action.DispositionRequireApproval, Reason: "deploys need review",
 		EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "release-manager"}}, ApprovalTTL: time.Hour,
 	}
 }
@@ -168,7 +168,7 @@ func TestLoopProposeAllowCreatesReadyLoopCallAndLeavesRun(t *testing.T) {
 func TestLoopProposeDenyLeavesRunRunning(t *testing.T) {
 	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, nil)
-		f.decision = action.ActionPolicyDecision{Disposition: action.ActionDispositionDeny, Reason: "production freeze"}
+		f.decision = action.PolicyDecision{Disposition: action.DispositionDeny, Reason: "production freeze"}
 		result := f.propose(f.request("call-1"))
 		if result.Call.Status != models.ActionCallStatusDenied || result.Call.Error != "production freeze" || result.Call.CompletedAt == nil ||
 			result.Approval != nil || result.Run != nil || result.Event.EventType != "action.denied" || result.Event.Payload["policyReason"] != "production freeze" {
@@ -210,7 +210,7 @@ func TestLoopProposeApprovalWithoutSummaryIsRejected(t *testing.T) {
 		t.Fatalf("rejected proposal was recorded: %#v", calls)
 	}
 	// An allowed call needs no summary; activity keeps its audit fallback.
-	f.decision = action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}
+	f.decision = action.PolicyDecision{Disposition: action.DispositionAllow}
 	result := f.propose(req)
 	if result.Call.Status != models.ActionCallStatusReady || result.Event.Summary != "Proposed release.deploy" {
 		t.Fatalf("allowed call without summary = %#v", result)
@@ -395,7 +395,7 @@ func TestLoopProposeRequiresLiveLeaseOfRunningRun(t *testing.T) {
 	} {
 		req := f.request("shape")
 		mutate(&req)
-		var rejection *action.ActionProposalRejection
+		var rejection *action.ProposalRejection
 		if _, err := f.coordinator.Propose(f.ctx, req); err == nil || errors.As(err, &rejection) {
 			t.Fatalf("%s: error = %v", name, err)
 		}
@@ -521,8 +521,8 @@ func TestLoopProposePersonCredentialApproverIsActingUser(t *testing.T) {
 	now := time.Now().UTC()
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
+	coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
 	}), nil, models.WithClock(func() time.Time { return now }))
 	proposal, err := coordinator.Propose(context.Background(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "release-agent",

@@ -74,7 +74,7 @@ func (r RefusedLoopCallRequest) validate() error {
 
 // NewRefusedLoopCall builds the refused row and its activity event. It does
 // not resolve policy, approval, budget or credentials: the call never runs.
-func (c *ActionCoordinator) NewRefusedLoopCall(req RefusedLoopCallRequest) (*models.ActionCall, *models.ActivityEvent, error) {
+func (c *Coordinator) NewRefusedLoopCall(req RefusedLoopCallRequest) (*models.ActionCall, *models.ActivityEvent, error) {
 	if c == nil {
 		return nil, nil, errors.New("action coordinator is required")
 	}
@@ -121,7 +121,7 @@ func (c *ActionCoordinator) NewRefusedLoopCall(req RefusedLoopCallRequest) (*mod
 // lease (the loop fence of CreateActionProposal), without changing the Run.
 // The executor then names the row on the tool entry's terminal transition
 // (ToolEntryTransitionRequest.ActionCallID), which requires it to exist.
-func (c *ActionCoordinator) RecordRefusedLoopCall(ctx context.Context, req RefusedLoopCallRequest) (*models.ActionProposalResult, error) {
+func (c *Coordinator) RecordRefusedLoopCall(ctx context.Context, req RefusedLoopCallRequest) (*models.ActionProposalResult, error) {
 	if req.Lease == nil {
 		return nil, errors.New("a refused loop call requires its Run lease")
 	}

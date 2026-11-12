@@ -78,7 +78,7 @@ type NestedHostActionOutcome struct {
 // the named offered action. An allowed call is ready for its host (see
 // AcquireNestedHostAction); a call that needs review waits for its approval;
 // a denied call is returned denied.
-func (c *ActionCoordinator) ProposeNestedHost(ctx context.Context, req NestedHostActionRequest) (*NestedActionResult, error) {
+func (c *Coordinator) ProposeNestedHost(ctx context.Context, req NestedHostActionRequest) (*NestedActionResult, error) {
 	skillID, action := strings.TrimSpace(req.SkillID), strings.TrimSpace(req.Action)
 	if skillID == "" || action == "" {
 		return nil, errors.New("a host call names the offered Skill action it acts as")
@@ -113,7 +113,7 @@ func selectOfferedSkillAction(actions []capability.ModelAction, skillID, action 
 
 // hostCall returns the host call actionCallID of the in-flight Turn and the
 // Turn's authority.
-func (c *ActionCoordinator) hostCall(ctx context.Context, scope models.Scope, runID, turnID, actionCallID string) (*nestedActionAuthority, *models.ActionCall, error) {
+func (c *Coordinator) hostCall(ctx context.Context, scope models.Scope, runID, turnID, actionCallID string) (*nestedActionAuthority, *models.ActionCall, error) {
 	if c == nil || c.actions == nil {
 		return nil, nil, errors.New("action coordinator is not configured")
 	}
@@ -134,12 +134,12 @@ func (c *ActionCoordinator) hostCall(ctx context.Context, scope models.Scope, ru
 	return authority, call, nil
 }
 
-func (c *ActionCoordinator) hostWorker() (*ActionWorker, error) {
+func (c *Coordinator) hostWorker() (*Worker, error) {
 	store, ok := c.actions.(models.KernelStore)
 	if !ok {
 		return nil, errors.New("host calls need a kernel store")
 	}
-	return &ActionWorker{store: store, now: c.now, newID: c.newID}, nil
+	return &Worker{store: store, now: c.now, newID: c.newID}, nil
 }
 
 // AcquireNestedHostAction claims a ready host call for the Turn's host, or
@@ -147,7 +147,7 @@ func (c *ActionCoordinator) hostWorker() (*ActionWorker, error) {
 // through issuer. A host acquires once per piece of work (for example each
 // HTTP request of one git operation); every lease is single-use and expires
 // within MaximumActionCredentialLeaseTTL.
-func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope models.Scope, runID, turnID, actionCallID string, issuer ActionCredentialLeaseIssuer) (*NestedHostActionGrant, error) {
+func (c *Coordinator) AcquireNestedHostAction(ctx context.Context, scope models.Scope, runID, turnID, actionCallID string, issuer CredentialLeaseIssuer) (*NestedHostActionGrant, error) {
 	if issuer == nil {
 		return nil, errors.New("host calls need a credential lease issuer")
 	}
@@ -210,7 +210,7 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope m
 	if err != nil {
 		return nil, fmt.Errorf("host call credential lease transport: %w", err)
 	}
-	lease, err := issuer.IssueActionCredentialLease(ctx, ActionCredentialLeaseIssueRequest{
+	lease, err := issuer.IssueActionCredentialLease(ctx, CredentialLeaseIssueRequest{
 		Call: models.CloneActionCall(call), Run: models.CloneAgentRun(run), References: maps.Clone(call.CredentialRefs), Transport: transport,
 	})
 	if err != nil {
@@ -224,7 +224,7 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope m
 
 // FinishNestedHostAction records how the host's work on a host call ended
 // and releases the call. A call still ready is closed without having run.
-func (c *ActionCoordinator) FinishNestedHostAction(ctx context.Context, outcome NestedHostActionOutcome) (*models.ActionCall, error) {
+func (c *Coordinator) FinishNestedHostAction(ctx context.Context, outcome NestedHostActionOutcome) (*models.ActionCall, error) {
 	authority, call, err := c.hostCall(ctx, outcome.Scope, outcome.RunID, outcome.TurnID, outcome.ActionCallID)
 	if err != nil {
 		return nil, err

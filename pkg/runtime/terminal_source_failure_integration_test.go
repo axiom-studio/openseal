@@ -30,7 +30,7 @@ func sourceFailureRun(t *testing.T, store sourceFailureStore, at time.Time) (*mo
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "source-failure-" + uuid.NewString()[:8]}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {

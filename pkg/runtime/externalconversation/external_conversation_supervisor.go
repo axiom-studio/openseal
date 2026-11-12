@@ -14,16 +14,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/callback"
 )
 
-type ExternalConversationSupervisorConfig struct {
+type SupervisorConfig struct {
 	Interval         time.Duration
 	BatchSize        int
-	Inbox            ExternalConversationInboxWorkerConfig
-	Delivery         ExternalConversationDeliveryWorkerConfig
-	Callback         callback.CallbackEventWorkerConfig
+	Inbox            InboxWorkerConfig
+	Delivery         DeliveryWorkerConfig
+	Callback         callback.EventWorkerConfig
 	Acknowledgements RunProgressAcknowledgementWorkerConfig
 }
 
-func (c *ExternalConversationSupervisorConfig) applyDefaults() error {
+func (c *SupervisorConfig) applyDefaults() error {
 	if c.Interval == 0 {
 		c.Interval = time.Second
 	}
@@ -36,18 +36,18 @@ func (c *ExternalConversationSupervisorConfig) applyDefaults() error {
 	return nil
 }
 
-// ExternalConversationSupervisor runs the provider-neutral durable transport
+// Supervisor runs the provider-neutral durable transport
 // loop. Provider verification, normalization, and delivery remain in the
 // Skill-owned adapter host; this supervisor only advances canonical state.
-type ExternalConversationSupervisor struct {
-	inbox            *ExternalConversationInboxWorker
-	replies          *ExternalConversationReplyWorker
-	delivery         *ExternalConversationDeliveryWorker
+type Supervisor struct {
+	inbox            *InboxWorker
+	replies          *ReplyWorker
+	delivery         *DeliveryWorker
 	approvals        *ApprovalNotificationWorker
-	callbacks        *callback.CallbackEventWorker
+	callbacks        *callback.EventWorker
 	acknowledgements *RunProgressAcknowledgementWorker
 	scopes           workqueue.WorkerScopeSource
-	config           ExternalConversationSupervisorConfig
+	config           SupervisorConfig
 	logger           *zap.SugaredLogger
 	wake             chan struct{}
 	signals          atomic.Pointer[workqueue.WorkSignalStatus]
@@ -59,27 +59,27 @@ type ExternalConversationSupervisor struct {
 	stopOnce         sync.Once
 }
 
-func (s *ExternalConversationSupervisor) SetCallbackWorker(worker *callback.CallbackEventWorker) {
+func (s *Supervisor) SetCallbackWorker(worker *callback.EventWorker) {
 	if s != nil {
 		s.callbacks = worker
 	}
 }
 
-func (s *ExternalConversationSupervisor) SetAcknowledgementWorker(worker *RunProgressAcknowledgementWorker) {
+func (s *Supervisor) SetAcknowledgementWorker(worker *RunProgressAcknowledgementWorker) {
 	if s != nil {
 		s.acknowledgements = worker
 	}
 }
 
-func NewExternalConversationSupervisor(
-	inbox *ExternalConversationInboxWorker,
-	replies *ExternalConversationReplyWorker,
-	delivery *ExternalConversationDeliveryWorker,
+func NewSupervisor(
+	inbox *InboxWorker,
+	replies *ReplyWorker,
+	delivery *DeliveryWorker,
 	approvals *ApprovalNotificationWorker,
 	scopes workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
-	config ExternalConversationSupervisorConfig,
-) (*ExternalConversationSupervisor, error) {
+	config SupervisorConfig,
+) (*Supervisor, error) {
 	if inbox == nil || replies == nil || delivery == nil || approvals == nil || scopes == nil {
 		return nil, errors.New("external conversation workers and scope source are required")
 	}
@@ -89,7 +89,7 @@ func NewExternalConversationSupervisor(
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	supervisor := &ExternalConversationSupervisor{
+	supervisor := &Supervisor{
 		inbox: inbox, replies: replies, delivery: delivery, approvals: approvals, scopes: scopes,
 		config: config, logger: logger, wake: make(chan struct{}, 1), queue: workqueue.NewScopeWakeQueue(),
 	}
@@ -97,7 +97,7 @@ func NewExternalConversationSupervisor(
 	return supervisor, nil
 }
 
-func (s *ExternalConversationSupervisor) Start(ctx context.Context) {
+func (s *Supervisor) Start(ctx context.Context) {
 	s.startOnce.Do(func() {
 		workerCtx, cancel := context.WithCancel(ctx)
 		s.cancel = cancel
@@ -107,7 +107,7 @@ func (s *ExternalConversationSupervisor) Start(ctx context.Context) {
 	})
 }
 
-func (s *ExternalConversationSupervisor) Stop() {
+func (s *Supervisor) Stop() {
 	s.stopOnce.Do(func() {
 		if s.cancel != nil {
 			s.cancel()
@@ -116,7 +116,7 @@ func (s *ExternalConversationSupervisor) Stop() {
 	})
 }
 
-func (s *ExternalConversationSupervisor) Wake() {
+func (s *Supervisor) Wake() {
 	select {
 	case s.wake <- struct{}{}:
 	default:
@@ -124,7 +124,7 @@ func (s *ExternalConversationSupervisor) Wake() {
 }
 
 // WakeScope reconciles one scope promptly instead of every listed scope.
-func (s *ExternalConversationSupervisor) WakeScope(scope models.Scope) {
+func (s *Supervisor) WakeScope(scope models.Scope) {
 	s.queue.WakeScope(scope)
 }
 
@@ -132,11 +132,11 @@ func (s *ExternalConversationSupervisor) WakeScope(scope models.Scope) {
 // supervisor then runs for scopes the queue delivers, and schedules each
 // scope's next retry, lease or approval deadline into the queue. Call before
 // Start.
-func (s *ExternalConversationSupervisor) SetWorkSignals(status *workqueue.WorkSignalStatus) {
+func (s *Supervisor) SetWorkSignals(status *workqueue.WorkSignalStatus) {
 	s.signals.Store(status)
 }
 
-func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
+func (s *Supervisor) Reconcile(ctx context.Context) error {
 	scopes, err := s.scopes.ListWorkerScopes(ctx)
 	if err != nil {
 		return err
@@ -144,7 +144,7 @@ func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 	return s.reconcileScopes(ctx, workqueue.NormalizeScopes(scopes))
 }
 
-func (s *ExternalConversationSupervisor) reconcileScopes(ctx context.Context, scopes []models.Scope) error {
+func (s *Supervisor) reconcileScopes(ctx context.Context, scopes []models.Scope) error {
 	var reconcileErrors []error
 	for _, scope := range scopes {
 		if err := s.reconcileScope(ctx, scope); err != nil {
@@ -154,7 +154,7 @@ func (s *ExternalConversationSupervisor) reconcileScopes(ctx context.Context, sc
 	return errors.Join(reconcileErrors...)
 }
 
-func (s *ExternalConversationSupervisor) reconcileScope(ctx context.Context, scope models.Scope) error {
+func (s *Supervisor) reconcileScope(ctx context.Context, scope models.Scope) error {
 	var reconcileErrors []error
 	if s.callbacks != nil {
 		for range s.config.BatchSize {
@@ -207,7 +207,7 @@ func (s *ExternalConversationSupervisor) reconcileScope(ctx context.Context, sco
 
 // scheduleScope schedules a queue-driven scope's next pass: its earliest
 // durable deadline, or a backed-off retry after a failed pass.
-func (s *ExternalConversationSupervisor) scheduleScope(ctx context.Context, signals *workqueue.WorkSignalStatus, scope models.Scope, failed error) {
+func (s *Supervisor) scheduleScope(ctx context.Context, signals *workqueue.WorkSignalStatus, scope models.Scope, failed error) {
 	now := time.Now().UTC()
 	next, err := s.deadlines.NextExternalConversationDeadline(ctx, scope, now)
 	if err != nil && ctx.Err() == nil {
@@ -217,7 +217,7 @@ func (s *ExternalConversationSupervisor) scheduleScope(ctx context.Context, sign
 	signals.Schedule(models.WorkFamilyExternalDue, scope, workqueue.EarliestDeadline(next, retry))
 }
 
-func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
+func (s *Supervisor) loop(ctx context.Context) {
 	defer s.wg.Done()
 	ticker := time.NewTicker(s.config.Interval)
 	defer ticker.Stop()

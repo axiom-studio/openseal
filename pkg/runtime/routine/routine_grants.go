@@ -14,16 +14,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// RoutineBrief is what the user approves before a routine is created.
-type RoutineBrief struct {
+// Brief is what the user approves before a routine is created.
+type Brief struct {
 	Summary   string                `json:"summary"`
 	DeliverTo string                `json:"deliverTo,omitempty"`
 	Grants    []models.RoutineGrant `json:"grants"`
 }
 
-// RoutineGrantCatalog resolves the Agent's bound actions when a brief is
+// GrantCatalog resolves the Agent's bound actions when a brief is
 // proposed. skill.Catalog implements it.
-type RoutineGrantCatalog interface {
+type GrantCatalog interface {
 	ListBindings(context.Context, skill.ScopeReference, string) ([]*skill.Binding, error)
 	GetDefinition(ctx context.Context, id, version string) (*skill.Definition, error)
 	GetDefinitionVariant(ctx context.Context, id, version, sourceIdentity string) (*skill.Definition, error)
@@ -41,7 +41,7 @@ const (
 
 // normalizeRoutineBrief checks a brief's shape. Labels may be empty only
 // when allowEmptyLabels (before the catalog fills them on proposal).
-func normalizeRoutineBrief(brief *RoutineBrief, allowEmptyLabels bool) (*RoutineBrief, error) {
+func normalizeRoutineBrief(brief *Brief, allowEmptyLabels bool) (*Brief, error) {
 	if brief == nil {
 		return nil, errors.New("a routine needs a brief: a summary, where results go and what it may do without asking")
 	}
@@ -60,7 +60,7 @@ func normalizeRoutineBrief(brief *RoutineBrief, allowEmptyLabels bool) (*Routine
 	if err != nil {
 		return nil, err
 	}
-	return &RoutineBrief{Summary: summary, DeliverTo: deliverTo, Grants: grants}, nil
+	return &Brief{Summary: summary, DeliverTo: deliverTo, Grants: grants}, nil
 }
 
 // resolveRoutineBriefGrants proves every grant names an enabled action bound
@@ -72,7 +72,7 @@ func normalizeRoutineBrief(brief *RoutineBrief, allowEmptyLabels bool) (*Routine
 // arguments, and each grant of an action that posts to a channel is pinned to
 // the destinations the user approved, which its label names. An earlier
 // contract that cannot carry a pin cannot grant those actions at all.
-func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners models.RoutineOwnerAddressResolver, run *models.AgentRun, grants []models.RoutineGrant, eventRoutine bool) ([]models.RoutineGrant, error) {
+func resolveRoutineBriefGrants(ctx context.Context, catalog GrantCatalog, owners models.RoutineOwnerAddressResolver, run *models.AgentRun, grants []models.RoutineGrant, eventRoutine bool) ([]models.RoutineGrant, error) {
 	if len(grants) == 0 {
 		return grants, nil
 	}
@@ -347,7 +347,7 @@ func (s *RunbookActivationService) RevokeGrants(ctx context.Context, scope model
 var ErrRoutineGrantsNotOwner = errors.New("only the person who asked for this routine can change what it does without asking")
 
 // routineBriefPreview is the brief as the approval card shows it.
-func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
+func routineBriefPreview(brief *Brief) map[string]interface{} {
 	if brief == nil {
 		return nil
 	}
@@ -379,9 +379,9 @@ func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
 // resolveRoutineBriefArguments normalizes a proposed create_task brief and
 // fills grant labels from the catalog before the arguments are digested, so
 // the approved arguments carry exactly the brief the user sees.
-func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners models.RoutineOwnerAddressResolver, run *models.AgentRun, arguments map[string]interface{}, eventRoutine bool) error {
+func resolveRoutineBriefArguments(ctx context.Context, catalog GrantCatalog, owners models.RoutineOwnerAddressResolver, run *models.AgentRun, arguments map[string]interface{}, eventRoutine bool) error {
 	var parsed struct {
-		Brief *RoutineBrief `json:"brief"`
+		Brief *Brief `json:"brief"`
 	}
 	raw, ok := arguments["brief"].(map[string]interface{})
 	if !ok {

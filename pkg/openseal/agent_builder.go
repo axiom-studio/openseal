@@ -12,12 +12,12 @@ import (
 )
 
 type (
-	AgentBuilderHost               = agentbuilder.AgentBuilderHost
+	AgentBuilderHost               = agentbuilder.Host
 	AgentModelRequest              = agentbuilder.AgentModelRequest
 	AgentCreated                   = agentbuilder.AgentCreated
-	AgentBuilderDraft              = agentbuilder.AgentBuilderDraft
-	AgentBuilderDraftStatus        = agentbuilder.AgentBuilderDraftStatus
-	AgentBuilderDraftFilter        = agentbuilder.AgentBuilderDraftFilter
+	AgentBuilderDraft              = agentbuilder.Draft
+	AgentBuilderDraftStatus        = agentbuilder.DraftStatus
+	AgentBuilderDraftFilter        = agentbuilder.DraftFilter
 	AgentBuilderApprovalAuthorizer = action.AgentBuilderApprovalAuthorizer
 	StartAgentBuilderRequest       = models.StartAgentBuilderRequest
 	StartAgentBuilderResult        = agentbuilder.StartAgentBuilderResult
@@ -77,7 +77,7 @@ func (e *Engine) configureAgentBuilderActions() error {
 		return errors.New("agent builder actions require space storage")
 	}
 	conversations, _ := e.store.(models.ConversationStore)
-	validator, err := agentbuilder.NewAgentBuilderActionValidator(e.agents, e.teams, e.skills, e.spaces, conversations, e.store, e.agentBuilderHost)
+	validator, err := agentbuilder.NewActionValidator(e.agents, e.teams, e.skills, e.spaces, conversations, e.store, e.agentBuilderHost)
 	if err != nil {
 		return err
 	}
@@ -88,14 +88,14 @@ func (e *Engine) configureAgentBuilderActions() error {
 	}
 	e.agentInstaller = installer
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := agentbuilder.NewAgentBuilderActionDispatcher(installer, e.actionPoolSpecs[index].dispatcher)
+		dispatcher, dispatchErr := agentbuilder.NewActionDispatcher(installer, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := agentbuilder.NewAgentBuilderActionDispatcher(installer, e.actionSupervisorSpecs[index].dispatcher)
+		dispatcher, dispatchErr := agentbuilder.NewActionDispatcher(installer, e.actionSupervisorSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}

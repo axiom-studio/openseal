@@ -49,7 +49,7 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 		run.Budget == nil || run.Budget.MaxTurns != 12 {
 		t.Fatalf("decision run = %#v", run)
 	}
-	persisted, err := runtimecollaboration.NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	persisted, err := runtimecollaboration.NewService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
 	if err != nil || persisted.Status != models.AgentRequestStatusPending {
 		t.Fatalf("pending request = %#v, %v", persisted, err)
 	}
@@ -127,7 +127,7 @@ func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t
 	if applied, resolveErr := reconciler.ResolveDecisionRun(t.Context(), failed); resolveErr != nil || !applied {
 		t.Fatalf("resolve failed decision = %t, %v", applied, resolveErr)
 	}
-	persisted, err := runtimecollaboration.NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	persisted, err := runtimecollaboration.NewService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
 	if err != nil || persisted.Status != models.AgentRequestStatusFailed || persisted.ResolutionReason != "provider exhausted retries" {
 		t.Fatalf("resolved request = %#v, %v", persisted, err)
 	}
@@ -199,7 +199,7 @@ func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnde
 	if applied, resolveErr := reconciler.ResolveDecisionRun(t.Context(), failed); resolveErr != nil || !applied {
 		t.Fatalf("resolve orphaned review = %t, %v", applied, resolveErr)
 	}
-	persisted, err := runtimecollaboration.NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	persisted, err := runtimecollaboration.NewService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
 	if err != nil || persisted.Status != models.AgentRequestStatusFailed || persisted.ResolutionReason != "review provider unavailable" {
 		t.Fatalf("resolved request = %#v, %v", persisted, err)
 	}
@@ -217,7 +217,7 @@ func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnde
 func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing.T) {
 	store := &collaborationtest.TeamStore{Store: kerneltest.NewStore(t)}
 	source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
-	otherSource, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	otherSource, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: request.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"},
 		AssignedAgentID: "other", Goal: "Unrelated work", Source: models.RunSourceManual,
 	})
@@ -249,7 +249,7 @@ func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing
 	if first.DecisionsApplied != 1 {
 		t.Fatalf("collision reconcile = %#v", first)
 	}
-	persisted, err := runtimecollaboration.NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	persisted, err := runtimecollaboration.NewService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
 	if err != nil || persisted.Status != models.AgentRequestStatusFailed {
 		t.Fatalf("failed request = %#v, %v", persisted, err)
 	}
@@ -269,8 +269,8 @@ func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing
 func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
 	store := &collaborationtest.TeamStore{Store: kerneltest.NewStore(t)}
 	scope := models.Scope{Kind: "tenant", ID: "paginated-inbox"}
-	portfolio := portfolio.NewPortfolioService(store)
-	collaboration := runtimecollaboration.NewCollaborationService(store)
+	portfolio := portfolio.NewService(store)
+	collaboration := runtimecollaboration.NewService(store)
 	const requestCount = 205
 	for index := 0; index < requestCount; index++ {
 		source, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
@@ -321,7 +321,7 @@ func TestAgentRequestInboxRecoversPreauthorizedDelegationWithoutReview(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	persisted, err := runtimecollaboration.NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	persisted, err := runtimecollaboration.NewService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
 	if err != nil || persisted.Status != models.AgentRequestStatusAccepted || persisted.AssignedAgentID != "recipient" {
 		t.Fatalf("accepted request = %#v, %v", persisted, err)
 	}
@@ -372,7 +372,7 @@ func TestAgentRequestInboxUsesDeterministicTeamMemberAndAcceptancePolicy(t *test
 					t.Fatalf("review result=%#v runs=%#v", result, runs)
 				}
 			} else {
-				persisted, getErr := runtimecollaboration.NewCollaborationService(store).GetAgentRequest(t.Context(), scope, request.ID)
+				persisted, getErr := runtimecollaboration.NewService(store).GetAgentRequest(t.Context(), scope, request.ID)
 				if getErr != nil || result.RequestsAccepted != 1 || persisted.Status != models.AgentRequestStatusAccepted ||
 					persisted.AssignedAgentID != "a-agent" || len(runs) != 1 || runs[0].Source != models.RunSourceRequest {
 					t.Fatalf("auto acceptance result=%#v request=%#v runs=%#v error=%v", result, persisted, runs, getErr)

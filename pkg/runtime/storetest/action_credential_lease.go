@@ -26,7 +26,7 @@ func ActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store Actio
 	now := time.Now().UTC().Round(0)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-credential-lease"}
 	const deploymentID = "research-agent"
-	// The Run runtime's PortfolioService builds for a manual request.
+	// The Run runtime's portfolio.Service builds for a manual request.
 	run := QueuedAgentRun(scope, deploymentID, "Research safely", now)
 	run.Source = models.RunSourceManual
 	if err := store.CreateAgentRun(ctx, run); err != nil {

@@ -52,7 +52,7 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 	insert("pending-member", "member", "pending")
 	insert("pending-gone", "gone", "pending")
 	insert("history", "member", "resolved")
-	if _, err := externalconversation.NewExternalConversationGatewayService(store, nil).Create(ctx, externalconversation.CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
+	if _, err := externalconversation.NewGatewayService(store, nil).Create(ctx, externalconversation.CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
 		Gateway: storetest.IngressGateway(models.Scope{Kind: "tenant", ID: "one"}), Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
 		t.Fatal(err)
 	}

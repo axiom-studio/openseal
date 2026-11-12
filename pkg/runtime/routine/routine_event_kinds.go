@@ -2,8 +2,8 @@ package routine
 
 import "github.com/axiom-studio/openseal/pkg/models"
 
-// RoutineEventKinds lists every kind in a fixed order.
-var RoutineEventKinds = []models.RoutineEventKind{
+// EventKinds lists every kind in a fixed order.
+var EventKinds = []models.RoutineEventKind{
 	models.RoutineEventSlackMessage,
 	models.RoutineEventTelegramMessage,
 	models.RoutineEventGitHub,

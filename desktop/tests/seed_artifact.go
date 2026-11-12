@@ -43,7 +43,7 @@ func main() {
 	} {
 		saved, err := content.Put(ctx, models.ArtifactContentWrite{Scope: scope, MediaType: fixture.mime, Reader: bytes.NewReader(fixture.body), SizeBytes: int64(len(fixture.body))})
 		check(err)
-		_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{ExpectedLatestVersion: fixture.version - 1, Artifact: &models.Artifact{ID: fixture.id, Version: fixture.version, Scope: scope, Name: fixture.name, MediaType: fixture.mime, ContentRef: saved.ContentRef, Digest: saved.Digest, SizeBytes: saved.SizeBytes, Classification: "internal", Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "synthetic-analyst"}, RunID: run.ID}}})
+		_, err = artifactcatalog.NewCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{ExpectedLatestVersion: fixture.version - 1, Artifact: &models.Artifact{ID: fixture.id, Version: fixture.version, Scope: scope, Name: fixture.name, MediaType: fixture.mime, ContentRef: saved.ContentRef, Digest: saved.Digest, SizeBytes: saved.SizeBytes, Classification: "internal", Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "synthetic-analyst"}, RunID: run.ID}}})
 		check(err)
 	}
 }

@@ -41,7 +41,7 @@ func ApprovalModeConversation(t *testing.T, store *sqlite.Store) *models.Convers
 func ApprovalModeConversationWithKey(t *testing.T, store *sqlite.Store, key string) *models.Conversation {
 	t.Helper()
 	SeedSpace(t, store, models.Scope{Kind: "tenant", ID: "one"})
-	created, _, err := conversation.NewConversationService(store).CreateConversation(context.Background(), conversation.CreateConversationRequest{
+	created, _, err := conversation.NewService(store).CreateConversation(context.Background(), conversation.CreateConversationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat " + key, IdempotencyKey: key,
 	})
 	if err != nil {
@@ -52,7 +52,7 @@ func ApprovalModeConversationWithKey(t *testing.T, store *sqlite.Store, key stri
 
 // SetApprovalMode sets the approval mode of target at its revision as
 // ApprovalModeActor.
-func SetApprovalMode(t *testing.T, service *conversation.ConversationApprovalModeService, target *models.Conversation, mode models.ConversationApprovalMode) *conversation.SetConversationApprovalModeResult {
+func SetApprovalMode(t *testing.T, service *conversation.ApprovalModeService, target *models.Conversation, mode models.ConversationApprovalMode) *conversation.SetConversationApprovalModeResult {
 	t.Helper()
 	result, err := service.SetApprovalMode(context.Background(), conversation.SetConversationApprovalModeRequest{
 		Scope: target.Scope, ConversationID: target.ID, ExpectedRevision: target.Revision, Mode: mode, Actor: ApprovalModeActor,
@@ -103,7 +103,7 @@ var approvalModeRuns int
 
 // ProposeForApprovalMode proposes action in a new Run of target and parks
 // the Run on its approval.
-func ProposeForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, target *models.Conversation, action string) *models.ApprovalCheckpoint {
+func ProposeForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.Coordinator, target *models.Conversation, action string) *models.ApprovalCheckpoint {
 	t.Helper()
 	approvalModeRuns++
 	return ProposeForApprovalModeInConversation(t, store, coordinator, target.ID, action, fmt.Sprintf("run-%s-%d", action, approvalModeRuns))
@@ -112,7 +112,7 @@ func ProposeForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *runt
 // ProposeForApprovalModeInConversation proposes action as a loop step of a
 // new Run of the conversation and parks the Run on its approval, as the loop
 // does at step end.
-func ProposeForApprovalModeInConversation(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, conversationID, action, key string) *models.ApprovalCheckpoint {
+func ProposeForApprovalModeInConversation(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.Coordinator, conversationID, action, key string) *models.ApprovalCheckpoint {
 	t.Helper()
 	result, f, err := ProposeLoopForApprovalMode(t, store, coordinator, conversationID, action, key, map[string]interface{}{})
 	if err != nil {
@@ -128,19 +128,19 @@ func ProposeForApprovalModeInConversation(t *testing.T, store *sqlite.Store, coo
 
 // ProposeLoopForApprovalMode proposes action as tool call key of a loop step
 // of a new Run acting for conversationID.
-func ProposeLoopForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*models.ActionProposalResult, *actiontest.LoopProposalFixture, error) {
+func ProposeLoopForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.Coordinator, conversationID, action, key string, arguments map[string]interface{}) (*models.ActionProposalResult, *actiontest.LoopProposalFixture, error) {
 	t.Helper()
 	return ProposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{"conversationId": conversationID}, action, key, arguments)
 }
 
 // ProposeLoopForApprovalModeWithContext is ProposeLoopForApprovalMode for a
 // new Run with this Context.
-func ProposeLoopForApprovalModeWithContext(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, runContext map[string]interface{}, action, key string, arguments map[string]interface{}) (*models.ActionProposalResult, *actiontest.LoopProposalFixture, error) {
+func ProposeLoopForApprovalModeWithContext(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.Coordinator, runContext map[string]interface{}, action, key string, arguments map[string]interface{}) (*models.ActionProposalResult, *actiontest.LoopProposalFixture, error) {
 	t.Helper()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
-	runs := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	runs := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := runs.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, AssignedAgentID: "assistant", Goal: key, Source: models.RunSourceObjective,
 		Context: runContext,

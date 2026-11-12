@@ -114,7 +114,7 @@ func TestAgentTrialTimerWakeCancelsRunningChild(t *testing.T) {
 	deadline := agentbuilder.AgentTrialDeadline(f.Child)
 
 	// The timer wakes the waiting parent only at the deadline.
-	wakes := agentrun.NewAgentRunWakeService(f.Store, f.Store)
+	wakes := agentrun.NewWakeService(f.Store, f.Store)
 	early, err := wakes.WakeDueTimers(ctx, f.Scope, deadline.Add(-time.Second))
 	if err != nil || len(early.Runs) != 0 || early.NextWakeAt == nil || !early.NextWakeAt.Equal(deadline) {
 		t.Fatalf("early wake = %#v, %v", early, err)

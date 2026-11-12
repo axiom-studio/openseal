@@ -3,7 +3,7 @@ package runtime
 // Steering and supersede journeys (run-loop section 12 §5.3, D8): a message
 // that arrives while a chat Run is working is appended to the Run's session
 // at its next step, and an answer the model wrote without having seen it is
-// never posted. The Runs are driven by the real RunLoop through the loop
+// never posted. The Runs are driven by the real runloop.Loop through the loop
 // fixture, whose chat bindings carry the real conversation seams
 // (bindConversationLoop: the catch-up preparer, the run_context note and the
 // chat delivery).
@@ -28,14 +28,14 @@ import (
 
 // steerClaim claims runID and drives one claim with the fixture's binding,
 // which binds the production conversation seams for a chat Run.
-func steerClaim(f *looptest.Fixture, runID string) (runloop.RunLoopExit, *models.AgentRun) {
+func steerClaim(f *looptest.Fixture, runID string) (runloop.Exit, *models.AgentRun) {
 	f.T.Helper()
 	claimed := f.Claim(runID)
 	binding := f.Binding(claimed)
 	if binding.Session != nil && claimed.SessionID != binding.Session.ID {
 		claimed = f.MustRun(runID)
 	}
-	exit := f.Loop.Drive(f.Ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.WorkerID, Binding: binding})
+	exit := f.Loop.Drive(f.Ctx, runloop.Claim{Run: claimed, WorkerID: f.WorkerID, Binding: binding})
 	return exit, f.MustRun(runID)
 }
 
@@ -44,7 +44,7 @@ func steerToRest(f *looptest.Fixture, runID string, maxClaims int) *models.Agent
 	f.T.Helper()
 	for i := 0; i < maxClaims; i++ {
 		exit, run := steerClaim(f, runID)
-		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
+		if exit.Err != nil && exit.Reason != runloop.ExitRequeued {
 			var events []string
 			for _, event := range f.Events(runID) {
 				events = append(events, event.EventType)

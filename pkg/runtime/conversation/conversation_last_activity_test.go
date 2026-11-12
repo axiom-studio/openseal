@@ -17,7 +17,7 @@ func TestLastConversationActivityMatchesTheOwnerList(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := open(t)
 			ctx := context.Background()
-			service := runtimeconversation.NewConversationService(store)
+			service := runtimeconversation.NewService(store)
 			scope := models.Scope{Kind: "tenant", ID: "last-activity"}
 			conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 			conversationtest.SeedSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "elsewhere"})

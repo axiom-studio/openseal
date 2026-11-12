@@ -25,7 +25,7 @@ import (
 
 func continuationLifecycleFixture(t *testing.T, store *sqlite.Store, id string) (*models.AgentRun, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: id}
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
@@ -265,9 +265,9 @@ func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 					t.Fatalf("claim: %#v %v", claimed, err)
 				}
 			}
-			reconciler, err := conversationrun.NewConversationRunReconciler(conversationruntest.NewScheduler(t, store), workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) {
+			reconciler, err := conversationrun.NewReconciler(conversationruntest.NewScheduler(t, store), workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) {
 				return []models.Scope{run.Scope}, nil
-			}), nil, conversationrun.ConversationRunReconcilerConfig{})
+			}), nil, conversationrun.ReconcilerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}

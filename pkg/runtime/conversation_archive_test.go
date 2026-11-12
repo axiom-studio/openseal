@@ -29,7 +29,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
-			service := conversation.NewConversationService(store.(models.ConversationStore))
+			service := conversation.NewService(store.(models.ConversationStore))
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "archive"}
 			seedTestSpace(t, store.(models.SpaceStore), scope)
@@ -37,9 +37,9 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 			request := conversation.ImportConversationArchiveRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
 				Title:          "Imported launch history",
-				Source:         conversation.ConversationArchiveSource{System: "legacy-system", ResourceType: "team-chat", ResourceID: "conversation-42"},
+				Source:         conversation.ArchiveSource{System: "legacy-system", ResourceType: "team-chat", ResourceID: "conversation-42"},
 				IdempotencyKey: "legacy-system-team-chat-conversation-42",
-				Messages: []conversation.ConversationArchiveMessage{
+				Messages: []conversation.ArchiveMessage{
 					{
 						RecordID: "message-1", Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "23"},
 						Intent: models.MessageIntentQuestion, Content: "Is the launch ready?",
@@ -81,7 +81,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 				len(replayed.Messages) != 2 {
 				t.Fatalf("replayed import = %#v, %v", replayed, err)
 			}
-			scheduler, err := conversationrun.NewConversationRunScheduler(store.(models.ConversationStore), store, conversationrun.ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewScheduler(store.(models.ConversationStore), store, conversationrun.SchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -100,11 +100,11 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 func TestConversationArchiveImportRejectsUnknownReplyAndDuplicateRecords(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "archive"})
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	base := conversation.ImportConversationArchiveRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "archive"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
-		Title: "Imported history", Source: conversation.ConversationArchiveSource{System: "source", ResourceType: "chat", ResourceID: "1"},
-		IdempotencyKey: "archive-1", Messages: []conversation.ConversationArchiveMessage{{
+		Title: "Imported history", Source: conversation.ArchiveSource{System: "source", ResourceType: "chat", ResourceID: "1"},
+		IdempotencyKey: "archive-1", Messages: []conversation.ArchiveMessage{{
 			RecordID: "message-1", Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "23"},
 			Intent: models.MessageIntentUpdate, Content: "Status", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			CreatedAt: time.Now().UTC(), ReplyToRecordID: "missing",

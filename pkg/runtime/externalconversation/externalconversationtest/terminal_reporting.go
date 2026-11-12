@@ -39,7 +39,7 @@ func TerminalReportingStoreOf(t *testing.T, store interface{}) TerminalReporting
 func TerminalReportingRun(t *testing.T, store TerminalReportingStore, scope models.Scope, at time.Time) (*models.AgentRun, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "report-agent"}
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Original request", IdempotencyKey: uuid.NewString()})
 	if err != nil {

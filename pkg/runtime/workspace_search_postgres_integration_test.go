@@ -26,7 +26,7 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	t.Cleanup(func() {
 		_ = store.Close()
 	})
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	for _, tenant := range []string{"one", "two"} {
 		scope := models.Scope{Kind: "tenant", ID: tenant}
 		seedTestSpace(t, store, scope)

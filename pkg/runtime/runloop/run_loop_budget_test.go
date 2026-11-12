@@ -59,7 +59,7 @@ func newStepBudgetFixture(t *testing.T, budget *models.BudgetPolicy) *stepBudget
 	ctx := t.Context()
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "local", ID: "step-budget-" + strings.ReplaceAll(t.Name(), "/", "-")}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "bounded work", Budget: budget,
 	})
 	if err != nil {

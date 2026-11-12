@@ -36,7 +36,7 @@ type Server struct {
 	bearerToken              string
 	teamWorkEnabled          bool
 	desktopConversationScope *models.Scope
-	agentRunCreation         func(context.Context, models.CreateAgentRunRequest) (*agentrun.AgentRunCommandResult, error)
+	agentRunCreation         func(context.Context, models.CreateAgentRunRequest) (*agentrun.CommandResult, error)
 	workforceBundles         kernelbundle.InstallationStore
 	workforceBundleActor     string
 	workforceBundleTrust     kernelbundle.TrustPolicy
@@ -125,7 +125,7 @@ func (s *Server) SetActionApprovalAuthorizer(authorizer action.ApprovalAuthorize
 // SetAgentRunCreationDispatcher enables Run creation only after the host has
 // installed a worker capable of claiming the created work. Inspection and
 // lifecycle intervention remain available without a worker.
-func (s *Server) SetAgentRunCreationDispatcher(dispatch func(context.Context, models.CreateAgentRunRequest) (*agentrun.AgentRunCommandResult, error)) {
+func (s *Server) SetAgentRunCreationDispatcher(dispatch func(context.Context, models.CreateAgentRunRequest) (*agentrun.CommandResult, error)) {
 	s.agentRunCreation = dispatch
 }
 

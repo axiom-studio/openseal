@@ -12,18 +12,18 @@ import (
 // Resolve the channel through kernel-owned lineage, never model-supplied context
 // on a delegated child. Restrict this handoff to the acting Agent's own work in
 // that chat.
-func ConversationWorkOrigin(ctx context.Context, runs models.PortfolioStore, conversations models.ConversationStore, run *models.AgentRun) (*models.AgentRun, *models.Conversation, *models.ChannelMessage, error) {
-	return ConversationWorkOriginForState(ctx, runs, conversations, run, false)
+func WorkOrigin(ctx context.Context, runs models.PortfolioStore, conversations models.ConversationStore, run *models.AgentRun) (*models.AgentRun, *models.Conversation, *models.ChannelMessage, error) {
+	return WorkOriginForState(ctx, runs, conversations, run, false)
 }
 
 // WorkOrigin is conversationWorkOrigin over the service's store.
-func (s *ConversationService) WorkOrigin(ctx context.Context, runs models.PortfolioStore, run *models.AgentRun) (*models.AgentRun, *models.Conversation, *models.ChannelMessage, error) {
-	return ConversationWorkOrigin(ctx, runs, s.store, run)
+func (s *Service) WorkOrigin(ctx context.Context, runs models.PortfolioStore, run *models.AgentRun) (*models.AgentRun, *models.Conversation, *models.ChannelMessage, error) {
+	return WorkOrigin(ctx, runs, s.store, run)
 }
 
 // Accepted-answer receipts may outlive a completed or paused parent. Resolve
 // their immutable initiating identity without treating it as a fresh Run grant.
-func ConversationWorkOriginForState(ctx context.Context, runs models.PortfolioStore, conversations models.ConversationStore, run *models.AgentRun, includeInactiveParents bool) (*models.AgentRun, *models.Conversation, *models.ChannelMessage, error) {
+func WorkOriginForState(ctx context.Context, runs models.PortfolioStore, conversations models.ConversationStore, run *models.AgentRun, includeInactiveParents bool) (*models.AgentRun, *models.Conversation, *models.ChannelMessage, error) {
 	if run != nil && run.ParentRunID == "" && run.Context[models.ConversationTaskContextKey] != nil {
 		return conversationTaskWorkOrigin(ctx, runs, conversations, run)
 	}
@@ -60,9 +60,9 @@ func ConversationWorkOriginForState(ctx context.Context, runs models.PortfolioSt
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		agentID := ConversationRunAgentID(conversation, run)
+		agentID := RunAgentID(conversation, run)
 		if conversation == nil || conversation.Status != models.ConversationStatusActive || conversation.Owner != run.Owner ||
-			agentID == "" || ConversationRunAgentID(conversation, current) != agentID {
+			agentID == "" || RunAgentID(conversation, current) != agentID {
 			return nil, nil, nil, nil
 		}
 		trigger, err := conversations.GetChannelMessage(ctx, run.Scope, id, triggerID)
@@ -111,7 +111,7 @@ func conversationTaskWorkOrigin(ctx context.Context, runs models.PortfolioStore,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	actor, valid := ConversationMessageInitiatingUser(conversation, trigger)
+	actor, valid := MessageInitiatingUser(conversation, trigger)
 	if !valid || actor != task.AuthenticatedActor || !models.IsValidConversationTaskAdmissionSource(source, conversation, trigger, task) {
 		return nil, nil, nil, nil
 	}
@@ -153,7 +153,7 @@ func ForegroundConversationWorkOrigin(ctx context.Context, runs models.Portfolio
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if _, valid := ConversationMessageInitiatingUser(conversation, trigger); !valid {
+	if _, valid := MessageInitiatingUser(conversation, trigger); !valid {
 		return nil, nil, nil, nil
 	}
 	if models.IsTeamMemberRun(canonical) {
@@ -162,7 +162,7 @@ func ForegroundConversationWorkOrigin(ctx context.Context, runs models.Portfolio
 		}
 		return canonical, conversation, trigger, nil
 	}
-	expected := ConversationAgentRunRequest(conversation, trigger)
+	expected := AgentRunRequest(conversation, trigger)
 	if run.ID != agentrun.RunIDForIdempotencyKey(run.Scope, expected.IdempotencyKey) || run.ConcurrencyKey != expected.ConcurrencyKey ||
 		canonical.ConcurrencyKey != expected.ConcurrencyKey || canonical.Context["threadRootMessageId"] != expected.Context["threadRootMessageId"] {
 		return nil, nil, nil, nil

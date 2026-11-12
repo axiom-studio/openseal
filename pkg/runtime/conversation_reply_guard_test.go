@@ -37,7 +37,7 @@ func newReplyGuardFixture(t *testing.T, store models.KernelStore) *replyGuardFix
 	}
 	f := &replyGuardFixture{LoopStore: actiontest.NewLoopStore(t, store), conversations: conversations}
 	seedTestSpace(t, store.(models.SpaceStore), f.Scope)
-	conversation, _, err := conversation.NewConversationService(conversations).CreateConversation(f.Ctx, conversation.CreateConversationRequest{
+	conversation, _, err := conversation.NewService(conversations).CreateConversation(f.Ctx, conversation.CreateConversationRequest{
 		ID: "chat-" + uuid.NewString()[:8], Scope: f.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"},
 		Title: "Reply guard", IdempotencyKey: "reply-guard-" + uuid.NewString()[:8],
 	})

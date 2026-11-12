@@ -82,10 +82,10 @@ func (c *governedRunChain) adopt(written *models.AgentRun) {
 
 // GovernedToolExecutorConfig wires the governed executor.
 type GovernedToolExecutorConfig struct {
-	Actions   *runtimeaction.ActionCoordinator
+	Actions   *runtimeaction.Coordinator
 	Approvals *runtimeaction.ApprovalCoordinator
 	// Worker executes loop calls inline in the claiming replica.
-	Worker *runtimeaction.ActionWorker
+	Worker *runtimeaction.Worker
 	Store  models.KernelStore
 	// Observer projects created proposals (optional).
 	Observer ActionProposalObserver
@@ -100,8 +100,8 @@ type GovernedToolExecutorConfig struct {
 // end (PlanPark, ReplanPark).
 type GovernedToolExecutor struct {
 	governedParker
-	actions  *runtimeaction.ActionCoordinator
-	worker   *runtimeaction.ActionWorker
+	actions  *runtimeaction.Coordinator
+	worker   *runtimeaction.Worker
 	store    models.KernelStore
 	observer ActionProposalObserver
 	logger   *zap.SugaredLogger
@@ -277,13 +277,13 @@ func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCal
 		return GovernedToolOutcome{}, err
 	}
 	if action == nil {
-		return refusedOutcome(renderGovernedRejection(&runtimeaction.ActionProposalRejection{
+		return refusedOutcome(renderGovernedRejection(&runtimeaction.ProposalRejection{
 			Code: runtimeaction.ProposalRejectionUnknownTool, Message: fmt.Sprintf("No tool named %q is available here.", call.Name),
 		}))
 	}
 	input, err := modelstep.ParseGovernedToolInput(*action, call.Arguments, governedDirective(call.Directive))
 	if err != nil {
-		var rejection *runtimeaction.ActionProposalRejection
+		var rejection *runtimeaction.ProposalRejection
 		if errors.As(err, &rejection) {
 			return refusedOutcome(renderGovernedRejection(rejection))
 		}
@@ -297,7 +297,7 @@ func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCal
 	}
 	req := runtimeaction.ProposeActionRequest{
 		Scope: call.Run.Scope, RunID: call.Run.ID, TurnID: call.Step.ID, WorkerID: call.WorkerID,
-		DeploymentID: runtimeaction.ActionDeploymentForSelection(call.Binding, action),
+		DeploymentID: runtimeaction.DeploymentForSelection(call.Binding, action),
 		BindingID:    action.BindingID, BindingRevision: action.BindingRevision,
 		SkillID: action.SkillID, SkillVersion: action.Version, Action: action.Action,
 		Arguments:       action.ActionInput(input.Arguments),
@@ -319,7 +319,7 @@ func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCal
 		}
 	}
 	if err != nil {
-		var rejection *runtimeaction.ActionProposalRejection
+		var rejection *runtimeaction.ProposalRejection
 		var maintenance *models.SkillRuntimeMaintenanceError
 		var inFlight *models.ExternalOperationConflictError
 		switch {
@@ -435,7 +435,7 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 	if current.Status == models.ActionCallStatusSucceeded && current.DuplicateOfActionCallID == "" {
 		outcome.Output = maps.Clone(current.Output)
 	}
-	if current.Status == models.ActionCallStatusDenied && current.Error == runtimeaction.ActionBudgetExhaustedReason {
+	if current.Status == models.ActionCallStatusDenied && current.Error == runtimeaction.BudgetExhaustedReason {
 		outcome.BudgetExhausted = true
 	}
 	return outcome, nil

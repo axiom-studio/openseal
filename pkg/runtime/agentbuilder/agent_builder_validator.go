@@ -25,37 +25,37 @@ import (
 // catalog (the OSS daemon).
 var errAgentModelUnavailable = errors.New("model selection is unavailable here")
 
-// AgentBuilderActionValidator checks a builder action (create_agent,
+// ActionValidator checks a builder action (create_agent,
 // update_agent, try_agent) before a card exists and returns the secret-free
 // preview the review card renders. Every refusal becomes an is_error tool
 // result the builder can correct.
-type AgentBuilderActionValidator struct {
+type ActionValidator struct {
 	agents        *kernelagent.Registry
 	teams         *kernelteam.Registry
 	catalog       *skill.Catalog
 	spaces        *portfolio.SpaceService
 	conversations models.ConversationStore
 	runs          models.PortfolioStore
-	host          AgentBuilderHost
+	host          Host
 }
 
-// NewAgentBuilderActionValidator needs the Agent and Team registries, the
+// NewActionValidator needs the Agent and Team registries, the
 // Skill catalog and the spaces. conversations and runs place a created Agent
 // in the conversation's space; without them it goes to the default space of
 // the person the run acts for. host may be nil.
-func NewAgentBuilderActionValidator(
+func NewActionValidator(
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
 	catalog *skill.Catalog,
 	spaces *portfolio.SpaceService,
 	conversations models.ConversationStore,
 	runs models.PortfolioStore,
-	host AgentBuilderHost,
-) (*AgentBuilderActionValidator, error) {
+	host Host,
+) (*ActionValidator, error) {
 	if agents == nil || teams == nil || catalog == nil || spaces == nil {
 		return nil, errors.New("agent builder validator requires the Agent and Team registries, the Skill catalog and spaces")
 	}
-	return &AgentBuilderActionValidator{
+	return &ActionValidator{
 		agents: agents, teams: teams, catalog: catalog, spaces: spaces,
 		conversations: conversations, runs: runs, host: host,
 	}, nil
@@ -64,7 +64,7 @@ func NewAgentBuilderActionValidator(
 // ResolveActionProposalArguments fills the kernel-resolved arguments: the
 // space of a created Agent (the Run's conversation space, else Default) and
 // the current revision of an updated Agent.
-func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+func (v *ActionValidator) ResolveActionProposalArguments(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if !isAgentBuilderAction(input.Bound) {
 		return nil, false, nil
 	}
@@ -109,7 +109,7 @@ func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context
 
 // ValidateActionProposal returns the §2.2 card preview for create_agent and
 // update_agent, and nil for the read actions after checking try_agent.
-func (v *AgentBuilderActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *ActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if !isAgentBuilderAction(input.Bound) {
 		return nil, nil
 	}
@@ -151,7 +151,7 @@ func (v *AgentBuilderActionValidator) ValidateActionProposal(ctx context.Context
 // authorizeAgentChange asks the host whether the Run's person may change
 // agentID. A refusal reads like a missing Agent, so the card never shows an
 // Agent the person can't manage. A nil host (the OSS daemon) has one person.
-func (v *AgentBuilderActionValidator) authorizeAgentChange(ctx context.Context, run *models.AgentRun, agentID string) error {
+func (v *ActionValidator) authorizeAgentChange(ctx context.Context, run *models.AgentRun, agentID string) error {
 	agentID = strings.TrimSpace(agentID)
 	if v.host == nil || agentID == "" {
 		return nil
@@ -169,9 +169,9 @@ func (v *AgentBuilderActionValidator) authorizeAgentChange(ctx context.Context, 
 // runSpaceID is the space an Agent or Team made by the run goes to when the
 // call names none: the space of the run's chat, else the default space of
 // the person the run acts for.
-func (v *AgentBuilderActionValidator) runSpaceID(ctx context.Context, run *models.AgentRun) (string, error) {
+func (v *ActionValidator) runSpaceID(ctx context.Context, run *models.AgentRun) (string, error) {
 	if v.runs != nil && v.conversations != nil {
-		_, conversation, _, err := conversation.ConversationWorkOrigin(ctx, v.runs, v.conversations, run)
+		_, conversation, _, err := conversation.WorkOrigin(ctx, v.runs, v.conversations, run)
 		if err != nil {
 			return "", err
 		}
@@ -239,7 +239,7 @@ func resolveAgentCreate(
 	teams *kernelteam.Registry,
 	catalog *skill.Catalog,
 	spaces *portfolio.SpaceService,
-	host AgentBuilderHost,
+	host Host,
 	scope models.Scope,
 	arguments map[string]interface{},
 ) (*resolvedAgentCreate, error) {
@@ -282,7 +282,7 @@ func resolveAgentUpdate(
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
 	catalog *skill.Catalog,
-	host AgentBuilderHost,
+	host Host,
 	scope models.Scope,
 	builderID string,
 	arguments map[string]interface{},
@@ -373,7 +373,7 @@ func resolveAgentUpdate(
 	}, nil
 }
 
-func resolveAgentTry(ctx context.Context, host AgentBuilderHost, scope models.Scope, arguments map[string]interface{}) (models.AgentTryArguments, error) {
+func resolveAgentTry(ctx context.Context, host Host, scope models.Scope, arguments map[string]interface{}) (models.AgentTryArguments, error) {
 	var args models.AgentTryArguments
 	if err := decodeAgentBuilderArguments(arguments, &args); err != nil {
 		return args, err
@@ -565,7 +565,7 @@ func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants
 		// The declared ceiling is never trusted: it is the riskiest allowed
 		// action of the exact catalog definition.
 		grant.MaximumRisk = catalogGrantRisk(definition, grant.AllowedActions)
-		if err := skillbinding.ValidateSkillBindingArguments(definition, skillbinding.SkillBindingUpsertArguments{
+		if err := skillbinding.ValidateSkillBindingArguments(definition, skillbinding.UpsertArguments{
 			SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, SourceIdentity: grant.SourceIdentity,
 			AllowedActions: grant.AllowedActions, EnablePrompt: grant.EnablePrompt,
 			MaximumRisk: grant.MaximumRisk, Config: grant.Config,
@@ -641,7 +641,7 @@ func resolveAgentRemovedBindings(ctx context.Context, catalog *skill.Catalog, sc
 	return result, nil
 }
 
-func validateAgentBuilderModel(ctx context.Context, host AgentBuilderHost, scope models.Scope, model string) error {
+func validateAgentBuilderModel(ctx context.Context, host Host, scope models.Scope, model string) error {
 	if model == "" {
 		return nil
 	}

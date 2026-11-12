@@ -27,7 +27,7 @@ func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing
 		}
 		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable, Actions: []skill.DiscoveryAction{{Name: "read", Risk: skill.RiskLevelRead}}}}}, nil
 	})
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 		}
 		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "2.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable, Actions: []skill.DiscoveryAction{{Name: "read", Risk: skill.RiskLevelRead}}}}}, nil
 	})
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 		discoveries++
 		return nil, errors.New("permanent catalog conflict")
 	})
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestSkillSetupResolvesAnOmittedSourceFromTheCatalog(t *testing.T) {
 		}
 		return &skill.DiscoveryPage{Items: items}, nil
 	})
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}

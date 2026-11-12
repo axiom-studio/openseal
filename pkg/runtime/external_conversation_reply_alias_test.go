@@ -15,11 +15,11 @@ import (
 
 type replyAliasDispatcher struct{}
 
-func (replyAliasDispatcher) DispatchExternalConversation(_ context.Context, req externalconversation.ExternalConversationDispatchRequest) (*externalconversation.ExternalConversationDispatchResult, error) {
-	return &externalconversation.ExternalConversationDispatchResult{RunID: "reply-run-" + req.Message.ID}, nil
+func (replyAliasDispatcher) DispatchExternalConversation(_ context.Context, req externalconversation.DispatchRequest) (*externalconversation.DispatchResult, error) {
+	return &externalconversation.DispatchResult{RunID: "reply-run-" + req.Message.ID}, nil
 }
 
-func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *externalconversation.ExternalConversationInboxWorker, endpoint *models.ExternalConversationEndpoint,
+func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *externalconversation.InboxWorker, endpoint *models.ExternalConversationEndpoint,
 	chatID, messageID, threadID, parentID, text string,
 ) *models.ChannelMessage {
 	t.Helper()
@@ -53,9 +53,9 @@ func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *externalc
 func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t *testing.T) {
 	ctx := t.Context()
 	store, catalog, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
-	host := &externalconversationtest.RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextUnavailable}}
-	worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{
-		WorkerID: "reply-alias-worker", ContextHost: host, ContextCatalog: externalconversationtest.ContextHistoryResolver{ExternalConversationAdapterResolver: catalog},
+	host := &externalconversationtest.RecordingContextHost{Result: &externalconversation.ContextResult{Status: runtimeconversation.ExternalConversationContextUnavailable}}
+	worker, err := externalconversation.NewInboxWorker(store, replyAliasDispatcher{}, externalconversation.InboxWorkerConfig{
+		WorkerID: "reply-alias-worker", ContextHost: host, ContextCatalog: externalconversationtest.ContextHistoryResolver{AdapterResolver: catalog},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t
 	if reply.ThreadRootID != root.ID || reply.ReplyToMessageID != root.ID {
 		t.Fatalf("reply to user lost root: root=%#v, reply=%#v", root, reply)
 	}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversation, err := service.GetConversation(ctx, endpoint.Scope, root.ConversationID)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestExternalConversationReplyAliasesNeverReuseForeignParents(t *testing.T) 
 		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
 			store, _, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
-			worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{WorkerID: "reply-alias-worker"})
+			worker, err := externalconversation.NewInboxWorker(store, replyAliasDispatcher{}, externalconversation.InboxWorkerConfig{WorkerID: "reply-alias-worker"})
 			if err != nil {
 				t.Fatal(err)
 			}

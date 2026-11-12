@@ -96,8 +96,8 @@ func TestForegroundConversationClarificationRejectsForeignAndInactiveAnswers(t *
 					other := f.Post(t, conversation.PostChannelMessageRequest{Sender: f.Trigger.Sender, Intent: models.MessageIntentUpdate, Content: "Another thread", StartThread: true, IdempotencyKey: "other-thread"})
 					req.ReplyToMessageID = other.ID
 				case "canceled":
-					result, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: f.Run.Scope, RunID: f.Run.ID,
-						ExpectedRevision: f.Run.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: f.Trigger.Sender.ID}})
+					result, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.CommandRequest{Scope: f.Run.Scope, RunID: f.Run.ID,
+						ExpectedRevision: f.Run.Revision, Kind: agentrun.CommandCancel, Actor: models.ActivityActor{Type: "user", ID: f.Trigger.Sender.ID}})
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -36,7 +36,7 @@ func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 			{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable},
 		}}, nil
 	})
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}

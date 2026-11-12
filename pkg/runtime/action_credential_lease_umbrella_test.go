@@ -54,7 +54,7 @@ func leaseUmbrellaRequest(t *testing.T, ctx context.Context, store models.Kernel
 	t.Helper()
 	now := time.Now().UTC().Round(0)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-lease-" + uuid.NewString()[:8]}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: test.owner, AssignedAgentID: test.assigned, ActingUser: test.actingUser,
 		Goal: "Research safely", Source: models.RunSourceManual,
 	})

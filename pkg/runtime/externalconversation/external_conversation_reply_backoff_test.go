@@ -72,7 +72,7 @@ func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.
 		}
 	}
 	clock := now
-	worker, err := NewExternalConversationReplyWorker(store, catalog, models.WithClock(func() time.Time { return clock }))
+	worker, err := NewReplyWorker(store, catalog, models.WithClock(func() time.Time { return clock }))
 	if err != nil {
 		t.Fatal(err)
 	}

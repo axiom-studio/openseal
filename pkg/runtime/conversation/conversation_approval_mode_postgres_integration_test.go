@@ -23,7 +23,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	dsn := pgSchema.DSN
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	conversationtest.SeedSpace(t, store, scope)
-	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
+	conversation, _, err := runtimeconversation.NewService(store).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})
 	if err != nil {
@@ -53,7 +53,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT payload->>'approvalMode' FROM `+pgSchema.Table("conversations")).Scan(&raw); err != nil || raw != "auto" {
 		t.Fatalf("migrated approval mode = %q, %v", raw, err)
 	}
-	service := runtimeconversation.NewConversationApprovalModeService(reopened)
+	service := runtimeconversation.NewApprovalModeService(reopened)
 	result, err := service.SetApprovalMode(ctx, runtimeconversation.SetConversationApprovalModeRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: models.ConversationApprovalManual, Actor: conversationtest.ApprovalModeActor,
 	})
@@ -64,15 +64,15 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if err != nil || stored.ApprovalMode != models.ConversationApprovalManual || stored.Revision != conversation.Revision+1 {
 		t.Fatalf("stored conversation = %#v, %v", stored, err)
 	}
-	events, err := reopened.ListActivity(ctx, models.ActivityFilter{Scope: scope, AgentID: "assistant", EventTypes: []string{runtimeconversation.ConversationApprovalModeChangedEvent}, Descending: true})
+	events, err := reopened.ListActivity(ctx, models.ActivityFilter{Scope: scope, AgentID: "assistant", EventTypes: []string{runtimeconversation.ApprovalModeChangedEvent}, Descending: true})
 	if err != nil || len(events) != 1 || events[0].ID != result.Event.ID || events[0].Payload["from"] != "auto" {
 		t.Fatalf("approval mode events = %#v, %v", events, err)
 	}
-	changes, err := runtimeconversation.NewConversationChangeService(reopened, reopened)
+	changes, err := runtimeconversation.NewChangeService(reopened, reopened)
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	set, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(set.Activity) != 1 || set.Activity[0].Payload["to"] != "manual" || set.Conversation.ApprovalMode != models.ConversationApprovalManual {
 		t.Fatalf("change set = %#v, %v", set, err)
 	}

@@ -79,7 +79,7 @@ func generatedFilesSchema() map[string]interface{} {
 type TaskArtifactPublisher struct {
 	Scope   models.Scope
 	Content models.ArtifactContentStore
-	Catalog *artifactcatalog.ArtifactCatalog
+	Catalog *artifactcatalog.Catalog
 }
 
 var _ agentrun.FinalOutputPublisher = (*TaskArtifactPublisher)(nil)

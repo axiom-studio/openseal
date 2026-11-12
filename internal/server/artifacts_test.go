@@ -141,7 +141,7 @@ func TestArtifactContentRoutesStreamOnlyConfiguredOperations(t *testing.T) {
 	if resolved.Code != http.StatusOK || !strings.Contains(resolved.Body.String(), "https://delivery.example/") {
 		t.Fatalf("resolve status = %d, body = %s", resolved.Code, resolved.Body.String())
 	}
-	loaded, err := artifactcatalog.NewArtifactCatalog(server.store.(models.ArtifactStore)).Get(context.Background(), models.Scope{Kind: "local", ID: "game"}, "game-log", 1)
+	loaded, err := artifactcatalog.NewCatalog(server.store.(models.ArtifactStore)).Get(context.Background(), models.Scope{Kind: "local", ID: "game"}, "game-log", 1)
 	if err != nil || loaded.ContentRef != stored.ContentRef || strings.Contains(loaded.ContentRef, "https://") {
 		t.Fatalf("resolution leaked into catalog: %#v, %v", loaded, err)
 	}

@@ -23,21 +23,21 @@ const (
 
 var errExternalConversationContextMappingMismatch = errors.New("provider history does not belong to the canonical thread")
 
-// ExternalConversationContextHost is an optional, read-only adapter boundary.
+// ContextHost is an optional, read-only adapter boundary.
 // It runs after durable ingress, never on the provider acknowledgement path.
 // Provider text is untrusted history and cannot authorize work or impersonate
 // a canonical Agent, even when the provider author is a bot.
-type ExternalConversationContextHost interface {
-	ReadExternalConversationContext(context.Context, ExternalConversationContextHostRequest) (*ExternalConversationContextResult, error)
+type ContextHost interface {
+	ReadExternalConversationContext(context.Context, ContextHostRequest) (*ContextResult, error)
 }
 
-type ExternalConversationContextHostRequest struct {
+type ContextHostRequest struct {
 	Endpoint *models.ExternalConversationEndpoint       `json:"endpoint"`
 	Adapter  *skill.BoundConversationAdapter            `json:"adapter"`
 	Event    models.NormalizedExternalConversationEvent `json:"event"`
 }
 
-type ExternalConversationContextMessage struct {
+type ContextMessage struct {
 	Source                 *models.ExternalMessageSource           `json:"source,omitempty"`
 	ExternalConversationID string                                  `json:"externalConversationId"`
 	ExternalThreadID       string                                  `json:"externalThreadId,omitempty"`
@@ -49,11 +49,11 @@ type ExternalConversationContextMessage struct {
 	OccurredAt             time.Time                               `json:"occurredAt"`
 }
 
-type ExternalConversationContextResult struct {
-	Source    *models.ExternalMessageSource        `json:"source,omitempty"`
-	Status    string                               `json:"status"`
-	ErrorCode string                               `json:"errorCode,omitempty"`
-	Messages  []ExternalConversationContextMessage `json:"messages,omitempty"`
+type ContextResult struct {
+	Source    *models.ExternalMessageSource `json:"source,omitempty"`
+	Status    string                        `json:"status"`
+	ErrorCode string                        `json:"errorCode,omitempty"`
+	Messages  []ContextMessage              `json:"messages,omitempty"`
 }
 
 func externalConversationContextReference(endpointID string, state *runtimeconversation.ExternalConversationContextState) models.ConversationReference {
@@ -73,7 +73,7 @@ func externalConversationContextOriginReference(endpointID string, state *runtim
 	return &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: id}
 }
 
-func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, endpoint *models.ExternalConversationEndpoint,
+func (w *InboxWorker) hydrateContext(ctx context.Context, endpoint *models.ExternalConversationEndpoint,
 	conversation *models.Conversation, mapping *models.ExternalConversationMapping, item *models.ExternalConversationInboxItem,
 ) (*models.ExternalConversationMapping, *runtimeconversation.ExternalConversationContextState, error) {
 	if w.config.ContextHost == nil || w.config.ContextCatalog == nil {
@@ -103,7 +103,7 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 	effective.Address = item.Event.ExternalConversationID
 	effective.Adapter = externalConversationResolvedAdapterReference(adapter)
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	result, readErr := w.config.ContextHost.ReadExternalConversationContext(fetchCtx, ExternalConversationContextHostRequest{
+	result, readErr := w.config.ContextHost.ReadExternalConversationContext(fetchCtx, ContextHostRequest{
 		Endpoint: effective, Adapter: adapter, Event: item.Event,
 	})
 	cancel()
@@ -160,7 +160,7 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 	return mapping, state, nil
 }
 
-func (w *ExternalConversationInboxWorker) resolveContextAdapter(ctx context.Context, endpoint *models.ExternalConversationEndpoint,
+func (w *InboxWorker) resolveContextAdapter(ctx context.Context, endpoint *models.ExternalConversationEndpoint,
 	ref models.ExternalConversationAdapterReference,
 ) (*skill.BoundConversationAdapter, error) {
 	adapter, err := w.config.ContextCatalog.ResolveConversationAdapterBinding(ctx,
@@ -175,13 +175,13 @@ func (w *ExternalConversationInboxWorker) resolveContextAdapter(ctx context.Cont
 	return adapter, nil
 }
 
-func normalizeExternalConversationContext(result *ExternalConversationContextResult, event models.NormalizedExternalConversationEvent) ([]ExternalConversationContextMessage, string, bool) {
+func normalizeExternalConversationContext(result *ContextResult, event models.NormalizedExternalConversationEvent) ([]ContextMessage, string, bool) {
 	if !runtimeconversation.ValidExternalConversationContextStatus(result.Status) || len(result.Messages) > runtimeconversation.MaximumExternalConversationContextMessages {
 		return nil, "", false
 	}
 	status := result.Status
-	seen := make(map[string]ExternalConversationContextMessage, len(result.Messages))
-	messages := make([]ExternalConversationContextMessage, 0, len(result.Messages))
+	seen := make(map[string]ContextMessage, len(result.Messages))
+	messages := make([]ContextMessage, 0, len(result.Messages))
 	bytes, attachmentCount := 0, 0
 	for _, message := range result.Messages {
 		if message.ExternalConversationID != event.ExternalConversationID ||
@@ -236,8 +236,8 @@ func normalizeExternalConversationContext(result *ExternalConversationContextRes
 	return messages, status, true
 }
 
-func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Context, endpoint *models.ExternalConversationEndpoint,
-	conversation *models.Conversation, thread *models.ExternalConversationMapping, historical ExternalConversationContextMessage,
+func (w *InboxWorker) ensureContextMessage(ctx context.Context, endpoint *models.ExternalConversationEndpoint,
+	conversation *models.Conversation, thread *models.ExternalConversationMapping, historical ContextMessage,
 ) (*models.ChannelMessage, error) {
 	for _, direction := range []models.ExternalMessageDirection{models.ExternalMessageInbound, models.ExternalMessageOutbound} {
 		mapping, err := w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, direction, historical.ExternalMessageID)

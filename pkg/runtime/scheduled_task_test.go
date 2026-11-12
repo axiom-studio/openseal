@@ -228,10 +228,10 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 			}
 			validator, _ := routine.NewRunbookActionValidator(store.(routineActionStore))
 			policyCalls := 0
-			coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+			coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
 				policyCalls++
-				return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
-			}), []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
+				return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
+			}), []action.ProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
 			invalid := []struct {
 				name  string
 				value interface{}
@@ -345,9 +345,9 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 				t.Fatalf("claim=%#v,%v", claimed, err)
 			}
 			validator, _ := routine.NewRunbookActionValidator(store)
-			coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-				return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
-			}), []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
+			coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+				return action.PolicyDecision{Disposition: action.DispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
+			}), []action.ProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
 			result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: models.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 			if err != nil {
 				t.Fatal(err)
@@ -386,7 +386,7 @@ func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
 	validator, _ := routine.NewRunbookActionValidator(store)
 	policy := action.NewDefaultActionPolicy()
 	policy.Approvers = []models.ApprovalPrincipal{{Type: "role", ID: "operator"}}
-	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
+	coordinator := action.NewCoordinator(store, store, catalog, policy, []action.ProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
 	result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: models.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "requester-routine", Summary: "Create recurring research", Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 	if err != nil {
 		t.Fatal(err)
@@ -413,7 +413,7 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 	if err != nil || len(b.ModelActions) != 1 {
 		t.Fatalf("live authority=%#v,%v", b, err)
 	}
-	if _, ok := b.Producer.(*modelstep.ModelStepProducer); !ok {
+	if _, ok := b.Producer.(*modelstep.Producer); !ok {
 		t.Fatalf("task did not use the model step producer: %T", b.Producer)
 	}
 	c.activation.Skills = nil // Revoked permission is not resurrected by persisted schedule.

@@ -79,7 +79,7 @@ func withRoutineReportHeader(delivery *models.ExternalConversationDelivery, mess
 // endpoint origin, the creating message's provider mapping and the active
 // endpoint's owner and Agent. Anything else is a no-op, as for the reply
 // worker; only store failures are returned for the reporting worker to retry.
-func projectRoutineReportDelivery(ctx context.Context, store models.ExternalConversationStore, transport *ExternalConversationTransportService, run *models.AgentRun) (*models.ExternalConversationDelivery, error) {
+func projectRoutineReportDelivery(ctx context.Context, store models.ExternalConversationStore, transport *TransportService, run *models.AgentRun) (*models.ExternalConversationDelivery, error) {
 	if store == nil || transport == nil || run == nil || !models.IsTerminalAgentRunStatus(run.Status) ||
 		run.Context[models.ScheduledTaskContextKey] != true || run.Context[models.ConversationTaskContextKey] != nil || !models.RunNeedsTerminalReporting(run) ||
 		conversationrun.SilentRoutineOccurrence(run) {

@@ -79,7 +79,7 @@ type modelProducerFixture struct {
 	host     *modelProducerTestHost
 	preparer *modelProducerTestPreparer
 	store    *modelProducerTestStore
-	producer *modelstep.ModelStepProducer
+	producer *modelstep.Producer
 	render   *modelsteptest.RenderFixture
 	in       agentrun.StepInput
 }
@@ -105,7 +105,7 @@ func newModelProducerFixture(t *testing.T) *modelProducerFixture {
 	f.render.Note("run-1", "Run context")
 	f.store = &modelProducerTestStore{path: f.render.Path()}
 
-	producer, err := modelstep.NewModelStepProducer(f.host, f.preparer, f.store)
+	producer, err := modelstep.NewProducer(f.host, f.preparer, f.store)
 	if err != nil {
 		t.Fatalf("NewModelStepProducer: %v", err)
 	}

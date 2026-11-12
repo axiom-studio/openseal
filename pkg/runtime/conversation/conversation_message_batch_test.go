@@ -27,7 +27,7 @@ func channelMessageBatchHistory(t testing.TB, store models.KernelStore, count in
 	for index := 0; index < count; index++ {
 		id := fmt.Sprintf("message-%03d", index)
 		conversationtest.CommitChannelMessage(t, conversationStore, &conversation, &models.ChannelMessage{ID: id, ThreadRootID: "parent", ReplyToMessageID: "parent"})
-		run, err := portfolio.NewPortfolioService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+		run, err := portfolio.NewService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 			Scope: conversation.Scope, Owner: conversation.Owner, Kind: models.RunKindConversation, ConcurrencyKey: conversation.ID,
 			Goal: "Historical reply", Source: models.RunSourceChat, Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID, models.ConversationRunTriggerIDContextKey: id},
 		})
@@ -44,33 +44,33 @@ func TestConversationMessageBatchReducesIdleHistoricalPollReads(t *testing.T) {
 	conversation, runs := channelMessageBatchHistory(t, store, 100)
 	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "viewer"}, Roles: []string{"reader"}}
 	counted := conversationtest.NewCountedBatchStore(store)
-	changes, err := runtimeconversation.NewConversationChangeService(counted, store)
+	changes, err := runtimeconversation.NewChangeService(counted, store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	initial, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: conversation.Scope, ConversationID: conversation.ID, Limit: 500, Viewer: &viewer})
+	initial, err := changes.ListChanges(t.Context(), runtimeconversation.ChangeRequest{Scope: conversation.Scope, ConversationID: conversation.ID, Limit: 500, Viewer: &viewer})
 	if err != nil || len(initial.Runs) != 100 {
 		t.Fatalf("initial historical projection = %#v, %v", initial, err)
 	}
 	counted.Points, counted.Batches = 0, nil
-	idle, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: conversation.Scope, ConversationID: conversation.ID, Cursor: initial.Cursor, Viewer: &viewer})
+	idle, err := changes.ListChanges(t.Context(), runtimeconversation.ChangeRequest{Scope: conversation.Scope, ConversationID: conversation.ID, Cursor: initial.Cursor, Viewer: &viewer})
 	if err != nil || idle.HasChanges || counted.Points != 0 || len(counted.Batches) != 2 || len(counted.Batches[0]) != 100 || !reflect.DeepEqual(counted.Batches[1], []string{"parent"}) {
 		t.Fatalf("idle poll retained historical point reads: changes=%#v err=%v points=%d batches=%v", idle, err, counted.Points, counted.Batches)
 	}
 	legacy := &conversationtest.CountedPointStore{ConversationStore: store}
-	legacyChanges, _ := runtimeconversation.NewConversationChangeService(legacy, store)
+	legacyChanges, _ := runtimeconversation.NewChangeService(legacy, store)
 	baseline, err := legacyChanges.FilterVisibleRuns(t.Context(), conversation.Scope, conversation.ID, runs, viewer)
 	if err != nil || len(baseline) != 100 || legacy.Points != 200 {
 		t.Fatalf("custom store compatibility changed: visible=%d err=%v reads=%d", len(baseline), err, legacy.Points)
 	}
 	viewer.Roles = nil
 	counted.Points, counted.Batches = 0, nil
-	hidden, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: conversation.Scope, ConversationID: conversation.ID, Cursor: idle.Cursor, Viewer: &viewer})
+	hidden, err := changes.ListChanges(t.Context(), runtimeconversation.ChangeRequest{Scope: conversation.Scope, ConversationID: conversation.ID, Cursor: idle.Cursor, Viewer: &viewer})
 	if err != nil || !hidden.RunsChanged || len(hidden.Runs) != 0 || counted.Points != 0 || len(counted.Batches) != 2 {
 		t.Fatalf("poll reused old viewer authorization: changes=%#v err=%v batches=%v", hidden, err, counted.Batches)
 	}
 	viewer.Roles = []string{"reader"}
-	restored, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: conversation.Scope, ConversationID: conversation.ID, Cursor: hidden.Cursor, Viewer: &viewer})
+	restored, err := changes.ListChanges(t.Context(), runtimeconversation.ChangeRequest{Scope: conversation.Scope, ConversationID: conversation.ID, Cursor: hidden.Cursor, Viewer: &viewer})
 	if err != nil || !restored.RunsChanged || len(restored.Runs) != 100 {
 		t.Fatalf("poll did not re-evaluate current viewer authorization: %#v, %v", restored, err)
 	}
@@ -105,7 +105,7 @@ func TestConversationMessageBatchPreservesLinkedParentVisibilityAndScope(t *test
 		viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "viewer"}}
 		counted := conversationtest.NewCountedBatchStore(conversationStore)
 		counted.FailID, counted.Err = "must-not-read", errors.New("hidden parent must not be queried")
-		changes, _ := runtimeconversation.NewConversationChangeService(counted, store)
+		changes, _ := runtimeconversation.NewChangeService(counted, store)
 		visible, err := changes.FilterVisibleRuns(t.Context(), scope, conversation.ID, runs, viewer)
 		if err != nil {
 			t.Fatal(err)
@@ -118,7 +118,7 @@ func TestConversationMessageBatchPreservesLinkedParentVisibilityAndScope(t *test
 			t.Fatalf("batch parent visibility changed: got=%v points=%d", ids, counted.Points)
 		}
 		legacy := &conversationtest.CountedPointStore{ConversationStore: conversationStore, FailID: "must-not-read", Err: counted.Err}
-		legacyChanges, _ := runtimeconversation.NewConversationChangeService(legacy, store)
+		legacyChanges, _ := runtimeconversation.NewChangeService(legacy, store)
 		baseline, err := legacyChanges.FilterVisibleRuns(t.Context(), scope, conversation.ID, runs, viewer)
 		if err != nil || !reflect.DeepEqual(visible, baseline) {
 			t.Fatalf("batch differs from custom point-read semantics: %#v, %v", baseline, err)
@@ -180,7 +180,7 @@ func TestConversationMessageBatchChunksAndDeduplicatesExactIDs(t *testing.T) {
 	conversation, runs := channelMessageBatchHistory(t, store, 401)
 	runs = append(runs, runs[0])
 	counted := conversationtest.NewCountedBatchStore(store)
-	changes, _ := runtimeconversation.NewConversationChangeService(counted, store)
+	changes, _ := runtimeconversation.NewChangeService(counted, store)
 	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "viewer"}, Roles: []string{"reader"}}
 	visible, err := changes.FilterVisibleRuns(t.Context(), conversation.Scope, conversation.ID, runs, viewer)
 	if err != nil || len(visible) != len(runs) || len(counted.Batches) != 4 {
@@ -214,7 +214,7 @@ func BenchmarkConversationMessageVisibilityHistory(b *testing.B) {
 				batch = &conversationtest.CountedBatchStore{CountedPointStore: points, Batch: store, CountOnly: true}
 				conversationStore = batch
 			}
-			changes, _ := runtimeconversation.NewConversationChangeService(conversationStore, store)
+			changes, _ := runtimeconversation.NewChangeService(conversationStore, store)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for index := 0; index < b.N; index++ {

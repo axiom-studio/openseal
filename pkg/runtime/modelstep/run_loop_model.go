@@ -14,19 +14,19 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
-// ModelStepProducer is the StepProducer of every model-driven Run: it builds
+// Producer is the StepProducer of every model-driven Run: it builds
 // one ModelStepRequest per step from the preparer's system and tools plus the
 // session path, calls StepHost.ExecuteModelStep and returns the validated
 // assistant entry. The loop appends that entry and its tool entries; the
 // producer writes only the step's capabilities note (capability_note.go),
 // right before it renders the path.
-type ModelStepProducer struct {
+type Producer struct {
 	host     agentrun.StepHost
 	preparer agentrun.ModelStepPreparer
 	sessions models.ModelStepProducerStore
 	// Media resolves image parts while rendering the path. A zero value renders
 	// every image as "[image omitted: <mediaType>]".
-	Media ModelStepMedia
+	Media Media
 	// Now stamps the capabilities note; nil = time.Now.
 	Now func() time.Time
 	// cache holds the preparer's request between PlanStepBudget and Produce of
@@ -34,8 +34,8 @@ type ModelStepProducer struct {
 	cache sync.Map
 }
 
-// ModelStepMedia are the image sources of the path renderer.
-type ModelStepMedia struct {
+// Media are the image sources of the path renderer.
+type Media struct {
 	Artifacts models.ArtifactStore
 	Content   models.ArtifactContentStore
 	// ImageInput reports whether the model the prepared request resolves to
@@ -44,11 +44,11 @@ type ModelStepMedia struct {
 }
 
 var (
-	_ agentrun.StepProducer = (*ModelStepProducer)(nil)
-	_ StepBudgetPlanner     = (*ModelStepProducer)(nil)
+	_ agentrun.StepProducer = (*Producer)(nil)
+	_ StepBudgetPlanner     = (*Producer)(nil)
 )
 
-func NewModelStepProducer(host agentrun.StepHost, preparer agentrun.ModelStepPreparer, store models.ModelStepProducerStore) (*ModelStepProducer, error) {
+func NewProducer(host agentrun.StepHost, preparer agentrun.ModelStepPreparer, store models.ModelStepProducerStore) (*Producer, error) {
 	if host == nil {
 		return nil, errors.New("model step producer requires a step host")
 	}
@@ -58,10 +58,10 @@ func NewModelStepProducer(host agentrun.StepHost, preparer agentrun.ModelStepPre
 	if store == nil {
 		return nil, errors.New("model step producer requires a session store")
 	}
-	return &ModelStepProducer{host: host, preparer: preparer, sessions: store}, nil
+	return &Producer{host: host, preparer: preparer, sessions: store}, nil
 }
 
-func (p *ModelStepProducer) Kind() models.StepProducerKind { return models.StepProducerModel }
+func (p *Producer) Kind() models.StepProducerKind { return models.StepProducerModel }
 
 // modelCredentialSource is a preparer that knows the model credential its
 // steps send.
@@ -71,7 +71,7 @@ type modelCredentialSource interface {
 
 // ModelCredential is a copy of the model credential the producer's steps
 // send, nil when its preparer names none (the host's default).
-func (p *ModelStepProducer) ModelCredential() *capability.CredentialReference {
+func (p *Producer) ModelCredential() *capability.CredentialReference {
 	source, _ := p.preparer.(modelCredentialSource)
 	if source == nil {
 		return nil
@@ -83,7 +83,7 @@ func (p *ModelStepProducer) ModelCredential() *capability.CredentialReference {
 // request's input estimate for every provider attempt plus the host's
 // correction message (doubled when compaction is due), against the Run's
 // remaining capacity. An unbounded Run plans nothing.
-func (p *ModelStepProducer) PlanStepBudget(ctx context.Context, in agentrun.StepInput) (models.BudgetUsage, error) {
+func (p *Producer) PlanStepBudget(ctx context.Context, in agentrun.StepInput) (models.BudgetUsage, error) {
 	if err := checkModelStepInput(in); err != nil {
 		return models.BudgetUsage{}, err
 	}
@@ -127,7 +127,7 @@ func (p *ModelStepProducer) PlanStepBudget(ctx context.Context, in agentrun.Step
 // Produce runs the step's model call. Host failures return unchanged (the
 // loop maps *TurnHostFailure codes, including TurnHostContextExceeded); a
 // result that does not answer the request wraps ErrTurnHostConfiguration.
-func (p *ModelStepProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
+func (p *Producer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	if err := checkModelStepInput(in); err != nil {
 		return agentrun.StepOutput{}, err
 	}
@@ -167,7 +167,7 @@ func (p *ModelStepProducer) Produce(ctx context.Context, in agentrun.StepInput) 
 // ensureCapabilityNote appends the capabilities note the step's current path
 // needs, after the step's context and any compaction, so the request rendered
 // next shows the current listing. A preparer without a catalog has none.
-func (p *ModelStepProducer) ensureCapabilityNote(ctx context.Context, in agentrun.StepInput) error {
+func (p *Producer) ensureCapabilityNote(ctx context.Context, in agentrun.StepInput) error {
 	source, ok := p.preparer.(capabilityListingSource)
 	if !ok || in.Mode != agentrun.StepModeNormal {
 		return nil
@@ -181,7 +181,7 @@ func (p *ModelStepProducer) ensureCapabilityNote(ctx context.Context, in agentru
 	return err
 }
 
-func (p *ModelStepProducer) now() time.Time {
+func (p *Producer) now() time.Time {
 	if p.Now != nil {
 		return p.Now().UTC()
 	}
@@ -208,7 +208,7 @@ func modelStepCacheKey(in agentrun.StepInput) string {
 	return in.Step.ID + ":" + strconv.Itoa(in.Attempt) + ":" + string(in.Mode)
 }
 
-func (p *ModelStepProducer) prepare(ctx context.Context, in agentrun.StepInput) (models.ModelStepRequest, error) {
+func (p *Producer) prepare(ctx context.Context, in agentrun.StepInput) (models.ModelStepRequest, error) {
 	req, err := p.preparer.PrepareModelStep(ctx, in)
 	if err != nil {
 		return models.ModelStepRequest{}, fmt.Errorf("prepare model step: %w", err)
@@ -220,7 +220,7 @@ func (p *ModelStepProducer) prepare(ctx context.Context, in agentrun.StepInput) 
 // the freshly loaded session path (after this step's context append and
 // compaction), the output cap and the preview flag. maxOutput > 0 caps
 // MaxOutputTokens at the step's reserved output.
-func (p *ModelStepProducer) request(ctx context.Context, in agentrun.StepInput, prepared models.ModelStepRequest, maxOutput int64) (models.ModelStepRequest, error) {
+func (p *Producer) request(ctx context.Context, in agentrun.StepInput, prepared models.ModelStepRequest, maxOutput int64) (models.ModelStepRequest, error) {
 	req, err := p.render(ctx, in, prepared, maxOutput)
 	if err != nil {
 		return models.ModelStepRequest{}, err
@@ -233,7 +233,7 @@ func (p *ModelStepProducer) request(ctx context.Context, in agentrun.StepInput, 
 
 // render builds the step's request from the prepared one and the session
 // path, without validating it.
-func (p *ModelStepProducer) render(ctx context.Context, in agentrun.StepInput, prepared models.ModelStepRequest, maxOutput int64) (models.ModelStepRequest, error) {
+func (p *Producer) render(ctx context.Context, in agentrun.StepInput, prepared models.ModelStepRequest, maxOutput int64) (models.ModelStepRequest, error) {
 	req := prepared
 	req.APIVersion = models.ModelStepAPIVersion
 	req.Scope = in.Run.Scope

@@ -39,7 +39,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	}
 
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := runtimeportfolio.NewPortfolioService(primary, models.WithClock(func() time.Time { return now }))
+	portfolio := runtimeportfolio.NewService(primary, models.WithClock(func() time.Time { return now }))
 	scope := models.Scope{Kind: "tenant", ID: "postgres-e2e"}
 	otherScope := models.Scope{Kind: "tenant", ID: "other"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"}
@@ -504,7 +504,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	}
 	defer replica.Close()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	portfolio := runtimeportfolio.NewPortfolioService(primary)
+	portfolio := runtimeportfolio.NewService(primary)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
 		Goal: "Ship", Source: models.RunSourceManual,
@@ -512,7 +512,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := collaboration.NewCollaborationService(primary)
+	service := collaboration.NewService(primary)
 	created, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
@@ -522,7 +522,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitingSource, err := runtimeportfolio.NewPortfolioService(replica).GetAgentRun(ctx, scope, source.ID)
+	waitingSource, err := runtimeportfolio.NewService(replica).GetAgentRun(ctx, scope, source.ID)
 	if err != nil || waitingSource.Status != models.AgentRunStatusWaitingForAgent || waitingSource.WakeCondition == nil ||
 		waitingSource.WakeCondition.Type != "agent_request_decision" ||
 		waitingSource.WakeCondition.Reference != created.Request.ID {
@@ -535,15 +535,15 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := collaboration.NewCollaborationService(replica).GetAgentRequest(ctx, scope, created.Request.ID)
+	restored, err := collaboration.NewService(replica).GetAgentRequest(ctx, scope, created.Request.ID)
 	if err != nil || restored.ChildRunID != accepted.Child.ID || restored.Status != models.AgentRequestStatusAccepted {
 		t.Fatalf("restored request = %#v, %v", restored, err)
 	}
-	child, err := runtimeportfolio.NewPortfolioService(replica).GetAgentRun(ctx, scope, accepted.Child.ID)
+	child, err := runtimeportfolio.NewService(replica).GetAgentRun(ctx, scope, accepted.Child.ID)
 	if err != nil || child.ParentRunID != source.ID || child.AssignedAgentID != "marketing" {
 		t.Fatalf("restored child = %#v, %v", child, err)
 	}
-	completed, err := collaboration.NewCollaborationService(replica).CompleteAgentRequest(ctx, collaboration.CompleteAgentRequestRequest{
+	completed, err := collaboration.NewService(replica).CompleteAgentRequest(ctx, collaboration.CompleteAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: accepted.Request.Revision,
 		ExpectedChildRevision: child.Revision, Principal: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 		Summary: "Launch completed", CompletionKey: "postgres-launch-complete",
@@ -551,7 +551,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil || completed.Request.Status != models.AgentRequestStatusCompleted || completed.Source.Status != models.AgentRunStatusQueued || completed.Child.Status != models.AgentRunStatusCompleted {
 		t.Fatalf("complete request = %#v, %v", completed, err)
 	}
-	restored, err = collaboration.NewCollaborationService(primary).GetAgentRequest(ctx, scope, created.Request.ID)
+	restored, err = collaboration.NewService(primary).GetAgentRequest(ctx, scope, created.Request.ID)
 	if err != nil || restored.Status != models.AgentRequestStatusCompleted || restored.CompletionKey != "postgres-launch-complete" {
 		t.Fatalf("restored completion = %#v, %v", restored, err)
 	}
@@ -582,7 +582,7 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 		Actor: models.ActivityActor{Type: "user", ID: "7"},
 	}
 	services := []*agentrun.RunCommandService{agentrun.NewRunCommandService(primary), agentrun.NewRunCommandService(replica)}
-	results := make(chan *agentrun.AgentRunCommandResult, len(services))
+	results := make(chan *agentrun.CommandResult, len(services))
 	errorsFound := make(chan error, len(services))
 	var group sync.WaitGroup
 	for _, service := range services {
@@ -630,39 +630,39 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 		t.Fatalf("creation activity = %#v, %v", events, err)
 	}
 
-	paused, err := services[1].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.AgentRunCommandPause,
+	paused, err := services[1].CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.CommandPause,
 		Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil || paused.Run.Status != models.AgentRunStatusPaused {
 		t.Fatalf("paused = %#v, %v", paused, err)
 	}
-	intervened, err := services[0].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: scope, RunID: run.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.AgentRunCommandIntervene,
+	intervened, err := services[0].CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.CommandIntervene,
 		Actor: models.ActivityActor{Type: "user", ID: "7"}, Instruction: "Check database saturation first",
 	})
 	if err != nil || len(intervened.Run.PendingInterventions) != 1 {
 		t.Fatalf("intervened = %#v, %v", intervened, err)
 	}
-	resumed, err := services[1].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: scope, RunID: run.ID, ExpectedRevision: intervened.Run.Revision, Kind: agentrun.AgentRunCommandResume,
+	resumed, err := services[1].CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: intervened.Run.Revision, Kind: agentrun.CommandResume,
 		Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil || resumed.Run.Status != models.AgentRunStatusQueued {
 		t.Fatalf("resumed = %#v, %v", resumed, err)
 	}
-	canceled, err := services[0].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: scope, RunID: run.ID, ExpectedRevision: resumed.Run.Revision, Kind: agentrun.AgentRunCommandCancel,
+	canceled, err := services[0].CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: resumed.Run.Revision, Kind: agentrun.CommandCancel,
 		Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil || canceled.Run.Status != models.AgentRunStatusCanceled || canceled.Run.CompletedAt == nil {
 		t.Fatalf("canceled = %#v, %v", canceled, err)
 	}
-	restored, err := runtimeportfolio.NewPortfolioService(replica).GetAgentRun(ctx, scope, run.ID)
+	restored, err := runtimeportfolio.NewService(replica).GetAgentRun(ctx, scope, run.ID)
 	if err != nil || restored.Status != models.AgentRunStatusCanceled || len(restored.PendingInterventions) != 1 {
 		t.Fatalf("restored = %#v, %v", restored, err)
 	}
-	if _, err := runtimeportfolio.NewPortfolioService(primary).GetAgentRun(ctx, models.Scope{Kind: "tenant", ID: "other"}, run.ID); !errors.Is(err, models.ErrRunNotFound) {
+	if _, err := runtimeportfolio.NewService(primary).GetAgentRun(ctx, models.Scope{Kind: "tenant", ID: "other"}, run.ID); !errors.Is(err, models.ErrRunNotFound) {
 		t.Fatalf("cross-scope get error = %v", err)
 	}
 	events, err = primary.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: run.ID, Limit: 10})

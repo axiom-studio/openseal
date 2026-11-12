@@ -14,7 +14,7 @@ func TestAskUserWithoutConversationIsRefused(t *testing.T) {
 	f.exec.handlers = nil // the real registry
 	f.exec.Reporting = f.store
 	result, err := f.exec.Settle(f.ctx, f.context("ask", agentrun.ControlAuthority{CanAskUser: true}))
-	if err != nil || result.Kind != ControlContinue || result.Entry.State != models.ToolEntryError {
+	if err != nil || result.Kind != Continue || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("settle = %#v %v", result, err)
 	}
 	requireControlError(t, result.Entry.Tool.Result, models.ToolResultRefused, "cannot_post")

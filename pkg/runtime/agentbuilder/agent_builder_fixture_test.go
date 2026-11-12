@@ -32,7 +32,7 @@ func (p rosterPortfolio) GetTeamDeployment(_ context.Context, scope capability.S
 }
 
 type switchableAdapterResolver struct {
-	externalconversation.ExternalConversationAdapterResolver
+	externalconversation.AdapterResolver
 	unavailable bool
 }
 
@@ -45,7 +45,7 @@ func (r *switchableAdapterResolver) ResolveConversationAdapter(
 	if r.unavailable {
 		return nil, errors.New("adapter unavailable")
 	}
-	return r.ExternalConversationAdapterResolver.ResolveConversationAdapter(ctx, scope, deploymentID, skillID, skillVersion, adapterID, binding...)
+	return r.AdapterResolver.ResolveConversationAdapter(ctx, scope, deploymentID, skillID, skillVersion, adapterID, binding...)
 }
 
 func (r *switchableAdapterResolver) ResolveConversationAdapterBinding(
@@ -56,7 +56,7 @@ func (r *switchableAdapterResolver) ResolveConversationAdapterBinding(
 	if r.unavailable {
 		return nil, errors.New("adapter unavailable")
 	}
-	return r.ExternalConversationAdapterResolver.ResolveConversationAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
+	return r.AdapterResolver.ResolveConversationAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
 }
 
 func slackConversationCatalog(t *testing.T, ctx context.Context) (*sqlite.Store, *skill.Catalog, models.Scope, models.ExternalConversationAdapterReference) {

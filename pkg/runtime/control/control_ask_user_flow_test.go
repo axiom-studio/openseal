@@ -20,7 +20,7 @@ func TestAskUserPostsQuestionAndParks(t *testing.T) {
 		f := controltest.ClaimedForegroundRun(t, store)
 		call := controltest.NewAskUserCall(t, store, f.Run, "foreground-worker", "  "+controltest.AskUserQuestion+"  ")
 		result := call.Settle(t)
-		if result.Kind != control.ControlParked || result.Park.Status != models.AgentRunStatusWaitingForEvent ||
+		if result.Kind != control.Parked || result.Park.Status != models.AgentRunStatusWaitingForEvent ||
 			result.Park.Wake.Type != "user_message" || result.Park.Wake.Reference != call.Entry.ID {
 			t.Fatalf("park = %#v", result)
 		}
@@ -72,7 +72,7 @@ func TestAskUserResumeWithoutAnswerRepostsAndReparks(t *testing.T) {
 	if err != nil || resumed.Resolved || resumed.Park == nil || resumed.Park.Wake.Reference != entry.ID {
 		t.Fatalf("resume = %#v %v", resumed, err)
 	}
-	key := conversation.ConversationClarificationKey(f.Run.ID, entry.ID)
+	key := conversation.ClarificationKey(f.Run.ID, entry.ID)
 	question, err := store.FindChannelMessageByIdempotencyKey(t.Context(), f.Run.Scope, f.Conversation.ID, key)
 	if err != nil || question == nil || question.Content != controltest.AskUserQuestion {
 		t.Fatalf("question not posted on resume: %#v %v", question, err)
@@ -96,12 +96,12 @@ func TestAskUserQuestionReconcilerRepostsFromEntry(t *testing.T) {
 	controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
 		f := controltest.ClaimedForegroundRun(t, store)
 		call := controltest.NewAskUserCall(t, store, f.Run, "foreground-worker", controltest.AskUserQuestion)
-		call.Exec.Conversations = conversation.NewConversationService(conflictingQuestionStore{store})
+		call.Exec.Conversations = conversation.NewService(conflictingQuestionStore{store})
 		result := call.Settle(t)
-		if result.Kind != control.ControlParked {
+		if result.Kind != control.Parked {
 			t.Fatalf("settle = %#v", result)
 		}
-		key := conversation.ConversationClarificationKey(f.Run.ID, call.Entry.ID)
+		key := conversation.ClarificationKey(f.Run.ID, call.Entry.ID)
 		if q, _ := store.FindChannelMessageByIdempotencyKey(t.Context(), f.Run.Scope, f.Conversation.ID, key); q != nil {
 			t.Fatal("question posted despite conflicts")
 		}
@@ -146,7 +146,7 @@ func TestAskUserOptionsPostedAndAnsweredWithSelectedOptions(t *testing.T) {
 		f := controltest.ClaimedForegroundRun(t, store)
 		call := controltest.NewAskUserCallWithArguments(t, store, f.Run, "foreground-worker", json.RawMessage(askUserOptionsArguments))
 		result := call.Settle(t)
-		if result.Kind != control.ControlParked {
+		if result.Kind != control.Parked {
 			t.Fatalf("settle = %#v", result)
 		}
 		f.Run = call.Park(t, result.Park)

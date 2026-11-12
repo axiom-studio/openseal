@@ -43,7 +43,7 @@ type surfaceInteractionFixture struct {
 	ctx           context.Context
 	scope         models.Scope
 	conversation  *models.Conversation
-	conversations *runtimeconversation.ConversationService
+	conversations *runtimeconversation.Service
 }
 
 func newSurfaceInteractionFixture(t *testing.T, store models.KernelStore) surfaceInteractionFixture {
@@ -51,7 +51,7 @@ func newSurfaceInteractionFixture(t *testing.T, store models.KernelStore) surfac
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "cards"}
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
-	conversations := runtimeconversation.NewConversationService(store.(models.ConversationStore), models.WithClock(func() time.Time { now = now.Add(time.Second); return now }))
+	conversations := runtimeconversation.NewService(store.(models.ConversationStore), models.WithClock(func() time.Time { now = now.Add(time.Second); return now }))
 	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "family"}, Title: "Trip", IdempotencyKey: "trip",
@@ -250,13 +250,13 @@ func TestConversationChangesCarrySurfaceInteractions(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
 			f := newSurfaceInteractionFixture(t, store)
-			changes, err := runtimeconversation.NewConversationChangeService(store.(models.ConversationStore), store)
+			changes, err := runtimeconversation.NewChangeService(store.(models.ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
-			list := func(cursor string, limit int) *runtimeconversation.ConversationChangeSet {
+			list := func(cursor string, limit int) *runtimeconversation.ChangeSet {
 				t.Helper()
-				set, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor, Limit: limit})
+				set, err := changes.ListChanges(f.ctx, runtimeconversation.ChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor, Limit: limit})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -337,7 +337,7 @@ func TestSurfaceInteractionVisibilityFollowsCardMessage(t *testing.T) {
 				"ben": {"ben-q1", "ana-q1", "vote-ana", "vote-ben"},
 				"cy":  {"ben-q1", "ana-q1", "vote-ana", "vote-ben"},
 			}
-			changes, err := runtimeconversation.NewConversationChangeService(store.(models.ConversationStore), store)
+			changes, err := runtimeconversation.NewChangeService(store.(models.ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -346,7 +346,7 @@ func TestSurfaceInteractionVisibilityFollowsCardMessage(t *testing.T) {
 				if viewerID != "" {
 					viewer = surfaceInteractionViewer(viewerID)
 				}
-				set, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: viewer})
+				set, err := changes.ListChanges(f.ctx, runtimeconversation.ChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: viewer})
 				if err != nil || !reflect.DeepEqual(surfaceInteractionKeys(set.SurfaceInteractions), keys) {
 					t.Fatalf("changes for %q = %v, %v", viewerID, surfaceInteractionKeys(set.SurfaceInteractions), err)
 				}
@@ -413,7 +413,7 @@ func TestConversationChangesAdvancePastHiddenSurfaceInteractions(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
 			f := newSurfaceInteractionFixture(t, store)
-			changes, err := runtimeconversation.NewConversationChangeService(store.(models.ConversationStore), store)
+			changes, err := runtimeconversation.NewChangeService(store.(models.ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -421,9 +421,9 @@ func TestConversationChangesAdvancePastHiddenSurfaceInteractions(t *testing.T) {
 			// ana's card goes only to ana, so ben never sees its interactions.
 			anaCard := f.postCard(t, "private", models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{surfaceInteractionUser("ana")}})
 			viewer := surfaceInteractionViewer("ben")
-			list := func(cursor string, limit int) *runtimeconversation.ConversationChangeSet {
+			list := func(cursor string, limit int) *runtimeconversation.ChangeSet {
 				t.Helper()
-				set, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor, Limit: limit, Viewer: viewer})
+				set, err := changes.ListChanges(f.ctx, runtimeconversation.ChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor, Limit: limit, Viewer: viewer})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -473,7 +473,7 @@ func TestConversationChangesShowOnlyTheViewersOwnOutcomes(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
 			f := newSurfaceInteractionFixture(t, store)
-			changes, err := runtimeconversation.NewConversationChangeService(store.(models.ConversationStore), store)
+			changes, err := runtimeconversation.NewChangeService(store.(models.ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -484,7 +484,7 @@ func TestConversationChangesShowOnlyTheViewersOwnOutcomes(t *testing.T) {
 				}
 			}
 			viewer := models.ConversationViewer{Participant: surfaceInteractionUser("ana")}
-			set, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: &viewer})
+			set, err := changes.ListChanges(f.ctx, runtimeconversation.ChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: &viewer})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -497,7 +497,7 @@ func TestConversationChangesShowOnlyTheViewersOwnOutcomes(t *testing.T) {
 					t.Fatalf("%s outcome = %s", interaction.ActorID, interaction.Outcome)
 				}
 			}
-			all, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID})
+			all, err := changes.ListChanges(f.ctx, runtimeconversation.ChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID})
 			if err != nil || len(all.SurfaceInteractions) != 2 || len(all.SurfaceInteractions[1].Outcome) == 0 {
 				t.Fatalf("stored outcomes changed: %#v, %v", all, err)
 			}

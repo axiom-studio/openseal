@@ -117,7 +117,7 @@ func createActionApprovalFixtureWithApprover(t *testing.T, store *sqlite.Store, 
 	t.Helper()
 	now := time.Now().UTC()
 	scope := models.Scope{Kind: "local", ID: "workspace"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
 		Goal: "Publish release", Source: models.RunSourceManual,
 	})

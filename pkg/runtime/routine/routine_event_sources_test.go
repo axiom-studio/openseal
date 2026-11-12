@@ -16,8 +16,8 @@ func TestEventSourcesListsConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sources := result["sources"].([]*routine.RoutineEventSourceView)
-	bySource := map[string]*routine.RoutineEventSourceView{}
+	sources := result["sources"].([]*routine.EventSourceView)
+	bySource := map[string]*routine.EventSourceView{}
 	for _, source := range sources {
 		if source.Kind != models.RoutineEventCalendar {
 			bySource[source.Source] = source
@@ -25,7 +25,7 @@ func TestEventSourcesListsConnections(t *testing.T) {
 	}
 	slack := bySource[f.SlackRef]
 	if slack == nil || slack.Kind != models.RoutineEventSlackMessage || slack.Label != "Acme Slack" || !slack.Available ||
-		!reflect.DeepEqual(slack.Channels, []routine.RoutineEventSourceChannel{{ID: "C1", Name: "#support"}}) {
+		!reflect.DeepEqual(slack.Channels, []routine.EventSourceChannel{{ID: "C1", Name: "#support"}}) {
 		t.Fatalf("slack source=%#v", slack)
 	}
 	github := bySource[f.GitHubRef]
@@ -41,11 +41,11 @@ func TestEventSourcesListsConnections(t *testing.T) {
 	if gmail == nil || gmail.Kind != models.RoutineEventGmailMessage || !gmail.Available || !reflect.DeepEqual(gmail.Fields, models.RoutineEventFilterFields(models.RoutineEventGmailMessage)) {
 		t.Fatalf("gmail source=%#v", gmail)
 	}
-	if webhook := bySource[routine.RoutineEventSourceNew]; webhook == nil || webhook.Kind != models.RoutineEventWebhook || !webhook.Available {
+	if webhook := bySource[routine.EventSourceNew]; webhook == nil || webhook.Kind != models.RoutineEventWebhook || !webhook.Available {
 		t.Fatalf("webhook source=%#v", webhook)
 	}
-	calendar := sources[slices.IndexFunc(sources, func(source *routine.RoutineEventSourceView) bool { return source.Kind == models.RoutineEventCalendar })]
-	if calendar.Available || calendar.Reason != routine.RoutineEventSourceNeedsSignIn || calendar.SkillID != "google" {
+	calendar := sources[slices.IndexFunc(sources, func(source *routine.EventSourceView) bool { return source.Kind == models.RoutineEventCalendar })]
+	if calendar.Available || calendar.Reason != routine.EventSourceNeedsSignIn || calendar.SkillID != "google" {
 		t.Fatalf("calendar source=%#v", calendar)
 	}
 	if len(sources) != 5 {
@@ -56,7 +56,7 @@ func TestEventSourcesListsConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if only := filtered["sources"].([]*routine.RoutineEventSourceView); len(only) != 1 || only[0].Source != f.GitHubRef {
+	if only := filtered["sources"].([]*routine.EventSourceView); len(only) != 1 || only[0].Source != f.GitHubRef {
 		t.Fatalf("filtered=%#v", only)
 	}
 
@@ -65,11 +65,11 @@ func TestEventSourcesListsConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if listed := result["sources"].([]*routine.RoutineEventSourceView); len(listed) != 0 {
+	if listed := result["sources"].([]*routine.EventSourceView); len(listed) != 0 {
 		t.Fatalf("webhook offered without hooks: %#v", listed)
 	}
 
-	checker := routine.NewRoutineEventSourceChecker(f.Store)
+	checker := routine.NewEventSourceChecker(f.Store)
 	for _, check := range []struct {
 		kind      models.RoutineEventKind
 		sourceRef string

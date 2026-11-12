@@ -40,7 +40,7 @@ func runningCredentialRequestFixture(t *testing.T) (context.Context, *sqlite.Sto
 	}
 	t.Cleanup(func() { e.Close() })
 	scope := Scope{Kind: "tenant", ID: "one"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
 		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Order a cable", Source: models.RunSourceChat,
 		Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
 	if err != nil {

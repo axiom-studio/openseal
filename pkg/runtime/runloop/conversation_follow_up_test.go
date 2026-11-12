@@ -20,15 +20,15 @@ import (
 
 type conversationFollowUpFixture struct {
 	store        *sqlite.Store
-	service      *conversation.ConversationService
-	scheduler    *conversationrun.ConversationRunScheduler
+	service      *conversation.Service
+	scheduler    *conversationrun.Scheduler
 	conversation *models.Conversation
 }
 
 func newConversationFollowUpFixture(t *testing.T) *conversationFollowUpFixture {
 	t.Helper()
 	store := kerneltest.NewStore(t)
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	conversationtest.SeedSpace(t, store, models.Scope{Kind: "tenant", ID: "follow-ups"})
 	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "follow-ups"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-42"},

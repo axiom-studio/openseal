@@ -49,9 +49,9 @@ func requiredOf(schema map[string]interface{}) []string {
 	return names
 }
 
-func expectRejection(t *testing.T, err error, code string) *runtimeaction.ActionProposalRejection {
+func expectRejection(t *testing.T, err error, code string) *runtimeaction.ProposalRejection {
 	t.Helper()
-	var rejection *runtimeaction.ActionProposalRejection
+	var rejection *runtimeaction.ProposalRejection
 	if !errors.As(err, &rejection) {
 		t.Fatalf("error = %v, want *ActionProposalRejection %s", err, code)
 	}

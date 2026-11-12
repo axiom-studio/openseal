@@ -119,7 +119,7 @@ type loopRepeatSessionStore interface {
 }
 
 // refusedLoopCallRecorder stores a refused governed loop call
-// (*ActionCoordinator).
+// (*action.Coordinator).
 type refusedLoopCallRecorder interface {
 	RecordRefusedLoopCall(ctx context.Context, req action.RefusedLoopCallRequest) (*models.ActionProposalResult, error)
 }

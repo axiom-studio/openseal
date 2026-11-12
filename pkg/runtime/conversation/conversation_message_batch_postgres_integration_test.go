@@ -36,7 +36,7 @@ func TestConversationMessageBatchPostgresScopesExactIDsAndBoundsHistoricalReads(
 		t.Fatalf("PostgreSQL exact scoped batch = %#v, %v", selected, err)
 	}
 	counted := conversationtest.NewCountedBatchStore(store)
-	changes, _ := runtimeconversation.NewConversationChangeService(counted, store)
+	changes, _ := runtimeconversation.NewChangeService(counted, store)
 	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "viewer"}, Roles: []string{"reader"}}
 	visible, err := changes.FilterVisibleRuns(ctx, conversation.Scope, conversation.ID, runs, viewer)
 	if err != nil || len(visible) != 100 || counted.Points != 0 || len(counted.Batches) != 2 {

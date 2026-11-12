@@ -39,18 +39,18 @@ const (
 	conversationImageMaxBytes = models.MaxModelStepMediaBytes
 )
 
-// ConversationAttachmentReader reads the artifact attachments of one channel
+// AttachmentReader reads the artifact attachments of one channel
 // message as content parts of that message's user entry. Attachments belong
 // to one immutable message version, so they are ingested once, with the
 // message (run-loop section 05 §4.6). Image bytes are never stored: an image
 // becomes a reference part that the step request builder resolves.
-type ConversationAttachmentReader struct {
+type AttachmentReader struct {
 	artifacts models.ArtifactStore
 	content   models.ArtifactContentStore
 }
 
-func NewConversationAttachmentReader(artifacts models.ArtifactStore, content models.ArtifactContentStore) *ConversationAttachmentReader {
-	return &ConversationAttachmentReader{artifacts: artifacts, content: content}
+func NewAttachmentReader(artifacts models.ArtifactStore, content models.ArtifactContentStore) *AttachmentReader {
+	return &AttachmentReader{artifacts: artifacts, content: content}
 }
 
 // conversationMessageAttachments is what a message's references produced:
@@ -72,7 +72,7 @@ type conversationAttachedArtifact struct {
 // file text, 48 KiB of app source, and never more than textBudget bytes of
 // text overall (so the user entry stays under MaxUserEntryContentBytes). Only
 // a message of the conversation's own scope and id is read.
-func (r *ConversationAttachmentReader) parts(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, textBudget int) conversationMessageAttachments {
+func (r *AttachmentReader) parts(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, textBudget int) conversationMessageAttachments {
 	var result conversationMessageAttachments
 	if conversation == nil || message == nil || conversation.Scope.Validate() != nil ||
 		message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
@@ -136,7 +136,7 @@ func (r *ConversationAttachmentReader) parts(ctx context.Context, conversation *
 
 // artifact loads the exact referenced version from the conversation's scope,
 // or nil when it is missing, foreign or nothing can read its content.
-func (r *ConversationAttachmentReader) artifact(ctx context.Context, scope models.Scope, ref models.ConversationReference) *models.Artifact {
+func (r *AttachmentReader) artifact(ctx context.Context, scope models.Scope, ref models.ConversationReference) *models.Artifact {
 	if r == nil || r.artifacts == nil || r.content == nil || ref.Version <= 0 {
 		return nil
 	}

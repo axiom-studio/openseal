@@ -22,7 +22,7 @@ func externalConversationFailureReplyFixture(t *testing.T, provider string, stat
 	store, catalog, endpoint := endpointFixtureWithOperations(t, ctx, provider, []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "External failure",
 		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
@@ -91,7 +91,7 @@ func TestExternalConversationFailureReplyIsSafeScopedAndIdempotent(t *testing.T)
 		t.Run(provider, func(t *testing.T) {
 			ctx := context.Background()
 			store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, provider, models.AgentRunStatusFailed)
-			worker, err := NewExternalConversationReplyWorker(store, catalog)
+			worker, err := NewReplyWorker(store, catalog)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -157,7 +157,7 @@ func TestExternalConversationFailureReplySkipsInactiveEndpointAndCanceledRun(t *
 					t.Fatal(err)
 				}
 			}
-			worker, _ := NewExternalConversationReplyWorker(store, catalog)
+			worker, _ := NewReplyWorker(store, catalog)
 			deliveries, err := worker.ProcessScope(ctx, endpoint.Scope, 10)
 			if scenario == "revision-conflict" && !errors.Is(err, models.ErrExternalConversationConflict) {
 				t.Fatalf("revision conflict = %v", err)
@@ -178,7 +178,7 @@ func TestExternalConversationFailureReplySupersessionIsThreadLocal(t *testing.T)
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", models.AgentRunStatusFailed)
-			conversations := runtimeconversation.NewConversationService(store)
+			conversations := runtimeconversation.NewService(store)
 			current, _ := conversations.GetConversation(ctx, endpoint.Scope, item.ConversationID)
 			sender := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "sender"}
 			intent := models.MessageIntentQuestion
@@ -199,7 +199,7 @@ func TestExternalConversationFailureReplySupersessionIsThreadLocal(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			worker, _ := NewExternalConversationReplyWorker(store, catalog)
+			worker, _ := NewReplyWorker(store, catalog)
 			deliveries, err := worker.ProcessScope(ctx, endpoint.Scope, 10)
 			want := 1
 			if strings.HasPrefix(scenario, "same-thread") {
@@ -239,7 +239,7 @@ func TestExternalConversationFailedStatusWaitsForReplyProjection(t *testing.T) {
 func TestExternalConversationFailureReplySkipsLegacyTerminalProjection(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", models.AgentRunStatusFailed)
-	legacy, err := NewExternalConversationTransportService(store, catalog).Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+	legacy, err := NewTransportService(store, catalog).Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: item.Scope, EndpointID: item.EndpointID, Operation: capability.ConversationDeliveryTypingIndicator,
 		ConversationID: item.ConversationID, ChannelMessageID: item.ChannelMessageID,
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: item.Event.ExternalMessageID,
@@ -249,7 +249,7 @@ func TestExternalConversationFailureReplySkipsLegacyTerminalProjection(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, _ := NewExternalConversationReplyWorker(store, catalog)
+	worker, _ := NewReplyWorker(store, catalog)
 	for range 2 {
 		projected, err := worker.ProcessScope(ctx, endpoint.Scope, 10)
 		if err != nil || len(projected) != 0 {

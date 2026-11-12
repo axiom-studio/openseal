@@ -24,7 +24,7 @@ type ArtifactRetentionSweepResult struct {
 }
 
 type ArtifactRetentionService struct {
-	catalog   *ArtifactCatalog
+	catalog   *Catalog
 	inspector ArtifactContentInspector
 	deleter   ArtifactContentDeleter
 	now       func() time.Time
@@ -34,7 +34,7 @@ func NewArtifactRetentionService(store models.ArtifactStore, inspector ArtifactC
 	if store == nil || inspector == nil || deleter == nil {
 		return nil, errors.New("artifact catalog, content inspector, and content deleter are required")
 	}
-	return &ArtifactRetentionService{catalog: NewArtifactCatalog(store, opts...), inspector: inspector, deleter: deleter, now: models.ClockFrom(opts)}, nil
+	return &ArtifactRetentionService{catalog: NewCatalog(store, opts...), inspector: inspector, deleter: deleter, now: models.ClockFrom(opts)}, nil
 }
 
 func (s *ArtifactRetentionService) Sweep(ctx context.Context, scope models.Scope, offset, limit int) (*ArtifactRetentionSweepResult, error) {

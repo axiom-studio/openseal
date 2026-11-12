@@ -20,13 +20,13 @@ import (
 
 type hostToolDispatchFixture struct {
 	host       *modelsteptest.FakeHostToolHost
-	actions    *action.ActionCoordinator
+	actions    *action.Coordinator
 	dispatcher *modelstep.HostToolDispatcher
 	slept      []time.Duration
 }
 
 func newHostToolDispatchFixture(replies ...func(context.Context, models.HostToolRequest) (models.HostToolResult, error)) *hostToolDispatchFixture {
-	f := &hostToolDispatchFixture{host: &modelsteptest.FakeHostToolHost{Replies: replies}, actions: action.NewActionCoordinator(nil, nil, nil, nil, nil)}
+	f := &hostToolDispatchFixture{host: &modelsteptest.FakeHostToolHost{Replies: replies}, actions: action.NewCoordinator(nil, nil, nil, nil, nil)}
 	f.dispatcher = modelstep.NewHostToolDispatcher(f.host, f.actions, nil)
 	f.dispatcher.SetSleep(func(ctx context.Context, wait time.Duration) error {
 		f.slept = append(f.slept, wait)

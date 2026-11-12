@@ -56,7 +56,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Community participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -71,7 +71,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 		t.Fatal(err)
 	}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
+	conversation, _, err := conversation.NewService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: objective.Title,
 		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision},
 		IdempotencyKey: "objective-channel",
@@ -79,7 +79,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	conversationRun, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	conversationRun, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: owner.ID,
 		Goal: "Run this objective now", Source: models.RunSourceChat,
 		Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID},
@@ -147,7 +147,7 @@ func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *test
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Community participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -167,14 +167,14 @@ func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *test
 		t.Fatal(err)
 	}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
+	conversation, _, err := conversation.NewService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: objective.Title,
 		Origin: &models.ConversationReference{Kind: models.ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision}, IdempotencyKey: "objective-channel-exhausted",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	conversationRun, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	conversationRun, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: owner.ID,
 		Goal: "Run this objective now", Source: models.RunSourceChat,
 		Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID},
@@ -201,7 +201,7 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Community participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -222,14 +222,14 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 		t.Fatal(err)
 	}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
+	conversation, _, err := conversation.NewService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: objective.Title,
 		Origin: &models.ConversationReference{Kind: models.ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision}, IdempotencyKey: "objective-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	conversationRun, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	conversationRun, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: owner.ID,
 		Goal: "Run hourly for five hours", Source: models.RunSourceChat,
 		Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID},
@@ -302,7 +302,7 @@ func TestRunbookScheduleReplacementRejectsActiveOrForeignActivation(t *testing.T
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	rowan := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	other := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{Scope: scope, Owner: other, Title: "Other work", Goal: "Do other work", Status: models.ObjectiveStatusActive})
+	objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{Scope: scope, Owner: other, Title: "Other work", Goal: "Do other work", Status: models.ObjectiveStatusActive})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	rowan := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	other := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{Scope: scope, Owner: other, Title: "Other work", Goal: "Do other work", Status: models.ObjectiveStatusActive})
+	objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{Scope: scope, Owner: other, Title: "Other work", Goal: "Do other work", Status: models.ObjectiveStatusActive})
 	if err != nil {
 		t.Fatal(err)
 	}

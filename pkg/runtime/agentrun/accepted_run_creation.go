@@ -11,7 +11,7 @@ import (
 // CreateAgentRunWithAcceptedExecution preserves an already accepted delivery
 // before consulting mutable deployment state. New work is prepared through the
 // host's authoritative catalog before the canonical creation transaction.
-func CreateAgentRunWithAcceptedExecution(ctx context.Context, commands *RunCommandService, request models.CreateAgentRunRequest, preparer models.AcceptedRunExecutionPreparer) (*AgentRunCommandResult, error) {
+func CreateAgentRunWithAcceptedExecution(ctx context.Context, commands *RunCommandService, request models.CreateAgentRunRequest, preparer models.AcceptedRunExecutionPreparer) (*CommandResult, error) {
 	if preparer != nil {
 		request.Context = maps.Clone(request.Context)
 		delete(request.Context, models.AcceptedRunExecutionContextKey)

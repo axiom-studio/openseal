@@ -19,13 +19,13 @@ import (
 
 type quotedPhotoHost struct{ calls int }
 
-func (h *quotedPhotoHost) ReadExternalConversationAttachment(_ context.Context, req externalconversation.ExternalConversationAttachmentHostRequest) (*externalconversation.ExternalConversationAttachmentContent, error) {
+func (h *quotedPhotoHost) ReadExternalConversationAttachment(_ context.Context, req externalconversation.AttachmentHostRequest) (*externalconversation.AttachmentContent, error) {
 	if err := req.Event.Validate(); err != nil {
 		return nil, err
 	}
 	h.calls++
 	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=")
-	return &externalconversation.ExternalConversationAttachmentContent{ID: req.Attachment.ID, Name: "photo.png", MediaType: "image/png", Data: data, Status: "supplied"}, nil
+	return &externalconversation.AttachmentContent{ID: req.Attachment.ID, Name: "photo.png", MediaType: "image/png", Data: data, Status: "supplied"}, nil
 }
 
 func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
@@ -34,11 +34,11 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 	photo := &quotedPhotoHost{}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	item := externalconversationtest.ReceiveContextEvent(t, store, endpoint, "photo-reply", "reply", "parent", now)
-	history := &externalconversationtest.RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []externalconversation.ExternalConversationContextMessage{{
+	history := &externalconversationtest.RecordingContextHost{Result: &externalconversation.ContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []externalconversation.ContextMessage{{
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: "parent", ExternalMessageID: "parent", ExternalParticipantID: "Kev", ParticipantDisplayName: "Kev", OccurredAt: now.Add(-time.Second),
 		Attachments: []models.ExternalConversationAttachment{{ID: "photo", Name: "photo.png", MediaType: "image/png", SizeBytes: 68}},
 	}}}}
-	worker, err := externalconversation.NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, externalconversation.ExternalConversationInboxWorkerConfig{WorkerID: "photo-worker", ContextHost: history, ContextCatalog: externalconversationtest.ContextHistoryResolver{ExternalConversationAdapterResolver: catalog}, AttachmentHost: photo, AttachmentContent: content})
+	worker, err := externalconversation.NewInboxWorker(store, replyAliasDispatcher{}, externalconversation.InboxWorkerConfig{WorkerID: "photo-worker", ContextHost: history, ContextCatalog: externalconversationtest.ContextHistoryResolver{AdapterResolver: catalog}, AttachmentHost: photo, AttachmentContent: content})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content models.ArtifactContentStore, conversation *models.Conversation, trigger *models.ChannelMessage, messageID string) *models.SessionEntry {
 	t.Helper()
 	ctx := t.Context()
-	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, runtimeconversation.ConversationAgentRunRequest(conversation, trigger))
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, runtimeconversation.AgentRunRequest(conversation, trigger))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content models.Arti
 		ModelProvider: string(models.ModelStepProviderAnthropic), Model: "chat-model", Producer: &runlooptest.ChatProducer{},
 		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
 	}}
-	runner, err := conversationrun.NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, runtimeconversation.NewConversationService(store)), conversationrun.ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewTurnRunner(store, conversationRunTestCoordinator(t, runtimeconversation.NewService(store)), conversationrun.TurnRunnerConfig{
 		AttachmentContent: content, AgentTurns: agent,
 	})
 	if err != nil {

@@ -47,7 +47,7 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 			scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}
 			catalog := objectiveActionCatalog(t, store, scope, owner.ID)
-			portfolio := runtimeportfolio.NewPortfolioService(store)
+			portfolio := runtimeportfolio.NewService(store)
 			run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: owner.ID, Goal: "Create release objective", Source: models.RunSourceChat})
 			if err != nil {
 				t.Fatal(err)
@@ -61,7 +61,7 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 				t.Fatal(err)
 			}
 			f := actiontest.NewLoopProposalFixture(t, store, claimed, "conversation-worker", time.Now().UTC())
-			coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
+			coordinator := action.NewCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ProposalValidator{validator})
 			proposal, err := coordinator.Propose(ctx, f.Request(action.ProposeActionRequest{
 				DeploymentID: owner.ID,
 				SkillID:      models.ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionCreate,
@@ -82,7 +82,7 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			executed := approveAndExecuteLoopAction(t, store, f, proposal, action.NewActionWorker(store, catalog, nil, dispatcher), "decision-42")
+			executed := approveAndExecuteLoopAction(t, store, f, proposal, action.NewWorker(store, catalog, nil, dispatcher), "decision-42")
 			if executed.Call.Status != models.ActionCallStatusSucceeded || executed.Call.Output["resourceType"] != "objective" || executed.Call.Output["operation"] != action.ObjectiveActionCreate || executed.Call.Output["created"] != true {
 				t.Fatalf("execution = %#v", executed)
 			}
@@ -109,7 +109,7 @@ func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeA
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "marketing"}
 	foreignOwner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "finance"}
 	catalog := objectiveActionCatalog(t, store, scope, owner.ID)
-	portfolio := runtimeportfolio.NewPortfolioService(store)
+	portfolio := runtimeportfolio.NewService(store)
 	foreign, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{Scope: scope, Owner: foreignOwner, Title: "Close books", Goal: "Close monthly books"})
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeA
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	validator, _ := action.NewObjectiveActionValidator(store)
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
+	coordinator := action.NewCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ProposalValidator{validator})
 	base := actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: models.ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionCreate, IdempotencyKey: "create"}, "create")
 	base.Arguments = map[string]interface{}{"title": "Campaign", "goal": "Launch campaign", "owner": map[string]interface{}{"type": "team", "id": "finance"}}
 	if _, err := coordinator.Propose(ctx, base); err == nil {
@@ -154,7 +154,7 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "sre"}
 	catalog := objectiveActionCatalog(t, store, scope, owner.ID)
-	portfolio := runtimeportfolio.NewPortfolioService(store)
+	portfolio := runtimeportfolio.NewService(store)
 	objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "Watch production", Goal: "Respond to incidents", Status: models.ObjectiveStatusActive})
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 	}
 	validator, _ := action.NewObjectiveActionValidator(store)
 	f := actiontest.NewLoopProposalFixture(t, store, claimed, "worker", time.Now().UTC())
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
+	coordinator := action.NewCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ProposalValidator{validator})
 	proposal, err := coordinator.Propose(ctx, f.Request(action.ProposeActionRequest{DeploymentID: owner.ID, SkillID: models.ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionPause, Arguments: map[string]interface{}{"objectiveId": objective.ID}, IdempotencyKey: "pause-on-request", Summary: "Pause objective: Watch production"}, "pause-on-request"))
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 		t.Fatalf("pause preview = %#v", proposal.Approval.ProposedAction)
 	}
 	dispatcher, _ := action.NewObjectiveActionDispatcher(store, nil)
-	executed := approveAndExecuteLoopAction(t, store, f, proposal, action.NewActionWorker(store, catalog, nil, dispatcher), "approve-pause")
+	executed := approveAndExecuteLoopAction(t, store, f, proposal, action.NewWorker(store, catalog, nil, dispatcher), "approve-pause")
 	paused, err := portfolio.GetObjective(ctx, scope, objective.ID)
 	if err != nil || paused.Status != models.ObjectiveStatusPaused || paused.Revision != objective.Revision+1 {
 		t.Fatalf("paused = %#v, %v", paused, err)
@@ -200,7 +200,7 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 // end, approves it as an operator, re-leases the queued Run to f's worker as
 // the loop's next claim does, and executes the ready call inline as the
 // loop's governed executor does.
-func approveAndExecuteLoopAction(t *testing.T, store models.KernelStore, f *actiontest.LoopProposalFixture, proposal *models.ActionProposalResult, worker *action.ActionWorker, decisionID string) *models.ActionExecutionResult {
+func approveAndExecuteLoopAction(t *testing.T, store models.KernelStore, f *actiontest.LoopProposalFixture, proposal *models.ActionProposalResult, worker *action.Worker, decisionID string) *models.ActionExecutionResult {
 	t.Helper()
 	f.AssertUntouched()
 	f.ParkOnApproval(proposal.Approval.ID)

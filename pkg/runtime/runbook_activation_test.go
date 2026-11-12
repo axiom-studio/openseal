@@ -23,7 +23,7 @@ func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Hourly research", Goal: "Research once per hour", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -102,7 +102,7 @@ func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 	}, "user", "admin", "test"); err != nil {
 		t.Fatal(err)
 	}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -159,7 +159,7 @@ func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 	}, "user", "admin", "verification test"); err != nil {
 		t.Fatal(err)
 	}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -190,7 +190,7 @@ func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	portfolio := runtimeportfolio.NewPortfolioService(store)
+	portfolio := runtimeportfolio.NewService(store)
 	objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful woodworking advice", Status: models.ObjectiveStatusActive,
 	})
@@ -227,7 +227,7 @@ func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -278,7 +278,7 @@ func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	seedTestSpace(t, store, scope)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Publish research", Goal: "Publish a cited brief", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -325,7 +325,7 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 	}
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -374,7 +374,7 @@ func TestRunbookActivationCannotCrossObjectiveOwner(t *testing.T) {
 	ctx := context.Background()
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}, Title: "Outcome", Goal: "Do useful work", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -395,7 +395,7 @@ func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testin
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Do useful work", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -441,7 +441,7 @@ func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Do useful work", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -477,13 +477,13 @@ func eventTaskFixture(t *testing.T, store *sqlite.Store) (models.Scope, routine.
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "event-task"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}
-	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+	objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Order alerts", Goal: "Summarize new orders", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	conversations := conversation.NewConversationService(store)
+	conversations := conversation.NewService(store)
 	seedTestSpace(t, store, scope)
 	c, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Orders", IdempotencyKey: "chat"})
 	if err != nil {

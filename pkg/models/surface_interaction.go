@@ -95,7 +95,7 @@ func (e *SurfaceInteractionConflictError) Is(target error) bool {
 
 // SurfaceInteractionFilter lists interactions in ascending Sequence order.
 // SurfaceID narrows the list to one surface across all its versions.
-// Viewer, honoured by ConversationService only (stores reject it), keeps the
+// Viewer, honoured by conversation.Service only (stores reject it), keeps the
 // interactions that viewer may read; see SurfaceInteraction.
 type SurfaceInteractionFilter struct {
 	Scope          Scope
@@ -112,7 +112,7 @@ type SurfaceInteractionFilter struct {
 // polls). Versions are not part of the key, so state carries forward to a
 // new version that keeps the component.
 //
-// Viewer, honoured by ConversationService only (stores reject it), reduces
+// Viewer, honoured by conversation.Service only (stores reject it), reduces
 // only the interactions that viewer may read: those on a card message the
 // viewer can see.
 type LatestSurfaceInteractionFilter struct {

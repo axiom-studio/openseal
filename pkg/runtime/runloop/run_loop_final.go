@@ -191,7 +191,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 	}
 	if explained && run.Status == models.AgentRunStatusFailed {
 		// Failed after an explanation the user already has.
-		return exitResult(RunLoopExit{Run: run, Reason: RunLoopExitFinal})
+		return exitResult(Exit{Run: run, Reason: ExitFinal})
 	}
 	return exitResultPtr(d.statusExit(run))
 }

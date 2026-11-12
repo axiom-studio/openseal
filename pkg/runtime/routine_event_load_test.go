@@ -56,10 +56,10 @@ func unboundRoutineEvent() *models.RoutineEvent {
 	}
 }
 
-func newUnboundRoutineEventMatcher(tb testing.TB) (*routine.RoutineEventMatcher, *countingRoutineEventStore) {
+func newUnboundRoutineEventMatcher(tb testing.TB) (*routine.EventMatcher, *countingRoutineEventStore) {
 	tb.Helper()
 	store := &countingRoutineEventStore{}
-	matcher := routine.NewRoutineEventMatcher(store)
+	matcher := routine.NewEventMatcher(store)
 	tb.Cleanup(matcher.Close)
 	// The scope has a routine, but on another connection.
 	if err := matcher.RefreshRoutineIndex(context.Background(), models.Scope{Kind: "tenant", ID: "busy"}); err != nil {
@@ -115,10 +115,10 @@ func TestRoutineEventTenantRunCap(t *testing.T) {
 		routines = append(routines, activation)
 	}
 	result := h.Pass()
-	if result.Started != routine.RoutineEventTenantRunCap || result.TenantCapped != 1 || h.ActiveEventRuns() != routine.RoutineEventTenantRunCap {
+	if result.Started != routine.EventTenantRunCap || result.TenantCapped != 1 || h.ActiveEventRuns() != routine.EventTenantRunCap {
 		t.Fatalf("first pass = %#v, active %d", result, h.ActiveEventRuns())
 	}
-	if result := h.Pass(); result.Started != 0 || h.ActiveEventRuns() != routine.RoutineEventTenantRunCap {
+	if result := h.Pass(); result.Started != 0 || h.ActiveEventRuns() != routine.EventTenantRunCap {
 		t.Fatalf("second pass = %#v, active %d", result, h.ActiveEventRuns())
 	}
 	// Finish three Runs: the two waiting routines start, and no more.
@@ -167,7 +167,7 @@ func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 	runStartedAt := map[string]time.Time{}
 	for minute := 0; minute < 180; minute++ {
 		h.Pass()
-		if active := h.ActiveEventRuns(); active > routine.RoutineEventTenantRunCap {
+		if active := h.ActiveEventRuns(); active > routine.EventTenantRunCap {
 			t.Fatalf("minute %d: %d event Runs are not finished", minute, active)
 		}
 		for _, activation := range routines {

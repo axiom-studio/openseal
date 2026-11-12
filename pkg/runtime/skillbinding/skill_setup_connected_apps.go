@@ -17,7 +17,7 @@ const maximumConnectedAppToolsNamed = 8
 // (a connected app), naming that binding's tools, or "" when none covers it.
 // A connected app is the user's own choice for that service, so the Agent
 // uses its tools instead of asking for a second, provider-specific account.
-func (d *SkillBindingActionDispatcher) connectedAppSetupRefusal(ctx context.Context, run *models.AgentRun, umbrella models.ObjectiveOwner, skillID string, candidate *skill.DiscoveryCandidate) (string, error) {
+func (d *ActionDispatcher) connectedAppSetupRefusal(ctx context.Context, run *models.AgentRun, umbrella models.ObjectiveOwner, skillID string, candidate *skill.DiscoveryCandidate) (string, error) {
 	set, err := d.runHostBindings(ctx, run, umbrella)
 	if err != nil || set == nil || len(set.Bindings) == 0 {
 		return "", err

@@ -56,12 +56,12 @@ type LoopBindingConfig struct {
 	ChatWorkspaces modelstep.ChatWorkspaces
 	// Media are the image sources of the path renderer; Media.ImageInput also
 	// decides whether the model step system carries the media section.
-	Media        modelstep.ModelStepMedia
+	Media        modelstep.Media
 	Capabilities modelstep.CapabilitySetConfig
 	// RoutineEventFiles keeps an event routine occurrence's events as a
 	// chat file when they are too big to inline (SPEC §6.3). nil: they are
 	// shortened to fit instead.
-	RoutineEventFiles routine.RoutineEventFileKeeper
+	RoutineEventFiles routine.EventFileKeeper
 	Logger            *zap.SugaredLogger
 	Now               func() time.Time
 }
@@ -304,7 +304,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 	}
 	for _, action := range actions {
 		if action.SkillID == models.RunbookManagementSkillID && action.Action == models.RunbookActionCreateTask {
-			prompt.AgentInstructions = append(prompt.AgentInstructions, routine.RoutineTimezoneInstruction, routine.RoutineDeliveryInstruction)
+			prompt.AgentInstructions = append(prompt.AgentInstructions, routine.TimezoneInstruction, routine.DeliveryInstruction)
 			if instruction := routine.BindingToolGrantInstruction(actions); instruction != "" {
 				prompt.AgentInstructions = append(prompt.AgentInstructions, instruction)
 			}
@@ -371,7 +371,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 	for _, skillPrompt := range prompts {
 		refs = append(refs, skillPrompt.Reference)
 	}
-	binding.Authority, err = control.ResolveControlAuthority(ctx, control.ControlAuthorityInput{
+	binding.Authority, err = control.ResolveControlAuthority(ctx, control.AuthorityInput{
 		Run: r.run, DeploymentID: r.deployment.ID, Catalog: r.catalog, Scope: r.scope,
 		SkillPromptRefs: refs, Operations: binding.RunbookOperations,
 		ConversationTasks: r.config.ConversationTasks, Runs: r.config.Store, Conversations: r.config.Conversations,
@@ -401,7 +401,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		})
 	}
 	preparer := runloop.NewCatalogModelStepPreparer(preparerConfig)
-	producer, err := modelstep.NewModelStepProducer(r.config.Host, preparer, r.config.Store)
+	producer, err := modelstep.NewProducer(r.config.Host, preparer, r.config.Store)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +431,7 @@ func (r *loopBindingResolution) deterministic(ctx context.Context, binding *agen
 	if err != nil {
 		return nil, err
 	}
-	binding.Authority, err = control.ResolveControlAuthority(ctx, control.ControlAuthorityInput{Run: r.run, DeploymentID: r.deployment.ID, Deterministic: true})
+	binding.Authority, err = control.ResolveControlAuthority(ctx, control.AuthorityInput{Run: r.run, DeploymentID: r.deployment.ID, Deterministic: true})
 	if err != nil {
 		return nil, err
 	}

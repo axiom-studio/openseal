@@ -17,7 +17,7 @@ func TestActionProposalIsAtomicAndIdempotent(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "deploy", Source: models.RunSourceManual,
 	})
 	if err != nil {

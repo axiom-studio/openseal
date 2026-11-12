@@ -48,7 +48,7 @@ func desktopRouteMessageInput(message models.ChannelMessage) desktopRouteMessage
 	return desktopRouteMessage{ID: message.ID, Sender: message.Sender, Name: message.SenderDisplayName, Intent: message.Intent, Content: content}
 }
 
-func (r *DesktopConversationRouter) Route(ctx context.Context, request conversation.ConversationRouteRequest) (conversation.ConversationRouteDecision, error) {
+func (r *DesktopConversationRouter) Route(ctx context.Context, request conversation.RouteRequest) (conversation.RouteDecision, error) {
 	members := make([]map[string]interface{}, 0, len(request.Members))
 	ids := make([]string, 0, len(request.Members))
 	for _, member := range request.Members {
@@ -67,7 +67,7 @@ func (r *DesktopConversationRouter) Route(ctx context.Context, request conversat
 		"recentMessages": recent, "message": desktopRouteMessageInput(request.Trigger),
 	})
 	if err != nil {
-		return conversation.ConversationRouteDecision{}, err
+		return conversation.RouteDecision{}, err
 	}
 	schema := map[string]interface{}{"type": "object", "additionalProperties": false, "required": []string{"agentId", "reason"}, "properties": map[string]interface{}{
 		"agentId": map[string]interface{}{"type": "string", "enum": ids}, "reason": map[string]interface{}{"type": "string", "maxLength": 120},
@@ -79,15 +79,15 @@ func (r *DesktopConversationRouter) Route(ctx context.Context, request conversat
 		"tool_choice": map[string]interface{}{"type": "function", "function": map[string]string{"name": "route_message"}},
 	})
 	if err != nil {
-		return conversation.ConversationRouteDecision{}, err
+		return conversation.RouteDecision{}, err
 	}
 	raw, err := r.client.post(ctx, body)
 	if err != nil {
 		var status *providerHTTPError
 		if errors.As(err, &status) {
-			return conversation.ConversationRouteDecision{}, fmt.Errorf("the routing provider returned HTTP %d", status.Status)
+			return conversation.RouteDecision{}, fmt.Errorf("the routing provider returned HTTP %d", status.Status)
 		}
-		return conversation.ConversationRouteDecision{}, errors.New("the routing provider could not be reached")
+		return conversation.RouteDecision{}, errors.New("the routing provider could not be reached")
 	}
 	var envelope struct {
 		Choices []struct {
@@ -103,14 +103,14 @@ func (r *DesktopConversationRouter) Route(ctx context.Context, request conversat
 	}
 	if json.Unmarshal(raw, &envelope) != nil || len(envelope.Choices) != 1 || len(envelope.Choices[0].Message.ToolCalls) != 1 ||
 		envelope.Choices[0].Message.ToolCalls[0].Function.Name != "route_message" {
-		return conversation.ConversationRouteDecision{}, errors.New("the routing provider returned no decision")
+		return conversation.RouteDecision{}, errors.New("the routing provider returned no decision")
 	}
 	var decision struct {
 		AgentID string `json:"agentId"`
 		Reason  string `json:"reason"`
 	}
 	if json.Unmarshal([]byte(envelope.Choices[0].Message.ToolCalls[0].Function.Arguments), &decision) != nil || strings.TrimSpace(decision.AgentID) == "" {
-		return conversation.ConversationRouteDecision{}, errors.New("the routing provider returned an invalid decision")
+		return conversation.RouteDecision{}, errors.New("the routing provider returned an invalid decision")
 	}
-	return conversation.ConversationRouteDecision{AgentID: strings.TrimSpace(decision.AgentID), Reason: strings.TrimSpace(decision.Reason)}, nil
+	return conversation.RouteDecision{AgentID: strings.TrimSpace(decision.AgentID), Reason: strings.TrimSpace(decision.Reason)}, nil
 }

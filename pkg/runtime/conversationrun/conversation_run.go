@@ -17,7 +17,7 @@ const (
 	governedActionProposalFailedStatus = "proposal_failed"
 )
 
-type ConversationRunSchedulerConfig struct {
+type SchedulerConfig struct {
 	ConversationPageSize int
 	MessagePageSize      int
 	// RequireParticipationOptIn leaves unconfigured channels inert. Existing
@@ -27,7 +27,7 @@ type ConversationRunSchedulerConfig struct {
 	Budget *models.BudgetPolicy
 }
 
-func (c ConversationRunSchedulerConfig) normalize() (ConversationRunSchedulerConfig, error) {
+func (c SchedulerConfig) normalize() (SchedulerConfig, error) {
 	if c.ConversationPageSize == 0 {
 		c.ConversationPageSize = 100
 	}
@@ -35,18 +35,18 @@ func (c ConversationRunSchedulerConfig) normalize() (ConversationRunSchedulerCon
 		c.MessagePageSize = 100
 	}
 	if c.ConversationPageSize < 1 || c.ConversationPageSize > 1000 || c.MessagePageSize < 1 || c.MessagePageSize > 1000 {
-		return ConversationRunSchedulerConfig{}, fmt.Errorf("%w: conversation reconciliation page sizes must be between 1 and 1000", models.ErrInvalidConversation)
+		return SchedulerConfig{}, fmt.Errorf("%w: conversation reconciliation page sizes must be between 1 and 1000", models.ErrInvalidConversation)
 	}
 	if c.Budget != nil {
 		if err := c.Budget.Validate(); err != nil {
-			return ConversationRunSchedulerConfig{}, err
+			return SchedulerConfig{}, err
 		}
 		c.Budget = models.CloneBudgetPolicy(c.Budget)
 	}
 	return c, nil
 }
 
-type ConversationRunReconcileResult struct {
+type ReconcileResult struct {
 	Conversations int `json:"conversations"`
 	Messages      int `json:"messages"`
 	Scheduled     int `json:"scheduled"`
@@ -55,15 +55,15 @@ type ConversationRunReconcileResult struct {
 	Results       int `json:"results"`
 }
 
-// ConversationRunScheduler projects durable channel messages into canonical
+// Scheduler projects durable channel messages into canonical
 // Runs. Message identity is the durable wake fact: immediate scheduling is a
 // latency optimization, while ReconcileScope closes the crash gap by advancing
 // a service cursor only after each page has been scheduled idempotently.
-type ConversationRunScheduler struct {
-	conversations  *runtimeconversation.ConversationService
+type Scheduler struct {
+	conversations  *runtimeconversation.Service
 	runs           *agentrun.RunCommandService
 	approvals      *action.ApprovalCoordinator
-	config         ConversationRunSchedulerConfig
+	config         SchedulerConfig
 	sessionContext ConversationSessionContextResolver
 	// conversationStore and runStore are the stores behind conversations
 	// and runs, for the reads the services do not offer.
@@ -77,12 +77,12 @@ type ConversationSessionContextResolver interface {
 	ResolveConversationSessionContext(context.Context, models.Scope, string) (map[string]interface{}, error)
 }
 
-func NewConversationRunScheduler(
+func NewScheduler(
 	conversationStore models.ConversationStore,
 	runStore models.RunCommandStore,
-	config ConversationRunSchedulerConfig,
+	config SchedulerConfig,
 	opts ...models.ServiceOption,
-) (*ConversationRunScheduler, error) {
+) (*Scheduler, error) {
 	if conversationStore == nil || runStore == nil {
 		return nil, errors.New("conversation and run command stores are required")
 	}
@@ -90,8 +90,8 @@ func NewConversationRunScheduler(
 	if err != nil {
 		return nil, err
 	}
-	return &ConversationRunScheduler{
-		conversations:     runtimeconversation.NewConversationService(conversationStore, opts...),
+	return &Scheduler{
+		conversations:     runtimeconversation.NewService(conversationStore, opts...),
 		runs:              agentrun.NewRunCommandService(runStore, opts...),
 		conversationStore: conversationStore,
 		runStore:          runStore,
@@ -101,18 +101,18 @@ func NewConversationRunScheduler(
 	}, nil
 }
 
-func (s *ConversationRunScheduler) SetSessionContextResolver(resolver ConversationSessionContextResolver) {
+func (s *Scheduler) SetSessionContextResolver(resolver ConversationSessionContextResolver) {
 	if s != nil {
 		s.sessionContext = resolver
 	}
 }
 
-func (s *ConversationRunScheduler) ScheduleMessage(
+func (s *Scheduler) ScheduleMessage(
 	ctx context.Context,
 	scope models.Scope,
 	conversationID string,
 	messageID string,
-) (*agentrun.AgentRunCommandResult, bool, error) {
+) (*agentrun.CommandResult, bool, error) {
 	if s == nil || s.conversations == nil || s.runs == nil {
 		return nil, false, errors.New("conversation run scheduler is not configured")
 	}
@@ -139,7 +139,7 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 		// Existing imported runs retain their original receipt and execution key.
 		// Replaying an event must not recreate or cancel already accepted work.
 		if models.IsExternalChannelConversation(conversation) {
-			return &agentrun.AgentRunCommandResult{Run: current}, true, nil
+			return &agentrun.CommandResult{Run: current}, true, nil
 		}
 		result, err := s.runs.CreateAgentRun(ctx, request)
 		return result, true, err
@@ -154,11 +154,11 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 	return s.scheduleLoadedMessage(ctx, conversation, message)
 }
 
-func (s *ConversationRunScheduler) scheduleLoadedMessage(
+func (s *Scheduler) scheduleLoadedMessage(
 	ctx context.Context,
 	conversation *models.Conversation,
 	message *models.ChannelMessage,
-) (*agentrun.AgentRunCommandResult, bool, error) {
+) (*agentrun.CommandResult, bool, error) {
 	if resumed, handled, err := s.resumeConversationAnswer(ctx, conversation, message); err != nil || handled {
 		return resumed, resumed != nil && resumed.Event == nil, err
 	}
@@ -176,8 +176,8 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	return result, result.Event == nil, nil
 }
 
-func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (models.CreateAgentRunRequest, error) {
-	request := runtimeconversation.ConversationAgentRunRequest(conversation, message)
+func (s *Scheduler) conversationAgentRunRequest(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (models.CreateAgentRunRequest, error) {
+	request := runtimeconversation.AgentRunRequest(conversation, message)
 	request.Budget = models.CloneBudgetPolicy(s.config.Budget)
 	if s.sessionContext == nil {
 		return request, nil
@@ -195,14 +195,14 @@ func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Conte
 	return request, nil
 }
 
-func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope models.Scope) (*ConversationRunReconcileResult, error) {
+func (s *Scheduler) ReconcileScope(ctx context.Context, scope models.Scope) (*ReconcileResult, error) {
 	if s == nil || s.conversations == nil || s.runs == nil {
 		return nil, errors.New("conversation run scheduler is not configured")
 	}
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	result := &ConversationRunReconcileResult{}
+	result := &ReconcileResult{}
 	if err := s.reconcileSkillSetupTasks(ctx, scope, result); err != nil {
 		return result, err
 	}
@@ -244,7 +244,7 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope mod
 // canceling a Run/Approval/ActionCall and projecting that terminal fact back
 // into its command channel. The message key is Run-stable, so any replica can
 // recover it after a restart without duplicating user-visible results.
-func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context.Context, scope models.Scope, result *ConversationRunReconcileResult) error {
+func (s *Scheduler) reconcileCanceledConversationRuns(ctx context.Context, scope models.Scope, result *ReconcileResult) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
 		runs, err := s.runStore.ListAgentRuns(ctx, models.AgentRunFilter{
@@ -320,7 +320,7 @@ func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context
 	}
 }
 
-func (s *ConversationRunScheduler) conversationTriggerResolved(ctx context.Context, scope models.Scope, conversationID, triggerID string) (bool, error) {
+func (s *Scheduler) conversationTriggerResolved(ctx context.Context, scope models.Scope, conversationID, triggerID string) (bool, error) {
 	const pageSize = 100
 	for after := int64(0); ; {
 		messages, err := s.conversations.ListChannelMessages(ctx, models.ChannelMessageFilter{
@@ -341,10 +341,10 @@ func (s *ConversationRunScheduler) conversationTriggerResolved(ctx context.Conte
 	}
 }
 
-func (s *ConversationRunScheduler) reconcileConversation(
+func (s *Scheduler) reconcileConversation(
 	ctx context.Context,
 	conversation *models.Conversation,
-	result *ConversationRunReconcileResult,
+	result *ReconcileResult,
 ) error {
 	participant := models.ConversationParticipant{Type: models.ConversationParticipantService, ID: models.ConversationRunSchedulerParticipant}
 	var coordinated map[string]bool
@@ -408,7 +408,7 @@ func (s *ConversationRunScheduler) reconcileConversation(
 	}
 }
 
-func (s *ConversationRunScheduler) coordinatedTriggerIDs(ctx context.Context, conversation *models.Conversation) (map[string]bool, error) {
+func (s *Scheduler) coordinatedTriggerIDs(ctx context.Context, conversation *models.Conversation) (map[string]bool, error) {
 	const pageSize = 100
 	result := make(map[string]bool)
 	for offset := 0; ; offset += pageSize {
@@ -429,7 +429,7 @@ func (s *ConversationRunScheduler) coordinatedTriggerIDs(ctx context.Context, co
 	}
 }
 
-func (s *ConversationRunScheduler) advanceSchedulerCursor(
+func (s *Scheduler) advanceSchedulerCursor(
 	ctx context.Context,
 	conversation *models.Conversation,
 	participant models.ConversationParticipant,
@@ -478,7 +478,7 @@ func conversationMessageStartsRun(conversation *models.Conversation, message *mo
 		return false
 	}
 	// Saved-artifact receipts project completed work; they are not new tasks.
-	if message.Sender.Type == models.ConversationParticipantService && message.Sender.ID == runtimeconversation.ConversationArtifactReceiptService {
+	if message.Sender.Type == models.ConversationParticipantService && message.Sender.ID == runtimeconversation.ArtifactReceiptService {
 		return false
 	}
 	// The owning Agent's reply is the projection of the current conversation

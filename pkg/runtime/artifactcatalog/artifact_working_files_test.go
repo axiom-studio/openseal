@@ -26,7 +26,7 @@ func TestWorkingFilesAreLeftOutOfResultsUntilHandedOver(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	stores := map[string]models.ArtifactStore{"sqlite": sqlite}
 	for name, store := range stores {
-		catalog := artifactcatalog.NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) }))
+		catalog := artifactcatalog.NewCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) }))
 		for _, id := range []string{"report.pdf", "plot.py", "panel.png", "upload.csv"} {
 			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: validCatalogArtifact(id, 1)}); err != nil {
 				t.Fatal(err)

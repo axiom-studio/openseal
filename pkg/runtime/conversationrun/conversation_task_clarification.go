@@ -13,7 +13,7 @@ import (
 // An explicit reply to a root Run's question is a clarification attempt, including
 // when its actor, thread or current Run state prevents acceptance. Do not turn
 // such rejected answers into unrelated foreground work.
-func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.Context, conversation *models.Conversation, answer *models.ChannelMessage) (bool, error) {
+func (s *Scheduler) targetsRootClarificationQuestion(ctx context.Context, conversation *models.Conversation, answer *models.ChannelMessage) (bool, error) {
 	if conversation == nil || answer == nil || answer.Scope != conversation.Scope || answer.ConversationID != conversation.ID {
 		return false, nil
 	}
@@ -47,7 +47,7 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 			if err != nil {
 				return false, err
 			}
-			if origin != nil && origin.ID == conversation.ID && runtimeconversation.ConversationRunAgentID(conversation, run) == question.Sender.ID {
+			if origin != nil && origin.ID == conversation.ID && runtimeconversation.RunAgentID(conversation, run) == question.Sender.ID {
 				return true, nil
 			}
 		}

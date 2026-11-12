@@ -103,12 +103,12 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 func TestRoutineScriptChangesAlwaysNeedApproval(t *testing.T) {
 	definition := routine.RunbookManagementSkill()
 	for _, action := range []string{models.RunbookActionCreateTask, models.RunbookActionSetScript} {
-		decision, err := runtimeaction.NewDefaultActionPolicy().EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{
+		decision, err := runtimeaction.NewDefaultActionPolicy().EvaluateAction(t.Context(), runtimeaction.PolicyInput{
 			Run:   &models.AgentRun{ID: "run", Scope: models.Scope{Kind: "tenant", ID: "one"}},
 			Bound: &skill.BoundAction{Definition: definition, Binding: &skill.Binding{ID: "routines"}, Action: definition.Actions[action]}, ApprovalMode: models.ConversationApprovalSkip,
 			RoutineGrant: &models.RoutineGrant{Action: models.RunbookManagementSkillID + "." + action, Label: "anything"},
 		})
-		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.ApprovalTimeout == models.ApprovalTimeoutApprove {
+		if err != nil || decision.Disposition != runtimeaction.DispositionRequireApproval || decision.ApprovalTimeout == models.ApprovalTimeoutApprove {
 			t.Fatalf("%s: %#v %v", action, decision, err)
 		}
 	}

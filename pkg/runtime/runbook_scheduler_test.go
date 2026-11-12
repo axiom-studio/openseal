@@ -34,7 +34,7 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 			defer cleanup()
 			scope := models.Scope{Kind: "tenant", ID: "bounded"}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-			objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+			objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: owner, Title: "Five useful comments", Goal: "Publish one useful comment per hour for five hours", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
@@ -106,7 +106,7 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Useful participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive, Priority: 4,
 	})
 	if err != nil {
@@ -222,7 +222,7 @@ func TestRunbookSchedulerKeepsSiblingRunbooksIndependent(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, _ := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+	objective, _ := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Pursue several methods", Status: models.ObjectiveStatusActive,
 	})
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)

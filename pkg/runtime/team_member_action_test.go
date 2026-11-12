@@ -27,7 +27,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	teams, agentDeploymentID := teamMemberActionRegistry(t, ctx, scope)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "accessibility-team"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: agentDeploymentID,
 		Goal: "Let the UX Reviewer speak", Source: models.RunSourceChat,
@@ -46,13 +46,13 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionRequireApproval, Reason: "Team behavior changes require review",
+	policy := action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{
+			Disposition: action.DispositionRequireApproval, Reason: "Team behavior changes require review",
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator})
+	coordinator := action.NewCoordinator(store, store, catalog, policy, []action.ProposalValidator{validator})
 	arguments := map[string]interface{}{
 		"memberId": "ux-reviewer", "expectedDeploymentRevision": 1, "channelParticipation": "active",
 	}
@@ -84,7 +84,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := action.NewActionWorker(store, catalog, nil, dispatcher)
+	worker := action.NewWorker(store, catalog, nil, dispatcher)
 	executed, err := worker.ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil {
 		t.Fatal(err)

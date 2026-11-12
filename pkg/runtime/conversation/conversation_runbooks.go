@@ -22,7 +22,7 @@ const maximumConversationRunbookLinkAttempts = 5
 // call it after a visual with routine components (presentation.
 // RoutineBindings) passes validation and is stored, e.g. from update_visual;
 // answer visuals are linked by the conversation runner.
-func (s *ConversationService) LinkRunbooks(ctx context.Context, scope models.Scope, conversationID string, activationIDs []string) (*models.Conversation, error) {
+func (s *Service) LinkRunbooks(ctx context.Context, scope models.Scope, conversationID string, activationIDs []string) (*models.Conversation, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}

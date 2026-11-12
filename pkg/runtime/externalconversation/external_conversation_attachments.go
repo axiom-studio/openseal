@@ -18,7 +18,7 @@ import (
 // Bound the wire payload below the default four MiB gRPC envelope limit.
 const MaximumExternalConversationAttachmentBytes = 2 << 20
 
-type ExternalConversationAttachmentContent struct {
+type AttachmentContent struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	MediaType string `json:"mediaType,omitempty"`
@@ -26,15 +26,15 @@ type ExternalConversationAttachmentContent struct {
 	Status    string `json:"status,omitempty"`
 }
 
-type ExternalConversationAttachmentHostRequest struct {
+type AttachmentHostRequest struct {
 	Endpoint   *models.ExternalConversationEndpoint
 	Adapter    *skill.BoundConversationAdapter
 	Event      models.NormalizedExternalConversationEvent
 	Attachment models.ExternalConversationAttachment
 }
 
-type ExternalConversationAttachmentHost interface {
-	ReadExternalConversationAttachment(context.Context, ExternalConversationAttachmentHostRequest) (*ExternalConversationAttachmentContent, error)
+type AttachmentHost interface {
+	ReadExternalConversationAttachment(context.Context, AttachmentHostRequest) (*AttachmentContent, error)
 }
 
 func containsConversationFeature(features []capability.ConversationAdapterFeature, feature capability.ConversationAdapterFeature) bool {
@@ -46,7 +46,7 @@ func containsConversationFeature(features []capability.ConversationAdapterFeatur
 	return false
 }
 
-func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context, endpoint *models.ExternalConversationEndpoint, conversation *models.Conversation, event models.NormalizedExternalConversationEvent) ([]models.ConversationReference, []string, error) {
+func (w *InboxWorker) importAttachments(ctx context.Context, endpoint *models.ExternalConversationEndpoint, conversation *models.Conversation, event models.NormalizedExternalConversationEvent) ([]models.ConversationReference, []string, error) {
 	if len(event.Attachments) == 0 {
 		return nil, nil, nil
 	}
@@ -66,7 +66,7 @@ func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context,
 	if !ok {
 		return nil, nil, errors.New("artifact catalog is unavailable")
 	}
-	catalog := artifactcatalog.NewArtifactCatalog(store, models.WithClock(w.now))
+	catalog := artifactcatalog.NewCatalog(store, models.WithClock(w.now))
 	remaining := MaximumExternalConversationAttachmentBytes
 	for _, file := range event.Attachments {
 		id := stableExternalConversationID(endpoint.Scope, endpoint.ID, "file", event.ExternalMessageID+":"+file.ID)
@@ -86,7 +86,7 @@ func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context,
 		}
 		origin := *endpoint
 		origin.Address = event.ExternalConversationID
-		content, err := w.config.AttachmentHost.ReadExternalConversationAttachment(ctx, ExternalConversationAttachmentHostRequest{Endpoint: &origin, Adapter: adapter, Event: event, Attachment: file})
+		content, err := w.config.AttachmentHost.ReadExternalConversationAttachment(ctx, AttachmentHostRequest{Endpoint: &origin, Adapter: adapter, Event: event, Attachment: file})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -127,8 +127,8 @@ func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context,
 	return refs, notices, nil
 }
 
-func externalDeliveryAttachments(ctx context.Context, store models.ExternalConversationStore, content models.ArtifactContentStore, scope models.Scope, message *models.ChannelMessage) ([]ExternalConversationAttachmentContent, error) {
-	var result []ExternalConversationAttachmentContent
+func externalDeliveryAttachments(ctx context.Context, store models.ExternalConversationStore, content models.ArtifactContentStore, scope models.Scope, message *models.ChannelMessage) ([]AttachmentContent, error) {
+	var result []AttachmentContent
 	seen := map[string]bool{}
 	catalog, ok := store.(models.ArtifactStore)
 	remaining := MaximumExternalConversationAttachmentBytes
@@ -157,7 +157,7 @@ func externalDeliveryAttachments(ctx context.Context, store models.ExternalConve
 		if readErr != nil || int64(len(data)) != artifact.SizeBytes || fmt.Sprintf("sha256:%x", sha256.Sum256(data)) != artifact.Digest {
 			return nil, errors.New("attachment integrity check failed")
 		}
-		result = append(result, ExternalConversationAttachmentContent{ID: key, Name: artifact.Name, MediaType: artifact.MediaType, Data: data})
+		result = append(result, AttachmentContent{ID: key, Name: artifact.Name, MediaType: artifact.MediaType, Data: data})
 		remaining -= len(data)
 	}
 	return result, nil

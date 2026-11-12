@@ -16,15 +16,15 @@ import (
 	"github.com/google/uuid"
 )
 
-type ActionDisposition string
+type Disposition string
 
 const (
-	ActionDispositionAllow           ActionDisposition = "allow"
-	ActionDispositionDeny            ActionDisposition = "deny"
-	ActionDispositionRequireApproval ActionDisposition = "require_approval"
+	DispositionAllow           Disposition = "allow"
+	DispositionDeny            Disposition = "deny"
+	DispositionRequireApproval Disposition = "require_approval"
 )
 
-type ActionPolicyInput struct {
+type PolicyInput struct {
 	Run               *models.AgentRun
 	Bound             *skill.BoundAction
 	Arguments         map[string]interface{}
@@ -44,8 +44,8 @@ type ActionPolicyInput struct {
 	RoutineGrant *models.RoutineGrant
 }
 
-type ActionPolicyDecision struct {
-	Disposition          ActionDisposition
+type PolicyDecision struct {
+	Disposition          Disposition
 	Reason               string
 	EligibleApprovers    []models.ApprovalPrincipal
 	ApprovalTTL          time.Duration
@@ -59,37 +59,37 @@ type ActionPolicyDecision struct {
 	Review skill.ActionReview `json:"review,omitempty"`
 }
 
-type ActionPolicyEvaluator interface {
-	EvaluateAction(context.Context, ActionPolicyInput) (ActionPolicyDecision, error)
+type PolicyEvaluator interface {
+	EvaluateAction(context.Context, PolicyInput) (PolicyDecision, error)
 }
 
-type ActionPolicyEvaluatorFunc func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error)
+type PolicyEvaluatorFunc func(context.Context, PolicyInput) (PolicyDecision, error)
 
-func (f ActionPolicyEvaluatorFunc) EvaluateAction(ctx context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
+func (f PolicyEvaluatorFunc) EvaluateAction(ctx context.Context, input PolicyInput) (PolicyDecision, error) {
 	return f(ctx, input)
 }
 
-type ActionCatalog interface {
+type Catalog interface {
 	Resolve(context.Context, skill.ScopeReference, string, string, string, string, ...skill.BindingReference) (*skill.BoundAction, error)
 	ValidateInput(context.Context, *skill.BoundAction, map[string]interface{}) error
 }
 
-// ActionProposalValidator applies deterministic kernel rules that cannot be
+// ProposalValidator applies deterministic kernel rules that cannot be
 // expressed by a JSON schema. Validators run before policy evaluation and
 // persistence, so an invalid or out-of-scope model proposal never becomes an
 // approval request. A validator may return a typed, secret-safe approval
 // preview; the last non-nil preview replaces the generic Skill invocation.
-type ActionProposalValidator interface {
+type ProposalValidator interface {
 	ValidateActionProposal(context.Context, agentrun.ActionProposalValidationInput) (map[string]interface{}, error)
 }
 
-// ActionProposalArgumentResolver lets a deterministic kernel validator add
+// ProposalArgumentResolver lets a deterministic kernel validator add
 // arguments that belong to the runtime rather than the model. Resolvers run
 // before JSON Schema validation; the resolved arguments are then used for
 // validation, policy, approval previews, persistence, and execution. This is
 // intentionally separate from model input so concurrency tokens and similar
 // implementation details never need to become user-facing prompt fields.
-type ActionProposalArgumentResolver interface {
+type ProposalArgumentResolver interface {
 	ResolveActionProposalArguments(context.Context, agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error)
 }
 
@@ -127,15 +127,15 @@ type ProposeActionRequest struct {
 	Execution models.ActionExecution
 }
 
-type ActionCoordinator struct {
+type Coordinator struct {
 	portfolio     models.PortfolioStore
 	actions       models.ActionStore
 	conversations ConversationReader
 	routines      models.RoutineGrantStore
 	owners        models.RoutineOwnerAddressResolver
-	catalog       ActionCatalog
-	policy        ActionPolicyEvaluator
-	validators    []ActionProposalValidator
+	catalog       Catalog
+	policy        PolicyEvaluator
+	validators    []ProposalValidator
 	now           func() time.Time
 	newID         func() string
 	nested        nestedActionTurns
@@ -143,10 +143,10 @@ type ActionCoordinator struct {
 	nestedMaxCalls, nestedMaxConcurrent int
 }
 
-func NewActionCoordinator(portfolio models.PortfolioStore, actions models.ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators []ActionProposalValidator, opts ...models.ServiceOption) *ActionCoordinator {
-	portable := []ActionProposalValidator{KernelResolvedActionArgumentResolver{}, skillbinding.BindingActionArgumentResolver{}, skillbinding.EmbedSessionActionAuthorityValidator{}, RequiredActionEvidenceValidator{}, ObservationRefActionProposalValidator{}}
+func NewCoordinator(portfolio models.PortfolioStore, actions models.ActionStore, catalog Catalog, policy PolicyEvaluator, validators []ProposalValidator, opts ...models.ServiceOption) *Coordinator {
+	portable := []ProposalValidator{KernelResolvedActionArgumentResolver{}, skillbinding.BindingActionArgumentResolver{}, skillbinding.EmbedSessionActionAuthorityValidator{}, RequiredActionEvidenceValidator{}, ObservationRefActionProposalValidator{}}
 	portable = append(portable, validators...)
-	coordinator := &ActionCoordinator{
+	coordinator := &Coordinator{
 		portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: models.ClockFrom(opts), newID: uuid.NewString,
 		nestedMaxCalls: MaxNestedActionCallsPerTurn, nestedMaxConcurrent: MaxConcurrentNestedActionCalls,
 	}
@@ -166,7 +166,7 @@ func NewActionCoordinator(portfolio models.PortfolioStore, actions models.Action
 }
 
 // SetRoutineOwnerAddresses lets owner-only routine grants check recipients.
-func (c *ActionCoordinator) SetRoutineOwnerAddresses(resolver models.RoutineOwnerAddressResolver) {
+func (c *Coordinator) SetRoutineOwnerAddresses(resolver models.RoutineOwnerAddressResolver) {
 	if c != nil {
 		c.owners = resolver
 	}
@@ -176,9 +176,9 @@ func (c *ActionCoordinator) SetRoutineOwnerAddresses(resolver models.RoutineOwne
 // external operation identity, approval mode, routine grant and policy, then
 // records the call with its approval and activity. A loop call never changes
 // the Run apart from its budget reservation; a nested call never changes it.
-// A *ActionProposalRejection is a reason the model can correct; any other
+// A *ProposalRejection is a reason the model can correct; any other
 // error stops the caller's claim.
-func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionRequest) (*models.ActionProposalResult, error) {
+func (c *Coordinator) Propose(ctx context.Context, req ProposeActionRequest) (*models.ActionProposalResult, error) {
 	if c == nil || c.portfolio == nil || c.actions == nil || c.catalog == nil || c.policy == nil {
 		return nil, errors.New("action coordinator is not configured")
 	}
@@ -255,7 +255,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	history := agentrun.NewRunActionHistory(c.actions, req.Scope, run.ID)
 	arguments := maps.Clone(req.Arguments)
 	for _, validator := range c.validators {
-		resolver, ok := validator.(ActionProposalArgumentResolver)
+		resolver, ok := validator.(ProposalArgumentResolver)
 		if !ok || resolver == nil {
 			continue
 		}
@@ -321,7 +321,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if err != nil {
 		return nil, fmt.Errorf("resolve routine grant: %w", err)
 	}
-	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{
+	decision, err := c.policy.EvaluateAction(ctx, PolicyInput{
 		Run: models.CloneAgentRun(run), Bound: bound, Arguments: maps.Clone(arguments), ExternalOperation: req.ExternalOperation, Actor: req.Actor, Summary: req.Summary,
 		ConversationID: conversationID, ApprovalMode: approvalMode, RoutineGrant: routineGrant,
 	})
@@ -338,7 +338,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	// way: it changes that Agent, so the asking person approves it.
 	targeted := skillbinding.IsTargetedSkillBindingAction(bound, arguments)
 	if bound.Action.AlwaysReview() || isAgentBuilderApprovalAction(bound) || targeted {
-		if decision.Disposition == ActionDispositionAllow {
+		if decision.Disposition == DispositionAllow {
 			return nil, fmt.Errorf("action policy allowed %s.%s, which always requires explicit review", req.SkillID, req.Action)
 		}
 		if decision.ApprovalTimeout == models.ApprovalTimeoutApprove {
@@ -352,10 +352,10 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	case "":
 	case skill.ActionReviewAlways:
 		review = skill.ActionReviewAlways
-		if decision.Disposition == ActionDispositionAllow {
-			decision.Disposition = ActionDispositionRequireApproval
+		if decision.Disposition == DispositionAllow {
+			decision.Disposition = DispositionRequireApproval
 		}
-		if decision.Disposition == ActionDispositionRequireApproval {
+		if decision.Disposition == DispositionRequireApproval {
 			decision.ApprovalTimeout = models.ApprovalTimeoutExpire
 		}
 	default:
@@ -363,22 +363,22 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	// An action that acts as one person's own account is approved only by
 	// that person, whatever the policy named.
-	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && boundUsesPersonCredential(bound) {
+	if decision.Disposition == DispositionRequireApproval && run.ActingUser != "" && boundUsesPersonCredential(bound) {
 		decision.EligibleApprovers = []models.ApprovalPrincipal{{Type: "user", ID: run.ActingUser}}
 	}
 	// An agent or team card is decided by the person who asked the builder
 	// for it (D9), whatever role the host policy named. So is a routine's
 	// brief: the person who asked for the routine accepts it, in any space.
-	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && (isAgentBuilderApprovalAction(bound) || isRoutineBriefAction(bound) || targeted) {
+	if decision.Disposition == DispositionRequireApproval && run.ActingUser != "" && (isAgentBuilderApprovalAction(bound) || isRoutineBriefAction(bound) || targeted) {
 		decision.EligibleApprovers = []models.ApprovalPrincipal{{Type: "user", ID: run.ActingUser}}
 	}
-	if decision.Disposition == ActionDispositionRequireApproval && len(decision.EligibleApprovers) == 0 {
+	if decision.Disposition == DispositionRequireApproval && len(decision.EligibleApprovers) == 0 {
 		return nil, errors.New("approval policy must identify at least one eligible approver")
 	}
 	// A person reads the summary on the approval card. The kernel never
 	// writes one for the model.
-	if loop && decision.Disposition == ActionDispositionRequireApproval && strings.TrimSpace(req.Summary) == "" {
-		return nil, &ActionProposalRejection{Code: ProposalRejectionReviewSummaryRequired, Message: proposalRejectionReviewSummaryRequiredMessage}
+	if loop && decision.Disposition == DispositionRequireApproval && strings.TrimSpace(req.Summary) == "" {
+		return nil, &ProposalRejection{Code: ProposalRejectionReviewSummaryRequired, Message: proposalRejectionReviewSummaryRequiredMessage}
 	}
 
 	callID := c.newID()
@@ -426,15 +426,15 @@ func replaysActionCall(prior *models.ActionCall, run *models.AgentRun, idempoten
 // createLoopProposal records a loop call with its disposition, approval and
 // activity. The Run is changed only to reserve the call's budget; an approval
 // parks the Run later, at step end.
-func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeActionRequest, run *models.AgentRun,
+func (c *Coordinator) createLoopProposal(ctx context.Context, req ProposeActionRequest, run *models.AgentRun,
 	bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *models.ActionCall,
-	decision ActionPolicyDecision, lease *models.AgentRunLeaseGuard, now time.Time) (*models.ActionProposalResult, error) {
+	decision PolicyDecision, lease *models.AgentRunLeaseGuard, now time.Time) (*models.ActionProposalResult, error) {
 	if lease == nil {
 		return nil, models.ErrLeaseLost
 	}
 	var updatedRun *models.AgentRun
 	budgetExhausted := false
-	if run.Budget != nil && decision.Disposition != ActionDispositionDeny {
+	if run.Budget != nil && decision.Disposition != DispositionDeny {
 		reserved := models.CloneAgentRun(run)
 		reserved.Revision++
 		reserved.UpdatedAt = now
@@ -444,8 +444,8 @@ func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeA
 		switch {
 		case errors.Is(err, models.ErrBudgetExhausted):
 			budgetExhausted = true
-			decision.Disposition = ActionDispositionDeny
-			decision.Reason = ActionBudgetExhaustedReason
+			decision.Disposition = DispositionDeny
+			decision.Reason = BudgetExhaustedReason
 		case err != nil:
 			return nil, err
 		default:
@@ -460,9 +460,9 @@ func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeA
 	}
 	var approval *models.ApprovalCheckpoint
 	switch decision.Disposition {
-	case ActionDispositionAllow:
+	case DispositionAllow:
 		call.Status = models.ActionCallStatusReady
-	case ActionDispositionDeny:
+	case DispositionDeny:
 		call.Status = models.ActionCallStatusDenied
 		call.Error = decision.Reason
 		call.CompletedAt = &now
@@ -471,7 +471,7 @@ func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeA
 			eventType = "budget.exhausted"
 			eventSummary = "The Run's action budget is exhausted, so the action was not run"
 		}
-	case ActionDispositionRequireApproval:
+	case DispositionRequireApproval:
 		approval = c.newApprovalCheckpoint(ctx, req, run, bound, arguments, proposedAction, call, decision, summary, now)
 		eventType = "action.approval_requested"
 	}
@@ -489,20 +489,20 @@ func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeA
 			result.BudgetExhausted = budgetExhausted
 		} else if existing := result.Call; existing != nil {
 			// A replay of a budget denial must still map to the budget pause.
-			result.BudgetExhausted = existing.Status == models.ActionCallStatusDenied && existing.Error == ActionBudgetExhaustedReason
+			result.BudgetExhausted = existing.Status == models.ActionCallStatusDenied && existing.Error == BudgetExhaustedReason
 		}
 	}
 	return result, nil
 }
 
-// ActionBudgetExhaustedReason is the denial reason of a loop call refused for
+// BudgetExhaustedReason is the denial reason of a loop call refused for
 // action budget; replays recognize the denial by it.
-const ActionBudgetExhaustedReason = "run action budget is exhausted"
+const BudgetExhaustedReason = "run action budget is exhausted"
 
 // createNestedProposal records a nested call with the same disposition,
 // approval and activity a model proposal would get, without touching the Run.
 // The store fences it against the running step and its bounds.
-func (c *ActionCoordinator) createNestedProposal(ctx context.Context, req ProposeActionRequest, run *models.AgentRun, bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *models.ActionCall, decision ActionPolicyDecision, lease *models.AgentRunLeaseGuard, now time.Time) (*models.ActionProposalResult, error) {
+func (c *Coordinator) createNestedProposal(ctx context.Context, req ProposeActionRequest, run *models.AgentRun, bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *models.ActionCall, decision PolicyDecision, lease *models.AgentRunLeaseGuard, now time.Time) (*models.ActionProposalResult, error) {
 	if lease == nil {
 		return nil, models.ErrNestedTurnNotActive
 	}
@@ -513,14 +513,14 @@ func (c *ActionCoordinator) createNestedProposal(ctx context.Context, req Propos
 	}
 	var approval *models.ApprovalCheckpoint
 	switch decision.Disposition {
-	case ActionDispositionAllow:
+	case DispositionAllow:
 		call.Status = models.ActionCallStatusReady
-	case ActionDispositionDeny:
+	case DispositionDeny:
 		call.Status = models.ActionCallStatusDenied
 		call.Error = decision.Reason
 		call.CompletedAt = &now
 		eventType = "action.denied"
-	case ActionDispositionRequireApproval:
+	case DispositionRequireApproval:
 		approval = c.newApprovalCheckpoint(ctx, req, run, bound, arguments, proposedAction, call, decision, summary, now)
 		eventType = "action.approval_requested"
 	}
@@ -560,7 +560,7 @@ func isRoutineBriefAction(bound *skill.BoundAction) bool {
 }
 
 // newApprovalCheckpoint puts call in review and returns its pending approval.
-func (c *ActionCoordinator) newApprovalCheckpoint(ctx context.Context, req ProposeActionRequest, run *models.AgentRun, bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *models.ActionCall, decision ActionPolicyDecision, summary string, now time.Time) *models.ApprovalCheckpoint {
+func (c *Coordinator) newApprovalCheckpoint(ctx context.Context, req ProposeActionRequest, run *models.AgentRun, bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *models.ActionCall, decision PolicyDecision, summary string, now time.Time) *models.ApprovalCheckpoint {
 	approvalID := c.newID()
 	ttl := decision.ApprovalTTL
 	if ttl <= 0 {
@@ -612,7 +612,7 @@ func (c *ActionCoordinator) newApprovalCheckpoint(ctx context.Context, req Propo
 
 // proposalEvent is the activity recorded with a proposal. A nested call's
 // event carries its origin so a feed can group it under its command.
-func (c *ActionCoordinator) proposalEvent(req ProposeActionRequest, run *models.AgentRun, call *models.ActionCall, decision ActionPolicyDecision, eventType, summary string, now time.Time) *models.ActivityEvent {
+func (c *Coordinator) proposalEvent(req ProposeActionRequest, run *models.AgentRun, call *models.ActionCall, decision PolicyDecision, eventType, summary string, now time.Time) *models.ActivityEvent {
 	actor := req.Actor
 	if actor.Type == "" {
 		actor = models.ActivityActor{Type: "worker", ID: req.WorkerID}
@@ -628,7 +628,7 @@ func (c *ActionCoordinator) proposalEvent(req ProposeActionRequest, run *models.
 	if call.PreparedRuntime != nil {
 		event.Payload["preparedRuntime"] = models.ClonePreparedRuntime(call.PreparedRuntime)
 	}
-	if decision.Reason != "" && decision.Disposition != ActionDispositionAllow {
+	if decision.Reason != "" && decision.Disposition != DispositionAllow {
 		event.Payload["policyReason"] = decision.Reason
 	}
 	return event
@@ -652,7 +652,7 @@ func addActionOrigin(payload map[string]interface{}, call *models.ActionCall) {
 // suppressDuplicateExternalOperation records a succeeded receipt call that
 // points at a completed prior external operation instead of running it
 // again. The Run is not changed.
-func (c *ActionCoordinator) suppressDuplicateExternalOperation(ctx context.Context, req ProposeActionRequest, run *models.AgentRun, bound *skill.BoundAction, arguments map[string]interface{}, digest string, prior *models.ActionCall, lease *models.AgentRunLeaseGuard, now time.Time) (*models.ActionProposalResult, error) {
+func (c *Coordinator) suppressDuplicateExternalOperation(ctx context.Context, req ProposeActionRequest, run *models.AgentRun, bound *skill.BoundAction, arguments map[string]interface{}, digest string, prior *models.ActionCall, lease *models.AgentRunLeaseGuard, now time.Time) (*models.ActionProposalResult, error) {
 	if lease == nil {
 		return nil, models.ErrLeaseLost
 	}
@@ -731,8 +731,8 @@ func persistedActionValue(value interface{}, schema map[string]interface{}) inte
 	}
 }
 
-func validActionDisposition(value ActionDisposition) bool {
-	return value == ActionDispositionAllow || value == ActionDispositionDeny || value == ActionDispositionRequireApproval
+func validActionDisposition(value Disposition) bool {
+	return value == DispositionAllow || value == DispositionDeny || value == DispositionRequireApproval
 }
 
 func boundCredentialReferences(bound *skill.BoundAction) map[string]skill.CredentialReference {
@@ -776,7 +776,7 @@ func approvalPreview(bound *skill.BoundAction, arguments map[string]interface{})
 // Keeping this in the kernel means Studio, a TUI, Slack, and future approval
 // destinations all review the same proposal instead of provider adapters
 // guessing what a preceding Skill action meant.
-func (c *ActionCoordinator) enrichApprovalPreview(
+func (c *Coordinator) enrichApprovalPreview(
 	ctx context.Context,
 	preview map[string]interface{},
 	run *models.AgentRun,

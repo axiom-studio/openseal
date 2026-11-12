@@ -135,7 +135,7 @@ func TestAttachmentPartsBudgetsAndImageRefs(t *testing.T) {
 		Content: "See attached", CreatedAt: time.Date(2026, 11, 7, 10, 42, 0, 0, time.UTC), References: refs}
 	conversation := &models.Conversation{ID: "chat", Scope: f.scope}
 	session := &models.AgentSession{ID: "session-1", Scope: f.scope, AgentID: "a_1"}
-	reader := &ConversationAttachmentReader{artifacts: f.store, content: f.content}
+	reader := &AttachmentReader{artifacts: f.store, content: f.content}
 
 	entry := readConversationMessageEntry(t.Context(), reader, conversation, session, "run-1", message, false)
 	if err := entry.Validate(); err != nil {
@@ -206,7 +206,7 @@ func TestMessageEntryStaysWithinUserEntryCap(t *testing.T) {
 	}
 	message := &models.ChannelMessage{ID: "m_1", Scope: f.scope, ConversationID: "chat", Sequence: 1,
 		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "u"}, Content: strings.Repeat("c", 65536), CreatedAt: time.Now(), References: refs}
-	reader := &ConversationAttachmentReader{artifacts: f.store, content: f.content}
+	reader := &AttachmentReader{artifacts: f.store, content: f.content}
 	entry := readConversationMessageEntry(t.Context(), reader, &models.Conversation{ID: "chat", Scope: f.scope}, &models.AgentSession{ID: "s", Scope: f.scope}, "run", message, false)
 	if err := entry.Validate(); err != nil {
 		t.Fatalf("a full message with full attachments must still be a valid entry: %v", err)

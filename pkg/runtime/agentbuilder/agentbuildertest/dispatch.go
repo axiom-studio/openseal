@@ -36,7 +36,7 @@ func (s *DispatchStore) GetApproval(ctx context.Context, scope models.Scope, app
 type Provisioner struct {
 	Agents        *kernelagent.Registry
 	Spaces        *portfolio.SpaceService
-	Conversations *conversation.ConversationService
+	Conversations *conversation.Service
 	Created       int
 	PutErr        error
 }
@@ -112,7 +112,7 @@ type DispatchFixture struct {
 	Store      *DispatchStore
 	Provision  *Provisioner
 	Recorder   *RecordingHost
-	Dispatcher *agentbuilder.AgentBuilderActionDispatcher
+	Dispatcher *agentbuilder.ActionDispatcher
 }
 
 // NewDispatchFixture builds the DispatchFixture on a new in-memory store.
@@ -125,11 +125,11 @@ func NewDispatchFixture(t *testing.T) *DispatchFixture {
 	base.SalesID, base.HomeID = SeedSpaces(t, base.Spaces, base.Scope)
 	recorder := &RecordingHost{}
 	var err error
-	base.Validator, err = agentbuilder.NewAgentBuilderActionValidator(base.Agents, base.Teams, base.Catalog, base.Spaces, store, store, recorder)
+	base.Validator, err = agentbuilder.NewActionValidator(base.Agents, base.Teams, base.Catalog, base.Spaces, store, store, recorder)
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: base.Scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"},
 		AssignedAgentID: "finn", ActingUser: Approver.ID, Goal: "Build an Agent", Source: models.RunSourceChat,
 	})
@@ -137,7 +137,7 @@ func NewDispatchFixture(t *testing.T) *DispatchFixture {
 		t.Fatal(err)
 	}
 	base.Run = run
-	provision := &Provisioner{Agents: base.Agents, Spaces: base.Spaces, Conversations: conversation.NewConversationService(store)}
+	provision := &Provisioner{Agents: base.Agents, Spaces: base.Spaces, Conversations: conversation.NewService(store)}
 	dispatcher, err := NewDispatcher(store, base.Agents, base.Teams, base.Catalog, provision, recorder, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -208,11 +208,11 @@ func (f *DispatchFixture) SpaceMember(t *testing.T, spaceID, deploymentID string
 // NewDispatcher builds a dispatcher over its own installer.
 func NewDispatcher(
 	store models.KernelStore, agents *kernelagent.Registry, teams *kernelteam.Registry, catalog *skill.Catalog,
-	provision agentbuilder.AgentProvisioner, host agentbuilder.AgentBuilderHost, fallback agentrun.ActionDispatcher,
-) (*agentbuilder.AgentBuilderActionDispatcher, error) {
+	provision agentbuilder.AgentProvisioner, host agentbuilder.Host, fallback agentrun.ActionDispatcher,
+) (*agentbuilder.ActionDispatcher, error) {
 	installer, err := agentbuilder.NewAgentInstaller(store, agents, teams, catalog, provision, host)
 	if err != nil {
 		return nil, err
 	}
-	return agentbuilder.NewAgentBuilderActionDispatcher(installer, fallback)
+	return agentbuilder.NewActionDispatcher(installer, fallback)
 }

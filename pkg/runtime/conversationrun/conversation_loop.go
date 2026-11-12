@@ -15,7 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
-// The conversation seams of the RunLoop (run-loop section 05 §7, §13 on
+// The conversation seams of the runloop.Loop (run-loop section 05 §7, §13 on
 // SPEC §2.4). An Agent chat Run (an Agent channel's Run or a Team member's)
 // gets, on top of the Agent's own binding:
 //   - a StepPreparer: at the Run's first step, the catch-up of the channel
@@ -42,7 +42,7 @@ type ConversationLoopAuthority struct {
 }
 
 // conversationLoopAuthority computes the §7 flags of an Agent chat Run.
-func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Context, run *models.AgentRun) (ConversationLoopAuthority, error) {
+func (r *TurnRunner) conversationLoopAuthority(ctx context.Context, run *models.AgentRun) (ConversationLoopAuthority, error) {
 	if r == nil || r.conversations == nil {
 		return ConversationLoopAuthority{}, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
@@ -53,12 +53,12 @@ func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Contex
 		CanReact: true,
 		Spoken:   run.Context["responseMode"] == "spoken",
 	}
-	_, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(ctx, r.portfolio, r.conversationStore, run)
+	_, conversation, trigger, err := runtimeconversation.WorkOrigin(ctx, r.portfolio, r.conversationStore, run)
 	if err != nil {
 		return ConversationLoopAuthority{}, err
 	}
 	authority.CanAskConversationQuestion = conversation != nil && trigger != nil &&
-		run.AssignedAgentID != "" && run.AssignedAgentID == runtimeconversation.ConversationRunAgentID(conversation, run)
+		run.AssignedAgentID != "" && run.AssignedAgentID == runtimeconversation.RunAgentID(conversation, run)
 	authority.ExternalChannelReply = models.IsExternalChannelConversation(conversation)
 	if _, authority.ApprovalMode, err = action.RunConversationApprovalMode(ctx, r.portfolio, r.conversationStore, run); err != nil {
 		return ConversationLoopAuthority{}, err
@@ -104,10 +104,10 @@ type ConversationLoopStores struct {
 // conversation StepPreparer, and its methods are the binding's ToolCheck and
 // AfterTool.
 type conversationLoop struct {
-	runner       *ConversationRunTurnRunner
+	runner       *TurnRunner
 	conversation *models.Conversation
 	trigger      *models.ChannelMessage
-	catchUp      *runtimeconversation.ConversationCatchUp
+	catchUp      *runtimeconversation.CatchUp
 	sessions     models.AgentSessionStore
 	actions      conversationLoopActions
 }
@@ -126,7 +126,7 @@ const replacedApprovalScan = 32
 // binding (§13). binding holds the Agent's own resolution (model, actions,
 // operations, control authority, the run-start preparer); run is the claimed
 // conversation Run.
-func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, run *models.AgentRun, binding *agentrun.TurnRunnerBinding, stores ConversationLoopStores) error {
+func (r *TurnRunner) bindConversationLoop(ctx context.Context, run *models.AgentRun, binding *agentrun.TurnRunnerBinding, stores ConversationLoopStores) error {
 	if r == nil || r.conversations == nil {
 		return runtimeconversation.ErrConversationCoordinationUnavailable
 	}
@@ -159,7 +159,7 @@ func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, ru
 	}
 	loop := &conversationLoop{
 		runner: r, conversation: conversation, trigger: trigger,
-		catchUp:  runtimeconversation.NewConversationCatchUp(r.conversations, r.portfolio, r.conversationAttachmentReader()),
+		catchUp:  runtimeconversation.NewCatchUp(r.conversations, r.portfolio, r.conversationAttachmentReader()),
 		sessions: stores.Sessions, actions: stores.Actions,
 	}
 	binding.Session = session
@@ -167,7 +167,7 @@ func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, ru
 	binding.Preparers = append(binding.Preparers, loop)
 	binding.ToolCheck = loop.checkToolCall
 	binding.AfterTool = loop.afterToolEntry
-	binding.Prompt.Sections = append(binding.Prompt.Sections, runtimeconversation.ConversationSystemSections(conversation, run, authority.Spoken)...)
+	binding.Prompt.Sections = append(binding.Prompt.Sections, runtimeconversation.SystemSections(conversation, run, authority.Spoken)...)
 	binding.Final = conversationObservedFinal{loop: loop, inner: newConversationFinalHandler(r, stores.Sessions, stores.Actions, stores.Activity)}
 	return nil
 }
@@ -192,7 +192,7 @@ func (f conversationObservedFinal) Deliver(ctx context.Context, d agentrun.Final
 // openConversationLoopSession resolves the Run's session and creates a lane
 // session row that does not exist yet (C2 GetOrCreateSession). Child and
 // run-owned sessions are already stored.
-func (r *ConversationRunTurnRunner) openConversationLoopSession(ctx context.Context, sessions models.AgentSessionStore, run *models.AgentRun) (*models.AgentSession, error) {
+func (r *TurnRunner) openConversationLoopSession(ctx context.Context, sessions models.AgentSessionStore, run *models.AgentRun) (*models.AgentSession, error) {
 	session, err := models.ConversationRunSession(ctx, sessions, run)
 	if err != nil {
 		return nil, err
@@ -219,11 +219,11 @@ func (r *ConversationRunTurnRunner) openConversationLoopSession(ctx context.Cont
 
 // conversationAttachmentReader is the catch-up's attachment reader, nil when
 // the runner has no artifact bytes (message text only).
-func (r *ConversationRunTurnRunner) conversationAttachmentReader() *runtimeconversation.ConversationAttachmentReader {
+func (r *TurnRunner) conversationAttachmentReader() *runtimeconversation.AttachmentReader {
 	if r.artifacts == nil || r.config.AttachmentContent == nil {
 		return nil
 	}
-	return runtimeconversation.NewConversationAttachmentReader(r.artifacts, r.config.AttachmentContent)
+	return runtimeconversation.NewAttachmentReader(r.artifacts, r.config.AttachmentContent)
 }
 
 // BeforeStep is the conversation preparer (§13 StartRun / BeforeStep).
@@ -412,7 +412,7 @@ func (l *conversationLoop) runContextNote(ctx context.Context, in agentrun.StepI
 		return nil, err
 	}
 	runtimeconversation.ReverseChannelMessages(recent)
-	note, err := l.runner.conversationRunContextNote(ctx, runtimeconversation.ConversationContextInput{
+	note, err := l.runner.conversationRunContextNote(ctx, runtimeconversation.ContextInput{
 		Run: in.Run, Session: in.Session, Sessions: l.sessions, Conversation: l.conversation, Trigger: l.trigger,
 		Viewer: viewer, Recent: recent, CatchUp: catchUp, Step: in.Step.Sequence,
 	})

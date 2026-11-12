@@ -256,7 +256,7 @@ func TestSendTestEventRejectsNonCreator(t *testing.T) {
 
 func resumeRefusedWith(t *testing.T, err error, reason models.RoutinePausedReason) {
 	t.Helper()
-	var refused *routine.RoutineSourceUnavailableError
+	var refused *routine.SourceUnavailableError
 	if !errors.Is(err, routine.ErrRoutineSourceUnavailable) || !errors.As(err, &refused) || refused.Reason != reason ||
 		!strings.Contains(err.Error(), string(reason)) {
 		t.Fatalf("resume error = %v, want %s", err, reason)
@@ -300,7 +300,7 @@ func TestResumeEventRoutineRechecksSource(t *testing.T) {
 	}
 	// The creator's Google sign-in is gone from the host's catalog.
 	f.Dispatcher.SetRoutineEvents(f.Offerer, routinetest.GoogleSources{
-		{Kind: models.RoutineEventGmailMessage, Source: models.RoutineGoogleSourceRef("user", "g-user"), Label: "your Gmail", Available: false, Reason: routine.RoutineEventSourceNeedsSignIn, SkillID: "google"},
+		{Kind: models.RoutineEventGmailMessage, Source: models.RoutineGoogleSourceRef("user", "g-user"), Label: "your Gmail", Available: false, Reason: routine.EventSourceNeedsSignIn, SkillID: "google"},
 	}, true)
 	_, err = f.SetRoutineStatus(t, gmail.ID, models.RunbookActivationActive, "resume-gmail-signed-out")
 	resumeRefusedWith(t, err, models.RoutinePausedNeedsSignIn)

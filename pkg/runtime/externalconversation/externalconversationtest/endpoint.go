@@ -102,7 +102,7 @@ func EndpointFixtureOwnedBy(
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := externalconversation.NewExternalConversationEndpointService(store, catalog).Create(
+	endpoint, err := externalconversation.NewEndpointService(store, catalog).Create(
 		ctx,
 		externalconversation.CreateExternalConversationEndpointRequest{
 			ID: provider + "-endpoint", Scope: scope,

@@ -25,7 +25,7 @@ func (s *countingFinalReplyStore) ListChannelMessages(ctx context.Context, filte
 func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 	ctx := t.Context()
 	store := &countingFinalReplyStore{Store: kerneltest.NewStore(t)}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: "17"}
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
@@ -62,7 +62,7 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := &ExternalConversationReplyWorker{store: store, conversations: service}
+	worker := &ReplyWorker{store: store, conversations: service}
 	item := &models.ExternalConversationInboxItem{Scope: scope, ConversationID: conversation.ID, ChannelMessageID: trigger.ID}
 	run := &models.AgentRun{ID: "failed-run", Scope: scope, Status: models.AgentRunStatusFailed,
 		FailureExplanation: &models.RunFailureExplanation{Kind: "execution", Code: "execution_failed", Message: "Image generation failed", Explained: true},

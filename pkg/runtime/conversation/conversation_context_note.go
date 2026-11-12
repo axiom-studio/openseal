@@ -79,7 +79,7 @@ var runContextShrinkOrder = []string{
 	ContextSectionTeam, ContextSectionThreadBackdrop,
 }
 
-type ConversationContextSection struct {
+type ContextSection struct {
 	Name   string
 	Text   string
 	Always bool // emitted every Run when non-empty, never diffed
@@ -89,7 +89,7 @@ type ConversationContextSection struct {
 	None string
 }
 
-type ConversationContextInput struct {
+type ContextInput struct {
 	Run          *models.AgentRun
 	Session      *models.AgentSession
 	Sessions     models.AgentSessionStore // reads the session's entries (path messages, earlier notes)
@@ -166,9 +166,9 @@ func latestContextDigests(entries []*models.SessionEntry) map[string]string {
 	return digests
 }
 
-// ConversationContextNote selects the sections to send and builds the note
+// ContextNote selects the sections to send and builds the note
 // entry of runID in session. It is nil when no section is to be sent.
-func ConversationContextNote(session *models.AgentSession, runID string, sections []ConversationContextSection, previous map[string]string) *models.SessionEntry {
+func ContextNote(session *models.AgentSession, runID string, sections []ContextSection, previous map[string]string) *models.SessionEntry {
 	if session == nil {
 		return nil
 	}
@@ -296,7 +296,7 @@ func BoundedRunContextValue(value string, limit int) string {
 // RunContextPathMessages is the set of channel message ids that are user
 // entries of the session: the recent ones already stored and the ones being
 // appended with the note.
-func RunContextPathMessages(ctx context.Context, in ConversationContextInput) (map[string]bool, error) {
+func RunContextPathMessages(ctx context.Context, in ContextInput) (map[string]bool, error) {
 	path := make(map[string]bool)
 	if in.CatchUp != nil {
 		for _, entry := range in.CatchUp.Entries {
@@ -328,7 +328,7 @@ func RunContextPathMessages(ctx context.Context, in ConversationContextInput) (m
 
 // RunContextRespondTo names the message to answer and how: spoken, a voice
 // call greeting, why a Team router picked this member, work handed over.
-func RunContextRespondTo(in ConversationContextInput) string {
+func RunContextRespondTo(in ContextInput) string {
 	trigger := in.Trigger
 	name := strings.TrimSpace(trigger.SenderDisplayName)
 	if name == "" {
@@ -357,7 +357,7 @@ func RunContextRespondTo(in ConversationContextInput) string {
 
 // RunContextMessage is a message's header line and content, the content cut
 // to limit bytes.
-func RunContextMessage(in ConversationContextInput, message *models.ChannelMessage, limit int) string {
+func RunContextMessage(in ContextInput, message *models.ChannelMessage, limit int) string {
 	attribution := conversationMessageAttribution(message, in.Session, in.Conversation.Owner.Type == models.OwnerTypeTeam)
 	content := strings.TrimSpace(message.Content)
 	if content == "" {
@@ -463,8 +463,8 @@ func RunContextActiveRuns(active []AgentConversationActiveRun) string {
 	return strings.Join(lines, "\n")
 }
 
-// ConversationTaskLister reads the conversation task ledger.
-type ConversationTaskLister interface {
+// TaskLister reads the conversation task ledger.
+type TaskLister interface {
 	ListConversationTasks(context.Context, models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error)
 }
 
@@ -480,7 +480,7 @@ func RunContextLines(lines []string) string {
 
 // RunContextReactions lists reactions on the recent messages the session
 // holds (its user entries) and on this Agent's own answers, newest first.
-func RunContextReactions(in ConversationContextInput, path map[string]bool) string {
+func RunContextReactions(in ContextInput, path map[string]bool) string {
 	reactions := reactionPromptLines(in.Recent, in.Trigger)
 	if len(reactions) == 0 {
 		return ""
@@ -511,7 +511,7 @@ func RunContextReactions(in ConversationContextInput, path map[string]bool) stri
 	return strings.Join(lines, "\n")
 }
 
-func RunContextPlaces(places []ConversationPlace) string {
+func RunContextPlaces(places []Place) string {
 	if len(places) == 0 {
 		return ""
 	}
@@ -526,7 +526,7 @@ func RunContextPlaces(places []ConversationPlace) string {
 	return strings.Join(lines, "\n")
 }
 
-func RunContextBackdrop(in ConversationContextInput, backdrop []*models.ChannelMessage) string {
+func RunContextBackdrop(in ContextInput, backdrop []*models.ChannelMessage) string {
 	parts := make([]string, 0, len(backdrop)+1)
 	for _, message := range backdrop {
 		if message != nil {

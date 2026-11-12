@@ -48,8 +48,8 @@ type externalLoopFixture struct {
 	endpoint *models.ExternalConversationEndpoint
 	host     *externalconversationtest.StreamChatHost
 	progress *externalconversation.RunProgressAcknowledgementWorker
-	replies  *externalconversation.ExternalConversationReplyWorker
-	delivery *externalconversation.ExternalConversationDeliveryWorker
+	replies  *externalconversation.ReplyWorker
+	delivery *externalconversation.DeliveryWorker
 }
 
 // externalChat is one inbound provider message and the Run answering it.
@@ -97,10 +97,10 @@ func newExternalLoopFixture(t *testing.T, store models.KernelStore, provider str
 	}, models.WithClock(f.Clock.Now)); err != nil {
 		t.Fatal(err)
 	}
-	if f.replies, err = externalconversation.NewExternalConversationReplyWorker(ext, f.adapters, models.WithClock(f.Clock.Now)); err != nil {
+	if f.replies, err = externalconversation.NewReplyWorker(ext, f.adapters, models.WithClock(f.Clock.Now)); err != nil {
 		t.Fatal(err)
 	}
-	if f.delivery, err = externalconversation.NewExternalConversationDeliveryWorker(ext, f.adapters, f.host, externalconversation.ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}, models.WithClock(f.Clock.Now)); err != nil {
+	if f.delivery, err = externalconversation.NewDeliveryWorker(ext, f.adapters, f.host, externalconversation.DeliveryWorkerConfig{WorkerID: "delivery"}, models.WithClock(f.Clock.Now)); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -285,7 +285,7 @@ func TestLoopNarrationIsTheStepSummaryNotCommentary(t *testing.T) {
 		if steps[1].OutputSummary != "" {
 			t.Fatalf("the final step has narration %q", steps[1].OutputSummary)
 		}
-		narrations := f.Events(chat.run.ID, activity.ActivityEventTurnNarration)
+		narrations := f.Events(chat.run.ID, activity.EventTurnNarration)
 		if len(narrations) != 1 || narrations[0].Summary != narration || narrations[0].TurnID != steps[0].ID {
 			t.Fatalf("turn.narration events = %#v", narrations)
 		}

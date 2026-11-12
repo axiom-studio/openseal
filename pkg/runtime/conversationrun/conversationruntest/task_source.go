@@ -15,9 +15,9 @@ import (
 )
 
 // NewScheduler is a run scheduler over store with the default config.
-func NewScheduler(t *testing.T, store *sqlite.Store) *conversationrun.ConversationRunScheduler {
+func NewScheduler(t *testing.T, store *sqlite.Store) *conversationrun.Scheduler {
 	t.Helper()
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func NewScheduler(t *testing.T, store *sqlite.Store) *conversationrun.Conversati
 // PostMessage posts content to the channel from a sender of senderType.
 func PostMessage(
 	t *testing.T,
-	service *conversation.ConversationService,
+	service *conversation.Service,
 	target *models.Conversation,
 	senderType models.ConversationParticipantType,
 	intent models.ConversationMessageIntent,
@@ -69,7 +69,7 @@ func ProposedTaskStartRequest(t *testing.T, store interface{}, source *models.Ag
 func SettledTaskSource(t *testing.T, store *sqlite.Store) (*models.AgentRun, *models.AgentTurn, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "worker-task"}
-	conversations := conversation.NewConversationService(store)
+	conversations := conversation.NewService(store)
 	conversationtest.SeedSpace(t, store, scope)
 	target, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",

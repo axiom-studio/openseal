@@ -30,7 +30,7 @@ func TestAskUserAnswerResumesWithAnswerAndConsumesIntervention(t *testing.T) {
 			t.Fatalf("receipt not bound to the ask_user step: %#v", receipt)
 		}
 		result, claimed := call.Resume(t)
-		if !result.Resolved || result.Result.Kind != control.ControlContinue || call.Entry.State != models.ToolEntryCompleted {
+		if !result.Resolved || result.Result.Kind != control.Continue || call.Entry.State != models.ToolEntryCompleted {
 			t.Fatalf("resume = %#v", result)
 		}
 		value := controltest.AskUserResultValue(t, call.Entry)
@@ -47,7 +47,7 @@ func TestAskUserAnswerResumesWithAnswerAndConsumesIntervention(t *testing.T) {
 		again := controltest.NewAskUserCall(t, store, claimed, "foreground-worker", controltest.AskUserQuestion)
 		refused := again.Settle(t)
 		value = controltest.AskUserResultValue(t, refused.Entry)
-		if refused.Kind != control.ControlContinue || refused.Entry.State != models.ToolEntryError || value["error"] != "already_asked" ||
+		if refused.Kind != control.Continue || refused.Entry.State != models.ToolEntryError || value["error"] != "already_asked" ||
 			!strings.Contains(value["message"].(string), "The pricing page.") {
 			t.Fatalf("repeat = %#v %#v", refused, value)
 		}

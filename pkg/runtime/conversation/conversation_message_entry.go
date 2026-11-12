@@ -91,7 +91,7 @@ func renderConversationMessageHeader(message *models.ChannelMessage, attribution
 	}
 	pieces := []string{fmt.Sprintf("%s (%s)", name, sender), message.ID}
 	if !message.CreatedAt.IsZero() {
-		pieces = append(pieces, ConversationMessageTime(message.CreatedAt))
+		pieces = append(pieces, MessageTime(message.CreatedAt))
 	}
 	if message.ReplyToMessageID != "" {
 		pieces = append(pieces, "replying to "+message.ReplyToMessageID)
@@ -102,7 +102,7 @@ func renderConversationMessageHeader(message *models.ChannelMessage, attribution
 	if message.Historical {
 		historical := "historical"
 		if source := message.ExternalSource; source != nil && !source.OccurredAt.IsZero() {
-			historical += ", occurred " + ConversationMessageTime(source.OccurredAt)
+			historical += ", occurred " + MessageTime(source.OccurredAt)
 		}
 		pieces = append(pieces, historical)
 	}
@@ -121,7 +121,7 @@ func renderConversationMessageHeader(message *models.ChannelMessage, attribution
 	return "[" + strings.Join(pieces, " · ") + "]"
 }
 
-func ConversationMessageTime(at time.Time) string {
+func MessageTime(at time.Time) string {
 	return at.UTC().Format(conversationMessageTimeLayout)
 }
 
@@ -183,7 +183,7 @@ func conversationMessageEntry(sessionID, runID string, message *models.ChannelMe
 // user entry. The attachments get what is left of MaxUserEntryContentBytes
 // after the message text and the largest "Attached:" line its references can
 // produce.
-func readConversationMessageEntry(ctx context.Context, reader *ConversationAttachmentReader, conversation *models.Conversation, session *models.AgentSession, runID string, message *models.ChannelMessage, teamOwned bool) *models.SessionEntry {
+func readConversationMessageEntry(ctx context.Context, reader *AttachmentReader, conversation *models.Conversation, session *models.AgentSession, runID string, message *models.ChannelMessage, teamOwned bool) *models.SessionEntry {
 	attribution := conversationMessageAttribution(message, session, teamOwned)
 	budget := models.MaxUserEntryContentBytes - len(renderConversationMessageBody(message, attribution, nil)) - conversationAttachedLineReserve(message)
 	var attachments conversationMessageAttachments

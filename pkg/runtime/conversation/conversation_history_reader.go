@@ -9,15 +9,15 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// ConversationHistoryReadStore must enforce Viewer on both reads. This is a
+// HistoryReadStore must enforce Viewer on both reads. This is a
 // provider-neutral kernel contract; hosts derive scope/owner/viewer from a run.
-type ConversationHistoryReadStore interface {
+type HistoryReadStore interface {
 	GetConversation(context.Context, models.Scope, string) (*models.Conversation, error)
 	ListChannelMessages(context.Context, models.ChannelMessageFilter) ([]*models.ChannelMessage, error)
 	GetVisibleChannelMessage(context.Context, models.Scope, string, string, models.ConversationViewer) (*models.ChannelMessage, error)
 }
 
-type ConversationHistoryReadRequest struct {
+type HistoryReadRequest struct {
 	MessageID      string `json:"messageId,omitempty"`
 	BeforeSequence int64  `json:"beforeSequence,omitempty"`
 	AfterSequence  *int64 `json:"afterSequence,omitempty"`
@@ -25,7 +25,7 @@ type ConversationHistoryReadRequest struct {
 	Limit          int    `json:"limit,omitempty"`
 }
 
-type ConversationHistoryExcerpt struct {
+type HistoryExcerpt struct {
 	CreatedAt        time.Time                        `json:"createdAt"`
 	Intent           models.ConversationMessageIntent `json:"intent"`
 	ReplyToMessageID string                           `json:"replyToMessageId,omitempty"`
@@ -39,16 +39,16 @@ type ConversationHistoryExcerpt struct {
 	References       []models.ConversationReference   `json:"references,omitempty"`
 }
 
-type ConversationHistoryReadResult struct {
-	Messages           []ConversationHistoryExcerpt `json:"messages"`
-	NextBeforeSequence int64                        `json:"nextBeforeSequence,omitempty"`
-	NextAfterSequence  int64                        `json:"nextAfterSequence,omitempty"`
+type HistoryReadResult struct {
+	Messages           []HistoryExcerpt `json:"messages"`
+	NextBeforeSequence int64            `json:"nextBeforeSequence,omitempty"`
+	NextAfterSequence  int64            `json:"nextAfterSequence,omitempty"`
 }
 
 // ReadConversationHistory returns bounded excerpts of durable originals, not a
 // synthesized recollection. Paging offsets are UTF-8 byte boundaries. Hidden
 // messages and their identifiers are never included in cursors or results.
-func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadStore, scope models.Scope, owner models.ObjectiveOwner, conversationID string, viewer models.ConversationViewer, request ConversationHistoryReadRequest, trustedThreadRoot ...string) (*ConversationHistoryReadResult, error) {
+func ReadConversationHistory(ctx context.Context, store HistoryReadStore, scope models.Scope, owner models.ObjectiveOwner, conversationID string, viewer models.ConversationViewer, request HistoryReadRequest, trustedThreadRoot ...string) (*HistoryReadResult, error) {
 	denied := errors.New("conversation history is unavailable to this run")
 	if store == nil || scope.Validate() != nil || owner.Validate() != nil || viewer.Validate() != nil || conversationID == "" {
 		return nil, denied
@@ -98,7 +98,7 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 			return nil, denied
 		}
 	}
-	result := &ConversationHistoryReadResult{Messages: make([]ConversationHistoryExcerpt, 0)}
+	result := &HistoryReadResult{Messages: make([]HistoryExcerpt, 0)}
 	if len(messages) > limit {
 		messages = messages[:limit]
 		if messages[len(messages)-1] == nil {
@@ -122,7 +122,7 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 		for end < len(message.Content) && !utf8.RuneStart(message.Content[end]) {
 			end--
 		}
-		excerpt := ConversationHistoryExcerpt{CreatedAt: message.CreatedAt, Intent: message.Intent, ReplyToMessageID: message.ReplyToMessageID, Quote: models.CloneChannelMessageQuote(message.Quote), ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, Content: message.Content[start:end], OffsetBytes: start, References: append([]models.ConversationReference(nil), message.References...)}
+		excerpt := HistoryExcerpt{CreatedAt: message.CreatedAt, Intent: message.Intent, ReplyToMessageID: message.ReplyToMessageID, Quote: models.CloneChannelMessageQuote(message.Quote), ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, Content: message.Content[start:end], OffsetBytes: start, References: append([]models.ConversationReference(nil), message.References...)}
 		if end < len(message.Content) {
 			next := end
 			excerpt.NextOffsetBytes = &next

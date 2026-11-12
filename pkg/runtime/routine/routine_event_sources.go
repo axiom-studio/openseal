@@ -29,27 +29,27 @@ var (
 	ErrRoutineEventsUnavailable = errors.New("event routines are not available here")
 	ErrHooksUnavailable         = errors.New("webhooks are not available here")
 	// ErrRoutineSourceUnavailable is what a refused resume matches; the
-	// error itself is a *RoutineSourceUnavailableError with the reason.
+	// error itself is a *SourceUnavailableError with the reason.
 	ErrRoutineSourceUnavailable = errors.New("the routine's event source is not available")
 )
 
-// RoutineSourceUnavailableError refuses the resume of an event routine whose
+// SourceUnavailableError refuses the resume of an event routine whose
 // source is gone. Reason is the code the hourly check would pause it with:
 // source_removed for a Slack, Telegram or GitHub source (the connection, a
 // named channel's endpoint or the registration is gone), needs_sign_in for a
 // Gmail or Calendar routine without its creator's Google sign-in.
-type RoutineSourceUnavailableError struct {
+type SourceUnavailableError struct {
 	Reason models.RoutinePausedReason
 }
 
-func (e *RoutineSourceUnavailableError) Error() string {
+func (e *SourceUnavailableError) Error() string {
 	if e.Reason == models.RoutinePausedNeedsSignIn {
 		return "the routine cannot be resumed (needs_sign_in): the Google sign-in of the person who created it is missing; they need to sign in to Google again first"
 	}
 	return "the routine cannot be resumed (source_removed): its connection, channel or repository is no longer set up for this Agent or Team"
 }
 
-func (e *RoutineSourceUnavailableError) Is(target error) bool {
+func (e *SourceUnavailableError) Is(target error) bool {
 	return target == ErrRoutineSourceUnavailable
 }
 
@@ -58,7 +58,7 @@ func (e *RoutineSourceUnavailableError) Is(target error) bool {
 // each named channel) and GitHub, and the creator's own Google sign-in in
 // the host's catalog for Gmail and Calendar. Webhook routines have no
 // outside source. resumedBy stands in for a routine with no creator yet.
-func checkRoutineResumeSource(ctx context.Context, store interface{}, google RoutineEventSourceCatalog, activation *models.RunbookActivation, resumedBy string) error {
+func checkRoutineResumeSource(ctx context.Context, store interface{}, google EventSourceCatalog, activation *models.RunbookActivation, resumedBy string) error {
 	subscription, ok := models.RoutineEventSubscriptionOf(activation)
 	if !ok {
 		return nil
@@ -75,47 +75,47 @@ func checkRoutineResumeSource(ctx context.Context, store interface{}, google Rou
 		if err != nil {
 			return err
 		}
-		if !slices.ContainsFunc(views, func(view *RoutineEventSourceView) bool {
+		if !slices.ContainsFunc(views, func(view *EventSourceView) bool {
 			return view.Available && view.Kind == subscription.Kind && view.Source == subscription.SourceRef
 		}) {
-			return &RoutineSourceUnavailableError{Reason: models.RoutinePausedNeedsSignIn}
+			return &SourceUnavailableError{Reason: models.RoutinePausedNeedsSignIn}
 		}
 		return nil
 	}
-	exists, err := NewRoutineEventSourceChecker(store).SourceExists(ctx, subscription)
+	exists, err := NewEventSourceChecker(store).SourceExists(ctx, subscription)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		return &RoutineSourceUnavailableError{Reason: models.RoutinePausedSourceRemoved}
+		return &SourceUnavailableError{Reason: models.RoutinePausedSourceRemoved}
 	}
 	return nil
 }
 
-// RoutineEventSourceChannel is one conversation of a Slack or Telegram
+// EventSourceChannel is one conversation of a Slack or Telegram
 // connection that the umbrella has an active endpoint in. Only these can be
 // named in a routine's channel or chat condition (E14).
-type RoutineEventSourceChannel struct {
+type EventSourceChannel struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
 }
 
-// RoutineEventSourceView is one event_sources entry: the host option plus the
+// EventSourceView is one event_sources entry: the host option plus the
 // endpoint channels of a Slack or Telegram connection.
-type RoutineEventSourceView struct {
-	RoutineEventSourceOption
-	Channels []RoutineEventSourceChannel `json:"channels,omitempty"`
+type EventSourceView struct {
+	EventSourceOption
+	Channels []EventSourceChannel `json:"channels,omitempty"`
 }
 
 // routineEventActions is what the event routine actions need from the host.
 // The zero value means event routines are not available.
 type routineEventActions struct {
 	offerer        externalconversation.RoutineEventOfferer
-	sources        RoutineEventSourceCatalog
+	sources        EventSourceCatalog
 	hooksAvailable bool
 }
 
-func newRoutineEventActions(offerer externalconversation.RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) routineEventActions {
+func newRoutineEventActions(offerer externalconversation.RoutineEventOfferer, sources EventSourceCatalog, hooksAvailable bool) routineEventActions {
 	return routineEventActions{offerer: offerer, sources: sources, hooksAvailable: hooksAvailable}
 }
 
@@ -155,17 +155,17 @@ func routineConversationSourceLabel(kind models.RoutineEventKind, name, installa
 // connections: one entry per connection SourceRef, from its active gateways
 // with an installation and its active endpoints, each with the channel
 // conversations of its active endpoints.
-func routineConversationSources(ctx context.Context, store interface{}, scope models.Scope, owner models.ObjectiveOwner) ([]*RoutineEventSourceView, error) {
-	views := map[string]*RoutineEventSourceView{}
+func routineConversationSources(ctx context.Context, store interface{}, scope models.Scope, owner models.ObjectiveOwner) ([]*EventSourceView, error) {
+	views := map[string]*EventSourceView{}
 	order := []string{}
-	add := func(kind models.RoutineEventKind, sourceRef, label string) *RoutineEventSourceView {
+	add := func(kind models.RoutineEventKind, sourceRef, label string) *EventSourceView {
 		if view := views[sourceRef]; view != nil {
 			if view.Label == "" {
 				view.Label = label
 			}
 			return view
 		}
-		view := &RoutineEventSourceView{RoutineEventSourceOption: RoutineEventSourceOption{
+		view := &EventSourceView{EventSourceOption: EventSourceOption{
 			Kind: kind, Source: sourceRef, Label: label, Available: true, Fields: models.RoutineEventFilterFields(kind),
 		}}
 		views[sourceRef] = view
@@ -216,8 +216,8 @@ func routineConversationSources(ctx context.Context, store interface{}, scope mo
 				if endpoint.Mode != capability.ConversationEndpointChannel || address == "" || endpoint.InstallationWide {
 					continue
 				}
-				if !slices.ContainsFunc(view.Channels, func(channel RoutineEventSourceChannel) bool { return channel.ID == address }) {
-					view.Channels = append(view.Channels, RoutineEventSourceChannel{ID: address, Name: strings.TrimSpace(endpoint.Name)})
+				if !slices.ContainsFunc(view.Channels, func(channel EventSourceChannel) bool { return channel.ID == address }) {
+					view.Channels = append(view.Channels, EventSourceChannel{ID: address, Name: strings.TrimSpace(endpoint.Name)})
 				}
 			}
 			if len(page) < routineEventSourcePageSize {
@@ -225,7 +225,7 @@ func routineConversationSources(ctx context.Context, store interface{}, scope mo
 			}
 		}
 	}
-	result := make([]*RoutineEventSourceView, 0, len(order))
+	result := make([]*EventSourceView, 0, len(order))
 	for _, sourceRef := range order {
 		view := views[sourceRef]
 		if view.Label == "" {
@@ -264,12 +264,12 @@ func routineCallbackRegistrationEventTypes(registration *models.CallbackRegistra
 
 // routineCallbackSources lists the umbrella's GitHub callback registrations
 // that have a routines subscription.
-func routineCallbackSources(ctx context.Context, store interface{}, scope models.Scope, owner models.ObjectiveOwner) ([]*RoutineEventSourceView, error) {
+func routineCallbackSources(ctx context.Context, store interface{}, scope models.Scope, owner models.ObjectiveOwner) ([]*EventSourceView, error) {
 	callbacks, ok := store.(models.CallbackRegistrationStore)
 	if !ok {
 		return nil, nil
 	}
-	result := []*RoutineEventSourceView{}
+	result := []*EventSourceView{}
 	for offset := 0; ; offset += routineEventSourcePageSize {
 		page, err := callbacks.ListCallbackRegistrations(ctx, models.CallbackRegistrationFilter{
 			Scope: scope, DeploymentID: owner.ID, Statuses: []models.CallbackRegistrationStatus{models.CallbackRegistrationActive},
@@ -287,7 +287,7 @@ func routineCallbackSources(ctx context.Context, store interface{}, scope models
 			if !strings.Contains(strings.ToLower(label), "github") {
 				label += " (GitHub)"
 			}
-			result = append(result, &RoutineEventSourceView{RoutineEventSourceOption: RoutineEventSourceOption{
+			result = append(result, &EventSourceView{EventSourceOption: EventSourceOption{
 				Kind: models.RoutineEventGitHub, Source: models.RoutineCallbackSourceRef(registration.ID), Label: models.TruncateUTF8(label, models.RoutineEventSourceLabelMax),
 				Available: true, Fields: models.RoutineEventFilterFields(models.RoutineEventGitHub), EventTypes: types,
 			}})
@@ -302,7 +302,7 @@ func routineCallbackSources(ctx context.Context, store interface{}, scope models
 // routineGoogleSources lists the host's Google sources of actingUser. Only
 // the person's own sign-in counts (E10): any option for another person is
 // dropped.
-func routineGoogleSources(ctx context.Context, catalog RoutineEventSourceCatalog, scope models.Scope, owner models.ObjectiveOwner, actingUser string) ([]*RoutineEventSourceView, error) {
+func routineGoogleSources(ctx context.Context, catalog EventSourceCatalog, scope models.Scope, owner models.ObjectiveOwner, actingUser string) ([]*EventSourceView, error) {
 	if catalog == nil || strings.TrimSpace(actingUser) == "" {
 		return nil, nil
 	}
@@ -310,7 +310,7 @@ func routineGoogleSources(ctx context.Context, catalog RoutineEventSourceCatalog
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*RoutineEventSourceView, 0, len(options))
+	result := make([]*EventSourceView, 0, len(options))
 	for _, option := range options {
 		if option.Kind != models.RoutineEventGmailMessage && option.Kind != models.RoutineEventCalendar {
 			continue
@@ -319,7 +319,7 @@ func routineGoogleSources(ctx context.Context, catalog RoutineEventSourceCatalog
 			continue
 		}
 		option.Fields = models.RoutineEventFilterFields(option.Kind)
-		result = append(result, &RoutineEventSourceView{RoutineEventSourceOption: option})
+		result = append(result, &EventSourceView{EventSourceOption: option})
 	}
 	return result, nil
 }
@@ -328,9 +328,9 @@ func routineGoogleSourceOf(sourceRef, userID string) bool {
 	return userID != "" && strings.HasPrefix(sourceRef, models.RoutineGoogleSourcePrefix+userID+":") && models.ValidateRoutineSourceRef(models.RoutineEventGmailMessage, sourceRef) == nil
 }
 
-func routineWebhookSource() *RoutineEventSourceView {
-	return &RoutineEventSourceView{RoutineEventSourceOption: RoutineEventSourceOption{
-		Kind: models.RoutineEventWebhook, Source: RoutineEventSourceNew, Label: "A new webhook address", Available: true,
+func routineWebhookSource() *EventSourceView {
+	return &EventSourceView{EventSourceOption: EventSourceOption{
+		Kind: models.RoutineEventWebhook, Source: EventSourceNew, Label: "A new webhook address", Available: true,
 		Fields: models.RoutineEventFilterFields(models.RoutineEventWebhook),
 	}}
 }
@@ -338,12 +338,12 @@ func routineWebhookSource() *RoutineEventSourceView {
 // listRoutineEventSources is what event_sources returns and what create_task
 // resolves a source against: the umbrella's connections, GitHub
 // registrations, the person's own Google sign-in and a new webhook.
-func listRoutineEventSources(ctx context.Context, store interface{}, events routineEventActions, scope models.Scope, owner models.ObjectiveOwner, actingUser string, kind models.RoutineEventKind) ([]*RoutineEventSourceView, error) {
+func listRoutineEventSources(ctx context.Context, store interface{}, events routineEventActions, scope models.Scope, owner models.ObjectiveOwner, actingUser string, kind models.RoutineEventKind) ([]*EventSourceView, error) {
 	if kind != "" && !kind.Valid() {
 		return nil, fmt.Errorf("unknown event kind %q", kind)
 	}
 	want := func(candidate models.RoutineEventKind) bool { return kind == "" || kind == candidate }
-	result := []*RoutineEventSourceView{}
+	result := []*EventSourceView{}
 	if want(models.RoutineEventSlackMessage) || want(models.RoutineEventTelegramMessage) {
 		conversations, err := routineConversationSources(ctx, store, scope, owner)
 		if err != nil {
@@ -393,7 +393,7 @@ func dispatchRoutineEventSources(ctx context.Context, store RunbookActionStore, 
 	return map[string]interface{}{"sources": sources}, nil
 }
 
-// routineEventSourceChecker is the store-backed RoutineEventSourceChecker. It
+// routineEventSourceChecker is the store-backed EventSourceChecker. It
 // tells the dispatcher's hourly source check whether an event routine's Slack,
 // Telegram or GitHub source still exists for its owner. Google and webhook sources are checked elsewhere (the host's
 // sync loop and the hook row), so it reports them as present.
@@ -401,7 +401,7 @@ type routineEventSourceChecker struct {
 	store interface{}
 }
 
-func NewRoutineEventSourceChecker(store interface{}) RoutineEventSourceChecker {
+func NewEventSourceChecker(store interface{}) EventSourceChecker {
 	return &routineEventSourceChecker{store: store}
 }
 
@@ -416,14 +416,14 @@ func (c *routineEventSourceChecker) SourceExists(ctx context.Context, subscripti
 		if err != nil {
 			return false, err
 		}
-		index := slices.IndexFunc(views, func(view *RoutineEventSourceView) bool {
+		index := slices.IndexFunc(views, func(view *EventSourceView) bool {
 			return view.Kind == kind && view.Source == sourceRef
 		})
 		if index < 0 {
 			return false, nil
 		}
 		for _, channel := range subscription.Channels {
-			if !slices.ContainsFunc(views[index].Channels, func(endpoint RoutineEventSourceChannel) bool {
+			if !slices.ContainsFunc(views[index].Channels, func(endpoint EventSourceChannel) bool {
 				return strings.EqualFold(endpoint.ID, channel)
 			}) {
 				return false, nil
@@ -477,9 +477,9 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 		calendar := *args.Calendar
 		trigger.Calendar = &calendar
 	}
-	var channels []RoutineEventSourceChannel
+	var channels []EventSourceChannel
 	if args.Kind == models.RoutineEventWebhook {
-		if source != RoutineEventSourceNew {
+		if source != EventSourceNew {
 			return nil, errors.New("a webhook routine's source must be \"new\"")
 		}
 		if !events.hooksAvailable {
@@ -492,7 +492,7 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 		if err != nil {
 			return nil, err
 		}
-		index := slices.IndexFunc(sources, func(view *RoutineEventSourceView) bool { return view.Source == source })
+		index := slices.IndexFunc(sources, func(view *EventSourceView) bool { return view.Source == source })
 		if index < 0 {
 			if args.Kind == models.RoutineEventGmailMessage || args.Kind == models.RoutineEventCalendar {
 				return nil, errors.New("Gmail and Calendar routines use only your own Google sign-in; use a source from event_sources")
@@ -502,9 +502,9 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 		option := sources[index]
 		if !option.Available {
 			switch option.Reason {
-			case RoutineEventSourceNeedsSignIn:
+			case EventSourceNeedsSignIn:
 				return nil, errors.New("this source needs the person's sign-in first")
-			case RoutineEventSourceSharedSignInNotAllowed:
+			case EventSourceSharedSignInNotAllowed:
 				return nil, errors.New("Gmail and Calendar routines use only your own Google sign-in, not a shared one")
 			}
 			return nil, errors.New("this event source is not available")
@@ -529,8 +529,8 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 // routine names to be a conversation the umbrella has an active endpoint in
 // on that connection (E14), and labels unlabeled conditions with the
 // endpoint's name.
-func pinRoutineEventChannels(trigger *models.RoutineEventTrigger, field string, channels []RoutineEventSourceChannel) error {
-	find := func(value string) *RoutineEventSourceChannel {
+func pinRoutineEventChannels(trigger *models.RoutineEventTrigger, field string, channels []EventSourceChannel) error {
+	find := func(value string) *EventSourceChannel {
 		value = strings.TrimSpace(value)
 		for index := range channels {
 			if strings.EqualFold(channels[index].ID, value) {
@@ -624,8 +624,8 @@ func routineEventPreview(trigger *models.RoutineEventTrigger) map[string]interfa
 
 // routineEventSourcesAction lists what the chat's Agent or Team can listen to.
 func routineEventSourcesAction() skill.Action {
-	kinds := make([]interface{}, 0, len(RoutineEventKinds))
-	for _, kind := range RoutineEventKinds {
+	kinds := make([]interface{}, 0, len(EventKinds))
+	for _, kind := range EventKinds {
 		kinds = append(kinds, string(kind))
 	}
 	return skill.Action{

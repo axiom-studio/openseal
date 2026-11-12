@@ -31,7 +31,7 @@ func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	// The builder dispatcher takes the current create_team and passes a
 	// 2.0.0 binding's on to the next dispatcher.
 	f := agentbuildertest.NewDispatchFixture(t)
-	fallback := runtimeaction.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	fallback := runtimeaction.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"fallback": true}, nil
 	})
 	dispatcher, err := agentbuildertest.NewDispatcher(f.Store, f.Agents, f.Teams, f.Catalog, f.Provision, nil, fallback)

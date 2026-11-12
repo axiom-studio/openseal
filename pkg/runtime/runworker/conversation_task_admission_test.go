@@ -41,8 +41,8 @@ func TestConversationTaskForegroundReserveLeavesFourthSlotForConversation(t *tes
 		for i := range tasks {
 			tasks[i] = storetest.CreateConversationTaskAdmissionTask(t, store, fmt.Sprintf("reserve-%d", i))
 		}
-		scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
-		request := agentrun.AgentRunClaimRequest{Scope: tasks[0].Task.Scope, Kind: models.RunKindAgentWork, WorkerID: "worker",
+		scheduler := agentrun.NewScheduler(store, models.WithClock(func() time.Time { return now }))
+		request := agentrun.ClaimRequest{Scope: tasks[0].Task.Scope, Kind: models.RunKindAgentWork, WorkerID: "worker",
 			AssignedAgentID: tasks[0].Task.TargetAgentID, MaxActiveForAgent: 4, ConversationTaskForegroundReserve: 1}
 		for i := 0; i < 3; i++ {
 			decision, err := scheduler.ClaimNextDecision(t.Context(), request)

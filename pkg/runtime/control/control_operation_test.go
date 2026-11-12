@@ -46,7 +46,7 @@ type operationCall struct {
 	step      *models.AgentTurn
 	assistant *models.SessionEntry
 	entry     *models.SessionEntry
-	exec      *ControlExecutor
+	exec      *Executor
 	authority agentrun.ControlAuthority
 }
 
@@ -61,7 +61,7 @@ func newOperationCall(t *testing.T, store forkTestStore, setup func(scope models
 	if setup != nil {
 		setup(scope, &req)
 	}
-	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, req)
+	created, err := portfolio.NewService(store).CreateAgentRun(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func newOperationCall(t *testing.T, store forkTestStore, setup func(scope models
 	})
 	return &operationCall{
 		t: t, ctx: ctx, store: store, sessions: store, scope: scope, run: claimed, session: opened.Session,
-		exec:      &ControlExecutor{Portfolio: store, Sessions: store, Forks: forks, Reporting: reporting},
+		exec:      &Executor{Portfolio: store, Sessions: store, Forks: forks, Reporting: reporting},
 		authority: agentrun.ControlAuthority{Operations: []agentrun.HostedRunbookOperation{operationTestEngage}},
 	}
 }
@@ -126,13 +126,13 @@ func (c *operationCall) addCall(n int64, arguments string) {
 }
 
 func (c *operationCall) context() agentrun.ControlContext {
-	return NewControlContext(agentrun.StepToolsInput{
+	return NewContext(agentrun.StepToolsInput{
 		Run: c.run, Step: c.step, Session: c.session, WorkerID: operationTestWorker,
 		Binding: &agentrun.TurnRunnerBinding{Authority: c.authority}, Assistant: c.assistant,
 	}, c.entry)
 }
 
-func (c *operationCall) settle() ControlResult {
+func (c *operationCall) settle() Result {
 	c.t.Helper()
 	result, err := c.exec.Settle(c.ctx, c.context())
 	if err != nil {
@@ -153,7 +153,7 @@ func (c *operationCall) getRun(id string) *models.AgentRun {
 	return run
 }
 
-func (c *operationCall) meta() *ControlEntryMeta {
+func (c *operationCall) meta() *EntryMeta {
 	c.t.Helper()
 	entry, err := c.sessions.GetSessionEntry(c.ctx, c.scope, c.entry.ID)
 	if err != nil {
@@ -211,7 +211,7 @@ func (c *operationCall) reclaim() {
 	c.entry = entry
 }
 
-func (c *operationCall) resume() ControlResume {
+func (c *operationCall) resume() Resume {
 	c.t.Helper()
 	resumed, err := c.exec.Resume(c.ctx, c.context())
 	if err != nil {
@@ -228,7 +228,7 @@ func (c *operationCall) startOperation(n int64, arguments string) string {
 	c.t.Helper()
 	c.addCall(n, arguments)
 	result := c.settle()
-	if result.Kind != ControlParked || result.Park == nil || !result.Park.Committed ||
+	if result.Kind != Parked || result.Park == nil || !result.Park.Committed ||
 		result.Park.Status != models.AgentRunStatusWaitingForDependency {
 		c.t.Fatalf("settle = %#v: %s", result, ResultText(c.entry.Tool.Result))
 	}
@@ -258,7 +258,7 @@ func TestRunOperationValidatesInputSchema(t *testing.T) {
 			c := newOperationCall(t, store, nil)
 			c.addCall(int64(i+1), tc.arguments)
 			result := c.settle()
-			if result.Kind != ControlContinue || c.entry.State != models.ToolEntryError {
+			if result.Kind != Continue || c.entry.State != models.ToolEntryError {
 				t.Fatalf("%s: result = %#v, entry %s", tc.name, result, c.entry.State)
 			}
 			value, _ := forkResult(t, c.entry)
@@ -328,7 +328,7 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 
 func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	var trigger *models.ChannelMessage
 	var conversation *models.Conversation
 	c := newOperationCall(t, store, func(scope models.Scope, req *models.CreateAgentRunRequest) {
@@ -443,7 +443,7 @@ func TestRunOperationsListedInCapabilitiesNoteInOrder(t *testing.T) {
 	second := agentrun.HostedRunbookOperation{Entrypoint: "report", Name: "Weekly report", Description: "Summarize the week"}
 	authority := agentrun.ControlAuthority{Operations: []agentrun.HostedRunbookOperation{operationTestEngage, second}}
 	specs := builtinControlSpecs(authority)
-	var spec *ControlToolSpec
+	var spec *ToolSpec
 	for i := range specs {
 		if specs[i].Name == models.ControlToolRunOperation {
 			spec = &specs[i]

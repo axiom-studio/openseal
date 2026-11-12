@@ -168,11 +168,11 @@ func TestRunbookValueRendersTypedTemplateSegments(t *testing.T) {
 
 func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	control := &runtimecontrol.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration.NewCollaborationService(store)}
+	control := &runtimecontrol.Executor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration.NewService(store)}
 	producer := newRoutineTestProducer(t, routineConcurrentDefinition(), "manual", store)
 	cc := agentrun.ControlContext{
 		Run:     &models.AgentRun{ID: "run", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "fork", "pendingFork": "fork", "pendingCall": "runbook.2.fork"}}},
-		Binding: &agentrun.TurnRunnerBinding{Producer: producer}, Origin: runtimecontrol.ControlOriginKernel,
+		Binding: &agentrun.TurnRunnerBinding{Producer: producer}, Origin: runtimecontrol.OriginKernel,
 		Entry:     &models.SessionEntry{ToolCallID: "runbook.9.fork"},
 		Arguments: &runbookKernelArgs{Step: "fork", Visit: 9},
 	}
@@ -184,11 +184,11 @@ func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	if _, _, _, err := runbookKernelCall(cc, pending); err != nil {
 		t.Fatalf("planned call refused: %v", err)
 	}
-	cc.Origin = runtimecontrol.ControlOriginModel
+	cc.Origin = runtimecontrol.OriginModel
 	if _, _, _, err := runbookKernelCall(cc, pending); err == nil {
 		t.Fatal("a model call reached the runbook engine")
 	}
-	cc.Origin, cc.Entry = runtimecontrol.ControlOriginKernel, nil
+	cc.Origin, cc.Entry = runtimecontrol.OriginKernel, nil
 	if _, _, _, err := runbookKernelCall(cc, pending); err == nil {
 		t.Fatal("a kernel call without its tool entry settled")
 	}

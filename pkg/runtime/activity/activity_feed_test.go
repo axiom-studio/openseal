@@ -54,7 +54,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 				}
 			}
 
-			page, err := service.ListActivityFeed(ctx, ActivityFeedRequest{
+			page, err := service.ListActivityFeed(ctx, FeedRequest{
 				Scope: scope, AgentID: "agent-one", Limit: 1,
 				Visibilities: []models.ActivityVisibility{models.ActivityVisibilityScope, models.ActivityVisibilityTeam},
 			})
@@ -67,7 +67,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 				page.Items[0].UsageDelta.CostMicros != 125_000 || page.Items[0].UsageDelta.DurationMS != 500 {
 				t.Fatalf("summary page = %#v", page)
 			}
-			next, err := service.ListActivityFeed(ctx, ActivityFeedRequest{
+			next, err := service.ListActivityFeed(ctx, FeedRequest{
 				Scope: scope, AgentID: "agent-one", Cursor: page.NextCursor, Limit: 1, IncludeDetails: true,
 				Visibilities: []models.ActivityVisibility{models.ActivityVisibilityScope, models.ActivityVisibilityTeam},
 			})
@@ -85,13 +85,13 @@ func TestActivityFeedRequiresSelectorAndRejectsInvalidCursor(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	service := NewRunActivityService(store, store)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	if _, err := service.ListActivityFeed(context.Background(), ActivityFeedRequest{Scope: scope}); err == nil {
+	if _, err := service.ListActivityFeed(context.Background(), FeedRequest{Scope: scope}); err == nil {
 		t.Fatal("selector-free activity feed was accepted")
 	}
-	if _, err := service.ListActivityFeed(context.Background(), ActivityFeedRequest{Scope: scope, AgentID: "agent", Cursor: "not-a-cursor"}); err == nil {
+	if _, err := service.ListActivityFeed(context.Background(), FeedRequest{Scope: scope, AgentID: "agent", Cursor: "not-a-cursor"}); err == nil {
 		t.Fatal("invalid activity cursor was accepted")
 	}
-	if _, err := service.ListActivityFeed(context.Background(), ActivityFeedRequest{Scope: scope, AgentID: "agent", Limit: maximumActivityFeedLimit + 1}); err == nil {
+	if _, err := service.ListActivityFeed(context.Background(), FeedRequest{Scope: scope, AgentID: "agent", Limit: maximumActivityFeedLimit + 1}); err == nil {
 		t.Fatal("oversized activity page was accepted")
 	}
 }

@@ -18,7 +18,7 @@ func TestAcceptedRunRecoveryPreservesUnprovableLegacyWorkWithoutAutomaticRetries
 	forWorkerRunStores(t, func(t *testing.T, fixture workerRunStoreFixture) {
 		store := fixture.store.(models.KernelStore)
 		scope := models.Scope{Kind: "tenant", ID: "legacy-recovery"}
-		original, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		original, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Entrypoint: "manual", Goal: "Complete the accepted older method", Source: models.RunSourceSchedule,
 			Context: map[string]interface{}{"runbookDefinitionId": "older-method", "runbookDefinitionVersion": "0", "inputs": map[string]interface{}{"preserved": "accepted"}},
 			Plan:    map[string]interface{}{"runbook": map[string]interface{}{"id": "older-method", "version": "0"}}, Checkpoint: map[string]interface{}{"committed": float64(7)}, Budget: &models.BudgetPolicy{MaxAttempts: 4, MaxTurns: 8},
@@ -60,7 +60,7 @@ func TestAcceptedRunRecoveryPreservesUnprovableLegacyWorkWithoutAutomaticRetries
 		if fixture.reopen != nil {
 			store = fixture.reopen().(models.KernelStore)
 		}
-		wake := agentrun.NewAgentRunWakeService(store, store)
+		wake := agentrun.NewWakeService(store, store)
 		for i := 0; i < 3; i++ {
 			if result, err := wake.WakeDueTimers(t.Context(), scope, at.Add(time.Duration(i+1)*time.Hour)); err != nil || len(result.Runs) != 0 {
 				t.Fatalf("manual recovery automatically woke: %#v %v", result, err)

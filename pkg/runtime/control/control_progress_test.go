@@ -23,7 +23,7 @@ func progressFixture(t *testing.T, calls ...agentrun.LoopToolCall) *controlFixtu
 	return f
 }
 
-func progressSpec(t *testing.T, authority agentrun.ControlAuthority) ControlToolSpec {
+func progressSpec(t *testing.T, authority agentrun.ControlAuthority) ToolSpec {
 	t.Helper()
 	for _, spec := range builtinControlSpecs(authority) {
 		if spec.Name == models.ControlToolReportProgress {
@@ -31,7 +31,7 @@ func progressSpec(t *testing.T, authority agentrun.ControlAuthority) ControlTool
 		}
 	}
 	t.Fatalf("turn_report_progress not offered under %#v", authority)
-	return ControlToolSpec{}
+	return ToolSpec{}
 }
 
 func progressCall(id, args string) agentrun.LoopToolCall {
@@ -53,9 +53,9 @@ func (f *controlFixture) progressEvents() []*models.ActivityEvent {
 	return out
 }
 
-func requirePosted(t *testing.T, result ControlResult) {
+func requirePosted(t *testing.T, result Result) {
 	t.Helper()
-	if result.Kind != ControlContinue || result.Entry == nil || result.Entry.State != models.ToolEntryCompleted {
+	if result.Kind != Continue || result.Entry == nil || result.Entry.State != models.ToolEntryCompleted {
 		t.Fatalf("result = %#v", result)
 	}
 	tr := result.Entry.Tool.Result
@@ -73,7 +73,7 @@ func TestReportProgressEmitsCommentary(t *testing.T) {
 	)
 	authority := agentrun.ControlAuthority{CanReportProgress: true}
 	spec := progressSpec(t, authority)
-	if spec.Phase != ControlPhaseInline {
+	if spec.Phase != PhaseInline {
 		t.Fatalf("phase = %s", spec.Phase)
 	}
 	props := spec.InputSchema["properties"].(map[string]interface{})
@@ -170,7 +170,7 @@ func TestReportProgressRejectsRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("again: %v", err)
 	}
-	if result.Kind != ControlContinue || result.Entry.State != models.ToolEntryError {
+	if result.Kind != Continue || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("repeat result = %#v", result)
 	}
 	value := requireControlError(t, f.stored("again").Tool.Result, models.ToolResultRefused, reportProgressRepeatCode)

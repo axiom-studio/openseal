@@ -57,41 +57,41 @@ func TestSQLiteApplicationRouteMatching(t *testing.T) {
 func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		mutate func(*models.ExternalConversationEndpoint, *externalconversation.ExternalConversationGatewayHostResult)
+		mutate func(*models.ExternalConversationEndpoint, *externalconversation.GatewayHostResult)
 		want   int
 	}{
 		{name: "verified application with no saved pin", want: 1},
-		{name: "explicit matching pin", want: 1, mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "explicit matching pin", want: 1, mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.GatewayHostResult) {
 			e.ApplicationID = "A123"
 		}},
-		{name: "wrong app", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "wrong app", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.GatewayHostResult) {
 			e.ApplicationID = "another-app"
 		}},
-		{name: "missing event app cannot bypass pin", mutate: func(e *models.ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "missing event app cannot bypass pin", mutate: func(e *models.ExternalConversationEndpoint, h *externalconversation.GatewayHostResult) {
 			e.ApplicationID = "A123"
 			h.Events[0].ApplicationID = ""
 		}},
-		{name: "other tenant", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other tenant", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.GatewayHostResult) {
 			e.Scope.ID = "other"
 		}},
-		{name: "other deployment", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other deployment", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.GatewayHostResult) {
 			e.DeploymentID = "other"
 			e.Owner.ID = "other"
 			e.Handler.ID = "other"
 		}},
-		{name: "other binding", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other binding", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.GatewayHostResult) {
 			e.Adapter.BindingID = "other"
 		}},
-		{name: "stale binding", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "stale binding", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.GatewayHostResult) {
 			e.Adapter.BindingRevision++
 		}},
-		{name: "other workspace", mutate: func(_ *models.ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other workspace", mutate: func(_ *models.ExternalConversationEndpoint, h *externalconversation.GatewayHostResult) {
 			h.Events[0].InstallationID = "other"
 		}},
-		{name: "other channel", mutate: func(_ *models.ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other channel", mutate: func(_ *models.ExternalConversationEndpoint, h *externalconversation.GatewayHostResult) {
 			h.Events[0].Address = "other"
 		}},
-		{name: "unverified event", mutate: func(_ *models.ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "unverified event", mutate: func(_ *models.ExternalConversationEndpoint, h *externalconversation.GatewayHostResult) {
 			h.StatusCode = http.StatusUnauthorized
 			h.Events = nil
 		}},
@@ -104,7 +104,7 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 			endpoint.InstallationID = "T123"
 			endpoint.ApplicationID = ""
 			endpoint.Address = "C123"
-			host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []externalconversation.ExternalConversationGatewayEvent{{
+			host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.GatewayHostResult{StatusCode: http.StatusOK, Events: []externalconversation.GatewayEvent{{
 				InstallationID: "T123", ApplicationID: "A123", Address: "C123",
 				Event: models.NormalizedExternalConversationEvent{ID: "event-1", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C123", ExternalMessageID: "171.003", ExternalParticipantID: "U123", Text: "hi", OrderingKey: "C123:171.003", OccurredAt: time.Now().UTC()},
 			}}}}
@@ -116,7 +116,7 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 			if err := store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
 				t.Fatal(err)
 			}
-			result, err := externalconversation.NewExternalConversationTransportService(store, catalog).NormalizeExternalConversationGatewayIngress(ctx, gateway, externalconversation.ExternalConversationPublicIngressRequest{Route: "verified-route", Method: http.MethodPost, Body: []byte(`{}`)}, host)
+			result, err := externalconversation.NewTransportService(store, catalog).NormalizeExternalConversationGatewayIngress(ctx, gateway, externalconversation.PublicIngressRequest{Route: "verified-route", Method: http.MethodPost, Body: []byte(`{}`)}, host)
 			if err != nil {
 				t.Fatal(err)
 			}

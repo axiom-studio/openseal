@@ -133,7 +133,7 @@ func TestLoopApprovalParksAtStepEnd(t *testing.T) {
 			f := newApprovalScenario(t, open(t))
 			conversation, run := f.StartChat(looptest.ApprovalScenarioTrigger)
 			exit, parked := f.RunClaim(run.ID)
-			if exit.Reason != runloop.RunLoopExitParked || exit.Err != nil {
+			if exit.Reason != runloop.ExitParked || exit.Err != nil {
 				t.Fatalf("exit = %s, %v", exit.Reason, exit.Err)
 			}
 			assertParkedOnApproval(t, f, parked)
@@ -588,7 +588,7 @@ func TestLoopApprovalModeIsCarriedOnTheStepRequest(t *testing.T) {
 		if !ok {
 			t.Fatalf("%T has no approval modes", f.Chats)
 		}
-		service := runtimeconversation.NewConversationApprovalModeService(modes, models.WithClock(f.Clock.Now))
+		service := runtimeconversation.NewApprovalModeService(modes, models.WithClock(f.Clock.Now))
 		current, err := f.Convs.GetConversation(f.Ctx, f.Scope, conversation.ID)
 		if err != nil {
 			t.Fatal(err)

@@ -219,7 +219,7 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 		if res, done := d.checkRunAfterProduce(ctx, st); done {
 			return res
 		}
-		return exitResult(RunLoopExit{Run: d.run, Reason: RunLoopExitLeaseLost, Err: err})
+		return exitResult(Exit{Run: d.run, Reason: ExitLeaseLost, Err: err})
 	case st.durCtx != nil && stepDurationExpired(st.stepCtx, st.durCtx):
 		return d.durationExpired(ctx, st, d.l.now().Sub(st.started).Milliseconds())
 	case errors.Is(err, modelstep.ErrTurnHostUnavailable):

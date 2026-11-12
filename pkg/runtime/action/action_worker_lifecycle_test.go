@@ -137,7 +137,7 @@ func TestActionWorkerLifecycleCallOnlyCompletionFencesParentRevision(t *testing.
 		if _, err := store.PersistActionExecution(t.Context(), record); err == nil {
 			t.Fatal("call-only completion accepted missing parent revision")
 		}
-		other, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		other, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 			Scope: call.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other-agent"},
 			AssignedAgentID: "other-agent", Goal: "Independent workstream", Source: models.RunSourceManual,
 		})

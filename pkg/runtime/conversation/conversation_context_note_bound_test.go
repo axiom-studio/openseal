@@ -17,13 +17,13 @@ func TestRunContextBoundedTo32KiB(t *testing.T) {
 	for index := 0; index < 50; index++ {
 		objectives = append(objectives, fmt.Sprintf("- objective obj-%03d \"Goal\" (active, priority 1, revision 1): %s", index, strings.Repeat("o", 150)))
 	}
-	sections := []ConversationContextSection{
+	sections := []ContextSection{
 		{Name: ContextSectionRespondTo, Always: true, Text: "Reply to message m1 from Kev (user kev)."},
 		{Name: ContextSectionObjectives, Text: "Objectives:\n" + strings.Join(objectives, "\n")},
 		{Name: ContextSectionActiveRuns, Text: "Active work:\n" + strings.Join(active, "\n")},
 		{Name: ContextSectionPlaces, Text: "Places already found in this chat (reuse their ids):\n- Home (place p1, 1,2)"},
 	}
-	note := ConversationContextNote(session, "run-1", sections, nil)
+	note := ContextNote(session, "run-1", sections, nil)
 	text := note.Note.Text
 	if len(text) > maximumRunContextBytes {
 		t.Fatalf("note is %d bytes", len(text))
@@ -39,7 +39,7 @@ func TestRunContextBoundedTo32KiB(t *testing.T) {
 		t.Fatalf("objectives %d, active %d", got, strings.Count(text, "- run run-"))
 	}
 	// The digest is of the whole section, so an unchanged truncated section is not sent again.
-	again := ConversationContextNote(session, "run-2", sections, latestContextDigests([]*models.SessionEntry{note}))
+	again := ContextNote(session, "run-2", sections, latestContextDigests([]*models.SessionEntry{note}))
 	if names := runContextSectionNames(t, again); len(names) != 1 || !names[ContextSectionRespondTo] {
 		t.Fatalf("re-sent sections = %v", names)
 	}
@@ -48,7 +48,7 @@ func TestRunContextBoundedTo32KiB(t *testing.T) {
 		objectives = append(objectives, fmt.Sprintf("- objective obj-%03d \"Goal\" (active, priority 1, revision 1): %s", index, strings.Repeat("o", 150)))
 	}
 	sections[1].Text = "Objectives:\n" + strings.Join(objectives, "\n")
-	large := ConversationContextNote(session, "run-1", sections, nil).Note.Text
+	large := ContextNote(session, "run-1", sections, nil).Note.Text
 	if len(large) > maximumRunContextBytes || !strings.Contains(large, "Active work:\n… (150 more)") || !strings.Contains(large, "- objective obj-000") ||
 		strings.Count(large, "- objective ") >= 300 {
 		t.Fatalf("large note is %d bytes, %d objectives", len(large), strings.Count(large, "- objective "))

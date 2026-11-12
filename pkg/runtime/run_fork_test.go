@@ -38,13 +38,13 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 			store, closeStore := tc.open(t)
 			defer closeStore()
 			scope := models.Scope{Kind: "tenant", ID: "7"}
-			source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+			source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", ActingUser: "7", Goal: "parent", Source: models.RunSourceManual,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			claimed, err := agentrun.NewAgentRunScheduler(store).ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
+			claimed, err := agentrun.NewScheduler(store).ClaimNext(t.Context(), agentrun.ClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
 			if err != nil || claimed == nil || claimed.ID != source.ID {
 				t.Fatalf("claim=%#v error=%v", claimed, err)
 			}
@@ -81,14 +81,14 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "parent", Source: models.RunSourceManual,
 		Budget: &models.BudgetPolicy{MaxTurns: 10},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := agentrun.NewAgentRunScheduler(store).ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
+	claimed, err := agentrun.NewScheduler(store).ClaimNext(t.Context(), agentrun.ClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,14 +130,14 @@ func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 func TestRunForkCoordinatorCarriesCallableRunbookEntrypoint(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 		AssignedAgentID: "agent", Goal: "parent", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := agentrun.NewAgentRunScheduler(store).ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{
+	claimed, err := agentrun.NewScheduler(store).ClaimNext(t.Context(), agentrun.ClaimRequest{
 		Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute,
 	})
 	if err != nil {
@@ -169,14 +169,14 @@ func TestRunForkCoordinatorCarriesCallableRunbookEntrypoint(t *testing.T) {
 func TestRunForkCoordinatorDoesNotTransferPrivateContext(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "lead", Goal: "Coordinate research", Source: models.RunSourceManual,
 		Context: map[string]interface{}{"privateCredentialRef": "source-only", "privateBrief": "lead-only"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := agentrun.NewAgentRunScheduler(store).ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
+	claimed, err := agentrun.NewScheduler(store).ClaimNext(t.Context(), agentrun.ClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

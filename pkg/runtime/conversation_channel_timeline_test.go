@@ -26,7 +26,7 @@ func TestChannelTimelineStoresPaginateRootsAndBroadcastsBeforeLimiting(t *testin
 // visibility of their own audience, root and immediate reply target.
 func testChannelTimelineStore(t *testing.T, store models.ConversationStore) {
 	t.Helper()
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: "channel-timeline"}
 	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{

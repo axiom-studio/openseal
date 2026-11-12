@@ -34,7 +34,7 @@ func finalCall(id, args string) agentrun.LoopToolCall {
 	return agentrun.LoopToolCall{ID: id, Name: string(models.ControlToolFinalAnswer), Arguments: json.RawMessage(args)}
 }
 
-func (f *controlFixture) settleFinal(callID string, authority agentrun.ControlAuthority) ControlResult {
+func (f *controlFixture) settleFinal(callID string, authority agentrun.ControlAuthority) Result {
 	f.t.Helper()
 	result, err := f.exec.Settle(f.ctx, f.context(callID, authority))
 	if err != nil {
@@ -53,7 +53,7 @@ func (f *controlFixture) plainContext(stepID string, sequence int64, authority a
 	}
 }
 
-func (f *controlFixture) plain(stepID string, sequence int64, authority agentrun.ControlAuthority, text string) ControlResult {
+func (f *controlFixture) plain(stepID string, sequence int64, authority agentrun.ControlAuthority, text string) Result {
 	f.t.Helper()
 	result, err := f.exec.PlainTextFinal(f.ctx, f.plainContext(stepID, sequence, authority), text)
 	if err != nil {
@@ -62,9 +62,9 @@ func (f *controlFixture) plain(stepID string, sequence int64, authority agentrun
 	return result
 }
 
-func requireFinal(t *testing.T, result ControlResult) *agentrun.FinalAnswer {
+func requireFinal(t *testing.T, result Result) *agentrun.FinalAnswer {
 	t.Helper()
-	if result.Kind != ControlFinal || result.Final == nil {
+	if result.Kind != Final || result.Final == nil {
 		t.Fatalf("result = %#v, want a final answer", result)
 	}
 	if err := result.validate(); err != nil {
@@ -73,9 +73,9 @@ func requireFinal(t *testing.T, result ControlResult) *agentrun.FinalAnswer {
 	return result.Final
 }
 
-func requireRejected(t *testing.T, f *controlFixture, result ControlResult, callID, code string) map[string]interface{} {
+func requireRejected(t *testing.T, f *controlFixture, result Result, callID, code string) map[string]interface{} {
 	t.Helper()
-	if result.Kind != ControlContinue || result.Entry == nil || result.Entry.State != models.ToolEntryError {
+	if result.Kind != Continue || result.Entry == nil || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("result = %#v, want a rejection", result)
 	}
 	stored := f.stored(callID)
@@ -89,10 +89,10 @@ func requireRejected(t *testing.T, f *controlFixture, result ControlResult, call
 	return value
 }
 
-func requireRejectionNote(t *testing.T, result ControlResult, stepID, code string) *models.SessionEntry {
+func requireRejectionNote(t *testing.T, result Result, stepID, code string) *models.SessionEntry {
 	t.Helper()
 	note := result.Entry
-	if result.Kind != ControlContinue && result.Kind != ControlFailed || note == nil || note.Type != models.SessionEntryNote ||
+	if result.Kind != Continue && result.Kind != Failed || note == nil || note.Type != models.SessionEntryNote ||
 		note.Note == nil || note.Note.Kind != models.NoteFinalRejection || note.SourceKey != models.FinalRejectionEntryKey(stepID) {
 		t.Fatalf("result = %#v, want a final_rejection note", result)
 	}
@@ -136,13 +136,13 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			specs := builtinControlSpecs(tc.authority)
-			var spec *ControlToolSpec
+			var spec *ToolSpec
 			for i := range specs {
 				if specs[i].Name == models.ControlToolFinalAnswer {
 					spec = &specs[i]
 				}
 			}
-			if spec == nil || spec.Phase != ControlPhaseSettle {
+			if spec == nil || spec.Phase != PhaseSettle {
 				t.Fatalf("final tool spec = %#v", spec)
 			}
 			properties, required := schemaProperties(t, spec.InputSchema)
@@ -278,7 +278,7 @@ func TestEmptyPlainTextRejectedThenFails(t *testing.T) {
 	f := newFinalFixture(t)
 	for i, step := range []string{"step-2", "step-3"} {
 		result := f.plain(step, int64(i+2), agentrun.ControlAuthority{}, "")
-		if result.Kind != ControlContinue {
+		if result.Kind != Continue {
 			t.Fatalf("attempt %d = %#v", i+1, result)
 		}
 		note := requireRejectionNote(t, result, step, finalEmptyReplyCode)
@@ -288,12 +288,12 @@ func TestEmptyPlainTextRejectedThenFails(t *testing.T) {
 	}
 	// Replaying the same step's rejection keeps one note.
 	again := f.plain("step-3", 3, agentrun.ControlAuthority{}, "")
-	if again.Kind != ControlContinue {
+	if again.Kind != Continue {
 		t.Fatalf("replay = %#v", again)
 	}
 	// The third distinct step fails the Run.
 	result := f.plain("step-4", 4, agentrun.ControlAuthority{}, "")
-	if result.Kind != ControlFailed || result.Failure == nil || result.Failure.Code != finalEmptyReplyCode {
+	if result.Kind != Failed || result.Failure == nil || result.Failure.Code != finalEmptyReplyCode {
 		t.Fatalf("third empty reply = %#v", result)
 	}
 	if err := result.validate(); err != nil {
@@ -322,7 +322,7 @@ func TestEmptyAnswerAfterReactionIsReactionsOnly(t *testing.T) {
 		finalCall("after", `{"answer":""}`),
 	)
 	requireRejected(t, f, f.settleFinal("empty", agentrun.ControlAuthority{}), "empty", finalAnswerEmptyCode)
-	if result := f.plain("step-2", 2, agentrun.ControlAuthority{}, ""); result.Kind != ControlContinue {
+	if result := f.plain("step-2", 2, agentrun.ControlAuthority{}, ""); result.Kind != Continue {
 		t.Fatalf("empty plain text before a reaction = %#v", result)
 	}
 	f.completeEntry("react")
@@ -447,7 +447,7 @@ func TestDecisionRunPlainTextGetsNoteThenFails(t *testing.T) {
 	decision := agentrun.ControlAuthority{FinalMode: agentrun.FinalModeDecision}
 	for i, step := range []string{"step-2", "step-3"} {
 		result := f.plain(step, int64(i+2), decision, "I accept the request.")
-		if result.Kind != ControlContinue {
+		if result.Kind != Continue {
 			t.Fatalf("attempt %d = %#v", i+1, result)
 		}
 		note := requireRejectionNote(t, result, step, finalToolRequiredCode)
@@ -457,7 +457,7 @@ func TestDecisionRunPlainTextGetsNoteThenFails(t *testing.T) {
 	}
 	// The JSON repair is only for turn_final_answer, which decision Runs lack.
 	result := f.plain("step-4", 4, decision, `{"answer":"accept"}`)
-	if result.Kind != ControlFailed || result.Failure == nil || result.Failure.Code != finalToolRequiredCode ||
+	if result.Kind != Failed || result.Failure == nil || result.Failure.Code != finalToolRequiredCode ||
 		result.Failure.Kind != conversation.RunFailureKindExecution {
 		t.Fatalf("third plain reply = %#v", result)
 	}
@@ -591,7 +591,7 @@ func TestFinalOutputPublisherValidatesExtensionFields(t *testing.T) {
 		cc.Binding.FinalOutput = publisher
 		return cc
 	}
-	settle := func(callID string) ControlResult {
+	settle := func(callID string) Result {
 		result, err := f.exec.Settle(f.ctx, context(callID))
 		if err != nil {
 			t.Fatalf("settle %s: %v", callID, err)
@@ -655,12 +655,12 @@ func TestBuiltinFinalAnswerChecksRunCompletionBeforeTaskReview(t *testing.T) {
 
 func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
 	var order []string
-	completion := finalAnswerCheck{Name: "completion", Check: func(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
+	completion := finalAnswerCheck{Name: "completion", Check: func(ctx context.Context, x *Executor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
 		order = append(order, "completion")
 		d.Output["checked"] = true
 		return nil, nil
 	}}
-	review := finalAnswerCheck{Name: "review", Check: func(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
+	review := finalAnswerCheck{Name: "review", Check: func(ctx context.Context, x *Executor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
 		order = append(order, "review")
 		prior, err := x.priorFinalErrorCodes(ctx, cc)
 		if err != nil {
@@ -676,7 +676,7 @@ func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
 	f.exec.finalChecks = []finalAnswerCheck{completion, review}
 	requireRejected(t, f, f.settleFinal("first", agentrun.ControlAuthority{}), "first", "task_completion_revise")
 	result := f.settleFinal("second", agentrun.ControlAuthority{})
-	if result.Kind != ControlFailed || result.Failure.Code != "task_completion_rejected" || result.Entry.State != models.ToolEntryError {
+	if result.Kind != Failed || result.Failure.Code != "task_completion_rejected" || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("second = %#v", result)
 	}
 	if !reflect.DeepEqual(order, []string{"completion", "review", "completion", "review"}) {
@@ -765,7 +765,7 @@ func TestSilentStillRejectedForChatRuns(t *testing.T) {
 	run := models.CloneAgentRun(f.run)
 	run.Kind = models.RunKindConversation
 	run.Context = map[string]interface{}{models.ScheduledTaskContextKey: true}
-	authority, err := ResolveControlAuthority(f.ctx, ControlAuthorityInput{Run: run, DeploymentID: "agent-1", Deterministic: true})
+	authority, err := ResolveControlAuthority(f.ctx, AuthorityInput{Run: run, DeploymentID: "agent-1", Deterministic: true})
 	if err != nil || authority.RoutineOccurrence {
 		t.Fatalf("authority = %#v, %v", authority, err)
 	}
@@ -778,7 +778,7 @@ func TestSilentStillRejectedForChatRuns(t *testing.T) {
 	}
 	occurrence := models.CloneAgentRun(f.run)
 	occurrence.Context = map[string]interface{}{models.ScheduledTaskContextKey: true}
-	authority, err = ResolveControlAuthority(f.ctx, ControlAuthorityInput{Run: occurrence, DeploymentID: "agent-1", Deterministic: true})
+	authority, err = ResolveControlAuthority(f.ctx, AuthorityInput{Run: occurrence, DeploymentID: "agent-1", Deterministic: true})
 	if err != nil || !authority.RoutineOccurrence || !finalFieldOffered("silent", authority) {
 		t.Fatalf("occurrence authority = %#v, %v", authority, err)
 	}

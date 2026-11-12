@@ -36,11 +36,11 @@ type StepToolDispatcherConfig struct {
 	// setup guards).
 	Actions models.ActionStore
 	// Coordinator records the refused row of a governed repeat refusal.
-	Coordinator *runtimeaction.ActionCoordinator
+	Coordinator *runtimeaction.Coordinator
 	Governed    *GovernedToolExecutor
 	// Control runs the control calls. One built without its own tools gets
 	// every tool of the run loop (loopControlRegistry) here.
-	Control *control.ControlExecutor
+	Control *control.Executor
 	// Host runs host tool calls; nil means this host runs none.
 	Host *modelstep.HostToolDispatcher
 	// Output keeps governed results over the 64 KiB cap as chat files
@@ -110,8 +110,8 @@ type ClaimToolExecutor struct {
 
 func (x *ClaimToolExecutor) now() time.Time { return x.cfg.Now().UTC() }
 
-// ControlExecutor runs the claim's control calls.
-func (x *ClaimToolExecutor) ControlExecutor() *control.ControlExecutor { return x.cfg.Control }
+// control.Executor runs the claim's control calls.
+func (x *ClaimToolExecutor) ControlExecutor() *control.Executor { return x.cfg.Control }
 
 // ---------------------------------------------------------------------------
 // Routing
@@ -131,7 +131,7 @@ const (
 type resolvedLoopTool struct {
 	Route      loopToolRoute
 	Control    models.ControlToolName
-	Phase      control.ControlPhase // control tools only
+	Phase      control.Phase // control tools only
 	Host       modelstep.HostToolSpec
 	Action     *capability.ModelAction
 	SideEffect models.ToolSideEffect
@@ -140,7 +140,7 @@ type resolvedLoopTool struct {
 
 // settle reports a settle-phase control call.
 func (t resolvedLoopTool) settle() bool {
-	return t.Route == loopRouteControl && t.Phase == control.ControlPhaseSettle
+	return t.Route == loopRouteControl && t.Phase == control.PhaseSettle
 }
 
 // concurrent reports a call that may run beside its neighbours (§5.2):
@@ -155,7 +155,7 @@ func (x *ClaimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding,
 	args := decodeLoopToolArguments(arguments)
 	switch {
 	case control.IsControlTool(name):
-		phase, _ := control.ControlToolPhase(name)
+		phase, _ := control.ToolPhase(name)
 		effect := repeatEffectOf(LoopToolKernel, "", false, name)
 		return resolvedLoopTool{
 			Route: loopRouteControl, Control: models.ControlToolName(name), Phase: phase,
@@ -662,7 +662,7 @@ func (r *stepToolRun) repeatGoverned(i int) *loopRepeatGovernedCall {
 	}
 	action := tool.Action
 	return &loopRepeatGovernedCall{
-		DeploymentID: runtimeaction.ActionDeploymentForSelection(r.binding, action),
+		DeploymentID: runtimeaction.DeploymentForSelection(r.binding, action),
 		SkillID:      action.SkillID, SkillVersion: action.Version, Action: action.Action,
 		BindingID: action.BindingID, BindingRevision: action.BindingRevision,
 		Risk: skill.RiskLevel(action.Risk), SideEffect: skill.SideEffect(action.SideEffect),
@@ -796,7 +796,7 @@ func (r *stepToolRun) controlContext(i int) agentrun.ControlContext {
 	if r.in.Assistant == nil || r.in.Assistant.StepID != control.StepIDOf(r.step) {
 		in.Assistant = nil
 	}
-	return control.NewControlContext(in, r.entry(i))
+	return control.NewContext(in, r.entry(i))
 }
 
 func (r *stepToolRun) runControlInline(ctx context.Context, i int) error {
@@ -812,7 +812,7 @@ func (r *stepToolRun) runControlInline(ctx context.Context, i int) error {
 }
 
 // applyControl records a control outcome on the step.
-func (r *stepToolRun) applyControl(ctx context.Context, i int, result control.ControlResult) error {
+func (r *stepToolRun) applyControl(ctx context.Context, i int, result control.Result) error {
 	r.adoptRun(result.Run)
 	if err := r.adopted(ctx, i, result.Entry); err != nil {
 		return err
@@ -820,14 +820,14 @@ func (r *stepToolRun) applyControl(ctx context.Context, i int, result control.Co
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch result.Kind {
-	case control.ControlParked:
+	case control.Parked:
 		park := *result.Park
 		r.park, r.held = &park, true
-	case control.ControlFinal:
+	case control.Final:
 		r.final = result.Final
-	case control.ControlEnded:
+	case control.Ended:
 		r.ended = true
-	case control.ControlFailed:
+	case control.Failed:
 		r.failure = result.Failure
 	}
 	return nil

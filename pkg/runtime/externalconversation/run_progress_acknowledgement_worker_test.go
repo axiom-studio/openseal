@@ -39,7 +39,7 @@ func newRunProgressWorkerFixtureOn(t *testing.T, store *sqlite.Store, provider s
 	t.Helper()
 	ctx := context.Background()
 	catalog, endpoint := endpointFixtureOn(t, ctx, store, provider, operations)
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Support thread",
 		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},

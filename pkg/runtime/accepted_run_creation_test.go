@@ -74,7 +74,7 @@ func acceptedCreationActivation(t *testing.T, store models.KernelStore, trigger 
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "accepted-hooks"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(t.Context(), portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(store).CreateObjective(t.Context(), portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Review", Goal: "Review authorized messages", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -242,14 +242,14 @@ func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing
 	store := kerneltest.NewStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}})
 	seedTestSpace(t, store, activation.Scope)
-	conversation, _, err := conversation.NewConversationService(store).CreateConversation(t.Context(), conversation.CreateConversationRequest{
+	conversation, _, err := conversation.NewService(store).CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: activation.Scope, Owner: activation.Owner, Title: "Review",
 		Origin: &models.ConversationReference{Kind: models.ConversationReferenceObjective, ID: activation.ObjectiveID, Version: 1}, IdempotencyKey: "review-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	parent, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: activation.Scope, Owner: activation.Owner, AssignedAgentID: "rowan", Kind: models.RunKindConversation, Goal: "Run reviewed work", Source: models.RunSourceChat,
 		Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID},
 	})

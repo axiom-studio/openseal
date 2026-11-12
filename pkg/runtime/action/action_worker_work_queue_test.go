@@ -60,7 +60,7 @@ func (s *deadlineActionStore) reads() int64 { return s.claims.Load() + s.deadlin
 func TestQueueDrivenActionPoolIssuesNoReadsWhileIdle(t *testing.T) {
 	store := &deadlineActionStore{Store: kerneltest.NewStore(t)}
 	catalog, scope := actiontest.GovernedCatalog(t)
-	pool := actiontest.NewPool(t, store, catalog, scope, 5*time.Millisecond, 4, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	pool := actiontest.NewPool(t, store, catalog, scope, 5*time.Millisecond, 4, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return nil, errors.New("unexpected idle dispatch")
 	}))
 	pool.SetWorkSignals(workqueuetest.NewHarness(t).Status)
@@ -79,7 +79,7 @@ func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
 	store := &deadlineActionStore{Store: kerneltest.NewStore(t)}
 	catalog, scope := actiontest.GovernedCatalog(t)
 	dispatched := make(chan struct{}, 1)
-	pool := actiontest.NewPool(t, store, catalog, scope, time.Hour, 2, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	pool := actiontest.NewPool(t, store, catalog, scope, time.Hour, 2, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched <- struct{}{}
 		return map[string]interface{}{"ok": true}, nil
 	}))
@@ -148,7 +148,7 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 					t.Fatalf("crashed claim = %#v, %v", claimed, err)
 				}
 			}
-			pool := actiontest.NewPool(t, store, catalog, scope, time.Hour, 1, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+			pool := actiontest.NewPool(t, store, catalog, scope, time.Hour, 1, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				return map[string]interface{}{"ok": true}, nil
 			}))
 			// The pool holds no timer: its deadline goes into the queue,
@@ -182,7 +182,7 @@ func TestQueueDrivenActionPoolPollsWhileQueueIsUnhealthy(t *testing.T) {
 	store := &deadlineActionStore{Store: kerneltest.NewStore(t)}
 	catalog, scope := actiontest.GovernedCatalog(t)
 	status := workqueuetest.NewHarness(t).Status
-	pool := actiontest.NewPool(t, store, catalog, scope, 10*time.Millisecond, 1, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	pool := actiontest.NewPool(t, store, catalog, scope, 10*time.Millisecond, 1, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"ok": true}, nil
 	}))
 	pool.SetWorkSignals(status)
@@ -207,7 +207,7 @@ func TestQueueDrivenSupervisorAdmitsScopesWithoutListingAndRetiresIdlePools(t *t
 	catalog, scope := actiontest.GovernedCatalog(t)
 	source := &workqueuetest.ScopeSource{}
 	source.Active.Store(true)
-	supervisor, err := action.NewActionWorkerSupervisorRetiringAfter(store, catalog, nil, nil, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	supervisor, err := action.NewActionWorkerSupervisorRetiringAfter(store, catalog, nil, nil, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"ok": true}, nil
 	}), source, nil, action.DynamicActionWorkerConfig{Concurrency: 1, PollInterval: 5 * time.Millisecond, ReconcileInterval: 10 * time.Millisecond}, 60*time.Millisecond)
 	if err != nil {

@@ -91,11 +91,11 @@ type ChatFixture struct {
 	T            *testing.T
 	Ctx          context.Context
 	Store        ChatStore
-	Service      *conversation.ConversationService
+	Service      *conversation.Service
 	Conversation *models.Conversation
-	Runner       *conversationrun.ConversationRunTurnRunner
+	Runner       *conversationrun.TurnRunner
 	Actions      *ChatActions
-	Loop         *runloop.RunLoop
+	Loop         *runloop.Loop
 	Team         bool
 	Now          time.Time
 	// agents is the runner's AgentTurns resolver: the bare Agent binding of
@@ -118,7 +118,7 @@ func NewChatFixture(t *testing.T, base conversationtest.ThreadStartStore, option
 	}
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "chat-loop-" + uuid.NewString()[:8]}
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}
 	if options.Team {
 		owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-1"}
@@ -130,12 +130,12 @@ func NewChatFixture(t *testing.T, base conversationtest.ThreadStartStore, option
 	if err != nil {
 		t.Fatal(err)
 	}
-	loop, err := runloop.NewRunLoop(store, nil, nil, runloop.RunLoopConfig{
+	loop, err := runloop.New(store, nil, nil, runloop.Config{
 		PlanToolEntries: func(*agentrun.TurnRunnerBinding, *models.AgentSession, *models.AgentTurn, *models.SessionEntry, []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
 			return nil, fmt.Errorf("chat loop tests make no tool calls")
 		},
-		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (control.ControlResult, error) {
-			return control.ControlResult{Kind: control.ControlFinal, Final: &agentrun.FinalAnswer{
+		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (control.Result, error) {
+			return control.Result{Kind: control.Final, Final: &agentrun.FinalAnswer{
 				StepID: cc.Step.ID, PlainText: true, Answer: text, Output: map[string]interface{}{conversationrun.FinalOutputSummaryKey: text},
 			}}, nil
 		},
@@ -149,16 +149,16 @@ func NewChatFixture(t *testing.T, base conversationtest.ThreadStartStore, option
 		Now:     time.Now().UTC().Truncate(time.Millisecond),
 		Agents:  ChatAgentTurns{},
 	}
-	f.Runner = f.NewRunner(conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: options.Participation})
+	f.Runner = f.NewRunner(conversationrun.TurnRunnerConfig{RequireParticipationOptIn: options.Participation})
 	return f
 }
 
 // NewRunner is a conversation turn runner over the fixture's store, with
 // config and the fixture's Agent bindings as its AgentTurns resolver.
-func (f *ChatFixture) NewRunner(config conversationrun.ConversationRunTurnRunnerConfig) *conversationrun.ConversationRunTurnRunner {
+func (f *ChatFixture) NewRunner(config conversationrun.TurnRunnerConfig) *conversationrun.TurnRunner {
 	f.T.Helper()
 	config.AgentTurns = f.Agents
-	runner, err := conversationrun.NewConversationRunTurnRunner(chatLoopRunnerStore(f.T, f.Store, f.Actions), chatCoordinator(f.T, f.Service), config)
+	runner, err := conversationrun.NewTurnRunner(chatLoopRunnerStore(f.T, f.Store, f.Actions), chatCoordinator(f.T, f.Service), config)
 	if err != nil {
 		f.T.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func (f *ChatFixture) Post(key, userID, content string) *models.ChannelMessage {
 // StartRun creates and claims the chat Run that answers trigger.
 func (f *ChatFixture) StartRun(trigger *models.ChannelMessage) *models.AgentRun {
 	f.T.Helper()
-	request := conversation.ConversationAgentRunRequest(f.Conversation, trigger)
+	request := conversation.AgentRunRequest(f.Conversation, trigger)
 	if f.Team {
 		request.AssignedAgentID = "agent-1"
 		request.ConcurrencyKey = models.ConversationRunLane(f.Conversation.ID, "", "agent-1")
@@ -308,13 +308,13 @@ func (f *ChatFixture) BindAgent(run *models.AgentRun, agentID string, producer a
 	return binding
 }
 
-func (f *ChatFixture) Drive(run *models.AgentRun, binding *agentrun.TurnRunnerBinding) runloop.RunLoopExit {
+func (f *ChatFixture) Drive(run *models.AgentRun, binding *agentrun.TurnRunnerBinding) runloop.Exit {
 	f.T.Helper()
 	current, err := f.Store.GetAgentRun(f.Ctx, run.Scope, run.ID)
 	if err != nil {
 		f.T.Fatal(err)
 	}
-	exit := f.Loop.Drive(f.Ctx, runloop.RunLoopClaim{Run: current, WorkerID: ChatWorker, Binding: binding})
+	exit := f.Loop.Drive(f.Ctx, runloop.Claim{Run: current, WorkerID: ChatWorker, Binding: binding})
 	if exit.Err != nil {
 		f.T.Fatalf("drive %s: %v (exit %s)", run.ID, exit.Err, exit.Reason)
 	}
@@ -466,26 +466,26 @@ type ChatFinalStore interface {
 
 // chatCoordinator routes every unaddressed message to agent-1. It is a copy
 // of runtime's conversationRunTestCoordinator; change them together.
-func chatCoordinator(t *testing.T, service *conversation.ConversationService) *conversation.ConversationCoordinator {
+func chatCoordinator(t *testing.T, service *conversation.Service) *conversation.Coordinator {
 	t.Helper()
-	participants := conversation.ConversationParticipantSourceFunc(func(context.Context, conversation.ConversationParticipantQuery) ([]conversation.ConversationParticipantBinding, error) {
-		return []conversation.ConversationParticipantBinding{{
+	participants := conversation.ParticipantSourceFunc(func(context.Context, conversation.ParticipantQuery) ([]conversation.ParticipantBinding, error) {
+		return []conversation.ParticipantBinding{{
 			Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent-1"}, SemanticRoles: []string{"developer"},
 		}}, nil
 	})
-	router := conversation.ConversationRouterFunc(func(context.Context, conversation.ConversationRouteRequest) (conversation.ConversationRouteDecision, error) {
-		return conversation.ConversationRouteDecision{AgentID: "agent-1", Reason: "owns the canary"}, nil
+	router := conversation.RouterFunc(func(context.Context, conversation.RouteRequest) (conversation.RouteDecision, error) {
+		return conversation.RouteDecision{AgentID: "agent-1", Reason: "owns the canary"}, nil
 	})
-	coordinator, err := conversation.NewConversationCoordinator(service, participants, router, conversation.DefaultConversationCoordinatorConfig())
+	coordinator, err := conversation.NewCoordinator(service, participants, router, conversation.DefaultConversationCoordinatorConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return coordinator
 }
 
-func (f *ChatFixture) ChatRunner(resolver conversation.TurnRunnerResolver, participation bool) *conversationrun.ConversationRunTurnRunner {
+func (f *ChatFixture) ChatRunner(resolver conversation.TurnRunnerResolver, participation bool) *conversationrun.TurnRunner {
 	f.T.Helper()
-	runner, err := conversationrun.NewConversationRunTurnRunner(f.Store, chatCoordinator(f.T, f.Service), conversationrun.ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewTurnRunner(f.Store, chatCoordinator(f.T, f.Service), conversationrun.TurnRunnerConfig{
 		AgentTurns: resolver, RequireParticipationOptIn: participation,
 	})
 	if err != nil {
@@ -494,9 +494,9 @@ func (f *ChatFixture) ChatRunner(resolver conversation.TurnRunnerResolver, parti
 	return runner
 }
 
-func (f *ChatFixture) Scheduler() *conversationrun.ConversationRunScheduler {
+func (f *ChatFixture) Scheduler() *conversationrun.Scheduler {
 	f.T.Helper()
-	scheduler, err := conversationrun.NewConversationRunScheduler(f.Store, f.Store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(f.Store, f.Store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		f.T.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func (f *ChatFixture) Schedule(message *models.ChannelMessage) *models.AgentRun 
 // Team chat, as the routing Run would (teamMemberRunRequest).
 func (f *ChatFixture) StartMember(trigger *models.ChannelMessage, agentID string) *models.AgentRun {
 	f.T.Helper()
-	request := conversation.ConversationAgentRunRequest(f.Conversation, trigger)
+	request := conversation.AgentRunRequest(f.Conversation, trigger)
 	request.AssignedAgentID = agentID
 	request.ConcurrencyKey = models.ConversationRunLane(f.Conversation.ID, "", agentID)
 	request.SessionID = models.ConversationSessionID(f.Conversation.Scope, request.ConcurrencyKey)

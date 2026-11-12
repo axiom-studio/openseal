@@ -88,7 +88,7 @@ type AgentRunWorkerSupervisor struct {
 	pools    *workqueue.ScopePools[*AgentRunWorkerPool]
 
 	mu                sync.RWMutex
-	actions           *action.ActionCoordinator
+	actions           *action.Coordinator
 	runFinalizer      agentrun.RunTerminalFinalizer
 	limiter           *workqueue.WorkerLimiter
 	executionPreparer models.AcceptedRunExecutionPreparer
@@ -103,7 +103,7 @@ func (s *AgentRunWorkerSupervisor) SetRunTerminalFinalizer(finalizer agentrun.Ru
 
 // SetActionCoordinator supplies the shared governed action lifecycle to every
 // scope pool created by this supervisor.
-func (s *AgentRunWorkerSupervisor) SetActionCoordinator(actions *action.ActionCoordinator) {
+func (s *AgentRunWorkerSupervisor) SetActionCoordinator(actions *action.Coordinator) {
 	s.mu.Lock()
 	s.actions = actions
 	s.mu.Unlock()

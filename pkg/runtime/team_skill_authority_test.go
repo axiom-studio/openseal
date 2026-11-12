@@ -146,7 +146,7 @@ func TestTeamSkillActionDispatcherStopsRevokedRosterAuthority(t *testing.T) {
 		Action:  capability.Action{Name: "search", Risk: capability.RiskLevelRead},
 	}
 	dispatched := 0
-	dispatcher, err := skillbinding.NewTeamSkillActionDispatcher(catalog, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	dispatcher, err := skillbinding.NewTeamSkillActionDispatcher(catalog, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched++
 		return map[string]interface{}{"ok": true}, nil
 	}))

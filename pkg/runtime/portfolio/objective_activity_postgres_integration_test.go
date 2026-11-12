@@ -16,7 +16,7 @@ func TestPostgresObjectiveLifecycleCommitsActivityAtomically(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	store, _ := kerneltest.OpenPostgres(t, "openseal_objective_activity_")
-	portfolio := runtimeportfolio.NewPortfolioService(store)
+	portfolio := runtimeportfolio.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: "audit"}
 	objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Audit", Goal: "Stay visible",

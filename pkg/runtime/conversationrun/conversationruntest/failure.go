@@ -27,7 +27,7 @@ func TerminalFailureConversation(t *testing.T, store RunConversationStore, at ti
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "failure-" + uuid.NewString()}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {

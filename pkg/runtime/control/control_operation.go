@@ -43,8 +43,8 @@ type operationHandler struct{}
 
 // Spec carries no operation list: the operations and their input schemas are
 // in the capabilities note, and the handler authorizes the entrypoint.
-func (operationHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
-	return ControlToolSpec{
+func (operationHandler) Spec(a agentrun.ControlAuthority) ToolSpec {
+	return ToolSpec{
 		Description: "Start one of your callable operations as a separate Run; its result comes back to you as this tool's result. The operations and their input schemas are listed in the capabilities note.",
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"entrypoint", "arguments"},
@@ -75,7 +75,7 @@ func (operationHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return args, nil
 }
 
-func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (operationHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
 	args := cc.Arguments.(*operationArgs)
 	run := cc.Run
 	op, ok := authorizedOperation(cc.Authority.Operations, args.Entrypoint)
@@ -97,7 +97,7 @@ func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 			return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, operationRecursiveCode,
 				"This operation is already running above you; it cannot start itself again.", nil))
 		}
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	// A callable operation is already reviewed work: its budget is the
 	// kernel's, not the model's. An unbounded Run starts an unbounded
@@ -114,7 +114,7 @@ func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 	summary := "Run " + operationName(op)
 	childContext, err := x.operationChildContext(ctx, run, op, args.Arguments, summary)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	forkID := "op-" + cc.Entry.ID
 	result, err := x.Fork(ctx, cc, ForkSpec{
@@ -126,7 +126,7 @@ func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 		}},
 		NoSessionForks: true, // deterministic runbook Run: no session (D3)
 	})
-	if err != nil || result.Kind != ControlParked {
+	if err != nil || result.Kind != Parked {
 		return result, err
 	}
 	if result.Park != nil {
@@ -154,7 +154,7 @@ func operationName(op agentrun.HostedRunbookOperation) string {
 
 // operationChildContext is the child's context: the arguments, the
 // invocation record and the runbook definition identity.
-func (x *ControlExecutor) operationChildContext(ctx context.Context, run *models.AgentRun, op agentrun.HostedRunbookOperation, arguments map[string]interface{}, summary string) (map[string]interface{}, error) {
+func (x *Executor) operationChildContext(ctx context.Context, run *models.AgentRun, op agentrun.HostedRunbookOperation, arguments map[string]interface{}, summary string) (map[string]interface{}, error) {
 	childContext := maps.Clone(arguments)
 	if childContext == nil {
 		childContext = map[string]interface{}{}
@@ -183,7 +183,7 @@ func (x *ControlExecutor) operationChildContext(ctx context.Context, run *models
 // projectOperationStart posts "Started: …" for the child. The child is
 // already committed, so a failure here is only logged: it must never fail the
 // source or start the operation twice.
-func (x *ControlExecutor) projectOperationStart(ctx context.Context, run *models.AgentRun, summary, childID string) {
+func (x *Executor) projectOperationStart(ctx context.Context, run *models.AgentRun, summary, childID string) {
 	if x.Reporting == nil || run.Kind != models.RunKindConversation {
 		return
 	}
@@ -249,14 +249,14 @@ func controlRejectRecursiveRunbook(ctx context.Context, portfolio models.Portfol
 
 // Resume: a group still waiting re-parks; otherwise the child's saved output
 // becomes the entry's result.
-func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
+func (operationHandler) Resume(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Resume, error) {
 	if !x.Forks.Configured() || x.Portfolio == nil {
-		return ControlResume{}, errors.New("control executor has no fork coordinator")
+		return Resume{}, errors.New("control executor has no fork coordinator")
 	}
 	args := cc.Arguments.(*operationArgs)
 	meta, err := DecodeControlEntryMeta(cc.Entry)
 	if err != nil {
-		return ControlResume{}, err
+		return Resume{}, err
 	}
 	groupID := ""
 	if meta != nil {
@@ -269,26 +269,26 @@ func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc agent
 	if groupID != "" {
 		group, err = x.Forks.DependencyGroup(ctx, cc.Run.Scope, groupID)
 		if err != nil && !errors.Is(err, models.ErrDependencyGroupNotFound) {
-			return ControlResume{}, err
+			return Resume{}, err
 		}
 	}
 	var child *models.AgentRun
 	if group != nil && meta != nil && len(meta.ChildRunIDs) > 0 {
 		if group.Status == models.RunDependencyGroupWaiting || group.Status == models.RunDependencyGroupOpen {
-			return ControlResume{Park: &agentrun.LoopPark{
+			return Resume{Park: &agentrun.LoopPark{
 				Status: models.AgentRunStatusWaitingForDependency, Wake: &models.WakeCondition{Type: "run_dependencies", Reference: group.ID},
 				Summary: "Waiting for operation " + args.Entrypoint,
 			}}, nil
 		}
 		child, err = x.Portfolio.GetAgentRun(ctx, cc.Run.Scope, meta.ChildRunIDs[0])
 		if err != nil {
-			return ControlResume{}, err
+			return Resume{}, err
 		}
 	}
 	if child == nil {
 		result, err := x.complete(ctx, cc, ErrorResult(models.ToolResultFailed, operationLostCode,
 			"The operation can no longer be found; start it again if it is still needed.", nil), nil)
-		return ControlResume{Resolved: true, Result: result}, err
+		return Resume{Resolved: true, Result: result}, err
 	}
 	output, _ := conversationrun.ConversationOperationSavedOutput(ctx, x.Portfolio, child)
 	value := map[string]interface{}{
@@ -307,7 +307,7 @@ func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc agent
 		status = models.ToolResultFailed
 	}
 	result, err := x.complete(ctx, cc, models.ControlJSONResult(status, value), nil)
-	return ControlResume{Resolved: true, Result: result}, err
+	return Resume{Resolved: true, Result: result}, err
 }
 
 func runbookInvocationIdentity(run *models.AgentRun) (string, string, string) {

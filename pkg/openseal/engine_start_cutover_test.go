@@ -174,7 +174,7 @@ func TestEngineStartRunsCutoverBeforeWorkers(t *testing.T) {
 		if err != nil || canceled == nil || canceled.Status != models.AgentRunStatusCanceled {
 			t.Fatalf("old running Run = %#v, %v; want canceled", canceled, err)
 		}
-		if canceled.FailureExplanation == nil || canceled.FailureExplanation.Code != runloop.RunLoopCutoverCode {
+		if canceled.FailureExplanation == nil || canceled.FailureExplanation.Code != runloop.CutoverCode {
 			t.Fatalf("canceled Run explanation = %#v", canceled.FailureExplanation)
 		}
 

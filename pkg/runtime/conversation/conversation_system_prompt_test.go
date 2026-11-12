@@ -22,18 +22,18 @@ func TestConversationSystemSectionsStableAcrossRuns(t *testing.T) {
 	conversation := &models.Conversation{ID: "conversation-1", Title: "Launch"}
 	first := &models.AgentRun{ID: "run-1", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, Goal: "first", SessionID: "session-1"}
 	second := &models.AgentRun{ID: "run-2", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, Goal: "second message", SessionID: "session-1", Revision: 9}
-	a, err := json.Marshal(ConversationSystemSections(conversation, first, false))
+	a, err := json.Marshal(SystemSections(conversation, first, false))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := json.Marshal(ConversationSystemSections(conversation, second, false))
+	b, err := json.Marshal(SystemSections(conversation, second, false))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(a) != string(b) {
 		t.Fatalf("sections differ across Runs of one session:\n%s\n%s", a, b)
 	}
-	got := conversationSectionIDs(ConversationSystemSections(conversation, first, false))
+	got := conversationSectionIDs(SystemSections(conversation, first, false))
 	if strings.Join(got, ",") != "conversation_channel,conversation_attachments" {
 		t.Fatalf("ids = %v", got)
 	}
@@ -57,7 +57,7 @@ func TestExternalAndTeamSectionsIncludedByConversationKind(t *testing.T) {
 		{"non-external origin", &models.Conversation{ID: "c", Origin: &models.ConversationReference{Kind: models.ConversationReferenceAgentControl, ID: "agent-1"}}, agentRun, false, "conversation_channel,conversation_attachments"},
 	}
 	for _, tc := range cases {
-		sections := ConversationSystemSections(tc.conversation, tc.run, tc.spoken)
+		sections := SystemSections(tc.conversation, tc.run, tc.spoken)
 		if got := strings.Join(conversationSectionIDs(sections), ","); got != tc.want {
 			t.Errorf("%s: ids = %s, want %s", tc.name, got, tc.want)
 		}
@@ -67,8 +67,8 @@ func TestExternalAndTeamSectionsIncludedByConversationKind(t *testing.T) {
 			}
 		}
 	}
-	sections := ConversationSystemSections(external, teamRun, false)
-	if sections[2].Text != ConversationExternalSourceRules || sections[3].Text != teamChannelRules {
+	sections := SystemSections(external, teamRun, false)
+	if sections[2].Text != ExternalSourceRules || sections[3].Text != teamChannelRules {
 		t.Fatalf("external/team texts not used: %+v", sections)
 	}
 }
@@ -78,7 +78,7 @@ func TestSystemSectionsHaveNoFormWords(t *testing.T) {
 	teamRun := &models.AgentRun{ID: "run-1", Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-1"}}
 	idPattern := regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
 	seen := map[string]bool{}
-	for _, section := range ConversationSystemSections(external, teamRun, true) {
+	for _, section := range SystemSections(external, teamRun, true) {
 		if !idPattern.MatchString(section.ID) || seen[section.ID] {
 			t.Errorf("section id %q is invalid or repeated", section.ID)
 		}
@@ -98,7 +98,7 @@ func TestSystemSectionsHaveNoFormWords(t *testing.T) {
 
 func TestSpokenRulesSectionKeepsAuthorityCaveat(t *testing.T) {
 	var spoken *models.ModelStepSystemSection
-	sections := ConversationSystemSections(&models.Conversation{ID: "c"}, &models.AgentRun{ID: "run-1"}, true)
+	sections := SystemSections(&models.Conversation{ID: "c"}, &models.AgentRun{ID: "run-1"}, true)
 	for i := range sections {
 		if sections[i].ID == conversationSectionSpoken {
 			spoken = &sections[i]
@@ -122,7 +122,7 @@ func TestSpokenRulesSectionKeepsAuthorityCaveat(t *testing.T) {
 	if strings.Contains(spoken.Text, "runOutput") {
 		t.Fatalf("spoken_rules kept the old form wording: %q", spoken.Text)
 	}
-	for _, section := range ConversationSystemSections(&models.Conversation{ID: "c"}, &models.AgentRun{ID: "run-1"}, false) {
+	for _, section := range SystemSections(&models.Conversation{ID: "c"}, &models.AgentRun{ID: "run-1"}, false) {
 		if section.ID == conversationSectionSpoken {
 			t.Fatal("spoken_rules included for a written reply")
 		}

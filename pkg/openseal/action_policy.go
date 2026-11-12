@@ -16,13 +16,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
-func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input action.PolicyInput) (action.PolicyDecision, error) {
 	if input.Run == nil || input.Bound == nil || input.Bound.Definition == nil || input.Bound.Binding == nil {
-		return action.ActionPolicyDecision{}, fmt.Errorf("run and bound action are required")
+		return action.PolicyDecision{}, fmt.Errorf("run and bound action are required")
 	}
 	if input.Bound.Action.Risk == capability.RiskLevelRead &&
 		(input.Bound.Action.SideEffect == capability.SideEffectNone || input.Bound.Action.SideEffect == capability.SideEffectRead) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow, Reason: "read-only action"}, nil
+		return action.PolicyDecision{Disposition: action.DispositionAllow, Reason: "read-only action"}, nil
 	}
 	// These host-owned actions create bounded conversation artifacts. Public
 	// app publication and all unrelated writes still follow approval policy.
@@ -30,12 +30,12 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input action.
 		(input.Bound.Action.Name == builtin.GenerateImage || input.Bound.Action.Name == builtin.Present || input.Bound.Action.Name == builtin.SaveApp || input.Bound.Action.Name == builtin.SaveAppData) ||
 		input.Bound.Definition.ID == presentation.SkillID && input.Bound.Definition.Version == presentation.SkillVersion &&
 			input.Bound.Action.Name == presentation.UpdateVisual {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow, Reason: "create bounded conversation artifact"}, nil
+		return action.PolicyDecision{Disposition: action.DispositionAllow, Reason: "create bounded conversation artifact"}, nil
 	}
 	// Remembering the asking user's own picture style changes only how their
 	// later images look.
 	if input.Bound.Definition.ID == builtin.SkillID && input.Bound.Definition.Version == builtin.SkillVersion && input.Bound.Action.Name == builtin.SetImageStyle {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow, Reason: "remember the user's picture style"}, nil
+		return action.PolicyDecision{Disposition: action.DispositionAllow, Reason: "remember the user's picture style"}, nil
 	}
 	// Starting an already reviewed Runbook does not widen authority: the
 	// activation pins its owner, Objective, definition, policy, budget, and
@@ -43,13 +43,13 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input action.
 	// facts before policy evaluation, so a conversational start is equivalent
 	// to the existing manual Start operation.
 	if input.Bound.Definition.ID == models.RunbookManagementSkillID && input.Bound.Action.Name == routine.RunbookActionStart {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow, Reason: "start reviewed Runbook activation"}, nil
+		return action.PolicyDecision{Disposition: action.DispositionAllow, Reason: "start reviewed Runbook activation"}, nil
 	}
 	// Conversation Run controls are validated against the durable owner and
 	// current revision before policy evaluation. They narrow or restore already
 	// reviewed work and never grant a new Skill, credential, or external scope.
 	if input.Bound.Definition.ID == models.RunManagementSkillID {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow, Reason: "control owner-scoped Run"}, nil
+		return action.PolicyDecision{Disposition: action.DispositionAllow, Reason: "control owner-scoped Run"}, nil
 	}
 
 	deploymentID := strings.TrimSpace(input.Run.AssignedAgentID)
@@ -81,7 +81,7 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input action.
 	alwaysReview := input.Bound.Action.AlwaysReview()
 	if !alwaysReview && bindingOwnedByAgent {
 		if grant := matchingStandingGrant(definition.Authority.StandingGrants, input); grant != nil {
-			return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow, Reason: "standing authority " + grant.ID}, nil
+			return action.PolicyDecision{Disposition: action.DispositionAllow, Reason: "standing authority " + grant.ID}, nil
 		}
 	}
 	// RequireApprovalAt is the Agent's reviewed risk boundary. Actions below
@@ -89,14 +89,14 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input action.
 	// are still handled by the default side-effect policy below. An omitted or
 	// invalid threshold retains the fail-closed default behavior.
 	if !alwaysReview && actionRiskBelowApprovalThreshold(input.Bound.Action.Risk, definition.Authority.RequireApprovalAt) {
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionAllow,
+		return action.PolicyDecision{
+			Disposition: action.DispositionAllow,
 			Reason:      fmt.Sprintf("%s risk is below the Agent approval threshold %s", input.Bound.Action.Risk, definition.Authority.RequireApprovalAt),
 		}, nil
 	}
 	decision, err := e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
 	if err != nil {
-		return action.ActionPolicyDecision{}, err
+		return action.PolicyDecision{}, err
 	}
 	for _, destination := range definition.Authority.ApprovalDestinations {
 		decision.ApprovalDestinations = append(decision.ApprovalDestinations, models.ApprovalDestination{EndpointID: destination.EndpointID})
@@ -112,11 +112,11 @@ func actionRiskBelowApprovalThreshold(action, threshold capability.RiskLevel) bo
 	return action.Rank() >= 0 && threshold.Rank() >= 0 && action.Rank() < threshold.Rank()
 }
 
-func (e *Engine) defaultSideEffectPolicy() action.ActionPolicyEvaluator {
+func (e *Engine) defaultSideEffectPolicy() action.PolicyEvaluator {
 	return action.NewDefaultActionPolicy()
 }
 
-func matchingStandingGrant(grants []agent.StandingActionGrant, input action.ActionPolicyInput) *agent.StandingActionGrant {
+func matchingStandingGrant(grants []agent.StandingActionGrant, input action.PolicyInput) *agent.StandingActionGrant {
 	for index := range grants {
 		grant := &grants[index]
 		if grant.SkillID != input.Bound.Definition.ID || grant.Action != input.Bound.Action.Name {

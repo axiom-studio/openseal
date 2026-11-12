@@ -49,23 +49,23 @@ type UpdateExternalConversationEndpointRequest struct {
 	Status           *models.ExternalConversationEndpointStatus
 }
 
-type ExternalConversationAdapterResolver interface {
+type AdapterResolver interface {
 	ResolveConversationAdapter(context.Context, skill.ScopeReference, string, string, string, string, ...skill.BindingReference) (*skill.BoundConversationAdapter, error)
 	ResolveConversationAdapterBinding(context.Context, skill.ScopeReference, string, string, string) (*skill.BoundConversationAdapter, error)
 }
 
-type ExternalConversationEndpointService struct {
+type EndpointService struct {
 	store    models.ExternalConversationEndpointStore
-	resolver ExternalConversationAdapterResolver
+	resolver AdapterResolver
 	now      func() time.Time
 	newID    func() string
 }
 
-func NewExternalConversationEndpointService(store models.ExternalConversationEndpointStore, resolver ExternalConversationAdapterResolver, opts ...models.ServiceOption) *ExternalConversationEndpointService {
-	return &ExternalConversationEndpointService{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
+func NewEndpointService(store models.ExternalConversationEndpointStore, resolver AdapterResolver, opts ...models.ServiceOption) *EndpointService {
+	return &EndpointService{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
-func (s *ExternalConversationEndpointService) Create(ctx context.Context, req CreateExternalConversationEndpointRequest) (*models.ExternalConversationEndpoint, error) {
+func (s *EndpointService) Create(ctx context.Context, req CreateExternalConversationEndpointRequest) (*models.ExternalConversationEndpoint, error) {
 	if s == nil || s.store == nil || s.resolver == nil {
 		return nil, errors.New("external conversation endpoint service is not configured")
 	}
@@ -103,7 +103,7 @@ func (s *ExternalConversationEndpointService) Create(ctx context.Context, req Cr
 	return models.CloneExternalConversationEndpoint(endpoint), nil
 }
 
-func (s *ExternalConversationEndpointService) Get(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationEndpoint, error) {
+func (s *EndpointService) Get(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationEndpoint, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("external conversation endpoint service is not configured")
 	}
@@ -117,7 +117,7 @@ func (s *ExternalConversationEndpointService) Get(ctx context.Context, scope mod
 	return endpoint, nil
 }
 
-func (s *ExternalConversationEndpointService) List(ctx context.Context, filter models.ExternalConversationEndpointFilter) ([]*models.ExternalConversationEndpoint, error) {
+func (s *EndpointService) List(ctx context.Context, filter models.ExternalConversationEndpointFilter) ([]*models.ExternalConversationEndpoint, error) {
 	if s == nil || s.store == nil || filter.Scope.Validate() != nil || filter.Offset < 0 {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -139,7 +139,7 @@ func (s *ExternalConversationEndpointService) List(ctx context.Context, filter m
 	return s.store.ListExternalConversationEndpoints(ctx, filter)
 }
 
-func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope models.Scope, id string, req UpdateExternalConversationEndpointRequest) (*models.ExternalConversationEndpoint, error) {
+func (s *EndpointService) Update(ctx context.Context, scope models.Scope, id string, req UpdateExternalConversationEndpointRequest) (*models.ExternalConversationEndpoint, error) {
 	next, err := s.PrepareUpdate(ctx, scope, id, req)
 	if err != nil {
 		return nil, err
@@ -153,7 +153,7 @@ func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope 
 // PrepareUpdate applies the same lifecycle, adapter and policy validation as
 // Update without persisting anything. Callers must still compare the reviewed
 // revision when committing the returned state.
-func (s *ExternalConversationEndpointService) PrepareUpdate(ctx context.Context, scope models.Scope, id string, req UpdateExternalConversationEndpointRequest) (*models.ExternalConversationEndpoint, error) {
+func (s *EndpointService) PrepareUpdate(ctx context.Context, scope models.Scope, id string, req UpdateExternalConversationEndpointRequest) (*models.ExternalConversationEndpoint, error) {
 	if s == nil || s.store == nil || s.resolver == nil || req.ExpectedRevision < 1 {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -228,7 +228,7 @@ func externalConversationEndpointSafetyShutdown(
 	return next.Status == models.ExternalConversationEndpointPaused || next.Status == models.ExternalConversationEndpointRetired
 }
 
-func (s *ExternalConversationEndpointService) resolveAdapter(ctx context.Context, endpoint *models.ExternalConversationEndpoint) (*skill.BoundConversationAdapter, error) {
+func (s *EndpointService) resolveAdapter(ctx context.Context, endpoint *models.ExternalConversationEndpoint) (*skill.BoundConversationAdapter, error) {
 	ref := endpoint.Adapter
 	resolved, err := s.resolver.ResolveConversationAdapterBinding(
 		ctx, skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID,

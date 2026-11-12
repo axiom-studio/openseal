@@ -89,7 +89,7 @@ type Conversation struct {
 	// RunbookActivationIDs are the routines (runbook activations) that
 	// routine visuals in this conversation show, oldest first, at most
 	// MaximumConversationRunbooks. The change stream carries their live
-	// state. See ConversationService.LinkRunbooks.
+	// state. See conversation.Service.LinkRunbooks.
 	RunbookActivationIDs []string `json:"runbookActivationIds,omitempty"`
 }
 

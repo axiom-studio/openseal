@@ -76,8 +76,8 @@ func (p *governedParker) agentTrialOutput(ctx context.Context, run *models.Agent
 // canceled reports that this call stopped it. A child that ended meanwhile
 // is returned as it ended.
 func (p *governedParker) cancelAgentTrial(ctx context.Context, child *models.AgentRun) (*models.AgentRun, bool, error) {
-	result, err := agentrun.NewRunCommandService(p.runs, models.WithClock(p.now)).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: child.Scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: agentrun.AgentRunCommandCancel,
+	result, err := agentrun.NewRunCommandService(p.runs, models.WithClock(p.now)).CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: child.Scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: agentrun.CommandCancel,
 		Actor:   models.ActivityActor{Type: "runtime", ID: "agent-trial"},
 		Summary: "Canceled: the trial did not answer in time", Visibility: models.ActivityVisibilityScope,
 	})

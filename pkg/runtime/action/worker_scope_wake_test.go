@@ -31,12 +31,12 @@ func TestWorkerPoolScopeWakeDoesNotWakeAnotherTenant(t *testing.T) {
 // newScopeWakeTestPool is an idle action pool for scope that dispatches
 // nothing. It is a cut-down copy of actiontest.NewPool, which an in-package
 // test cannot import (actiontest imports action).
-func newScopeWakeTestPool(t *testing.T, scope models.Scope) *ActionWorkerPool {
+func newScopeWakeTestPool(t *testing.T, scope models.Scope) *WorkerPool {
 	t.Helper()
-	pool, err := NewActionWorkerPool(kerneltest.NewStore(t), skill.NewCatalog(), CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+	pool, err := NewWorkerPool(kerneltest.NewStore(t), skill.NewCatalog(), CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "test-secret"}, nil
-	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }), nil,
-		ActionWorkerConfig{Scope: scope, Concurrency: 1, PollInterval: time.Hour, LeaseDuration: time.Second})
+	}), DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }), nil,
+		WorkerConfig{Scope: scope, Concurrency: 1, PollInterval: time.Hour, LeaseDuration: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

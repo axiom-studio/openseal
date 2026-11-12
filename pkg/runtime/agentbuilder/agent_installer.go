@@ -28,7 +28,7 @@ type AgentInstaller struct {
 	teams     *kernelteam.Registry
 	catalog   *skill.Catalog
 	provision AgentProvisioner
-	host      AgentBuilderHost
+	host      Host
 }
 
 // NewAgentInstaller builds the installer. host may be nil: model choices are
@@ -39,7 +39,7 @@ func NewAgentInstaller(
 	teams *kernelteam.Registry,
 	catalog *skill.Catalog,
 	provision AgentProvisioner,
-	host AgentBuilderHost,
+	host Host,
 ) (*AgentInstaller, error) {
 	if store == nil || agents == nil || teams == nil || catalog == nil || provision == nil {
 		return nil, errors.New("agent installer requires the kernel store, the Agent and Team registries, the Skill catalog and a provisioner")
@@ -297,7 +297,7 @@ func (i *AgentInstaller) placeAgentInSpace(ctx context.Context, scope models.Sco
 func (i *AgentInstaller) grantAgentSkill(ctx context.Context, scope models.Scope, deploymentID string, grant models.AgentSkillGrant, credentials map[string]skill.CredentialReference, actor skill.BindingActor, reason string) (*skill.Binding, error) {
 	reference := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	bindingID := agentBuilderBindingID(deploymentID, grant.SkillID)
-	args := skillbinding.SkillBindingUpsertArguments{
+	args := skillbinding.UpsertArguments{
 		BindingID: bindingID, SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, SourceIdentity: grant.SourceIdentity,
 		AllowedActions: grant.AllowedActions, EnablePrompt: grant.EnablePrompt, MaximumRisk: grant.MaximumRisk, Config: grant.Config,
 	}
@@ -305,7 +305,7 @@ func (i *AgentInstaller) grantAgentSkill(ctx context.Context, scope models.Scope
 	if err != nil && !errors.Is(err, skill.ErrBindingNotFound) {
 		return nil, err
 	}
-	candidate := skillbinding.SkillBindingCandidate(reference, deploymentID, args, current)
+	candidate := skillbinding.Candidate(reference, deploymentID, args, current)
 	if credentials != nil {
 		candidate.Credentials = maps.Clone(credentials)
 	}

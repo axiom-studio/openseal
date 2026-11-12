@@ -24,8 +24,8 @@ const (
 	SkillManagementEndpoint     = "kernel://skills"
 )
 
-// SkillBindingUpsertArguments are the arguments of upsert_binding.
-type SkillBindingUpsertArguments struct {
+// UpsertArguments are the arguments of upsert_binding.
+type UpsertArguments struct {
 	BindingID                   string                                   `json:"bindingId"`
 	ExpectedRevision            int64                                    `json:"expectedRevision"`
 	SkillID                     string                                   `json:"skillId"`
@@ -55,33 +55,33 @@ type skillDiscoveryArguments struct {
 	TargetAgentID   string          `json:"targetAgentId,omitempty"`
 }
 
-// SkillBindingActionValidator resolves both deployment authority and the
+// ActionValidator resolves both deployment authority and the
 // exact registered Skill before a proposal can become an approval request.
-type SkillBindingActionValidator struct {
+type ActionValidator struct {
 	catalog *skill.Catalog
 	roster  models.TeamRosterReader
 	agents  *kernelagent.Registry
 }
 
-// NewSkillBindingActionValidator checks Skill management proposals. roster
+// NewActionValidator checks Skill management proposals. roster
 // reads Team (and, when it can, Agent) deployments to derive the run's
 // umbrella, which every binding change targets.
-func NewSkillBindingActionValidator(catalog *skill.Catalog, roster models.TeamRosterReader) (*SkillBindingActionValidator, error) {
+func NewActionValidator(catalog *skill.Catalog, roster models.TeamRosterReader) (*ActionValidator, error) {
 	if catalog == nil {
 		return nil, errors.New("skill catalog is required")
 	}
-	return &SkillBindingActionValidator{catalog: catalog, roster: roster}, nil
+	return &ActionValidator{catalog: catalog, roster: roster}, nil
 }
 
 // UseAgentRegistry lets a builder act for another Agent (targetAgentId).
 // Without it every targetAgentId is refused.
-func (v *SkillBindingActionValidator) UseAgentRegistry(agents *kernelagent.Registry) {
+func (v *ActionValidator) UseAgentRegistry(agents *kernelagent.Registry) {
 	if v != nil {
 		v.agents = agents
 	}
 }
 
-func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *ActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if !isSkillBindingAction(input.Bound) {
 		return nil, nil
 	}
@@ -139,7 +139,7 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 			"id": definition.ID, "version": definition.Version, "sourceIdentity": skill.DefinitionSourceIdentity(definition), "name": definition.Name,
 		}
 		preview["current"] = SecretSafeBindingPreview(current)
-		preview["changes"] = SecretSafeBindingPreview(SkillBindingCandidate(scope, deploymentID, args, current))
+		preview["changes"] = SecretSafeBindingPreview(Candidate(scope, deploymentID, args, current))
 		return preview, nil
 	}
 	args, current, resolveErr := resolveSkillBindingDisable(ctx, v.catalog, scope, deploymentID, input.Arguments)
@@ -153,9 +153,9 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 	return preview, nil
 }
 
-// SkillBindingActionDispatcher materializes approved proposals through the
+// ActionDispatcher materializes approved proposals through the
 // existing CAS-protected, audited Skill binding lifecycle.
-type SkillBindingActionDispatcher struct {
+type ActionDispatcher struct {
 	store     models.KernelStore
 	catalog   *skill.Catalog
 	discovery skill.DiscoveryProvider
@@ -166,18 +166,18 @@ type SkillBindingActionDispatcher struct {
 
 // UseAgentRegistry lets a builder act for another Agent (targetAgentId).
 // Without it every targetAgentId is refused.
-func (d *SkillBindingActionDispatcher) UseAgentRegistry(agents *kernelagent.Registry) {
+func (d *ActionDispatcher) UseAgentRegistry(agents *kernelagent.Registry) {
 	if d != nil {
 		d.agents = agents
 	}
 }
 
 // roster reads the Team and Agent deployments RunUmbrella checks.
-func (d *SkillBindingActionDispatcher) roster() models.TeamRosterReader {
+func (d *ActionDispatcher) roster() models.TeamRosterReader {
 	return models.TeamRosterReaderOf(d.store)
 }
 
-func NewSkillBindingActionDispatcher(store models.KernelStore, catalog *skill.Catalog, fallback agentrun.ActionDispatcher, discovery ...skill.DiscoveryProvider) (*SkillBindingActionDispatcher, error) {
+func NewActionDispatcher(store models.KernelStore, catalog *skill.Catalog, fallback agentrun.ActionDispatcher, discovery ...skill.DiscoveryProvider) (*ActionDispatcher, error) {
 	if store == nil || catalog == nil {
 		return nil, errors.New("kernel store and skill catalog are required")
 	}
@@ -191,10 +191,10 @@ func NewSkillBindingActionDispatcher(store models.KernelStore, catalog *skill.Ca
 			return nil, errors.New("Skill discovery provider is required when configured")
 		}
 	}
-	return &SkillBindingActionDispatcher{store: store, catalog: catalog, discovery: provider, fallback: fallback}, nil
+	return &ActionDispatcher{store: store, catalog: catalog, discovery: provider, fallback: fallback}, nil
 }
 
-func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+func (d *ActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if !isSkillBindingAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")
@@ -313,7 +313,7 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 			return nil, getErr
 		}
 		binding, upsertErr := d.catalog.UpsertBinding(ctx, skill.UpsertBindingRequest{
-			Binding: SkillBindingCandidate(scope, deploymentID, args, current), ExpectedRevision: args.ExpectedRevision,
+			Binding: Candidate(scope, deploymentID, args, current), ExpectedRevision: args.ExpectedRevision,
 			Actor: actor, Reason: "Approved Skill access change from conversation",
 		})
 		if errors.Is(upsertErr, skill.ErrBindingRevisionConflict) {
@@ -352,8 +352,8 @@ func approvedSkillActionCheckpoint(ctx context.Context, store models.ActionStore
 	return approval, nil
 }
 
-func resolveSkillBindingUpsert(ctx context.Context, catalog *skill.Catalog, scope skill.ScopeReference, deploymentID string, arguments map[string]interface{}) (SkillBindingUpsertArguments, *skill.Definition, *skill.Binding, error) {
-	var args SkillBindingUpsertArguments
+func resolveSkillBindingUpsert(ctx context.Context, catalog *skill.Catalog, scope skill.ScopeReference, deploymentID string, arguments map[string]interface{}) (UpsertArguments, *skill.Definition, *skill.Binding, error) {
+	var args UpsertArguments
 	if err := decodeSkillBindingArguments(arguments, &args); err != nil {
 		return args, nil, nil, err
 	}
@@ -418,7 +418,7 @@ func resolveSkillBindingDisable(ctx context.Context, catalog *skill.Catalog, sco
 
 // ValidateSkillBindingArguments checks a proposed upsert against the exact
 // definition. credentials are the saved binding's; a model cannot supply any.
-func ValidateSkillBindingArguments(definition *skill.Definition, args SkillBindingUpsertArguments, credentials map[string]skill.CredentialReference) error {
+func ValidateSkillBindingArguments(definition *skill.Definition, args UpsertArguments, credentials map[string]skill.CredentialReference) error {
 	// The canonical Catalog performs the same recursive validation at write
 	// time. Rejecting here prevents secret-shaped config from reaching approval
 	// previews or durable Action arguments.
@@ -524,10 +524,10 @@ func ExactSkillDefinition(ctx context.Context, catalog *skill.Catalog, id, versi
 	return definition, nil
 }
 
-// SkillBindingCandidate is the binding a model-proposed upsert writes. A
+// Candidate is the binding a model-proposed upsert writes. A
 // model never adds, changes or removes credentials: the candidate keeps the
 // current binding's, and only a person's card or route attaches them.
-func SkillBindingCandidate(scope skill.ScopeReference, deploymentID string, args SkillBindingUpsertArguments, current *skill.Binding) *skill.Binding {
+func Candidate(scope skill.ScopeReference, deploymentID string, args UpsertArguments, current *skill.Binding) *skill.Binding {
 	var credentials map[string]skill.CredentialReference
 	if current != nil {
 		credentials = maps.Clone(current.Credentials)
@@ -576,12 +576,12 @@ func SecretSafeBindingPreview(binding *skill.Binding) interface{} {
 	}
 }
 
-func (d *SkillBindingActionDispatcher) replayedUpsert(ctx context.Context, scope skill.ScopeReference, deploymentID string, args SkillBindingUpsertArguments) (map[string]interface{}, error) {
+func (d *ActionDispatcher) replayedUpsert(ctx context.Context, scope skill.ScopeReference, deploymentID string, args UpsertArguments) (map[string]interface{}, error) {
 	current, err := d.catalog.GetBinding(ctx, scope, deploymentID, args.BindingID)
 	if err != nil {
 		return nil, err
 	}
-	candidate := SkillBindingCandidate(scope, deploymentID, args, current)
+	candidate := Candidate(scope, deploymentID, args, current)
 	if current == nil || current.Disabled || !SameManagedSkillBinding(current, candidate) {
 		return nil, skill.ErrBindingRevisionConflict
 	}
@@ -595,7 +595,7 @@ func (d *SkillBindingActionDispatcher) replayedUpsert(ctx context.Context, scope
 	return skillBindingActionResult(SkillActionUpsertBinding, current, true), nil
 }
 
-func (d *SkillBindingActionDispatcher) replayedDisable(ctx context.Context, scope skill.ScopeReference, deploymentID string, args skillBindingDisableArguments) (map[string]interface{}, error) {
+func (d *ActionDispatcher) replayedDisable(ctx context.Context, scope skill.ScopeReference, deploymentID string, args skillBindingDisableArguments) (map[string]interface{}, error) {
 	current, err := d.catalog.GetBinding(ctx, scope, deploymentID, args.BindingID)
 	if err != nil {
 		return nil, err

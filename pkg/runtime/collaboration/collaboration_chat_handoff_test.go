@@ -37,9 +37,9 @@ func TestTeamChatHandOffAcceptanceRechecksTheRoster(t *testing.T) {
 	team.definition = &kernelteam.Definition{ID: owner.ID, Version: "1", Delegation: kernelteam.DelegationPolicy{
 		MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true, RequireAcceptance: true,
 	}}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	service.teams = team
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: "marlow", Goal: "Answer", Source: models.RunSourceChat,
 		ConcurrencyKey: models.ConversationRunLane("chat", "", "marlow"),
 		Context:        map[string]interface{}{models.ConversationRunConversationIDContextKey: "chat", models.ConversationRunTriggerIDContextKey: "ask"},

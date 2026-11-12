@@ -17,12 +17,12 @@ import (
 
 // modePolicy is the kernel default policy evaluated as if the chat were in
 // mode, the way a host that falls through to it decides openseal.* writes.
-func modePolicy(mode models.ConversationApprovalMode) runtimeaction.ActionPolicyEvaluator {
+func modePolicy(mode models.ConversationApprovalMode) runtimeaction.PolicyEvaluator {
 	base := runtimeaction.NewDefaultActionPolicy()
-	return runtimeaction.ActionPolicyEvaluatorFunc(func(ctx context.Context, input runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
+	return runtimeaction.PolicyEvaluatorFunc(func(ctx context.Context, input runtimeaction.PolicyInput) (runtimeaction.PolicyDecision, error) {
 		input.ApprovalMode = mode
 		decision, err := base.EvaluateAction(ctx, input)
-		if err == nil && decision.Disposition == runtimeaction.ActionDispositionRequireApproval {
+		if err == nil && decision.Disposition == runtimeaction.DispositionRequireApproval {
 			decision.ApprovalTimeout = models.ApprovalTimeoutApprove
 			decision.ApprovalDestinations = []models.ApprovalDestination{{EndpointID: "slack-approvals"}}
 		}
@@ -33,7 +33,7 @@ func modePolicy(mode models.ConversationApprovalMode) runtimeaction.ActionPolicy
 // targetedSkillCoordinator is Finn's claimed chat Run in the skills target
 // fixture, with researcher and Finn already connected to Reddit, and a
 // coordinator deciding with policy.
-func targetedSkillCoordinator(t *testing.T, policy runtimeaction.ActionPolicyEvaluator) (*skillbindingtest.TargetFixture, *models.AgentRun, *runtimeaction.ActionCoordinator) {
+func targetedSkillCoordinator(t *testing.T, policy runtimeaction.PolicyEvaluator) (*skillbindingtest.TargetFixture, *models.AgentRun, *runtimeaction.Coordinator) {
 	t.Helper()
 	f := skillbindingtest.NewTargetFixture(t)
 	for _, deploymentID := range []string{"researcher", "finn"} {
@@ -52,7 +52,7 @@ func targetedSkillCoordinator(t *testing.T, policy runtimeaction.ActionPolicyEva
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	return f, claimed, runtimeaction.NewActionCoordinator(f.Store, f.Store, f.Catalog, policy, []runtimeaction.ActionProposalValidator{f.Validator})
+	return f, claimed, runtimeaction.NewCoordinator(f.Store, f.Store, f.Catalog, policy, []runtimeaction.ProposalValidator{f.Validator})
 }
 
 func targetedSkillRequest(f *skillbindingtest.TargetFixture, run *models.AgentRun, action string, arguments map[string]interface{}, toolCallID string) runtimeaction.ProposeActionRequest {
@@ -102,8 +102,8 @@ func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
 }
 
 func TestTargetedSkillBindingChangeCannotBeAllowedByPolicy(t *testing.T) {
-	allow := runtimeaction.ActionPolicyEvaluatorFunc(func(context.Context, runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
-		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "host allows everything"}, nil
+	allow := runtimeaction.PolicyEvaluatorFunc(func(context.Context, runtimeaction.PolicyInput) (runtimeaction.PolicyDecision, error) {
+		return runtimeaction.PolicyDecision{Disposition: runtimeaction.DispositionAllow, Reason: "host allows everything"}, nil
 	})
 	f, run, coordinator := targetedSkillCoordinator(t, allow)
 	_, err := coordinator.Propose(f.Ctx, targetedSkillRequest(f, run, skillbinding.SkillActionUpsertBinding, skillbindingtest.ReaderUpsertArguments("researcher"), "allowed"))

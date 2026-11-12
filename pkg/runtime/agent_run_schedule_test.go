@@ -16,7 +16,7 @@ import (
 func TestCreateAgentRunInitializesDurableQueueMetadata(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
-	service := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	service := runtimeportfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	available := now.Add(time.Hour)
 	deadline := now.Add(2 * time.Hour)
 	run, err := service.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
@@ -52,7 +52,7 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 			ctx := t.Context()
 			scope := models.Scope{Kind: "tenant", ID: "portfolio-capacity-" + testCase.name}
 			now := time.Date(2026, 8, 7, 4, 0, 0, 0, time.UTC)
-			portfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			portfolio := runtimeportfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 			team := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research-team"}
 			otherTeam := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "support-team"}
 			objectiveA, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
@@ -104,7 +104,7 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 			}
 
 			objectiveScope := models.Scope{Kind: "tenant", ID: "objective-capacity-" + testCase.name}
-			objectivePortfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			objectivePortfolio := runtimeportfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 			objectiveOwner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}
 			left, err := objectivePortfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 				Scope: objectiveScope, Owner: objectiveOwner, Title: "Release", Goal: "Release safely", Status: models.ObjectiveStatusActive,
@@ -169,7 +169,7 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 			scope := models.Scope{Kind: "tenant", ID: "objective-policy-" + testCase.name}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "portfolio-team"}
 			now := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
-			portfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			portfolio := runtimeportfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 			limited, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: owner, Title: "Primary", Goal: "Ship primary work", Status: models.ObjectiveStatusActive,
 				ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
@@ -245,7 +245,7 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 			now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
 			scope := models.Scope{Kind: "tenant", ID: "admission-decision-" + testCase.name}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "autonomous-agent"}
-			portfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			portfolio := runtimeportfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 			objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: owner, Title: "Bounded", Goal: "Run serially", Status: models.ObjectiveStatusActive,
 				ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
@@ -266,8 +266,8 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 					firstRunID = run.ID
 				}
 			}
-			scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
-			inspection, err := scheduler.Inspect(ctx, agentrun.AgentRunClaimRequest{Scope: scope})
+			scheduler := agentrun.NewScheduler(store, models.WithClock(func() time.Time { return now }))
+			inspection, err := scheduler.Inspect(ctx, agentrun.ClaimRequest{Scope: scope})
 			if err != nil || inspection == nil || inspection.Outcome != models.AgentRunAdmissionReady || inspection.Run == nil {
 				t.Fatalf("ready inspection = %#v, %v", inspection, err)
 			}
@@ -275,10 +275,10 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 			if err != nil || stillQueued.Status != models.AgentRunStatusQueued || stillQueued.LeaseOwner != "" {
 				t.Fatalf("inspection acquired authority: %#v, %v", stillQueued, err)
 			}
-			if run, err := scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour}); err != nil || run == nil {
+			if run, err := scheduler.ClaimNext(ctx, agentrun.ClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour}); err != nil || run == nil {
 				t.Fatalf("initial claim = %#v, %v", run, err)
 			}
-			decision, err := scheduler.ClaimNextDecision(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
+			decision, err := scheduler.ClaimNextDecision(ctx, agentrun.ClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
 			if err != nil || decision == nil || decision.Outcome != models.AgentRunAdmissionBackpressured || decision.Run != nil {
 				t.Fatalf("backpressure decision = %#v, %v", decision, err)
 			}
@@ -315,7 +315,7 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 			now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)
 			scope := models.Scope{Kind: "tenant", ID: "objective-resources-" + testCase.name}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "research-agent"}
-			portfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			portfolio := runtimeportfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 			objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: owner, Title: "Browser research", Goal: "Research without sharing sessions", Status: models.ObjectiveStatusActive,
 				ExecutionPolicy: &models.ObjectiveExecutionPolicy{ResourceCapacities: map[string]int{"browser": 1}},
@@ -334,8 +334,8 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 				}
 				runIDs = append(runIDs, run.ID)
 			}
-			scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
-			first, err := scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour})
+			scheduler := agentrun.NewScheduler(store, models.WithClock(func() time.Time { return now }))
+			first, err := scheduler.ClaimNext(ctx, agentrun.ClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour})
 			if err != nil || first == nil || first.ResourceRequirements["browser"] != 1 {
 				t.Fatalf("first resource claim = %#v, %v", first, err)
 			}
@@ -343,7 +343,7 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 			if first.ID == queuedRunID {
 				queuedRunID = runIDs[1]
 			}
-			decision, err := scheduler.ClaimNextDecision(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
+			decision, err := scheduler.ClaimNextDecision(ctx, agentrun.ClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
 			if err != nil || decision == nil || decision.Outcome != models.AgentRunAdmissionBackpressured || decision.Run != nil {
 				t.Fatalf("resource admission decision = %#v, %v", decision, err)
 			}
@@ -365,7 +365,7 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-three", LeaseDuration: time.Hour})
+			second, err := scheduler.ClaimNext(ctx, agentrun.ClaimRequest{Scope: scope, WorkerID: "worker-three", LeaseDuration: time.Hour})
 			if err != nil || second == nil || second.ID != queuedRunID {
 				t.Fatalf("amended resource policy did not admit queued work: %#v, %v", second, err)
 			}

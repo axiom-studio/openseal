@@ -28,7 +28,7 @@ func seedSQLiteChangeSets(t *testing.T, path string) string {
 	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
 	ctx := context.Background()
-	// The Run runtime's PortfolioService builds for a manual request.
+	// The Run runtime's portfolio.Service builds for a manual request.
 	run := storetest.QueuedAgentRun(storetest.BuilderCutoverScope, "agent", "author", time.Now())
 	run.AssignedAgentID, run.Source = "", models.RunSourceManual
 	if err := store.CreateAgentRun(ctx, run); err != nil {

@@ -19,14 +19,14 @@ import (
 
 // proposePersonAction proposes send as the governed tool call of run loop
 // step stepID, as the loop does for the Run's lease owner.
-func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catalog, scope models.Scope, run *models.AgentRun, now time.Time, stepID, key string, policy action.ActionPolicyEvaluator) *models.ActionProposalResult {
+func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catalog, scope models.Scope, run *models.AgentRun, now time.Time, stepID, key string, policy action.PolicyEvaluator) *models.ActionProposalResult {
 	t.Helper()
 	if policy == nil {
-		policy = action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-			return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+		policy = action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+			return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 		})
 	}
-	coordinator := action.NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now }))
+	coordinator := action.NewCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now }))
 	proposal, err := coordinator.Propose(context.Background(), action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, TurnID: stepID, WorkerID: "agent-worker", DeploymentID: "release-agent",
 		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Summary: "Send a message to ana@example.com",
@@ -41,7 +41,7 @@ func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catal
 
 // executePersonAction executes the loop call inline for the Run's lease
 // owner, as the governed executor does.
-func executePersonAction(t *testing.T, worker *action.ActionWorker, scope models.Scope, proposal *models.ActionProposalResult) *models.ActionExecutionResult {
+func executePersonAction(t *testing.T, worker *action.Worker, scope models.Scope, proposal *models.ActionProposalResult) *models.ActionExecutionResult {
 	t.Helper()
 	result, err := worker.ExecuteOwnLoopCall(context.Background(), scope, proposal.Call.ID, "agent-worker")
 	if err != nil {
@@ -57,9 +57,9 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, "")
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	dispatched := false
-	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+	worker := action.NewWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
-	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched = true
 		return map[string]interface{}{}, nil
 	}))
@@ -90,9 +90,9 @@ func TestParkedCallReleasesExternalOperation(t *testing.T) {
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
-	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+	worker := action.NewWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
-	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{}, nil
 	}))
 	worker.SetCredentialAvailabilityChecker(actiontest.AvailabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
@@ -111,9 +111,9 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
-	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+	worker := action.NewWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
-	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("a shared gap must not dispatch")
 		return nil, nil
 	}))
@@ -137,7 +137,7 @@ func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
-	worker := action.NewActionWorker(store, catalog, nil, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	worker := action.NewWorker(store, catalog, nil, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("a no_person gap must not dispatch")
 		return nil, nil
 	}))
@@ -159,8 +159,8 @@ func TestPersonActionApprovalOnlyByActingUser(t *testing.T) {
 	now := time.Now().UTC()
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
-	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
+	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
 	}))
 	if proposal.Approval == nil || len(proposal.Approval.EligibleApprovers) != 1 || proposal.Approval.EligibleApprovers[0] != (models.ApprovalPrincipal{Type: "user", ID: actiontest.ActingUser}) {
 		t.Fatalf("approval = %#v", proposal.Approval)

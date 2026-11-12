@@ -13,7 +13,7 @@ import (
 // RetryConversationRun requeues the original reply identity, never reposts the
 // user message. This first recovery path deliberately excludes task trees and
 // any tool execution; those require their own recovery protocol.
-func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
+func (s *RunCommandService) RetryConversationRun(ctx context.Context, req CommandRequest) (*CommandResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("run command store is not configured")
 	}
@@ -75,7 +75,7 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 	if err != nil {
 		return nil, err
 	}
-	return &AgentRunCommandResult{Run: run, Event: persisted}, nil
+	return &CommandResult{Run: run, Event: persisted}, nil
 }
 
 type RunRetryEligibility struct {

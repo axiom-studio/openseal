@@ -9,7 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-type AgentRunClaimRequest struct {
+type ClaimRequest struct {
 	Scope                             models.Scope
 	Kind                              models.RunKind
 	WorkerID                          string
@@ -23,16 +23,16 @@ type AgentRunClaimRequest struct {
 	ConversationTaskForegroundReserve int
 }
 
-type AgentRunScheduler struct {
+type Scheduler struct {
 	store models.AgentRunScheduleStore
 	now   func() time.Time
 }
 
-func NewAgentRunScheduler(store models.AgentRunScheduleStore, opts ...models.ServiceOption) *AgentRunScheduler {
-	return &AgentRunScheduler{store: store, now: models.ClockFrom(opts)}
+func NewScheduler(store models.AgentRunScheduleStore, opts ...models.ServiceOption) *Scheduler {
+	return &Scheduler{store: store, now: models.ClockFrom(opts)}
 }
 
-func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequest) (*models.AgentRun, error) {
+func (s *Scheduler) ClaimNext(ctx context.Context, req ClaimRequest) (*models.AgentRun, error) {
 	decision, err := s.ClaimNextDecision(ctx, req)
 	if err != nil || decision == nil {
 		return nil, err
@@ -40,7 +40,7 @@ func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequ
 	return decision.Run, nil
 }
 
-func (s *AgentRunScheduler) ClaimNextDecision(ctx context.Context, req AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
+func (s *Scheduler) ClaimNextDecision(ctx context.Context, req ClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("agent run scheduler is not configured")
 	}
@@ -80,7 +80,7 @@ func (s *AgentRunScheduler) ClaimNextDecision(ctx context.Context, req AgentRunC
 // Inspect returns the current portfolio admission decision without acquiring a
 // lease. It is an observational projection for operators and user interfaces;
 // only ClaimNextDecision grants execution authority.
-func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
+func (s *Scheduler) Inspect(ctx context.Context, req ClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("agent run scheduler is not configured")
 	}
@@ -170,7 +170,7 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 	return decision, nil
 }
 
-func (s *AgentRunScheduler) RenewLease(ctx context.Context, scope models.Scope, runID, workerID string, leaseDuration time.Duration) (*models.AgentRun, error) {
+func (s *Scheduler) RenewLease(ctx context.Context, scope models.Scope, runID, workerID string, leaseDuration time.Duration) (*models.AgentRun, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("agent run scheduler is not configured")
 	}

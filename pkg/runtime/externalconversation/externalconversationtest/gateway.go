@@ -10,19 +10,19 @@ import (
 
 // IngressHostStub records the ingress request and answers it with Result.
 type IngressHostStub struct {
-	Request externalconversation.ExternalConversationIngressHostRequest
-	Result  *externalconversation.ExternalConversationIngressHostResult
+	Request externalconversation.IngressHostRequest
+	Result  *externalconversation.IngressHostResult
 }
 
 // GatewayHostStub records the gateway request and answers it with Result.
 type GatewayHostStub struct {
-	Request externalconversation.ExternalConversationGatewayHostRequest
-	Result  *externalconversation.ExternalConversationGatewayHostResult
+	Request externalconversation.GatewayHostRequest
+	Result  *externalconversation.GatewayHostResult
 }
 
 // CreateActiveGateway creates the gateway paused and then activates it, as
 // an operator does after reviewing the provider route.
-func CreateActiveGateway(t *testing.T, ctx context.Context, service *externalconversation.ExternalConversationGatewayService, request externalconversation.CreateExternalConversationGatewayRequest) *models.ExternalConversationGatewayRegistration {
+func CreateActiveGateway(t *testing.T, ctx context.Context, service *externalconversation.GatewayService, request externalconversation.CreateExternalConversationGatewayRequest) *models.ExternalConversationGatewayRegistration {
 	t.Helper()
 	request.Status = models.ExternalConversationGatewayPaused
 	created, err := service.Create(ctx, request)
@@ -42,16 +42,16 @@ func CreateActiveGateway(t *testing.T, ctx context.Context, service *externalcon
 
 func (h *GatewayHostStub) NormalizeExternalConversationGateway(
 	_ context.Context,
-	request externalconversation.ExternalConversationGatewayHostRequest,
-) (*externalconversation.ExternalConversationGatewayHostResult, error) {
+	request externalconversation.GatewayHostRequest,
+) (*externalconversation.GatewayHostResult, error) {
 	h.Request = request
 	return h.Result, nil
 }
 
 func (h *IngressHostStub) NormalizeExternalConversation(
 	_ context.Context,
-	request externalconversation.ExternalConversationIngressHostRequest,
-) (*externalconversation.ExternalConversationIngressHostResult, error) {
+	request externalconversation.IngressHostRequest,
+) (*externalconversation.IngressHostResult, error) {
 	h.Request = request
 	return h.Result, nil
 }

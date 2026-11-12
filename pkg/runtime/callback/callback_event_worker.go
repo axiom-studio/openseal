@@ -10,7 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-type CallbackEventWorkerConfig struct {
+type EventWorkerConfig struct {
 	WorkerID      string
 	LeaseDuration time.Duration
 	BaseRetry     time.Duration
@@ -18,10 +18,10 @@ type CallbackEventWorkerConfig struct {
 	MaxAttempts   int
 }
 
-func (c CallbackEventWorkerConfig) normalize() (CallbackEventWorkerConfig, error) {
+func (c EventWorkerConfig) normalize() (EventWorkerConfig, error) {
 	c.WorkerID = strings.TrimSpace(c.WorkerID)
 	if !models.IsValidOpaqueIdentifier(c.WorkerID, 256) {
-		return CallbackEventWorkerConfig{}, fmt.Errorf("%w: callback worker id is invalid", models.ErrInvalidCallbackRegistration)
+		return EventWorkerConfig{}, fmt.Errorf("%w: callback worker id is invalid", models.ErrInvalidCallbackRegistration)
 	}
 	if c.LeaseDuration == 0 {
 		c.LeaseDuration = time.Minute
@@ -36,28 +36,28 @@ func (c CallbackEventWorkerConfig) normalize() (CallbackEventWorkerConfig, error
 		c.MaxAttempts = 10
 	}
 	if c.LeaseDuration <= 0 || c.BaseRetry <= 0 || c.MaximumRetry < c.BaseRetry || c.MaxAttempts < 1 || c.MaxAttempts > 1000 {
-		return CallbackEventWorkerConfig{}, fmt.Errorf("%w: callback worker policy is invalid", models.ErrInvalidCallbackRegistration)
+		return EventWorkerConfig{}, fmt.Errorf("%w: callback worker policy is invalid", models.ErrInvalidCallbackRegistration)
 	}
 	return c, nil
 }
 
-// CallbackEventWorker dispatches provider-verified durable receipts outside
+// EventWorker dispatches provider-verified durable receipts outside
 // the provider acknowledgement request. Claims are leased and CAS-updated so
 // expired work is recovered after a process or pod restart.
-type CallbackEventWorker struct {
+type EventWorker struct {
 	store interface {
 		models.CallbackRegistrationStore
 		models.CallbackEventStore
 	}
-	service *CallbackIngressService
-	config  CallbackEventWorkerConfig
+	service *IngressService
+	config  EventWorkerConfig
 	now     func() time.Time
 }
 
-func NewCallbackEventWorker(store interface {
+func NewEventWorker(store interface {
 	models.CallbackRegistrationStore
 	models.CallbackEventStore
-}, service *CallbackIngressService, config CallbackEventWorkerConfig, opts ...models.ServiceOption) (*CallbackEventWorker, error) {
+}, service *IngressService, config EventWorkerConfig, opts ...models.ServiceOption) (*EventWorker, error) {
 	if store == nil || service == nil {
 		return nil, errors.New("callback event store and ingress service are required")
 	}
@@ -65,10 +65,10 @@ func NewCallbackEventWorker(store interface {
 	if err != nil {
 		return nil, err
 	}
-	return &CallbackEventWorker{store: store, service: service, config: normalized, now: models.ClockFrom(opts)}, nil
+	return &EventWorker{store: store, service: service, config: normalized, now: models.ClockFrom(opts)}, nil
 }
 
-func (w *CallbackEventWorker) ProcessOne(ctx context.Context, scope models.Scope) (*models.CallbackEventReceipt, error) {
+func (w *EventWorker) ProcessOne(ctx context.Context, scope models.Scope) (*models.CallbackEventReceipt, error) {
 	if w == nil || w.store == nil || w.service == nil {
 		return nil, errors.New("callback event worker is not configured")
 	}

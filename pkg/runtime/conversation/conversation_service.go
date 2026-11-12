@@ -110,18 +110,18 @@ type SetConversationPresenceRequest struct {
 	TTL              time.Duration
 }
 
-type ConversationService struct {
+type Service struct {
 	store     models.ConversationStore
 	now       func() time.Time
 	newID     func() string
 	reactions MessageReactionProjector
 }
 
-func NewConversationService(store models.ConversationStore, opts ...models.ServiceOption) *ConversationService {
-	return &ConversationService{store: store, now: models.ClockFrom(opts), newID: uuid.NewString}
+func NewService(store models.ConversationStore, opts ...models.ServiceOption) *Service {
+	return &Service{store: store, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
-func (s *ConversationService) CreateConversation(ctx context.Context, req CreateConversationRequest) (*models.Conversation, bool, error) {
+func (s *Service) CreateConversation(ctx context.Context, req CreateConversationRequest) (*models.Conversation, bool, error) {
 	if s == nil || s.store == nil {
 		return nil, false, errors.New("conversation store is not configured")
 	}
@@ -160,7 +160,7 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 	return s.store.CreateConversation(ctx, conversation, key)
 }
 
-func (s *ConversationService) GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error) {
+func (s *Service) GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error) {
 	conversation, err := s.store.GetConversation(ctx, scope, strings.TrimSpace(conversationID))
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ func (s *ConversationService) GetConversation(ctx context.Context, scope models.
 	return conversation, nil
 }
 
-func (s *ConversationService) UpdateConversation(ctx context.Context, req UpdateConversationRequest) (*models.Conversation, error) {
+func (s *Service) UpdateConversation(ctx context.Context, req UpdateConversationRequest) (*models.Conversation, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -224,15 +224,15 @@ func (s *ConversationService) UpdateConversation(ctx context.Context, req Update
 	return s.store.UpdateConversation(ctx, updated, conversation.Revision)
 }
 
-func (s *ConversationService) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
+func (s *Service) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
 	return s.store.ListConversations(ctx, filter)
 }
 
-func (s *ConversationService) LastConversationActivity(ctx context.Context, scope models.Scope, ownerType models.OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+func (s *Service) LastConversationActivity(ctx context.Context, scope models.Scope, ownerType models.OwnerType, ownerIDs []string) (map[string]time.Time, error) {
 	return s.store.LastConversationActivity(ctx, scope, ownerType, ownerIDs)
 }
 
-func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error) {
+func (s *Service) PostChannelMessage(ctx context.Context, req PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -347,7 +347,7 @@ func selectedOptionIDs(in []string) []string {
 // validateSelectedOptions checks a reply's chosen options against the question
 // it resolves (or replies to): every id is one of its options, and at most one
 // unless it allows several. A reply that picks nothing is free text.
-func (s *ConversationService) validateSelectedOptions(ctx context.Context, req PostChannelMessageRequest) error {
+func (s *Service) validateSelectedOptions(ctx context.Context, req PostChannelMessageRequest) error {
 	ids := selectedOptionIDs(req.SelectedOptionIDs)
 	if len(ids) == 0 {
 		return nil
@@ -379,7 +379,7 @@ func (s *ConversationService) validateSelectedOptions(ctx context.Context, req P
 
 // CommitConversationRouting durably records a routing decision. It posts no
 // messages: every responder commits its own answer from its own Run.
-func (s *ConversationService) CommitConversationRouting(ctx context.Context, req CommitConversationRoutingRequest) (*models.ParticipationRoundResult, error) {
+func (s *Service) CommitConversationRouting(ctx context.Context, req CommitConversationRoutingRequest) (*models.ParticipationRoundResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -434,7 +434,7 @@ func (s *ConversationService) CommitConversationRouting(ctx context.Context, req
 
 // replayConversationRouting returns the already committed round for the
 // request's idempotency key, or nil when none exists yet.
-func (s *ConversationService) replayConversationRouting(ctx context.Context, round *models.ParticipationRound) (*models.ParticipationRoundResult, error) {
+func (s *Service) replayConversationRouting(ctx context.Context, round *models.ParticipationRound) (*models.ParticipationRoundResult, error) {
 	existing, err := s.store.FindParticipationRoundByIdempotencyKey(ctx, round.Scope, round.ConversationID, round.IdempotencyKey)
 	if err != nil || existing == nil {
 		return nil, err
@@ -445,7 +445,7 @@ func (s *ConversationService) replayConversationRouting(ctx context.Context, rou
 	return existing, nil
 }
 
-func (s *ConversationService) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
+func (s *Service) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
 	if err := models.ValidateChannelMessageViewFilter(filter); err != nil {
 		return nil, err
 	}
@@ -497,7 +497,7 @@ func (s *ConversationService) ListChannelMessages(ctx context.Context, filter mo
 	return withMessageReactions(ctx, s.store, result)
 }
 
-func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
+func (s *Service) filterVisibleChannelMessages(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	visible, err := s.filterVisibleChannelMessageParents(ctx, scope, conversationID, messages, viewer)
 	if err != nil {
 		return nil, err
@@ -507,7 +507,7 @@ func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, 
 
 // redactUnviewableQuotes keeps a quote's sender and excerpt only for viewers
 // who can see the quoted message itself.
-func (s *ConversationService) redactUnviewableQuotes(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
+func (s *Service) redactUnviewableQuotes(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	ids := make([]string, 0)
 	for _, message := range messages {
 		if message != nil && message.Quote != nil && !message.Quote.Unavailable {
@@ -548,7 +548,7 @@ func (s *ConversationService) redactUnviewableQuotes(ctx context.Context, scope 
 	return out, nil
 }
 
-func (s *ConversationService) filterVisibleChannelMessageParents(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
+func (s *Service) filterVisibleChannelMessageParents(ctx context.Context, scope models.Scope, conversationID string, messages []*models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	if err := viewer.Validate(); err != nil {
 		return nil, err
 	}
@@ -600,7 +600,7 @@ func (s *ConversationService) filterVisibleChannelMessageParents(ctx context.Con
 	return filterChannelMessageThreadStarts(ctx, scope, conversationID, visible, known, s.threadStartParentLoader(scope, conversationID), viewer)
 }
 
-func (s *ConversationService) GetVisibleChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string, viewer models.ConversationViewer) (*models.ChannelMessage, error) {
+func (s *Service) GetVisibleChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string, viewer models.ConversationViewer) (*models.ChannelMessage, error) {
 	message, err := s.GetChannelMessage(ctx, scope, conversationID, messageID)
 	if err != nil {
 		return nil, err
@@ -615,7 +615,7 @@ func (s *ConversationService) GetVisibleChannelMessage(ctx context.Context, scop
 	return visible[0], nil
 }
 
-func (s *ConversationService) GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error) {
+func (s *Service) GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error) {
 	message, err := s.store.GetChannelMessage(ctx, scope, conversationID, messageID)
 	if err != nil {
 		return nil, err
@@ -630,7 +630,7 @@ func (s *ConversationService) GetChannelMessage(ctx context.Context, scope model
 	return filled[0], nil
 }
 
-func (s *ConversationService) GetParticipationRound(ctx context.Context, scope models.Scope, conversationID, roundID string) (*models.ParticipationRoundResult, error) {
+func (s *Service) GetParticipationRound(ctx context.Context, scope models.Scope, conversationID, roundID string) (*models.ParticipationRoundResult, error) {
 	result, err := s.store.GetParticipationRound(ctx, scope, conversationID, roundID)
 	if err != nil {
 		return nil, err
@@ -641,7 +641,7 @@ func (s *ConversationService) GetParticipationRound(ctx context.Context, scope m
 	return result, nil
 }
 
-func (s *ConversationService) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ParticipationRoundResult, error) {
+func (s *Service) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ParticipationRoundResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -654,25 +654,25 @@ func (s *ConversationService) FindParticipationRoundByIdempotencyKey(ctx context
 	return s.store.FindParticipationRoundByIdempotencyKey(ctx, scope, strings.TrimSpace(conversationID), strings.TrimSpace(key))
 }
 
-func (s *ConversationService) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
+func (s *Service) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
 	return s.store.ListParticipationRounds(ctx, filter)
 }
 
-func (s *ConversationService) GetCursor(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
+func (s *Service) GetCursor(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	return s.store.GetConversationCursor(ctx, scope, conversationID, participant)
 }
 
 // ListCursors returns the durable delivery and read position for every
 // participant that has observed a conversation. The result is ordered by
 // participant identity so API projections remain deterministic across stores.
-func (s *ConversationService) ListCursors(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationCursor, error) {
+func (s *Service) ListCursors(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationCursor, error) {
 	if _, err := s.GetConversation(ctx, scope, conversationID); err != nil {
 		return nil, err
 	}
 	return s.store.ListConversationCursors(ctx, scope, conversationID)
 }
 
-func (s *ConversationService) AdvanceCursor(ctx context.Context, req AdvanceConversationCursorRequest) (*models.ConversationCursor, bool, error) {
+func (s *Service) AdvanceCursor(ctx context.Context, req AdvanceConversationCursorRequest) (*models.ConversationCursor, bool, error) {
 	conversation, err := s.GetConversation(ctx, req.Scope, req.ConversationID)
 	if err != nil {
 		return nil, false, err
@@ -711,7 +711,7 @@ func (s *ConversationService) AdvanceCursor(ctx context.Context, req AdvanceConv
 	return s.store.PutConversationCursor(ctx, models.ConversationCursorRecord{Cursor: cursor, ExpectedRevision: req.ExpectedRevision})
 }
 
-func (s *ConversationService) SetPresence(ctx context.Context, req SetConversationPresenceRequest) (*models.ConversationPresence, error) {
+func (s *Service) SetPresence(ctx context.Context, req SetConversationPresenceRequest) (*models.ConversationPresence, error) {
 	if _, err := s.GetConversation(ctx, req.Scope, req.ConversationID); err != nil {
 		return nil, err
 	}
@@ -756,18 +756,18 @@ func (s *ConversationService) SetPresence(ctx context.Context, req SetConversati
 	return s.store.PutConversationPresence(ctx, models.ConversationPresenceRecord{Presence: presence, ExpectedRevision: req.ExpectedRevision})
 }
 
-func (s *ConversationService) ReleasePresence(ctx context.Context, req models.ReleaseConversationPresenceRequest) error {
+func (s *Service) ReleasePresence(ctx context.Context, req models.ReleaseConversationPresenceRequest) error {
 	if s == nil || s.store == nil {
 		return errors.New("conversation store is not configured")
 	}
 	return s.store.ReleaseConversationPresence(ctx, req)
 }
 
-func (s *ConversationService) ListPresence(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationPresence, error) {
+func (s *Service) ListPresence(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationPresence, error) {
 	return s.store.ListConversationPresence(ctx, scope, conversationID, s.now().UTC())
 }
 
-func (s *ConversationService) resolveThreadRoot(ctx context.Context, scope models.Scope, conversationID, replyTo string) (string, error) {
+func (s *Service) resolveThreadRoot(ctx context.Context, scope models.Scope, conversationID, replyTo string) (string, error) {
 	replyTo = strings.TrimSpace(replyTo)
 	if replyTo == "" {
 		return "", nil
@@ -785,7 +785,7 @@ func (s *ConversationService) resolveThreadRoot(ctx context.Context, scope model
 	return message.ID, nil
 }
 
-func (s *ConversationService) resolveQuote(ctx context.Context, scope models.Scope, conversationID, quotedID string) (*models.ChannelMessageQuote, error) {
+func (s *Service) resolveQuote(ctx context.Context, scope models.Scope, conversationID, quotedID string) (*models.ChannelMessageQuote, error) {
 	quotedID = strings.TrimSpace(quotedID)
 	if quotedID == "" {
 		return nil, nil
@@ -802,7 +802,7 @@ func (s *ConversationService) resolveQuote(ctx context.Context, scope models.Sco
 
 // answerQuoteID returns the explicit quote, or quotes the message an Agent or
 // Team is answering when that answer would otherwise read out of order.
-func (s *ConversationService) answerQuoteID(ctx context.Context, req PostChannelMessageRequest) (string, error) {
+func (s *Service) answerQuoteID(ctx context.Context, req PostChannelMessageRequest) (string, error) {
 	if quoted := strings.TrimSpace(req.QuotedMessageID); quoted != "" {
 		return quoted, nil
 	}

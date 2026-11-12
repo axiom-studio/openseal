@@ -370,8 +370,8 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 
 			// The person solves the captcha through the run command service.
 			commands := agentrun.NewRunCommandService(f.Chats, models.WithClock(f.Clock.Now))
-			if _, err := commands.CommandAgentRun(f.Ctx, agentrun.AgentRunCommandRequest{
-				Scope: f.Scope, RunID: run.ID, ExpectedRevision: parked.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
+			if _, err := commands.CommandAgentRun(f.Ctx, agentrun.CommandRequest{
+				Scope: f.Scope, RunID: run.ID, ExpectedRevision: parked.Revision, Kind: agentrun.CommandResolveHumanIntervention,
 				HumanInterventionID: parked.HumanInterventions[0].ID, Instruction: "Solved the captcha.",
 				Actor: models.ActivityActor{Type: "user", ID: looptest.FixtureUser},
 			}); err != nil {
@@ -478,7 +478,7 @@ func TestWaitToolParksUntilTimer(t *testing.T) {
 			t.Fatalf("wait entries = %#v, wake %#v", waits, parked.WakeCondition)
 		}
 
-		wake := agentrun.NewAgentRunWakeService(f.Store, f.Store, models.WithClock(f.Clock.Now))
+		wake := agentrun.NewWakeService(f.Store, f.Store, models.WithClock(f.Clock.Now))
 		// Before the timer nothing wakes.
 		f.Clock.Advance(599 * time.Second)
 		if result, err := wake.WakeDueTimers(f.Ctx, f.Scope, f.Clock.Now()); err != nil || len(result.Runs) != 0 {

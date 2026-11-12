@@ -174,9 +174,9 @@ func (d *RunActionDispatcher) DispatchAction(ctx context.Context, input ActionDi
 	if err := validateConversationTaskControl(ctx, d.store, input.Run, target); err != nil {
 		return nil, err
 	}
-	result, err := d.commands.CommandAgentRun(ctx, AgentRunCommandRequest{
+	result, err := d.commands.CommandAgentRun(ctx, CommandRequest{
 		Scope: input.Call.Scope, RunID: runID, ExpectedRevision: revision,
-		Kind:       AgentRunCommandKind(input.Bound.Action.Name),
+		Kind:       CommandKind(input.Bound.Action.Name),
 		Actor:      models.ActivityActor{Type: "agent", ID: input.Run.Owner.ID},
 		Summary:    strings.TrimSpace(fmt.Sprint(input.Call.Arguments["reason"])),
 		Visibility: models.ActivityVisibilityScope,

@@ -33,7 +33,7 @@ func runFieldsBackends(t *testing.T, test func(t *testing.T, store runFieldsStor
 
 func runFieldsRun(t *testing.T, store runFieldsStore, sessionID string) *models.AgentRun {
 	t.Helper()
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: models.Scope{Kind: "local", ID: "run-fields"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 		Goal: "work", Source: models.RunSourceManual, SessionID: sessionID,
 	})

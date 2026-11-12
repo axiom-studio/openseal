@@ -12,13 +12,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 )
 
-func (s *Server) collaborationService(w http.ResponseWriter) (*collaboration.CollaborationService, bool) {
+func (s *Server) collaborationService(w http.ResponseWriter) (*collaboration.Service, bool) {
 	store, ok := s.store.(models.CollaborationKernelStore)
 	if !ok {
 		s.respondError(w, http.StatusNotImplemented, "agent requests are not configured")
 		return nil, false
 	}
-	return collaboration.NewCollaborationService(store), true
+	return collaboration.NewService(store), true
 }
 
 func (s *Server) handleCreateAgentRequest(w http.ResponseWriter, r *http.Request) {

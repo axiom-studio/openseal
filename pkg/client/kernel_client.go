@@ -43,13 +43,13 @@ type KernelClient interface {
 	ListRunbooks(context.Context, models.RunbookActivationFilter) ([]*models.RunbookActivation, error)
 	GetRunbook(context.Context, models.Scope, string) (*routine.RunbookDetail, error)
 	UpdateRunbook(context.Context, models.Scope, string, routine.UpdateRunbookActivationRequest) (*models.RunbookActivation, error)
-	StartRunbook(context.Context, models.Scope, string, routine.StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error)
+	StartRunbook(context.Context, models.Scope, string, routine.StartRunbookActivationRequest) (*agentrun.CommandResult, error)
 	ReconcileRunbookSchedules(context.Context, kernelapi.ReconcileRunbookSchedulesRequest) (*kernelapi.RunbookScheduleReconciliation, error)
-	ListActivity(context.Context, activity.ActivityFeedRequest) (*activity.ActivityFeedPage, error)
-	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*agentrun.AgentRunCommandResult, error)
+	ListActivity(context.Context, activity.FeedRequest) (*activity.FeedPage, error)
+	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*agentrun.CommandResult, error)
 	ListAgentRuns(context.Context, models.AgentRunFilter) ([]*models.AgentRun, error)
 	GetAgentRun(context.Context, models.Scope, string) (*models.AgentRun, error)
-	CommandAgentRun(context.Context, models.Scope, string, kernelapi.AgentRunCommandRequest) (*agentrun.AgentRunCommandResult, error)
+	CommandAgentRun(context.Context, models.Scope, string, kernelapi.AgentRunCommandRequest) (*agentrun.CommandResult, error)
 	ListAgentTurns(context.Context, models.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error)
 	GetAgentTurn(context.Context, models.Scope, string) (*kernelapi.AgentTurnRecord, error)
 	CreateAgentRequest(context.Context, kernelapi.CreateAgentRequestRequest, string) (*collaboration.AgentRequestResult, error)
@@ -626,9 +626,9 @@ func (c *KernelHTTPClient) UpdateRunbook(ctx context.Context, scope models.Scope
 	return &value, nil
 }
 
-func (c *KernelHTTPClient) StartRunbook(ctx context.Context, scope models.Scope, activationID string, request routine.StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error) {
+func (c *KernelHTTPClient) StartRunbook(ctx context.Context, scope models.Scope, activationID string, request routine.StartRunbookActivationRequest) (*agentrun.CommandResult, error) {
 	query := scopeQuery(scope)
-	var value agentrun.AgentRunCommandResult
+	var value agentrun.CommandResult
 	path := "/api/v1/runbooks/" + url.PathEscape(strings.TrimSpace(activationID)) + "/runs?" + query.Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, "", &value); err != nil {
 		return nil, err
@@ -706,7 +706,7 @@ func (c *KernelHTTPClient) UpdateExternalConversationGateway(
 	return &value, nil
 }
 
-func (c *KernelHTTPClient) ListActivity(ctx context.Context, request activity.ActivityFeedRequest) (*activity.ActivityFeedPage, error) {
+func (c *KernelHTTPClient) ListActivity(ctx context.Context, request activity.FeedRequest) (*activity.FeedPage, error) {
 	query := scopeQuery(request.Scope)
 	for _, item := range []struct{ key, value string }{
 		{"runId", request.RunID}, {"agentId", request.AgentID}, {"objectiveId", request.ObjectiveID}, {"teamId", request.TeamID}, {"cursor", request.Cursor},
@@ -732,15 +732,15 @@ func (c *KernelHTTPClient) ListActivity(ctx context.Context, request activity.Ac
 	if request.IncludeDetails {
 		query.Set("includeDetails", "true")
 	}
-	var page activity.ActivityFeedPage
+	var page activity.FeedPage
 	if err := c.do(ctx, http.MethodGet, "/api/v1/activity?"+query.Encode(), nil, "", &page); err != nil {
 		return nil, err
 	}
 	return &page, nil
 }
 
-func (c *KernelHTTPClient) CreateAgentRun(ctx context.Context, request kernelapi.CreateAgentRunRequest, idempotencyKey string) (*agentrun.AgentRunCommandResult, error) {
-	var result agentrun.AgentRunCommandResult
+func (c *KernelHTTPClient) CreateAgentRun(ctx context.Context, request kernelapi.CreateAgentRunRequest, idempotencyKey string) (*agentrun.CommandResult, error) {
+	var result agentrun.CommandResult
 	if err := c.do(ctx, http.MethodPost, "/api/v1/agent-runs", request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}
@@ -774,7 +774,7 @@ func (c *KernelHTTPClient) ListAgentRuns(ctx context.Context, filter models.Agen
 	return runs, nil
 }
 
-func (c *KernelHTTPClient) InspectAgentRunAdmission(ctx context.Context, request agentrun.AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
+func (c *KernelHTTPClient) InspectAgentRunAdmission(ctx context.Context, request agentrun.ClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	query := scopeQuery(request.Scope)
 	setIfPresent(query, "kind", string(request.Kind))
 	setIfPresent(query, "assignedAgentId", request.AssignedAgentID)
@@ -823,9 +823,9 @@ func (c *KernelHTTPClient) GetRunExecutionAudit(ctx context.Context, scope model
 	return &value, nil
 }
 
-func (c *KernelHTTPClient) CommandAgentRun(ctx context.Context, scope models.Scope, runID string, request kernelapi.AgentRunCommandRequest) (*agentrun.AgentRunCommandResult, error) {
+func (c *KernelHTTPClient) CommandAgentRun(ctx context.Context, scope models.Scope, runID string, request kernelapi.AgentRunCommandRequest) (*agentrun.CommandResult, error) {
 	query := scopeQuery(scope)
-	var result agentrun.AgentRunCommandResult
+	var result agentrun.CommandResult
 	path := "/api/v1/agent-runs/" + url.PathEscape(strings.TrimSpace(runID)) + "/commands?" + query.Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
 		return nil, err

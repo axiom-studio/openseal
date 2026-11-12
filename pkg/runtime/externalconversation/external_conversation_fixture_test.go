@@ -107,7 +107,7 @@ func endpointFixtureOwnedBy(
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := NewExternalConversationEndpointService(store, catalog).Create(
+	endpoint, err := NewEndpointService(store, catalog).Create(
 		ctx,
 		CreateExternalConversationEndpointRequest{
 			ID: provider + "-endpoint", Scope: scope,
@@ -135,7 +135,7 @@ func endpointFixtureOwnedBy(
 // crashAfterDispatch dispatches through next and, with crashOnce, fails the
 // first dispatch after its Run is durable, as a crash would.
 type crashAfterDispatch struct {
-	next       ExternalConversationDispatcher
+	next       Dispatcher
 	crashOnce  bool
 	dispatches int
 	runID      string
@@ -143,8 +143,8 @@ type crashAfterDispatch struct {
 
 func (d *crashAfterDispatch) DispatchExternalConversation(
 	ctx context.Context,
-	req ExternalConversationDispatchRequest,
-) (*ExternalConversationDispatchResult, error) {
+	req DispatchRequest,
+) (*DispatchResult, error) {
 	d.dispatches++
 	result, err := d.next.DispatchExternalConversation(ctx, req)
 	if err != nil {

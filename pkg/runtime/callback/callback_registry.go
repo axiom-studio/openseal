@@ -39,29 +39,29 @@ type UpdateCallbackRegistrationRequest struct {
 	Reason           string
 }
 
-type CallbackAdapterResolver interface {
+type AdapterResolver interface {
 	ResolveCallbackAdapter(context.Context, skill.ScopeReference, string, string, string, string, ...skill.BindingReference) (*skill.BoundCallbackAdapter, error)
 	ResolveCallbackAdapterBinding(context.Context, skill.ScopeReference, string, string, string) (*skill.BoundCallbackAdapter, error)
 }
 
-type CallbackRegistry struct {
+type Registry struct {
 	store    models.CallbackRegistrationStore
-	resolver CallbackAdapterResolver
+	resolver AdapterResolver
 	now      func() time.Time
 	newID    func() string
 }
 
-func NewCallbackRegistry(store models.CallbackRegistrationStore, resolver CallbackAdapterResolver, opts ...models.ServiceOption) *CallbackRegistry {
-	return &CallbackRegistry{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
+func NewRegistry(store models.CallbackRegistrationStore, resolver AdapterResolver, opts ...models.ServiceOption) *Registry {
+	return &Registry{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
 // ResolvesAdapters reports whether r can resolve a registration's callback
 // adapter (false for a nil registry).
-func (r *CallbackRegistry) ResolvesAdapters() bool {
+func (r *Registry) ResolvesAdapters() bool {
 	return r != nil && r.resolver != nil
 }
 
-func (r *CallbackRegistry) Create(ctx context.Context, request CreateCallbackRegistrationRequest) (*models.CallbackRegistration, error) {
+func (r *Registry) Create(ctx context.Context, request CreateCallbackRegistrationRequest) (*models.CallbackRegistration, error) {
 	if r == nil || r.store == nil || r.resolver == nil {
 		return nil, errors.New("callback registry is not configured")
 	}
@@ -95,7 +95,7 @@ func (r *CallbackRegistry) Create(ctx context.Context, request CreateCallbackReg
 	return models.CloneCallbackRegistration(value), nil
 }
 
-func (r *CallbackRegistry) Get(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error) {
+func (r *Registry) Get(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error) {
 	if r == nil || r.store == nil {
 		return nil, errors.New("callback registry is not configured")
 	}
@@ -109,14 +109,14 @@ func (r *CallbackRegistry) Get(ctx context.Context, scope models.Scope, id strin
 	return value, nil
 }
 
-func (r *CallbackRegistry) List(ctx context.Context, filter models.CallbackRegistrationFilter) ([]*models.CallbackRegistration, error) {
+func (r *Registry) List(ctx context.Context, filter models.CallbackRegistrationFilter) ([]*models.CallbackRegistration, error) {
 	if r == nil || r.store == nil {
 		return nil, errors.New("callback registry is not configured")
 	}
 	return r.store.ListCallbackRegistrations(ctx, filter)
 }
 
-func (r *CallbackRegistry) Update(ctx context.Context, scope models.Scope, id string, request UpdateCallbackRegistrationRequest) (*models.CallbackRegistration, error) {
+func (r *Registry) Update(ctx context.Context, scope models.Scope, id string, request UpdateCallbackRegistrationRequest) (*models.CallbackRegistration, error) {
 	current, err := r.Get(ctx, scope, id)
 	if err != nil {
 		return nil, err
@@ -170,7 +170,7 @@ func (r *CallbackRegistry) Update(ctx context.Context, scope models.Scope, id st
 // VerifyAdapter returns an error unless value's exact callback Skill adapter
 // is bound for its provider, has an ingress endpoint and declares every
 // event type value subscribes to.
-func (r *CallbackRegistry) VerifyAdapter(ctx context.Context, value *models.CallbackRegistration) error {
+func (r *Registry) VerifyAdapter(ctx context.Context, value *models.CallbackRegistration) error {
 	ref := value.Adapter
 	bound, err := r.resolver.ResolveCallbackAdapterBinding(
 		ctx, skill.ScopeReference{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.DeploymentID,

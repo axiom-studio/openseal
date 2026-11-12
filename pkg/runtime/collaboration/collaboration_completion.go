@@ -20,7 +20,7 @@ import (
 // policy requires an independent completion review. The
 // Principal is the authorized recipient; Actor is the agent or Team member
 // that actually performed the completion and is retained in the audit trail.
-func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req CompleteAgentRequestRequest) (*AgentRequestResult, error) {
+func (s *Service) CompleteAgentRequest(ctx context.Context, req CompleteAgentRequestRequest) (*AgentRequestResult, error) {
 	if s == nil || s.store == nil || s.runs == nil || s.artifacts == nil {
 		return nil, errors.New("collaboration store is not configured")
 	}
@@ -191,7 +191,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 // ReviewAgentRequestCompletion resolves the independent review checkpoint
 // required by the snapshotted Team policy. The requester reviews the result;
 // the recipient that performed the work cannot approve its own completion.
-func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context, req ReviewAgentRequestCompletionRequest) (*AgentRequestResult, error) {
+func (s *Service) ReviewAgentRequestCompletion(ctx context.Context, req ReviewAgentRequestCompletionRequest) (*AgentRequestResult, error) {
 	if s == nil || s.store == nil || s.runs == nil {
 		return nil, errors.New("collaboration store is not configured")
 	}
@@ -378,7 +378,7 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 // ResolveTerminalAgentRequestChild closes the collaboration lifecycle from an
 // authoritative terminal child Run. Artifact-bearing requests remain accepted
 // until their required immutable artifacts are explicitly supplied.
-func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Context, child *models.AgentRun) (*AgentRequestResult, error) {
+func (s *Service) ResolveTerminalAgentRequestChild(ctx context.Context, child *models.AgentRun) (*AgentRequestResult, error) {
 	if s == nil || s.store == nil || s.runs == nil || child == nil {
 		return nil, errors.New("collaboration service and child run are required")
 	}

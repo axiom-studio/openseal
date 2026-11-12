@@ -24,7 +24,7 @@ func BenchmarkSkillRuntimeUsageTerminalHistory(b *testing.B) {
 			sqlDB := kerneltest.OpenSQLiteDB(b, path)
 			defer store.Close()
 			scope := models.Scope{Kind: "tenant", ID: "benchmark"}
-			run, err := portfolio.NewPortfolioService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Historical finished task", Source: models.RunSourceManual})
+			run, err := portfolio.NewService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Historical finished task", Source: models.RunSourceManual})
 			if err != nil {
 				b.Fatal(err)
 			}

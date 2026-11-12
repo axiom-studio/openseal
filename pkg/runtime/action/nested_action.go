@@ -143,7 +143,7 @@ func (t *nestedActionTurns) lookup(scope models.Scope, turnID string) *nestedAct
 // calls until the returned function is called. The run loop calls it when a
 // step begins and closes it when the step ends, so nested calls and their
 // bounds are scoped to one step.
-func (c *ActionCoordinator) OpenNestedActionTurn(run *models.AgentRun, turn *models.AgentTurn, binding *agentrun.TurnRunnerBinding) func() {
+func (c *Coordinator) OpenNestedActionTurn(run *models.AgentRun, turn *models.AgentTurn, binding *agentrun.TurnRunnerBinding) func() {
 	if c == nil {
 		return func() {}
 	}
@@ -155,11 +155,11 @@ func (c *ActionCoordinator) OpenNestedActionTurn(run *models.AgentRun, turn *mod
 // action set, binding, credential references, policy and approvals. It never
 // changes the Run. An allowed call is ready for action workers; a call that
 // needs review waits for its approval; a denied call is returned denied.
-func (c *ActionCoordinator) ProposeNested(ctx context.Context, req NestedActionRequest) (*NestedActionResult, error) {
+func (c *Coordinator) ProposeNested(ctx context.Context, req NestedActionRequest) (*NestedActionResult, error) {
 	return c.proposeNested(ctx, req, "", nil)
 }
 
-func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionRequest, execution models.ActionExecution, choose func(*agentrun.TurnRunnerBinding) (*capability.ModelAction, error)) (*NestedActionResult, error) {
+func (c *Coordinator) proposeNested(ctx context.Context, req NestedActionRequest, execution models.ActionExecution, choose func(*agentrun.TurnRunnerBinding) (*capability.ModelAction, error)) (*NestedActionResult, error) {
 	if c == nil {
 		return nil, errors.New("action coordinator is not configured")
 	}
@@ -193,7 +193,7 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 	if selected == nil {
 		return nil, fmt.Errorf("%w: %q", ErrNestedActionNotAuthorized, req.Capability)
 	}
-	deploymentID := ActionDeploymentForSelection(binding, selected)
+	deploymentID := DeploymentForSelection(binding, selected)
 	summary := strings.TrimSpace(req.Summary)
 	if summary == "" {
 		summary = "Called " + selected.Name + " from the chat's VM"
@@ -229,11 +229,11 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 	return &NestedActionResult{Call: proposal.Call, Approval: proposal.Approval, Created: proposal.Created}, nil
 }
 
-// ActionDeploymentForSelection is the deployment whose bindings authorize the
+// DeploymentForSelection is the deployment whose bindings authorize the
 // selected action: the action's own owner, else the binding's action
 // deployment (a Team member Run resolves Team actions against the Team), else
 // the Run's deployment.
-func ActionDeploymentForSelection(binding *agentrun.TurnRunnerBinding, selected *capability.ModelAction) string {
+func DeploymentForSelection(binding *agentrun.TurnRunnerBinding, selected *capability.ModelAction) string {
 	if selected != nil {
 		if deploymentID := strings.TrimSpace(selected.DeploymentID); deploymentID != "" {
 			return deploymentID
@@ -249,7 +249,7 @@ func ActionDeploymentForSelection(binding *agentrun.TurnRunnerBinding, selected 
 }
 
 // GetNested returns the current state of one nested call of a Run.
-func (c *ActionCoordinator) GetNested(ctx context.Context, scope models.Scope, runID, actionCallID string) (*NestedActionResult, error) {
+func (c *Coordinator) GetNested(ctx context.Context, scope models.Scope, runID, actionCallID string) (*NestedActionResult, error) {
 	if c == nil || c.actions == nil {
 		return nil, errors.New("action coordinator is not configured")
 	}

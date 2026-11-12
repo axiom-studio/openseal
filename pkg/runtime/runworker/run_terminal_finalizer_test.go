@@ -70,7 +70,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 31, 8, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "use session", Source: models.RunSourceObjective,
@@ -105,7 +105,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		t.Fatal(err)
 	}
 	dispatches := 0
-	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, action.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, action.DispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		if input.Bound.Action.Name != "release" || input.Arguments["sessionId"] != "agent-session" ||
 			input.Run.ID != terminal.ID {
@@ -177,7 +177,7 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 	}
 	store.actions.put(&models.ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: models.ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	dispatches := 0
-	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"released": true}, nil
 	}), models.WithClock(func() time.Time { return now.Add(time.Second) }))
@@ -262,7 +262,7 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	ctx := context.Background()
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "canceled-child"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	parent, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "scheduler"}, AssignedAgentID: "scheduler",
 		Goal: "run scheduled delegated work", Source: models.RunSourceSchedule,
@@ -270,7 +270,7 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	collaboration := runtimecollaboration.NewCollaborationService(store)
+	collaboration := runtimecollaboration.NewService(store)
 	created, err := collaboration.CreateAgentRequest(ctx, runtimecollaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: parent.ID,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "scheduler"},
@@ -286,8 +286,8 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	canceled, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: scope, RunID: accepted.Child.ID, ExpectedRevision: accepted.Child.Revision, Kind: agentrun.AgentRunCommandCancel,
+	canceled, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: scope, RunID: accepted.Child.ID, ExpectedRevision: accepted.Child.Revision, Kind: agentrun.CommandCancel,
 	})
 	if err != nil {
 		t.Fatal(err)

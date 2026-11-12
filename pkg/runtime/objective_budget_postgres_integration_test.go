@@ -28,7 +28,7 @@ func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 	}
 	defer replica.Close()
 	scope := models.Scope{Kind: "tenant", ID: "postgres-budget"}
-	objective, err := portfolio.NewPortfolioService(primary).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(primary).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Bounded", Goal: "Allocate once",
 		Budget: &models.BudgetPolicy{MaxTurns: 10},
 	})
@@ -65,7 +65,7 @@ func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 			t.Fatalf("unexpected replica error: %v", err)
 		}
 	}
-	loaded, err := portfolio.NewPortfolioService(primary).GetObjective(ctx, scope, objective.ID)
+	loaded, err := portfolio.NewService(primary).GetObjective(ctx, scope, objective.ID)
 	if err != nil || succeeded != 1 || exhausted != 1 || len(loaded.BudgetAllocations) != 1 {
 		t.Fatalf("replica allocation success=%d exhausted=%d objective=%#v err=%v", succeeded, exhausted, loaded, err)
 	}

@@ -42,14 +42,14 @@ func TestAgentBuilderEngineWiresValidatorAndDispatchers(t *testing.T) {
 	}
 	validators := 0
 	for _, validator := range engine.actionValidators {
-		if _, ok := validator.(*agentbuilder.AgentBuilderActionValidator); ok {
+		if _, ok := validator.(*agentbuilder.ActionValidator); ok {
 			validators++
 		}
 	}
 	if validators != 1 {
 		t.Fatalf("builder validators = %d", validators)
 	}
-	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*agentbuilder.AgentBuilderActionDispatcher); !ok {
+	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*agentbuilder.ActionDispatcher); !ok {
 		t.Fatalf("pool dispatcher = %T", engine.actionPoolSpecs[0].dispatcher)
 	}
 	if governed := engine.GovernedTools(); governed == nil {
@@ -211,7 +211,7 @@ func TestAgentBuilderListDraftsKeepsRequesterActiveConversations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(drafts) != 1 || drafts[0].ConversationID != first.ID || drafts[0].Status != agentbuilder.AgentBuilderDraftIdle || drafts[0].Title != "Scout" || drafts[0].Approval != nil {
+	if len(drafts) != 1 || drafts[0].ConversationID != first.ID || drafts[0].Status != agentbuilder.DraftIdle || drafts[0].Title != "Scout" || drafts[0].Approval != nil {
 		t.Fatalf("drafts = %#v", drafts)
 	}
 }

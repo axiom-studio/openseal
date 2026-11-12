@@ -62,7 +62,7 @@ func controlAuthorityTeamRun(scope models.Scope, context map[string]interface{})
 	}
 }
 
-func resolveControlAuthorityForTest(t *testing.T, in ControlAuthorityInput) agentrun.ControlAuthority {
+func resolveControlAuthorityForTest(t *testing.T, in AuthorityInput) agentrun.ControlAuthority {
 	t.Helper()
 	authority, err := ResolveControlAuthority(t.Context(), in)
 	if err != nil {
@@ -76,7 +76,7 @@ func resolveControlAuthorityForTest(t *testing.T, in ControlAuthorityInput) agen
 func claimedForegroundChatRun(t *testing.T, store *sqlite.Store) *models.AgentRun {
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
-	conversations := conversation.NewConversationService(store)
+	conversations := conversation.NewService(store)
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "control-authority-chat",
@@ -99,8 +99,8 @@ func claimedForegroundChatRun(t *testing.T, store *sqlite.Store) *models.AgentRu
 	return claimed
 }
 
-func chatAuthorityInput(store *sqlite.Store, run *models.AgentRun) ControlAuthorityInput {
-	return ControlAuthorityInput{
+func chatAuthorityInput(store *sqlite.Store, run *models.AgentRun) AuthorityInput {
+	return AuthorityInput{
 		Run: run, DeploymentID: "agent", ConversationTasks: store, Runs: store, Conversations: store,
 	}
 }
@@ -122,7 +122,7 @@ func assertOnlyFinalTool(t *testing.T, authority agentrun.ControlAuthority, mode
 func TestDecisionRunOffersOnlyDecisionTool(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	run := controlAuthorityTeamRun(scope, map[string]interface{}{agentrun.AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request"}})
-	authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{
+	authority := resolveControlAuthorityForTest(t, AuthorityInput{
 		Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
 		SkillPromptRefs: []string{"skill:prompt"}, Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
@@ -132,7 +132,7 @@ func TestDecisionRunOffersOnlyDecisionTool(t *testing.T) {
 func TestReviewRunOffersOnlyReviewTool(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	run := controlAuthorityTeamRun(scope, map[string]interface{}{agentrun.AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"}})
-	authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{
+	authority := resolveControlAuthorityForTest(t, AuthorityInput{
 		Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
 		SkillPromptRefs: []string{"skill:prompt"}, Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
@@ -144,7 +144,7 @@ func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
 	catalog := controlAuthorityTeamCatalog(scope)
 
 	// The same Team Run outside a task may fork to and delegate to the reviewer.
-	ordinary := resolveControlAuthorityForTest(t, ControlAuthorityInput{
+	ordinary := resolveControlAuthorityForTest(t, AuthorityInput{
 		Run: controlAuthorityTeamRun(scope, map[string]interface{}{}), DeploymentID: "lead", Catalog: catalog,
 	})
 	want := []agentrun.HostedAgentTarget{{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review"}}
@@ -152,7 +152,7 @@ func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
 		t.Fatalf("ordinary authority = %#v", ordinary)
 	}
 
-	worker := resolveControlAuthorityForTest(t, ControlAuthorityInput{
+	worker := resolveControlAuthorityForTest(t, AuthorityInput{
 		Run: controlAuthorityTeamRun(scope, map[string]interface{}{models.ConversationTaskContextKey: "task-1"}), DeploymentID: "lead", Catalog: catalog,
 		Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
@@ -173,7 +173,7 @@ func TestForkChildCannotFork(t *testing.T) {
 	run := controlAuthorityTeamRun(scope, map[string]interface{}{})
 	run.Source = models.RunSourceFork
 	run.ParentRunID = "parent"
-	authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope)})
+	authority := resolveControlAuthorityForTest(t, AuthorityInput{Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope)})
 	if authority.ForkAllowed || len(authority.ForkTargets) != 0 {
 		t.Fatalf("fork child may fork: %#v", authority)
 	}
@@ -235,7 +235,7 @@ func TestChatReplyCannotWait(t *testing.T) {
 		t.Fatalf("non-answering Agent authority = %#v", foreign)
 	}
 
-	background := resolveControlAuthorityForTest(t, ControlAuthorityInput{
+	background := resolveControlAuthorityForTest(t, AuthorityInput{
 		Run:          &models.AgentRun{ID: "routine", Scope: run.Scope, Kind: models.RunKindAgentWork, Owner: run.Owner, AssignedAgentID: "agent", Context: map[string]interface{}{}},
 		DeploymentID: "agent", Runs: store, Conversations: store, ConversationTasks: store,
 	})
@@ -255,7 +255,7 @@ func TestControlAuthorityFinalModesAndDeterministicRuns(t *testing.T) {
 		"spoken":  {map[string]interface{}{"responseMode": "spoken"}, conversationrun.FinalModeSpoken, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{
+			authority := resolveControlAuthorityForTest(t, AuthorityInput{
 				Run: controlAuthorityTeamRun(scope, tc.context), DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
 			})
 			if authority.FinalMode != tc.mode || authority.VisualAllowed != tc.visual || !authority.CanReportProgress {
@@ -263,14 +263,14 @@ func TestControlAuthorityFinalModesAndDeterministicRuns(t *testing.T) {
 			}
 		})
 	}
-	deterministic := resolveControlAuthorityForTest(t, ControlAuthorityInput{
+	deterministic := resolveControlAuthorityForTest(t, AuthorityInput{
 		Run: controlAuthorityTeamRun(scope, map[string]interface{}{}), DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
 		Operations: []agentrun.HostedRunbookOperation{{Name: "op"}}, Deterministic: true,
 	})
 	if !reflect.DeepEqual(deterministic, agentrun.ControlAuthority{AgentID: "lead", FinalMode: agentrun.FinalModeDefault}) {
 		t.Fatalf("deterministic authority = %#v", deterministic)
 	}
-	if _, err := ResolveControlAuthority(t.Context(), ControlAuthorityInput{Run: controlAuthorityTeamRun(scope, nil)}); err == nil {
+	if _, err := ResolveControlAuthority(t.Context(), AuthorityInput{Run: controlAuthorityTeamRun(scope, nil)}); err == nil {
 		t.Fatal("authority resolved without a speaking Agent")
 	}
 }

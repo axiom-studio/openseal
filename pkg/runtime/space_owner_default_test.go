@@ -40,7 +40,7 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 	clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 	tick := models.WithClock(func() time.Time { clock = clock.Add(time.Second); return clock })
 	spaces := portfolio.NewSpaceService(store, tick)
-	conversations := conversation.NewConversationService(store, tick)
+	conversations := conversation.NewService(store, tick)
 	scope := models.Scope{Kind: "tenant", ID: "owner-default-" + strings.ReplaceAll(t.Name(), "/", "-")}
 	const ana, ben, solo, stranger = "7", "8", "", "404"
 	drifter := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "drifter"}

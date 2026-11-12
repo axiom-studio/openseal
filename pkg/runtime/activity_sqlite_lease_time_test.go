@@ -21,7 +21,7 @@ func TestSQLiteRunTransitionLeaseUsesAbsoluteTimeAndExactExpiry(t *testing.T) {
 	scope := models.Scope{Kind: "local", ID: "lease-offset"}
 	now := time.Date(2026, 10, 3, 0, 0, 0, 123456789, time.UTC)
 	offset := time.FixedZone("caller", 5*60*60+30*60)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	at := now
 	activity := runtimeactivity.NewRunActivityService(store, store, models.WithClock(func() time.Time { return at }))
 	for _, tc := range []struct {

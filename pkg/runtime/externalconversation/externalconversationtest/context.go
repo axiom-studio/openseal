@@ -17,11 +17,11 @@ import (
 // ContextHistoryResolver resolves adapter bindings through the embedded
 // resolver and adds the context history feature to every adapter.
 type ContextHistoryResolver struct {
-	externalconversation.ExternalConversationAdapterResolver
+	externalconversation.AdapterResolver
 }
 
 func (r ContextHistoryResolver) ResolveConversationAdapterBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID, adapterID string) (*skill.BoundConversationAdapter, error) {
-	resolved, err := r.ExternalConversationAdapterResolver.ResolveConversationAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
+	resolved, err := r.AdapterResolver.ResolveConversationAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
 	if err != nil {
 		return nil, err
 	}
@@ -33,13 +33,13 @@ func (r ContextHistoryResolver) ResolveConversationAdapterBinding(ctx context.Co
 // RecordingContextHost records context history reads and answers each with
 // Result and Err, calling AfterRead first when it is set.
 type RecordingContextHost struct {
-	requests  []externalconversation.ExternalConversationContextHostRequest
-	Result    *externalconversation.ExternalConversationContextResult
+	requests  []externalconversation.ContextHostRequest
+	Result    *externalconversation.ContextResult
 	err       error
 	AfterRead func()
 }
 
-func (h *RecordingContextHost) ReadExternalConversationContext(_ context.Context, req externalconversation.ExternalConversationContextHostRequest) (*externalconversation.ExternalConversationContextResult, error) {
+func (h *RecordingContextHost) ReadExternalConversationContext(_ context.Context, req externalconversation.ContextHostRequest) (*externalconversation.ContextResult, error) {
 	h.requests = append(h.requests, req)
 	if h.AfterRead != nil {
 		h.AfterRead()
@@ -71,14 +71,14 @@ func ReceiveContextEvent(t *testing.T, store *sqlite.Store, endpoint *models.Ext
 // NewContextWorker is an inbox worker that reads context history from host
 // and dispatches through a conversation run scheduler; with crash the first
 // dispatch fails after its Run is durable.
-func NewContextWorker(t *testing.T, store *sqlite.Store, resolver externalconversation.ExternalConversationAdapterResolver, host externalconversation.ExternalConversationContextHost, crash bool, opts ...models.ServiceOption) (*externalconversation.ExternalConversationInboxWorker, *CrashAfterDispatch) {
+func NewContextWorker(t *testing.T, store *sqlite.Store, resolver externalconversation.AdapterResolver, host externalconversation.ContextHost, crash bool, opts ...models.ServiceOption) (*externalconversation.InboxWorker, *CrashAfterDispatch) {
 	t.Helper()
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	dispatcher := &CrashAfterDispatch{Next: externalconversation.NewCanonicalExternalConversationDispatcher(scheduler), CrashOnce: crash}
-	worker, err := externalconversation.NewExternalConversationInboxWorker(store, dispatcher, externalconversation.ExternalConversationInboxWorkerConfig{
+	worker, err := externalconversation.NewInboxWorker(store, dispatcher, externalconversation.InboxWorkerConfig{
 		WorkerID: "context-worker", BaseRetry: time.Second, MaximumRetry: time.Minute,
 		ContextHost: host, ContextCatalog: resolver,
 	}, opts...)
@@ -92,7 +92,7 @@ func NewContextWorker(t *testing.T, store *sqlite.Store, resolver externalconver
 // first dispatch after its Run is durable, as a crash would. It counts the
 // dispatches and keeps the last Run dispatched.
 type CrashAfterDispatch struct {
-	Next       externalconversation.ExternalConversationDispatcher
+	Next       externalconversation.Dispatcher
 	CrashOnce  bool
 	Dispatches int
 	RunID      string
@@ -100,8 +100,8 @@ type CrashAfterDispatch struct {
 
 func (d *CrashAfterDispatch) DispatchExternalConversation(
 	ctx context.Context,
-	req externalconversation.ExternalConversationDispatchRequest,
-) (*externalconversation.ExternalConversationDispatchResult, error) {
+	req externalconversation.DispatchRequest,
+) (*externalconversation.DispatchResult, error) {
 	d.Dispatches++
 	result, err := d.Next.DispatchExternalConversation(ctx, req)
 	if err != nil {

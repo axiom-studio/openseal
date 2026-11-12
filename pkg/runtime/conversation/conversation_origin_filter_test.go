@@ -55,7 +55,7 @@ func TestConversationOriginFilter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := open(t)
 			ctx := context.Background()
-			service := conversation.NewConversationService(store)
+			service := conversation.NewService(store)
 			scope := models.Scope{Kind: "tenant", ID: "origin-filter"}
 			builder := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
 			other := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}

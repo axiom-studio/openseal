@@ -23,15 +23,15 @@ import (
 
 type conversationActorFixture struct {
 	store        *sqlite.Store
-	service      *runtimeconversation.ConversationService
-	scheduler    *conversationrun.ConversationRunScheduler
+	service      *runtimeconversation.Service
+	scheduler    *conversationrun.Scheduler
 	conversation *models.Conversation
 }
 
 func newConversationActorFixture(t *testing.T, scope models.Scope, agentID string) *conversationActorFixture {
 	t.Helper()
 	store := kerneltest.NewStore(t)
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: agentID},
@@ -89,7 +89,7 @@ func (f *conversationActorFixture) waitingQuestion(t *testing.T, trigger *models
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := portfolio.NewPortfolioService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	child, err := portfolio.NewService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: root.Scope, Kind: models.RunKindAgentWork, Owner: root.Owner, AssignedAgentID: root.Owner.ID,
 		ParentRunID: root.ID, Goal: "Draft the requested report", Source: models.RunSourceRequest,
 	})
@@ -246,8 +246,8 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 	// The run loop claims member A's Run; one of its steps proposes the
 	// reviewed action and the step-end park waits on its approval.
 	loop := actiontest.NewLoopProposalFixture(t, f.store, root, "worker", time.Now().UTC())
-	coordinator := action.NewActionCoordinator(f.store, f.store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
+	coordinator := action.NewCoordinator(f.store, f.store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
 	}), nil)
 	proposal, err := coordinator.Propose(t.Context(), loop.Request(action.ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
@@ -380,7 +380,7 @@ func TestConversationInitiatingUserRejectsUnboundOrMalformedOrigin(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			message := models.CloneChannelMessage(voice)
 			test.change(message)
-			actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, message)
+			actor, valid := runtimeconversation.MessageInitiatingUser(conversation, message)
 			if valid != test.valid || valid && actor != a {
 				t.Fatalf("origin actor = %#v, valid=%v; want valid=%v", actor, valid, test.valid)
 			}

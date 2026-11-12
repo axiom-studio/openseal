@@ -20,7 +20,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// RunLoop is the kernel-owned agent loop (D1): one claim of a Run runs steps
+// Loop is the kernel-owned agent loop (D1): one claim of a Run runs steps
 // until a final answer, a park, a fairness yield, a requeue, a budget pause or
 // a failure. Each step is one agent_turns row; the model's view of the work is
 // the Run's session log, never Run.Checkpoint.
@@ -30,10 +30,10 @@ import (
 // and runs terminal reporting after Drive returns.
 
 const (
-	// RunLoopMaxStepsPerClaim and RunLoopMaxClaimDuration bound one claim
+	// MaxStepsPerClaim and MaxClaimDuration bound one claim
 	// (D13); the Run then yields and the next claim resumes from the log.
-	RunLoopMaxStepsPerClaim = 50
-	RunLoopMaxClaimDuration = 8 * time.Minute
+	MaxStepsPerClaim = 50
+	MaxClaimDuration = 8 * time.Minute
 
 	// maximumFinalRejections is the bound of consecutive final-answer
 	// rejections (A9): the third fails the Run with final_answer_rejected.
@@ -78,15 +78,15 @@ const (
 type StepToolEntryPlanner func(binding *agentrun.TurnRunnerBinding, session *models.AgentSession, step *models.AgentTurn, assistant *models.SessionEntry, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error)
 
 // PlainTextFinalizer judges the text of a model step that made no tool calls
-// (CTL-14 ControlExecutor.PlainTextFinal): ControlFinal accepts it,
-// ControlContinue means a final_rejection note was appended, ControlFailed
+// (CTL-14 control.Executor.PlainTextFinal): control.Final accepts it,
+// control.Continue means a final_rejection note was appended, control.Failed
 // fails the Run.
-type PlainTextFinalizer func(ctx context.Context, cc agentrun.ControlContext, text string) (control.ControlResult, error)
+type PlainTextFinalizer func(ctx context.Context, cc agentrun.ControlContext, text string) (control.Result, error)
 
-type RunLoopConfig struct {
+type Config struct {
 	StepLeaseDuration time.Duration // default 30s (AgentRunWorkerConfig.TurnLeaseDuration)
-	MaxStepsPerClaim  int           // default RunLoopMaxStepsPerClaim
-	MaxClaimDuration  time.Duration // default RunLoopMaxClaimDuration
+	MaxStepsPerClaim  int           // default MaxStepsPerClaim
+	MaxClaimDuration  time.Duration // default MaxClaimDuration
 	Now               func() time.Time
 	// PlanToolEntries and PlainTextFinal are the dispatcher's and the
 	// control section's parts of phases 7 and 8. Both are required.
@@ -94,19 +94,19 @@ type RunLoopConfig struct {
 	PlainTextFinal  PlainTextFinalizer
 }
 
-type RunLoop struct {
+type Loop struct {
 	store    models.KernelStore
 	sessions models.AgentSessionStore
 	activity *runtimeactivity.RunActivityService
 	turns    *runtimeactivity.AgentTurnService
-	actions  *action.ActionCoordinator // nil: no nested-action window
-	config   RunLoopConfig
+	actions  *action.Coordinator // nil: no nested-action window
+	config   Config
 	logger   *zap.SugaredLogger
 }
 
-// NewRunLoop builds the loop over the kernel store. The store must also be
+// New builds the loop over the kernel store. The store must also be
 // the session log (AgentSessionStore).
-func NewRunLoop(store models.KernelStore, actions *action.ActionCoordinator, logger *zap.SugaredLogger, config RunLoopConfig) (*RunLoop, error) {
+func New(store models.KernelStore, actions *action.Coordinator, logger *zap.SugaredLogger, config Config) (*Loop, error) {
 	if store == nil {
 		return nil, errors.New("run loop needs a kernel store")
 	}
@@ -121,10 +121,10 @@ func NewRunLoop(store models.KernelStore, actions *action.ActionCoordinator, log
 		config.StepLeaseDuration = defaultStepLeaseDuration
 	}
 	if config.MaxStepsPerClaim <= 0 {
-		config.MaxStepsPerClaim = RunLoopMaxStepsPerClaim
+		config.MaxStepsPerClaim = MaxStepsPerClaim
 	}
 	if config.MaxClaimDuration <= 0 {
-		config.MaxClaimDuration = RunLoopMaxClaimDuration
+		config.MaxClaimDuration = MaxClaimDuration
 	}
 	if config.Now == nil {
 		config.Now = time.Now
@@ -134,46 +134,46 @@ func NewRunLoop(store models.KernelStore, actions *action.ActionCoordinator, log
 	}
 	activity := runtimeactivity.NewRunActivityService(store, store, models.WithClock(config.Now))
 	turns := runtimeactivity.NewAgentTurnService(store, store, models.WithClock(config.Now))
-	return &RunLoop{
+	return &Loop{
 		store: store, sessions: sessions, activity: activity, turns: turns,
 		actions: actions, config: config, logger: logger,
 	}, nil
 }
 
-func (l *RunLoop) now() time.Time { return l.config.Now().UTC() }
+func (l *Loop) now() time.Time { return l.config.Now().UTC() }
 
 // SetActionCoordinator opens each step's nested-action window on actions.
-func (l *RunLoop) SetActionCoordinator(actions *action.ActionCoordinator) { l.actions = actions }
+func (l *Loop) SetActionCoordinator(actions *action.Coordinator) { l.actions = actions }
 
-type RunLoopClaim struct {
+type Claim struct {
 	Run      *models.AgentRun // claimed, status running, LeaseOwner == WorkerID
 	WorkerID string
 	Binding  *agentrun.TurnRunnerBinding // resolved by the worker
 }
 
-type RunLoopExitReason string
+type ExitReason string
 
 const (
-	RunLoopExitFinal     RunLoopExitReason = "final"      // completed (or failed after an explanation)
-	RunLoopExitParked    RunLoopExitReason = "parked"     // waiting_* / sleeping
-	RunLoopExitYielded   RunLoopExitReason = "yielded"    // fairness, queued
-	RunLoopExitRequeued  RunLoopExitReason = "requeued"   // host retry, stale step lease or park re-plans, queued with AvailableAt
-	RunLoopExitPaused    RunLoopExitReason = "paused"     // budget or output publication
-	RunLoopExitFailed    RunLoopExitReason = "failed"     // Run failed; with Err and the Run left running: an infrastructure error
-	RunLoopExitLeaseLost RunLoopExitReason = "lease_lost" // nothing written after the loss
-	RunLoopExitEnded     RunLoopExitReason = "ended"      // Run became terminal by command
+	ExitFinal     ExitReason = "final"      // completed (or failed after an explanation)
+	ExitParked    ExitReason = "parked"     // waiting_* / sleeping
+	ExitYielded   ExitReason = "yielded"    // fairness, queued
+	ExitRequeued  ExitReason = "requeued"   // host retry, stale step lease or park re-plans, queued with AvailableAt
+	ExitPaused    ExitReason = "paused"     // budget or output publication
+	ExitFailed    ExitReason = "failed"     // Run failed; with Err and the Run left running: an infrastructure error
+	ExitLeaseLost ExitReason = "lease_lost" // nothing written after the loss
+	ExitEnded     ExitReason = "ended"      // Run became terminal by command
 )
 
-type RunLoopExit struct {
+type Exit struct {
 	Run    *models.AgentRun
-	Reason RunLoopExitReason
+	Reason ExitReason
 	Steps  int // producer calls in this claim
 	Err    error
 }
 
 // drive is the state of one claim.
 type drive struct {
-	l        *RunLoop
+	l        *Loop
 	run      *models.AgentRun // latest Run this claim read or wrote
 	binding  *agentrun.TurnRunnerBinding
 	session  *models.AgentSession // current session (moves on promotion)
@@ -183,15 +183,15 @@ type drive struct {
 
 // Drive runs the claim's loop until it exits. ctx is the claim context the
 // worker cancels on Run lease loss.
-func (l *RunLoop) Drive(ctx context.Context, claim RunLoopClaim) RunLoopExit {
+func (l *Loop) Drive(ctx context.Context, claim Claim) Exit {
 	if l == nil {
-		return RunLoopExit{Run: claim.Run, Reason: RunLoopExitFailed, Err: errors.New("run loop is not configured")}
+		return Exit{Run: claim.Run, Reason: ExitFailed, Err: errors.New("run loop is not configured")}
 	}
 	if claim.Run == nil || strings.TrimSpace(claim.WorkerID) == "" || claim.Binding == nil || claim.Binding.Producer == nil {
-		return RunLoopExit{Run: claim.Run, Reason: RunLoopExitFailed, Err: errors.New("run loop claim needs a Run, a worker and a binding with a producer")}
+		return Exit{Run: claim.Run, Reason: ExitFailed, Err: errors.New("run loop claim needs a Run, a worker and a binding with a producer")}
 	}
 	if claim.Run.Status != models.AgentRunStatusRunning || claim.Run.LeaseOwner != claim.WorkerID {
-		return RunLoopExit{Run: claim.Run, Reason: RunLoopExitLeaseLost, Err: models.ErrLeaseLost}
+		return Exit{Run: claim.Run, Reason: ExitLeaseLost, Err: models.ErrLeaseLost}
 	}
 	d := &drive{l: l, run: models.CloneAgentRun(claim.Run), binding: claim.Binding, session: claim.Binding.Session, workerID: claim.WorkerID}
 	started := l.now()
@@ -208,7 +208,7 @@ func (l *RunLoop) Drive(ctx context.Context, claim RunLoopClaim) RunLoopExit {
 	rejections := 0
 	for {
 		if err := ctx.Err(); err != nil {
-			return d.withSteps(RunLoopExit{Run: d.run, Reason: RunLoopExitLeaseLost, Err: err})
+			return d.withSteps(Exit{Run: d.run, Reason: ExitLeaseLost, Err: err})
 		}
 		if d.steps >= l.config.MaxStepsPerClaim || l.now().Sub(started) >= l.config.MaxClaimDuration {
 			return d.withSteps(d.yield(ctx))
@@ -238,7 +238,7 @@ func (l *RunLoop) Drive(ctx context.Context, claim RunLoopClaim) RunLoopExit {
 	}
 }
 
-func (d *drive) withSteps(exit RunLoopExit) RunLoopExit {
+func (d *drive) withSteps(exit Exit) Exit {
 	exit.Steps = d.steps
 	if exit.Run == nil {
 		exit.Run = d.run
@@ -419,40 +419,40 @@ func (d *drive) reloadRun(ctx context.Context) (*models.AgentRun, error) {
 // Exits
 
 // statusExit maps a Run that stopped running after a loop write to its exit.
-func (d *drive) statusExit(run *models.AgentRun) *RunLoopExit {
-	exit := RunLoopExit{Run: run}
+func (d *drive) statusExit(run *models.AgentRun) *Exit {
+	exit := Exit{Run: run}
 	switch {
 	case run.Status == models.AgentRunStatusPaused:
-		exit.Reason = RunLoopExitPaused
+		exit.Reason = ExitPaused
 	case run.Status == models.AgentRunStatusQueued:
-		exit.Reason = RunLoopExitRequeued
+		exit.Reason = ExitRequeued
 	case models.IsWaitingRunStatus(run.Status):
-		exit.Reason = RunLoopExitParked
+		exit.Reason = ExitParked
 	case run.Status == models.AgentRunStatusCompleted:
-		exit.Reason = RunLoopExitFinal
+		exit.Reason = ExitFinal
 	case run.Status == models.AgentRunStatusFailed:
-		exit.Reason = RunLoopExitFailed
+		exit.Reason = ExitFailed
 	case models.IsTerminalAgentRunStatus(run.Status):
-		exit.Reason = RunLoopExitEnded
+		exit.Reason = ExitEnded
 	default:
-		exit.Reason = RunLoopExitLeaseLost
+		exit.Reason = ExitLeaseLost
 	}
 	return &exit
 }
 
 // errorExit leaves the Run as it is (its lease expires and a later claim
 // resumes from the log).
-func (d *drive) errorExit(err error) *RunLoopExit {
-	return &RunLoopExit{Run: d.run, Reason: RunLoopExitFailed, Err: err}
+func (d *drive) errorExit(err error) *Exit {
+	return &Exit{Run: d.run, Reason: ExitFailed, Err: err}
 }
 
 // writeErrorExit classifies an error of a fenced write.
-func (d *drive) writeErrorExit(err error) *RunLoopExit {
+func (d *drive) writeErrorExit(err error) *Exit {
 	switch {
 	case errors.Is(err, errRunEnded):
-		return &RunLoopExit{Run: d.run, Reason: RunLoopExitEnded}
+		return &Exit{Run: d.run, Reason: ExitEnded}
 	case isLeaseLoss(err):
-		return &RunLoopExit{Run: d.run, Reason: RunLoopExitLeaseLost, Err: err}
+		return &Exit{Run: d.run, Reason: ExitLeaseLost, Err: err}
 	}
 	return d.errorExit(err)
 }
@@ -462,7 +462,7 @@ func isLeaseLoss(err error) bool {
 }
 
 // yield ends the claim for fairness (D13); the next claim resumes from the log.
-func (d *drive) yield(ctx context.Context) RunLoopExit {
+func (d *drive) yield(ctx context.Context) Exit {
 	run, err := d.commitRun(ctx, nil, runtimeactivity.RunTransitionRequest{
 		Status: models.AgentRunStatusQueued, EventType: "run.yielded", Summary: "Run yielded after its step slice",
 		Payload: map[string]interface{}{"steps": d.steps},
@@ -470,12 +470,12 @@ func (d *drive) yield(ctx context.Context) RunLoopExit {
 	if err != nil {
 		return *d.writeErrorExit(err)
 	}
-	return RunLoopExit{Run: run, Reason: RunLoopExitYielded}
+	return Exit{Run: run, Reason: ExitYielded}
 }
 
 // requeue puts the Run back in the queue, claimable at availableAt. st's
 // finished step, when not yet applied, is applied by the same write.
-func (d *drive) requeue(ctx context.Context, st *stepState, availableAt *time.Time, reason, summary string) RunLoopExit {
+func (d *drive) requeue(ctx context.Context, st *stepState, availableAt *time.Time, reason, summary string) Exit {
 	run, err := d.commitRun(ctx, st, runtimeactivity.RunTransitionRequest{
 		Status: models.AgentRunStatusQueued, EventType: "run.requeued", Summary: summary, AvailableAt: availableAt,
 		Payload: map[string]interface{}{"reason": reason},
@@ -483,11 +483,11 @@ func (d *drive) requeue(ctx context.Context, st *stepState, availableAt *time.Ti
 	if err != nil {
 		return *d.writeErrorExit(err)
 	}
-	return RunLoopExit{Run: run, Reason: RunLoopExitRequeued}
+	return Exit{Run: run, Reason: ExitRequeued}
 }
 
 // pauseAttempts pauses a Run that used up its attempt budget.
-func (d *drive) pauseAttempts(ctx context.Context) RunLoopExit {
+func (d *drive) pauseAttempts(ctx context.Context) Exit {
 	run, err := d.commitRun(ctx, nil, runtimeactivity.RunTransitionRequest{
 		Status: models.AgentRunStatusPaused, EventType: "budget.exhausted",
 		Summary: "Run paused before exceeding its autonomous attempt budget",
@@ -499,17 +499,17 @@ func (d *drive) pauseAttempts(ctx context.Context) RunLoopExit {
 	if err != nil {
 		return *d.writeErrorExit(err)
 	}
-	return RunLoopExit{Run: run, Reason: RunLoopExitPaused}
+	return Exit{Run: run, Reason: ExitPaused}
 }
 
 // failWithoutStep fails the Run outside a running step (before the first
 // step, or after the step that triggered it was applied). It is never
 // explained by the model.
-func (d *drive) failWithoutStep(ctx context.Context, failure agentrun.LoopFailure, cause error) RunLoopExit {
+func (d *drive) failWithoutStep(ctx context.Context, failure agentrun.LoopFailure, cause error) Exit {
 	failure.Explainable = false
 	res := d.fail(ctx, nil, failure, cause, "")
 	if res.kind != stepExit {
-		return RunLoopExit{Run: d.run, Reason: RunLoopExitFailed, Err: errors.New("run failure did not end the run")}
+		return Exit{Run: d.run, Reason: ExitFailed, Err: errors.New("run failure did not end the run")}
 	}
 	return res.exit
 }

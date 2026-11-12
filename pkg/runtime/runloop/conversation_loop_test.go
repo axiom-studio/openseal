@@ -18,10 +18,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// The conversation seams of the RunLoop (run-loop section 05 §7, §13 on
+// The conversation seams of the Loop (run-loop section 05 §7, §13 on
 // SPEC §2.4), on the SQLite store. A chat Run's binding comes from the
 // conversation turn runner, as the worker resolves it. Runs are driven
-// through the real RunLoop with a recording model producer, or the seams are
+// through the real Loop with a recording model producer, or the seams are
 // called the way the loop calls them (appendStepContext is the loop's
 // phase 3).
 
@@ -33,7 +33,7 @@ func TestChatRunAnswersFromSessionNotGoal(t *testing.T) {
 		producer := &runlooptest.ChatProducer{Answers: []string{"Friday."}}
 		binding := f.Bind(run, producer)
 		exit := f.Drive(run, binding)
-		if exit.Reason != runloop.RunLoopExitFinal || exit.Run.Status != models.AgentRunStatusCompleted {
+		if exit.Reason != runloop.ExitFinal || exit.Run.Status != models.AgentRunStatusCompleted {
 			t.Fatalf("exit = %s, run %s", exit.Reason, exit.Run.Status)
 		}
 		if len(producer.Paths) != 1 {
@@ -209,7 +209,7 @@ func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 
 		trigger := f.Post("pause", "user-1", "Pause the export.")
 		run := f.StartRun(trigger)
-		portfolio := portfolio.NewPortfolioService(f.Store, models.WithClock(func() time.Time { return f.Now }))
+		portfolio := portfolio.NewService(f.Store, models.WithClock(func() time.Time { return f.Now }))
 		work, err := portfolio.CreateAgentRun(f.Ctx, models.CreateAgentRunRequest{
 			Scope: run.Scope, Kind: models.RunKindAgentWork, ParentRunID: run.ID, Owner: run.Owner, AssignedAgentID: "agent-1",
 			Goal: "Export the report", Source: models.RunSourceFork, IdempotencyKey: "work-" + run.ID,
@@ -300,7 +300,7 @@ func TestParticipationStoppedBeforeFirstStepPostsNothing(t *testing.T) {
 		binding := f.Bind(run, producer)
 		f.SetParticipation(false)
 		exit := f.Drive(run, binding)
-		if exit.Reason != runloop.RunLoopExitFinal || exit.Run.Status != models.AgentRunStatusCompleted || exit.Run.Output["participationSkipped"] != true {
+		if exit.Reason != runloop.ExitFinal || exit.Run.Status != models.AgentRunStatusCompleted || exit.Run.Output["participationSkipped"] != true {
 			t.Fatalf("exit = %s %s %#v", exit.Reason, exit.Run.Status, exit.Run.Output)
 		}
 		if len(producer.Paths) != 0 {

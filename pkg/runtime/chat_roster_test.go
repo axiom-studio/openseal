@@ -106,14 +106,14 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}
 	team := chatRosterTeam(scope, "task-agent")
 	store := teamRosterPortfolio{Store: memory, team: team}
-	conversations := conversation.NewConversationService(store)
+	conversations := conversation.NewService(store)
 	seedTestSpace(t, memory, scope)
 	chat, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Team task", IdempotencyKey: "team-task-chat"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	message := conversationruntest.PostMessage(t, conversations, chat, models.ConversationParticipantUser, models.MessageIntentQuestion, "Read the community in the background", "team-task-source")
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: "task-agent", Goal: "Answer", Source: models.RunSourceChat,
 		ConcurrencyKey: models.ConversationRunLane(chat.ID, message.ThreadRootID, "task-agent"),
 		Context:        map[string]interface{}{models.ConversationRunConversationIDContextKey: chat.ID, models.ConversationRunTriggerIDContextKey: message.ID, "threadRootMessageId": message.ThreadRootID},

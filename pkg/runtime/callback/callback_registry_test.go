@@ -18,7 +18,7 @@ func TestCallbackRegistryPinsExactAdapterAndLifecycle(t *testing.T) {
 	catalog := skill.NewCatalogWithStore(store)
 	definition, binding := registerCallbackFixture(t, ctx, catalog)
 	clock := time.Date(2026, 7, 30, 1, 2, 3, 0, time.UTC)
-	registry := NewCallbackRegistry(store, catalog, models.WithClock(func() time.Time { return clock }))
+	registry := NewRegistry(store, catalog, models.WithClock(func() time.Time { return clock }))
 	registry.newID = func() string { return "opaque-route" }
 	created, err := registry.Create(ctx, CreateCallbackRegistrationRequest{
 		ID: "slack-approval", Scope: models.Scope{Kind: "tenant", ID: "one"},
@@ -89,7 +89,7 @@ func TestCallbackRegistryRejectsUndeclaredEvent(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	definition, binding := registerCallbackFixture(t, ctx, catalog)
-	_, err := NewCallbackRegistry(store, catalog).Create(ctx, CreateCallbackRegistrationRequest{
+	_, err := NewRegistry(store, catalog).Create(ctx, CreateCallbackRegistrationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-one"},
 		DeploymentID: "agent-one", Name: "Invalid callback", Provider: "slack",
 		Adapter: models.CallbackAdapterReference{

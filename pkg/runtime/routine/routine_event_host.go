@@ -7,22 +7,22 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// RoutineEventSourceCatalog lists host-owned sources (Google) for event_sources and create_task.
-type RoutineEventSourceCatalog interface {
-	ListRoutineEventSources(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, actingUser string) ([]RoutineEventSourceOption, error)
+// EventSourceCatalog lists host-owned sources (Google) for event_sources and create_task.
+type EventSourceCatalog interface {
+	ListRoutineEventSources(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, actingUser string) ([]EventSourceOption, error)
 }
 
-// Reasons a RoutineEventSourceOption is not available.
+// Reasons a EventSourceOption is not available.
 const (
-	RoutineEventSourceNeedsSignIn            = "needs_sign_in"
-	RoutineEventSourceNotConfigured          = "not_configured"
-	RoutineEventSourceSharedSignInNotAllowed = "shared_sign_in_not_allowed"
+	EventSourceNeedsSignIn            = "needs_sign_in"
+	EventSourceNotConfigured          = "not_configured"
+	EventSourceSharedSignInNotAllowed = "shared_sign_in_not_allowed"
 )
 
-// RoutineEventSourceNew is RoutineEventSourceOption.Source for a webhook routine that gets a new hook.
-const RoutineEventSourceNew = "new"
+// EventSourceNew is EventSourceOption.Source for a webhook routine that gets a new hook.
+const EventSourceNew = "new"
 
-type RoutineEventSourceOption struct {
+type EventSourceOption struct {
 	Kind       models.RoutineEventKind `json:"kind"`
 	Source     string                  `json:"source"` // the SourceRef, or "new" for webhook
 	Label      string                  `json:"label"`
@@ -33,21 +33,21 @@ type RoutineEventSourceOption struct {
 	EventTypes []string                `json:"eventTypes,omitempty"` // github: subscribed types without "github."
 }
 
-// RoutineIndexPublisher tells other processes that a scope's event routines changed. Best effort; the
+// IndexPublisher tells other processes that a scope's event routines changed. Best effort; the
 // receiving host calls Engine.RefreshRoutineIndex(scope). Nil in single-process hosts (desktop daemon, tests).
-type RoutineIndexPublisher interface {
+type IndexPublisher interface {
 	PublishRoutineIndexChange(scope models.Scope)
 }
 
-// RoutineEventLatencyBuckets are the upper bounds in seconds of the match latency histogram.
-var RoutineEventLatencyBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, math.Inf(1)}
+// EventLatencyBuckets are the upper bounds in seconds of the match latency histogram.
+var EventLatencyBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, math.Inf(1)}
 
-// RoutineEventStats is a snapshot of the matcher's and dispatcher's lock-free counters.
-type RoutineEventStats struct {
+// EventStats is a snapshot of the matcher's and dispatcher's lock-free counters.
+type EventStats struct {
 	In, Matched, Dropped         map[models.RoutineEventKind]uint64 // cumulative; Dropped counts overflow rows
 	RunsStarted, TestRunsStarted uint64
 	QueueDepth                   int       // pending events at the dispatcher's last pass
-	MatchLatencyBuckets          []float64 // upper bounds in seconds, RoutineEventLatencyBuckets
+	MatchLatencyBuckets          []float64 // upper bounds in seconds, EventLatencyBuckets
 	MatchLatencyCounts           []uint64  // cumulative per bucket, index hits only
 	MatchLatencySum              float64
 }

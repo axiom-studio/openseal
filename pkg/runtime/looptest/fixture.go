@@ -1,7 +1,7 @@
 package looptest
 
 // Run-loop test kit, part 2 (run-loop section 12 §3.3): Fixture drives the
-// real RunLoop with the production bindings: the model step producer over the
+// real runloop.Loop with the production bindings: the model step producer over the
 // catalog preparer, the run-start preparer, the step tool dispatcher with the
 // governed executor, the control executor and the host tool dispatcher, and
 // the conversation final handler for chats. Only the model, the host tools,
@@ -89,7 +89,7 @@ func WithContextWindow(tokens int64) Option {
 	return func(c *FixtureConfig) { c.contextWindow = tokens }
 }
 
-// WithMaxSteps bounds one claim (RunLoopConfig.MaxStepsPerClaim).
+// WithMaxSteps bounds one claim (runloop.Config.MaxStepsPerClaim).
 func WithMaxSteps(n int) Option {
 	return func(c *FixtureConfig) { c.maxSteps = n }
 }
@@ -211,17 +211,17 @@ type fixturePolicy struct {
 	deny               map[string]bool
 }
 
-func (p *fixturePolicy) evaluate(_ context.Context, in action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+func (p *fixturePolicy) evaluate(_ context.Context, in action.PolicyInput) (action.PolicyDecision, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if in.Bound != nil && p.deny[in.Bound.Action.Name] {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionDeny, Reason: "the fixture policy denies " + in.Bound.Action.Name}, nil
+		return action.PolicyDecision{Disposition: action.DispositionDeny, Reason: "the fixture policy denies " + in.Bound.Action.Name}, nil
 	}
 	if in.Bound == nil || in.Bound.Action.SideEffect == skill.SideEffectRead || !p.writesNeedApproval {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+		return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 	}
-	return action.ActionPolicyDecision{
-		Disposition: action.ActionDispositionRequireApproval, Reason: "writes need review",
+	return action.PolicyDecision{
+		Disposition: action.DispositionRequireApproval, Reason: "writes need review",
 		EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: FixtureUser}}, ApprovalTTL: time.Hour,
 	}, nil
 }
@@ -286,18 +286,18 @@ type Fixture struct {
 	Tools    *FakeHostTools
 	Dispatch *FakeDispatcher
 	policy   *fixturePolicy
-	Actions  *action.ActionCoordinator
+	Actions  *action.Coordinator
 	Approve  *action.ApprovalCoordinator
-	Executor *action.ActionWorker
-	Loop     *runloop.RunLoop
-	Convs    *runtimeconversation.ConversationService
+	Executor *action.Worker
+	Loop     *runloop.Loop
+	Convs    *runtimeconversation.Service
 	WorkerID string // "loop-worker-1"; crash() switches to "loop-worker-2"
 
 	Config     FixtureConfig
-	Portfolio  *portfolio.PortfolioService
-	Scheduler  *conversationrun.ConversationRunScheduler
-	Runner     *conversationrun.ConversationRunTurnRunner
-	Control    *control.ControlExecutor
+	Portfolio  *portfolio.Service
+	Scheduler  *conversationrun.Scheduler
+	Runner     *conversationrun.TurnRunner
+	Control    *control.Executor
 	Dispatcher *runloop.StepToolDispatcher
 	Offered    []capability.ModelAction
 	// chats is the raw store's conversation side. Conversation services
@@ -371,14 +371,14 @@ func NewFixture(t *testing.T, store models.KernelStore, opts ...Option) *Fixture
 	}
 	f.Chats = chats
 	clock := models.WithClock(f.Clock.Now)
-	f.Convs = runtimeconversation.NewConversationService(chats, clock)
-	f.Portfolio = portfolio.NewPortfolioService(f.Store, clock)
-	scheduler, err := conversationrun.NewConversationRunScheduler(chats, chats, conversationrun.ConversationRunSchedulerConfig{}, clock)
+	f.Convs = runtimeconversation.NewService(chats, clock)
+	f.Portfolio = portfolio.NewService(f.Store, clock)
+	scheduler, err := conversationrun.NewScheduler(chats, chats, conversationrun.SchedulerConfig{}, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.Scheduler = scheduler
-	runner, err := conversationrun.NewConversationRunTurnRunner(chats, f.Coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewTurnRunner(chats, f.Coordinator(), conversationrun.TurnRunnerConfig{
 		AttachmentContent: &AnswerVisualContent{}, AgentTurns: runtimeconversation.TurnRunnerResolverFunc(f.AgentBinding),
 	}, clock)
 	if err != nil {
@@ -398,25 +398,25 @@ func loopFixtureStart() time.Time { return time.Now().UTC().Truncate(time.Second
 
 // Coordinator routes every chat message to the fixture's acting Agent: finn,
 // or the first Team member.
-func (f *Fixture) Coordinator() *runtimeconversation.ConversationCoordinator {
+func (f *Fixture) Coordinator() *runtimeconversation.Coordinator {
 	f.T.Helper()
 	members := f.Config.Team
 	if len(members) == 0 {
 		members = []string{FixtureAgent}
 	}
-	participants := runtimeconversation.ConversationParticipantSourceFunc(func(context.Context, runtimeconversation.ConversationParticipantQuery) ([]runtimeconversation.ConversationParticipantBinding, error) {
-		bindings := make([]runtimeconversation.ConversationParticipantBinding, 0, len(members))
+	participants := runtimeconversation.ParticipantSourceFunc(func(context.Context, runtimeconversation.ParticipantQuery) ([]runtimeconversation.ParticipantBinding, error) {
+		bindings := make([]runtimeconversation.ParticipantBinding, 0, len(members))
 		for _, member := range members {
-			bindings = append(bindings, runtimeconversation.ConversationParticipantBinding{
+			bindings = append(bindings, runtimeconversation.ParticipantBinding{
 				Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: member}, SemanticRoles: []string{"assistant"},
 			})
 		}
 		return bindings, nil
 	})
-	router := runtimeconversation.ConversationRouterFunc(func(context.Context, runtimeconversation.ConversationRouteRequest) (runtimeconversation.ConversationRouteDecision, error) {
-		return runtimeconversation.ConversationRouteDecision{AgentID: members[0], Reason: "the fixture routes to the first member"}, nil
+	router := runtimeconversation.RouterFunc(func(context.Context, runtimeconversation.RouteRequest) (runtimeconversation.RouteDecision, error) {
+		return runtimeconversation.RouteDecision{AgentID: members[0], Reason: "the fixture routes to the first member"}, nil
 	})
-	coordinator, err := runtimeconversation.NewConversationCoordinator(f.Convs, participants, router, runtimeconversation.DefaultConversationCoordinatorConfig())
+	coordinator, err := runtimeconversation.NewCoordinator(f.Convs, participants, router, runtimeconversation.DefaultConversationCoordinatorConfig())
 	if err != nil {
 		f.T.Fatal(err)
 	}
@@ -428,11 +428,11 @@ func (f *Fixture) Coordinator() *runtimeconversation.ConversationCoordinator {
 // loop. crash() calls it again for the second worker.
 func (f *Fixture) Build() {
 	f.T.Helper()
-	policy := action.ActionPolicyEvaluatorFunc(f.policy.evaluate)
+	policy := action.PolicyEvaluatorFunc(f.policy.evaluate)
 	clock := models.WithClock(f.Clock.Now)
-	f.Actions = action.NewActionCoordinator(f.Store, f.Store, f.Catalog, policy, nil, clock)
+	f.Actions = action.NewCoordinator(f.Store, f.Store, f.Catalog, policy, nil, clock)
 	f.Approve = action.NewApprovalCoordinator(f.Store, f.Store, action.ApprovalAuthorizerFunc(func(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error { return nil }), clock)
-	f.Executor = action.NewActionWorker(f.Store, f.Catalog, f.Config.credentials, action.ActionDispatcherFunc(f.Dispatch.Dispatch), clock)
+	f.Executor = action.NewWorker(f.Store, f.Catalog, f.Config.credentials, action.DispatcherFunc(f.Dispatch.Dispatch), clock)
 	governed, err := runloop.NewGovernedToolExecutor(runloop.GovernedToolExecutorConfig{
 		Actions: f.Actions, Approvals: f.Approve, Worker: f.Executor, Store: f.Store, Now: f.Clock.Now,
 	})
@@ -440,7 +440,7 @@ func (f *Fixture) Build() {
 		f.T.Fatal(err)
 	}
 	activity := activity.NewRunActivityService(f.Store, f.Store, models.WithClock(f.Clock.Now))
-	f.Control = &control.ControlExecutor{
+	f.Control = &control.Executor{
 		Portfolio: f.Store, Sessions: f.Store.(models.AgentSessionStore), Activity: activity,
 		Conversations: f.Convs, Reporting: f.Chats, Now: f.Clock.Now,
 	}
@@ -454,7 +454,7 @@ func (f *Fixture) Build() {
 	if err != nil {
 		f.T.Fatal(err)
 	}
-	f.Loop, err = runloop.NewRunLoop(f.Store, f.Actions, nil, runloop.RunLoopConfig{
+	f.Loop, err = runloop.New(f.Store, f.Actions, nil, runloop.Config{
 		StepLeaseDuration: FixtureLease, MaxStepsPerClaim: f.Config.maxSteps, Now: f.Clock.Now,
 		PlanToolEntries: f.planToolEntries, PlainTextFinal: f.Control.PlainTextFinal,
 	})
@@ -517,7 +517,7 @@ func (f *Fixture) ChatRun(conversation *models.Conversation, message *models.Cha
 		return result.Run
 	}
 	member := f.Config.Team[0]
-	request := runtimeconversation.ConversationAgentRunRequest(conversation, message)
+	request := runtimeconversation.AgentRunRequest(conversation, message)
 	request.AssignedAgentID = member
 	threadRoot, _ := request.Context["threadRootMessageId"].(string)
 	request.ConcurrencyKey = models.ConversationRunLane(conversation.ID, threadRoot, member)
@@ -598,19 +598,19 @@ func (f *Fixture) Claim(runID string) *models.AgentRun {
 }
 
 // RunClaim claims the Run and drives one claim of the loop.
-func (f *Fixture) RunClaim(runID string) (runloop.RunLoopExit, *models.AgentRun) {
+func (f *Fixture) RunClaim(runID string) (runloop.Exit, *models.AgentRun) {
 	f.T.Helper()
 	return f.RunClaimContext(f.Ctx, runID)
 }
 
-func (f *Fixture) RunClaimContext(ctx context.Context, runID string) (runloop.RunLoopExit, *models.AgentRun) {
+func (f *Fixture) RunClaimContext(ctx context.Context, runID string) (runloop.Exit, *models.AgentRun) {
 	f.T.Helper()
 	claimed := f.Claim(runID)
 	binding := f.Binding(claimed)
 	if binding.Session != nil && claimed.SessionID != binding.Session.ID {
 		claimed = f.MustRun(runID)
 	}
-	exit := f.Loop.Drive(ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.WorkerID, Binding: binding})
+	exit := f.Loop.Drive(ctx, runloop.Claim{Run: claimed, WorkerID: f.WorkerID, Binding: binding})
 	return exit, f.MustRun(runID)
 }
 
@@ -621,7 +621,7 @@ func (f *Fixture) DriveToRest(runID string, maxClaims int) *models.AgentRun {
 	f.T.Helper()
 	for i := 0; i < maxClaims; i++ {
 		exit, run := f.RunClaim(runID)
-		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
+		if exit.Err != nil && exit.Reason != runloop.ExitRequeued {
 			f.T.Fatalf("claim %d of %s exited %s: %v", i+1, runID, exit.Reason, exit.Err)
 		}
 		if run.Status != models.AgentRunStatusQueued {
@@ -660,7 +660,7 @@ func (f *Fixture) Binding(run *models.AgentRun) *agentrun.TurnRunnerBinding {
 // Agent binding the fixture cannot build (Team members, threads, children).
 func (f *Fixture) ConversationBinding(run *models.AgentRun, agent func(*models.AgentRun) *agentrun.TurnRunnerBinding) *agentrun.TurnRunnerBinding {
 	f.T.Helper()
-	runner, err := conversationrun.NewConversationRunTurnRunner(f.Chats, f.Coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewTurnRunner(f.Chats, f.Coordinator(), conversationrun.TurnRunnerConfig{
 		AttachmentContent: &AnswerVisualContent{},
 		AgentTurns: runtimeconversation.TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			return agent(run), nil
@@ -695,7 +695,7 @@ func (f *Fixture) AgentBinding(_ context.Context, run *models.AgentRun) (*agentr
 		}
 		authority = workspace.ChatAuthority(workspaceID)
 	}
-	input := control.ControlAuthorityInput{Run: run, DeploymentID: run.AssignedAgentID, Runs: f.Store, Conversations: f.Chats}
+	input := control.AuthorityInput{Run: run, DeploymentID: run.AssignedAgentID, Runs: f.Store, Conversations: f.Chats}
 	if len(f.Config.Team) > 0 {
 		input.Catalog = loopFixtureTeamCatalog{members: f.Config.Team}
 	}
@@ -709,7 +709,7 @@ func (f *Fixture) AgentBinding(_ context.Context, run *models.AgentRun) (*agentr
 		Capabilities:      loopFixtureCapabilities,
 	})
 	host := FakeStepHost{ScriptedModel: f.Model, FakeHostTools: f.Tools}
-	producer, err := modelstep.NewModelStepProducer(host, preparer, f.Store)
+	producer, err := modelstep.NewProducer(host, preparer, f.Store)
 	if err != nil {
 		f.T.Fatal(err)
 	}

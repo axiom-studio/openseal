@@ -23,7 +23,7 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 	catalog := &toolTransportActionCatalog{ActionExecutionCatalog: baseCatalog, endpoint: "release_deploy"}
 	signer := actiontest.CredentialLeaseSigner{Key: []byte("lease-signing-key")}
 	issuerCalls := 0
-	worker := action.NewActionWorkerWithCredentialLeaseIssuer(store, catalog, action.ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request action.ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
+	worker := action.NewWorkerWithCredentialLeaseIssuer(store, catalog, action.CredentialLeaseIssuerFunc(func(ctx context.Context, request action.CredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
 		issuerCalls++
 		if request.Call == nil || request.Run == nil || request.Call.ID != proposal.Call.ID || request.Run.ID != proposal.Call.RunID || request.Run.AssignedAgentID == "" || request.References["token"] != proposal.Call.CredentialRefs["token"] || request.Transport != "release_deploy" {
 			t.Fatalf("credential lease issue request = %#v", request)
@@ -36,7 +36,7 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 			return nil, err
 		}
 		return action.SignActionCredentialLease(ctx, *lease, signer)
-	}), action.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.DispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		if len(input.Credentials) != 0 || input.CredentialLease == nil || input.CredentialLease.Lease.ActionCallID != proposal.Call.ID || input.CredentialReferences["token"] != proposal.Call.CredentialRefs["token"] {
 			t.Fatalf("opaque dispatch input = %#v", input)
 		}
@@ -77,9 +77,9 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 	catalog, proposal := createRunnableAction(t, store, now)
 	attempts := 0
 	current := now.Add(2 * time.Second)
-	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+	worker := action.NewWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "raw-secret-value"}, nil
-	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		attempts++
 		if attempts == 1 {
 			return nil, errors.New("provider rejected raw-secret-value")
@@ -108,7 +108,7 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 func createRunnableAction(t *testing.T, store models.KernelStore, now time.Time) (*skill.Catalog, *models.ActionProposalResult) {
 	t.Helper()
 	catalog, scope := actiontest.GovernedCatalog(t)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,
 	})

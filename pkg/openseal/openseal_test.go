@@ -447,17 +447,17 @@ func loopResolver(engine **Engine, host StepHost) TurnRunnerResolver {
 
 func loopBindingConfig(engine *Engine, host StepHost) (LoopBindingConfig, error) {
 	store := engine.Store()
-	control := &control.ControlExecutor{Portfolio: store, Sessions: store, Activity: activity.NewRunActivityService(store, store)}
+	control := &control.Executor{Portfolio: store, Sessions: store, Activity: activity.NewRunActivityService(store, store)}
 	var conversations models.ConversationStore
 	if reporting, ok := store.(models.ConversationStore); ok {
 		conversations = reporting
 		control.Reporting = reporting
-		control.Conversations = conversation.NewConversationService(reporting)
+		control.Conversations = conversation.NewService(reporting)
 		control.Conversations.SetReactionProjector(engine.ReactionProjector())
 	}
 	tools, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{
 		Sessions: store, Turns: store, Actions: store,
-		Coordinator: action.NewActionCoordinator(store, store, nil, nil, nil),
+		Coordinator: action.NewCoordinator(store, store, nil, nil, nil),
 		Governed:    engine.GovernedTools(), Control: control,
 	})
 	if err != nil {
@@ -684,7 +684,7 @@ func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T)
 	}
 	// Bypass the Engine hook to model a process dying after the message store
 	// commit and before the immediate Run scheduling call.
-	committedOnly, err := conversation.NewConversationService(store).PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
+	committedOnly, err := conversation.NewService(store).PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: recovered.ID, ExpectedRevision: recovered.Revision,
 		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"},
 		Intent: models.MessageIntentQuestion, Content: "What is the recovered channel state?",

@@ -12,7 +12,7 @@ import (
 // an Agent's 1:1 chat hands work to no one.
 func TestChatDelegationStaysOnTheRoster(t *testing.T) {
 	ctx, scope := context.Background(), models.Scope{Kind: "tenant", ID: "roster"}
-	service := &CollaborationService{teams: collaborationRosterTeams{team: collaborationRosterTeam(scope, "marlow", "harp")}}
+	service := &Service{teams: collaborationRosterTeams{team: collaborationRosterTeam(scope, "marlow", "harp")}}
 	source := &models.AgentRun{ID: "marlow-run", Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "marlow"}
 	for _, recipient := range []models.CollaborationParty{{Type: models.OwnerTypeAgent, ID: "harp"}, {Type: models.OwnerTypeTeam, ID: "crew"}} {
 		if err := service.validateChatDelegation(ctx, source, recipient); err != nil {
@@ -24,7 +24,7 @@ func TestChatDelegationStaysOnTheRoster(t *testing.T) {
 			t.Fatalf("hand-off to %v = %v", recipient, err)
 		}
 	}
-	if err := (&CollaborationService{}).validateChatDelegation(ctx, source, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "harp"}); !errors.Is(err, ErrAgentRequestUnauthorized) {
+	if err := (&Service{}).validateChatDelegation(ctx, source, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "harp"}); !errors.Is(err, ErrAgentRequestUnauthorized) {
 		t.Fatalf("hand-off without a Team roster = %v", err)
 	}
 	own := &models.AgentRun{ID: "own-run", Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "own"}, AssignedAgentID: "own"}

@@ -18,9 +18,9 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-// ControlAuthorityInput is what the loop binding knows about a claim when it
+// AuthorityInput is what the loop binding knows about a claim when it
 // resolves which control tools the Run is offered (section 04 §4).
-type ControlAuthorityInput struct {
+type AuthorityInput struct {
 	// Run is the canonical Run being claimed (a conversation Run keeps its
 	// conversation kind; it is never lowered to Agent work here).
 	Run *models.AgentRun
@@ -40,7 +40,7 @@ type ControlAuthorityInput struct {
 
 // ResolveControlAuthority resolves the control authority of one claim. It is
 // called once per claim so the advertised tool list stays stable.
-func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (agentrun.ControlAuthority, error) {
+func ResolveControlAuthority(ctx context.Context, in AuthorityInput) (agentrun.ControlAuthority, error) {
 	run := in.Run
 	if run == nil {
 		return agentrun.ControlAuthority{}, errors.New("control authority requires a Run")
@@ -106,12 +106,12 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 
 	authority.CanReact = run.Kind == models.RunKindConversation && chatReply && run.AssignedAgentID == agentID
 	if in.Runs != nil && in.Conversations != nil {
-		_, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(ctx, in.Runs, in.Conversations, run)
+		_, conversation, trigger, err := runtimeconversation.WorkOrigin(ctx, in.Runs, in.Conversations, run)
 		if err != nil {
 			return agentrun.ControlAuthority{}, fmt.Errorf("resolve conversation origin: %w", err)
 		}
 		authority.CanAskUser = conversation != nil && trigger != nil && run.AssignedAgentID == agentID &&
-			run.AssignedAgentID == runtimeconversation.ConversationRunAgentID(conversation, run)
+			run.AssignedAgentID == runtimeconversation.RunAgentID(conversation, run)
 		authority.ExternalChannelReply = models.IsExternalChannelConversation(conversation)
 		_, authority.ApprovalMode, err = action.RunConversationApprovalMode(ctx, in.Runs, in.Conversations, run)
 		if err != nil {

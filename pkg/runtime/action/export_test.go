@@ -49,28 +49,28 @@ func NewActionWorkerSupervisorRetiringAfter(
 	store models.KernelStore,
 	catalog agentrun.ActionExecutionCatalog,
 	credentials CredentialResolver,
-	issuer ActionCredentialLeaseIssuer,
+	issuer CredentialLeaseIssuer,
 	dispatcher agentrun.ActionDispatcher,
 	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
 	retire time.Duration,
-) (*ActionWorkerSupervisor, error) {
+) (*WorkerSupervisor, error) {
 	return newActionWorkerSupervisor(store, catalog, credentials, issuer, dispatcher, source, logger, config, retire)
 }
 
-func (c *ActionCoordinator) SetNewID(newID func() string) { c.newID = newID }
+func (c *Coordinator) SetNewID(newID func() string) { c.newID = newID }
 
-func (c *ActionCoordinator) SetNestedLimits(calls, concurrent int) {
+func (c *Coordinator) SetNestedLimits(calls, concurrent int) {
 	c.nestedMaxCalls, c.nestedMaxConcurrent = calls, concurrent
 }
 
 func (c *ApprovalCoordinator) SetNewID(newID func() string) { c.newID = newID }
 
-func (w *ActionWorker) SetNewID(newID func() string) { w.newID = newID }
+func (w *Worker) SetNewID(newID func() string) { w.newID = newID }
 
-func (w *ActionWorker) SetLoopLease(lease time.Duration) { w.loopLease = lease }
+func (w *Worker) SetLoopLease(lease time.Duration) { w.loopLease = lease }
 
-func (w *ActionWorker) SetOnClaim(onClaim func()) { w.onClaim = onClaim }
+func (w *Worker) SetOnClaim(onClaim func()) { w.onClaim = onClaim }
 
-func (w *ActionWorker) SetCredentials(credentials CredentialResolver) { w.credentials = credentials }
+func (w *Worker) SetCredentials(credentials CredentialResolver) { w.credentials = credentials }

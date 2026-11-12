@@ -21,7 +21,7 @@ import (
 )
 
 type switchableConversationAdapterResolver struct {
-	externalconversation.ExternalConversationAdapterResolver
+	externalconversation.AdapterResolver
 	unavailable bool
 }
 
@@ -34,7 +34,7 @@ func (r *switchableConversationAdapterResolver) ResolveConversationAdapter(
 	if r.unavailable {
 		return nil, errors.New("adapter unavailable")
 	}
-	return r.ExternalConversationAdapterResolver.ResolveConversationAdapter(ctx, scope, deploymentID, skillID, skillVersion, adapterID, binding...)
+	return r.AdapterResolver.ResolveConversationAdapter(ctx, scope, deploymentID, skillID, skillVersion, adapterID, binding...)
 }
 
 func (r *switchableConversationAdapterResolver) ResolveConversationAdapterBinding(
@@ -45,13 +45,13 @@ func (r *switchableConversationAdapterResolver) ResolveConversationAdapterBindin
 	if r.unavailable {
 		return nil, errors.New("adapter unavailable")
 	}
-	return r.ExternalConversationAdapterResolver.ResolveConversationAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
+	return r.AdapterResolver.ResolveConversationAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
 }
 
 func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
-	service := externalconversation.NewExternalConversationEndpointService(store, catalog)
+	service := externalconversation.NewEndpointService(store, catalog)
 	endpoint, err := service.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Customer channel", Adapter: adapter,
@@ -146,8 +146,8 @@ func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T
 func TestExternalConversationEndpointCanRetireWhenAdapterIsUnavailable(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
-	resolver := &switchableConversationAdapterResolver{ExternalConversationAdapterResolver: catalog}
-	service := externalconversation.NewExternalConversationEndpointService(store, resolver)
+	resolver := &switchableConversationAdapterResolver{AdapterResolver: catalog}
+	service := externalconversation.NewEndpointService(store, resolver)
 	endpoint, err := service.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-retire", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Retirable endpoint", Adapter: adapter,
@@ -462,7 +462,7 @@ func TestExternalConversationClaimsSerializeOrderingKeysAndParallelizeIndependen
 func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalReplies(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
-	endpoint, err := externalconversation.NewExternalConversationEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
+	endpoint, err := externalconversation.NewEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",
@@ -508,7 +508,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 		t.Fatalf("current adapter is incompatible: provider %q/%q modes %#v/%q", resolvedAfterAmendment.Adapter.Provider, endpoint.Provider, resolvedAfterAmendment.Adapter.EndpointModes, endpoint.Mode)
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	transport := externalconversation.NewExternalConversationTransportService(store, catalog, models.WithClock(func() time.Time { return now }))
+	transport := externalconversation.NewTransportService(store, catalog, models.WithClock(func() time.Time { return now }))
 	event := models.NormalizedExternalConversationEvent{
 		ID: "event/non-mention", Type: capability.ConversationEventMessageReceived,
 		ExternalConversationID: "C/one", ExternalThreadID: "171.001",
@@ -545,7 +545,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 		t.Fatalf("undeclared event error = %v", err)
 	}
 
-	conversations := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return now }))
+	conversations := runtimeconversation.NewService(store, models.WithClock(func() time.Time { return now }))
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
@@ -627,7 +627,7 @@ func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite
 func activeExternalConversationTestEndpoint(t *testing.T, ctx context.Context) (*sqlite.Store, *models.ExternalConversationEndpoint) {
 	t.Helper()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
-	endpoint, err := externalconversation.NewExternalConversationEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
+	endpoint, err := externalconversation.NewEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",

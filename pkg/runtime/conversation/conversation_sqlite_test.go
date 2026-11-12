@@ -27,8 +27,8 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	}
 	ctx := context.Background()
 	fixed := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	primaryService := runtimeconversation.NewConversationService(primary, models.WithClock(func() time.Time { return fixed }))
-	replicaService := runtimeconversation.NewConversationService(replica, models.WithClock(func() time.Time { return fixed }))
+	primaryService := runtimeconversation.NewService(primary, models.WithClock(func() time.Time { return fixed }))
+	replicaService := runtimeconversation.NewService(replica, models.WithClock(func() time.Time { return fixed }))
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	conversationtest.SeedSpace(t, primary, scope)
 	conversation, _, err := primaryService.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
@@ -82,7 +82,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
 		Responders: []models.ConversationResponder{{Participant: agent, Addressed: models.ConversationAddressedRouted, Reason: "owns the release"}},
 	}
-	services := []*runtimeconversation.ConversationService{primaryService, replicaService}
+	services := []*runtimeconversation.Service{primaryService, replicaService}
 	var committed atomic.Int32
 	var failed atomic.Int32
 	failureErrors := make(chan error, 12)
@@ -125,7 +125,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	}
 	defer restarted.Close()
 	restartedServiceClock := func() time.Time { return fixed }
-	restartedService := runtimeconversation.NewConversationService(restarted, models.WithClock(func() time.Time { return restartedServiceClock() }))
+	restartedService := runtimeconversation.NewService(restarted, models.WithClock(func() time.Time { return restartedServiceClock() }))
 	restored, err := restartedService.GetConversation(ctx, scope, conversation.ID)
 	if err != nil || restored.Revision != 3 || restored.LastSequence != 1 {
 		t.Fatalf("restored conversation = %#v, err = %v", restored, err)

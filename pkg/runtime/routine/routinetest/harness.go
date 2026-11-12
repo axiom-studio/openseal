@@ -69,8 +69,8 @@ type EventHarness struct {
 	Store        *sqlite.Store
 	Scope        models.Scope
 	Owner        models.ObjectiveOwner
-	Matcher      *routine.RoutineEventMatcher
-	Dispatcher   *routine.RoutineEventDispatcher
+	Matcher      *routine.EventMatcher
+	Dispatcher   *routine.EventDispatcher
 	Now          time.Time
 	Conversation string
 	Message      string
@@ -100,7 +100,7 @@ func (h *EventHarness) deployOwner() {
 // Chat creates a chat with one user request and returns their IDs.
 func (h *EventHarness) Chat(title string) (string, string) {
 	h.T.Helper()
-	conversations := conversation.NewConversationService(h.Store)
+	conversations := conversation.NewService(h.Store)
 	c, _, err := conversations.CreateConversation(h.Ctx, conversation.CreateConversationRequest{Scope: h.Scope, Owner: h.Owner, Title: title, IdempotencyKey: "chat:" + title})
 	if err != nil {
 		h.T.Fatal(err)
@@ -123,7 +123,7 @@ func (h *EventHarness) Advance(d time.Duration) { h.Now = h.Now.Add(d) }
 // Routine creates an active Gmail routine on its own Google source.
 func (h *EventHarness) Routine(name string, mutate func(*models.RoutineEventTrigger)) *models.RunbookActivation {
 	h.T.Helper()
-	objective, err := portfolio.NewPortfolioService(h.Store).CreateObjective(h.Ctx, portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(h.Store).CreateObjective(h.Ctx, portfolio.CreateObjectiveRequest{
 		Scope: h.Scope, Owner: h.Owner, Title: name, Goal: "Summarize new email for " + name, Status: models.ObjectiveStatusActive,
 		ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
 	})
@@ -177,7 +177,7 @@ func (h *EventHarness) Offer(activation *models.RunbookActivation, count int) []
 	return ids
 }
 
-func (h *EventHarness) Pass() *routine.RoutineEventDispatchResult {
+func (h *EventHarness) Pass() *routine.EventDispatchResult {
 	h.T.Helper()
 	result, err := h.Dispatcher.ReconcileAll(h.Ctx, 200)
 	if err != nil {
@@ -326,9 +326,9 @@ func NewEventHarnessOn(t *testing.T, store *sqlite.Store) *EventHarness {
 		T: t, Ctx: t.Context(), Store: store, Scope: models.Scope{Kind: "tenant", ID: "event-routines"},
 		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, Now: time.Now().UTC(),
 	}
-	h.Matcher = routine.NewRoutineEventMatcher(h.Store, models.WithClock(h.Clock))
+	h.Matcher = routine.NewEventMatcher(h.Store, models.WithClock(h.Clock))
 	t.Cleanup(h.Matcher.Close)
-	h.Dispatcher = routine.NewRoutineEventDispatcher(h.Store, h.Matcher, models.WithClock(h.Clock))
+	h.Dispatcher = routine.NewEventDispatcher(h.Store, h.Matcher, models.WithClock(h.Clock))
 	conversationtest.SeedSpace(t, h.Store, h.Scope)
 	h.deployOwner()
 	h.Conversation, h.Message = h.Chat("Inbox")

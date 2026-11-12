@@ -12,10 +12,10 @@ import (
 // person may not change the Agent.
 var ErrAgentChangeForbidden = errors.New("the person can't change this Agent")
 
-// AgentBuilderHost is what a host adds to the builder actions: model choice
+// Host is what a host adds to the builder actions: model choice
 // and the work that follows a created Agent. A nil host (the OSS daemon)
 // refuses a model choice and does nothing after creation.
-type AgentBuilderHost interface {
+type Host interface {
 	// ValidateAgentModel runs at proposal time for create_agent, update_agent
 	// and try_agent. An error becomes an is_error tool result and no card.
 	ValidateAgentModel(ctx context.Context, scope skill.ScopeReference, model string) error
@@ -58,9 +58,9 @@ type AgentCreated struct {
 	InstallKey string
 }
 
-// AgentBuilderCutoverHost converts the retired change-set drafts into
+// CutoverHost converts the retired change-set drafts into
 // builder conversations at engine start.
-type AgentBuilderCutoverHost interface {
+type CutoverHost interface {
 	// EnsureBuilderAgent makes the builder Agent exist and be builder-ready
 	// (current definition and bindings with the agent builder actions). It
 	// is idempotent and runs before a scope's drafts convert, whether or not

@@ -67,7 +67,7 @@ func TestConversationIdleSchedulingSkipsCaughtUpPayloadReads(t *testing.T) {
 				}
 				counter := &idleScheduleCountingStore{ConversationStore: store, roundError: errors.New("caught-up history must not be loaded")}
 				scheduler := idleScheduleScheduler(t, counter, kernel)
-				result := &ConversationRunReconcileResult{}
+				result := &ReconcileResult{}
 				if err := scheduler.reconcileConversation(t.Context(), conversation, result); err != nil {
 					t.Fatal(err)
 				}
@@ -115,7 +115,7 @@ func TestConversationIdleSchedulingDoesNotTreatDeliveryAsProcessed(t *testing.T)
 		store := kernel.(models.ConversationStore)
 		conversation := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "delivered-unread"}, "channel")
 		conversationtest.CommitChannelMessage(t, store, &conversation, &models.ChannelMessage{ID: "delivered"})
-		if _, _, err := runtimeconversation.NewConversationService(store).AdvanceCursor(t.Context(), runtimeconversation.AdvanceConversationCursorRequest{
+		if _, _, err := runtimeconversation.NewService(store).AdvanceCursor(t.Context(), runtimeconversation.AdvanceConversationCursorRequest{
 			Scope: conversation.Scope, ConversationID: conversation.ID, Participant: idleScheduleParticipant(),
 			DeliveredSequence: 1, ReadSequence: 0,
 		}); err != nil {
@@ -177,7 +177,7 @@ func TestConversationIdleSchedulingRecoversConcurrentPostAfterCaughtUpSnapshot(t
 		counter := &idleScheduleCountingStore{ConversationStore: store, onCursor: func() {
 			conversationtest.CommitChannelMessage(t, store, &conversation, &models.ChannelMessage{ID: "later"})
 		}}
-		if err := idleScheduleScheduler(t, counter, kernel).reconcileConversation(t.Context(), staleSnapshot, &ConversationRunReconcileResult{}); err != nil {
+		if err := idleScheduleScheduler(t, counter, kernel).reconcileConversation(t.Context(), staleSnapshot, &ReconcileResult{}); err != nil {
 			t.Fatal(err)
 		}
 		if counter.messages != 0 || counter.rounds != 0 {
@@ -202,7 +202,7 @@ func TestConversationIdleSchedulingHonorsCommittedRoundAndScopedVisibility(t *te
 		idleScheduleAdvanceCursor(t, store, first)
 		second := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "second"}, "same-channel")
 		conversationtest.CommitChannelMessage(t, store, &second, &models.ChannelMessage{ID: "coordinated"})
-		service := runtimeconversation.NewConversationService(store)
+		service := runtimeconversation.NewService(store)
 		if _, err := service.CommitConversationRouting(t.Context(), runtimeconversation.CommitConversationRoutingRequest{
 			Scope: second.Scope, ConversationID: second.ID, ExpectedRevision: second.Revision,
 			TriggerMessageID: "coordinated", IdempotencyKey: "silent-round",
@@ -237,7 +237,7 @@ func idleScheduleParticipant() models.ConversationParticipant {
 
 func idleScheduleAdvanceCursor(t testing.TB, store models.ConversationStore, conversation *models.Conversation) {
 	t.Helper()
-	if _, _, err := runtimeconversation.NewConversationService(store).AdvanceCursor(context.Background(), runtimeconversation.AdvanceConversationCursorRequest{
+	if _, _, err := runtimeconversation.NewService(store).AdvanceCursor(context.Background(), runtimeconversation.AdvanceConversationCursorRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, Participant: idleScheduleParticipant(),
 		DeliveredSequence: conversation.LastSequence, ReadSequence: conversation.LastSequence,
 	}); err != nil {
@@ -245,9 +245,9 @@ func idleScheduleAdvanceCursor(t testing.TB, store models.ConversationStore, con
 	}
 }
 
-func idleScheduleScheduler(t testing.TB, conversations models.ConversationStore, runs models.RunCommandStore) *ConversationRunScheduler {
+func idleScheduleScheduler(t testing.TB, conversations models.ConversationStore, runs models.RunCommandStore) *Scheduler {
 	t.Helper()
-	scheduler, err := NewConversationRunScheduler(conversations, runs, ConversationRunSchedulerConfig{})
+	scheduler, err := NewScheduler(conversations, runs, SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

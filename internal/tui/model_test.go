@@ -88,14 +88,14 @@ type fakeKernelClient struct {
 	runbookVerifications       map[string]*runbook.VerificationReport
 	runbookUpdates             []routine.UpdateRunbookActivationRequest
 	runbookStarts              []routine.StartRunbookActivationRequest
-	runbookStartResult         *agentrun.AgentRunCommandResult
+	runbookStartResult         *agentrun.CommandResult
 	objectiveKeys              []string
 	objectiveCreates           []kernelapi.CreateObjectiveRequest
 	objectiveUpdates           []kernelapi.UpdateObjectiveRequest
 	scheduleRequests           []kernelapi.ReconcileRunbookSchedulesRequest
 	scheduleResult             *kernelapi.RunbookScheduleReconciliation
-	activityPages              map[string]*activity.ActivityFeedPage
-	activityRequests           []activity.ActivityFeedRequest
+	activityPages              map[string]*activity.FeedPage
+	activityRequests           []activity.FeedRequest
 	commands                   []kernelapi.AgentRunCommandRequest
 	artifacts                  []*models.Artifact
 	downloadBody               string
@@ -603,7 +603,7 @@ func (f *fakeKernelClient) UpdateRunbook(_ context.Context, _ models.Scope, id s
 	return nil, models.ErrRunbookActivationNotFound
 }
 
-func (f *fakeKernelClient) StartRunbook(_ context.Context, _ models.Scope, _ string, request routine.StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error) {
+func (f *fakeKernelClient) StartRunbook(_ context.Context, _ models.Scope, _ string, request routine.StartRunbookActivationRequest) (*agentrun.CommandResult, error) {
 	f.runbookStarts = append(f.runbookStarts, request)
 	if f.runbookStartResult != nil {
 		return f.runbookStartResult, nil
@@ -625,7 +625,7 @@ func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ models.Scope, id
 	return nil, models.ErrObjectiveNotFound
 }
 
-func (f *fakeKernelClient) ListActivity(_ context.Context, request activity.ActivityFeedRequest) (*activity.ActivityFeedPage, error) {
+func (f *fakeKernelClient) ListActivity(_ context.Context, request activity.FeedRequest) (*activity.FeedPage, error) {
 	f.activityRequests = append(f.activityRequests, request)
 	keys := []string{activityTestRequestKey(request), request.RunID, request.AgentID, request.TeamID}
 	for _, key := range keys {
@@ -636,10 +636,10 @@ func (f *fakeKernelClient) ListActivity(_ context.Context, request activity.Acti
 	if page := f.activityPages[request.RunID]; page != nil {
 		return page, nil
 	}
-	return &activity.ActivityFeedPage{}, nil
+	return &activity.FeedPage{}, nil
 }
 
-func activityTestRequestKey(request activity.ActivityFeedRequest) string {
+func activityTestRequestKey(request activity.FeedRequest) string {
 	selector := "agent:" + request.AgentID
 	if request.TeamID != "" {
 		selector = "team:" + request.TeamID
@@ -656,7 +656,7 @@ func activityTestRequestKey(request activity.ActivityFeedRequest) string {
 	}
 	return selector
 }
-func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.CreateAgentRunRequest, key string) (*agentrun.AgentRunCommandResult, error) {
+func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.CreateAgentRunRequest, key string) (*agentrun.CommandResult, error) {
 	f.createKeys = append(f.createKeys, key)
 	f.createRequests = append(f.createRequests, request)
 	if len(f.createErrors) > 0 {
@@ -668,7 +668,7 @@ func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.C
 	}
 	run := testRun("created", models.AgentRunStatusQueued, 1)
 	f.runs = append([]*models.AgentRun{run}, f.runs...)
-	return &agentrun.AgentRunCommandResult{Run: run}, nil
+	return &agentrun.CommandResult{Run: run}, nil
 }
 
 func (f *fakeKernelClient) ListAgentRuns(context.Context, models.AgentRunFilter) ([]*models.AgentRun, error) {
@@ -800,16 +800,16 @@ func (f *fakeKernelClient) GetAgentRun(_ context.Context, _ models.Scope, id str
 	return nil, models.ErrRunNotFound
 }
 
-func (f *fakeKernelClient) CommandAgentRun(_ context.Context, _ models.Scope, id string, request kernelapi.AgentRunCommandRequest) (*agentrun.AgentRunCommandResult, error) {
+func (f *fakeKernelClient) CommandAgentRun(_ context.Context, _ models.Scope, id string, request kernelapi.AgentRunCommandRequest) (*agentrun.CommandResult, error) {
 	f.commands = append(f.commands, request)
 	status := models.AgentRunStatusPaused
-	if request.Kind == agentrun.AgentRunCommandResume {
+	if request.Kind == agentrun.CommandResume {
 		status = models.AgentRunStatusQueued
-	} else if request.Kind == agentrun.AgentRunCommandCancel {
+	} else if request.Kind == agentrun.CommandCancel {
 		status = models.AgentRunStatusCanceled
 	}
 	run := testRun(id, status, request.ExpectedRevision+1)
-	return &agentrun.AgentRunCommandResult{Run: run}, nil
+	return &agentrun.CommandResult{Run: run}, nil
 }
 
 func (f *fakeKernelClient) RegisterTeamDefinition(context.Context, *kernelteam.Definition) (*kernelteam.Definition, error) {
@@ -1556,7 +1556,7 @@ func TestActivityWorkspacePollsPaginatesAndExpandsWithoutLosingSelection(t *test
 	detail.Payload = map[string]interface{}{"approvalId": "approval-7", "decisionReason": "Exact workload and namespace reviewed"}
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability()),
-		activityPages: map[string]*activity.ActivityFeedPage{
+		activityPages: map[string]*activity.FeedPage{
 			"agent:operator":                 {Items: []models.ActivityProjection{summary}, HasMore: true, NextCursor: "cursor-1"},
 			"agent:operator|cursor:cursor-1": {Items: []models.ActivityProjection{summary, older}},
 			"run:run-2|details":              {Items: []models.ActivityProjection{detail}},
@@ -1588,7 +1588,7 @@ func TestActivityWorkspacePollsPaginatesAndExpandsWithoutLosingSelection(t *test
 		Visibility: models.ActivityVisibilityScope, AgentID: "operator", RunID: "run-2",
 		Actor: models.ActivityActor{Type: "system", ID: "worker"}, Summary: "Restart completed", CreatedAt: now.Add(time.Second),
 	}
-	fake.activityPages["agent:operator"] = &activity.ActivityFeedPage{Items: []models.ActivityProjection{newest, summary}, HasMore: true, NextCursor: "new-first-page-cursor"}
+	fake.activityPages["agent:operator"] = &activity.FeedPage{Items: []models.ActivityProjection{newest, summary}, HasMore: true, NextCursor: "new-first-page-cursor"}
 	applyCommand(t, model, model.loadActivity(false))
 	if len(model.activity) != 3 || model.selectedActivity != "event-2" || !model.activityExpanded || model.activityNextCursor != "" {
 		t.Fatalf("poll reconciliation count=%d selected=%q expanded=%t cursor=%q", len(model.activity), model.selectedActivity, model.activityExpanded, model.activityNextCursor)
@@ -1605,7 +1605,7 @@ func TestActivityWorkspacePollsPaginatesAndExpandsWithoutLosingSelection(t *test
 func TestActivityWorkspaceUsesExactTeamSelectorAndFailsClosedOnVersionMismatch(t *testing.T) {
 	teamFake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability()),
-		activityPages: map[string]*activity.ActivityFeedPage{"team:marketing": {Items: []models.ActivityProjection{{
+		activityPages: map[string]*activity.FeedPage{"team:marketing": {Items: []models.ActivityProjection{{
 			ID: "team-event", EventType: "handoff.completed", TeamID: "marketing", Summary: "Launch brief returned", CreatedAt: time.Now().UTC(),
 		}}}},
 	}
@@ -1633,7 +1633,7 @@ func TestActivityWorkspaceUsesExactTeamSelectorAndFailsClosedOnVersionMismatch(t
 	missingDeployment := &fakeKernelClient{
 		document:       kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability(), kernelapi.AgentDefinitionsCapability()),
 		compilationErr: &client.APIError{StatusCode: 404, Message: "Agent deployment was not found in this scope"},
-		activityPages: map[string]*activity.ActivityFeedPage{"agent:operator": {Items: []models.ActivityProjection{{
+		activityPages: map[string]*activity.FeedPage{"agent:operator": {Items: []models.ActivityProjection{{
 			ID: "available-activity", EventType: "run.created", AgentID: "operator", Summary: "Standalone work remains observable", CreatedAt: time.Now().UTC(),
 		}}}},
 	}
@@ -1777,7 +1777,7 @@ func TestObjectiveRunbookInspectionAndLifecycleUseExactPublicCapability(t *testi
 		objectives: []*models.Objective{objective}, runbooks: []*models.RunbookActivation{activation},
 		runbookDefinitions:   map[string]*runbook.Definition{activation.ID: definition},
 		runbookVerifications: map[string]*runbook.VerificationReport{activation.ID: {Valid: true}},
-		runbookStartResult:   &agentrun.AgentRunCommandResult{Run: &models.AgentRun{ID: "run:manual"}},
+		runbookStartResult:   &agentrun.CommandResult{Run: &models.AgentRun{ID: "run:manual"}},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -1873,12 +1873,12 @@ func TestLifecycleCommandUsesSelectedRevisionAndAdvertisedOperation(t *testing.T
 		t.Fatalf("commands = %#v", fake.commands)
 	}
 	command := fake.commands[0]
-	if command.Kind != agentrun.AgentRunCommandPause || command.ExpectedRevision != 7 {
+	if command.Kind != agentrun.CommandPause || command.ExpectedRevision != 7 {
 		t.Fatalf("command = %#v", command)
 	}
 
 	model.runCapability.Operations = []string{kernelapi.OperationList}
-	if command := model.commandSelected(agentrun.AgentRunCommandCancel, ""); command != nil {
+	if command := model.commandSelected(agentrun.CommandCancel, ""); command != nil {
 		t.Fatal("TUI dispatched an unadvertised cancel operation")
 	}
 }
@@ -2348,7 +2348,7 @@ func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "Ship the release", Source: models.RunSourceManual,
 	})
@@ -2420,7 +2420,7 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
 		Goal: "Publish the release", Source: models.RunSourceManual,
 	})
@@ -2513,7 +2513,7 @@ func TestActivityWorkspaceFlowsThroughPublicHTTPKernelBoundary(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "local", ID: "activity-http"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Verify durable Activity", Source: models.RunSourceManual,
 	})

@@ -18,7 +18,7 @@ func TestAgentRunClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "work", Source: models.RunSourceObjective,
@@ -88,7 +88,7 @@ func TestAgentRunAttemptBudgetSurvivesLeaseRecovery(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "attempt-budget"}
 	now := time.Now().UTC()
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "recover at most once", Source: models.RunSourceObjective, Budget: &models.BudgetPolicy{MaxAttempts: 1, MaxTurns: 5},
@@ -113,7 +113,7 @@ func TestAgentRunClaimHonorsCapacityAndScope(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	otherScope := models.Scope{Kind: "tenant", ID: "two"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	service := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	service := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	for i := 0; i < 2; i++ {
 		_, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
@@ -160,7 +160,7 @@ func TestAgentRunClaimHonorsConcurrencyKeyCapacity(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "conversation-capacity"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	for _, candidate := range []struct {
 		key      string
 		priority int
@@ -210,7 +210,7 @@ func TestAgentRunClaimIsolatesRunKinds(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "kinds"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	agentRun, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "ordinary work",
 	})

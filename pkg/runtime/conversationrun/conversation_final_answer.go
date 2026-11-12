@@ -35,7 +35,7 @@ const (
 // (Agent channel Runs and Team member Runs). The Team routing Run posts
 // nothing and does not use it.
 type conversationFinalHandler struct {
-	runner   *ConversationRunTurnRunner
+	runner   *TurnRunner
 	sessions runtimeconversation.LoopSessionEntryLister
 	actions  models.ActionCallReader
 	activity activityAppender
@@ -50,7 +50,7 @@ type activityAppender interface {
 // loop binding already holds. sessions and actions read this Run's tool
 // entries and governed calls (reactions, artifact references, prior delivery
 // rejections); activity may be nil (no visual_rejected event).
-func newConversationFinalHandler(runner *ConversationRunTurnRunner, sessions runtimeconversation.LoopSessionEntryLister, actions models.ActionCallReader, activity activityAppender) *conversationFinalHandler {
+func newConversationFinalHandler(runner *TurnRunner, sessions runtimeconversation.LoopSessionEntryLister, actions models.ActionCallReader, activity activityAppender) *conversationFinalHandler {
 	return &conversationFinalHandler{runner: runner, sessions: sessions, actions: actions, activity: activity}
 }
 
@@ -268,10 +268,10 @@ func answerVisualFollowUpKey(run *models.AgentRun) string {
 }
 
 // checkAnswerVisual runs the host checks (bindings, links, images, places)
-// of ConversationRunTurnRunnerConfig.VisualChecks on a structurally valid
+// of TurnRunnerConfig.VisualChecks on a structurally valid
 // visual and stamps its places. A visual that fails them wraps
 // errInvalidAnswerVisual.
-func (r *ConversationRunTurnRunner) checkAnswerVisual(ctx context.Context, run *models.AgentRun, visual *presentation.Visual) (*presentation.Visual, error) {
+func (r *TurnRunner) checkAnswerVisual(ctx context.Context, run *models.AgentRun, visual *presentation.Visual) (*presentation.Visual, error) {
 	checked := runtimeconversation.CloneVisual(visual)
 	var options presentation.ValidateOptions
 	if r.config.VisualChecks != nil {

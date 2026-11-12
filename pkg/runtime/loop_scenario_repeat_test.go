@@ -520,7 +520,7 @@ func TestLoopRepeatsAreCountedAcrossClaimsAndParks(t *testing.T) {
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Check 6815")
 		exit, after := f.RunClaim(run.ID)
-		if exit.Reason != runloop.RunLoopExitYielded || after.Status != models.AgentRunStatusQueued {
+		if exit.Reason != runloop.ExitYielded || after.Status != models.AgentRunStatusQueued {
 			t.Fatalf("first claim exited %s with %s, want a yield", exit.Reason, after.Status)
 		}
 		if got := len(repeatToolEntries(f, run.ID, "lookup")); got != 2 {

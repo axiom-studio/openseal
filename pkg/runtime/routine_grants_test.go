@@ -125,8 +125,8 @@ func TestCreateTaskAlwaysAsksForItsBriefInEveryMode(t *testing.T) {
 	definition := routine.RunbookManagementSkill()
 	bound := &skill.BoundAction{Definition: definition, Binding: f.bound.Binding, Action: definition.Actions[models.RunbookActionCreateTask]}
 	for _, mode := range []models.ConversationApprovalMode{"", models.ConversationApprovalManual, models.ConversationApprovalAuto, models.ConversationApprovalSkip} {
-		decision, err := policy.EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &models.RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
-		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.ApprovalTimeout != models.ApprovalTimeoutExpire {
+		decision, err := policy.EvaluateAction(t.Context(), runtimeaction.PolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &models.RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
+		if err != nil || decision.Disposition != runtimeaction.DispositionRequireApproval || decision.ApprovalTimeout != models.ApprovalTimeoutExpire {
 			t.Fatalf("mode %q create_task decision = %#v, %v", mode, decision, err)
 		}
 	}
@@ -214,7 +214,7 @@ func (f *routineGrantFixtureState) routineOccurrence(t *testing.T, activation *m
 	t.Helper()
 	now := time.Now().UTC()
 	f.completeOccurrence(t, now)
-	run, err := portfolio.NewPortfolioService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 		Goal: activation.Task.Goal, Source: models.RunSourceSchedule, IdempotencyKey: key,
 		Context: map[string]interface{}{
@@ -274,12 +274,12 @@ func (f *routineGrantFixtureState) reviewEverything(t *testing.T, activation *mo
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtimeconversation.NewConversationApprovalModeService(f.store).SetApprovalMode(t.Context(), runtimeconversation.SetConversationApprovalModeRequest{Scope: f.run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: models.ConversationApprovalManual, Actor: models.ActivityActor{Type: "user", ID: "user"}}); err != nil {
+	if _, err := runtimeconversation.NewApprovalModeService(f.store).SetApprovalMode(t.Context(), runtimeconversation.SetConversationApprovalModeRequest{Scope: f.run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: models.ConversationApprovalManual, Actor: models.ActivityActor{Type: "user", ID: "user"}}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (f *routineGrantFixtureState) propose(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *models.AgentRun, action, key string, arguments map[string]interface{}) *models.ActionProposalResult {
+func (f *routineGrantFixtureState) propose(t *testing.T, coordinator *runtimeaction.Coordinator, run *models.AgentRun, action, key string, arguments map[string]interface{}) *models.ActionProposalResult {
 	t.Helper()
 	result, err := coordinator.Propose(t.Context(), runtimeaction.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", Action: action, Arguments: arguments, IdempotencyKey: key})
 	if err != nil {
@@ -293,7 +293,7 @@ func TestRoutineRunsPerformGrantedActionsWithoutAsking(t *testing.T) {
 	activation, _ := f.createRoutine(t, map[string]interface{}{"action": "mail.send", "label": "Email you the summary", "toOwnerOnly": true})
 	// Manual review in the chat does not stop what the brief approved.
 	f.reviewEverything(t, activation)
-	coordinator := runtimeaction.NewActionCoordinator(f.store, f.store, f.catalog, runtimeaction.NewDefaultActionPolicy(), nil)
+	coordinator := runtimeaction.NewCoordinator(f.store, f.store, f.catalog, runtimeaction.NewDefaultActionPolicy(), nil)
 	coordinator.SetRoutineOwnerAddresses(f.owners)
 
 	cases := []struct {
@@ -333,7 +333,7 @@ func TestRoutineGrantWithoutOwnerLimitAndRevoke(t *testing.T) {
 	f := routineGrantFixture(t)
 	activation, _ := f.createRoutine(t, map[string]interface{}{"action": "mail.note"})
 	f.reviewEverything(t, activation)
-	coordinator := runtimeaction.NewActionCoordinator(f.store, f.store, f.catalog, runtimeaction.NewDefaultActionPolicy(), nil)
+	coordinator := runtimeaction.NewCoordinator(f.store, f.store, f.catalog, runtimeaction.NewDefaultActionPolicy(), nil)
 	run := f.routineOccurrence(t, activation, "before-revoke")
 	if result := f.propose(t, coordinator, run, "note", "note-before", map[string]interface{}{}); result.Approval != nil {
 		t.Fatal("granted note asked")

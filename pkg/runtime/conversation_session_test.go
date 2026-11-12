@@ -42,12 +42,12 @@ func TestConversationSessionIDIsStablePerLane(t *testing.T) {
 	// A 1:1 Agent chat Run, on the channel and on a thread lane.
 	agentChat := &models.Conversation{ID: "chat", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}}
 	message := &models.ChannelMessage{ID: "m1", Scope: scope, ConversationID: "chat", Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "7"}}
-	request := conversation.ConversationAgentRunRequest(agentChat, message)
+	request := conversation.AgentRunRequest(agentChat, message)
 	if request.SessionID == "" || request.SessionID != models.ConversationSessionID(scope, request.ConcurrencyKey) || request.SessionID != ids["base"] {
 		t.Fatalf("agent chat request session = %q, lane %q", request.SessionID, request.ConcurrencyKey)
 	}
 	threaded := &models.ChannelMessage{ID: "m2", Scope: scope, ConversationID: "chat", ThreadRootID: "root", Sender: message.Sender}
-	if request := conversation.ConversationAgentRunRequest(agentChat, threaded); request.SessionID != ids["thread"] {
+	if request := conversation.AgentRunRequest(agentChat, threaded); request.SessionID != ids["thread"] {
 		t.Fatalf("thread request session = %q, want %q", request.SessionID, ids["thread"])
 	}
 
@@ -64,7 +64,7 @@ func TestTeamRoutingRunHasNoSession(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "sessions"}
 	team := &models.Conversation{ID: "chat", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}}
 	message := &models.ChannelMessage{ID: "m1", Scope: scope, ConversationID: "chat", Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "7"}}
-	request := conversation.ConversationAgentRunRequest(team, message)
+	request := conversation.AgentRunRequest(team, message)
 	if request.AssignedAgentID != "" || request.SessionID != "" {
 		t.Fatalf("routing request = agent %q session %q", request.AssignedAgentID, request.SessionID)
 	}

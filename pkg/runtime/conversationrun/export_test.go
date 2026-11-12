@@ -13,25 +13,25 @@ import (
 // conversation run code (control's ask_user tool, the task source fixture)
 // and so cannot be in-package tests of it.
 
-func (s *ConversationRunScheduler) ResumeConversationAnswer(ctx context.Context, conversation *models.Conversation, answer *models.ChannelMessage) (*agentrun.AgentRunCommandResult, bool, error) {
+func (s *Scheduler) ResumeConversationAnswer(ctx context.Context, conversation *models.Conversation, answer *models.ChannelMessage) (*agentrun.CommandResult, bool, error) {
 	return s.resumeConversationAnswer(ctx, conversation, answer)
 }
 
-func (s *ConversationRunScheduler) ReplaceOtherMemberApprovals(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, root string, routed map[string]bool) error {
+func (s *Scheduler) ReplaceOtherMemberApprovals(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, root string, routed map[string]bool) error {
 	return s.replaceOtherMemberApprovals(ctx, conversation, message, root, routed)
 }
 
 // Runs is the run command service the scheduler creates Runs with.
-func (s *ConversationRunScheduler) Runs() *agentrun.RunCommandService {
+func (s *Scheduler) Runs() *agentrun.RunCommandService {
 	return s.runs
 }
 
 // NewPortfolioTurnRunner is a turn runner that only reads Runs from
 // portfolio, enough for ActiveConversationRuns.
-func NewPortfolioTurnRunner(portfolio models.PortfolioStore) *ConversationRunTurnRunner {
-	return &ConversationRunTurnRunner{portfolio: portfolio}
+func NewPortfolioTurnRunner(portfolio models.PortfolioStore) *TurnRunner {
+	return &TurnRunner{portfolio: portfolio}
 }
 
-func (r *ConversationRunTurnRunner) ActiveConversationRuns(ctx context.Context, conversation *models.Conversation, triggers ...*models.ChannelMessage) ([]runtimeconversation.AgentConversationActiveRun, error) {
+func (r *TurnRunner) ActiveConversationRuns(ctx context.Context, conversation *models.Conversation, triggers ...*models.ChannelMessage) ([]runtimeconversation.AgentConversationActiveRun, error) {
 	return r.activeConversationRuns(ctx, conversation, triggers...)
 }

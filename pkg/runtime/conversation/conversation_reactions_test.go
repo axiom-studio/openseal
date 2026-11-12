@@ -44,7 +44,7 @@ func testConversationReactions(t *testing.T, store models.ConversationStore) {
 	ctx := context.Background()
 	fixed := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	tick := 0
-	service := NewConversationService(store, models.WithClock(func() time.Time { tick++; return fixed.Add(time.Duration(tick) * time.Second) }))
+	service := NewService(store, models.WithClock(func() time.Time { tick++; return fixed.Add(time.Duration(tick) * time.Second) }))
 	projector := &recordingReactionProjector{}
 	service.SetReactionProjector(projector)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
@@ -152,11 +152,11 @@ func testConversationReactions(t *testing.T, store models.ConversationStore) {
 		t.Fatalf("external reaction projected back out: %d, %v", len(projector.events), err)
 	}
 
-	changes, err := NewConversationChangeService(store, kerneltest.NewStore(t))
+	changes, err := NewChangeService(store, kerneltest.NewStore(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Limit: 3, Viewer: &models.ConversationViewer{Participant: rio}})
+	page, err := changes.ListChanges(ctx, ChangeRequest{Scope: scope, ConversationID: conversation.ID, Limit: 3, Viewer: &models.ConversationViewer{Participant: rio}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,14 +164,14 @@ func testConversationReactions(t *testing.T, store models.ConversationStore) {
 		len(page.ReactionEvents[0].Reactions) != 5 || len(page.Messages) != 1 || len(page.Messages[0].Reactions) != 5 {
 		t.Fatalf("first change page = %d events, more %v, %+v", len(page.ReactionEvents), page.HasMore, page.Messages)
 	}
-	next, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: page.Cursor, Limit: 100, Viewer: &models.ConversationViewer{Participant: rio}})
+	next, err := changes.ListChanges(ctx, ChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: page.Cursor, Limit: 100, Viewer: &models.ConversationViewer{Participant: rio}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(next.ReactionEvents) != 5 || next.ReactionEvents[0].Sequence != 4 || next.ReactionEvents[4].Emoji != "🎉" || !next.HasChanges {
 		t.Fatalf("next change page = %+v", next.ReactionEvents)
 	}
-	idle, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: next.Cursor, Viewer: &models.ConversationViewer{Participant: rio}})
+	idle, err := changes.ListChanges(ctx, ChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: next.Cursor, Viewer: &models.ConversationViewer{Participant: rio}})
 	if err != nil || len(idle.ReactionEvents) != 0 {
 		t.Fatalf("idle page = %+v, %v", idle, err)
 	}

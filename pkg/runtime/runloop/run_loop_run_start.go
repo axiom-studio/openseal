@@ -36,7 +36,7 @@ func RateLimitedSourceKey(runID, actionCallID string) string {
 	return "rate-limited-source:" + runID + ":" + actionCallID
 }
 
-// RunStartPreparer is the StepPreparer the RunLoop runs first. Actions may be
+// RunStartPreparer is the StepPreparer the Loop runs first. Actions may be
 // nil (no governed tools); then it produces no notes.
 type RunStartPreparer struct {
 	sessions models.AgentSessionStore

@@ -43,7 +43,7 @@ func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) 
 		SkillID: definition.ID, SkillVersion: definition.Version,
 		BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
 	}
-	endpoint, err := externalconversation.NewExternalConversationEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
+	endpoint, err := externalconversation.NewEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",
@@ -104,7 +104,7 @@ func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) 
 	}
 	defer restarted.Close()
 	restartedCatalog := skill.NewCatalogWithStore(restarted)
-	if resolved, err := externalconversation.NewExternalConversationEndpointService(restarted, restartedCatalog).Get(ctx, scope, endpoint.ID); err != nil || resolved.Provider != "slack" {
+	if resolved, err := externalconversation.NewEndpointService(restarted, restartedCatalog).Get(ctx, scope, endpoint.ID); err != nil || resolved.Provider != "slack" {
 		t.Fatalf("restarted endpoint = %#v, %v", resolved, err)
 	}
 	replay := models.CloneExternalConversationInboxItem(inbox)

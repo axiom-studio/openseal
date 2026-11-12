@@ -52,7 +52,7 @@ func newTaskReviewFixture(t *testing.T, calls ...agentrun.LoopToolCall) *control
 	return f
 }
 
-func (f *controlFixture) settleReviewed(callID string, host agentrun.StepHost) ControlResult {
+func (f *controlFixture) settleReviewed(callID string, host agentrun.StepHost) Result {
 	f.t.Helper()
 	cc := f.context(callID, agentrun.ControlAuthority{})
 	cc.Binding.Host = host
@@ -111,7 +111,7 @@ func TestTaskReviewReviseOnceThenRejectFails(t *testing.T) {
 		t.Fatalf("rejection = %#v", value)
 	}
 	result := f.settleReviewed("second", host)
-	if result.Kind != ControlFailed || result.Failure == nil || result.Failure.Code != taskCompletionRejectedCode ||
+	if result.Kind != Failed || result.Failure == nil || result.Failure.Code != taskCompletionRejectedCode ||
 		result.Failure.Kind != conversation.RunFailureKindTaskCompletion || !strings.Contains(result.Failure.Message, "still a plan") ||
 		result.Entry == nil || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("second = %#v", result)
@@ -163,7 +163,7 @@ func TestTaskReviewPlainTextRevise(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireRejectionNote(t, result, "step-2", taskCompletionReviseCode)
-	if result.Kind != ControlContinue {
+	if result.Kind != Continue {
 		t.Fatalf("result = %#v", result)
 	}
 }

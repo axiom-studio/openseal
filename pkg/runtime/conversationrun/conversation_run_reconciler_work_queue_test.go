@@ -26,7 +26,7 @@ func (s *signalConversationStore) ListConversations(ctx context.Context, filter 
 
 func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) {
 	store := &signalConversationStore{Store: kerneltest.NewStore(t)}
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) 
 	source := &workqueuetest.ScopeSource{}
 	source.Active.Store(true)
 	source.Scopes.Store(&[]models.Scope{scope, other})
-	reconciler, err := conversationrun.NewConversationRunReconciler(scheduler, source, nil, conversationrun.ConversationRunReconcilerConfig{Interval: 100 * time.Millisecond})
+	reconciler, err := conversationrun.NewReconciler(scheduler, source, nil, conversationrun.ReconcilerConfig{Interval: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

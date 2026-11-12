@@ -75,7 +75,7 @@ func NewEventRoutine(t *testing.T, hooksAvailable bool) *EventRoutine {
 	google := GoogleSources{
 		{Kind: models.RoutineEventGmailMessage, Source: models.RoutineGoogleSourceRef("user", "g-user"), Label: "your Gmail (user@acme.com)", Available: true, SkillID: "google"},
 		{Kind: models.RoutineEventGmailMessage, Source: models.RoutineGoogleSourceRef("other", "g-other"), Label: "Gmail (other@acme.com)", Available: true, SkillID: "google"},
-		{Kind: models.RoutineEventCalendar, Source: models.RoutineGoogleSourceRef("user", "g-user"), Label: "your Google Calendar (user@acme.com)", Available: false, Reason: routine.RoutineEventSourceNeedsSignIn, SkillID: "google"},
+		{Kind: models.RoutineEventCalendar, Source: models.RoutineGoogleSourceRef("user", "g-user"), Label: "your Google Calendar (user@acme.com)", Available: false, Reason: routine.EventSourceNeedsSignIn, SkillID: "google"},
 	}
 	validator, err := routine.NewRunbookActionValidator(store)
 	if err != nil {
@@ -97,10 +97,10 @@ func NewEventRoutine(t *testing.T, hooksAvailable bool) *EventRoutine {
 
 // GoogleSources returns its options whoever asks, so the
 // kernel's own person check is what is tested.
-type GoogleSources []routine.RoutineEventSourceOption
+type GoogleSources []routine.EventSourceOption
 
-func (c GoogleSources) ListRoutineEventSources(context.Context, models.Scope, models.ObjectiveOwner, string) ([]routine.RoutineEventSourceOption, error) {
-	return append([]routine.RoutineEventSourceOption(nil), c...), nil
+func (c GoogleSources) ListRoutineEventSources(context.Context, models.Scope, models.ObjectiveOwner, string) ([]routine.EventSourceOption, error) {
+	return append([]routine.EventSourceOption(nil), c...), nil
 }
 
 // EventRoutine is the fixture NewEventRoutine builds.

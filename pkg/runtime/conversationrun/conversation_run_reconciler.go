@@ -12,11 +12,11 @@ import (
 	"go.uber.org/zap"
 )
 
-type ConversationRunReconcilerConfig struct {
+type ReconcilerConfig struct {
 	Interval time.Duration
 }
 
-func (c *ConversationRunReconcilerConfig) applyDefaults() error {
+func (c *ReconcilerConfig) applyDefaults() error {
 	if c.Interval == 0 {
 		c.Interval = 5 * time.Second
 	}
@@ -26,14 +26,14 @@ func (c *ConversationRunReconcilerConfig) applyDefaults() error {
 	return nil
 }
 
-// ConversationRunReconciler periodically scans active host scopes so a
+// Reconciler periodically scans active host scopes so a
 // committed message is never dependent on the process surviving the immediate
 // scheduling call. One loop owns reconciliation to avoid local overlap;
 // idempotent Run creation and service cursors make multiple replicas safe.
-type ConversationRunReconciler struct {
-	scheduler *ConversationRunScheduler
+type Reconciler struct {
+	scheduler *Scheduler
 	scopes    workqueue.WorkerScopeSource
-	config    ConversationRunReconcilerConfig
+	config    ReconcilerConfig
 	logger    *zap.SugaredLogger
 	wake      chan struct{}
 	signals   atomic.Pointer[workqueue.WorkSignalStatus]
@@ -44,12 +44,12 @@ type ConversationRunReconciler struct {
 	stopOnce  sync.Once
 }
 
-func NewConversationRunReconciler(
-	scheduler *ConversationRunScheduler,
+func NewReconciler(
+	scheduler *Scheduler,
 	scopes workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
-	config ConversationRunReconcilerConfig,
-) (*ConversationRunReconciler, error) {
+	config ReconcilerConfig,
+) (*Reconciler, error) {
 	if scheduler == nil || scopes == nil {
 		return nil, errors.New("conversation Run scheduler and scope source are required")
 	}
@@ -59,14 +59,14 @@ func NewConversationRunReconciler(
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	reconciler := &ConversationRunReconciler{
+	reconciler := &Reconciler{
 		scheduler: scheduler, scopes: scopes, config: config, logger: logger, wake: make(chan struct{}, 1),
 		queue: workqueue.NewScopeWakeQueue(),
 	}
 	return reconciler, nil
 }
 
-func (r *ConversationRunReconciler) Start(ctx context.Context) {
+func (r *Reconciler) Start(ctx context.Context) {
 	r.startOnce.Do(func() {
 		workerCtx, cancel := context.WithCancel(ctx)
 		r.cancel = cancel
@@ -76,7 +76,7 @@ func (r *ConversationRunReconciler) Start(ctx context.Context) {
 	})
 }
 
-func (r *ConversationRunReconciler) Stop() {
+func (r *Reconciler) Stop() {
 	r.stopOnce.Do(func() {
 		if r.cancel != nil {
 			r.cancel()
@@ -85,7 +85,7 @@ func (r *ConversationRunReconciler) Stop() {
 	})
 }
 
-func (r *ConversationRunReconciler) Wake() {
+func (r *Reconciler) Wake() {
 	select {
 	case r.wake <- struct{}{}:
 	default:
@@ -93,18 +93,18 @@ func (r *ConversationRunReconciler) Wake() {
 }
 
 // WakeScope reconciles one scope promptly instead of every listed scope.
-func (r *ConversationRunReconciler) WakeScope(scope models.Scope) {
+func (r *Reconciler) WakeScope(scope models.Scope) {
 	r.queue.WakeScope(scope)
 }
 
 // SetWorkSignals stops the fixed reconciliation tick while the work queue is
 // healthy: the reconciler then runs only for scopes the queue delivers. Call
 // before Start.
-func (r *ConversationRunReconciler) SetWorkSignals(status *workqueue.WorkSignalStatus) {
+func (r *Reconciler) SetWorkSignals(status *workqueue.WorkSignalStatus) {
 	r.signals.Store(status)
 }
 
-func (r *ConversationRunReconciler) Reconcile(ctx context.Context) error {
+func (r *Reconciler) Reconcile(ctx context.Context) error {
 	scopes, err := r.scopes.ListWorkerScopes(ctx)
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ func (r *ConversationRunReconciler) Reconcile(ctx context.Context) error {
 	return r.reconcileScopes(ctx, workqueue.NormalizeScopes(scopes))
 }
 
-func (r *ConversationRunReconciler) loop(ctx context.Context) {
+func (r *Reconciler) loop(ctx context.Context) {
 	defer r.wg.Done()
 	ticker := time.NewTicker(r.config.Interval)
 	defer ticker.Stop()
@@ -182,7 +182,7 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 	}
 }
 
-func (r *ConversationRunReconciler) reconcileScopes(ctx context.Context, scopes []models.Scope) error {
+func (r *Reconciler) reconcileScopes(ctx context.Context, scopes []models.Scope) error {
 	for _, scope := range scopes {
 		if _, err := r.scheduler.ReconcileScope(ctx, scope); err != nil {
 			return err

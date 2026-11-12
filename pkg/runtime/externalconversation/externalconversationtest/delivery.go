@@ -11,34 +11,34 @@ import (
 // and deletes remove them.
 type StreamChatHost struct {
 	Messages  map[string]string
-	Requests  []externalconversation.ExternalConversationDeliveryHostRequest
+	Requests  []externalconversation.DeliveryHostRequest
 	rejectAll capability.ConversationDeliveryOperation
 	next      int
 }
 
-func (h *StreamChatHost) LookupExternalConversationDelivery(context.Context, externalconversation.ExternalConversationDeliveryHostRequest) (*externalconversation.ExternalConversationDeliveryAcknowledgement, error) {
-	return &externalconversation.ExternalConversationDeliveryAcknowledgement{Status: externalconversation.ExternalConversationAcknowledgementUnknown}, nil
+func (h *StreamChatHost) LookupExternalConversationDelivery(context.Context, externalconversation.DeliveryHostRequest) (*externalconversation.DeliveryAcknowledgement, error) {
+	return &externalconversation.DeliveryAcknowledgement{Status: externalconversation.AcknowledgementUnknown}, nil
 }
 
-func (h *StreamChatHost) DeliverExternalConversation(_ context.Context, request externalconversation.ExternalConversationDeliveryHostRequest) (*externalconversation.ExternalConversationDeliveryHostResult, error) {
+func (h *StreamChatHost) DeliverExternalConversation(_ context.Context, request externalconversation.DeliveryHostRequest) (*externalconversation.DeliveryHostResult, error) {
 	h.Requests = append(h.Requests, request)
 	if request.Delivery.Operation == h.rejectAll {
-		return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeFailed, ErrorCode: "message_not_found"}, nil
+		return &externalconversation.DeliveryHostResult{Outcome: externalconversation.DeliveryOutcomeFailed, ErrorCode: "message_not_found"}, nil
 	}
 	switch request.Delivery.Operation {
 	case capability.ConversationDeliveryMessageSend:
 		h.next++
 		id := "chat-" + string(rune('0'+h.next))
 		h.Messages[id] = request.Message.Content
-		return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+		return &externalconversation.DeliveryHostResult{Outcome: externalconversation.DeliveryOutcomeDelivered, ProviderMessageID: id}, nil
 	case capability.ConversationDeliveryMessageUpdate:
 		id, _ := request.Delivery.Parameters["providerMessageId"].(string)
 		h.Messages[id] = request.Message.Content
-		return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+		return &externalconversation.DeliveryHostResult{Outcome: externalconversation.DeliveryOutcomeDelivered, ProviderMessageID: id}, nil
 	case capability.ConversationDeliveryMessageDelete:
 		id, _ := request.Delivery.Parameters["providerMessageId"].(string)
 		delete(h.Messages, id)
-		return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+		return &externalconversation.DeliveryHostResult{Outcome: externalconversation.DeliveryOutcomeDelivered, ProviderMessageID: id}, nil
 	}
-	return &externalconversation.ExternalConversationDeliveryHostResult{Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: "status"}, nil
+	return &externalconversation.DeliveryHostResult{Outcome: externalconversation.DeliveryOutcomeDelivered, ProviderMessageID: "status"}, nil
 }

@@ -38,7 +38,7 @@ func TestConversationImageBecomesReferencePart(t *testing.T) {
 		t.Fatal(err)
 	}
 	bytesStore := &conversationTestContent{text: content}
-	reader := &ConversationAttachmentReader{artifacts: store, content: bytesStore}
+	reader := &AttachmentReader{artifacts: store, content: bytesStore}
 	conversation := &models.Conversation{ID: "chat", Scope: artifact.Scope}
 	message := &models.ChannelMessage{ID: "message", Scope: artifact.Scope, ConversationID: "chat", References: []models.ConversationReference{{Kind: models.ConversationReferenceArtifact, ID: artifact.ID, Version: 1}}}
 	got := reader.parts(t.Context(), conversation, message, models.MaxUserEntryContentBytes)
@@ -146,7 +146,7 @@ func TestConversationAttachmentScopeAndProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	bytesStore := &conversationTestContent{text: content}
-	reader := &ConversationAttachmentReader{artifacts: store, content: bytesStore}
+	reader := &AttachmentReader{artifacts: store, content: bytesStore}
 	conversation := &models.Conversation{ID: "chat", Scope: artifact.Scope}
 	message := &models.ChannelMessage{ID: "message", Scope: artifact.Scope, ConversationID: "chat", References: []models.ConversationReference{
 		{Kind: models.ConversationReferenceArtifact, ID: "file", Version: 1},

@@ -58,7 +58,7 @@ func TestRunbookActionOwnerChecksTheCurrentRoster(t *testing.T) {
 func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	ctx, store, scope := t.Context(), kerneltest.NewStore(t), models.Scope{Kind: "tenant", ID: "task-test"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	conversationtest.SeedSpace(t, store, scope)
 	chat, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
 	if err != nil {
@@ -68,7 +68,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: "researcher", Goal: "Handle request", Source: models.RunSourceChat, Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: chat.ID, models.ConversationRunTriggerIDContextKey: posted.Message.ID}})
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: "researcher", Goal: "Handle request", Source: models.RunSourceChat, Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: chat.ID, models.ConversationRunTriggerIDContextKey: posted.Message.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}

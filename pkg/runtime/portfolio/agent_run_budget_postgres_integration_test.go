@@ -28,7 +28,7 @@ func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.
 
 	scope := models.Scope{Kind: "tenant", ID: "attempt-budget"}
 	now := time.Now().UTC()
-	portfolio := runtimeportfolio.NewPortfolioService(primary, models.WithClock(func() time.Time { return now }))
+	portfolio := runtimeportfolio.NewService(primary, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "execute within one claim", Source: models.RunSourceObjective, Budget: &models.BudgetPolicy{MaxAttempts: 1, MaxTurns: 4},
@@ -87,7 +87,7 @@ func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.
 		!models.RunAttemptBudgetAtLimit(recovered) || models.RunAttemptBudgetExceeded(recovered) {
 		t.Fatalf("recovered attempt = %#v", recovered)
 	}
-	loaded, err := runtimeportfolio.NewPortfolioService(replica).GetAgentRun(ctx, scope, run.ID)
+	loaded, err := runtimeportfolio.NewService(replica).GetAgentRun(ctx, scope, run.ID)
 	if err != nil || loaded.Status != models.AgentRunStatusPaused || loaded.BudgetUsage.Attempts != 1 {
 		t.Fatalf("replica restart view = %#v, %v", loaded, err)
 	}

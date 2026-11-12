@@ -68,17 +68,17 @@ func (c RunProgressAcknowledgementWorkerConfig) normalize() (RunProgressAcknowle
 // the bound conversation adapter choose its declared presentation capability.
 type RunProgressAcknowledgementWorker struct {
 	store         models.RunProgressAcknowledgementStore
-	resolver      ExternalConversationAdapterResolver
+	resolver      AdapterResolver
 	renderer      agentrun.RunProgressAcknowledgementRenderer
-	conversations *runtimeconversation.ConversationService
-	transport     *ExternalConversationTransportService
+	conversations *runtimeconversation.Service
+	transport     *TransportService
 	config        RunProgressAcknowledgementWorkerConfig
 	now           func() time.Time
 }
 
 func NewRunProgressAcknowledgementWorker(
 	store models.RunProgressAcknowledgementStore,
-	resolver ExternalConversationAdapterResolver,
+	resolver AdapterResolver,
 	renderer agentrun.RunProgressAcknowledgementRenderer,
 	config RunProgressAcknowledgementWorkerConfig,
 	opts ...models.ServiceOption,
@@ -91,8 +91,8 @@ func NewRunProgressAcknowledgementWorker(
 		return nil, err
 	}
 	return &RunProgressAcknowledgementWorker{
-		store: store, resolver: resolver, renderer: renderer, conversations: runtimeconversation.NewConversationService(store, opts...),
-		transport: NewExternalConversationTransportService(store, resolver, opts...), config: normalized, now: models.ClockFrom(opts),
+		store: store, resolver: resolver, renderer: renderer, conversations: runtimeconversation.NewService(store, opts...),
+		transport: NewTransportService(store, resolver, opts...), config: normalized, now: models.ClockFrom(opts),
 	}, nil
 }
 

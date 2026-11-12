@@ -70,9 +70,9 @@ func cancelTerminalCloseRun(t *testing.T, store terminalCloseTestStore, service 
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+	result, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
 		Scope: current.Scope, RunID: current.ID, ExpectedRevision: current.Revision,
-		Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: "7"},
+		Kind: agentrun.CommandCancel, Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil {
 		t.Fatalf("cancel: %v", err)

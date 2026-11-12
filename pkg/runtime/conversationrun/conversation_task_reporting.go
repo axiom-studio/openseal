@@ -33,7 +33,7 @@ func FindConversationTaskResultMessage(ctx context.Context, store models.Convers
 		}
 		return message, nil
 	}
-	verified, sourceReport, err := conversation.ConversationTaskForReport(ctx, store, run)
+	verified, sourceReport, err := conversation.TaskForReport(ctx, store, run)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func projectConversationTaskContinuationResult(ctx context.Context, store models
 	if source == nil {
 		return models.ErrChannelMessageNotFound
 	}
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	channel, err := service.GetConversation(ctx, task.Scope, task.ConversationID)
 	if err != nil {
 		return err

@@ -42,7 +42,7 @@ type forkCall struct {
 	assistant *models.SessionEntry
 	step      *models.AgentTurn
 	entry     *models.SessionEntry
-	exec      *ControlExecutor
+	exec      *Executor
 	authority agentrun.ControlAuthority
 }
 
@@ -64,7 +64,7 @@ func newForkCall(t *testing.T, store forkTestStore, budget *models.BudgetPolicy,
 	t.Helper()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "fork-" + uuid.NewString()[:8]}
-	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	created, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a",
 		Goal: "compare two vendors", Source: models.RunSourceObjective, Budget: budget,
 		Context: map[string]interface{}{"projectId": "p1"},
@@ -134,7 +134,7 @@ func newForkCall(t *testing.T, store forkTestStore, budget *models.BudgetPolicy,
 		t: t, ctx: ctx, store: store, sessions: sessions, scope: scope, run: run, session: session,
 		user: userStored, assistant: appended.Entries[0], entry: appended.Entries[1],
 		step: &models.AgentTurn{ID: stepID, RunID: run.ID, Sequence: 1, Status: models.AgentTurnStatusCompleted},
-		exec: &ControlExecutor{Portfolio: store, Sessions: sessions, Forks: agentrun.NewRunForkCoordinator(store)},
+		exec: &Executor{Portfolio: store, Sessions: sessions, Forks: agentrun.NewRunForkCoordinator(store)},
 		authority: agentrun.ControlAuthority{ForkAllowed: true, ForkTargets: []agentrun.HostedAgentTarget{
 			{ID: "agent-b", DisplayName: "Researcher"},
 		}},
@@ -142,13 +142,13 @@ func newForkCall(t *testing.T, store forkTestStore, budget *models.BudgetPolicy,
 }
 
 func (c *forkCall) context() agentrun.ControlContext {
-	return NewControlContext(agentrun.StepToolsInput{
+	return NewContext(agentrun.StepToolsInput{
 		Run: c.run, Step: c.step, Session: c.session, WorkerID: forkTestWorker,
 		Binding: &agentrun.TurnRunnerBinding{Authority: c.authority}, Assistant: c.assistant,
 	}, c.entry)
 }
 
-func (c *forkCall) settle() ControlResult {
+func (c *forkCall) settle() Result {
 	c.t.Helper()
 	result, err := c.exec.Settle(c.ctx, c.context())
 	if err != nil {
@@ -178,7 +178,7 @@ func (c *forkCall) storedEntry() *models.SessionEntry {
 	return entry
 }
 
-func (c *forkCall) meta() *ControlEntryMeta {
+func (c *forkCall) meta() *EntryMeta {
 	c.t.Helper()
 	meta, err := DecodeControlEntryMeta(c.storedEntry())
 	if err != nil || meta == nil {
@@ -241,7 +241,7 @@ func (c *forkCall) reclaim() {
 	c.t.Fatal("source was never reclaimed")
 }
 
-func (c *forkCall) resume() ControlResume {
+func (c *forkCall) resume() Resume {
 	c.t.Helper()
 	resumed, err := c.exec.Resume(c.ctx, c.context())
 	if err != nil {
@@ -274,7 +274,7 @@ func TestForkParksSourceAndCreatesAgentWorkChildren(t *testing.T) {
 		c := newForkCall(t, store, nil, twoBranchFork)
 		checkpointBefore := maps.Clone(c.run.Checkpoint)
 		result := c.settle()
-		if result.Kind != ControlParked || result.Park == nil || !result.Park.Committed ||
+		if result.Kind != Parked || result.Park == nil || !result.Park.Committed ||
 			result.Park.Status != models.AgentRunStatusWaitingForDependency || result.Park.Wake == nil || result.Park.Wake.Type != "run_dependencies" {
 			t.Fatalf("result = %#v park %#v", result, result.Park)
 		}
@@ -329,7 +329,7 @@ func TestForkResumeReturnsEachBranchFinalAnswer(t *testing.T) {
 		}
 		c.reclaim()
 		resumed := c.resume()
-		if !resumed.Resolved || resumed.Result.Kind != ControlContinue {
+		if !resumed.Resolved || resumed.Result.Kind != Continue {
 			t.Fatalf("resume = %#v", resumed)
 		}
 		if c.entry.State != models.ToolEntryCompleted || c.entry.Tool.Result.IsError {
@@ -393,7 +393,7 @@ func TestForkFailedBranchIsErrorResultNotRunFailure(t *testing.T) {
 		}
 		c.reclaim()
 		resumed := c.resume()
-		if !resumed.Resolved || resumed.Result.Kind != ControlContinue {
+		if !resumed.Resolved || resumed.Result.Kind != Continue {
 			t.Fatalf("resume = %#v", resumed)
 		}
 		if c.entry.State != models.ToolEntryError || !c.entry.Tool.Result.IsError || c.entry.Tool.Result.Status != models.ToolResultFailed {
@@ -447,7 +447,7 @@ func TestForkCrashBeforeCreateResettlesOnce(t *testing.T) {
 		c.run = c.getRun(c.run.ID)
 		c.run.LastAppliedTurn = 1
 		result := c.settle()
-		if result.Kind != ControlParked || !result.Park.Committed {
+		if result.Kind != Parked || !result.Park.Committed {
 			t.Fatalf("re-settle = %#v", result)
 		}
 		children, err = store.ListAgentRuns(c.ctx, models.AgentRunFilter{Scope: c.scope, ParentRunID: c.run.ID, Limit: 10})
@@ -510,7 +510,7 @@ func TestForkOtherAgentNotOfferedIsToolError(t *testing.T) {
 		c := newForkCall(t, store, nil, `{"branches":[{"goal":"A"},{"goal":"B","agentId":"agent-z"}]}`)
 		result := c.settle()
 		value, raw := forkResult(t, c.entry)
-		if result.Kind != ControlContinue || c.entry.State != models.ToolEntryError || value["error"] != "agent_not_eligible" {
+		if result.Kind != Continue || c.entry.State != models.ToolEntryError || value["error"] != "agent_not_eligible" {
 			t.Fatalf("result %#v entry %s %s", result.Kind, c.entry.State, raw)
 		}
 	})
@@ -520,7 +520,7 @@ func TestForkInsufficientBudgetIsToolError(t *testing.T) {
 	forkStores(t, func(t *testing.T, store forkTestStore) {
 		c := newForkCall(t, store, &models.BudgetPolicy{MaxTurns: 10}, twoBranchFork)
 		result := c.settle()
-		if result.Kind != ControlContinue || c.entry.State != models.ToolEntryError {
+		if result.Kind != Continue || c.entry.State != models.ToolEntryError {
 			t.Fatalf("result = %#v entry %s", result, c.entry.State)
 		}
 		value, raw := forkResult(t, c.entry)
@@ -541,7 +541,7 @@ func TestForkBoundedRunFundsMinimumChildren(t *testing.T) {
 	const childMinimumTurns = 8 // the Turns every child is funded with at least
 	forkStores(t, func(t *testing.T, store forkTestStore) {
 		c := newForkCall(t, store, &models.BudgetPolicy{MaxTurns: 40}, twoBranchFork)
-		if result := c.settle(); result.Kind != ControlParked {
+		if result := c.settle(); result.Kind != Parked {
 			t.Fatalf("result = %#v", result)
 		}
 		for _, id := range c.meta().ChildRunIDs {
@@ -566,7 +566,7 @@ func TestForkRefusedWhenMessageArrived(t *testing.T) {
 		}
 		result := c.settle()
 		value, raw := forkResult(t, c.entry)
-		if result.Kind != ControlContinue || c.entry.State != models.ToolEntryError || value["error"] != forkNewMessageCode {
+		if result.Kind != Continue || c.entry.State != models.ToolEntryError || value["error"] != forkNewMessageCode {
 			t.Fatalf("result %s entry %s %s", result.Kind, c.entry.State, raw)
 		}
 		children, err := store.ListAgentRuns(c.ctx, models.AgentRunFilter{Scope: c.scope, ParentRunID: c.run.ID, Limit: 10})

@@ -180,9 +180,9 @@ func TestActionRuntimeMaintenanceCoordinatorRejectsBeforeCatalogAndPolicy(t *tes
 		}
 		before := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 		catalogCalls, policyCalls := 0, 0
-		coordinator := action.NewActionCoordinator(kernel, kernel, &actiontest.CountingCatalog{ActionExecutionCatalog: fixture.catalog, Calls: &catalogCalls}, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		coordinator := action.NewCoordinator(kernel, kernel, &actiontest.CountingCatalog{ActionExecutionCatalog: fixture.catalog, Calls: &catalogCalls}, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
 			policyCalls++
-			return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+			return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 		}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
 		result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 			Scope: before.Scope, RunID: before.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
@@ -218,10 +218,10 @@ func TestActionRuntimeMaintenanceObservedAfterClaimDefersWithoutFailure(t *testi
 				if boundary == "after_catalog" {
 					catalog.AfterResolve = func() { wrapped.active = true }
 				}
-				worker := action.NewActionWorker(wrapped, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+				worker := action.NewWorker(wrapped, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 					credentialCalls++
 					return map[string]string{"token": "secret"}, nil
-				}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+				}), action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 					dispatches++
 					return map[string]interface{}{"providerResult": "delivered"}, nil
 				}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
@@ -276,9 +276,9 @@ func TestActionRuntimeMaintenanceVerifiedReleaseUsesFreshVersion(t *testing.T) {
 			t.Fatalf("released gate did not permit a fresh-version action: %#v, %v", created, err)
 		}
 		dispatches := 0
-		worker := action.NewActionWorker(kernel, fixture.catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+		worker := action.NewWorker(kernel, fixture.catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 			return map[string]string{"token": "secret"}, nil
-		}), action.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		}), action.DispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			dispatches++
 			if input.Bound.Definition.Version != "1.1.0" || input.Bound.Binding.SourceIdentity != gate.SourceIdentity || input.Call.BindingRevision != binding.Revision {
 				t.Fatalf("released action used stale executable authority: %#v", input)
@@ -471,11 +471,11 @@ func assertActionRuntimeMaintenanceNoSubmission(t *testing.T, kernel models.Kern
 	}
 }
 
-func actionRuntimeMaintenanceWorker(kernel models.KernelStore, fixture *actionBindingFenceFixture, catalogCalls, credentialCalls, dispatches *int) *action.ActionWorker {
-	worker := action.NewActionWorker(kernel, &actiontest.CountingCatalog{ActionExecutionCatalog: fixture.catalog, Calls: catalogCalls}, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+func actionRuntimeMaintenanceWorker(kernel models.KernelStore, fixture *actionBindingFenceFixture, catalogCalls, credentialCalls, dispatches *int) *action.Worker {
+	worker := action.NewWorker(kernel, &actiontest.CountingCatalog{ActionExecutionCatalog: fixture.catalog, Calls: catalogCalls}, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		(*credentialCalls)++
 		return map[string]string{"token": "secret"}, nil
-	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		(*dispatches)++
 		return map[string]interface{}{"providerResult": "delivered"}, nil
 	}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))

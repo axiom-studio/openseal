@@ -146,7 +146,7 @@ func withMessageReactions(ctx context.Context, store models.ConversationStore, m
 
 // SetReactionProjector mirrors later reaction changes made through this
 // service to external conversations.
-func (s *ConversationService) SetReactionProjector(projector MessageReactionProjector) {
+func (s *Service) SetReactionProjector(projector MessageReactionProjector) {
 	if s != nil {
 		s.reactions = projector
 	}
@@ -155,17 +155,17 @@ func (s *ConversationService) SetReactionProjector(projector MessageReactionProj
 // AddMessageReaction adds the actor's emoji to a message the actor can see.
 // Adding a present reaction is not an error; Changed reports whether it was
 // new.
-func (s *ConversationService) AddMessageReaction(ctx context.Context, req MessageReactionRequest) (*MessageReactionResult, error) {
+func (s *Service) AddMessageReaction(ctx context.Context, req MessageReactionRequest) (*MessageReactionResult, error) {
 	return s.changeMessageReaction(ctx, req, true)
 }
 
 // RemoveMessageReaction removes the actor's emoji from a message the actor
 // can see. Removing an absent reaction is not an error.
-func (s *ConversationService) RemoveMessageReaction(ctx context.Context, req MessageReactionRequest) (*MessageReactionResult, error) {
+func (s *Service) RemoveMessageReaction(ctx context.Context, req MessageReactionRequest) (*MessageReactionResult, error) {
 	return s.changeMessageReaction(ctx, req, false)
 }
 
-func (s *ConversationService) changeMessageReaction(ctx context.Context, req MessageReactionRequest, add bool) (*MessageReactionResult, error) {
+func (s *Service) changeMessageReaction(ctx context.Context, req MessageReactionRequest, add bool) (*MessageReactionResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -214,7 +214,7 @@ func (s *ConversationService) changeMessageReaction(ctx context.Context, req Mes
 
 // visibleReactionEvents keeps the events on messages the viewer can see and
 // fills each with its message's current reactions.
-func (s *ConversationService) visibleReactionEvents(ctx context.Context, scope models.Scope, conversationID string, events []*models.ConversationReactionEvent, viewer *models.ConversationViewer) ([]*models.ConversationReactionEvent, error) {
+func (s *Service) visibleReactionEvents(ctx context.Context, scope models.Scope, conversationID string, events []*models.ConversationReactionEvent, viewer *models.ConversationViewer) ([]*models.ConversationReactionEvent, error) {
 	if len(events) == 0 {
 		return []*models.ConversationReactionEvent{}, nil
 	}
@@ -330,9 +330,9 @@ type TurnReaction struct {
 // MaximumTurnReactions bounds the reactions one Run may add with react.
 const MaximumTurnReactions = 3
 
-// ConversationReactInstruction is the description of the react control tool
+// ReactInstruction is the description of the react control tool
 // (control/control_interaction.go).
-const ConversationReactInstruction = "Add an emoji reaction as yourself. A reaction is not a reply and never asks anyone to act. When a message needs no real answer (thanks, ok, got it, a joke, good news), react instead of replying, such as 👍 ❤️ 😂 🎉, and finish with an empty answer."
+const ReactInstruction = "Add an emoji reaction as yourself. A reaction is not a reply and never asks anyone to act. When a message needs no real answer (thanks, ok, got it, a joke, good news), react instead of replying, such as 👍 ❤️ 😂 🎉, and finish with an empty answer."
 
 func cloneTurnReactions(in []TurnReaction) []TurnReaction {
 	return append([]TurnReaction(nil), in...)

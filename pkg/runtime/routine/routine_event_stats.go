@@ -67,7 +67,7 @@ func (c *routineEventStatsCounters) observeLatency(elapsed time.Duration) {
 		elapsed = 0
 	}
 	seconds := elapsed.Seconds()
-	for index, bound := range RoutineEventLatencyBuckets {
+	for index, bound := range EventLatencyBuckets {
 		if seconds <= bound {
 			c.latencyCounts[index].Add(1)
 			break
@@ -86,19 +86,19 @@ func (c *routineEventStatsCounters) countRunStarted(test bool) {
 
 // snapshot copies the counters. Latency counts are cumulative per bucket, as
 // a Prometheus histogram expects.
-func (c *routineEventStatsCounters) snapshot() RoutineEventStats {
-	stats := RoutineEventStats{
+func (c *routineEventStatsCounters) snapshot() EventStats {
+	stats := EventStats{
 		In:                  make(map[models.RoutineEventKind]uint64, routineEventKindCount),
 		Matched:             make(map[models.RoutineEventKind]uint64, routineEventKindCount),
 		Dropped:             make(map[models.RoutineEventKind]uint64, routineEventKindCount),
 		RunsStarted:         c.runsStarted.Load(),
 		TestRunsStarted:     c.testRunsStarted.Load(),
 		QueueDepth:          int(c.queueDepth.Load()),
-		MatchLatencyBuckets: append([]float64(nil), RoutineEventLatencyBuckets...),
-		MatchLatencyCounts:  make([]uint64, len(RoutineEventLatencyBuckets)),
+		MatchLatencyBuckets: append([]float64(nil), EventLatencyBuckets...),
+		MatchLatencyCounts:  make([]uint64, len(EventLatencyBuckets)),
 		MatchLatencySum:     time.Duration(c.latencySumNanos.Load()).Seconds(),
 	}
-	for _, kind := range RoutineEventKinds {
+	for _, kind := range EventKinds {
 		slot := routineEventKindSlot(kind)
 		stats.In[kind] = c.in[slot].Load()
 		stats.Matched[kind] = c.matched[slot].Load()
@@ -112,19 +112,19 @@ func (c *routineEventStatsCounters) snapshot() RoutineEventStats {
 	return stats
 }
 
-// RoutineEventBatchView is the folded "what started it" view of one
+// EventBatchView is the folded "what started it" view of one
 // occurrence: the batch and its events' facts, never their payloads.
-type RoutineEventBatchView struct {
-	BatchID      string             `json:"batchId"`
-	ActivationID string             `json:"activationId"`
-	RunID        string             `json:"runId,omitempty"`
-	Test         bool               `json:"test"`
-	Dropped      int                `json:"dropped"`
-	Events       []RoutineEventView `json:"events"`
+type EventBatchView struct {
+	BatchID      string      `json:"batchId"`
+	ActivationID string      `json:"activationId"`
+	RunID        string      `json:"runId,omitempty"`
+	Test         bool        `json:"test"`
+	Dropped      int         `json:"dropped"`
+	Events       []EventView `json:"events"`
 }
 
-// RoutineEventView is one event of a RoutineEventBatchView.
-type RoutineEventView struct {
+// EventView is one event of a EventBatchView.
+type EventView struct {
 	ID         string                  `json:"id"`
 	Kind       models.RoutineEventKind `json:"kind"`
 	OccurredAt time.Time               `json:"occurredAt"`
@@ -132,15 +132,15 @@ type RoutineEventView struct {
 	Fields     map[string][]string     `json:"fields"`
 }
 
-// NewRoutineEventBatchView builds the view of a batch from the records
+// NewEventBatchView builds the view of a batch from the records
 // GetRoutineEventBatch returns, in the batch's event order.
-func NewRoutineEventBatchView(batch *models.RoutineEventBatch, records []*models.RoutineEventRecord) *RoutineEventBatchView {
+func NewEventBatchView(batch *models.RoutineEventBatch, records []*models.RoutineEventRecord) *EventBatchView {
 	if batch == nil {
 		return nil
 	}
-	view := &RoutineEventBatchView{
+	view := &EventBatchView{
 		BatchID: batch.ID, ActivationID: batch.ActivationID, RunID: batch.RunID, Test: batch.Test, Dropped: batch.Dropped,
-		Events: make([]RoutineEventView, 0, len(batch.EventIDs)),
+		Events: make([]EventView, 0, len(batch.EventIDs)),
 	}
 	byID := make(map[string]*models.RoutineEventRecord, len(records))
 	for _, record := range records {
@@ -157,7 +157,7 @@ func NewRoutineEventBatchView(batch *models.RoutineEventBatch, records []*models
 		for key, values := range record.Event.Fields {
 			fields[key] = append([]string(nil), values...)
 		}
-		view.Events = append(view.Events, RoutineEventView{
+		view.Events = append(view.Events, EventView{
 			ID: record.Event.ID, Kind: record.Event.Kind, OccurredAt: record.Event.OccurredAt.UTC(),
 			Summary: record.Event.Summary, Fields: fields,
 		})

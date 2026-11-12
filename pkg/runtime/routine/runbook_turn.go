@@ -33,7 +33,7 @@ import (
 //   - fork / delegate: one kernel control call (runbook_fork /
 //     runbook_delegate). It settles after the step is applied, so the engine
 //     state the children are built from is durable, and calls
-//     ControlExecutor.Fork / Delegate with kernel origin; the tool entry waits
+//     control.Executor.Fork / Delegate with kernel origin; the tool entry waits
 //     awaiting_child and the next step reads the joined result from Run.Output
 //     exactly as before;
 //   - timer or event wait: a Park;

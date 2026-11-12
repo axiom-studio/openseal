@@ -208,7 +208,7 @@ func agentChannelEndpointUpdate(endpoint *models.ExternalConversationEndpoint, d
 func resolveAgentChannelAction(
 	ctx context.Context,
 	agents *kernelagent.Registry,
-	endpoints *externalconversation.ExternalConversationEndpointService,
+	endpoints *externalconversation.EndpointService,
 	run *models.AgentRun,
 	arguments map[string]interface{},
 ) (agentChannelActionArguments, *kernelagent.AgentDeployment, *kernelagent.AgentDefinition, *models.ExternalConversationEndpoint, *kernelagent.AgentDefinition, map[string]interface{}, error) {

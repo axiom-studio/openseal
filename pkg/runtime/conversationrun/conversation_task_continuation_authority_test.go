@@ -200,14 +200,14 @@ func TestConversationTaskContinuationCatalogAndProofUsePersistedActorAndDeadline
 	}
 	forged := models.CloneAgentRun(run)
 	forged.Context[models.ConversationTaskContextKey] = "copied-task-marker"
-	if _, _, err := runtimeconversation.ConversationTaskForReport(t.Context(), store, forged); !errors.Is(err, models.ErrInvalidConversationTask) {
+	if _, _, err := runtimeconversation.TaskForReport(t.Context(), store, forged); !errors.Is(err, models.ErrInvalidConversationTask) {
 		t.Fatalf("copied marker established reporting authority: %v", err)
 	}
 }
 
 func TestConversationTaskContinuationTerminalReportingReusesCanonicalAnswer(t *testing.T) {
 	store, result, _, source := promotedContinuationAuthorityFixture(t, "continuation-answer")
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversation, err := service.GetConversation(t.Context(), result.Task.Scope, result.Task.ConversationID)
 	if err != nil {
 		t.Fatal(err)

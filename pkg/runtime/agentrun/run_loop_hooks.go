@@ -7,7 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
-// The seams the RunLoop calls. Each owning section implements one; the loop
+// The seams the runloop.Loop calls. Each owning section implements one; the loop
 // owns only the order in which they run (SPEC §3.1).
 
 // PromptContribution is the kernel-authored system text the owning section

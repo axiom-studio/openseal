@@ -6,7 +6,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// ConversationRouter picks the one Team member who answers a channel message
+// Router picks the one Team member who answers a channel message
 // that addressed nobody (no @mention, no @everyone, no quoted or replied-to
 // Agent). The host implements it with one small, fast model call and posts
 // nothing. The router encodes, in order: the topic's owner, then whoever the
@@ -17,19 +17,19 @@ import (
 // A router error, or a decision naming someone outside Members, is not
 // retried: OpenSeal routes to LastAgentWithUser, else Lead, else the first
 // member who is not busy.
-type ConversationRouter interface {
-	Route(ctx context.Context, req ConversationRouteRequest) (ConversationRouteDecision, error)
+type Router interface {
+	Route(ctx context.Context, req RouteRequest) (RouteDecision, error)
 }
 
-// ConversationRouterFunc adapts a function to ConversationRouter.
-type ConversationRouterFunc func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error)
+// RouterFunc adapts a function to Router.
+type RouterFunc func(context.Context, RouteRequest) (RouteDecision, error)
 
-func (f ConversationRouterFunc) Route(ctx context.Context, req ConversationRouteRequest) (ConversationRouteDecision, error) {
+func (f RouterFunc) Route(ctx context.Context, req RouteRequest) (RouteDecision, error) {
 	return f(ctx, req)
 }
 
-// ConversationRouteRequest is the lead's view of the Team for one message.
-type ConversationRouteRequest struct {
+// RouteRequest is the lead's view of the Team for one message.
+type RouteRequest struct {
 	Scope          models.Scope
 	ConversationID string
 	TeamID         string
@@ -58,9 +58,9 @@ type RouteMember struct {
 	BusyWith string
 }
 
-// ConversationRouteDecision names the responder. Reason is short and
+// RouteDecision names the responder. Reason is short and
 // user-facing ("owns the press list"); it is shown with the member's answer.
-type ConversationRouteDecision struct {
+type RouteDecision struct {
 	AgentID string
 	Reason  string
 }

@@ -59,8 +59,8 @@ func (f *nestedActionFixture) hostPush(key string) action.NestedHostActionReques
 
 // hostIssuer signs a credential lease for each acquisition, as a host's
 // issuer does, and counts them.
-func (f *nestedActionFixture) hostIssuer(t *testing.T, issued *atomic.Int64) action.ActionCredentialLeaseIssuer {
-	return action.ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request action.ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
+func (f *nestedActionFixture) hostIssuer(t *testing.T, issued *atomic.Int64) action.CredentialLeaseIssuer {
+	return action.CredentialLeaseIssuerFunc(func(ctx context.Context, request action.CredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
 		if request.Transport != "skill-github" || request.References["token"].ID != "credential://github" || request.Call.Execution != models.ActionExecutionHost {
 			t.Fatalf("host lease request = %#v", request)
 		}
@@ -78,8 +78,8 @@ func (f *nestedActionFixture) hostIssuer(t *testing.T, issued *atomic.Int64) act
 }
 
 // refusingWorker fails the test if it dispatches anything.
-func (f *nestedActionFixture) refusingWorker(t *testing.T, at time.Time) *action.ActionWorker {
-	worker := action.NewActionWorker(f.store, f.catalog, nil, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+func (f *nestedActionFixture) refusingWorker(t *testing.T, at time.Time) *action.Worker {
+	worker := action.NewWorker(f.store, f.catalog, nil, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("an action worker dispatched a host call")
 		return nil, nil
 	}), models.WithClock(func() time.Time { return at }))

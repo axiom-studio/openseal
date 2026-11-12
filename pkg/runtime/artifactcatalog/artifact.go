@@ -27,24 +27,24 @@ type ArtifactRegistrationResult struct {
 	Replayed bool             `json:"replayed"`
 }
 
-type ArtifactCatalog struct {
+type Catalog struct {
 	store     models.ArtifactStore
 	placement ArtifactPlacement
 	now       func() time.Time
 }
 
-func NewArtifactCatalog(store models.ArtifactStore, opts ...models.ServiceOption) *ArtifactCatalog {
-	return &ArtifactCatalog{store: store, now: models.ClockFrom(opts)}
+func NewCatalog(store models.ArtifactStore, opts ...models.ServiceOption) *Catalog {
+	return &Catalog{store: store, now: models.ClockFrom(opts)}
 }
 
 // WithPlacement records the chat and space of each artifact the catalog
 // registers from the run that made it.
-func (c *ArtifactCatalog) WithPlacement(placement ArtifactPlacement) *ArtifactCatalog {
+func (c *Catalog) WithPlacement(placement ArtifactPlacement) *Catalog {
 	c.placement = placement
 	return c
 }
 
-func (c *ArtifactCatalog) Register(ctx context.Context, req RegisterArtifactRequest) (*ArtifactRegistrationResult, error) {
+func (c *Catalog) Register(ctx context.Context, req RegisterArtifactRequest) (*ArtifactRegistrationResult, error) {
 	if c == nil || c.store == nil {
 		return nil, errors.New("artifact catalog is not configured")
 	}
@@ -90,7 +90,7 @@ func (c *ArtifactCatalog) Register(ctx context.Context, req RegisterArtifactRequ
 	return &ArtifactRegistrationResult{Artifact: models.CloneArtifact(artifact)}, nil
 }
 
-func (c *ArtifactCatalog) Get(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
+func (c *Catalog) Get(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
 	if c == nil || c.store == nil {
 		return nil, errors.New("artifact catalog is not configured")
 	}
@@ -107,7 +107,7 @@ func (c *ArtifactCatalog) Get(ctx context.Context, scope models.Scope, id string
 	return artifact, nil
 }
 
-func (c *ArtifactCatalog) List(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
+func (c *Catalog) List(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
 	if c == nil || c.store == nil {
 		return nil, errors.New("artifact catalog is not configured")
 	}

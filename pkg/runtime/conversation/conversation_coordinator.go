@@ -20,16 +20,16 @@ var (
 	ErrNoConversationParticipants          = errors.New("conversation has no eligible agent participants")
 )
 
-// ConversationParticipantBinding is one Team member that may answer in a
+// ParticipantBinding is one Team member that may answer in a
 // channel. Hosts resolve authorization, membership, deployment health, and
 // credentials before returning a binding; observers are left out. OpenSeal
 // never transfers credentials between Agents.
-type ConversationParticipantBinding struct {
+type ParticipantBinding struct {
 	Participant   models.ConversationParticipant `json:"participant"`
 	SemanticRoles []string                       `json:"semanticRoles,omitempty"`
 }
 
-func (b ConversationParticipantBinding) Validate() error {
+func (b ParticipantBinding) Validate() error {
 	if err := b.Participant.Validate(); err != nil {
 		return err
 	}
@@ -50,70 +50,70 @@ func (b ConversationParticipantBinding) Validate() error {
 	return nil
 }
 
-type ConversationParticipantQuery struct {
+type ParticipantQuery struct {
 	Conversation *models.Conversation
 	Trigger      *models.ChannelMessage
 }
 
-// ConversationParticipantSource is an embedding boundary. An enterprise host
+// ParticipantSource is an embedding boundary. An enterprise host
 // can resolve Team membership, RBAC, health, and policy; standalone OpenSeal can
 // resolve local Agent deployments through the same contract.
-type ConversationParticipantSource interface {
-	ResolveConversationParticipants(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error)
+type ParticipantSource interface {
+	ResolveConversationParticipants(context.Context, ParticipantQuery) ([]ParticipantBinding, error)
 }
 
-type ConversationParticipantSourceFunc func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error)
+type ParticipantSourceFunc func(context.Context, ParticipantQuery) ([]ParticipantBinding, error)
 
-func (f ConversationParticipantSourceFunc) ResolveConversationParticipants(ctx context.Context, query ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+func (f ParticipantSourceFunc) ResolveConversationParticipants(ctx context.Context, query ParticipantQuery) ([]ParticipantBinding, error) {
 	return f(ctx, query)
 }
 
-// ConversationRoutingRequest asks who answers one Team channel message.
-type ConversationRoutingRequest struct {
+// RoutingRequest asks who answers one Team channel message.
+type RoutingRequest struct {
 	Scope            models.Scope
 	ConversationID   string
 	TriggerMessageID string
 	IdempotencyKey   string
 }
 
-type ConversationCoordinatorConfig struct {
+type CoordinatorConfig struct {
 	MaximumParticipants int
 	// RecentMessageLimit bounds the history the router sees.
 	RecentMessageLimit int
 	RouteTimeout       time.Duration
 }
 
-func DefaultConversationCoordinatorConfig() ConversationCoordinatorConfig {
-	return ConversationCoordinatorConfig{MaximumParticipants: 32, RecentMessageLimit: 10, RouteTimeout: 30 * time.Second}
+func DefaultConversationCoordinatorConfig() CoordinatorConfig {
+	return CoordinatorConfig{MaximumParticipants: 32, RecentMessageLimit: 10, RouteTimeout: 30 * time.Second}
 }
 
-func (c ConversationCoordinatorConfig) normalize() (ConversationCoordinatorConfig, error) {
-	if c == (ConversationCoordinatorConfig{}) {
+func (c CoordinatorConfig) normalize() (CoordinatorConfig, error) {
+	if c == (CoordinatorConfig{}) {
 		return DefaultConversationCoordinatorConfig(), nil
 	}
 	if c.MaximumParticipants < 1 || c.MaximumParticipants > 256 || c.RecentMessageLimit < 1 || c.RecentMessageLimit > 100 ||
 		c.RouteTimeout < time.Second || c.RouteTimeout > 5*time.Minute {
-		return ConversationCoordinatorConfig{}, fmt.Errorf("%w: invalid conversation coordinator configuration", models.ErrInvalidConversation)
+		return CoordinatorConfig{}, fmt.Errorf("%w: invalid conversation coordinator configuration", models.ErrInvalidConversation)
 	}
 	return c, nil
 }
 
-// ConversationCoordinator decides who answers a Team channel message. It never
+// Coordinator decides who answers a Team channel message. It never
 // writes an answer: addressed members (mentions, @everyone, a quoted or
 // replied-to Agent) answer directly; otherwise one router call picks a member.
-type ConversationCoordinator struct {
-	conversations *ConversationService
-	participants  ConversationParticipantSource
-	router        ConversationRouter
-	config        ConversationCoordinatorConfig
+type Coordinator struct {
+	conversations *Service
+	participants  ParticipantSource
+	router        Router
+	config        CoordinatorConfig
 }
 
-func NewConversationCoordinator(
-	conversations *ConversationService,
-	participants ConversationParticipantSource,
-	router ConversationRouter,
-	config ConversationCoordinatorConfig,
-) (*ConversationCoordinator, error) {
+func NewCoordinator(
+	conversations *Service,
+	participants ParticipantSource,
+	router Router,
+	config CoordinatorConfig,
+) (*Coordinator, error) {
 	if conversations == nil || participants == nil || router == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
@@ -121,19 +121,19 @@ func NewConversationCoordinator(
 	if err != nil {
 		return nil, err
 	}
-	return &ConversationCoordinator{conversations: conversations, participants: participants, router: router, config: normalized}, nil
+	return &Coordinator{conversations: conversations, participants: participants, router: router, config: normalized}, nil
 }
 
 // Coordinate commits the routing decision for a trigger once. A replay with the
 // same idempotency key returns the saved decision without calling the router.
-func (c *ConversationCoordinator) Coordinate(ctx context.Context, req ConversationRoutingRequest) (*models.ParticipationRoundResult, error) {
+func (c *Coordinator) Coordinate(ctx context.Context, req RoutingRequest) (*models.ParticipationRoundResult, error) {
 	return c.CoordinateWithChildRuns(ctx, req, nil)
 }
 
 // CoordinateWithChildRuns is Coordinate for a Team channel's routing Run.
 // childRunKey derives each responder's child Run idempotency key, so the
 // round records the Run id before the Run exists.
-func (c *ConversationCoordinator) CoordinateWithChildRuns(ctx context.Context, req ConversationRoutingRequest, childRunKey func(models.ConversationParticipant) string) (*models.ParticipationRoundResult, error) {
+func (c *Coordinator) CoordinateWithChildRuns(ctx context.Context, req RoutingRequest, childRunKey func(models.ConversationParticipant) string) (*models.ParticipationRoundResult, error) {
 	if c == nil || c.conversations == nil || c.participants == nil || c.router == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
@@ -165,7 +165,7 @@ func (c *ConversationCoordinator) CoordinateWithChildRuns(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
-	bindings, err := c.participants.ResolveConversationParticipants(ctx, ConversationParticipantQuery{
+	bindings, err := c.participants.ResolveConversationParticipants(ctx, ParticipantQuery{
 		Conversation: models.CloneConversation(conversation), Trigger: models.CloneChannelMessage(trigger),
 	})
 	if err != nil {
@@ -187,7 +187,7 @@ func (c *ConversationCoordinator) CoordinateWithChildRuns(ctx context.Context, r
 		}
 		seen[binding.Participant] = true
 	}
-	bindings = append([]ConversationParticipantBinding(nil), bindings...)
+	bindings = append([]ParticipantBinding(nil), bindings...)
 	sort.SliceStable(bindings, func(i, j int) bool { return bindings[i].Participant.ID < bindings[j].Participant.ID })
 
 	responders, err := c.addressedResponders(ctx, conversation, trigger, bindings)
@@ -226,8 +226,8 @@ func (c *ConversationCoordinator) CoordinateWithChildRuns(ctx context.Context, r
 // @mentioned Agents, then @everyone, then the author of a quoted or
 // replied-to Agent message. An Agent's own message (a handoff) is addressed
 // only through its @mentions and never fans out to everyone.
-func (c *ConversationCoordinator) addressedResponders(ctx context.Context, conversation *models.Conversation, trigger *models.ChannelMessage, bindings []ConversationParticipantBinding) ([]models.ConversationResponder, error) {
-	members := make(map[models.ConversationParticipant]ConversationParticipantBinding, len(bindings))
+func (c *Coordinator) addressedResponders(ctx context.Context, conversation *models.Conversation, trigger *models.ChannelMessage, bindings []ParticipantBinding) ([]models.ConversationResponder, error) {
+	members := make(map[models.ConversationParticipant]ParticipantBinding, len(bindings))
 	for _, binding := range bindings {
 		members[binding.Participant] = binding
 	}
@@ -295,9 +295,9 @@ func (c *ConversationCoordinator) addressedResponders(ctx context.Context, conve
 // route makes the one routing call and applies the fixed fallback order when
 // it fails: the Agent last talking with this user, else the lead, else the
 // first member who is not busy.
-func (c *ConversationCoordinator) route(ctx context.Context, conversation *models.Conversation, trigger *models.ChannelMessage, bindings []ConversationParticipantBinding) (models.ConversationResponder, error) {
+func (c *Coordinator) route(ctx context.Context, conversation *models.Conversation, trigger *models.ChannelMessage, bindings []ParticipantBinding) (models.ConversationResponder, error) {
 	roster := LoadConversationTeamRoster(ctx, c.conversations.store, conversation)
-	request := ConversationRouteRequest{
+	request := RouteRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, TeamID: conversation.Owner.ID,
 		RoutingNotes: roster.notes, Trigger: *models.CloneChannelMessage(trigger),
 	}
@@ -358,7 +358,7 @@ func (c *ConversationCoordinator) route(ctx context.Context, conversation *model
 	return fallbackConversationResponder(request), nil
 }
 
-func fallbackConversationResponder(request ConversationRouteRequest) models.ConversationResponder {
+func fallbackConversationResponder(request RouteRequest) models.ConversationResponder {
 	pick := func(id, reason string) models.ConversationResponder {
 		return models.ConversationResponder{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: id}, Addressed: models.ConversationAddressedRouted, Reason: reason}
 	}
@@ -418,7 +418,7 @@ type conversationTeamMember struct {
 	owns       []string
 }
 
-type ConversationTeamRoster struct {
+type TeamRoster struct {
 	notes   string
 	lead    string
 	members map[string]conversationTeamMember
@@ -438,8 +438,8 @@ type conversationAgentCatalog interface {
 // names, purposes and owned topics from the kernel store. It is best effort: a
 // store without Team records yields an empty roster, never an error, because
 // membership itself comes from the host's participant source.
-func LoadConversationTeamRoster(ctx context.Context, store models.ConversationStore, conversation *models.Conversation) ConversationTeamRoster {
-	roster := ConversationTeamRoster{members: map[string]conversationTeamMember{}}
+func LoadConversationTeamRoster(ctx context.Context, store models.ConversationStore, conversation *models.Conversation) TeamRoster {
+	roster := TeamRoster{members: map[string]conversationTeamMember{}}
 	teams, ok := store.(conversationTeamCatalog)
 	if !ok || conversation == nil || conversation.Owner.Type != models.OwnerTypeTeam {
 		return roster
@@ -515,7 +515,7 @@ func teamBusyMembers(ctx context.Context, store models.ConversationStore, conver
 	}
 }
 
-func (c *ConversationCoordinator) MarkObserved(ctx context.Context, conversation *models.Conversation, participant models.ConversationParticipant, sequence int64) error {
+func (c *Coordinator) MarkObserved(ctx context.Context, conversation *models.Conversation, participant models.ConversationParticipant, sequence int64) error {
 	if sequence <= 0 {
 		return nil
 	}
@@ -575,6 +575,6 @@ func ReverseChannelMessages(messages []*models.ChannelMessage) {
 
 // ResolveParticipants lists the participants who may answer in query's
 // conversation.
-func (c *ConversationCoordinator) ResolveParticipants(ctx context.Context, query ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+func (c *Coordinator) ResolveParticipants(ctx context.Context, query ParticipantQuery) ([]ParticipantBinding, error) {
 	return c.participants.ResolveConversationParticipants(ctx, query)
 }

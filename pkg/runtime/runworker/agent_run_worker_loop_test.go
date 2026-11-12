@@ -73,7 +73,7 @@ func waitForRunStatus(t *testing.T, store models.KernelStore, scope models.Scope
 	}
 }
 
-// The worker drives each claim through the RunLoop: a parked step exits the
+// The worker drives each claim through the runloop.Loop: a parked step exits the
 // claim, the timer wake requeues the Run and the next claim finishes it.
 func TestAgentRunWorkerDrivesRunLoopAcrossClaims(t *testing.T) {
 	for _, test := range workerLoopStores() {
@@ -82,7 +82,7 @@ func TestAgentRunWorkerDrivesRunLoopAcrossClaims(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			scope := models.Scope{Kind: "local", ID: "test"}
-			run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 				Goal: "sleep once, then finish", Source: models.RunSourceObjective,
 			})
@@ -130,7 +130,7 @@ func TestAgentRunWorkerFailsRunWithoutStepProducer(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "nothing to run", Source: models.RunSourceObjective,
 	})
@@ -144,7 +144,7 @@ func TestAgentRunWorkerFailsRunWithoutStepProducer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := pool.scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-1", AssignedAgentID: "agent", LeaseDuration: time.Second})
+	claimed, err := pool.scheduler.ClaimNext(ctx, agentrun.ClaimRequest{Scope: scope, WorkerID: "worker-1", AssignedAgentID: "agent", LeaseDuration: time.Second})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}

@@ -18,36 +18,36 @@ import (
 // and deletes remove them.
 type streamChatHost struct {
 	messages  map[string]string
-	requests  []ExternalConversationDeliveryHostRequest
+	requests  []DeliveryHostRequest
 	rejectAll capability.ConversationDeliveryOperation
 	next      int
 }
 
-func (h *streamChatHost) LookupExternalConversationDelivery(context.Context, ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryAcknowledgement, error) {
-	return &ExternalConversationDeliveryAcknowledgement{Status: ExternalConversationAcknowledgementUnknown}, nil
+func (h *streamChatHost) LookupExternalConversationDelivery(context.Context, DeliveryHostRequest) (*DeliveryAcknowledgement, error) {
+	return &DeliveryAcknowledgement{Status: AcknowledgementUnknown}, nil
 }
 
-func (h *streamChatHost) DeliverExternalConversation(_ context.Context, request ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryHostResult, error) {
+func (h *streamChatHost) DeliverExternalConversation(_ context.Context, request DeliveryHostRequest) (*DeliveryHostResult, error) {
 	h.requests = append(h.requests, request)
 	if request.Delivery.Operation == h.rejectAll {
-		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeFailed, ErrorCode: "message_not_found"}, nil
+		return &DeliveryHostResult{Outcome: DeliveryOutcomeFailed, ErrorCode: "message_not_found"}, nil
 	}
 	switch request.Delivery.Operation {
 	case capability.ConversationDeliveryMessageSend:
 		h.next++
 		id := "chat-" + string(rune('0'+h.next))
 		h.messages[id] = request.Message.Content
-		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+		return &DeliveryHostResult{Outcome: DeliveryOutcomeDelivered, ProviderMessageID: id}, nil
 	case capability.ConversationDeliveryMessageUpdate:
 		id, _ := request.Delivery.Parameters["providerMessageId"].(string)
 		h.messages[id] = request.Message.Content
-		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+		return &DeliveryHostResult{Outcome: DeliveryOutcomeDelivered, ProviderMessageID: id}, nil
 	case capability.ConversationDeliveryMessageDelete:
 		id, _ := request.Delivery.Parameters["providerMessageId"].(string)
 		delete(h.messages, id)
-		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+		return &DeliveryHostResult{Outcome: DeliveryOutcomeDelivered, ProviderMessageID: id}, nil
 	}
-	return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: "status"}, nil
+	return &DeliveryHostResult{Outcome: DeliveryOutcomeDelivered, ProviderMessageID: "status"}, nil
 }
 
 type answerStreamFixture struct {
@@ -55,8 +55,8 @@ type answerStreamFixture struct {
 	t        *testing.T
 	host     *streamChatHost
 	progress *RunProgressAcknowledgementWorker
-	replies  *ExternalConversationReplyWorker
-	delivery *ExternalConversationDeliveryWorker
+	replies  *ReplyWorker
+	delivery *DeliveryWorker
 	clock    time.Time
 	sequence uint64
 }
@@ -75,10 +75,10 @@ func newAnswerStreamFixture(t *testing.T, operations ...capability.ConversationD
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fixture.replies, err = NewExternalConversationReplyWorker(fixture.store, fixture.catalog, fixture.clockOption()); err != nil {
+	if fixture.replies, err = NewReplyWorker(fixture.store, fixture.catalog, fixture.clockOption()); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.delivery, err = NewExternalConversationDeliveryWorker(fixture.store, fixture.catalog, fixture.host, ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}, fixture.clockOption()); err != nil {
+	if fixture.delivery, err = NewDeliveryWorker(fixture.store, fixture.catalog, fixture.host, DeliveryWorkerConfig{WorkerID: "delivery"}, fixture.clockOption()); err != nil {
 		t.Fatal(err)
 	}
 	return fixture
@@ -143,7 +143,7 @@ func (f *answerStreamFixture) finish(status models.AgentRunStatus, answer string
 	f.t.Helper()
 	ctx := f.t.Context()
 	if answer != "" {
-		conversations := conversation.NewConversationService(f.store)
+		conversations := conversation.NewService(f.store)
 		current, _ := conversations.GetConversation(ctx, f.endpoint.Scope, f.conversation.ID)
 		if _, err := conversations.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 			Scope: f.endpoint.Scope, ConversationID: f.conversation.ID, ExpectedRevision: current.Revision,
@@ -208,7 +208,7 @@ func TestExternalAnswerStreamEditsOneMessageAndFinishesIt(t *testing.T) {
 	}
 	f.deliverAll()
 	// A restarted reply worker finds the streamed message in the outbox.
-	replies, err := NewExternalConversationReplyWorker(f.store, f.catalog, f.clockOption())
+	replies, err := NewReplyWorker(f.store, f.catalog, f.clockOption())
 	if err != nil {
 		t.Fatal(err)
 	}

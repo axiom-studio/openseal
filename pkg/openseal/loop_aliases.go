@@ -45,9 +45,9 @@ type (
 	LoopFinal         = agentrun.LoopFinal
 	LoopPark          = agentrun.LoopPark
 	LoopFailure       = agentrun.LoopFailure
-	ModelStepProducer = modelstep.ModelStepProducer
+	ModelStepProducer = modelstep.Producer
 	ModelStepPreparer = agentrun.ModelStepPreparer
-	ModelStepMedia    = modelstep.ModelStepMedia
+	ModelStepMedia    = modelstep.Media
 
 	RunFailureExplanation = models.RunFailureExplanation
 )
@@ -93,6 +93,6 @@ var (
 	ErrInvalidModelStepRequest = models.ErrInvalidModelStepRequest
 	ErrInvalidStepOutput       = agentrun.ErrInvalidStepOutput
 
-	NewModelStepProducer    = modelstep.NewModelStepProducer
+	NewModelStepProducer    = modelstep.NewProducer
 	ValidateModelStepResult = modelstep.ValidateModelStepResult
 )

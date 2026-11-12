@@ -126,14 +126,14 @@ func getLoopRun(t testing.TB, store *sqlite.Store, scope models.Scope, id string
 
 // proposeLoopPersonAction proposes send as the governed tool call of run loop
 // step stepID, as the loop does for the Run's lease owner.
-func proposeLoopPersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catalog, scope models.Scope, run *models.AgentRun, now time.Time, stepID, key string, policy action.ActionPolicyEvaluator) *models.ActionProposalResult {
+func proposeLoopPersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catalog, scope models.Scope, run *models.AgentRun, now time.Time, stepID, key string, policy action.PolicyEvaluator) *models.ActionProposalResult {
 	t.Helper()
 	if policy == nil {
-		policy = action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-			return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+		policy = action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+			return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 		})
 	}
-	coordinator := action.NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now }))
+	coordinator := action.NewCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now }))
 	proposal, err := coordinator.Propose(context.Background(), action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, TurnID: stepID, WorkerID: "agent-worker", DeploymentID: "release-agent",
 		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Summary: "Send a message to ana@example.com",
@@ -148,7 +148,7 @@ func proposeLoopPersonAction(t *testing.T, store *sqlite.Store, catalog *skill.C
 
 // executeLoopPersonAction executes the loop call inline for the Run's lease
 // owner, as the governed executor does.
-func executeLoopPersonAction(t *testing.T, worker *action.ActionWorker, scope models.Scope, proposal *models.ActionProposalResult) *models.ActionExecutionResult {
+func executeLoopPersonAction(t *testing.T, worker *action.Worker, scope models.Scope, proposal *models.ActionProposalResult) *models.ActionExecutionResult {
 	t.Helper()
 	result, err := worker.ExecuteOwnLoopCall(context.Background(), scope, proposal.Call.ID, "agent-worker")
 	if err != nil {

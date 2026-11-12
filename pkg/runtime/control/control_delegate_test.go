@@ -34,8 +34,8 @@ var delegateTargets = []agentrun.HostedAgentTarget{{ID: "specialist", DisplayNam
 type delegateFixture struct {
 	t       *testing.T
 	store   delegateTestStore
-	collab  *collaboration.CollaborationService
-	exec    *ControlExecutor
+	collab  *collaboration.Service
+	exec    *Executor
 	scope   models.Scope
 	run     *models.AgentRun
 	session *models.AgentSession
@@ -59,14 +59,14 @@ func newDelegateFixtureIn(t *testing.T, store delegateTestStore, scope models.Sc
 	if mutate != nil {
 		mutate(&req)
 	}
-	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), req)
+	created, err := portfolio.NewService(store).CreateAgentRun(t.Context(), req)
 	if err != nil {
 		t.Fatalf("create source: %v", err)
 	}
-	collab := collaboration.NewCollaborationService(store)
+	collab := collaboration.NewService(store)
 	f := &delegateFixture{
 		t: t, store: store, collab: collab, scope: scope,
-		exec: &ControlExecutor{Portfolio: store, Sessions: store, Collaboration: collab},
+		exec: &Executor{Portfolio: store, Sessions: store, Collaboration: collab},
 	}
 	f.claim()
 	if f.run.ID != created.ID {
@@ -149,13 +149,13 @@ func (f *delegateFixture) call(tool models.ControlToolName, arguments interface{
 }
 
 func (f *delegateFixture) context() agentrun.ControlContext {
-	return NewControlContext(agentrun.StepToolsInput{
+	return NewContext(agentrun.StepToolsInput{
 		Run: f.run, Step: f.step, Session: f.session, WorkerID: delegateWorker,
 		Binding: &agentrun.TurnRunnerBinding{Authority: agentrun.ControlAuthority{AgentID: "manager", DelegateTargets: delegateTargets}},
 	}, f.entry)
 }
 
-func (f *delegateFixture) settle() (ControlResult, error) {
+func (f *delegateFixture) settle() (Result, error) {
 	result, err := f.exec.Settle(f.t.Context(), f.context())
 	if err == nil && result.Entry != nil {
 		f.entry = result.Entry
@@ -163,7 +163,7 @@ func (f *delegateFixture) settle() (ControlResult, error) {
 	return result, err
 }
 
-func (f *delegateFixture) mustSettle() ControlResult {
+func (f *delegateFixture) mustSettle() Result {
 	f.t.Helper()
 	result, err := f.settle()
 	if err != nil {
@@ -172,13 +172,13 @@ func (f *delegateFixture) mustSettle() ControlResult {
 	return result
 }
 
-func (f *delegateFixture) delegate() (ControlResult, *models.AgentRequest) {
+func (f *delegateFixture) delegate() (Result, *models.AgentRequest) {
 	f.t.Helper()
 	f.call(models.ControlToolDelegate, map[string]interface{}{
 		"agentId": "specialist", "goal": "Analyze the release", "context": map[string]interface{}{"release": "2026.07"},
 	})
 	result := f.mustSettle()
-	if result.Kind != ControlParked || result.Park == nil || !result.Park.Committed {
+	if result.Kind != Parked || result.Park == nil || !result.Park.Committed {
 		f.t.Fatalf("delegate did not commit a park: %#v", result)
 	}
 	return result, f.onlyRequest()
@@ -259,7 +259,7 @@ func (f *delegateFixture) finishChild(id string, status models.AgentRunStatus, o
 }
 
 // resume claims the re-queued source and resumes the current entry.
-func (f *delegateFixture) resume() ControlResume {
+func (f *delegateFixture) resume() Resume {
 	f.t.Helper()
 	if run := f.reload(); run.Status != models.AgentRunStatusQueued {
 		f.t.Fatalf("source = %s, want queued", run.Status)
@@ -325,7 +325,7 @@ func TestDelegateCompletedResultCarriesAnswerAndArtifacts(t *testing.T) {
 		"report": "Ship it: no blockers found.", "summary": "Release analysed",
 	}, "")
 	resumed := f.resume()
-	if !resumed.Resolved || resumed.Result.Kind != ControlContinue {
+	if !resumed.Resolved || resumed.Result.Kind != Continue {
 		t.Fatalf("resume = %#v", resumed)
 	}
 	if f.entry.State != models.ToolEntryCompleted || f.entry.Tool.Result.IsError {
@@ -357,7 +357,7 @@ func TestDelegateClarificationThenReplyParksAgain(t *testing.T) {
 
 	f.call(models.ControlToolDelegateReply, map[string]interface{}{"requestId": request.ID, "answer": "EU only."})
 	result := f.mustSettle()
-	if result.Kind != ControlParked || !result.Park.Committed || result.Park.Status != models.AgentRunStatusWaitingForAgent {
+	if result.Kind != Parked || !result.Park.Committed || result.Park.Status != models.AgentRunStatusWaitingForAgent {
 		t.Fatalf("reply = %#v", result)
 	}
 	answered := f.request(request.ID)
@@ -463,7 +463,7 @@ func TestReplyToForeignRequestIsRefused(t *testing.T) {
 	f := newDelegateFixtureIn(t, store, other.scope, nil) // same tenant, another source Run
 	f.call(models.ControlToolDelegateReply, map[string]interface{}{"requestId": foreign.ID, "answer": "EU only."})
 	result := f.mustSettle()
-	if result.Kind != ControlContinue || f.entry.State != models.ToolEntryError {
+	if result.Kind != Continue || f.entry.State != models.ToolEntryError {
 		t.Fatalf("reply = %#v", result)
 	}
 	if value := delegateResult(t, f.entry); value["error"] != controlRequestNotAwaitingCode {
@@ -520,7 +520,7 @@ func TestDelegateNewMessageRefusesWithoutRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := f.mustSettle()
-	if result.Kind != ControlContinue || f.entry.State != models.ToolEntryError || delegateResult(t, f.entry)["error"] != controlNewMessageCode {
+	if result.Kind != Continue || f.entry.State != models.ToolEntryError || delegateResult(t, f.entry)["error"] != controlNewMessageCode {
 		t.Fatalf("result = %#v entry %s", result, f.entry.State)
 	}
 	if len(f.requests()) != 0 {
@@ -607,7 +607,7 @@ func TestDelegateCrashBeforeRequestResettlesOnce(t *testing.T) {
 				f.run.LastAppliedTurn = f.step.Sequence
 				f.entry = f.currentEntry()
 				result := f.mustSettle()
-				if result.Kind != ControlParked || !result.Park.Committed {
+				if result.Kind != Parked || !result.Park.Committed {
 					t.Fatalf("re-settle = %#v", result)
 				}
 				request := f.onlyRequest()

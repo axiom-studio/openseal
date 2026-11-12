@@ -52,20 +52,20 @@ type EnqueueExternalConversationDeliveryResult struct {
 	Replayed bool                                 `json:"replayed"`
 }
 
-type ExternalConversationTransportService struct {
+type TransportService struct {
 	store    models.ExternalConversationStore
-	resolver ExternalConversationAdapterResolver
+	resolver AdapterResolver
 	routines RoutineEventOfferer
 	now      func() time.Time
 }
 
-func NewExternalConversationTransportService(store models.ExternalConversationStore, resolver ExternalConversationAdapterResolver, opts ...models.ServiceOption) *ExternalConversationTransportService {
-	return &ExternalConversationTransportService{store: store, resolver: resolver, now: models.ClockFrom(opts)}
+func NewTransportService(store models.ExternalConversationStore, resolver AdapterResolver, opts ...models.ServiceOption) *TransportService {
+	return &TransportService{store: store, resolver: resolver, now: models.ClockFrom(opts)}
 }
 
 // SetRoutineEventOfferer lets verified Slack and Telegram messages start event
 // routines. Set it before ingress starts; nil turns the routine path off.
-func (s *ExternalConversationTransportService) SetRoutineEventOfferer(offerer RoutineEventOfferer) {
+func (s *TransportService) SetRoutineEventOfferer(offerer RoutineEventOfferer) {
 	if s != nil {
 		s.routines = offerer
 	}
@@ -74,7 +74,7 @@ func (s *ExternalConversationTransportService) SetRoutineEventOfferer(offerer Ro
 // Receive persists one already verified and normalized provider event. Policy
 // filtering is itself durable, so retries of ignored bot or non-mention events
 // remain idempotent and auditable without waking a cognitive handler.
-func (s *ExternalConversationTransportService) Receive(ctx context.Context, req ReceiveExternalConversationEventRequest) (*ReceiveExternalConversationEventResult, error) {
+func (s *TransportService) Receive(ctx context.Context, req ReceiveExternalConversationEventRequest) (*ReceiveExternalConversationEventResult, error) {
 	if s == nil || s.store == nil || s.resolver == nil {
 		return nil, errors.New("external conversation transport service is not configured")
 	}
@@ -132,7 +132,7 @@ func (s *ExternalConversationTransportService) Receive(ctx context.Context, req 
 	}, nil
 }
 
-func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
+func (s *TransportService) resolveExternalApprovalDecision(
 	ctx context.Context,
 	endpoint *models.ExternalConversationEndpoint,
 	event models.NormalizedExternalConversationEvent,
@@ -267,7 +267,7 @@ func approvalHasDestination(approval *models.ApprovalCheckpoint, endpointID stri
 // Enqueue projects one canonical ChannelMessage into the durable outbox. The
 // body is intentionally not copied; the adapter worker reloads the canonical
 // message immediately before delivery.
-func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req EnqueueExternalConversationDeliveryRequest) (*EnqueueExternalConversationDeliveryResult, error) {
+func (s *TransportService) Enqueue(ctx context.Context, req EnqueueExternalConversationDeliveryRequest) (*EnqueueExternalConversationDeliveryResult, error) {
 	if s == nil || s.store == nil || s.resolver == nil {
 		return nil, errors.New("external conversation transport service is not configured")
 	}
@@ -355,7 +355,7 @@ func externalConversationDeliveryOrderingKey(
 	return stableExternalConversationID(scope, endpointID, "delivery-order", key)
 }
 
-func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context.Context, scope models.Scope, endpointID string) (*models.ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {
+func (s *TransportService) resolveActiveEndpoint(ctx context.Context, scope models.Scope, endpointID string) (*models.ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -451,7 +451,7 @@ func stableExternalConversationID(scope models.Scope, endpointID, kind, key stri
 
 // An originating chat is a review destination only when the durable provider
 // inbox proves which endpoint started this run.
-func (s *ExternalConversationTransportService) approvalOriginDestination(ctx context.Context, approval *models.ApprovalCheckpoint, endpoint *models.ExternalConversationEndpoint) (bool, error) {
+func (s *TransportService) approvalOriginDestination(ctx context.Context, approval *models.ApprovalCheckpoint, endpoint *models.ExternalConversationEndpoint) (bool, error) {
 	store := s.store.(interface {
 		models.ExternalConversationStore
 		models.ActionStore

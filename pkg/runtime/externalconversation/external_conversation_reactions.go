@@ -20,7 +20,7 @@ const externalReactionDeliveryScanPages = 10
 // marked external so it is never delivered back out. A reaction on a message
 // OpenSeal does not know, or cannot show to that participant, is applied as a
 // no-op. Reactions never start a Run.
-func (w *ExternalConversationInboxWorker) applyReaction(ctx context.Context, item *models.ExternalConversationInboxItem) error {
+func (w *InboxWorker) applyReaction(ctx context.Context, item *models.ExternalConversationInboxItem) error {
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, item.Scope, item.EndpointID)
 	if err != nil {
 		return err
@@ -80,7 +80,7 @@ type externalReactionTarget struct {
 // reaction made in OpenSeal on a message that came from, or was delivered
 // to, an external conversation whose adapter declares reactions. The
 // delivery parameters carry the emoji and the provider message id.
-func (s *ExternalConversationTransportService) ProjectMessageReaction(ctx context.Context, event *models.ConversationReactionEvent) error {
+func (s *TransportService) ProjectMessageReaction(ctx context.Context, event *models.ConversationReactionEvent) error {
 	if s == nil || s.store == nil || s.resolver == nil || event == nil {
 		return nil
 	}
@@ -119,7 +119,7 @@ func (s *ExternalConversationTransportService) ProjectMessageReaction(ctx contex
 
 // externalReactionTarget finds the external conversation of an imported
 // message from its source, and of an OpenSeal answer from its delivered send.
-func (s *ExternalConversationTransportService) externalReactionTarget(ctx context.Context, message *models.ChannelMessage) (*externalReactionTarget, error) {
+func (s *TransportService) externalReactionTarget(ctx context.Context, message *models.ChannelMessage) (*externalReactionTarget, error) {
 	if source := message.ExternalSource; source != nil {
 		for _, reference := range message.References {
 			if reference.Kind != models.ConversationReferenceExternalSource {

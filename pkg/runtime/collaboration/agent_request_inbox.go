@@ -60,7 +60,7 @@ type AgentRequestInboxReconcileResult struct {
 // idempotency makes request review recoverable across process restarts without
 // leasing Agent identity to a human caller.
 type AgentRequestInboxReconciler struct {
-	collaboration      *CollaborationService
+	collaboration      *Service
 	commands           *agentrun.RunCommandService
 	projector          *AgentRequestConversationProjector
 	projectionMu       sync.Mutex
@@ -74,7 +74,7 @@ func NewAgentRequestInboxReconciler(store models.AgentRequestInboxStore, opts ..
 		return nil, errors.New("AgentRequest inbox store is required")
 	}
 	reconciler := &AgentRequestInboxReconciler{
-		collaboration: NewCollaborationService(store, opts...),
+		collaboration: NewService(store, opts...),
 		commands:      agentrun.NewRunCommandService(store, opts...),
 		now:           models.ClockFrom(opts),
 	}

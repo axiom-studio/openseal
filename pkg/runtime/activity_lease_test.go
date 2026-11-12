@@ -33,7 +33,7 @@ func TestRunTransitionsRejectStaleLeaseOwners(t *testing.T) {
 			ctx := context.Background()
 			scope := models.Scope{Kind: "local", ID: "test"}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 			run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 				AssignedAgentID: "agent", Goal: "work", Source: models.RunSourceObjective,

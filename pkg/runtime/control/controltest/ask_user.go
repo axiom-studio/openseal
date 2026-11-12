@@ -50,8 +50,8 @@ const AskUserQuestion = "Which page should I research?"
 // foreground conversation Run.
 type ForegroundClarification struct {
 	Store        Store
-	Service      *conversation.ConversationService
-	Scheduler    *conversationrun.ConversationRunScheduler
+	Service      *conversation.Service
+	Scheduler    *conversationrun.Scheduler
 	Conversation *models.Conversation
 	Trigger      *models.ChannelMessage
 	Run          *models.AgentRun
@@ -63,7 +63,7 @@ type ForegroundClarification struct {
 // threaded) and schedules its foreground Run.
 func NewForegroundClarification(t *testing.T, store Store, threaded bool) *ForegroundClarification {
 	t.Helper()
-	f := &ForegroundClarification{Store: store, Service: conversation.NewConversationService(store)}
+	f := &ForegroundClarification{Store: store, Service: conversation.NewService(store)}
 	var err error
 	conversationtest.SeedSpace(t, store.(models.SpaceStore), models.Scope{Kind: "organization", ID: "foreground-clarification"})
 	f.Conversation, _, err = f.Service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
@@ -73,7 +73,7 @@ func NewForegroundClarification(t *testing.T, store Store, threaded bool) *Foreg
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Scheduler, err = conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{MessagePageSize: 2})
+	f.Scheduler, err = conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{MessagePageSize: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func ParkedQuestionKey(run *models.AgentRun) string {
 	if run == nil || run.WakeCondition == nil {
 		return ""
 	}
-	return conversation.ConversationClarificationKey(run.ID, run.WakeCondition.Reference)
+	return conversation.ClarificationKey(run.ID, run.WakeCondition.Reference)
 }
 
 // Question reconciles the scope and returns the question the Run is parked
@@ -196,7 +196,7 @@ type AskUserCall struct {
 	Session *models.AgentSession
 	Step    *models.AgentTurn
 	Entry   *models.SessionEntry
-	Exec    *control.ControlExecutor
+	Exec    *control.Executor
 }
 
 // NewAskUserCall records an ask_user call on claimed, a Run leased by worker.
@@ -256,7 +256,7 @@ func NewAskUserCallWithArguments(t *testing.T, store AskUserStore, claimed *mode
 		Store: store, Worker: worker, Run: run, Session: session,
 		Step:  &models.AgentTurn{ID: stepID, RunID: run.ID, Sequence: sequence, Status: models.AgentTurnStatusCompleted},
 		Entry: appended.Entries[1],
-		Exec:  &control.ControlExecutor{Portfolio: store, Sessions: sessions, Conversations: conversation.NewConversationService(store)},
+		Exec:  &control.Executor{Portfolio: store, Sessions: sessions, Conversations: conversation.NewService(store)},
 	}
 }
 
@@ -300,14 +300,14 @@ func openAskUserSession(t *testing.T, sessions models.AgentSessionStore, run *mo
 
 // Context is the control context of the call's entry, with ask_user offered.
 func (c *AskUserCall) Context() agentrun.ControlContext {
-	return control.NewControlContext(agentrun.StepToolsInput{
+	return control.NewContext(agentrun.StepToolsInput{
 		Run: c.Run, Step: c.Step, Session: c.Session, WorkerID: c.Worker,
 		Binding: &agentrun.TurnRunnerBinding{Authority: agentrun.ControlAuthority{CanAskUser: true}},
 	}, c.Entry)
 }
 
 // Settle settles the ask_user entry and keeps the entry it leaves.
-func (c *AskUserCall) Settle(t *testing.T) control.ControlResult {
+func (c *AskUserCall) Settle(t *testing.T) control.Result {
 	t.Helper()
 	result, err := c.Exec.Settle(t.Context(), c.Context())
 	if err != nil {
@@ -341,14 +341,14 @@ func AskUserParked(t *testing.T, store AskUserStore, claimed *models.AgentRun, w
 	t.Helper()
 	call := NewAskUserCall(t, store, claimed, worker, question)
 	result := call.Settle(t)
-	if result.Kind != control.ControlParked || result.Park == nil {
+	if result.Kind != control.Parked || result.Park == nil {
 		t.Fatalf("ask_user did not park: %#v", result)
 	}
 	return call.Park(t, result.Park), call
 }
 
 // Resume claims the Run again and resumes the ask_user entry.
-func (c *AskUserCall) Resume(t *testing.T) (control.ControlResume, *models.AgentRun) {
+func (c *AskUserCall) Resume(t *testing.T) (control.Resume, *models.AgentRun) {
 	t.Helper()
 	claimed := ClaimRun(t, c.Store, c.Run, c.Worker)
 	entry, err := askUserSessions(t, c.Store).GetSessionEntry(t.Context(), claimed.Scope, c.Entry.ID)

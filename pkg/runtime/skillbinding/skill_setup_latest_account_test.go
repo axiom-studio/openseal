@@ -27,7 +27,7 @@ type latestSetupTestFixture struct {
 	store      *sqlite.Store
 	catalog    *skill.Catalog
 	run        *models.AgentRun
-	dispatcher *skillbinding.SkillBindingActionDispatcher
+	dispatcher *skillbinding.ActionDispatcher
 	source     string
 	candidates []skill.DiscoveryCandidate
 	locations  []latestSetupTestLocation
@@ -50,7 +50,7 @@ func newLatestSetupTestFixture(t *testing.T, source string) *latestSetupTestFixt
 		return &skill.DiscoveryPage{Items: f.candidates}, nil
 	})
 	var err error
-	f.dispatcher, err = skillbinding.NewSkillBindingActionDispatcher(f.store, f.catalog, nil, provider)
+	f.dispatcher, err = skillbinding.NewActionDispatcher(f.store, f.catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}

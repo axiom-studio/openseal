@@ -63,7 +63,7 @@ func forEachTurnStepBackend(t *testing.T, test func(t *testing.T, store models.K
 func runningStepRun(t *testing.T, store models.KernelStore, scope models.Scope) *models.AgentRun {
 	t.Helper()
 	ctx := t.Context()
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "work in steps", Source: models.RunSourceManual,
 	})
@@ -99,7 +99,7 @@ func narrationEvents(t *testing.T, store models.KernelStore, scope models.Scope,
 	}
 	var result []*models.ActivityEvent
 	for _, event := range events {
-		if event.EventType == activity.ActivityEventTurnNarration {
+		if event.EventType == activity.EventTurnNarration {
 			result = append(result, event)
 		}
 	}
@@ -223,7 +223,7 @@ func TestRecordStepModelLeaseLost(t *testing.T) {
 			t.Fatal(err)
 		}
 		next.Revision = taken.Revision + 1
-		event := &models.ActivityEvent{ID: uuid.NewString(), Scope: scope, RunID: run.ID, TurnID: step.ID, EventType: activity.ActivityEventTurnNarration,
+		event := &models.ActivityEvent{ID: uuid.NewString(), Scope: scope, RunID: run.ID, TurnID: step.ID, EventType: activity.EventTurnNarration,
 			Severity: models.ActivitySeverityInfo, Summary: "Looking it up", Visibility: models.ActivityVisibilityScope, CreatedAt: time.Now()}
 		if err := store.RecordAgentTurnStepModel(ctx, next, taken.Revision, []*models.ActivityEvent{event}); !errors.Is(err, models.ErrTurnLeaseHeld) {
 			t.Fatalf("store record after takeover error = %v, want ErrTurnLeaseHeld", err)
@@ -263,7 +263,7 @@ func TestRecordStepModelRevisionConflict(t *testing.T) {
 		next.OutputSummary, next.ToolCallCount = "Stale", 1
 		next.UpdatedAt = time.Now()
 		next.Revision = step.Revision + 1
-		event := &models.ActivityEvent{ID: uuid.NewString(), Scope: scope, RunID: run.ID, TurnID: step.ID, EventType: activity.ActivityEventTurnNarration,
+		event := &models.ActivityEvent{ID: uuid.NewString(), Scope: scope, RunID: run.ID, TurnID: step.ID, EventType: activity.EventTurnNarration,
 			Severity: models.ActivitySeverityInfo, Summary: "Stale", Visibility: models.ActivityVisibilityScope, CreatedAt: time.Now()}
 		if err := store.RecordAgentTurnStepModel(ctx, next, step.Revision, []*models.ActivityEvent{event}); !errors.Is(err, models.ErrRevisionConflict) {
 			t.Fatalf("store stale record error = %v, want ErrRevisionConflict", err)

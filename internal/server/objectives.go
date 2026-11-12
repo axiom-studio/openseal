@@ -20,7 +20,7 @@ func (s *Server) handleCreateObjective(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		key = strings.TrimSpace(payload.IdempotencyKey)
 	}
-	result, err := portfolio.NewPortfolioService(s.store).CreateObjectiveIdempotent(r.Context(), portfolio.CreateObjectiveRequest{
+	result, err := portfolio.NewService(s.store).CreateObjectiveIdempotent(r.Context(), portfolio.CreateObjectiveRequest{
 		Scope: payload.Scope, Owner: payload.Owner, Title: strings.TrimSpace(payload.Title), Goal: strings.TrimSpace(payload.Goal),
 		Status: payload.Status, Priority: payload.Priority, Budget: payload.Budget,
 		Constraints: payload.Constraints, SuccessCriteria: payload.SuccessCriteria, IdempotencyKey: key,
@@ -42,7 +42,7 @@ func (s *Server) handleListObjectives(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	objectives, err := portfolio.NewPortfolioService(s.store).ListObjectives(r.Context(), filter)
+	objectives, err := portfolio.NewService(s.store).ListObjectives(r.Context(), filter)
 	if err != nil {
 		s.respondObjectiveError(w, err)
 		return
@@ -56,7 +56,7 @@ func (s *Server) handleGetObjective(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	service := portfolio.NewPortfolioService(s.store)
+	service := portfolio.NewService(s.store)
 	objective, err := service.GetObjective(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
 		s.respondObjectiveError(w, err)
@@ -86,7 +86,7 @@ func (s *Server) handleUpdateObjective(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	objective, err := portfolio.NewPortfolioService(s.store).UpdateObjective(r.Context(), scope, strings.TrimSpace(r.PathValue("id")), portfolio.UpdateObjectiveRequest{
+	objective, err := portfolio.NewService(s.store).UpdateObjective(r.Context(), scope, strings.TrimSpace(r.PathValue("id")), portfolio.UpdateObjectiveRequest{
 		ExpectedRevision: payload.ExpectedRevision, Title: payload.Title, Goal: payload.Goal, Status: payload.Status,
 		Priority: payload.Priority, Budget: payload.Budget,
 		Constraints: payload.Constraints, SuccessCriteria: payload.SuccessCriteria, ProgressSummary: payload.ProgressSummary,

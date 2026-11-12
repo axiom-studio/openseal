@@ -16,8 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// RoutineEventFileKeeper keeps a batch's events as one chat file in the routine's chat. Idempotent per batch.
-type RoutineEventFileKeeper interface {
+// EventFileKeeper keeps a batch's events as one chat file in the routine's chat. Idempotent per batch.
+type EventFileKeeper interface {
 	KeepRoutineEvents(ctx context.Context, run *models.AgentRun, batchID string, data []byte) (path string, err error)
 }
 
@@ -33,7 +33,7 @@ const (
 
 // routineEventSeedStore is what the event entry reads: the batch and its
 // routine. KernelStore satisfies it.
-type RoutineEventSeedStore interface {
+type EventSeedStore interface {
 	GetRoutineEventBatch(ctx context.Context, scope models.Scope, batchID string) (*models.RoutineEventBatch, []*models.RoutineEventRecord, error)
 	GetRunbookActivation(ctx context.Context, scope models.Scope, id string) (*models.RunbookActivation, error)
 }
@@ -44,7 +44,7 @@ type RoutineEventSeedStore interface {
 // get only the brief seed: a delegated, collaboration or forked child
 // inherits routineEventBatchId only to keep the manual approval mode, never
 // the events themselves.
-func SessionSeedEntries(ctx context.Context, store RoutineEventSeedStore, keeper RoutineEventFileKeeper, logger *zap.SugaredLogger, run *models.AgentRun) ([]*models.SessionEntry, error) {
+func SessionSeedEntries(ctx context.Context, store EventSeedStore, keeper EventFileKeeper, logger *zap.SugaredLogger, run *models.AgentRun) ([]*models.SessionEntry, error) {
 	var entries []*models.SessionEntry
 	seed, err := loopRunSessionSeed(run)
 	if err != nil {
@@ -75,7 +75,7 @@ func routineEventOccurrenceRoot(run *models.AgentRun) bool {
 // of events (SPEC §6.2). Its text is fixed kernel wording with only
 // kernel-computed numbers and IDs; every event-derived string is in the JSON
 // part or the kept file, JSON-encoded.
-func routineEventSeedEntry(ctx context.Context, store RoutineEventSeedStore, keeper RoutineEventFileKeeper, logger *zap.SugaredLogger, run *models.AgentRun, batchID string) (*models.SessionEntry, error) {
+func routineEventSeedEntry(ctx context.Context, store EventSeedStore, keeper EventFileKeeper, logger *zap.SugaredLogger, run *models.AgentRun, batchID string) (*models.SessionEntry, error) {
 	if store == nil {
 		return nil, fmt.Errorf("%w: run %s has event batch %s but the binding has no store", models.ErrInvalidAgentRun, run.ID, batchID)
 	}

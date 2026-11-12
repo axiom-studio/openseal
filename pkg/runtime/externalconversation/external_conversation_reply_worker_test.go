@@ -17,7 +17,7 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	store, catalog, endpoint := endpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack thread",
 		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
@@ -89,7 +89,7 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	if _, replayed, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil || replayed {
 		t.Fatalf("store applied inbox replayed=%t err=%v", replayed, err)
 	}
-	worker, err := NewExternalConversationReplyWorker(store, catalog)
+	worker, err := NewReplyWorker(store, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, endpoint := endpointFixture(t, ctx, "webchat")
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Web chat",
 		IdempotencyKey: "direct-reply-conversation",
@@ -212,7 +212,7 @@ func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *test
 	if _, _, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil {
 		t.Fatal(err)
 	}
-	worker, _ := NewExternalConversationReplyWorker(store, catalog)
+	worker, _ := NewReplyWorker(store, catalog)
 	deliveries, err := worker.ProcessScope(ctx, endpoint.Scope, 10)
 	if err != nil || len(deliveries) != 1 || deliveries[0].ChannelMessageID != reply.Message.ID {
 		t.Fatalf("direct delivery = %#v, %v", deliveries, err)
@@ -228,7 +228,7 @@ func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *test
 // reprojectAppliedExternalInbox projects every applied item directly,
 // bypassing the worker's terminal reply state, to prove projection itself
 // stays idempotent.
-func reprojectAppliedExternalInbox(t *testing.T, worker *ExternalConversationReplyWorker, store models.ExternalConversationStore, scope models.Scope) []*models.ExternalConversationDelivery {
+func reprojectAppliedExternalInbox(t *testing.T, worker *ReplyWorker, store models.ExternalConversationStore, scope models.Scope) []*models.ExternalConversationDelivery {
 	t.Helper()
 	items, err := store.ListExternalConversationInbox(t.Context(), models.ExternalConversationInboxFilter{
 		Scope: scope, Statuses: []models.ExternalConversationInboxStatus{models.ExternalConversationInboxApplied}, Limit: 100,

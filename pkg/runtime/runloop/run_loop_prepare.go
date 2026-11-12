@@ -23,7 +23,7 @@ import (
 // path send byte-identical System and Tools, and a load only appends tools.
 //
 // It fills the whole request except MaxOutputTokens, which is the step's
-// output reservation and is set by the ModelStepProducer after it planned the
+// output reservation and is set by the modelstep.Producer after it planned the
 // step budget (0 here means no Run limit).
 //
 // Nothing the catalog decides is in System or in a harness or core tool: the
@@ -328,7 +328,7 @@ func loopCapabilityToolName(actions []capability.ModelAction) func(id string) st
 
 // ControlToolSpecs lists the control tools offered under a in the stable
 // advertised order (SPEC §5.1).
-func ControlToolSpecs(a agentrun.ControlAuthority) []control.ControlToolSpec {
+func ControlToolSpecs(a agentrun.ControlAuthority) []control.ToolSpec {
 	return loopControlRegistry().Specs(a)
 }
 

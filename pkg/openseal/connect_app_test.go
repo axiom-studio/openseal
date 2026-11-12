@@ -32,7 +32,7 @@ func waitingConnectAppFixture(t *testing.T) (context.Context, *sqlite.Store, *En
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "one"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
 		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "List my Linear issues", Source: models.RunSourceChat,
 		Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
 	if err != nil {

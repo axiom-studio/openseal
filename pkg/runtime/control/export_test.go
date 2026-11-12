@@ -17,6 +17,6 @@ func AskUserAnswer(run *models.AgentRun, entry *models.SessionEntry, questionMes
 	return askUserAnswer(run, entry, questionMessageID)
 }
 
-func (x *ControlExecutor) TransitionControlEntry(ctx context.Context, cc agentrun.ControlContext, to models.ToolEntryState, wait *models.ToolEntryWait, result *models.ToolResult, meta *ControlEntryMeta) (*models.SessionEntry, error) {
+func (x *Executor) TransitionControlEntry(ctx context.Context, cc agentrun.ControlContext, to models.ToolEntryState, wait *models.ToolEntryWait, result *models.ToolResult, meta *EntryMeta) (*models.SessionEntry, error) {
 	return x.transitionControlEntry(ctx, cc, to, wait, result, meta)
 }

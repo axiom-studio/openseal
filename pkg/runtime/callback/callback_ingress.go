@@ -17,14 +17,14 @@ import (
 
 const MaximumCallbackIngressBytes = 1 << 20
 
-type CallbackPublicRequest struct {
+type PublicRequest struct {
 	Route   string              `json:"route"`
 	Method  string              `json:"method"`
 	Headers map[string][]string `json:"headers,omitempty"`
 	Body    []byte              `json:"body"`
 }
 
-func (r *CallbackPublicRequest) Validate() error {
+func (r *PublicRequest) Validate() error {
 	if r == nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(r.Route), 128) || r.Method != http.MethodPost ||
 		len(r.Body) == 0 || len(r.Body) > MaximumCallbackIngressBytes || len(r.Headers) > 64 {
 		return models.ErrInvalidCallbackRegistration
@@ -75,20 +75,20 @@ func (e NormalizedCallbackEvent) Validate() error {
 	return probe.Validate()
 }
 
-type CallbackHostRequest struct {
+type HostRequest struct {
 	Registration *models.CallbackRegistration `json:"registration"`
 	Adapter      *skill.BoundCallbackAdapter  `json:"adapter"`
-	Request      *CallbackPublicRequest       `json:"request"`
+	Request      *PublicRequest               `json:"request"`
 }
 
-type CallbackHostResult struct {
+type HostResult struct {
 	StatusCode  int                       `json:"statusCode"`
 	ContentType string                    `json:"contentType,omitempty"`
 	Body        []byte                    `json:"body,omitempty"`
 	Events      []NormalizedCallbackEvent `json:"events,omitempty"`
 }
 
-func (r *CallbackHostResult) Validate() error {
+func (r *HostResult) Validate() error {
 	if r == nil || r.StatusCode < 200 || r.StatusCode > 599 || len(r.ContentType) > 256 ||
 		strings.ContainsAny(r.ContentType, "\r\n") || len(r.Body) > MaximumCallbackIngressBytes || len(r.Events) > 100 {
 		return models.ErrInvalidCallbackRegistration
@@ -104,33 +104,33 @@ func (r *CallbackHostResult) Validate() error {
 	return nil
 }
 
-type CallbackAdapterHost interface {
-	NormalizeCallback(context.Context, CallbackHostRequest) (*CallbackHostResult, error)
+type AdapterHost interface {
+	NormalizeCallback(context.Context, HostRequest) (*HostResult, error)
 }
 
-type CallbackEventConsumer interface {
+type EventConsumer interface {
 	ConsumeCallbackEvent(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error
 }
 
-type CallbackEventConsumerFunc func(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error
+type EventConsumerFunc func(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error
 
-func (f CallbackEventConsumerFunc) ConsumeCallbackEvent(ctx context.Context, registration *models.CallbackRegistration, subscription models.CallbackSubscription, event models.EventEnvelope) error {
+func (f EventConsumerFunc) ConsumeCallbackEvent(ctx context.Context, registration *models.CallbackRegistration, subscription models.CallbackSubscription, event models.EventEnvelope) error {
 	return f(ctx, registration, subscription, event)
 }
 
-type CallbackIngressResult struct {
-	Response *CallbackHostResult            `json:"response"`
+type IngressResult struct {
+	Response *HostResult                    `json:"response"`
 	Receipts []*models.CallbackEventReceipt `json:"receipts,omitempty"`
 	Replayed int                            `json:"replayed,omitempty"`
 }
 
-type CallbackIngressService struct {
+type IngressService struct {
 	store interface {
 		models.CallbackRegistrationStore
 		models.CallbackEventStore
 	}
-	resolver  CallbackAdapterResolver
-	consumers map[string]CallbackEventConsumer
+	resolver  AdapterResolver
+	consumers map[string]EventConsumer
 	now       func() time.Time
 	async     bool
 	wake      func()
@@ -140,25 +140,25 @@ type CallbackIngressService struct {
 // verification and durable receipt persistence. The supplied wake function
 // should notify a restart-safe leased worker; it may be nil when polling alone
 // is sufficient.
-func (s *CallbackIngressService) SetDurableDispatcher(wake func()) {
+func (s *IngressService) SetDurableDispatcher(wake func()) {
 	if s == nil {
 		return
 	}
 	s.async, s.wake = true, wake
 }
 
-func NewCallbackIngressService(store interface {
+func NewIngressService(store interface {
 	models.CallbackRegistrationStore
 	models.CallbackEventStore
-}, resolver CallbackAdapterResolver, consumers map[string]CallbackEventConsumer, opts ...models.ServiceOption) *CallbackIngressService {
-	copyConsumers := make(map[string]CallbackEventConsumer, len(consumers))
+}, resolver AdapterResolver, consumers map[string]EventConsumer, opts ...models.ServiceOption) *IngressService {
+	copyConsumers := make(map[string]EventConsumer, len(consumers))
 	for name, consumer := range consumers {
 		copyConsumers[strings.TrimSpace(name)] = consumer
 	}
-	return &CallbackIngressService{store: store, resolver: resolver, consumers: copyConsumers, now: models.ClockFrom(opts)}
+	return &IngressService{store: store, resolver: resolver, consumers: copyConsumers, now: models.ClockFrom(opts)}
 }
 
-func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPublicRequest, host CallbackAdapterHost) (*CallbackIngressResult, error) {
+func (s *IngressService) Receive(ctx context.Context, request PublicRequest, host AdapterHost) (*IngressResult, error) {
 	if s == nil || s.store == nil || s.resolver == nil || host == nil {
 		return nil, errors.New("callback ingress is not configured")
 	}
@@ -189,7 +189,7 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 		adapter.Adapter.Provider != registration.Provider {
 		return nil, fmt.Errorf("%w: exact callback Skill adapter is unavailable or stale", models.ErrCallbackRegistrationConflict)
 	}
-	hostResult, err := host.NormalizeCallback(ctx, CallbackHostRequest{Registration: registration, Adapter: adapter, Request: &request})
+	hostResult, err := host.NormalizeCallback(ctx, HostRequest{Registration: registration, Adapter: adapter, Request: &request})
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +209,7 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 			return nil, fmt.Errorf("%w: callback emitted undeclared event type %q", models.ErrCallbackRegistrationConflict, normalized.Type)
 		}
 	}
-	result := &CallbackIngressResult{Response: hostResult, Receipts: make([]*models.CallbackEventReceipt, 0, len(hostResult.Events))}
+	result := &IngressResult{Response: hostResult, Receipts: make([]*models.CallbackEventReceipt, 0, len(hostResult.Events))}
 	for _, normalized := range hostResult.Events {
 		event := normalized.envelope(registration)
 		now := s.now().UTC()
@@ -258,7 +258,7 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 	return result, nil
 }
 
-func (s *CallbackIngressService) dispatch(ctx context.Context, registration *models.CallbackRegistration, event models.EventEnvelope, receivedAt time.Time) error {
+func (s *IngressService) dispatch(ctx context.Context, registration *models.CallbackRegistration, event models.EventEnvelope, receivedAt time.Time) error {
 	// A durable receipt may outlive its binding. Revalidate acquisition
 	// authority before an asynchronous worker publishes observations or
 	// invokes consumers, rather than treating the original ingress check as

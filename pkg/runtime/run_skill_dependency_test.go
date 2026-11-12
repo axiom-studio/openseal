@@ -57,7 +57,7 @@ func TestRunSkillDependencyPinsQueuedInvocationBeforeFirstActionAcrossStores(t *
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(models.KernelStore)
 		catalog, scope, _ := runSkillDependencyFixture(t, store)
-		run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
+		run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func TestRunSkillDependencySurvivesPausedContinuationAndDisabledBindingAcrossSto
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(models.KernelStore)
 		catalog, scope, binding := runSkillDependencyFixture(t, store)
-		run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
+		run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +173,7 @@ func TestRunSkillDependencySerializesNewInvocationAndMaintenanceAcrossStores(t *
 				var gate *models.SkillRuntimeMaintenance
 				var runErr, gateErr error
 				create := func() {
-					run, runErr = portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
+					run, runErr = portfolio.NewService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
 				}
 				acquire := func() {
 					gate, gateErr = store.(models.SkillRuntimeMaintenanceStore).AcquireSkillRuntimeMaintenance(t.Context(), runSkillDependencyMaintenanceRequest(scope))
@@ -229,7 +229,7 @@ func TestRunSkillDependencySerializesNewInvocationAndBindingUpgradeAcrossStores(
 				var run *models.AgentRun
 				var runErr, upgradeErr error
 				create := func() {
-					run, runErr = portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
+					run, runErr = portfolio.NewService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
 				}
 				upgrade := func() {
 					_, upgradeErr = service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: models.ActivityActor{Type: "system", ID: "controller"}, Reason: "Adopt new runtime"})
@@ -268,7 +268,7 @@ func TestRunSkillDependencyRejectsNewPinUpdateDuringMaintenanceAtomicallyAcrossS
 		_, scope, _ := runSkillDependencyFixture(t, store)
 		request := runSkillDependencyRequest(scope)
 		request.Context = nil
-		run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), request)
+		run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -301,7 +301,7 @@ func TestRunSkillDependencyRetainsTeamGrantWithoutAssumingAssignedMemberOwnsBind
 		_, scope, _ := runSkillDependencyFixture(t, store)
 		request := runSkillDependencyRequest(scope)
 		request.Owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}
-		if _, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), request); err != nil {
+		if _, err := portfolio.NewService(store).CreateAgentRun(t.Context(), request); err != nil {
 			t.Fatal(err)
 		}
 		for _, deployment := range []string{"agent", "team"} {

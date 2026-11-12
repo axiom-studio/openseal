@@ -20,7 +20,7 @@ type (
 func (e *Engine) buildGovernedToolExecutor() error {
 	e.governedWorker = nil
 	e.governedTools = nil
-	var worker *action.ActionWorker
+	var worker *action.Worker
 	switch {
 	case len(e.actionSupervisorSpecs) > 0:
 		spec := e.actionSupervisorSpecs[0]
@@ -46,11 +46,11 @@ func (e *Engine) buildGovernedToolExecutor() error {
 
 // newInlineActionWorker is the action worker the claiming replica runs loop
 // calls with; it holds the same credentials and dispatcher as the pools.
-func newInlineActionWorker(e *Engine, credentials action.CredentialResolver, issuer action.ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher) *action.ActionWorker {
+func newInlineActionWorker(e *Engine, credentials action.CredentialResolver, issuer action.CredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher) *action.Worker {
 	if issuer != nil {
-		return action.NewActionWorkerWithCredentialLeaseIssuer(e.store, e.skills, issuer, dispatcher)
+		return action.NewWorkerWithCredentialLeaseIssuer(e.store, e.skills, issuer, dispatcher)
 	}
-	return action.NewActionWorker(e.store, e.skills, credentials, dispatcher)
+	return action.NewWorker(e.store, e.skills, credentials, dispatcher)
 }
 
 // GovernedTools returns the executor the RunLoop's tool executor uses, or nil

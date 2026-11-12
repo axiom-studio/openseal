@@ -25,14 +25,14 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 	}
 	f.conversation = team
 	person := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "member-a"}
-	coordinator := action.NewActionCoordinator(f.store, f.store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
+	coordinator := action.NewCoordinator(f.store, f.store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
 	}), nil)
 	waiting := func(agentID string, trigger *models.ChannelMessage) *models.ActionProposalResult {
 		created, err := f.scheduler.Runs().CreateAgentRun(ctx, models.CreateAgentRunRequest{
 			Scope: scope, Kind: models.RunKindConversation, Owner: team.Owner, AssignedAgentID: agentID,
 			ConcurrencyKey: models.ConversationRunLane(team.ID, "", agentID), Goal: "Respond to a Team channel message", Source: models.RunSourceChat,
-			Context:        map[string]interface{}{models.ConversationRunConversationIDContextKey: team.ID, models.ConversationRunTriggerIDContextKey: trigger.ID, conversation.ConversationRunContextTriggerSeq: trigger.Sequence},
+			Context:        map[string]interface{}{models.ConversationRunConversationIDContextKey: team.ID, models.ConversationRunTriggerIDContextKey: trigger.ID, conversation.RunContextTriggerSeq: trigger.Sequence},
 			IdempotencyKey: "member-" + agentID + "-" + trigger.ID, Actor: models.ActivityActor{Type: "service", ID: models.ConversationRunSchedulerParticipant},
 		})
 		if err != nil {

@@ -37,7 +37,7 @@ func TestConversationChangeBatchesHistoricalRootLookups(t *testing.T) {
 	for i := 0; i < 501; i++ {
 		store.roots = append(store.roots, &models.AgentRun{ID: fmt.Sprintf("root-%03d", i), Scope: scope, ConcurrencyKey: "chat", Status: models.AgentRunStatusCompleted})
 	}
-	service := &ConversationChangeService{portfolio: store}
+	service := &ChangeService{portfolio: store}
 	if _, err := service.listConversationRuns(t.Context(), &models.Conversation{ID: "chat", Scope: scope}); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 			scope := models.Scope{Kind: "tenant", ID: "one"}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "writer"}
 			seedTestSpace(t, store.(models.SpaceStore), scope)
-			conversation, _, err := NewConversationService(store.(models.ConversationStore)).CreateConversation(t.Context(), CreateConversationRequest{
+			conversation, _, err := NewService(store.(models.ConversationStore)).CreateConversation(t.Context(), CreateConversationRequest{
 				Scope: scope, Owner: owner, Title: "Draft report", IdempotencyKey: "report-chat",
 			})
 			if err != nil {
@@ -115,7 +115,7 @@ func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 					t.Fatalf("root batch %v exact %q: got %d, want %d, error %v", check.roots, check.exact, len(got), check.want, err)
 				}
 			}
-			service, err := NewConversationChangeService(store.(models.ConversationStore), store)
+			service, err := NewChangeService(store.(models.ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -130,11 +130,11 @@ func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			initial, err := service.ListChanges(t.Context(), ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+			initial, err := service.ListChanges(t.Context(), ChangeRequest{Scope: scope, ConversationID: conversation.ID})
 			if err != nil {
 				t.Fatal(err)
 			}
-			unchanged, err := service.ListChanges(t.Context(), ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor})
+			unchanged, err := service.ListChanges(t.Context(), ChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -156,7 +156,7 @@ func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 			if before == after || projection[0].Status != models.AgentRunStatusFailed {
 				t.Fatal("child failure did not change the projection")
 			}
-			changed, err := service.ListChanges(t.Context(), ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor})
+			changed, err := service.ListChanges(t.Context(), ChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor})
 			if err != nil {
 				t.Fatal(err)
 			}

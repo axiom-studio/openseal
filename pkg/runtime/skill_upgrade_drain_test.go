@@ -34,7 +34,7 @@ func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *te
 			t.Fatalf("queued call was not drained: %v", err)
 		}
 		assertSkillUpgradePin(t, catalog, proposal.Call, "1.0.0", 1)
-		worker := action.NewActionWorker(store, catalog, nil, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		worker := action.NewWorker(store, catalog, nil, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"channel": "provider-conversation"}, nil
 		}))
 		result, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "chat-worker")
@@ -87,7 +87,7 @@ func skillUpgradeDrainFixture(t *testing.T, store models.KernelStore) (*skill.Ca
 	if err := catalog.Bind(t.Context(), &skill.Binding{ID: "account", Scope: skill.ScopeReference(scope), DeploymentID: "agent", SkillID: "follow-up", SkillVersion: "1.0.0", AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Read and follow up", Source: models.RunSourceManual})
 	if err != nil {
 		t.Fatal(err)
@@ -96,8 +96,8 @@ func skillUpgradeDrainFixture(t *testing.T, store models.KernelStore) (*skill.Ca
 	if err != nil || run == nil {
 		t.Fatalf("claim run: %#v %v", run, err)
 	}
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+	coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 	}), nil)
 	proposal, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "chat-worker", DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "follow-up", SkillVersion: "1.0.0", Action: "read", Arguments: map[string]interface{}{}, Summary: "Read messages"}, "read"))
 	if err != nil {
@@ -151,7 +151,7 @@ func TestSkillRuntimeUsageScopesAndRetentionAcrossStores(t *testing.T) {
 		}
 		// The loop's inline execution retires a stale/revoked call instead of
 		// issuing side effects.
-		worker := action.NewActionWorker(store, catalog, nil, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		worker := action.NewWorker(store, catalog, nil, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			t.Fatal("revoked call dispatched")
 			return nil, nil
 		}))
@@ -171,7 +171,7 @@ func TestSkillUpgradeDrainProjectsRollingVersionWritesAcrossStores(t *testing.T)
 		db, actions := fixture.db, fixture.table("action_calls")
 		_, postgres := store.(*postgres.Store)
 		scope := models.Scope{Kind: "tenant", ID: "rolling"}
-		run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Rolling-version write", Source: models.RunSourceManual})
+		run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Rolling-version write", Source: models.RunSourceManual})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -215,7 +215,7 @@ func TestSkillUpgradeDrainFencesLegacyWritersAgainstExistingAuthority(t *testing
 				db, actions := fixture.db, fixture.table("action_calls")
 				_, postgres := store.(*postgres.Store)
 				scope := models.Scope{Kind: "tenant", ID: "legacy-fence"}
-				run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Fence old writer", Source: models.RunSourceManual})
+				run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Fence old writer", Source: models.RunSourceManual})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -296,7 +296,7 @@ func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(models.KernelStore)
 		scope := models.Scope{Kind: "tenant", ID: "statuses"}
-		run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Check status metadata", Source: models.RunSourceManual})
+		run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Check status metadata", Source: models.RunSourceManual})
 		if err != nil {
 			t.Fatal(err)
 		}

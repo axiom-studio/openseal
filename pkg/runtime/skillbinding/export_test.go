@@ -15,25 +15,25 @@ import (
 
 type InteractionRequestRefusal = interactionRequestRefusal
 
-func (d *SkillBindingActionDispatcher) RequestSkillSetup(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella, owner models.ObjectiveOwner) (map[string]interface{}, error) {
+func (d *ActionDispatcher) RequestSkillSetup(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella, owner models.ObjectiveOwner) (map[string]interface{}, error) {
 	return d.requestSkillSetup(ctx, input, run, member, umbrella, owner)
 }
 
-func (d *SkillBindingActionDispatcher) RequestConnection(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella, owner models.ObjectiveOwner) (map[string]interface{}, error) {
+func (d *ActionDispatcher) RequestConnection(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella, owner models.ObjectiveOwner) (map[string]interface{}, error) {
 	return d.requestConnection(ctx, input, run, member, umbrella, owner)
 }
 
-func (d *SkillBindingActionDispatcher) ListSkillSetupRequests(ctx context.Context, run *models.AgentRun, member string, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
+func (d *ActionDispatcher) ListSkillSetupRequests(ctx context.Context, run *models.AgentRun, member string, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
 	return d.listSkillSetupRequests(ctx, run, member, umbrella)
 }
 
-func (d *SkillBindingActionDispatcher) FindApps(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
+func (d *ActionDispatcher) FindApps(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
 	return d.findApps(ctx, input, run, umbrella)
 }
 
-func (d *SkillBindingActionDispatcher) Catalog() *skill.Catalog { return d.catalog }
+func (d *ActionDispatcher) Catalog() *skill.Catalog { return d.catalog }
 
-func (d *SkillBindingActionDispatcher) SetDiscovery(discovery skill.DiscoveryProvider) {
+func (d *ActionDispatcher) SetDiscovery(discovery skill.DiscoveryProvider) {
 	d.discovery = discovery
 }
 

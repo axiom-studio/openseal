@@ -25,7 +25,7 @@ func TestObjectiveLifecycleIsAtomicallyAudited(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			store := createStore(t)
-			portfolio := runtimeportfolio.NewPortfolioService(store)
+			portfolio := runtimeportfolio.NewService(store)
 			scope := models.Scope{Kind: "tenant", ID: name}
 			objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"},

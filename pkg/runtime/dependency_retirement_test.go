@@ -160,7 +160,7 @@ func TestDependencyRetirementPausedSourceKeepsResultsUntilNormalResume(t *testin
 		t.Run(name, func(t *testing.T) {
 			forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
 				fixture := agentruntest.NewDependencyFixture(t, store)
-				fixture.Command(t, agentrun.AgentRunCommandPause)
+				fixture.Command(t, agentrun.CommandPause)
 				fixture.AssertWaitingWork(t, 1, false)
 				paused := fixture.Snapshot(t).Source
 				for _, branch := range []string{"alpha", "beta"} {
@@ -196,7 +196,7 @@ func TestDependencyRetirementPausedSourceKeepsResultsUntilNormalResume(t *testin
 					}
 				}
 				request := fixture.Request(t)
-				fixture.Command(t, agentrun.AgentRunCommandResume)
+				fixture.Command(t, agentrun.CommandResume)
 				resumed := fixture.Snapshot(t)
 				if resumed.Source.Status != models.AgentRunStatusQueued || resumed.Source.WakeCondition != nil || resumed.Source.PausedWakeCondition != nil || !reflect.DeepEqual(resumed.Source.Output, joined.Source.Output) {
 					t.Fatalf("normal resume restored a completed wait or lost output: %#v", resumed.Source)
@@ -282,7 +282,7 @@ func TestDependencyRetirementWaitingScanIsBoundedScopedAndUsesExactKeyset(t *tes
 			}
 		}
 		retired := fixtures[1]
-		retired.Command(t, agentrun.AgentRunCommandCancel)
+		retired.Command(t, agentrun.CommandCancel)
 		if _, err := retired.Coordinator().ReconcileRunDependencyGroup(t.Context(), retired.Request(t)); err != nil {
 			t.Fatal(err)
 		}
@@ -388,7 +388,7 @@ func TestDependencyRetirementSourceCancellationBetweenReadAndCommitIsFenced(t *t
 		var canceled *models.AgentRun
 		var before agentruntest.DependencySnapshot
 		wrapped := &dependencyRetirementCancelBeforeStore{DependencyStore: store, before: func() {
-			canceled = fixture.Command(t, agentrun.AgentRunCommandCancel)
+			canceled = fixture.Command(t, agentrun.CommandCancel)
 			before = fixture.Snapshot(t)
 		}}
 		coordinator := portfolio.NewDependencyCoordinator(wrapped, models.WithClock(func() time.Time { return fixture.Now.Add(10 * time.Second) }))
@@ -412,7 +412,7 @@ func TestDependencyRetirementDirectResolutionCannotReviveCanceledSource(t *testi
 	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
 		fixture := agentruntest.NewDependencyFixture(t, store)
 		child := fixture.FinishChild(t, "alpha", models.AgentRunStatusCompleted)
-		fixture.Command(t, agentrun.AgentRunCommandCancel)
+		fixture.Command(t, agentrun.CommandCancel)
 		before := fixture.Snapshot(t)
 		result := fixture.ResolveChild(t, "alpha", child)
 		after := fixture.Snapshot(t)
@@ -435,7 +435,7 @@ func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(
 			forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
 				catalog, scope, binding := runSkillDependencyFixture(t, store)
 				now := time.Now().UTC().Round(0)
-				portfolioService := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+				portfolioService := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 				source, err := portfolioService.CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
 				if err != nil {
 					t.Fatal(err)

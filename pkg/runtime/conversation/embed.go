@@ -61,7 +61,7 @@ type OpenEmbedSessionResult struct {
 
 type EmbedSessionService struct {
 	store         models.EmbedStore
-	conversations *ConversationService
+	conversations *Service
 	now           func() time.Time
 	newID         func() string
 	randomToken   func() (string, error)
@@ -71,7 +71,7 @@ func NewEmbedSessionService(store models.EmbedStore, conversations models.Conver
 	if store == nil || conversations == nil {
 		return nil, errors.New("embed and conversation stores are required")
 	}
-	return &EmbedSessionService{store: store, conversations: NewConversationService(conversations, opts...), now: models.ClockFrom(opts), newID: uuid.NewString, randomToken: randomEmbedToken}, nil
+	return &EmbedSessionService{store: store, conversations: NewService(conversations, opts...), now: models.ClockFrom(opts), newID: uuid.NewString, randomToken: randomEmbedToken}, nil
 }
 
 func (s *EmbedSessionService) CreateInstallation(ctx context.Context, req CreateEmbedInstallationRequest) (*models.EmbedInstallation, error) {

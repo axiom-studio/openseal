@@ -331,15 +331,15 @@ func TestRunbookKernelToolsAreNeverOffered(t *testing.T) {
 		}
 	}
 	for _, name := range []models.ControlToolName{models.ControlToolRunbookFork, models.ControlToolRunbookDelegate} {
-		if phase, ok := control.ControlToolPhase(string(name)); !ok || phase != control.ControlPhaseSettle {
+		if phase, ok := control.ToolPhase(string(name)); !ok || phase != control.PhaseSettle {
 			t.Fatalf("%s phase=%s ok=%t", name, phase, ok)
 		}
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Through the RunLoop: the kernel calls settle after the engine state is
-// applied, through the real claim tool executor and ControlExecutor.
+// Through the runloop.Loop: the kernel calls settle after the engine state is
+// applied, through the real claim tool executor and control.Executor.
 
 const runbookLoopWorker = "runbook-loop-worker"
 
@@ -366,9 +366,9 @@ type runbookLoopFixture struct {
 	ctx      context.Context
 	store    *sqlite.Store
 	scope    models.Scope
-	control  *control.ControlExecutor
+	control  *control.Executor
 	tools    *runloop.StepToolDispatcher
-	loop     *runloop.RunLoop
+	loop     *runloop.Loop
 	producer *routine.RunbookStepProducer
 }
 
@@ -376,15 +376,15 @@ func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runboo
 	t.Helper()
 	store := kerneltest.NewStore(t)
 	f := &runbookLoopFixture{t: t, ctx: context.Background(), store: store, scope: models.Scope{Kind: "tenant", ID: "runbook-loop"}}
-	collaboration := collaboration.NewCollaborationService(store)
-	f.control = &control.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration}
+	collaboration := collaboration.NewService(store)
+	f.control = &control.Executor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration}
 	tools, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: f.control})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.tools = tools
 	f.producer = newTestRunbookProducer(t, definition, "manual", store)
-	loop, err := runloop.NewRunLoop(store, nil, nil, runloop.RunLoopConfig{
+	loop, err := runloop.New(store, nil, nil, runloop.Config{
 		PlanToolEntries: func(binding *agentrun.TurnRunnerBinding, session *models.AgentSession, step *models.AgentTurn, _ *models.SessionEntry, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
 			return runloop.PlanToolCallEntries(binding, &models.AgentRun{ID: step.RunID, Scope: step.Scope}, step, session.ID, calls)
 		},
@@ -409,7 +409,7 @@ func (f *runbookLoopFixture) create(req models.CreateAgentRunRequest) *models.Ag
 	if req.Source == "" {
 		req.Source = models.RunSourceManual
 	}
-	run, err := portfolio.NewPortfolioService(f.store).CreateAgentRun(f.ctx, req)
+	run, err := portfolio.NewService(f.store).CreateAgentRun(f.ctx, req)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func (f *runbookLoopFixture) create(req models.CreateAgentRunRequest) *models.Ag
 
 // drive claims the next queued Run of the scope (it must be one of wantIDs)
 // and drives one claim on its run session.
-func (f *runbookLoopFixture) drive(wantIDs ...string) (string, runloop.RunLoopExit) {
+func (f *runbookLoopFixture) drive(wantIDs ...string) (string, runloop.Exit) {
 	f.t.Helper()
 	now := time.Now().UTC()
 	claimed, err := f.store.ClaimNextAgentRun(f.ctx, models.AgentRunClaim{Scope: f.scope, WorkerID: runbookLoopWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
@@ -445,7 +445,7 @@ func (f *runbookLoopFixture) drive(wantIDs ...string) (string, runloop.RunLoopEx
 	}
 	claimed = f.run(claimed.ID)
 	binding := &agentrun.TurnRunnerBinding{Producer: f.producer, Session: session, Tools: f.tools.ForClaim(runloop.LoopToolClaim{})}
-	return claimed.ID, f.loop.Drive(f.ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: runbookLoopWorker, Binding: binding})
+	return claimed.ID, f.loop.Drive(f.ctx, runloop.Claim{Run: claimed, WorkerID: runbookLoopWorker, Binding: binding})
 }
 
 func (f *runbookLoopFixture) run(id string) *models.AgentRun {

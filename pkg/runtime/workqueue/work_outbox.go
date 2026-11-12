@@ -7,7 +7,7 @@ import (
 )
 
 // WorkOutboxStore is a store whose committed work changes are recorded in a
-// transactional outbox for relay into a WorkQueue.
+// transactional outbox for relay into a Queue.
 type WorkOutboxStore interface {
 	// WorkCommitted receives after this process commits a write that may
 	// have added outbox rows. It is a coalescing hint, never closed.

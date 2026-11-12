@@ -66,7 +66,7 @@ type AppCatalog interface {
 
 // isCatalogApp reports whether id is the slug of an app in the host's
 // catalog, so a Skill setup naming an app can say how to connect it.
-func (d *SkillBindingActionDispatcher) isCatalogApp(ctx context.Context, scope models.Scope, id string) bool {
+func (d *ActionDispatcher) isCatalogApp(ctx context.Context, scope models.Scope, id string) bool {
 	catalog := d.apps.get()
 	if catalog == nil || !models.IsValidAppSlug(id) {
 		return false
@@ -102,7 +102,7 @@ func (r *AppCatalogRef) get() AppCatalog {
 
 // UseAppCatalog gives the dispatcher the host's app catalog for find_apps
 // and request_connection.
-func (d *SkillBindingActionDispatcher) UseAppCatalog(ref *AppCatalogRef) {
+func (d *ActionDispatcher) UseAppCatalog(ref *AppCatalogRef) {
 	if d != nil {
 		d.apps = ref
 	}
@@ -150,7 +150,7 @@ type findAppsArguments struct {
 	Limit int    `json:"limit,omitempty"`
 }
 
-func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
+func (d *ActionDispatcher) findApps(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, umbrella models.ObjectiveOwner) (map[string]interface{}, error) {
 	var a findAppsArguments
 	if err := decodeSkillBindingArguments(input.Arguments, &a); err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input agent
 
 // findSetupSkills lists the Skills that discovery offers for the query and
 // that the user can set up from chat, so one search covers apps and Skills.
-func (d *SkillBindingActionDispatcher) findSetupSkills(ctx context.Context, run *models.AgentRun, deploymentID, query string, limit int) ([]interface{}, error) {
+func (d *ActionDispatcher) findSetupSkills(ctx context.Context, run *models.AgentRun, deploymentID, query string, limit int) ([]interface{}, error) {
 	skills := []interface{}{}
 	if d.discovery == nil {
 		return skills, nil
@@ -298,7 +298,7 @@ func decodeAppAddress(value, reason string) (models.ConnectAppTarget, string, er
 // requestConnection saves a connect card in the run's chat (under umbrella)
 // for owner, the Agent or Team the app is connected for: the umbrella, or
 // the Agent a builder names with targetAgentId.
-func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella, owner models.ObjectiveOwner) (map[string]interface{}, error) {
+func (d *ActionDispatcher) requestConnection(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun, member string, umbrella, owner models.ObjectiveOwner) (map[string]interface{}, error) {
 	target, reason, err := decodeRequestConnectionArguments(input.Arguments)
 	if err != nil {
 		return nil, err
@@ -399,7 +399,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 // run uses them: the run's umbrella, or the Agent a builder in its own chat
 // acts for (skillActionTarget checked it), read as that Agent for the
 // person the run acts for.
-func (d *SkillBindingActionDispatcher) runHostBindings(ctx context.Context, run *models.AgentRun, owner models.ObjectiveOwner) (*skill.HostBindingSet, error) {
+func (d *ActionDispatcher) runHostBindings(ctx context.Context, run *models.AgentRun, owner models.ObjectiveOwner) (*skill.HostBindingSet, error) {
 	if run == nil {
 		return &skill.HostBindingSet{}, nil
 	}

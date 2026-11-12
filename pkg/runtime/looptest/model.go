@@ -3,7 +3,7 @@ package looptest
 // Run-loop test kit, part 1 (run-loop section 12 §3.1-3.4): the scripted
 // model, its step view and result builders, fake host tools, the step host
 // that joins them, the store matrix, the fake clock and the crash store.
-// The loop fixture that drives the real RunLoop lives in
+// The loop fixture that drives the real runloop.Loop lives in
 // fixture.go.
 //
 // Fakes see only what the model sees: ModelStepRequest (its Entries, Tools

@@ -13,14 +13,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
-// ExternalConversationReplyWorker projects applied inbox work after its
+// ReplyWorker projects applied inbox work after its
 // canonical Run finishes. Direct Agent/Team handlers normally already wrote
 // the reply; event Runbooks expose the reply as their typed "reply" output.
 // Both paths converge on the same idempotent Conversation message and outbox.
-type ExternalConversationReplyWorker struct {
+type ReplyWorker struct {
 	store         models.ExternalConversationReplyStore
-	conversations *conversation.ConversationService
-	transport     *ExternalConversationTransportService
+	conversations *conversation.Service
+	transport     *TransportService
 	now           func() time.Time
 }
 
@@ -40,17 +40,17 @@ func externalConversationReplyRetryDelay(attempt int) time.Duration {
 	return min(delay, externalConversationReplyMaximumRetry)
 }
 
-func NewExternalConversationReplyWorker(
+func NewReplyWorker(
 	store models.ExternalConversationReplyStore,
-	resolver ExternalConversationAdapterResolver,
+	resolver AdapterResolver,
 	opts ...models.ServiceOption,
-) (*ExternalConversationReplyWorker, error) {
+) (*ReplyWorker, error) {
 	if store == nil || resolver == nil {
 		return nil, errors.New("external conversation reply store and adapter resolver are required")
 	}
-	return &ExternalConversationReplyWorker{
-		store: store, conversations: conversation.NewConversationService(store, opts...),
-		transport: NewExternalConversationTransportService(store, resolver, opts...),
+	return &ReplyWorker{
+		store: store, conversations: conversation.NewService(store, opts...),
+		transport: NewTransportService(store, resolver, opts...),
 		now:       models.ClockFrom(opts),
 	}, nil
 }
@@ -60,7 +60,7 @@ func NewExternalConversationReplyWorker(
 // store records reply progress, a resolved item is marked terminal and a
 // failing one backs off, so idle scopes stop re-projecting every applied
 // item on every pass; other stores keep the original revisit behaviour.
-func (w *ExternalConversationReplyWorker) ProcessScope(
+func (w *ReplyWorker) ProcessScope(
 	ctx context.Context,
 	scope models.Scope,
 	limit int,
@@ -105,7 +105,7 @@ func (w *ExternalConversationReplyWorker) ProcessScope(
 	return deliveries, errors.Join(projectErrors...)
 }
 
-func (w *ExternalConversationReplyWorker) recordFailure(ctx context.Context, progress models.ExternalConversationReplyStateStore, item *models.ExternalConversationInboxItem, now time.Time, cause error) {
+func (w *ReplyWorker) recordFailure(ctx context.Context, progress models.ExternalConversationReplyStateStore, item *models.ExternalConversationInboxItem, now time.Time, cause error) {
 	attempts := item.ReplyAttempts + 1
 	next := models.ExternalConversationReplyProgress{Attempts: attempts, Error: cause.Error(), At: now}
 	if attempts >= externalConversationReplyMaximumAttempts {
@@ -120,7 +120,7 @@ func (w *ExternalConversationReplyWorker) recordFailure(ctx context.Context, pro
 // project returns resolved=true when no further projection can ever be
 // needed for the item: its replies exist or were delivered, or no reply is
 // due (no Run, a canceled Run, a paused endpoint, a superseded failure).
-func (w *ExternalConversationReplyWorker) project(
+func (w *ReplyWorker) project(
 	ctx context.Context,
 	item *models.ExternalConversationInboxItem,
 ) ([]*models.ExternalConversationDelivery, bool, error) {
@@ -136,7 +136,7 @@ var errExternalReplyPending = errors.New("external conversation reply pending")
 
 // projectItem delivers each answer the item has: one for an Agent's Run,
 // one per member for a Team's. Each member answer has its own keys.
-func (w *ExternalConversationReplyWorker) projectItem(
+func (w *ReplyWorker) projectItem(
 	ctx context.Context,
 	item *models.ExternalConversationInboxItem,
 ) ([]*models.ExternalConversationDelivery, error) {
@@ -176,7 +176,7 @@ func (w *ExternalConversationReplyWorker) projectItem(
 	return deliveries, nil
 }
 
-func (w *ExternalConversationReplyWorker) projectReply(
+func (w *ReplyWorker) projectReply(
 	ctx context.Context,
 	item *models.ExternalConversationInboxItem,
 	reply externalItemReply,
@@ -369,7 +369,7 @@ func (w *ExternalConversationReplyWorker) projectReply(
 // its preview streamed into. A failed turn's partial preview, or a reply
 // with files an edit cannot carry, is deleted when the adapter can; the reply
 // is then posted as usual.
-func (w *ExternalConversationReplyWorker) finishAnswerStream(
+func (w *ReplyWorker) finishAnswerStream(
 	ctx context.Context,
 	item *models.ExternalConversationInboxItem,
 	replyID string,
@@ -407,7 +407,7 @@ func (w *ExternalConversationReplyWorker) finishAnswerStream(
 	return nil
 }
 
-func (w *ExternalConversationReplyWorker) findCanonicalReply(
+func (w *ReplyWorker) findCanonicalReply(
 	ctx context.Context,
 	item *models.ExternalConversationInboxItem,
 	run *models.AgentRun,
@@ -559,7 +559,7 @@ func externalConversationRunReply(ctx context.Context, sessions conversation.Loo
 // runs are deliberately excluded by project: replacement turns handle them.
 // For a Team member (member != ""), only that member's own later answer
 // supersedes its failure; a teammate's answer does not.
-func (w *ExternalConversationReplyWorker) failureSuperseded(
+func (w *ReplyWorker) failureSuperseded(
 	ctx context.Context,
 	item *models.ExternalConversationInboxItem,
 	endpoint *models.ExternalConversationEndpoint,

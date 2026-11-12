@@ -3,7 +3,7 @@ package runtime
 // Run-loop scenarios, child sessions (run-loop section 12 §5.8, A3/A4): forks,
 // delegation through decision/execution/review Runs, conversation tasks,
 // foreground promotion and runbook operations, driven through the real
-// RunLoop by the loop fixture plus a small worker: the claim of the next
+// runloop.Loop by the loop fixture plus a small worker: the claim of the next
 // queued Run, the binding the worker's resolver gives it (ResolveLoopBinding
 // shape: a Run bound to a session keeps it, any other Run gets its run session
 // at first claim, seeded with its brief), and the terminal-child resolution
@@ -67,7 +67,7 @@ func TestLoopForkCreatesChildSessionAndResumesWithItsFinalText(t *testing.T) {
 		parent := c.StartRun(models.RunKindAgentWork, "Count the stock")
 
 		// The fork parks the parent and releases its claim.
-		if exit, _ := c.drive(parent.ID); exit.Reason != runloop.RunLoopExitParked {
+		if exit, _ := c.drive(parent.ID); exit.Reason != runloop.ExitParked {
 			t.Fatalf("parent exit = %s", exit.Reason)
 		}
 		waiting := c.MustRun(parent.ID)
@@ -737,7 +737,7 @@ func TestLoopRunbookStartParksForChild(t *testing.T) {
 	looptest.EachStore(t, "child_runbook_start", func(t *testing.T, store models.KernelStore) {
 		c := newRunbookChildFixture(t, store)
 		parent := c.StartRun(models.RunKindAgentWork, "Engage acme")
-		if exit, _ := c.drive(parent.ID); exit.Reason != runloop.RunLoopExitParked {
+		if exit, _ := c.drive(parent.ID); exit.Reason != runloop.ExitParked {
 			t.Fatalf("parent exit = %s", exit.Reason)
 		}
 		c.MustStatus(parent, models.AgentRunStatusWaitingForDependency)

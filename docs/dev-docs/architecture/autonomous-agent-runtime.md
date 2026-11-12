@@ -332,7 +332,7 @@ The engine rejects mismatched policies. The default remains compatible with
 existing hosts. The desktop enables this policy on both components and exposes
 explicit per-channel Team replies settings.
 
-`ConversationService.UpdateConversation` accepts `ParticipationEnabled` under
+`conversation.Service.UpdateConversation` accepts `ParticipationEnabled` under
 revision control. Enabling records the channel's current sequence as a boundary:
 only subsequent messages qualify. Repeated enabling preserves that boundary;
 disabling and re-enabling skips messages received before the new boundary.
@@ -348,7 +348,7 @@ usage accounting remain enforced by the desktop host.
 
 ### Team replies and usage
 
-A host that bounds Team replies configures `ConversationRunSchedulerConfig.Budget`;
+A host that bounds Team replies configures `conversationrun.SchedulerConfig.Budget`;
 the scheduler copies that policy onto each new conversation Run. An unaddressed
 Team message first runs a routing step that picks one member, and the chosen
 member answers in its own conversation Run, an ordinary agent loop. Every model

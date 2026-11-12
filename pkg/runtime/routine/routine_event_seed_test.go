@@ -96,7 +96,7 @@ const routineEventSeedIntro = ". They are in the JSON below (or the file named b
 
 const routineEventSeedSilent = "\nIf nothing here needs the person's attention and you changed nothing, finish with silent set to true and an empty answer."
 
-func routineEventSeedEntriesFor(t *testing.T, run *models.AgentRun, store RoutineEventSeedStore, keeper RoutineEventFileKeeper) []*models.SessionEntry {
+func routineEventSeedEntriesFor(t *testing.T, run *models.AgentRun, store EventSeedStore, keeper EventFileKeeper) []*models.SessionEntry {
 	t.Helper()
 	entries, err := SessionSeedEntries(t.Context(), store, keeper, nil, run)
 	if err != nil {

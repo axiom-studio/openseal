@@ -30,7 +30,7 @@ func TestConversationThreadBackdropDoesNotSeekPastHiddenPage(t *testing.T) {
 	for _, replyTo := range []bool{false, true} {
 		t.Run(fmt.Sprintf("replyTo=%t", replyTo), func(t *testing.T) {
 			store := kerneltest.NewStore(t)
-			service := runtimeconversation.NewConversationService(store)
+			service := runtimeconversation.NewService(store)
 			conversation := conversationtest.ThreadStartConversation(t, store)
 			older := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
 				IdempotencyKey: "older-authorized", Content: "AUTHORIZED_OLDER_CONTEXT", Intent: models.MessageIntentUpdate,
@@ -51,7 +51,7 @@ func TestConversationThreadBackdropDoesNotSeekPastHiddenPage(t *testing.T) {
 			})
 			counted := &countedConversationBackdropStore{CountedPointStore: &conversationtest.CountedPointStore{ConversationStore: store}}
 			viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: conversation.Owner.ID}}
-			backdrop, err := runtimeconversation.LoadConversationThreadBackdrop(t.Context(), runtimeconversation.NewConversationService(counted), conversation, root, viewer)
+			backdrop, err := runtimeconversation.LoadConversationThreadBackdrop(t.Context(), runtimeconversation.NewService(counted), conversation, root, viewer)
 			if err != nil || counted.lists != 1 || len(counted.filters) != 1 {
 				t.Fatalf("backdrop sought past its first hidden page: lists=%d filters=%#v err=%v", counted.lists, counted.filters, err)
 			}
@@ -75,7 +75,7 @@ func TestConversationThreadBackdropDoesNotSeekPastHiddenPage(t *testing.T) {
 	}
 }
 
-func conversationThreadBackdropFixture(t *testing.T, service *runtimeconversation.ConversationService, conversation *models.Conversation, replyTo bool) (*models.ChannelMessage, []*models.ChannelMessage) {
+func conversationThreadBackdropFixture(t *testing.T, service *runtimeconversation.Service, conversation *models.Conversation, replyTo bool) (*models.ChannelMessage, []*models.ChannelMessage) {
 	t.Helper()
 	otherRoot := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "other-root", Intent: models.MessageIntentSystem})
 	own := make([]*models.ChannelMessage, 0, 11)
@@ -120,7 +120,7 @@ func TestConversationThreadBackdropIsBoundedAuthorizedAndStable(t *testing.T) {
 		t.Run(fmt.Sprintf("replyTo=%t", replyTo), func(t *testing.T) {
 			conversationtest.ForThreadStartStores(t, func(t *testing.T, store conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
 				conversation := conversationtest.ThreadStartConversation(t, store)
-				service := runtimeconversation.NewConversationService(store)
+				service := runtimeconversation.NewService(store)
 				root, expected := conversationThreadBackdropFixture(t, service, conversation, replyTo)
 				viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: conversation.Owner.ID}}
 				backdrop, err := runtimeconversation.LoadConversationThreadBackdrop(t.Context(), service, conversation, root, viewer)
@@ -154,12 +154,12 @@ func TestConversationThreadBackdropIsBoundedAuthorizedAndStable(t *testing.T) {
 
 func TestOrdinaryConversationHasNoThreadBackdropReads(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversation := conversationtest.ThreadStartConversation(t, store)
 	root := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "ordinary-root"})
 	reply := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "ordinary-reply", ReplyToMessageID: root.ID})
 	counted := &countedConversationBackdropStore{CountedPointStore: &conversationtest.CountedPointStore{ConversationStore: store}}
-	reader := runtimeconversation.NewConversationService(counted)
+	reader := runtimeconversation.NewService(counted)
 	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: conversation.Owner.ID}}
 	backdrop, err := runtimeconversation.LoadConversationThreadBackdrop(t.Context(), reader, conversation, root, viewer)
 	if err != nil || len(backdrop) != 0 || counted.Points != 0 || counted.lists != 0 {

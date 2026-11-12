@@ -45,7 +45,7 @@ func newLoopWorkerFixture(t *testing.T, store models.KernelStore, budget *models
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "loop-worker"}
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
 		Goal: "ship the release", Source: models.RunSourceObjective, Budget: budget,
@@ -71,24 +71,24 @@ func (f *loopWorkerFixture) propose(id, action string) *models.ActionCall {
 
 // worker counts catalog resolutions, credential resolutions and dispatches;
 // its clock is f.clock.
-func (f *loopWorkerFixture) worker(dispatch action.ActionDispatcherFunc) *action.ActionWorker {
+func (f *loopWorkerFixture) worker(dispatch action.DispatcherFunc) *action.Worker {
 	return f.workerWithClock(dispatch, func() time.Time { return f.clock })
 }
 
 // workerWithClock is worker reading time from clock.
-func (f *loopWorkerFixture) workerWithClock(dispatch action.ActionDispatcherFunc, clock models.Clock) *action.ActionWorker {
-	worker := action.NewActionWorker(f.store, &actiontest.CountingCatalog{ActionExecutionCatalog: f.catalog, Calls: &f.catalogCalls},
+func (f *loopWorkerFixture) workerWithClock(dispatch action.DispatcherFunc, clock models.Clock) *action.Worker {
+	worker := action.NewWorker(f.store, &actiontest.CountingCatalog{ActionExecutionCatalog: f.catalog, Calls: &f.catalogCalls},
 		action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 			f.credentialCalls++
 			return map[string]string{"token": "loop-secret"}, nil
-		}), action.ActionDispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		}), action.DispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			f.dispatches++
 			return dispatch(ctx, input)
 		}), models.WithClock(clock))
 	return worker
 }
 
-func (f *loopWorkerFixture) execute(worker *action.ActionWorker, id string) (*models.ActionExecutionResult, error) {
+func (f *loopWorkerFixture) execute(worker *action.Worker, id string) (*models.ActionExecutionResult, error) {
 	return worker.ExecuteOwnLoopCall(context.Background(), f.scope, id, loopWorkerID)
 }
 
@@ -384,10 +384,10 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				if boundary == "after_catalog" {
 					catalog.AfterResolve = func() { wrapped.active = true }
 				}
-				worker := action.NewActionWorker(wrapped, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+				worker := action.NewWorker(wrapped, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 					f.credentialCalls++
 					return map[string]string{"token": "loop-secret"}, nil
-				}), action.ActionDispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+				}), action.DispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 					f.dispatches++
 					return succeedDispatch(ctx, input)
 				}), models.WithClock(func() time.Time { return f.clock }))
@@ -530,9 +530,9 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 	}
 	before, _ := store.GetAgentRun(t.Context(), scope, run.ID)
 	dispatches := 0
-	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+	worker := action.NewWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
-	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"sent": true}, nil
 	}), models.WithClock(func() time.Time { return now.Add(time.Second) }))

@@ -367,7 +367,7 @@ type actionApprovalResolved struct {
 }
 
 type activityLoaded struct {
-	page   *activity.ActivityFeedPage
+	page   *activity.FeedPage
 	append bool
 	err    error
 }
@@ -415,7 +415,7 @@ type runbookChanged struct {
 }
 
 type runbookStarted struct {
-	result *agentrun.AgentRunCommandResult
+	result *agentrun.CommandResult
 	err    error
 }
 
@@ -509,13 +509,13 @@ type artifactDownloaded struct {
 }
 
 type runCreated struct {
-	result *agentrun.AgentRunCommandResult
+	result *agentrun.CommandResult
 	err    error
 }
 
 type runCommanded struct {
-	result *agentrun.AgentRunCommandResult
-	kind   agentrun.AgentRunCommandKind
+	result *agentrun.CommandResult
+	kind   agentrun.CommandKind
 	err    error
 }
 
@@ -1343,7 +1343,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.selectedID = msg.result.Run.ID
 		m.status = commandSuccessMessage(msg.kind)
-		if msg.kind == agentrun.AgentRunCommandIntervene {
+		if msg.kind == agentrun.CommandIntervene {
 			m.mode = modeCreate
 			m.editor.Reset()
 			m.editor.Placeholder = "Describe the outcome you want…"
@@ -1677,7 +1677,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "x":
 			if m.section == sectionRuns {
-				return m, m.commandSelected(agentrun.AgentRunCommandCancel, "")
+				return m, m.commandSelected(agentrun.CommandCancel, "")
 			} else if m.section == sectionRequests && m.canRespondToSelectedRequest(collaboration.AgentRequestDecisionReject) {
 				m.prepareRequestComposer(modeRequestReject, "Explain why this request cannot be accepted…")
 			} else if m.section == sectionApprovals && m.canResolveSelectedActionApproval() {
@@ -1923,8 +1923,8 @@ func (m *Model) loadSelectedActionCalls() tea.Cmd {
 	}
 }
 
-func (m *Model) activityFeedRequest(cursor string, includeDetails bool, limit int) activity.ActivityFeedRequest {
-	request := activity.ActivityFeedRequest{
+func (m *Model) activityFeedRequest(cursor string, includeDetails bool, limit int) activity.FeedRequest {
+	request := activity.FeedRequest{
 		Scope: m.config.Scope, Cursor: cursor, IncludeDetails: includeDetails, Limit: limit,
 	}
 	if m.config.Owner.Type == models.OwnerTypeTeam {
@@ -1989,7 +1989,7 @@ func (m *Model) loadSelectedActivityDetail() tea.Cmd {
 	}
 }
 
-func (m *Model) mergeActivityPage(page *activity.ActivityFeedPage, appendPage bool) {
+func (m *Model) mergeActivityPage(page *activity.FeedPage, appendPage bool) {
 	if page == nil {
 		return
 	}
@@ -2982,7 +2982,7 @@ func (m *Model) submitGuidance() tea.Cmd {
 		m.status = "Write the guidance you want the worker to receive."
 		return nil
 	}
-	return m.commandSelected(agentrun.AgentRunCommandIntervene, instruction)
+	return m.commandSelected(agentrun.CommandIntervene, instruction)
 }
 
 func (m *Model) pauseOrResume() tea.Cmd {
@@ -2991,12 +2991,12 @@ func (m *Model) pauseOrResume() tea.Cmd {
 		return nil
 	}
 	if run.Status == models.AgentRunStatusPaused {
-		return m.commandSelected(agentrun.AgentRunCommandResume, "")
+		return m.commandSelected(agentrun.CommandResume, "")
 	}
-	return m.commandSelected(agentrun.AgentRunCommandPause, "")
+	return m.commandSelected(agentrun.CommandPause, "")
 }
 
-func (m *Model) commandSelected(kind agentrun.AgentRunCommandKind, instruction string) tea.Cmd {
+func (m *Model) commandSelected(kind agentrun.CommandKind, instruction string) tea.Cmd {
 	run := m.selectedRun()
 	if run == nil || m.busy || !m.commandAllowed(run, kind) {
 		return nil
@@ -3137,18 +3137,18 @@ func (m *Model) supportsAgentBuilder() bool {
 	return m.ready && m.agentBuilderClient != nil && m.agentBuilderCapability.Supports(kernelapi.OperationCreate)
 }
 
-func (m *Model) commandAllowed(run *models.AgentRun, kind agentrun.AgentRunCommandKind) bool {
+func (m *Model) commandAllowed(run *models.AgentRun, kind agentrun.CommandKind) bool {
 	if run == nil || isTerminal(run.Status) {
 		return false
 	}
 	switch kind {
-	case agentrun.AgentRunCommandPause:
+	case agentrun.CommandPause:
 		return run.Status != models.AgentRunStatusPaused && m.supportsRun(kernelapi.OperationPause)
-	case agentrun.AgentRunCommandResume:
+	case agentrun.CommandResume:
 		return run.Status == models.AgentRunStatusPaused && m.supportsRun(kernelapi.OperationResume)
-	case agentrun.AgentRunCommandCancel:
+	case agentrun.CommandCancel:
 		return m.supportsRun(kernelapi.OperationCancel)
-	case agentrun.AgentRunCommandIntervene:
+	case agentrun.CommandIntervene:
 		return m.supportsRun(kernelapi.OperationIntervene)
 	default:
 		return false
@@ -4522,15 +4522,15 @@ func isTerminal(status models.AgentRunStatus) bool {
 	return status == models.AgentRunStatusCompleted || status == models.AgentRunStatusFailed || status == models.AgentRunStatusCanceled
 }
 
-func commandSuccessMessage(kind agentrun.AgentRunCommandKind) string {
+func commandSuccessMessage(kind agentrun.CommandKind) string {
 	switch kind {
-	case agentrun.AgentRunCommandPause:
+	case agentrun.CommandPause:
 		return "Work paused safely."
-	case agentrun.AgentRunCommandResume:
+	case agentrun.CommandResume:
 		return "Work resumed."
-	case agentrun.AgentRunCommandCancel:
+	case agentrun.CommandCancel:
 		return "Work stopped."
-	case agentrun.AgentRunCommandIntervene:
+	case agentrun.CommandIntervene:
 		return "Guidance delivered and recorded in the audit trail."
 	default:
 		return "Work updated."

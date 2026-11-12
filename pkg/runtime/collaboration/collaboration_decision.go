@@ -13,7 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
-func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req RespondAgentRequestRequest) (*AgentRequestResult, error) {
+func (s *Service) RespondAgentRequest(ctx context.Context, req RespondAgentRequestRequest) (*AgentRequestResult, error) {
 	if s == nil || s.store == nil || s.runs == nil {
 		return nil, errors.New("collaboration store is not configured")
 	}
@@ -220,7 +220,7 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 	return &AgentRequestResult{Request: models.CloneAgentRequest(updated), Source: models.CloneAgentRun(source), Child: models.CloneAgentRun(record.ChildRun), Events: events}, nil
 }
 
-func (s *CollaborationService) validateDecisionRunAuthority(ctx context.Context, request *models.AgentRequest, actor models.CollaborationParty, decisionRunID string) error {
+func (s *Service) validateDecisionRunAuthority(ctx context.Context, request *models.AgentRequest, actor models.CollaborationParty, decisionRunID string) error {
 	decisionRunID = strings.TrimSpace(decisionRunID)
 	if decisionRunID == "" {
 		return nil

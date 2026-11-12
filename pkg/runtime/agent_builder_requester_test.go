@@ -27,7 +27,7 @@ func TestAgentBuilderCardIsDecidedByTheRequester(t *testing.T) {
 	} {
 		fixture := agentbuildertest.NewFixture(t, true)
 		store := kerneltest.NewStore(t)
-		if _, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		if _, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 			Scope: fixture.Scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"},
 			AssignedAgentID: "finn", ActingUser: tc.actingUser, Goal: "Build an inbox helper", Source: models.RunSourceChat,
 		}); err != nil {
@@ -41,7 +41,7 @@ func TestAgentBuilderCardIsDecidedByTheRequester(t *testing.T) {
 		}
 		policy := action.NewDefaultActionPolicy()
 		policy.Approvers = []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}
-		coordinator := action.NewActionCoordinator(store, store, fixture.Catalog, policy, []action.ActionProposalValidator{fixture.Validator})
+		coordinator := action.NewCoordinator(store, store, fixture.Catalog, policy, []action.ProposalValidator{fixture.Validator})
 		create := agentbuildertest.CreateArguments()
 		create["spaceId"] = fixture.SalesID
 		result, err := coordinator.Propose(ctx, agentBuilderApprovalRequest(fixture, run, models.AgentActionCreateAgent, create, "requester-"+tc.actingUser))

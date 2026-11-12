@@ -13,7 +13,7 @@ import (
 // source message/actor/thread, settled source turn and exact work lineage can
 // route an account setup back to its originating conversation. The run's
 // acting member is member and its umbrella must own the conversation.
-func (d *SkillBindingActionDispatcher) skillSetupConversationOrigin(ctx context.Context, run *models.AgentRun, member string, umbrella models.ObjectiveOwner) (string, string, error) {
+func (d *ActionDispatcher) skillSetupConversationOrigin(ctx context.Context, run *models.AgentRun, member string, umbrella models.ObjectiveOwner) (string, string, error) {
 	return skillSetupConversationOrigin(ctx, d.store, run, member, umbrella)
 }
 

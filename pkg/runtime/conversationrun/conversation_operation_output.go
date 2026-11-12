@@ -35,7 +35,7 @@ func ConversationOperationSavedOutput(_ context.Context, _ models.PortfolioStore
 
 // Repair old status-only terminal replies without rerunning the model or
 // rewriting history. The same durable recovery key survives restarts.
-func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx context.Context, scope models.Scope, result *ConversationRunReconcileResult) error {
+func (s *Scheduler) reconcileConversationOperationOutputs(ctx context.Context, scope models.Scope, result *ReconcileResult) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
 		runs, err := s.runStore.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: models.RunKindConversation, Statuses: []models.AgentRunStatus{models.AgentRunStatusCompleted, models.AgentRunStatusFailed}, Limit: pageSize, Offset: offset})
@@ -102,7 +102,7 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			}
 			// Only the Agent that posted the reply repairs it, with its own
 			// operation's output, while it is still on the chat's roster.
-			agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
+			agentID := runtimeconversation.RunAgentID(conversation, run)
 			if agentID == "" || old.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: agentID}) || operation.AssignedAgentID != agentID {
 				continue
 			}

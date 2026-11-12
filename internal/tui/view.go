@@ -2070,15 +2070,15 @@ func renderParticipationAudit(rounds []*models.ParticipationRoundResult, width i
 
 func (m *Model) availableActions(run *models.AgentRun) string {
 	actions := make([]string, 0, 3)
-	if run.Status == models.AgentRunStatusPaused && m.commandAllowed(run, agentrun.AgentRunCommandResume) {
+	if run.Status == models.AgentRunStatusPaused && m.commandAllowed(run, agentrun.CommandResume) {
 		actions = append(actions, "p resume")
-	} else if m.commandAllowed(run, agentrun.AgentRunCommandPause) {
+	} else if m.commandAllowed(run, agentrun.CommandPause) {
 		actions = append(actions, "p pause")
 	}
-	if m.commandAllowed(run, agentrun.AgentRunCommandIntervene) {
+	if m.commandAllowed(run, agentrun.CommandIntervene) {
 		actions = append(actions, "g guide")
 	}
-	if m.commandAllowed(run, agentrun.AgentRunCommandCancel) {
+	if m.commandAllowed(run, agentrun.CommandCancel) {
 		actions = append(actions, "x stop")
 	}
 	return strings.Join(actions, "  ·  ")

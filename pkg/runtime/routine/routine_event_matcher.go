@@ -15,14 +15,14 @@ import (
 
 // Caps of waiting events and test events (SPEC §0a, §3.1).
 const (
-	// RoutineEventMaxPendingPerRoutine is the most events that wait for one
+	// EventMaxPendingPerRoutine is the most events that wait for one
 	// routine; later ones are stored as dropped rows without payload.
-	RoutineEventMaxPendingPerRoutine = 500
-	// RoutineEventMaxPendingPerTenant is the same cap for a whole scope.
-	RoutineEventMaxPendingPerTenant = 20_000
-	// RoutineTestEventsPerHour is the most test events one routine accepts in
+	EventMaxPendingPerRoutine = 500
+	// EventMaxPendingPerTenant is the same cap for a whole scope.
+	EventMaxPendingPerTenant = 20_000
+	// TestEventsPerHour is the most test events one routine accepts in
 	// a rolling hour.
-	RoutineTestEventsPerHour = 5
+	TestEventsPerHour = 5
 )
 
 var (
@@ -31,7 +31,7 @@ var (
 	ErrRoutineEventsWaitingIsFull = errors.New("too many events are already waiting for this routine")
 )
 
-type RoutineEventMatcherStore interface {
+type EventMatcherStore interface {
 	models.RoutineEventStore
 	GetRunbookActivation(context.Context, models.Scope, string) (*models.RunbookActivation, error)
 }
@@ -40,22 +40,22 @@ type routineCallbackRegistrationReader interface {
 	GetCallbackRegistration(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error)
 }
 
-// RoutineEventMatcher matches events to event routines and stores them for
+// EventMatcher matches events to event routines and stores them for
 // the dispatcher. It never starts a Run or calls a provider. An event whose
 // (scope, kind, SourceRef) has no active routine costs one map lookup.
-type RoutineEventMatcher struct {
-	store      RoutineEventMatcherStore
+type EventMatcher struct {
+	store      EventMatcherStore
 	index      routineEventIndexHolder
 	stats      routineEventStatsCounters
 	nudge      chan struct{}
-	publisher  RoutineIndexPublisher
+	publisher  IndexPublisher
 	now        func() time.Time
 	unregister func()
 }
 
-var _ externalconversation.RoutineEventOfferer = (*RoutineEventMatcher)(nil)
+var _ externalconversation.RoutineEventOfferer = (*EventMatcher)(nil)
 
-// NewRoutineEventMatcher builds a matcher with an empty index and registers it
+// NewEventMatcher builds a matcher with an empty index and registers it
 // for activation writes made through RunbookActivationService on this store.
 // Call RebuildRoutineIndex once before serving.
 //
@@ -63,18 +63,18 @@ var _ externalconversation.RoutineEventOfferer = (*RoutineEventMatcher)(nil)
 // same store value, so the host must pass the store its
 // RunbookActivationService writes to (not a wrapper of it). A store that
 // cannot be a map key could never be followed, so it panics here.
-func NewRoutineEventMatcher(store RoutineEventMatcherStore, opts ...models.ServiceOption) *RoutineEventMatcher {
+func NewEventMatcher(store EventMatcherStore, opts ...models.ServiceOption) *EventMatcher {
 	if _, ok := routineActivationObserverKey(store); !ok {
 		panic("routine event matcher needs a comparable store (a pointer) so activation writes refresh its index")
 	}
-	matcher := &RoutineEventMatcher{store: store, nudge: make(chan struct{}, 1), now: models.ClockFrom(opts)}
+	matcher := &EventMatcher{store: store, nudge: make(chan struct{}, 1), now: models.ClockFrom(opts)}
 	matcher.index.current.Store(&routineEventIndex{scopes: map[models.Scope]routineEventScopeKeys{}})
 	matcher.unregister = registerRoutineActivationObserver(store, matcher.activationWritten)
 	return matcher
 }
 
 // Close stops the matcher from following activation writes.
-func (m *RoutineEventMatcher) Close() {
+func (m *EventMatcher) Close() {
 	if m != nil && m.unregister != nil {
 		m.unregister()
 	}
@@ -82,7 +82,7 @@ func (m *RoutineEventMatcher) Close() {
 
 // SetRoutineIndexPublisher sets the host's signal to other processes. Nil in
 // single-process hosts.
-func (m *RoutineEventMatcher) SetRoutineIndexPublisher(publisher RoutineIndexPublisher) {
+func (m *EventMatcher) SetRoutineIndexPublisher(publisher IndexPublisher) {
 	if m != nil {
 		m.publisher = publisher
 	}
@@ -91,13 +91,13 @@ func (m *RoutineEventMatcher) SetRoutineIndexPublisher(publisher RoutineIndexPub
 // Listening reports whether any active event routine of the scope listens to
 // this kind and SourceRef. It is a lookup in the in-memory index: no I/O and
 // no allocation.
-func (m *RoutineEventMatcher) Listening(scope models.Scope, kind models.RoutineEventKind, sourceRef string) bool {
+func (m *EventMatcher) Listening(scope models.Scope, kind models.RoutineEventKind, sourceRef string) bool {
 	return m != nil && m.index.listening(scope, kind, sourceRef)
 }
 
 // RefreshRoutineIndex rereads one scope's index keys from the store. Hosts
 // call it when another process signals that the scope's routines changed.
-func (m *RoutineEventMatcher) RefreshRoutineIndex(ctx context.Context, scope models.Scope) error {
+func (m *EventMatcher) RefreshRoutineIndex(ctx context.Context, scope models.Scope) error {
 	if m == nil || m.store == nil {
 		return errors.New("routine event matcher is not configured")
 	}
@@ -106,31 +106,31 @@ func (m *RoutineEventMatcher) RefreshRoutineIndex(ctx context.Context, scope mod
 
 // RebuildRoutineIndex rereads the whole index: at start, when the host's
 // signal subscription reconnects, and as the dispatcher's backstop.
-func (m *RoutineEventMatcher) RebuildRoutineIndex(ctx context.Context) error {
+func (m *EventMatcher) RebuildRoutineIndex(ctx context.Context) error {
 	if m == nil || m.store == nil {
 		return errors.New("routine event matcher is not configured")
 	}
 	return m.index.rebuild(ctx, m.store)
 }
 
-// RoutineEventStats returns a snapshot of the counters.
-func (m *RoutineEventMatcher) RoutineEventStats() RoutineEventStats {
+// EventStats returns a snapshot of the counters.
+func (m *EventMatcher) RoutineEventStats() EventStats {
 	if m == nil {
-		return RoutineEventStats{}
+		return EventStats{}
 	}
 	return m.stats.snapshot()
 }
 
 // Nudges is the channel the dispatcher loop wakes on. It holds at most one
 // pending nudge.
-func (m *RoutineEventMatcher) Nudges() <-chan struct{} {
+func (m *EventMatcher) Nudges() <-chan struct{} {
 	if m == nil {
 		return nil
 	}
 	return m.nudge
 }
 
-func (m *RoutineEventMatcher) wake() {
+func (m *EventMatcher) wake() {
 	select {
 	case m.nudge <- struct{}{}:
 	default:
@@ -139,7 +139,7 @@ func (m *RoutineEventMatcher) wake() {
 
 // activationWritten keeps the index in step with a committed activation
 // write and tells other processes.
-func (m *RoutineEventMatcher) activationWritten(ctx context.Context, previous, next *models.RunbookActivation) {
+func (m *EventMatcher) activationWritten(ctx context.Context, previous, next *models.RunbookActivation) {
 	if !isRoutineEventActivation(previous) && !isRoutineEventActivation(next) {
 		return
 	}
@@ -162,7 +162,7 @@ func isRoutineEventActivation(activation *models.RunbookActivation) bool {
 }
 
 // OfferRoutineEvent stores the event for every active routine it matches.
-func (m *RoutineEventMatcher) OfferRoutineEvent(ctx context.Context, event *models.RoutineEvent) (externalconversation.RoutineEventOffer, error) {
+func (m *EventMatcher) OfferRoutineEvent(ctx context.Context, event *models.RoutineEvent) (externalconversation.RoutineEventOffer, error) {
 	if m == nil || event == nil {
 		return externalconversation.RoutineEventOffer{}, nil
 	}
@@ -180,7 +180,7 @@ func (m *RoutineEventMatcher) OfferRoutineEvent(ctx context.Context, event *mode
 	return offer, err
 }
 
-func (m *RoutineEventMatcher) offer(ctx context.Context, event *models.RoutineEvent) (externalconversation.RoutineEventOffer, error) {
+func (m *EventMatcher) offer(ctx context.Context, event *models.RoutineEvent) (externalconversation.RoutineEventOffer, error) {
 	offer := externalconversation.RoutineEventOffer{}
 	if err := event.Validate(); err != nil {
 		return offer, err
@@ -236,12 +236,12 @@ func (m *RoutineEventMatcher) offer(ctx context.Context, event *models.RoutineEv
 
 // waitingIsFull applies the per-routine and per-scope caps on waiting
 // events. The scope count is read once per offer.
-func (m *RoutineEventMatcher) waitingIsFull(ctx context.Context, activation *models.RunbookActivation, scopePending *int) (bool, error) {
+func (m *EventMatcher) waitingIsFull(ctx context.Context, activation *models.RunbookActivation, scopePending *int) (bool, error) {
 	pending, err := m.store.CountPendingRoutineEvents(ctx, activation.Scope, activation.ID)
 	if err != nil {
 		return false, err
 	}
-	if pending >= RoutineEventMaxPendingPerRoutine {
+	if pending >= EventMaxPendingPerRoutine {
 		return true, nil
 	}
 	if *scopePending < 0 {
@@ -251,12 +251,12 @@ func (m *RoutineEventMatcher) waitingIsFull(ctx context.Context, activation *mod
 		}
 		*scopePending = count
 	}
-	return *scopePending >= RoutineEventMaxPendingPerTenant, nil
+	return *scopePending >= EventMaxPendingPerTenant, nil
 }
 
 // ownsSource is the owner check of SPEC §1.3: the routine may only hear
 // sources its owner or creator holds.
-func (m *RoutineEventMatcher) ownsSource(ctx context.Context, activation *models.RunbookActivation, event *models.RoutineEvent) (bool, error) {
+func (m *EventMatcher) ownsSource(ctx context.Context, activation *models.RunbookActivation, event *models.RoutineEvent) (bool, error) {
 	trigger := activation.Task.Event
 	if activation.Scope != event.Scope || trigger.SourceRef != event.SourceRef {
 		return false, nil
@@ -301,7 +301,7 @@ func (m *RoutineEventMatcher) ownsSource(ctx context.Context, activation *models
 // OfferRoutineTestEvent stores one test event for one routine and returns
 // its event ID. Only the routine's creator may send it; the filter is skipped
 // for it.
-func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope models.Scope, activationID, testBy string, payload json.RawMessage) (string, externalconversation.RoutineEventOffer, error) {
+func (m *EventMatcher) OfferRoutineTestEvent(ctx context.Context, scope models.Scope, activationID, testBy string, payload json.RawMessage) (string, externalconversation.RoutineEventOffer, error) {
 	offer := externalconversation.RoutineEventOffer{}
 	if m == nil || m.store == nil {
 		return "", offer, errors.New("routine event matcher is not configured")
@@ -331,7 +331,7 @@ func (m *RoutineEventMatcher) OfferRoutineTestEvent(ctx context.Context, scope m
 	if err != nil {
 		return "", offer, err
 	}
-	if recent >= RoutineTestEventsPerHour {
+	if recent >= TestEventsPerHour {
 		return "", offer, ErrRoutineTestEventLimit
 	}
 	scopePending := -1

@@ -9,10 +9,10 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-type ExternalConversationContextHost = externalconversation.ExternalConversationContextHost
-type ExternalConversationContextHostRequest = externalconversation.ExternalConversationContextHostRequest
-type ExternalConversationContextResult = externalconversation.ExternalConversationContextResult
-type ExternalConversationContextMessage = externalconversation.ExternalConversationContextMessage
+type ExternalConversationContextHost = externalconversation.ContextHost
+type ExternalConversationContextHostRequest = externalconversation.ContextHostRequest
+type ExternalConversationContextResult = externalconversation.ContextResult
+type ExternalConversationContextMessage = externalconversation.ContextMessage
 type ExternalMessageSource = models.ExternalMessageSource
 
 const ConversationFeatureContextHistory = capability.ConversationFeatureContextHistory

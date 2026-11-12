@@ -41,11 +41,11 @@ type governedFixture struct {
 	step      *models.AgentTurn
 	binding   *agentrun.TurnRunnerBinding
 	executor  *GovernedToolExecutor
-	actions   *runtimeaction.ActionCoordinator
+	actions   *runtimeaction.Coordinator
 	approvals *runtimeaction.ApprovalCoordinator
-	worker    *runtimeaction.ActionWorker
+	worker    *runtimeaction.Worker
 	// policy maps a Skill action to its decision; allow by default.
-	policy      map[string]runtimeaction.ActionPolicyDecision
+	policy      map[string]runtimeaction.PolicyDecision
 	dispatch    func(agentrun.ActionDispatchInput) (map[string]interface{}, error)
 	dispatches  int
 	validations int
@@ -65,12 +65,12 @@ func newGovernedFixture(t *testing.T, store models.KernelStore) *governedFixture
 	start := time.Now().UTC().Truncate(time.Millisecond)
 	f := &governedFixture{
 		t: t, ctx: context.Background(), store: store, scope: scope, start: start, clock: start.Add(time.Second),
-		step: &models.AgentTurn{ID: governedStep, Scope: scope}, policy: map[string]runtimeaction.ActionPolicyDecision{},
+		step: &models.AgentTurn{ID: governedStep, Scope: scope}, policy: map[string]runtimeaction.PolicyDecision{},
 		dispatch: func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"providerResult": "delivered"}, nil
 		},
 	}
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return start }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return start }))
 	created, err := portfolio.CreateAgentRun(f.ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
 		Goal: "ship the release", Source: models.RunSourceObjective,
@@ -85,12 +85,12 @@ func newGovernedFixture(t *testing.T, store models.KernelStore) *governedFixture
 	f.step.RunID = f.run.ID
 	catalog := actiontest.LoopWorkerCatalog(t, scope)
 	now := func() time.Time { return f.clock }
-	coordinator := runtimeaction.NewActionCoordinator(store, store, catalog, runtimeaction.ActionPolicyEvaluatorFunc(func(_ context.Context, input runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
+	coordinator := runtimeaction.NewCoordinator(store, store, catalog, runtimeaction.PolicyEvaluatorFunc(func(_ context.Context, input runtimeaction.PolicyInput) (runtimeaction.PolicyDecision, error) {
 		if decision, ok := f.policy[input.Bound.Action.Name]; ok {
 			return decision, nil
 		}
-		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow}, nil
-	}), []runtimeaction.ActionProposalValidator{actiontest.ProposalValidatorFunc(func(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+		return runtimeaction.PolicyDecision{Disposition: runtimeaction.DispositionAllow}, nil
+	}), []runtimeaction.ProposalValidator{actiontest.ProposalValidatorFunc(func(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 		f.validations++
 		if f.validate != nil {
 			return nil, f.validate(input)
@@ -99,10 +99,10 @@ func newGovernedFixture(t *testing.T, store models.KernelStore) *governedFixture
 	})}, models.WithClock(now))
 	f.actions = coordinator
 	f.approvals = runtimeaction.NewApprovalCoordinator(store, store, runtimeaction.EligibleApprovalAuthorizer{}, models.WithClock(now))
-	f.worker = runtimeaction.NewActionWorker(store, catalog,
+	f.worker = runtimeaction.NewWorker(store, catalog,
 		runtimeaction.CredentialResolverFunc(func(context.Context, runtimeaction.CredentialResolutionRequest) (map[string]string, error) {
 			return map[string]string{"token": "loop-secret"}, nil
-		}), runtimeaction.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		}), runtimeaction.DispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			f.dispatches++
 			return f.dispatch(input)
 		}), models.WithClock(now))
@@ -143,8 +143,8 @@ func (f *governedFixture) claim(worker string) *models.AgentRun {
 func (f *governedFixture) advance(d time.Duration) { f.clock = f.clock.Add(d) }
 
 func (f *governedFixture) requireApprovalFor(action string) {
-	f.policy[action] = runtimeaction.ActionPolicyDecision{
-		Disposition: runtimeaction.ActionDispositionRequireApproval, Reason: "deploys need review",
+	f.policy[action] = runtimeaction.PolicyDecision{
+		Disposition: runtimeaction.DispositionRequireApproval, Reason: "deploys need review",
 		EligibleApprovers: []models.ApprovalPrincipal{governedApprover}, ApprovalTTL: time.Hour,
 	}
 }

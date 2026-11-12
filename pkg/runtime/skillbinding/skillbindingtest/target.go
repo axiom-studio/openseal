@@ -28,8 +28,8 @@ type TargetFixture struct {
 	SkillScope skill.ScopeReference
 	Agents     *kernelagent.Registry
 	Catalog    *skill.Catalog
-	Validator  *skillbinding.SkillBindingActionValidator
-	Dispatcher *skillbinding.SkillBindingActionDispatcher
+	Validator  *skillbinding.ActionValidator
+	Dispatcher *skillbinding.ActionDispatcher
 	Discovered []skill.DiscoveryRequest
 }
 
@@ -116,11 +116,11 @@ func NewTargetFixture(t *testing.T) *TargetFixture {
 		}}}, nil
 	})
 	var err error
-	if f.Validator, err = skillbinding.NewSkillBindingActionValidator(f.Catalog, f.Store); err != nil {
+	if f.Validator, err = skillbinding.NewActionValidator(f.Catalog, f.Store); err != nil {
 		t.Fatal(err)
 	}
 	f.Validator.UseAgentRegistry(f.Agents)
-	if f.Dispatcher, err = skillbinding.NewSkillBindingActionDispatcher(f.Store, f.Catalog, nil, provider); err != nil {
+	if f.Dispatcher, err = skillbinding.NewActionDispatcher(f.Store, f.Catalog, nil, provider); err != nil {
 		t.Fatal(err)
 	}
 	f.Dispatcher.UseAgentRegistry(f.Agents)
@@ -130,7 +130,7 @@ func NewTargetFixture(t *testing.T) *TargetFixture {
 // ChatRun is a reply Run of member in its own chat.
 func (f *TargetFixture) ChatRun(t *testing.T, member string) *models.AgentRun {
 	t.Helper()
-	run, err := portfolio.NewPortfolioService(f.Store).CreateAgentRun(f.Ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(f.Store).CreateAgentRun(f.Ctx, models.CreateAgentRunRequest{
 		Scope: f.Scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: member}, AssignedAgentID: member,
 		Goal: "Build an Agent", Source: models.RunSourceChat, ActingUser: "7",
 		Context: map[string]interface{}{"conversationId": "chat-" + member, "triggerMessageId": "message-" + member},

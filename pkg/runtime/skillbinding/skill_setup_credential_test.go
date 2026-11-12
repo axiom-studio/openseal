@@ -32,7 +32,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 			provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 				return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessUnavailable, Compatibility: tc.checks}}}, nil
 			})
-			dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+			dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
 			if err != nil {
 				t.Fatal(err)
 			}

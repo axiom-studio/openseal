@@ -49,9 +49,9 @@ func TestActionWorkerSupervisorReconcilesIsolatedScopes(t *testing.T) {
 	source := &mutableActionWorkerScopeSource{scopes: []models.Scope{
 		{Kind: "tenant", ID: "2"}, {Kind: "tenant", ID: "1"}, {Kind: "tenant", ID: "1"},
 	}, listed: make(chan struct{}, 1)}
-	supervisor, err := action.NewActionWorkerSupervisor(
+	supervisor, err := action.NewWorkerSupervisor(
 		store, skill.NewCatalog(), nil,
-		action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
+		action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
 		source, zap.NewNop().Sugar(), action.DynamicActionWorkerConfig{ReconcileInterval: time.Hour},
 	)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestActionWorkerSupervisorReconcilesIsolatedScopes(t *testing.T) {
 
 // waitActionWorkerScopeCount waits up to a second for the supervisor to run
 // want scope pools, and returns the count it saw last.
-func waitActionWorkerScopeCount(supervisor *action.ActionWorkerSupervisor, want int) int {
+func waitActionWorkerScopeCount(supervisor *action.WorkerSupervisor, want int) int {
 	deadline := time.Now().Add(time.Second)
 	for supervisor.ScopeCount() != want && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -94,9 +94,9 @@ func waitActionWorkerScopeCount(supervisor *action.ActionWorkerSupervisor, want 
 }
 
 func TestActionWorkerSupervisorStartStopIsIdempotent(t *testing.T) {
-	supervisor, err := action.NewActionWorkerSupervisor(
+	supervisor, err := action.NewWorkerSupervisor(
 		kerneltest.NewStore(t), skill.NewCatalog(), nil,
-		action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
+		action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
 		workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) { return []models.Scope{{Kind: "tenant", ID: "1"}}, nil }),
 		zap.NewNop().Sugar(), action.DynamicActionWorkerConfig{ReconcileInterval: 5 * time.Millisecond},
 	)

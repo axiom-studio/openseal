@@ -37,7 +37,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	if _, _, err := store.PutSpaceMember(ctx, scope, &models.SpaceMember{SpaceID: seeded.ID, Type: models.SpaceMemberAgent, ID: "helper", AddedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
+	conversation, _, err := conversation.NewService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {

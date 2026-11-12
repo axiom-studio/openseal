@@ -8,7 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func (s *ExternalConversationGatewayService) prepareGatewayAuthority(ctx context.Context, gateway *models.ExternalConversationIngressGateway) error {
+func (s *GatewayService) prepareGatewayAuthority(ctx context.Context, gateway *models.ExternalConversationIngressGateway) error {
 	if gateway == nil || gateway.Scope.Kind == "platform" || gateway.InstallationID != "" {
 		return nil
 	}

@@ -24,7 +24,7 @@ func TestAgentRunCreatedDescendingOrderPrecedesPagination(t *testing.T) {
 	}
 	for name, createStore := range stores {
 		t.Run(name, func(t *testing.T) {
-			service := portfolio.NewPortfolioService(createStore(t))
+			service := portfolio.NewService(createStore(t))
 			scope := models.Scope{Kind: "tenant", ID: "7"}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "42"}
 			created := make([]*models.AgentRun, 0, 3)
@@ -62,7 +62,7 @@ func TestAgentRunSearchPrecedesPaginationAndIsLiteral(t *testing.T) {
 				defer db.Close()
 				store = db
 			}
-			service := portfolio.NewPortfolioService(store)
+			service := portfolio.NewService(store)
 			scope := models.Scope{Kind: "local", ID: "default"}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "analyst"}
 			var expected []*models.AgentRun

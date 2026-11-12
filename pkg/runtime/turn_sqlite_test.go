@@ -68,7 +68,7 @@ func TestSQLiteAgentTurnsEnforceOneActiveAndSurviveRestart(t *testing.T) {
 	}
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "work", Source: models.RunSourceManual,
 	})
 	if err != nil {

@@ -124,7 +124,7 @@ func cutoverAgentConversationRun(t *testing.T, store cutoverTestStore, key strin
 func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string, owner models.ObjectiveOwner) cutoverLane {
 	t.Helper()
 	ctx := context.Background()
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversationtest.SeedSpace(t, store.(models.SpaceStore), cutoverScope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: cutoverScope, Owner: owner,
@@ -142,7 +142,7 @@ func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func claimCutoverRun(t *testing.T, store cutoverTestStore, run *models.AgentRun)
 
 func cutoverMessages(t *testing.T, store cutoverTestStore, conversationID string) []*models.ChannelMessage {
 	t.Helper()
-	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(context.Background(), models.ChannelMessageFilter{Scope: cutoverScope, ConversationID: conversationID})
+	messages, err := runtimeconversation.NewService(store).ListChannelMessages(context.Background(), models.ChannelMessageFilter{Scope: cutoverScope, ConversationID: conversationID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,9 +180,9 @@ func cutoverMessages(t *testing.T, store cutoverTestStore, conversationID string
 	return cut
 }
 
-func runCutover(t *testing.T, store cutoverTestStore) RunLoopCutoverReport {
+func runCutover(t *testing.T, store cutoverTestStore) CutoverReport {
 	t.Helper()
-	report, err := RunLoopCutover(context.Background(), store, runtimeconversation.NewConversationService(store))
+	report, err := Cutover(context.Background(), store, runtimeconversation.NewService(store))
 	if err != nil {
 		t.Fatalf("cutover: %v", err)
 	}
@@ -248,14 +248,14 @@ func TestCutoverCancelsOldInFlightRunsOncePerLane(t *testing.T) {
 					t.Fatalf("lane %s messages = %#v", lane.conversation.ID, messages)
 				}
 				message := messages[0]
-				if message.Content != RunLoopCutoverMessage || message.ResolvesMessageID != lane.trigger.ID || message.ReplyToMessageID != lane.trigger.ID ||
+				if message.Content != CutoverMessage || message.ResolvesMessageID != lane.trigger.ID || message.ReplyToMessageID != lane.trigger.ID ||
 					message.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "openseal.conversation"}) ||
 					len(message.References) != 1 || message.References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRun, ID: lane.run.ID}) {
 					t.Fatalf("cutover message = %#v", message)
 				}
 			}
 			// The canceled-run reconciler finds both requests answered.
-			scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -361,13 +361,13 @@ func TestCutoverIdempotent(t *testing.T) {
 
 			// Two processes start at once: together they do the work once.
 			var wg sync.WaitGroup
-			reports := make([]RunLoopCutoverReport, 2)
+			reports := make([]CutoverReport, 2)
 			errs := make([]error, 2)
 			for i := range reports {
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
-					reports[i], errs[i] = RunLoopCutover(ctx, store, runtimeconversation.NewConversationService(store))
+					reports[i], errs[i] = Cutover(ctx, store, runtimeconversation.NewService(store))
 				}(i)
 			}
 			wg.Wait()
@@ -381,7 +381,7 @@ func TestCutoverIdempotent(t *testing.T) {
 			adopted := requireRunStatus(t, store, queued.ID, models.AgentRunStatusQueued)
 
 			again := runCutover(t, store)
-			if again != (RunLoopCutoverReport{}) {
+			if again != (CutoverReport{}) {
 				t.Fatalf("second cutover = %#v", again)
 			}
 			if run := requireRunStatus(t, store, lane.run.ID, models.AgentRunStatusCanceled); run.Revision != canceled.Revision {
@@ -422,7 +422,7 @@ func (s *failingCutoverStore) UpdateAgentRunWithEvent(ctx context.Context, run *
 
 // failingCutoverConversations refuses to post.
 type failingCutoverConversations struct {
-	*runtimeconversation.ConversationService
+	*runtimeconversation.Service
 }
 
 func (failingCutoverConversations) PostChannelMessage(context.Context, runtimeconversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error) {
@@ -441,20 +441,20 @@ func TestCutoverFailsClosed(t *testing.T) {
 			lane := cutoverConversationRun(t, store, "closed")
 			running := asOldRun(t, store, claimCutoverRun(t, store, lane.run).ID, nil)
 
-			if _, err := RunLoopCutover(ctx, nil, nil); err == nil {
+			if _, err := Cutover(ctx, nil, nil); err == nil {
 				t.Fatal("cutover without a store succeeded")
 			}
 			for name, broken := range map[string]*failingCutoverStore{
 				"list":   {cutoverTestStore: store, failList: true},
 				"update": {cutoverTestStore: store, failUpdate: true},
 			} {
-				if _, err := RunLoopCutover(ctx, broken, runtimeconversation.NewConversationService(store)); !errors.Is(err, errCutoverTestFailure) {
+				if _, err := Cutover(ctx, broken, runtimeconversation.NewService(store)); !errors.Is(err, errCutoverTestFailure) {
 					t.Fatalf("%s failure: cutover err = %v", name, err)
 				}
 			}
 			// A message that cannot be posted stops the pass before the Run
 			// is canceled, so the next start posts it.
-			if _, err := RunLoopCutover(ctx, store, failingCutoverConversations{runtimeconversation.NewConversationService(store)}); !errors.Is(err, errCutoverTestFailure) {
+			if _, err := Cutover(ctx, store, failingCutoverConversations{runtimeconversation.NewService(store)}); !errors.Is(err, errCutoverTestFailure) {
 				t.Fatalf("post failure: cutover err = %v", err)
 			}
 			if run := requireRunStatus(t, store, running.ID, models.AgentRunStatusRunning); run.Engine != "" {

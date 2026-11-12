@@ -15,8 +15,8 @@ type WorkSignalHealth = workqueue.WorkSignalHealth
 // WorkItem asks for one pass over a family's durable work in a scope.
 type WorkItem = models.WorkItem
 
-// WorkQueue is the shared schedule of scope passes. See workqueue.WorkQueue.
-type WorkQueue = workqueue.WorkQueue
+// WorkQueue is the shared schedule of scope passes. See workqueue.Queue.
+type WorkQueue = workqueue.Queue
 
 // WorkSignal is one delivery or lifecycle event from a WorkQueue.
 type WorkSignal = workqueue.WorkSignal
@@ -51,7 +51,7 @@ const (
 // replica, for example Valkey streams. Without it a PostgreSQL store uses a
 // process-local queue: each replica then handles the work its own commits
 // create, plus the pending work sweeps. Other stores keep polling.
-func WithWorkQueue(queue workqueue.WorkQueue) Option {
+func WithWorkQueue(queue workqueue.Queue) Option {
 	return func(e *Engine) error {
 		e.workQueue = queue
 		return nil

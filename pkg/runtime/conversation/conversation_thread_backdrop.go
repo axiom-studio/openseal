@@ -14,7 +14,7 @@ const maximumConversationThreadBackdropContentBytes = 1024
 // A thread gets a stable, authorized view of the discussion it continued.
 // These excerpts are prompt-only context, not entries in its transcript or
 // additional authority for the scoped history tool.
-func loadConversationThreadBackdrop(ctx context.Context, service *ConversationService, conversation *models.Conversation, trigger *models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
+func loadConversationThreadBackdrop(ctx context.Context, service *Service, conversation *models.Conversation, trigger *models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	if service == nil || conversation == nil || trigger == nil || !trigger.StartsThread && trigger.ThreadRootID == "" {
 		return nil, nil
 	}

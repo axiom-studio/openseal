@@ -118,7 +118,7 @@ func isExactTaskSetupWait(run *models.AgentRun, requestID string) bool {
 // ReconcileSkillSetupTask resumes only the exact task waiting for this saved
 // setup request. Handled remains true for pending, paused, canceled and already
 // resumed tasks: a host must not create a new foreground request for those.
-func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, scope models.Scope, requestID string) (*agentrun.AgentRunCommandResult, bool, error) {
+func (s *Scheduler) ReconcileSkillSetupTask(ctx context.Context, scope models.Scope, requestID string) (*agentrun.CommandResult, bool, error) {
 	if s == nil || s.runs == nil || scope.Validate() != nil || !models.IsValidOpaqueIdentifier(requestID, 256) {
 		return nil, false, models.ErrInvalidSkillSetup
 	}
@@ -145,7 +145,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 	if task == nil {
 		return nil, false, nil
 	}
-	result := &agentrun.AgentRunCommandResult{Run: run}
+	result := &agentrun.CommandResult{Run: run}
 	accepted, err := skillSetupTaskAccepted(ctx, s.runStore, run, request)
 	if err != nil || accepted {
 		return result, true, err
@@ -190,14 +190,14 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 				return nil, true, readErr
 			}
 			if accepted || latest.Status != models.AgentRunStatusWaitingForEvent {
-				return &agentrun.AgentRunCommandResult{Run: latest}, true, nil
+				return &agentrun.CommandResult{Run: latest}, true, nil
 			}
 		}
 	}
 	if err != nil {
 		return nil, true, err
 	}
-	return &agentrun.AgentRunCommandResult{Run: updated, Event: event}, true, nil
+	return &agentrun.CommandResult{Run: updated, Event: event}, true, nil
 }
 
 func skillSetupTaskAccepted(ctx context.Context, store models.RunActivityStore, run *models.AgentRun, request *models.SkillSetupRequest) (bool, error) {
@@ -218,7 +218,7 @@ func skillSetupTaskAccepted(ctx context.Context, store models.RunActivityStore, 
 	}
 }
 
-func (s *ConversationRunScheduler) reconcileSkillSetupTasks(ctx context.Context, scope models.Scope, result *ConversationRunReconcileResult) error {
+func (s *Scheduler) reconcileSkillSetupTasks(ctx context.Context, scope models.Scope, result *ReconcileResult) error {
 	if _, ok := s.runStore.(conversationTaskSetupStore); !ok {
 		return nil
 	}

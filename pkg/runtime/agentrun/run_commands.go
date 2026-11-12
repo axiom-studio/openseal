@@ -15,22 +15,22 @@ import (
 	"github.com/google/uuid"
 )
 
-type AgentRunCommandKind string
+type CommandKind string
 
 const (
-	AgentRunCommandPause                    AgentRunCommandKind = "pause"
-	AgentRunCommandResume                   AgentRunCommandKind = "resume"
-	AgentRunCommandRetry                    AgentRunCommandKind = "retry"
-	AgentRunCommandCancel                   AgentRunCommandKind = "cancel"
-	AgentRunCommandIntervene                AgentRunCommandKind = "intervene"
-	AgentRunCommandResolveHumanIntervention AgentRunCommandKind = "resolve_human_intervention"
+	CommandPause                    CommandKind = "pause"
+	CommandResume                   CommandKind = "resume"
+	CommandRetry                    CommandKind = "retry"
+	CommandCancel                   CommandKind = "cancel"
+	CommandIntervene                CommandKind = "intervene"
+	CommandResolveHumanIntervention CommandKind = "resolve_human_intervention"
 )
 
-type AgentRunCommandRequest struct {
+type CommandRequest struct {
 	Scope               models.Scope
 	RunID               string
 	ExpectedRevision    int64
-	Kind                AgentRunCommandKind
+	Kind                CommandKind
 	Actor               models.ActivityActor
 	Summary             string
 	Instruction         string
@@ -39,7 +39,7 @@ type AgentRunCommandRequest struct {
 	Visibility          models.ActivityVisibility
 }
 
-type AgentRunCommandResult struct {
+type CommandResult struct {
 	Run   *models.AgentRun      `json:"run"`
 	Event *models.ActivityEvent `json:"event,omitempty"`
 }
@@ -61,7 +61,7 @@ func (s *RunCommandService) TransitionRun(ctx context.Context, scope models.Scop
 
 // FindCreatedAgentRun recovers an exact accepted request without creating work.
 // Hosts may use it before checking mutable admission state on a delivery retry.
-func (s *RunCommandService) FindCreatedAgentRun(ctx context.Context, req models.CreateAgentRunRequest) (*AgentRunCommandResult, error) {
+func (s *RunCommandService) FindCreatedAgentRun(ctx context.Context, req models.CreateAgentRunRequest) (*CommandResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("run command store is not configured")
 	}
@@ -83,7 +83,7 @@ func (s *RunCommandService) FindCreatedAgentRun(ctx context.Context, req models.
 // CreateAgentRun creates the canonical durable run and its first audit event
 // atomically. A supplied idempotency key is scope-bound, stored only as a hash,
 // and conflicts if replayed with different work.
-func (s *RunCommandService) CreateAgentRun(ctx context.Context, req models.CreateAgentRunRequest) (*AgentRunCommandResult, error) {
+func (s *RunCommandService) CreateAgentRun(ctx context.Context, req models.CreateAgentRunRequest) (*CommandResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("run command store is not configured")
 	}
@@ -140,7 +140,7 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req models.Creat
 		}
 		return nil, err
 	}
-	return &AgentRunCommandResult{Run: run, Event: persisted}, nil
+	return &CommandResult{Run: run, Event: persisted}, nil
 }
 
 func RunIDForIdempotencyKey(scope models.Scope, key string) string {
@@ -150,14 +150,14 @@ func RunIDForIdempotencyKey(scope models.Scope, key string) string {
 // replayedRun returns the stored run for an exact replay. ActingUser is not
 // part of the creation fingerprint, so a run created before it existed still
 // replays; a stored acting user must match the replayed request.
-func replayedRun(current *models.AgentRun, fingerprint, actingUser string) (*AgentRunCommandResult, error) {
+func replayedRun(current *models.AgentRun, fingerprint, actingUser string) (*CommandResult, error) {
 	if current.CreationFingerprint != fingerprint || (current.ActingUser != "" && current.ActingUser != actingUser) {
 		return nil, models.ErrRunIdempotency
 	}
-	return &AgentRunCommandResult{Run: current}, nil
+	return &CommandResult{Run: current}, nil
 }
 
-func (s *RunCommandService) CommandAgentRun(ctx context.Context, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
+func (s *RunCommandService) CommandAgentRun(ctx context.Context, req CommandRequest) (*CommandResult, error) {
 	result, err := s.commandAgentRun(ctx, req)
 	if err != nil {
 		return nil, err
@@ -177,9 +177,9 @@ var ErrRunCommandNotAuthorized = errors.New("Only the person this run acts for c
 // authorizeRunSteering lets only the person a run acts for intervene in,
 // answer, resume or retry it. Pause and cancel stay open to everyone allowed
 // today, and kernel actors (system, service, agent) are not people.
-func authorizeRunSteering(run *models.AgentRun, req AgentRunCommandRequest) error {
+func authorizeRunSteering(run *models.AgentRun, req CommandRequest) error {
 	switch req.Kind {
-	case AgentRunCommandIntervene, AgentRunCommandResolveHumanIntervention, AgentRunCommandResume, AgentRunCommandRetry:
+	case CommandIntervene, CommandResolveHumanIntervention, CommandResume, CommandRetry:
 	default:
 		return nil
 	}
@@ -189,8 +189,8 @@ func authorizeRunSteering(run *models.AgentRun, req AgentRunCommandRequest) erro
 	return ErrRunCommandNotAuthorized
 }
 
-func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
-	if req.Kind == AgentRunCommandRetry {
+func (s *RunCommandService) commandAgentRun(ctx context.Context, req CommandRequest) (*CommandResult, error) {
+	if req.Kind == CommandRetry {
 		return s.RetryConversationRun(ctx, req)
 	}
 	if s == nil || s.store == nil {
@@ -216,7 +216,7 @@ func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCom
 		return nil, err
 	}
 	if req.InterventionID != "" {
-		if req.Kind != AgentRunCommandIntervene {
+		if req.Kind != CommandIntervene {
 			return nil, fmt.Errorf("%w: intervention id is only supported for guidance", portfolio.ErrInvalidRunCommand)
 		}
 		if _, err := uuid.Parse(req.InterventionID); err != nil {
@@ -227,17 +227,17 @@ func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCom
 				if existing.Instruction != strings.TrimSpace(req.Instruction) || existing.Actor != req.Actor {
 					return nil, fmt.Errorf("%w: intervention id already belongs to different guidance", portfolio.ErrInvalidRunCommand)
 				}
-				return &AgentRunCommandResult{Run: current}, nil
+				return &CommandResult{Run: current}, nil
 			}
 		}
 	}
 	if current.Revision != req.ExpectedRevision {
 		return nil, models.ErrRevisionConflict
 	}
-	if req.Kind == AgentRunCommandCancel && current.Status == models.AgentRunStatusWaitingForApproval {
+	if req.Kind == CommandCancel && current.Status == models.AgentRunStatusWaitingForApproval {
 		return s.cancelWaitingApprovalRun(ctx, current, req)
 	}
-	if req.Kind == AgentRunCommandCancel && current.Status == models.AgentRunStatusPaused && current.PausedFrom == models.AgentRunStatusWaitingForApproval {
+	if req.Kind == CommandCancel && current.Status == models.AgentRunStatusPaused && current.PausedFrom == models.AgentRunStatusWaitingForApproval {
 		condition := current.PausedWakeCondition
 		if condition != nil && condition.Type == "approval" && condition.Reference != "" {
 			approval, err := s.store.GetApproval(ctx, current.Scope, condition.Reference)
@@ -261,7 +261,7 @@ func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCom
 	if err != nil {
 		return nil, err
 	}
-	return &AgentRunCommandResult{Run: run, Event: event}, nil
+	return &CommandResult{Run: run, Event: event}, nil
 }
 
 // CascadeTerminalRun closes a terminal Run's running step and open tool
@@ -359,9 +359,9 @@ func (s *RunCommandService) cancelRunDescendants(ctx context.Context, parent *mo
 		}
 		actor := models.ActivityActor{Type: "runtime", ID: "parent-run-terminalizer"}
 		summary := fmt.Sprintf("Canceled because parent Run %s reached %s", parent.ID, parent.Status)
-		_, err = s.commandAgentRun(ctx, AgentRunCommandRequest{
+		_, err = s.commandAgentRun(ctx, CommandRequest{
 			Scope: current.Scope, RunID: current.ID, ExpectedRevision: current.Revision,
-			Kind: AgentRunCommandCancel, Actor: actor, Summary: summary,
+			Kind: CommandCancel, Actor: actor, Summary: summary,
 			Visibility: models.ActivityVisibilityScope,
 		})
 		if err != nil {
@@ -382,7 +382,7 @@ func (s *RunCommandService) cancelRunDescendants(ctx context.Context, parent *mo
 // that otherwise permit future work: the pending approval, its ActionCall, and
 // the waiting Run. A plain Run transition is insufficient because an approval
 // could still be accepted later and make the external action executable.
-func (s *RunCommandService) cancelWaitingApprovalRun(ctx context.Context, current *models.AgentRun, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
+func (s *RunCommandService) cancelWaitingApprovalRun(ctx context.Context, current *models.AgentRun, req CommandRequest) (*CommandResult, error) {
 	condition := current.WakeCondition
 	if current.Status == models.AgentRunStatusPaused && current.PausedFrom == models.AgentRunStatusWaitingForApproval {
 		condition = current.PausedWakeCondition
@@ -471,16 +471,16 @@ func (s *RunCommandService) cancelWaitingApprovalRun(ctx context.Context, curren
 	if err != nil {
 		return nil, err
 	}
-	return &AgentRunCommandResult{Run: resolved.Run, Event: resolved.Event}, nil
+	return &CommandResult{Run: resolved.Run, Event: resolved.Event}, nil
 }
 
-func commandTransition(current *models.AgentRun, req AgentRunCommandRequest, now time.Time) (activity.RunTransitionRequest, error) {
+func commandTransition(current *models.AgentRun, req CommandRequest, now time.Time) (activity.RunTransitionRequest, error) {
 	transition := activity.RunTransitionRequest{
 		ExpectedRevision: req.ExpectedRevision, Actor: req.Actor, Visibility: req.Visibility,
 		Summary: strings.TrimSpace(req.Summary), OccurredAt: &now,
 	}
 	switch req.Kind {
-	case AgentRunCommandPause:
+	case CommandPause:
 		if current.Status == models.AgentRunStatusPaused || models.IsTerminalAgentRunStatus(current.Status) {
 			return transition, fmt.Errorf("%w: cannot pause %s run", models.ErrInvalidRunTransition, current.Status)
 		}
@@ -489,7 +489,7 @@ func commandTransition(current *models.AgentRun, req AgentRunCommandRequest, now
 		if transition.Summary == "" {
 			transition.Summary = "Run paused"
 		}
-	case AgentRunCommandResume:
+	case CommandResume:
 		if current.Status != models.AgentRunStatusPaused {
 			return transition, fmt.Errorf("%w: cannot resume %s run", models.ErrInvalidRunTransition, current.Status)
 		}
@@ -504,7 +504,7 @@ func commandTransition(current *models.AgentRun, req AgentRunCommandRequest, now
 		if transition.Summary == "" {
 			transition.Summary = "Run resumed"
 		}
-	case AgentRunCommandCancel:
+	case CommandCancel:
 		if models.IsTerminalAgentRunStatus(current.Status) {
 			return transition, fmt.Errorf("%w: cannot cancel %s run", models.ErrInvalidRunTransition, current.Status)
 		}
@@ -514,7 +514,7 @@ func commandTransition(current *models.AgentRun, req AgentRunCommandRequest, now
 		if transition.Summary == "" {
 			transition.Summary = "Run canceled"
 		}
-	case AgentRunCommandIntervene:
+	case CommandIntervene:
 		instruction := strings.TrimSpace(req.Instruction)
 		if instruction == "" || len(instruction) > 16000 {
 			return transition, fmt.Errorf("%w: guidance must contain 1 to 16000 UTF-8 bytes", portfolio.ErrInvalidRunCommand)
@@ -540,7 +540,7 @@ func commandTransition(current *models.AgentRun, req AgentRunCommandRequest, now
 		if transition.Summary == "" {
 			transition.Summary = "Operator steered the run"
 		}
-	case AgentRunCommandResolveHumanIntervention:
+	case CommandResolveHumanIntervention:
 		requestID := strings.TrimSpace(req.HumanInterventionID)
 		instruction := strings.TrimSpace(req.Instruction)
 		if requestID == "" || instruction == "" {

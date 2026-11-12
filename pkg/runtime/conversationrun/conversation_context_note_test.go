@@ -17,19 +17,19 @@ import (
 // The run_context note (run-loop section 05 §5, CONV-04), on the
 // SQLite store through the catch-up fixture.
 
-func catchUpNoteRunner(f *conversationtest.CatchUpFixture) *ConversationRunTurnRunner {
-	return &ConversationRunTurnRunner{conversations: f.Service, portfolio: f.Store, runbooks: f.Store}
+func catchUpNoteRunner(f *conversationtest.CatchUpFixture) *TurnRunner {
+	return &TurnRunner{conversations: f.Service, portfolio: f.Store, runbooks: f.Store}
 }
 
-func catchUpNoteInput(f *conversationtest.CatchUpFixture, run *models.AgentRun, session *models.AgentSession, trigger *models.ChannelMessage) conversation.ConversationContextInput {
-	return conversation.ConversationContextInput{
+func catchUpNoteInput(f *conversationtest.CatchUpFixture, run *models.AgentRun, session *models.AgentSession, trigger *models.ChannelMessage) conversation.ContextInput {
+	return conversation.ContextInput{
 		Run: run, Session: session, Sessions: f.Store, Conversation: f.Conversation, Trigger: trigger,
 		Viewer: f.Viewer(), Step: 1,
 	}
 }
 
 // catchUpNote builds the run_context note of in and appends it to the session.
-func catchUpNote(f *conversationtest.CatchUpFixture, runner *ConversationRunTurnRunner, in conversation.ConversationContextInput) *models.SessionEntry {
+func catchUpNote(f *conversationtest.CatchUpFixture, runner *TurnRunner, in conversation.ContextInput) *models.SessionEntry {
 	f.T.Helper()
 	note, err := runner.conversationRunContextNote(f.T.Context(), in)
 	if err != nil {
@@ -190,7 +190,7 @@ func TestActiveRunsBecomesNoneWhenWorkEnds(t *testing.T) {
 		ctx := t.Context()
 		runner := catchUpNoteRunner(f)
 		trigger := f.Say("q1", "Run the report")
-		portfolio := portfolio.NewPortfolioService(f.Store)
+		portfolio := portfolio.NewService(f.Store)
 		root, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 			Scope: f.Conversation.Scope, Owner: f.Conversation.Owner, AssignedAgentID: f.AgentID, Kind: models.RunKindConversation,
 			Goal: "chat", Source: models.RunSourceChat,
@@ -229,13 +229,13 @@ func TestActiveRunsBecomesNoneWhenWorkEnds(t *testing.T) {
 
 func TestTeamRosterSectionAndRoutingReason(t *testing.T) {
 	conversationtest.ForCatchUpStores(t, models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "launch"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
-		participants := conversation.ConversationParticipantSourceFunc(func(context.Context, conversation.ConversationParticipantQuery) ([]conversation.ConversationParticipantBinding, error) {
-			return []conversation.ConversationParticipantBinding{{Participant: f.Agent()}, {Participant: conversationtest.AgentParticipant("maya")}}, nil
+		participants := conversation.ParticipantSourceFunc(func(context.Context, conversation.ParticipantQuery) ([]conversation.ParticipantBinding, error) {
+			return []conversation.ParticipantBinding{{Participant: f.Agent()}, {Participant: conversationtest.AgentParticipant("maya")}}, nil
 		})
-		router := conversation.ConversationRouterFunc(func(context.Context, conversation.ConversationRouteRequest) (conversation.ConversationRouteDecision, error) {
-			return conversation.ConversationRouteDecision{AgentID: f.AgentID}, nil
+		router := conversation.RouterFunc(func(context.Context, conversation.RouteRequest) (conversation.RouteDecision, error) {
+			return conversation.RouteDecision{AgentID: f.AgentID}, nil
 		})
-		coordinator, err := conversation.NewConversationCoordinator(f.Service, participants, router, conversation.DefaultConversationCoordinatorConfig())
+		coordinator, err := conversation.NewCoordinator(f.Service, participants, router, conversation.DefaultConversationCoordinatorConfig())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -346,7 +346,7 @@ func TestRunContextListsRecentConversationTasks(t *testing.T) {
 		run, session := f.Open("")
 		text := catchUpNote(f, runner, catchUpNoteInput(f, run, session, trigger)).Note.Text
 		want := "Conversation tasks you started for this person here, newest first:\n" +
-			"- task " + running.Task.ID + " (independent, running) workRunId work-research revision 3, started " + conversation.ConversationMessageTime(f.Now) +
+			"- task " + running.Task.ID + " (independent, running) workRunId work-research revision 3, started " + conversation.MessageTime(f.Now) +
 			`: "Research the three vendors and compare prices"`
 		if !strings.Contains(text, want) || !strings.Contains(text, "- task "+done.Task.ID+" (independent, completed) workRunId work-inbox") {
 			t.Fatalf("tasks section = %q", text)

@@ -22,7 +22,7 @@ import (
 )
 
 // Conversation task tests over the run loop: chat source Runs are driven by
-// the worker pool's RunLoop with a scripted model-kind producer, the
+// the worker pool's runloop.Loop with a scripted model-kind producer, the
 // production step tool dispatcher and the control executor. The model's
 // conversation_start_task call becomes a real step row, assistant entry and
 // tool entry; only the model is scripted.
@@ -77,8 +77,8 @@ func answerStep(text string) agentrun.StepOutput {
 func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks models.ConversationTaskKernelStore, producer agentrun.StepProducer) conversation.TurnRunnerResolverFunc {
 	t.Helper()
 	activity := activity.NewRunActivityService(store, store)
-	control := &runtimecontrol.ControlExecutor{
-		Portfolio: store, Sessions: store, Activity: activity, Conversations: conversation.NewConversationService(store),
+	control := &runtimecontrol.Executor{
+		Portfolio: store, Sessions: store, Activity: activity, Conversations: conversation.NewService(store),
 		Reporting: store, Tasks: conversationrun.NewConversationTaskService(tasks),
 	}
 	dispatcher, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: control})
@@ -90,7 +90,7 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks models.Conversa
 		if err != nil {
 			return nil, err
 		}
-		authority, err := runtimecontrol.ResolveControlAuthority(ctx, runtimecontrol.ControlAuthorityInput{
+		authority, err := runtimecontrol.ResolveControlAuthority(ctx, runtimecontrol.AuthorityInput{
 			Run: run, DeploymentID: run.AssignedAgentID, ConversationTasks: store, Runs: store, Conversations: store,
 		})
 		if err != nil {
@@ -170,7 +170,7 @@ func (s *admissionLostTaskStore) CreateConversationTask(context.Context, models.
 func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*models.AgentRun, *models.AgentTurn, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "worker-task"}
-	conversations := conversation.NewConversationService(store)
+	conversations := conversation.NewService(store)
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
@@ -234,7 +234,7 @@ func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
 		return answerStep("unexpected second step"), nil
 	}}
 	pool := workerTaskPool(t, store, source.Scope, producer)
-	claimed, err := pool.scheduler.ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{
+	claimed, err := pool.scheduler.ClaimNext(t.Context(), agentrun.ClaimRequest{
 		Scope: source.Scope, Kind: models.RunKindConversation, WorkerID: "worker-2", LeaseDuration: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != source.ID {

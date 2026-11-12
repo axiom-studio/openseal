@@ -66,7 +66,7 @@ func (w *RunTerminalReportingWorker) SetWorkerLimiter(limiter *workqueue.WorkerL
 // the external conversation the routine was created from, through the same
 // durable outbox as replies. A report is acknowledged only once that delivery
 // is enqueued, so a crash between the two retries both idempotently.
-func (w *RunTerminalReportingWorker) SetExternalConversationDelivery(resolver ExternalConversationAdapterResolver) error {
+func (w *RunTerminalReportingWorker) SetExternalConversationDelivery(resolver AdapterResolver) error {
 	if w == nil || resolver == nil {
 		return errors.New("external conversation delivery requires an adapter resolver")
 	}
@@ -74,7 +74,7 @@ func (w *RunTerminalReportingWorker) SetExternalConversationDelivery(resolver Ex
 	if !ok {
 		return errors.New("terminal reporting store has no external conversations")
 	}
-	transport := NewExternalConversationTransportService(store, resolver, models.WithClock(w.now))
+	transport := NewTransportService(store, resolver, models.WithClock(w.now))
 	conversations := w.store.(models.ConversationStore)
 	w.project = func(ctx context.Context, run *models.AgentRun) error {
 		if err := conversationrun.ProjectTerminalRunReporting(ctx, conversations, run); err != nil {

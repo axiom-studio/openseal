@@ -73,7 +73,7 @@ func connectAccountEngine(t *testing.T) (context.Context, *sqlite.Store, *Engine
 func parkedConnectAccountRun(t *testing.T, ctx context.Context, store *sqlite.Store, call, actingUser, requestedFor, mode string) (*models.AgentRun, *SkillSetupRequest) {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "one"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
 		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Send mail", Source: models.RunSourceChat, ActingUser: actingUser,
 		Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message-" + call}})
 	if err != nil {

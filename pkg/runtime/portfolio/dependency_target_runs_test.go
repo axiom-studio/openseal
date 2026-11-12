@@ -73,7 +73,7 @@ func atomicTargetRunFixture(t *testing.T, store atomicForkStore) models.RunDepen
 	t.Helper()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "7"}
-	portfolio := runtimeportfolio.NewPortfolioService(store)
+	portfolio := runtimeportfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "parent", Source: models.RunSourceManual})
 	if err != nil {
 		t.Fatal(err)

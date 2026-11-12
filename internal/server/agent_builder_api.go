@@ -21,7 +21,7 @@ var localBuilderRequester = models.ConversationParticipant{Type: models.Conversa
 // agentBuilderWriter creates through the conversation service and posts
 // through the host dispatcher when one schedules Runs.
 type agentBuilderWriter struct {
-	service *conversation.ConversationService
+	service *conversation.Service
 	post    func(context.Context, conversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error)
 }
 
@@ -34,7 +34,7 @@ func (w agentBuilderWriter) PostChannelMessage(ctx context.Context, request conv
 }
 
 type agentBuilderReader struct {
-	service *conversation.ConversationService
+	service *conversation.Service
 	store   models.KernelStore
 }
 
@@ -121,7 +121,7 @@ func (s *Server) handleListAgentBuilderDrafts(w http.ResponseWriter, r *http.Req
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	drafts, err := agentbuilder.ListAgentBuilderDrafts(r.Context(), agentBuilderReader{service: service, store: s.store}, agentbuilder.AgentBuilderDraftFilter{
+	drafts, err := agentbuilder.ListAgentBuilderDrafts(r.Context(), agentBuilderReader{service: service, store: s.store}, agentbuilder.DraftFilter{
 		Scope: scope, Requester: localBuilderRequester,
 		Principal: models.ApprovalPrincipal{Type: string(localBuilderRequester.Type), ID: localBuilderRequester.ID},
 		Limit:     limit, Offset: offset,

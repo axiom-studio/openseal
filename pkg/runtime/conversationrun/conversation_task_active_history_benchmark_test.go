@@ -138,7 +138,7 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 					}
 				}
 			})
-			runner := &ConversationRunTurnRunner{portfolio: store}
+			runner := &TurnRunner{portfolio: store}
 			trigger := &models.ChannelMessage{ID: "current-status-message", Scope: filter.Scope, ConversationID: filter.ConversationID, Sender: filter.AuthenticatedActor, ThreadRootID: filter.ThreadRootID}
 			b.Run("foreground_active_context", func(b *testing.B) {
 				b.ReportAllocs()
@@ -415,7 +415,7 @@ func conversationTaskBenchmarkPost(t testing.TB, store models.ConversationTaskKe
 	if err != nil || conversation == nil {
 		t.Fatalf("benchmark conversation: %v", err)
 	}
-	service := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return at }))
+	service := runtimeconversation.NewService(store, models.WithClock(func() time.Time { return at }))
 	_, err = service.PostChannelMessage(context.Background(), runtimeconversation.PostChannelMessageRequest{ID: id, Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requester"}, Intent: models.MessageIntentQuestion, Content: "Review the requested result", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: reply, RequiresResponse: true, IdempotencyKey: "benchmark-message-" + id})
 	if err != nil {
 		t.Fatal(err)

@@ -25,7 +25,7 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := models.Scope{Kind: "tenant", ID: "tenant-1"}
-	service := externalconversation.NewExternalConversationGatewayService(store, nil)
+	service := externalconversation.NewGatewayService(store, nil)
 	if _, err := service.Create(ctx, externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "unsafe-active", Name: "Unsafe active", Gateway: storetest.IngressGateway(scope),
 		Status: models.ExternalConversationGatewayActive,
@@ -58,7 +58,7 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	service = externalconversation.NewExternalConversationGatewayService(reopened, nil)
+	service = externalconversation.NewGatewayService(reopened, nil)
 	persisted, err := service.GetByIngressRoute(ctx, created.IngressRoute)
 	if err != nil || persisted.ID != created.ID || persisted.Status != models.ExternalConversationGatewayActive {
 		t.Fatalf("persisted gateway = %#v, err = %v", persisted, err)
@@ -107,7 +107,7 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
-	service := externalconversation.NewExternalConversationGatewayService(store, catalog)
+	service := externalconversation.NewGatewayService(store, catalog)
 	gateway := models.ExternalConversationIngressGateway{
 		Scope: endpoint.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
 		Adapter: endpoint.Adapter, Provider: endpoint.Provider,
@@ -183,7 +183,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := externalconversation.NewExternalConversationEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
+	endpoint, err := externalconversation.NewEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "synthetic-endpoint", Scope: scope,
 		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "synthetic-agent"}, DeploymentID: "synthetic-agent",
 		Name: "Synthetic channel",
@@ -209,7 +209,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
 		t.Fatal(err)
 	}
-	gateway := externalconversationtest.CreateActiveGateway(t, ctx, externalconversation.NewExternalConversationGatewayService(store, catalog), externalconversation.CreateExternalConversationGatewayRequest{
+	gateway := externalconversationtest.CreateActiveGateway(t, ctx, externalconversation.NewGatewayService(store, catalog), externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "synthetic-gateway", Name: "Synthetic gateway",
 		Gateway: models.ExternalConversationIngressGateway{
 			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "synthetic-agent"}, DeploymentID: "synthetic-agent", Provider: "synthetic",
@@ -237,9 +237,9 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 	if err != nil || resolved == nil || resolved.Adapter.Features != nil || resolved.Adapter.Credentials != nil {
 		t.Fatalf("restarted adapter = %#v, %v", resolved, err)
 	}
-	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
+	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.GatewayHostResult{
 		StatusCode: http.StatusOK,
-		Events: []externalconversation.ExternalConversationGatewayEvent{{
+		Events: []externalconversation.GatewayEvent{{
 			InstallationID: "installation-1", ApplicationID: "application-1", Address: "channel-1",
 			Event: models.NormalizedExternalConversationEvent{
 				ID: "event-1", Type: capability.ConversationEventMessageReceived,
@@ -249,8 +249,8 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 			},
 		}},
 	}}
-	result, err := externalconversation.NewExternalConversationTransportService(reopened, restartedCatalog).
-		NormalizeExternalConversationRegisteredGatewayIngress(ctx, externalconversation.ExternalConversationPublicIngressRequest{
+	result, err := externalconversation.NewTransportService(reopened, restartedCatalog).
+		NormalizeExternalConversationRegisteredGatewayIngress(ctx, externalconversation.PublicIngressRequest{
 			Route: gateway.IngressRoute, Method: http.MethodPost, Body: []byte(`{"message":"hello"}`),
 		}, host)
 	if err != nil || len(result.Received) != 1 || !result.Received[0].Accepted || result.Received[0].Item.EndpointID != endpoint.ID {

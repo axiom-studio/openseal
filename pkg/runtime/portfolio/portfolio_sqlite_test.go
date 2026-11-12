@@ -17,7 +17,7 @@ func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	service := portfolio.NewPortfolioService(store)
+	service := portfolio.NewService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	otherScope := models.Scope{Kind: "tenant", ID: "other"}

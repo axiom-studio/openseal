@@ -44,25 +44,25 @@ const (
 	agentBuilderCreateFailedReason = "Creating it in chat failed"
 )
 
-// AgentBuilderActionDispatcher executes list_agents, create_agent,
+// ActionDispatcher executes list_agents, create_agent,
 // update_agent, try_agent and openseal.teams create_team. Every write step is idempotent on the
 // ActionCall, so a retry or a crash-resumed execution converges on the same
 // Agent.
-type AgentBuilderActionDispatcher struct {
+type ActionDispatcher struct {
 	*AgentInstaller
 	fallback agentrun.ActionDispatcher
 }
 
-// NewAgentBuilderActionDispatcher wraps fallback, which receives every other
+// NewActionDispatcher wraps fallback, which receives every other
 // action. Every dispatcher of an Engine shares its one installer.
-func NewAgentBuilderActionDispatcher(installer *AgentInstaller, fallback agentrun.ActionDispatcher) (*AgentBuilderActionDispatcher, error) {
+func NewActionDispatcher(installer *AgentInstaller, fallback agentrun.ActionDispatcher) (*ActionDispatcher, error) {
 	if installer == nil {
 		return nil, errors.New("agent builder dispatcher requires the agent installer")
 	}
-	return &AgentBuilderActionDispatcher{AgentInstaller: installer, fallback: fallback}, nil
+	return &ActionDispatcher{AgentInstaller: installer, fallback: fallback}, nil
 }
 
-func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+func (d *ActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if !isAgentBuilderDispatchedAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")
@@ -142,7 +142,7 @@ func agentBuilderBindingID(deploymentID, skillID string) string {
 	return "builder:" + deploymentID + ":" + skillID
 }
 
-func (d *AgentBuilderActionDispatcher) listAgents(ctx context.Context, scope models.Scope, builderID string, arguments map[string]interface{}) (map[string]interface{}, error) {
+func (d *ActionDispatcher) listAgents(ctx context.Context, scope models.Scope, builderID string, arguments map[string]interface{}) (map[string]interface{}, error) {
 	var args models.AgentListArguments
 	if err := decodeAgentBuilderArguments(arguments, &args); err != nil {
 		return nil, err
@@ -186,7 +186,7 @@ func (d *AgentBuilderActionDispatcher) listAgents(ctx context.Context, scope mod
 }
 
 // agentSpaceIDs maps each Agent deployment to the spaces it is in.
-func (d *AgentBuilderActionDispatcher) agentSpaceIDs(ctx context.Context, scope models.Scope) (map[string][]string, error) {
+func (d *ActionDispatcher) agentSpaceIDs(ctx context.Context, scope models.Scope) (map[string][]string, error) {
 	spaces, err := d.provision.ListSpaces(ctx, scope)
 	if err != nil {
 		return nil, err
@@ -219,7 +219,7 @@ func agentDeploymentDisplayName(deployment *kernelagent.AgentDeployment, definit
 	return definition.DisplayName
 }
 
-func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
+func (d *ActionDispatcher) createAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	approval, err := approvedAgentBuilderCheckpoint(ctx, d.store, call)
 	if err != nil {
@@ -289,7 +289,7 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input ag
 	})
 }
 
-func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
+func (d *ActionDispatcher) updateAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	approval, err := approvedAgentBuilderCheckpoint(ctx, d.store, call)
 	if err != nil {

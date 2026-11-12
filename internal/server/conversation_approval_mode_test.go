@@ -49,7 +49,7 @@ func TestConversationApprovalModeAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !result.Changed || result.Conversation.ApprovalMode != models.ConversationApprovalManual || result.Event == nil ||
-		result.Event.EventType != runtimeconversation.ConversationApprovalModeChangedEvent {
+		result.Event.EventType != runtimeconversation.ApprovalModeChangedEvent {
 		t.Fatalf("update result = %#v", result)
 	}
 	read := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/conversations/"+conversation.ID+"?scopeKind=tenant&scopeId=one", "", "")

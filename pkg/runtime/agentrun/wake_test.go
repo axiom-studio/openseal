@@ -34,7 +34,7 @@ func TestWakeSignalsRequeueRunsExactlyOnce(t *testing.T) {
 			ctx := context.Background()
 			scope := models.Scope{Kind: "local", ID: "test"}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 			run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 				Goal: "wait", Source: models.RunSourceEvent,
@@ -56,7 +56,7 @@ func TestWakeSignalsRequeueRunsExactlyOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wake := NewAgentRunWakeService(store, store)
+			wake := NewWakeService(store, store)
 			wrong, err := wake.Wake(ctx, WakeSignal{
 				ID: "signal-wrong", Scope: scope, Type: "event", Reference: "jobs",
 				Payload: map[string]interface{}{"state": "pending"}, At: now.Add(2 * time.Second),
@@ -147,7 +147,7 @@ func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 		Goal: "sleep", Source: models.RunSourceSchedule,
@@ -178,7 +178,7 @@ func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	result, err := NewAgentRunWakeService(reopened, reopened).WakeDueTimers(ctx, scope, due)
+	result, err := NewWakeService(reopened, reopened).WakeDueTimers(ctx, scope, due)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,14 +80,14 @@ func proposeInteraction(t *testing.T, ctx context.Context, store *sqlite.Store, 
 // fixture and its ready call.
 func proposeInteractionCall(t *testing.T, ctx context.Context, store *sqlite.Store, catalog *skill.Catalog, scope models.Scope, action string, arguments map[string]interface{}) (*actiontest.LoopProposalFixture, *models.ActionCall) {
 	t.Helper()
-	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+	created, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "Order a cable on amazon.in", Source: models.RunSourceChat, Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := actiontest.NewLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
-	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, store)
-	proposal, err := runtimeaction.NewActionCoordinator(store, store, catalog, runtimeaction.NewDefaultActionPolicy(), []runtimeaction.ActionProposalValidator{validator}).Propose(ctx, f.Request(runtimeaction.ProposeActionRequest{
+	validator, _ := skillbinding.NewActionValidator(catalog, store)
+	proposal, err := runtimeaction.NewCoordinator(store, store, catalog, runtimeaction.NewDefaultActionPolicy(), []runtimeaction.ProposalValidator{validator}).Propose(ctx, f.Request(runtimeaction.ProposeActionRequest{
 		DeploymentID: "agent", SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: action, Arguments: arguments, Summary: "Ask the user"}, "interaction"))
 	if err != nil || proposal.Approval != nil || proposal.Call.Status != models.ActionCallStatusReady {
 		t.Fatalf("proposal: %#v %v", proposal, err)
@@ -112,7 +112,7 @@ func TestRequestCredentialParksRunUntilTheUserSavesIt(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
 		"kind": "website_login", "website": "https://www.amazon.in/", "reason": "Add your amazon.in login so I can finish the order"})
-	executed := f.Execute(runtimeaction.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+	executed := f.Execute(runtimeaction.NewWorker(store, catalog, nil, dispatcher), call.ID)
 	if executed.Call.Status != models.ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
 		t.Fatalf("credential action: %#v", executed.Call)
 	}
@@ -149,7 +149,7 @@ func TestFailedInteractionRequestsAreExplainedInsteadOfFailingTheRun(t *testing.
 		t.Run(name, func(t *testing.T) {
 			ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 			f, call := proposeInteractionCall(t, ctx, store, catalog, scope, tc.action, tc.arguments)
-			executed := f.Execute(runtimeaction.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+			executed := f.Execute(runtimeaction.NewWorker(store, catalog, nil, dispatcher), call.ID)
 			refused, _ := executed.Call.Output["refused"].(map[string]interface{})
 			if executed.Call.Status != models.ActionCallStatusSucceeded || refused == nil || refused["message"] == "" {
 				t.Fatalf("refusal not returned to the model: %#v", executed.Call)
@@ -166,18 +166,18 @@ func TestFailedInteractionRequestsAreExplainedInsteadOfFailingTheRun(t *testing.
 	}
 }
 
-func mustConversationChanges(t *testing.T, ctx context.Context, store *sqlite.Store, scope models.Scope) (*conversation.ConversationChangeSet, error) {
+func mustConversationChanges(t *testing.T, ctx context.Context, store *sqlite.Store, scope models.Scope) (*conversation.ChangeSet, error) {
 	t.Helper()
 	now := time.Now().UTC()
 	seedTestSpace(t, store, scope)
 	if _, _, err := store.CreateConversation(ctx, &models.Conversation{ID: "chat", Scope: scope, Title: "Amazon order", Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Status: models.ConversationStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now}, "chat-key"); err != nil {
 		return nil, err
 	}
-	service, err := conversation.NewConversationChangeService(store, store)
+	service, err := conversation.NewChangeService(store, store)
 	if err != nil {
 		return nil, err
 	}
-	return service.ListChanges(ctx, conversation.ConversationChangeRequest{Scope: scope, ConversationID: "chat"})
+	return service.ListChanges(ctx, conversation.ChangeRequest{Scope: scope, ConversationID: "chat"})
 }
 
 // A member asking in a Team chat saves the request to the Team, stamped with
@@ -199,21 +199,21 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 		Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "agent", AgentDeploymentID: "agent"}}}, activation(crew.ID, 1)); err != nil {
 		t.Fatal(err)
 	}
-	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: crew, AssignedAgentID: "agent",
+	created, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: crew, AssignedAgentID: "agent",
 		Goal: "Order a cable", Source: models.RunSourceChat, Context: map[string]interface{}{"conversationId": "team-chat", "triggerMessageId": "message"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := actiontest.NewLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
 	run := f.Run
-	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, store)
-	proposal, err := runtimeaction.NewActionCoordinator(store, store, catalog, runtimeaction.NewDefaultActionPolicy(), []runtimeaction.ActionProposalValidator{validator}).Propose(ctx, f.Request(runtimeaction.ProposeActionRequest{
+	validator, _ := skillbinding.NewActionValidator(catalog, store)
+	proposal, err := runtimeaction.NewCoordinator(store, store, catalog, runtimeaction.NewDefaultActionPolicy(), []runtimeaction.ProposalValidator{validator}).Propose(ctx, f.Request(runtimeaction.ProposeActionRequest{
 		DeploymentID: "agent", SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestCredential,
 		Arguments: map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}, "request-credential"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := runtimeaction.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, f.Worker)
+	executed, err := runtimeaction.NewWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, f.Worker)
 	if err != nil || executed.Call.Status != models.ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
 		t.Fatalf("credential action: %#v %v", executed, err)
 	}

@@ -15,13 +15,13 @@ import (
 
 // Dispatcher limits and intervals (SPEC §4).
 const (
-	// RoutineEventTenantRunCap is the default most event Runs that are not
+	// EventTenantRunCap is the default most event Runs that are not
 	// finished in one scope at once; further batches wait.
-	RoutineEventTenantRunCap = 10
-	// RoutineEventDispatchInterval is the default loop tick.
-	RoutineEventDispatchInterval = 10 * time.Second
-	// RoutineEventHeaderMaxBytes bounds the routineEventHeader context value.
-	RoutineEventHeaderMaxBytes = 200
+	EventTenantRunCap = 10
+	// EventDispatchInterval is the default loop tick.
+	EventDispatchInterval = 10 * time.Second
+	// EventHeaderMaxBytes bounds the routineEventHeader context value.
+	EventHeaderMaxBytes = 200
 
 	routineEventSourceCheckInterval = time.Hour
 	routineEventPruneInterval       = 24 * time.Hour
@@ -35,15 +35,15 @@ const (
 	routineEventMinPassGap = time.Second
 )
 
-// RoutineEventSourceChecker tells the dispatcher whether a routine's
+// EventSourceChecker tells the dispatcher whether a routine's
 // conversation or callback source, and each channel or chat it names, still
 // exists. Nil skips the check.
-type RoutineEventSourceChecker interface {
+type EventSourceChecker interface {
 	SourceExists(ctx context.Context, subscription models.RoutineEventSubscription) (bool, error)
 }
 
-// RoutineEventDispatchResult counts what one dispatcher pass did.
-type RoutineEventDispatchResult struct {
+// EventDispatchResult counts what one dispatcher pass did.
+type EventDispatchResult struct {
 	Scopes       int `json:"scopes"`
 	Examined     int `json:"examined"`
 	Started      int `json:"started"`
@@ -60,7 +60,7 @@ type RoutineEventDispatchResult struct {
 	Failed int `json:"failed"`
 }
 
-func (r *RoutineEventDispatchResult) add(other *RoutineEventDispatchResult) {
+func (r *EventDispatchResult) add(other *EventDispatchResult) {
 	r.Examined += other.Examined
 	r.Started += other.Started
 	r.TestStarted += other.TestStarted
@@ -74,21 +74,21 @@ func (r *RoutineEventDispatchResult) add(other *RoutineEventDispatchResult) {
 	r.Failed += other.Failed
 }
 
-// RoutineEventDispatcher turns stored routine events into occurrence Runs:
+// EventDispatcher turns stored routine events into occurrence Runs:
 // one active Run per routine, at most MaxPerHour real batches an hour, at
 // most TenantRunCap event Runs per scope. It runs on one process (the host's
 // sweep leader), so its check-then-claim cannot race. It keeps no goroutine
 // or timer per routine.
-type RoutineEventDispatcher struct {
+type EventDispatcher struct {
 	store             models.KernelStore
-	matcher           *RoutineEventMatcher
+	matcher           *EventMatcher
 	reportingStore    models.ConversationStore
 	executionPreparer models.AcceptedRunExecutionPreparer
-	// TenantRunCap overrides RoutineEventTenantRunCap when positive.
+	// TenantRunCap overrides EventTenantRunCap when positive.
 	TenantRunCap int
 	// SourceChecker checks conversation and callback sources hourly. Nil
 	// skips the check.
-	SourceChecker RoutineEventSourceChecker
+	SourceChecker EventSourceChecker
 	now           func() time.Time
 	minPassGap    time.Duration
 
@@ -103,26 +103,26 @@ type RoutineEventDispatcher struct {
 	lastPrune       time.Time
 }
 
-// NewRoutineEventDispatcher builds a dispatcher on the matcher's store.
-func NewRoutineEventDispatcher(store models.KernelStore, matcher *RoutineEventMatcher, opts ...models.ServiceOption) *RoutineEventDispatcher {
-	dispatcher := &RoutineEventDispatcher{store: store, matcher: matcher, now: models.ClockFrom(opts), minPassGap: routineEventMinPassGap, workCursors: map[models.Scope]string{}}
+// NewEventDispatcher builds a dispatcher on the matcher's store.
+func NewEventDispatcher(store models.KernelStore, matcher *EventMatcher, opts ...models.ServiceOption) *EventDispatcher {
+	dispatcher := &EventDispatcher{store: store, matcher: matcher, now: models.ClockFrom(opts), minPassGap: routineEventMinPassGap, workCursors: map[models.Scope]string{}}
 	if reportingStore, ok := store.(models.ConversationStore); ok {
 		dispatcher.reportingStore = reportingStore
 	}
 	return dispatcher
 }
 
-func (d *RoutineEventDispatcher) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
+func (d *EventDispatcher) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
 	if d != nil {
 		d.executionPreparer = preparer
 	}
 }
 
-func (d *RoutineEventDispatcher) tenantRunCap() int {
+func (d *EventDispatcher) tenantRunCap() int {
 	if d.TenantRunCap > 0 {
 		return d.TenantRunCap
 	}
-	return RoutineEventTenantRunCap
+	return EventTenantRunCap
 }
 
 // Run is the dispatcher loop: it wakes on the matcher's nudge and on a
@@ -130,12 +130,12 @@ func (d *RoutineEventDispatcher) tenantRunCap() int {
 // Every process keeps its index fresh (rebuild at start and every 15
 // minutes); only a process for which leads returns true (nil = always)
 // starts Runs and does the hourly source check and daily prune.
-func (d *RoutineEventDispatcher) Run(ctx context.Context, interval time.Duration, leads func() bool) error {
+func (d *EventDispatcher) Run(ctx context.Context, interval time.Duration, leads func() bool) error {
 	if d == nil || d.store == nil {
 		return errors.New("routine event dispatcher is not configured")
 	}
 	if interval <= 0 {
-		interval = RoutineEventDispatchInterval
+		interval = EventDispatchInterval
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -162,9 +162,9 @@ func (d *RoutineEventDispatcher) Run(ctx context.Context, interval time.Duration
 }
 
 // pass is one loop iteration. Errors are retried on the next tick.
-func (d *RoutineEventDispatcher) pass(ctx context.Context, leads func() bool) {
+func (d *EventDispatcher) pass(ctx context.Context, leads func() bool) {
 	now := d.now()
-	if d.matcher != nil && (d.lastRebuild.IsZero() || now.Sub(d.lastRebuild) >= RoutineEventIndexRebuildInterval) {
+	if d.matcher != nil && (d.lastRebuild.IsZero() || now.Sub(d.lastRebuild) >= EventIndexRebuildInterval) {
 		if d.matcher.RebuildRoutineIndex(ctx) == nil {
 			d.lastRebuild = now
 		}
@@ -187,7 +187,7 @@ func (d *RoutineEventDispatcher) pass(ctx context.Context, leads func() bool) {
 
 // ReconcileAll runs one dispatch pass over every scope with waiting events.
 // One query finds those scopes, so idle tenants cost nothing.
-func (d *RoutineEventDispatcher) ReconcileAll(ctx context.Context, limitPerScope int) (*RoutineEventDispatchResult, error) {
+func (d *EventDispatcher) ReconcileAll(ctx context.Context, limitPerScope int) (*EventDispatchResult, error) {
 	if d == nil || d.store == nil {
 		return nil, errors.New("routine event dispatcher is not configured")
 	}
@@ -196,7 +196,7 @@ func (d *RoutineEventDispatcher) ReconcileAll(ctx context.Context, limitPerScope
 		return nil, err
 	}
 	d.keepWorkCursors(scopes)
-	total := &RoutineEventDispatchResult{Scopes: len(scopes)}
+	total := &EventDispatchResult{Scopes: len(scopes)}
 	queueDepth := 0
 	var firstErr error
 	for _, scope := range scopes {
@@ -216,7 +216,7 @@ func (d *RoutineEventDispatcher) ReconcileAll(ctx context.Context, limitPerScope
 }
 
 // ReconcileScope runs one dispatch pass over one scope.
-func (d *RoutineEventDispatcher) ReconcileScope(ctx context.Context, scope models.Scope, limit int) (*RoutineEventDispatchResult, error) {
+func (d *EventDispatcher) ReconcileScope(ctx context.Context, scope models.Scope, limit int) (*EventDispatchResult, error) {
 	if d == nil || d.store == nil {
 		return nil, errors.New("routine event dispatcher is not configured")
 	}
@@ -229,8 +229,8 @@ type routineEventScopePass struct {
 	capped     bool
 }
 
-func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope models.Scope, limit int) (*RoutineEventDispatchResult, int, error) {
-	result := &RoutineEventDispatchResult{}
+func (d *EventDispatcher) reconcileScope(ctx context.Context, scope models.Scope, limit int) (*EventDispatchResult, int, error) {
+	result := &EventDispatchResult{}
 	if err := scope.Validate(); err != nil {
 		return result, 0, err
 	}
@@ -281,7 +281,7 @@ func (d *RoutineEventDispatcher) reconcileScope(ctx context.Context, scope model
 
 // routineEventWork lists the scope's routines with waiting events, starting
 // after the scope's cursor and wrapping around to the start.
-func (d *RoutineEventDispatcher) routineEventWork(ctx context.Context, scope models.Scope, limit int) ([]string, error) {
+func (d *EventDispatcher) routineEventWork(ctx context.Context, scope models.Scope, limit int) ([]string, error) {
 	d.cursorMu.Lock()
 	after := d.workCursors[scope]
 	d.cursorMu.Unlock()
@@ -305,7 +305,7 @@ func (d *RoutineEventDispatcher) routineEventWork(ctx context.Context, scope mod
 // advanceWorkCursor moves the scope's cursor past the last routine examined
 // when the pass left work unexamined (tenant cap or list limit); otherwise
 // every routine had its turn and the next pass starts from the beginning.
-func (d *RoutineEventDispatcher) advanceWorkCursor(scope models.Scope, examined string, unfinished bool) {
+func (d *EventDispatcher) advanceWorkCursor(scope models.Scope, examined string, unfinished bool) {
 	d.cursorMu.Lock()
 	defer d.cursorMu.Unlock()
 	switch {
@@ -320,7 +320,7 @@ func (d *RoutineEventDispatcher) advanceWorkCursor(scope models.Scope, examined 
 }
 
 // keepWorkCursors forgets the cursors of scopes that no longer have work.
-func (d *RoutineEventDispatcher) keepWorkCursors(scopes []models.Scope) {
+func (d *EventDispatcher) keepWorkCursors(scopes []models.Scope) {
 	d.cursorMu.Lock()
 	defer d.cursorMu.Unlock()
 	if len(d.workCursors) == 0 {
@@ -341,7 +341,7 @@ func routineEventIdempotencyKey(batchID string) string {
 	return routineEventIdempotencyPrefix + batchID
 }
 
-func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope models.Scope, activationID string, pass *routineEventScopePass, result *RoutineEventDispatchResult) error {
+func (d *EventDispatcher) dispatchActivation(ctx context.Context, scope models.Scope, activationID string, pass *routineEventScopePass, result *EventDispatchResult) error {
 	activation, err := d.store.GetRunbookActivation(ctx, scope, activationID)
 	if err != nil {
 		return err
@@ -442,7 +442,7 @@ func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope m
 	return d.startBatch(ctx, activation, batch, pass, result)
 }
 
-func (d *RoutineEventDispatcher) startBatch(ctx context.Context, activation *models.RunbookActivation, batch *models.RoutineEventBatch, pass *routineEventScopePass, result *RoutineEventDispatchResult) error {
+func (d *EventDispatcher) startBatch(ctx context.Context, activation *models.RunbookActivation, batch *models.RoutineEventBatch, pass *routineEventScopePass, result *EventDispatchResult) error {
 	scope := activation.Scope
 	if err := verifyRunbookActivationExecution(ctx, d.store, scope, activation.ID); err != nil {
 		if !errors.Is(err, ErrRunbookActivationUnverified) {
@@ -512,7 +512,7 @@ func (d *RoutineEventDispatcher) startBatch(ctx context.Context, activation *mod
 
 // exhausted reports whether the routine already started its maximum of real
 // batches. The count comes from durable batch rows, never the activation.
-func (d *RoutineEventDispatcher) exhausted(ctx context.Context, activation *models.RunbookActivation) (bool, error) {
+func (d *EventDispatcher) exhausted(ctx context.Context, activation *models.RunbookActivation) (bool, error) {
 	maximum := activation.Task.Event.MaximumOccurrences
 	if maximum <= 0 {
 		return false, nil
@@ -524,7 +524,7 @@ func (d *RoutineEventDispatcher) exhausted(ctx context.Context, activation *mode
 	return int64(count) >= maximum, nil
 }
 
-func (d *RoutineEventDispatcher) retireWhenExhausted(ctx context.Context, activation *models.RunbookActivation, result *RoutineEventDispatchResult) error {
+func (d *EventDispatcher) retireWhenExhausted(ctx context.Context, activation *models.RunbookActivation, result *EventDispatchResult) error {
 	exhausted, err := d.exhausted(ctx, activation)
 	if err != nil || !exhausted {
 		return err
@@ -532,7 +532,7 @@ func (d *RoutineEventDispatcher) retireWhenExhausted(ctx context.Context, activa
 	return d.retire(ctx, activation, result)
 }
 
-func (d *RoutineEventDispatcher) hourlyLimitReached(ctx context.Context, activation *models.RunbookActivation, now time.Time) (bool, error) {
+func (d *EventDispatcher) hourlyLimitReached(ctx context.Context, activation *models.RunbookActivation, now time.Time) (bool, error) {
 	maximum := activation.Task.Event.MaxPerHour
 	if maximum <= 0 {
 		maximum = models.RoutineEventDefaultMaxPerHour
@@ -544,7 +544,7 @@ func (d *RoutineEventDispatcher) hourlyLimitReached(ctx context.Context, activat
 	return count >= maximum, nil
 }
 
-func (d *RoutineEventDispatcher) retire(ctx context.Context, activation *models.RunbookActivation, result *RoutineEventDispatchResult) error {
+func (d *EventDispatcher) retire(ctx context.Context, activation *models.RunbookActivation, result *EventDispatchResult) error {
 	_, err := NewRunbookActivationService(d.store, models.WithClock(d.now)).Update(ctx, activation.Scope, activation.ID, UpdateRunbookActivationRequest{
 		ExpectedRevision: activation.Revision, Status: models.RunbookActivationRetired, Exhausted: true,
 	})
@@ -560,7 +560,7 @@ func (d *RoutineEventDispatcher) retire(ctx context.Context, activation *models.
 	return err
 }
 
-func (d *RoutineEventDispatcher) pause(ctx context.Context, activation *models.RunbookActivation, reason models.RoutinePausedReason, result *RoutineEventDispatchResult) error {
+func (d *EventDispatcher) pause(ctx context.Context, activation *models.RunbookActivation, reason models.RoutinePausedReason, result *EventDispatchResult) error {
 	_, err := NewRunbookActivationService(d.store, models.WithClock(d.now)).Update(ctx, activation.Scope, activation.ID, UpdateRunbookActivationRequest{
 		ExpectedRevision: activation.Revision, Status: models.RunbookActivationPaused, PausedReason: reason,
 	})
@@ -579,7 +579,7 @@ func (d *RoutineEventDispatcher) pause(ctx context.Context, activation *models.R
 // closeOut ends a routine's waiting work when it is paused, retired or used
 // up. An open batch whose Run already started is marked started first; the
 // rest is dropped, and the store deletes the open batch row.
-func (d *RoutineEventDispatcher) closeOut(ctx context.Context, scope models.Scope, activationID, reason string) (int, error) {
+func (d *EventDispatcher) closeOut(ctx context.Context, scope models.Scope, activationID, reason string) (int, error) {
 	open, err := d.store.GetOpenRoutineEventBatch(ctx, scope, activationID)
 	if err != nil {
 		return 0, err
@@ -601,7 +601,7 @@ func (d *RoutineEventDispatcher) closeOut(ctx context.Context, scope models.Scop
 // CheckRoutineSources pauses conversation and callback routines whose source,
 // or a channel or chat they name, is gone (source_removed). It runs hourly on
 // the leader.
-func (d *RoutineEventDispatcher) CheckRoutineSources(ctx context.Context) (int, error) {
+func (d *EventDispatcher) CheckRoutineSources(ctx context.Context) (int, error) {
 	if d == nil || d.store == nil || d.SourceChecker == nil {
 		return 0, nil
 	}
@@ -625,7 +625,7 @@ func (d *RoutineEventDispatcher) CheckRoutineSources(ctx context.Context) (int, 
 			if activation == nil || activation.Status != models.RunbookActivationActive {
 				continue
 			}
-			result := &RoutineEventDispatchResult{}
+			result := &EventDispatchResult{}
 			if err := d.pause(ctx, activation, models.RoutinePausedSourceRemoved, result); err != nil {
 				return paused, err
 			}
@@ -641,7 +641,7 @@ func (d *RoutineEventDispatcher) CheckRoutineSources(ctx context.Context) (int, 
 // PruneRoutineEventData removes started and dropped events older than the
 // retention, batch rows of routines gone that long, and hooks of retired or
 // missing routines. It runs daily on the leader.
-func (d *RoutineEventDispatcher) PruneRoutineEventData(ctx context.Context) (int, error) {
+func (d *EventDispatcher) PruneRoutineEventData(ctx context.Context) (int, error) {
 	if d == nil || d.store == nil {
 		return 0, nil
 	}
@@ -688,7 +688,7 @@ func routineEventBatchHeader(kind models.RoutineEventKind, batch *models.Routine
 		}
 		header = fmt.Sprintf("%d new %s", count, noun)
 	}
-	return models.TruncateUTF8(header, RoutineEventHeaderMaxBytes)
+	return models.TruncateUTF8(header, EventHeaderMaxBytes)
 }
 
 // PauseRoutine pauses one event routine for a system reason (needs_sign_in,
@@ -700,7 +700,7 @@ func routineEventBatchHeader(kind models.RoutineEventKind, batch *models.Routine
 // The dispatcher closes out the waiting events on its next pass, on its own
 // goroutine, so the close-out never deletes the batch of a Run it is
 // creating at that moment.
-func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope models.Scope, activationID string, reason models.RoutinePausedReason) (bool, error) {
+func (d *EventDispatcher) PauseRoutine(ctx context.Context, scope models.Scope, activationID string, reason models.RoutinePausedReason) (bool, error) {
 	if d == nil || d.store == nil {
 		return false, errors.New("routine event dispatcher is not configured")
 	}
@@ -746,7 +746,7 @@ func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope models.
 // PauseRoutinesForSource pauses every active event routine of the scope that
 // listens to this kind and SourceRef, for example when a person's Google
 // sign-in is revoked. It returns how many it paused.
-func (d *RoutineEventDispatcher) PauseRoutinesForSource(ctx context.Context, scope models.Scope, kind models.RoutineEventKind, sourceRef string, reason models.RoutinePausedReason) (int, error) {
+func (d *EventDispatcher) PauseRoutinesForSource(ctx context.Context, scope models.Scope, kind models.RoutineEventKind, sourceRef string, reason models.RoutinePausedReason) (int, error) {
 	if d == nil || d.store == nil {
 		return 0, errors.New("routine event dispatcher is not configured")
 	}

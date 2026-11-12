@@ -36,7 +36,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 		t.Run(factory.name, func(t *testing.T) {
 			store, closeStore := factory.open(t)
 			defer closeStore()
-			catalog := artifactcatalog.NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
+			catalog := artifactcatalog.NewCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
 			ctx := context.Background()
 			artifact := validCatalogArtifact("research-report", 1)
 
@@ -109,7 +109,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 
 func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	catalog := artifactcatalog.NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
+	catalog := artifactcatalog.NewCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
 	artifact := validCatalogArtifact("game-log", 1)
 	var created atomic.Int32
 	var wait sync.WaitGroup
@@ -139,7 +139,7 @@ func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
 }
 
 func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T) {
-	catalog := artifactcatalog.NewArtifactCatalog(kerneltest.NewStore(t))
+	catalog := artifactcatalog.NewCatalog(kerneltest.NewStore(t))
 	tests := []struct {
 		name   string
 		mutate func(*models.Artifact)
@@ -172,7 +172,7 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog := artifactcatalog.NewArtifactCatalog(store)
+	catalog := artifactcatalog.NewCatalog(store)
 	created, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: validCatalogArtifact("restart-report", 1)})
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	loaded, err := artifactcatalog.NewArtifactCatalog(reopened).Get(context.Background(), created.Artifact.Scope, created.Artifact.ID, 1)
+	loaded, err := artifactcatalog.NewCatalog(reopened).Get(context.Background(), created.Artifact.Scope, created.Artifact.ID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	}
 	defer sqlite.Close()
 	stamp := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
-	catalog := artifactcatalog.NewArtifactCatalog(sqlite, models.WithClock(func() time.Time { return stamp }))
+	catalog := artifactcatalog.NewCatalog(sqlite, models.WithClock(func() time.Time { return stamp }))
 	for i := 0; i < 125; i++ {
 		artifact := validCatalogArtifact(fmt.Sprintf("artifact-%03d", i), 1)
 		if i%2 == 0 {

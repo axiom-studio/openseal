@@ -46,23 +46,23 @@ func (c *DynamicActionWorkerConfig) applyDefaults() error {
 	return nil
 }
 
-// ActionWorkerSupervisor runs an isolated worker pool per scope with
+// WorkerSupervisor runs an isolated worker pool per scope with
 // ActionCall work. See workqueue.ScopePools for when a scope has a pool.
-type ActionWorkerSupervisor struct {
+type WorkerSupervisor struct {
 	store       models.KernelStore
 	catalog     agentrun.ActionExecutionCatalog
 	credentials CredentialResolver
-	leaseIssuer ActionCredentialLeaseIssuer
+	leaseIssuer CredentialLeaseIssuer
 	dispatcher  agentrun.ActionDispatcher
 	config      DynamicActionWorkerConfig
 	logger      *zap.SugaredLogger
 	limiter     atomic.Pointer[workqueue.WorkerLimiter]
-	pools       *workqueue.ScopePools[*ActionWorkerPool]
+	pools       *workqueue.ScopePools[*WorkerPool]
 	// availability is installed on every scope pool, current and future.
 	availability atomic.Pointer[credentialAvailabilityBox]
 }
 
-func NewActionWorkerSupervisor(
+func NewWorkerSupervisor(
 	store models.KernelStore,
 	catalog agentrun.ActionExecutionCatalog,
 	credentials CredentialResolver,
@@ -70,19 +70,19 @@ func NewActionWorkerSupervisor(
 	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
-) (*ActionWorkerSupervisor, error) {
+) (*WorkerSupervisor, error) {
 	return newActionWorkerSupervisor(store, catalog, credentials, nil, dispatcher, source, logger, config, workqueue.PoolRetireAfter)
 }
 
-func NewActionCredentialLeaseWorkerSupervisor(
+func NewCredentialLeaseWorkerSupervisor(
 	store models.KernelStore,
 	catalog agentrun.ActionExecutionCatalog,
-	issuer ActionCredentialLeaseIssuer,
+	issuer CredentialLeaseIssuer,
 	dispatcher agentrun.ActionDispatcher,
 	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
-) (*ActionWorkerSupervisor, error) {
+) (*WorkerSupervisor, error) {
 	if issuer == nil {
 		return nil, errors.New("action credential lease issuer is required")
 	}
@@ -93,13 +93,13 @@ func newActionWorkerSupervisor(
 	store models.KernelStore,
 	catalog agentrun.ActionExecutionCatalog,
 	credentials CredentialResolver,
-	issuer ActionCredentialLeaseIssuer,
+	issuer CredentialLeaseIssuer,
 	dispatcher agentrun.ActionDispatcher,
 	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
 	retire time.Duration,
-) (*ActionWorkerSupervisor, error) {
+) (*WorkerSupervisor, error) {
 	if store == nil || catalog == nil || dispatcher == nil || source == nil {
 		return nil, errors.New("action store, catalog, dispatcher, and scope source are required")
 	}
@@ -109,7 +109,7 @@ func newActionWorkerSupervisor(
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	supervisor := &ActionWorkerSupervisor{
+	supervisor := &WorkerSupervisor{
 		store: store, catalog: catalog, credentials: credentials, leaseIssuer: issuer, dispatcher: dispatcher,
 		config: config, logger: logger,
 	}
@@ -117,8 +117,8 @@ func newActionWorkerSupervisor(
 	return supervisor, nil
 }
 
-func (s *ActionWorkerSupervisor) newPool(scope models.Scope) (*ActionWorkerPool, error) {
-	pool, err := newActionWorkerPool(s.store, s.catalog, s.credentials, s.leaseIssuer, s.dispatcher, s.logger, ActionWorkerConfig{
+func (s *WorkerSupervisor) newPool(scope models.Scope) (*WorkerPool, error) {
+	pool, err := newActionWorkerPool(s.store, s.catalog, s.credentials, s.leaseIssuer, s.dispatcher, s.logger, WorkerConfig{
 		Scope: scope, Concurrency: s.config.Concurrency, PollInterval: s.config.PollInterval,
 		LeaseDuration:  s.config.LeaseDuration,
 		WorkerIDPrefix: fmt.Sprintf("%s-%s-%s", s.config.WorkerIDPrefix, scope.Kind, scope.ID),
@@ -135,31 +135,31 @@ func (s *ActionWorkerSupervisor) newPool(scope models.Scope) (*ActionWorkerPool,
 
 // SetCredentialAvailabilityChecker installs the host's pre-dispatch
 // credential check on every scope pool.
-func (s *ActionWorkerSupervisor) SetCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
+func (s *WorkerSupervisor) SetCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
 	s.availability.Store(&credentialAvailabilityBox{checker: checker})
-	s.pools.Each(func(pool *ActionWorkerPool) { pool.SetCredentialAvailabilityChecker(checker) })
+	s.pools.Each(func(pool *WorkerPool) { pool.SetCredentialAvailabilityChecker(checker) })
 }
 
-func (s *ActionWorkerSupervisor) Start(parent context.Context) { s.pools.Start(parent) }
+func (s *WorkerSupervisor) Start(parent context.Context) { s.pools.Start(parent) }
 
-func (s *ActionWorkerSupervisor) Stop() { s.pools.Stop() }
+func (s *WorkerSupervisor) Stop() { s.pools.Stop() }
 
-func (s *ActionWorkerSupervisor) Wake() { s.pools.Wake() }
+func (s *WorkerSupervisor) Wake() { s.pools.Wake() }
 
-func (s *ActionWorkerSupervisor) WakeScope(scope models.Scope) { s.pools.WakeScope(scope) }
+func (s *WorkerSupervisor) WakeScope(scope models.Scope) { s.pools.WakeScope(scope) }
 
 // RefreshScopes lists worker scopes now while polling.
-func (s *ActionWorkerSupervisor) RefreshScopes() { s.pools.Request() }
+func (s *WorkerSupervisor) RefreshScopes() { s.pools.Request() }
 
 // SetWorkSignals binds the work queue status. Call before Start.
-func (s *ActionWorkerSupervisor) SetWorkSignals(status *workqueue.WorkSignalStatus) {
+func (s *WorkerSupervisor) SetWorkSignals(status *workqueue.WorkSignalStatus) {
 	s.pools.SetSignals(status)
 }
 
-func (s *ActionWorkerSupervisor) SetWorkerLimiter(limiter *workqueue.WorkerLimiter) {
+func (s *WorkerSupervisor) SetWorkerLimiter(limiter *workqueue.WorkerLimiter) {
 	s.limiter.Store(limiter)
-	s.pools.Each(func(pool *ActionWorkerPool) { pool.SetWorkerLimiter(limiter) })
+	s.pools.Each(func(pool *WorkerPool) { pool.SetWorkerLimiter(limiter) })
 }
 
 // ScopeCount exposes bounded operational state without revealing queued work.
-func (s *ActionWorkerSupervisor) ScopeCount() int { return s.pools.Count() }
+func (s *WorkerSupervisor) ScopeCount() int { return s.pools.Count() }

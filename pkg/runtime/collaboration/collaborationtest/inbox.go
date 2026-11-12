@@ -43,14 +43,14 @@ func (s *TeamStore) GetTeamDefinition(_ context.Context, id, version string) (*k
 func CreateInboxRequest(t *testing.T, store models.AgentRequestInboxStore, policy models.AgentRequestAcceptancePolicy, recipient models.CollaborationParty) (*models.AgentRun, *models.AgentRequest) {
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "inbox"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "requester"}, AssignedAgentID: "requester",
 		Goal: "Coordinate launch", Source: models.RunSourceManual, Priority: 3,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := collaboration.NewCollaborationService(store).CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
+	created, err := collaboration.NewService(store).CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "requester"},
 		Recipient: recipient, SourceRunID: source.ID, Goal: "Review the launch evidence",
 		Instructions:     "Check the evidence before accepting.",

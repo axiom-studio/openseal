@@ -21,7 +21,7 @@ import (
 // workerID.
 func ClaimedSkillActionRun(t *testing.T, ctx context.Context, store *sqlite.Store, scope models.Scope, deploymentID, workerID string) *models.AgentRun {
 	t.Helper()
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, AssignedAgentID: deploymentID,
 		Goal: "Manage Skills", Source: models.RunSourceChat,
 	})
@@ -37,7 +37,7 @@ func ClaimedSkillActionRun(t *testing.T, ctx context.Context, store *sqlite.Stor
 
 // CredentialRequestDispatchFixture is a dispatcher for an Agent bound to
 // request setup and credentials, with an empty discovery catalog.
-func CredentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *skillbinding.SkillBindingActionDispatcher, models.Scope) {
+func CredentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *skillbinding.ActionDispatcher, models.Scope) {
 	t.Helper()
 	ctx := context.Background()
 	store := kerneltest.NewStore(t)
@@ -51,7 +51,7 @@ func CredentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.St
 	provider := skill.DiscoveryProviderFunc(func(context.Context, skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		return &skill.DiscoveryPage{}, nil
 	})
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ var LinearLogo = strings.Repeat("ab", 32)
 
 // ConnectAppFixture is an Agent whose run sees a Linear connection only once
 // connected is set, as the host supplies connected apps per run.
-func ConnectAppFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *skillbinding.SkillBindingActionDispatcher, models.Scope, *atomic.Bool) {
+func ConnectAppFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *skillbinding.ActionDispatcher, models.Scope, *atomic.Bool) {
 	t.Helper()
 	ctx, store, catalog, dispatcher, scope := CredentialRequestDispatchFixture(t)
 	if err := catalog.Register(ctx, mcp.SkillDefinition()); err != nil {

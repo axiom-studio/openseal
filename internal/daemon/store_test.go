@@ -40,7 +40,7 @@ func TestOpenKernelStorePersistsCanonicalRunsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	loaded, err := portfolio.NewPortfolioService(reopened).GetAgentRun(context.Background(), scope, created.Run.ID)
+	loaded, err := portfolio.NewService(reopened).GetAgentRun(context.Background(), scope, created.Run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

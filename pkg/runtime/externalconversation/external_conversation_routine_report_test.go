@@ -33,7 +33,7 @@ func newRoutineReportFixture(t *testing.T, threadID string, mapSource bool) *rou
 	store, catalog, endpoint := endpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend,
 	})
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack DM",
 		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
@@ -176,13 +176,13 @@ func TestRoutineReportDeliveryRequiresARoutineAndAnActiveProvenEndpoint(t *testi
 // recordingMessageHost records the messages the delivery worker sends.
 type recordingMessageHost struct{ sent []string }
 
-func (h *recordingMessageHost) LookupExternalConversationDelivery(context.Context, ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryAcknowledgement, error) {
-	return &ExternalConversationDeliveryAcknowledgement{Status: ExternalConversationAcknowledgementNotFound}, nil
+func (h *recordingMessageHost) LookupExternalConversationDelivery(context.Context, DeliveryHostRequest) (*DeliveryAcknowledgement, error) {
+	return &DeliveryAcknowledgement{Status: AcknowledgementNotFound}, nil
 }
 
-func (h *recordingMessageHost) DeliverExternalConversation(_ context.Context, req ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryHostResult, error) {
+func (h *recordingMessageHost) DeliverExternalConversation(_ context.Context, req DeliveryHostRequest) (*DeliveryHostResult, error) {
 	h.sent = append(h.sent, req.Message.Content)
-	return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: "172.001"}, nil
+	return &DeliveryHostResult{Outcome: DeliveryOutcomeDelivered, ProviderMessageID: "172.001"}, nil
 }
 
 // An event occurrence's mirrored report starts with its header line, because
@@ -208,7 +208,7 @@ func TestRoutineReportMirrorHeader(t *testing.T) {
 				t.Fatalf("HelloSeal report = %#v, %v", report, err)
 			}
 			host := &recordingMessageHost{}
-			worker, err := NewExternalConversationDeliveryWorker(f.store, f.catalog, host, ExternalConversationDeliveryWorkerConfig{WorkerID: "mirror"})
+			worker, err := NewDeliveryWorker(f.store, f.catalog, host, DeliveryWorkerConfig{WorkerID: "mirror"})
 			if err != nil {
 				t.Fatal(err)
 			}

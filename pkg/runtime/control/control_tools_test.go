@@ -30,18 +30,18 @@ type fakeControlHandler struct {
 	seen  []interface{}
 }
 
-func (h *fakeControlHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
-	return ControlToolSpec{Description: "fake", InputSchema: map[string]interface{}{"type": "object"}}
+func (h *fakeControlHandler) Spec(a agentrun.ControlAuthority) ToolSpec {
+	return ToolSpec{Description: "fake", InputSchema: map[string]interface{}{"type": "object"}}
 }
 
 func (h *fakeControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[fakeControlArgs](raw)
 }
 
-func (h *fakeControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (h *fakeControlHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
 	h.calls++
 	h.seen = append(h.seen, cc.Arguments)
-	return x.complete(ctx, cc, models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{"status": "done"}), &ControlEntryMeta{ForkID: "fork-" + cc.Entry.ID})
+	return x.complete(ctx, cc, models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{"status": "done"}), &EntryMeta{ForkID: "fork-" + cc.Entry.ID})
 }
 
 func fakeControlRegistry() (Registry, map[models.ControlToolName]*fakeControlHandler) {
@@ -58,7 +58,7 @@ func fakeControlRegistry() (Registry, map[models.ControlToolName]*fakeControlHan
 // builtinControlSpecs are the specs of the built-in control tools offered
 // under a. The runbook tools are never offered, so they are the specs every
 // loop step gets.
-func builtinControlSpecs(a agentrun.ControlAuthority) []ControlToolSpec {
+func builtinControlSpecs(a agentrun.ControlAuthority) []ToolSpec {
 	return NewRegistry(BuiltinTools()...).Specs(a)
 }
 
@@ -72,7 +72,7 @@ func builtinControlModelStepTools(a agentrun.ControlAuthority) []models.ModelSte
 	return tools
 }
 
-func specNames(specs []ControlToolSpec) []string {
+func specNames(specs []ToolSpec) []string {
 	names := make([]string, 0, len(specs))
 	for _, spec := range specs {
 		names = append(names, string(spec.Name))
@@ -241,7 +241,7 @@ type controlFixture struct {
 	session  *models.AgentSession
 	step     *models.AgentTurn
 	entries  map[string]*models.SessionEntry
-	exec     *ControlExecutor
+	exec     *Executor
 	handlers map[models.ControlToolName]*fakeControlHandler
 	now      time.Time
 }
@@ -254,7 +254,7 @@ func newControlFixture(t *testing.T, calls []agentrun.LoopToolCall) *controlFixt
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "control-" + uuid.NewString()[:8]}
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, AssignedAgentID: "agent-1",
 		Goal: "work", Source: models.RunSourceObjective,
@@ -327,7 +327,7 @@ func newControlFixture(t *testing.T, calls []agentrun.LoopToolCall) *controlFixt
 	registry, handlers := fakeControlRegistry()
 	f.handlers = handlers
 	f.records = &controlRecords{Store: store}
-	f.exec = &ControlExecutor{Portfolio: f.records, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
+	f.exec = &Executor{Portfolio: f.records, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
 	return f
 }
 
@@ -377,7 +377,7 @@ func (f *controlFixture) context(callID string, authority agentrun.ControlAuthor
 		// Deterministic entries carry their own (finished, applied) step.
 		step = &models.AgentTurn{ID: entry.StepID, RunID: f.run.ID, Sequence: f.step.Sequence, Status: models.AgentTurnStatusCompleted}
 	}
-	return NewControlContext(agentrun.StepToolsInput{
+	return NewContext(agentrun.StepToolsInput{
 		Run: f.run, Step: step, Session: f.session, WorkerID: controlTestWorker,
 		Binding: &agentrun.TurnRunnerBinding{Authority: authority},
 	}, entry)
@@ -404,7 +404,7 @@ func TestControlArgumentsRejectUnknownFields(t *testing.T) {
 		if err != nil {
 			t.Fatalf("settle %s: %v", callID, err)
 		}
-		if result.Kind != ControlContinue || result.Entry.State != models.ToolEntryError {
+		if result.Kind != Continue || result.Entry.State != models.ToolEntryError {
 			t.Fatalf("%s result = %#v", callID, result)
 		}
 		requireControlError(t, f.stored(callID).Tool.Result, models.ToolResultFailed, "tool_arguments_invalid")
@@ -416,7 +416,7 @@ func TestControlArgumentsRejectUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settle ok: %v", err)
 	}
-	if result.Kind != ControlContinue || result.Entry.State != models.ToolEntryCompleted {
+	if result.Kind != Continue || result.Entry.State != models.ToolEntryCompleted {
 		t.Fatalf("ok result = %#v", result)
 	}
 	if args, _ := f.handlers[models.ControlToolAskUser].seen[0].(*fakeControlArgs); args == nil || args.Goal != "x" {
@@ -449,7 +449,7 @@ func TestControlToolNotOfferedIsError(t *testing.T) {
 		if err != nil {
 			t.Fatalf("settle %s: %v", callID, err)
 		}
-		if result.Kind != ControlContinue || result.Entry.State != models.ToolEntryError {
+		if result.Kind != Continue || result.Entry.State != models.ToolEntryError {
 			t.Fatalf("%s result = %#v", callID, result)
 		}
 		value := requireControlError(t, f.stored(callID).Tool.Result, models.ToolResultRefused, "tool_not_available")
@@ -462,7 +462,7 @@ func TestControlToolNotOfferedIsError(t *testing.T) {
 	}
 	// A kernel-origin call (runbook directive) is preauthorized.
 	cc := f.context("kernel", authority)
-	if cc.Origin != ControlOriginKernel {
+	if cc.Origin != OriginKernel {
 		t.Fatalf("origin = %s", cc.Origin)
 	}
 	result, err := f.exec.Settle(f.ctx, cc)
@@ -621,7 +621,7 @@ func TestControlTransitionRetriesOneStaleRevision(t *testing.T) {
 	if bumped.State != models.ToolEntryPending || bumped.Revision == cc.Entry.Revision {
 		t.Fatal("revision not bumped")
 	}
-	meta := &ControlEntryMeta{}
+	meta := &EntryMeta{}
 	entry, err := f.exec.transitionControlEntry(f.ctx, cc, models.ToolEntryCompleted, nil,
 		models.ControlJSONResult(models.ToolResultSucceeded, nil), meta)
 	if err != nil || entry.State != models.ToolEntryCompleted {

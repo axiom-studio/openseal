@@ -23,7 +23,7 @@ type interactionFixture struct {
 func newInteractionFixture(t *testing.T, calls []agentrun.LoopToolCall) *interactionFixture {
 	t.Helper()
 	f := newControlFixture(t, calls)
-	conversations := runtimeconversation.NewConversationService(f.store)
+	conversations := runtimeconversation.NewService(f.store)
 	conversationtest.SeedSpace(t, f.store, f.run.Scope)
 	conversation, _, err := conversations.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.run.Scope, Owner: f.run.Owner, Title: "Chat", IdempotencyKey: "chat",
@@ -74,7 +74,7 @@ var reactAuthority = agentrun.ControlAuthority{CanReact: true}
 func TestReactAddsReactionAsAnsweringAgent(t *testing.T) {
 	f := newInteractionFixture(t, []agentrun.LoopToolCall{reactCall("r1", reactTestMessageID, "👀")})
 	result, err := f.exec.Inline(f.ctx, f.context("r1", reactAuthority))
-	if err != nil || result.Kind != ControlContinue {
+	if err != nil || result.Kind != Continue {
 		t.Fatalf("inline = %#v, %v", result, err)
 	}
 	stored := f.stored("r1")
@@ -177,7 +177,7 @@ func waitCall(id string, seconds int) agentrun.LoopToolCall {
 
 var waitAuthority = agentrun.ControlAuthority{CanWait: true}
 
-func (f *interactionFixture) settleWait(t *testing.T, callID string) ControlResult {
+func (f *interactionFixture) settleWait(t *testing.T, callID string) Result {
 	t.Helper()
 	result, err := f.exec.Settle(f.ctx, f.context(callID, waitAuthority))
 	if err != nil {
@@ -191,7 +191,7 @@ func TestWaitSleepsAndResumesElapsed(t *testing.T) {
 	f := newInteractionFixture(t, []agentrun.LoopToolCall{waitCall("w", 90)})
 	result := f.settleWait(t, "w")
 	wakeAt := f.clock.Add(90 * time.Second)
-	if result.Kind != ControlParked || result.Park == nil || result.Park.Committed ||
+	if result.Kind != Parked || result.Park == nil || result.Park.Committed ||
 		result.Park.Status != models.AgentRunStatusSleeping || result.Park.Wake == nil || result.Park.Wake.Type != "timer" ||
 		result.Park.Wake.WakeAt == nil || !result.Park.Wake.WakeAt.Equal(wakeAt) || result.Park.Wake.Reference != f.entries["w"].ID {
 		t.Fatalf("park = %#v", result.Park)
@@ -211,7 +211,7 @@ func TestWaitSleepsAndResumesElapsed(t *testing.T) {
 
 	f.clock = wakeAt.Add(2 * time.Second)
 	resumed, err = f.exec.Resume(f.ctx, f.context("w", waitAuthority))
-	if err != nil || !resumed.Resolved || resumed.Result.Kind != ControlContinue {
+	if err != nil || !resumed.Resolved || resumed.Result.Kind != Continue {
 		t.Fatalf("resume = %#v, %v", resumed, err)
 	}
 	done := f.stored("w")
@@ -243,7 +243,7 @@ func TestWaitSecondsOutOfRangeIsArgumentsError(t *testing.T) {
 	f := newInteractionFixture(t, []agentrun.LoopToolCall{waitCall("zero", 0), waitCall("long", maximumWaitSeconds+1)})
 	for _, callID := range []string{"zero", "long"} {
 		result, err := f.exec.Settle(f.ctx, f.context(callID, waitAuthority))
-		if err != nil || result.Kind != ControlContinue {
+		if err != nil || result.Kind != Continue {
 			t.Fatalf("%s: %#v, %v", callID, result, err)
 		}
 		if value := controlResultValue(t, f.stored(callID)); value["error"] != ArgumentsInvalidCode {

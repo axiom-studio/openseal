@@ -77,7 +77,7 @@ func MessageBatchStores(t *testing.T, test func(*testing.T, models.KernelStore))
 func MessageBatchConversation(t testing.TB, store models.ConversationStore, scope models.Scope, id string) *models.Conversation {
 	t.Helper()
 	SeedSpace(t, store.(models.SpaceStore), scope)
-	created, _, err := conversation.NewConversationService(store).CreateConversation(context.Background(), conversation.CreateConversationRequest{
+	created, _, err := conversation.NewService(store).CreateConversation(context.Background(), conversation.CreateConversationRequest{
 		ID: id, Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Title: "Batch visibility", IdempotencyKey: id,
 	})
 	if err != nil {

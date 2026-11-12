@@ -12,7 +12,7 @@ import (
 
 func TestPostgresRunSearchIsLiteralAndPrecedesPagination(t *testing.T) {
 	store, _ := kerneltest.OpenPostgres(t, "openseal_run_search_")
-	service := portfolio.NewPortfolioService(store)
+	service := portfolio.NewService(store)
 	scope := models.Scope{Kind: "local", ID: "default"}
 	var expected []*models.AgentRun
 	for i, goal := range []string{"Review 50%_ Evidence", "Review 50%_ Evidence", "Review 50%_ Evidence", "Review 50xx Evidence", "Unrelated work"} {

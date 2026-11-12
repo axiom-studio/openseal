@@ -17,7 +17,7 @@ func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "conversation-runbook-start"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-42"}
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Agent work", IdempotencyKey: "agent-work-channel",
@@ -61,7 +61,7 @@ func TestRoutineOccurrenceSilentPostsNothing(t *testing.T) {
 	if err := f.worker.project(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := conversation.NewConversationService(f.store).ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: run.Scope, ConversationID: f.conversation.ID})
+	messages, err := conversation.NewService(f.store).ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: run.Scope, ConversationID: f.conversation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

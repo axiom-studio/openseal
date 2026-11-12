@@ -33,8 +33,8 @@ func RunbookControlTools() []control.Tool {
 	}
 }
 
-func runbookKernelSpec(description string) control.ControlToolSpec {
-	return control.ControlToolSpec{
+func runbookKernelSpec(description string) control.ToolSpec {
+	return control.ToolSpec{
 		Description: description,
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"step", "visit"},
@@ -64,7 +64,7 @@ func decodeRunbookKernelArgs(raw json.RawMessage) (interface{}, error) {
 func runbookKernelCall(cc agentrun.ControlContext, pending func(runbookExecutionState) string) (*RunbookStepProducer, map[string]interface{}, runbookExecutionState, error) {
 	args := cc.Arguments.(*runbookKernelArgs)
 	var state runbookExecutionState
-	if cc.Origin != control.ControlOriginKernel {
+	if cc.Origin != control.OriginKernel {
 		return nil, nil, state, errors.New("runbook kernel calls are made only by the runbook engine")
 	}
 	var producer *RunbookStepProducer
@@ -88,7 +88,7 @@ func runbookKernelCall(cc agentrun.ControlContext, pending func(runbookExecution
 	return producer, checkpoint, state, nil
 }
 
-func (runbookForkHandler) Spec(agentrun.ControlAuthority) control.ControlToolSpec {
+func (runbookForkHandler) Spec(agentrun.ControlAuthority) control.ToolSpec {
 	return runbookKernelSpec("Kernel only: start the concurrent branches of a runbook fork.")
 }
 
@@ -96,7 +96,7 @@ func (runbookForkHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return decodeRunbookKernelArgs(raw)
 }
 
-func (runbookForkHandler) Run(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResult, error) {
+func (runbookForkHandler) Run(ctx context.Context, x *control.Executor, cc agentrun.ControlContext) (control.Result, error) {
 	producer, checkpoint, state, err := runbookKernelCall(cc, func(s runbookExecutionState) string { return s.PendingFork })
 	if err != nil {
 		return x.RefuseIfEntry(ctx, cc, control.ErrorResult(models.ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
@@ -108,11 +108,11 @@ func (runbookForkHandler) Run(ctx context.Context, x *control.ControlExecutor, c
 	return x.Fork(ctx, cc, spec)
 }
 
-func (runbookForkHandler) Resume(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResume, error) {
+func (runbookForkHandler) Resume(ctx context.Context, x *control.Executor, cc agentrun.ControlContext) (control.Resume, error) {
 	return x.ResumeFork(ctx, cc)
 }
 
-func (runbookDelegateHandler) Spec(agentrun.ControlAuthority) control.ControlToolSpec {
+func (runbookDelegateHandler) Spec(agentrun.ControlAuthority) control.ToolSpec {
 	return runbookKernelSpec("Kernel only: hand a runbook delegation node to its Agent.")
 }
 
@@ -120,7 +120,7 @@ func (runbookDelegateHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return decodeRunbookKernelArgs(raw)
 }
 
-func (runbookDelegateHandler) Run(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResult, error) {
+func (runbookDelegateHandler) Run(ctx context.Context, x *control.Executor, cc agentrun.ControlContext) (control.Result, error) {
 	producer, checkpoint, state, err := runbookKernelCall(cc, func(s runbookExecutionState) string { return s.PendingDelegation })
 	if err != nil {
 		return x.RefuseIfEntry(ctx, cc, control.ErrorResult(models.ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
@@ -132,6 +132,6 @@ func (runbookDelegateHandler) Run(ctx context.Context, x *control.ControlExecuto
 	return x.Delegate(ctx, cc, spec)
 }
 
-func (runbookDelegateHandler) Resume(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResume, error) {
+func (runbookDelegateHandler) Resume(ctx context.Context, x *control.Executor, cc agentrun.ControlContext) (control.Resume, error) {
 	return x.ResumeDelegation(ctx, cc)
 }

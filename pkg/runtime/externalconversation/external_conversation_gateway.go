@@ -30,22 +30,22 @@ type UpdateExternalConversationGatewayRequest struct {
 	Reason           string
 }
 
-type ExternalConversationGatewayService struct {
+type GatewayService struct {
 	store    models.ExternalConversationGatewayStore
-	resolver ExternalConversationAdapterResolver
+	resolver AdapterResolver
 	now      func() time.Time
 	newID    func() string
 }
 
-func NewExternalConversationGatewayService(
+func NewGatewayService(
 	store models.ExternalConversationGatewayStore,
-	resolver ExternalConversationAdapterResolver,
+	resolver AdapterResolver,
 	opts ...models.ServiceOption,
-) *ExternalConversationGatewayService {
-	return &ExternalConversationGatewayService{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
+) *GatewayService {
+	return &GatewayService{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
-func (s *ExternalConversationGatewayService) Create(
+func (s *GatewayService) Create(
 	ctx context.Context,
 	request CreateExternalConversationGatewayRequest,
 ) (*models.ExternalConversationGatewayRegistration, error) {
@@ -90,7 +90,7 @@ func (s *ExternalConversationGatewayService) Create(
 	return models.CloneExternalConversationGateway(value), nil
 }
 
-func (s *ExternalConversationGatewayService) Get(
+func (s *GatewayService) Get(
 	ctx context.Context,
 	scope models.Scope,
 	id string,
@@ -108,7 +108,7 @@ func (s *ExternalConversationGatewayService) Get(
 	return value, nil
 }
 
-func (s *ExternalConversationGatewayService) GetByIngressRoute(
+func (s *GatewayService) GetByIngressRoute(
 	ctx context.Context,
 	route string,
 ) (*models.ExternalConversationGatewayRegistration, error) {
@@ -125,7 +125,7 @@ func (s *ExternalConversationGatewayService) GetByIngressRoute(
 	return value, nil
 }
 
-func (s *ExternalConversationGatewayService) List(
+func (s *GatewayService) List(
 	ctx context.Context,
 	filter models.ExternalConversationGatewayFilter,
 ) ([]*models.ExternalConversationGatewayRegistration, error) {
@@ -135,7 +135,7 @@ func (s *ExternalConversationGatewayService) List(
 	return s.store.ListExternalConversationGateways(ctx, filter)
 }
 
-func (s *ExternalConversationGatewayService) Update(
+func (s *GatewayService) Update(
 	ctx context.Context,
 	scope models.Scope,
 	id string,
@@ -227,7 +227,7 @@ func externalConversationGatewayLifecycleAction(previous models.ExternalConversa
 // enabled Skill binding reviewed by the operator. Structural validation alone
 // must not create a public webhook that will fail only after a provider begins
 // sending signed traffic.
-func (s *ExternalConversationGatewayService) resolveGateway(
+func (s *GatewayService) resolveGateway(
 	ctx context.Context,
 	gateway models.ExternalConversationIngressGateway,
 ) error {

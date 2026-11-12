@@ -81,13 +81,13 @@ func ProjectFailedConversationReply(ctx context.Context, store models.Conversati
 	if root, _ := run.Context["threadRootMessageId"].(string); root != expectedRoot {
 		return undeliverable("Run thread differs from the trigger thread")
 	}
-	agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
+	agentID := runtimeconversation.RunAgentID(conversation, run)
 	if !models.IsValidOpaqueIdentifier(agentID, 256) {
 		return undeliverable("Run has no Agent to answer")
 	}
 	references := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}
 	if run.Context[models.ConversationTaskContextKey] != nil {
-		task, source, taskErr := runtimeconversation.ConversationTaskForReport(ctx, store, run)
+		task, source, taskErr := runtimeconversation.TaskForReport(ctx, store, run)
 		if taskErr != nil {
 			return taskErr
 		}
@@ -127,7 +127,7 @@ func ProjectFailedConversationReply(ctx context.Context, store models.Conversati
 		BroadcastToChannel: trigger.ThreadRootID == "" || trigger.BroadcastToChannel, ResponseMode: trigger.ResponseMode,
 		References: references, IdempotencyKey: key,
 	}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	posted, err := service.PostChannelMessage(ctx, request)
 	if errors.Is(err, models.ErrRevisionConflict) {
 		current, getErr := store.GetConversation(ctx, run.Scope, conversationID)

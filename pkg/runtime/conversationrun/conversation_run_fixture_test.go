@@ -26,9 +26,9 @@ import (
 // loop fixture of the run loop tests. Change the copies together.
 
 // newTestScheduler is a run scheduler over store with the default config.
-func newTestScheduler(t *testing.T, store *sqlite.Store) *ConversationRunScheduler {
+func newTestScheduler(t *testing.T, store *sqlite.Store) *Scheduler {
 	t.Helper()
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := NewScheduler(store, store, SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,17 +36,17 @@ func newTestScheduler(t *testing.T, store *sqlite.Store) *ConversationRunSchedul
 }
 
 // newTestCoordinator routes every unaddressed message to agent-1.
-func newTestCoordinator(t *testing.T, service *conversation.ConversationService) *conversation.ConversationCoordinator {
+func newTestCoordinator(t *testing.T, service *conversation.Service) *conversation.Coordinator {
 	t.Helper()
-	participants := conversation.ConversationParticipantSourceFunc(func(context.Context, conversation.ConversationParticipantQuery) ([]conversation.ConversationParticipantBinding, error) {
-		return []conversation.ConversationParticipantBinding{{
+	participants := conversation.ParticipantSourceFunc(func(context.Context, conversation.ParticipantQuery) ([]conversation.ParticipantBinding, error) {
+		return []conversation.ParticipantBinding{{
 			Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent-1"}, SemanticRoles: []string{"developer"},
 		}}, nil
 	})
-	router := conversation.ConversationRouterFunc(func(context.Context, conversation.ConversationRouteRequest) (conversation.ConversationRouteDecision, error) {
-		return conversation.ConversationRouteDecision{AgentID: "agent-1", Reason: "owns the canary"}, nil
+	router := conversation.RouterFunc(func(context.Context, conversation.RouteRequest) (conversation.RouteDecision, error) {
+		return conversation.RouteDecision{AgentID: "agent-1", Reason: "owns the canary"}, nil
 	})
-	coordinator, err := conversation.NewConversationCoordinator(service, participants, router, conversation.DefaultConversationCoordinatorConfig())
+	coordinator, err := conversation.NewCoordinator(service, participants, router, conversation.DefaultConversationCoordinatorConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func newTestCoordinator(t *testing.T, service *conversation.ConversationService)
 // postTestMessage posts content to the channel from a sender of senderType.
 func postTestMessage(
 	t *testing.T,
-	service *conversation.ConversationService,
+	service *conversation.Service,
 	target *models.Conversation,
 	senderType models.ConversationParticipantType,
 	intent models.ConversationMessageIntent,
@@ -105,7 +105,7 @@ func (s *visualTestContent) Open(context.Context, models.Scope, string) (io.Read
 // request in a new agent chat.
 func continuationFixture(t *testing.T, store *sqlite.Store, id string) (*models.AgentRun, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: id}
 	conversationtest.SeedSpace(t, store, scope)
 	target, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
@@ -141,9 +141,9 @@ type bindingFixture struct {
 	t            *testing.T
 	ctx          context.Context
 	store        conversationtest.ThreadStartStore
-	service      *conversation.ConversationService
+	service      *conversation.Service
 	conversation *models.Conversation
-	runner       *ConversationRunTurnRunner
+	runner       *TurnRunner
 	now          time.Time
 	agents       bindingAgentTurns
 }
@@ -159,7 +159,7 @@ func newBindingFixture(t *testing.T, store conversationtest.ThreadStartStore) *b
 	t.Helper()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "chat-loop-" + uuid.NewString()[:8]}
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	target, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, Title: "Chat loop", IdempotencyKey: "chat-loop",
@@ -171,7 +171,7 @@ func newBindingFixture(t *testing.T, store conversationtest.ThreadStartStore) *b
 		t: t, ctx: ctx, store: store, service: service, conversation: target,
 		now: time.Now().UTC().Truncate(time.Millisecond), agents: bindingAgentTurns{},
 	}
-	f.runner, err = NewConversationRunTurnRunner(store, newTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: f.agents})
+	f.runner, err = NewTurnRunner(store, newTestCoordinator(t, service), TurnRunnerConfig{AgentTurns: f.agents})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func (f *bindingFixture) post(key, userID, content string) *models.ChannelMessag
 // startRun creates and claims the chat Run that answers trigger.
 func (f *bindingFixture) startRun(trigger *models.ChannelMessage) *models.AgentRun {
 	f.t.Helper()
-	request := conversation.ConversationAgentRunRequest(f.conversation, trigger)
+	request := conversation.AgentRunRequest(f.conversation, trigger)
 	commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
 	result, err := commands.CreateAgentRun(f.ctx, request)
 	if err != nil {

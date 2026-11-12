@@ -108,7 +108,7 @@ func TestAgentBuilderRoutesStartAndListThroughClient(t *testing.T) {
 	}
 	drafts, err := kernel.ListAgentBuilderDrafts(ctx, scope, 10, 0)
 	if err != nil || len(drafts.Drafts) != 1 || drafts.Drafts[0].ConversationID != started.Conversation.ID ||
-		drafts.Drafts[0].Status != agentbuilder.AgentBuilderDraftIdle || drafts.Drafts[0].Title != "Triage" {
+		drafts.Drafts[0].Status != agentbuilder.DraftIdle || drafts.Drafts[0].Title != "Triage" {
 		t.Fatalf("drafts = %#v, %v", drafts, err)
 	}
 	if page, err := kernel.ListAgentBuilderDrafts(ctx, scope, 10, 1); err != nil || len(page.Drafts) != 0 {

@@ -49,7 +49,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		skill.ConversationDeliveryMessageSend, skill.ConversationDeliveryMessageUpdate,
 	})
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
 		Goal: "post reviewed comment", Source: models.RunSourceObjective,
@@ -119,7 +119,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if _, err := store.CreateActionProposal(ctx, models.ActionProposalRecord{Call: call, Approval: approval, Run: waiting, Event: event, ExpectedRunRevision: claimed.Revision, Lease: &models.AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
 		t.Fatal(err)
 	}
-	transport := NewExternalConversationTransportService(store, catalog, models.WithClock(func() time.Time { return now }))
+	transport := NewTransportService(store, catalog, models.WithClock(func() time.Time { return now }))
 	workerWithoutCallback := NewApprovalNotificationWorker(store, transport, catalog, models.WithClock(func() time.Time { return now }))
 	if count, err := workerWithoutCallback.ProcessScope(ctx, endpoint.Scope, 10); err == nil || count != 0 ||
 		!strings.Contains(err.Error(), "no active provider callback") {
@@ -318,7 +318,7 @@ func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T
 		skill.ConversationDeliveryMessageSend,
 	})
 	now := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
 		Goal: "review pull request", Source: models.RunSourceManual,
@@ -359,7 +359,7 @@ func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	worker := NewApprovalNotificationWorker(store, NewExternalConversationTransportService(store, catalog), catalog, models.WithClock(func() time.Time { return now }))
+	worker := NewApprovalNotificationWorker(store, NewTransportService(store, catalog), catalog, models.WithClock(func() time.Time { return now }))
 	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 0 {
 		t.Fatalf("internal notification = %d, %v", count, err)
 	}
@@ -415,7 +415,7 @@ func registerApprovalNotificationCallback(
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	registry := callback.NewCallbackRegistry(store, catalog)
+	registry := callback.NewRegistry(store, catalog)
 	created, err := registry.Create(ctx, callback.CreateCallbackRegistrationRequest{
 		ID: endpoint.ID + "-approval-callback", Scope: endpoint.Scope, Owner: endpoint.Owner,
 		DeploymentID: endpoint.DeploymentID, Name: endpoint.Name + " approval callback", Provider: endpoint.Provider,
@@ -446,7 +446,7 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 	ctx := t.Context()
 	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
 		Goal: "post reviewed comment", Source: models.RunSourceObjective, Budget: &models.BudgetPolicy{MaxActions: 1},
@@ -489,7 +489,7 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 	conflicts := &approvalNotificationConflictStore{ApprovalNotificationStore: store}
 	conflicts.remaining.Store(2)
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
-	worker := NewApprovalNotificationWorker(conflicts, NewExternalConversationTransportService(store, catalog), catalog, models.WithClock(func() time.Time { return now }))
+	worker := NewApprovalNotificationWorker(conflicts, NewTransportService(store, catalog), catalog, models.WithClock(func() time.Time { return now }))
 	var group sync.WaitGroup
 	errorsByPass := make(chan error, 2)
 	for range 2 {
@@ -517,7 +517,7 @@ func TestApprovalNotificationReusesConversationAfterEndpointRename(t *testing.T)
 	ctx := t.Context()
 	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
-	worker := NewApprovalNotificationWorker(store, NewExternalConversationTransportService(store, catalog), catalog)
+	worker := NewApprovalNotificationWorker(store, NewTransportService(store, catalog), catalog)
 
 	first, err := worker.approvalConversation(ctx, endpoint.Scope, endpoint)
 	if err != nil {
@@ -546,7 +546,7 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 		skill.ConversationDeliveryMessageSend, skill.ConversationDeliveryMessageUpdate,
 	})
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
 		Goal: "post reviewed comment", Source: models.RunSourceObjective,
@@ -587,7 +587,7 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 	}); err != nil {
 		t.Fatal(err)
 	}
-	transport := NewExternalConversationTransportService(store, catalog, models.WithClock(func() time.Time { return now }))
+	transport := NewTransportService(store, catalog, models.WithClock(func() time.Time { return now }))
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
 	workerClock := func() time.Time { return now }
 	worker := NewApprovalNotificationWorker(store, transport, catalog, models.WithClock(func() time.Time { return workerClock() }))

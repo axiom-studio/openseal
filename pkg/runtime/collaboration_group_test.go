@@ -33,14 +33,14 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 			defer closeStore()
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "research"}
-			source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, AssignedAgentID: "lead",
 				Goal: "Synthesize the market report", Source: models.RunSourceObjective,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			service := collaboration.NewCollaborationService(store)
+			service := collaboration.NewService(store)
 			create := collaboration.CreateAgentRequestGroupRequest{
 				Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 				Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "lead"},
@@ -71,7 +71,7 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 				}
 				accepted = append(accepted, result)
 			}
-			waiting, err := portfolio.NewPortfolioService(store).GetAgentRun(ctx, scope, source.ID)
+			waiting, err := portfolio.NewService(store).GetAgentRun(ctx, scope, source.ID)
 			if err != nil || waiting.Status != models.AgentRunStatusWaitingForDependency || waiting.WakeCondition == nil || waiting.WakeCondition.Reference != created.Group.Group.ID {
 				t.Fatalf("source after accepts = %#v, %v", waiting, err)
 			}
@@ -110,14 +110,14 @@ func TestGroupedAgentRequestsRecordLosingCompletionWithoutSecondWake(t *testing.
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "any-fan-in"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
 		Goal: "Use the first valid answer", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := collaboration.NewCollaborationService(store)
+	service := collaboration.NewService(store)
 	created, err := service.CreateAgentRequestGroup(ctx, collaboration.CreateAgentRequestGroupRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "lead"},
@@ -172,14 +172,14 @@ func TestGroupedAgentRequestRejectionFailsRequiredFanIn(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "reject-fan-in"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
 		Goal: "Collect required reviews", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := collaboration.NewCollaborationService(store)
+	service := collaboration.NewService(store)
 	created, err := service.CreateAgentRequestGroup(ctx, collaboration.CreateAgentRequestGroupRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "lead"},

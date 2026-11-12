@@ -1,7 +1,7 @@
 package runworker
 
 // Worker pool scenarios (run-loop section 12, tests-T17a): the pool claims a
-// Run, resolves its binding and drives the RunLoop until the Run is at rest
+// Run, resolves its binding and drives the runloop.Loop until the Run is at rest
 // (terminal, parked, or yielded back to the queue). These replace the old
 // per-Turn worker tests: claim/yield/attempt limit/lease renewal, budget
 // planning and settlement per step, and terminal handoff resolution.
@@ -30,7 +30,7 @@ import (
 func poolFixturePool(t *testing.T, f *looptest.Fixture, maxSteps int) *AgentRunWorkerPool {
 	t.Helper()
 	if maxSteps <= 0 {
-		maxSteps = runloop.RunLoopMaxStepsPerClaim
+		maxSteps = runloop.MaxStepsPerClaim
 	}
 	pool, err := newAgentRunWorkerPool(f.Store, conversation.TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return f.Binding(run), nil
@@ -46,7 +46,7 @@ func poolFixturePool(t *testing.T, f *looptest.Fixture, maxSteps int) *AgentRunW
 // and executes the claim. It returns the Run as stored afterwards.
 func poolClaim(t *testing.T, f *looptest.Fixture, pool *AgentRunWorkerPool, runID string) *models.AgentRun {
 	t.Helper()
-	claimed, err := pool.scheduler.ClaimNext(f.Ctx, agentrun.AgentRunClaimRequest{
+	claimed, err := pool.scheduler.ClaimNext(f.Ctx, agentrun.ClaimRequest{
 		Scope: f.Scope, WorkerID: f.WorkerID, LeaseDuration: looptest.FixtureLease,
 	})
 	if err != nil || claimed == nil || claimed.ID != runID {
@@ -146,7 +146,7 @@ func TestLoopPoolNeverChargesPastAttemptLimit(t *testing.T) {
 	}
 	paused := poolClaim(t, f, pool, run.ID)
 	f.MustStatus(paused, models.AgentRunStatusPaused)
-	if next, err := pool.scheduler.ClaimNext(f.Ctx, agentrun.AgentRunClaimRequest{Scope: f.Scope, WorkerID: f.WorkerID, LeaseDuration: looptest.FixtureLease}); err != nil || next != nil {
+	if next, err := pool.scheduler.ClaimNext(f.Ctx, agentrun.ClaimRequest{Scope: f.Scope, WorkerID: f.WorkerID, LeaseDuration: looptest.FixtureLease}); err != nil || next != nil {
 		t.Fatalf("paused Run was claimed again: %#v %v", next, err)
 	}
 	if paused.BudgetUsage.Attempts != 1 || len(f.Model.Calls(models.ModelStepPurposeStep)) != 1 || len(f.Steps(run.ID)) != 1 {
@@ -252,7 +252,7 @@ func (p *plannedPoolProducer) Produce(_ context.Context, in agentrun.StepInput) 
 func TestLoopPoolPreservesProducerBudgetPlanning(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher",
 		Goal: "Synthesize bounded evidence", Source: models.RunSourceManual,
 		Budget: &models.BudgetPolicy{MaxTurns: 2, MaxInputTokens: 8000, MaxOutputTokens: 2000, MaxTotalTokens: 10000},
@@ -310,7 +310,7 @@ func TestLoopPoolRenewsLeaseDuringLongStep(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	scope := models.Scope{Kind: "local", ID: "test"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "finish a long bounded step", Source: models.RunSourceObjective,
 	})
@@ -354,7 +354,7 @@ func (handoffPoolProducer) Produce(context.Context, agentrun.StepInput) (agentru
 func TestLoopPoolCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "Build the feature", Source: models.RunSourceManual,
@@ -362,7 +362,7 @@ func TestLoopPoolCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	collaboration := runtimecollaboration.NewCollaborationService(store)
+	collaboration := runtimecollaboration.NewService(store)
 	created, err := collaboration.CreateAgentRequest(t.Context(), runtimecollaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindHandoff, Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
 		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"}, SourceRunID: source.ID,

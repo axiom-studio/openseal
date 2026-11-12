@@ -14,9 +14,9 @@ import (
 
 const (
 
-	// ConversationApprovalModeChangedEvent is the activity event recorded when
+	// ApprovalModeChangedEvent is the activity event recorded when
 	// a conversation's approval mode changes. Its payload is {from, to}.
-	ConversationApprovalModeChangedEvent = "conversation.approval_mode_changed"
+	ApprovalModeChangedEvent = "conversation.approval_mode_changed"
 )
 
 type SetConversationApprovalModeRequest struct {
@@ -41,10 +41,10 @@ type SetConversationApprovalModeResult struct {
 	ApprovalSweepIncomplete bool `json:"approvalSweepIncomplete,omitempty"`
 }
 
-// ConversationApprovalModeService is the governed update of a conversation's
+// ApprovalModeService is the governed update of a conversation's
 // approval mode. Hosts authorize the caller (a principal allowed to execute
 // the conversation's Agent) before calling it.
-type ConversationApprovalModeService struct {
+type ApprovalModeService struct {
 	conversations models.ConversationStore
 	modes         models.ConversationApprovalModeStore
 	actions       models.ActionStore
@@ -54,8 +54,8 @@ type ConversationApprovalModeService struct {
 	newID         func() string
 }
 
-func NewConversationApprovalModeService(store models.ConversationApprovalModeKernelStore, opts ...models.ServiceOption) *ConversationApprovalModeService {
-	return &ConversationApprovalModeService{
+func NewApprovalModeService(store models.ConversationApprovalModeKernelStore, opts ...models.ServiceOption) *ApprovalModeService {
+	return &ApprovalModeService{
 		conversations: store, modes: store, actions: store, runs: store,
 		// Approval modes never approve an agent-builder card (D11): those
 		// actions are Review always, and the coordinator refuses the approve.
@@ -65,7 +65,7 @@ func NewConversationApprovalModeService(store models.ConversationApprovalModeKer
 
 const approvalModeSweepPageSize = 100
 
-func (s *ConversationApprovalModeService) SetApprovalMode(ctx context.Context, req SetConversationApprovalModeRequest) (*SetConversationApprovalModeResult, error) {
+func (s *ApprovalModeService) SetApprovalMode(ctx context.Context, req SetConversationApprovalModeRequest) (*SetConversationApprovalModeResult, error) {
 	if s == nil || s.conversations == nil || s.modes == nil || s.actions == nil || s.runs == nil || s.approvals == nil {
 		return nil, errors.New("conversation approval mode service is not configured")
 	}
@@ -106,7 +106,7 @@ func (s *ConversationApprovalModeService) SetApprovalMode(ctx context.Context, r
 			return nil, err
 		}
 		event := &models.ActivityEvent{
-			ID: s.newID(), Scope: req.Scope, EventType: ConversationApprovalModeChangedEvent, Severity: models.ActivitySeverityInfo,
+			ID: s.newID(), Scope: req.Scope, EventType: ApprovalModeChangedEvent, Severity: models.ActivitySeverityInfo,
 			ConversationRefs: []string{updated.ID}, Actor: req.Actor, Visibility: models.ActivityVisibilityScope,
 			Summary:       fmt.Sprintf("Approval mode changed from %s to %s", previous, req.Mode),
 			Payload:       map[string]interface{}{"conversationId": updated.ID, "from": string(previous), "to": string(req.Mode)},
@@ -137,7 +137,7 @@ func (s *ConversationApprovalModeService) SetApprovalMode(ctx context.Context, r
 // mode allows. Each resolution is revision-checked; a checkpoint a human (or
 // another sweep) resolved first is skipped. The conversation mode is re-read
 // before every resolution so a concurrent tightening stops the sweep.
-func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Context, scope models.Scope, conversationID string, mode models.ConversationApprovalMode, correlationID string) ([]string, bool) {
+func (s *ApprovalModeService) sweepPendingApprovals(ctx context.Context, scope models.Scope, conversationID string, mode models.ConversationApprovalMode, correlationID string) ([]string, bool) {
 	pending := make([]*models.ApprovalCheckpoint, 0)
 	for offset := 0; ; offset += approvalModeSweepPageSize {
 		page, err := s.actions.ListApprovals(ctx, models.ApprovalFilter{

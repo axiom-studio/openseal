@@ -30,16 +30,16 @@ type StartAgentBuilderResult struct {
 	Replayed     bool
 }
 
-// AgentBuilderConversationWriter creates and posts to conversations. The
+// ConversationWriter creates and posts to conversations. The
 // Engine implements it and schedules the builder's Run on post.
-type AgentBuilderConversationWriter interface {
+type ConversationWriter interface {
 	CreateConversation(context.Context, runtimeconversation.CreateConversationRequest) (*models.Conversation, bool, error)
 	PostChannelMessage(context.Context, runtimeconversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error)
 }
 
 // StartAgentBuilderConversation creates (or replays) the builder conversation
 // keyed by req.IdempotencyKey and posts the request as its first message.
-func StartAgentBuilderConversation(ctx context.Context, writer AgentBuilderConversationWriter, req models.StartAgentBuilderRequest) (*StartAgentBuilderResult, error) {
+func StartAgentBuilderConversation(ctx context.Context, writer ConversationWriter, req models.StartAgentBuilderRequest) (*StartAgentBuilderResult, error) {
 	if writer == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -105,8 +105,8 @@ func agentBuilderConversationTitle(parameters models.AgentBuilderParameters) str
 	return "New agent"
 }
 
-// AgentBuilderDraftFilter selects the viewer's builder conversations.
-type AgentBuilderDraftFilter struct {
+// DraftFilter selects the viewer's builder conversations.
+type DraftFilter struct {
 	Scope models.Scope
 	// Requester is the viewer; only conversations whose first message they
 	// sent are listed.
@@ -119,29 +119,29 @@ type AgentBuilderDraftFilter struct {
 	Offset  int
 }
 
-type AgentBuilderDraftStatus string
+type DraftStatus string
 
 const (
-	AgentBuilderDraftDrafting      AgentBuilderDraftStatus = "drafting"
-	AgentBuilderDraftNeedsInput    AgentBuilderDraftStatus = "needs_input"
-	AgentBuilderDraftReady         AgentBuilderDraftStatus = "ready"
-	AgentBuilderDraftNeedsApproval AgentBuilderDraftStatus = "needs_approval"
-	AgentBuilderDraftStopped       AgentBuilderDraftStatus = "stopped"
-	AgentBuilderDraftFailed        AgentBuilderDraftStatus = "failed"
-	AgentBuilderDraftIdle          AgentBuilderDraftStatus = "draft"
+	DraftDrafting      DraftStatus = "drafting"
+	DraftNeedsInput    DraftStatus = "needs_input"
+	DraftReady         DraftStatus = "ready"
+	DraftNeedsApproval DraftStatus = "needs_approval"
+	DraftStopped       DraftStatus = "stopped"
+	DraftFailed        DraftStatus = "failed"
+	DraftIdle          DraftStatus = "draft"
 )
 
-// AgentBuilderDraft is one builder conversation that has not produced its
+// Draft is one builder conversation that has not produced its
 // Agent or Team yet (D5).
-type AgentBuilderDraft struct {
+type Draft struct {
 	ConversationID string `json:"conversationId"`
 	// SpaceID is the space the builder conversation lives in, so a drafts
 	// rail can show only the current space's drafts.
 	SpaceID string `json:"spaceId"`
 	// Title is the newest card's displayName, else the builder parameters'
 	// name, else "".
-	Title  string                  `json:"title"`
-	Status AgentBuilderDraftStatus `json:"status"`
+	Title  string      `json:"title"`
+	Status DraftStatus `json:"status"`
 	// RunID is the newest top-level builder Run of the conversation.
 	RunID string `json:"runId,omitempty"`
 	// Approval is the pending agent card, if any.
@@ -154,7 +154,7 @@ type AgentBuilderDraft struct {
 // newest first, that have not produced their Agent or Team, with the status
 // the drafts rail shows. The store selects the page; only its conversations
 // are read for status.
-func ListAgentBuilderDrafts(ctx context.Context, reader models.AgentBuilderDraftReader, filter AgentBuilderDraftFilter) ([]AgentBuilderDraft, error) {
+func ListAgentBuilderDrafts(ctx context.Context, reader models.AgentBuilderDraftReader, filter DraftFilter) ([]Draft, error) {
 	if reader == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -179,7 +179,7 @@ func ListAgentBuilderDrafts(ctx context.Context, reader models.AgentBuilderDraft
 	if err != nil {
 		return nil, err
 	}
-	drafts := make([]AgentBuilderDraft, 0, len(conversations))
+	drafts := make([]Draft, 0, len(conversations))
 	for _, conversation := range conversations {
 		draft, err := agentBuilderDraft(ctx, reader, filter, conversation)
 		if err != nil {
@@ -190,12 +190,12 @@ func ListAgentBuilderDrafts(ctx context.Context, reader models.AgentBuilderDraft
 	return drafts, nil
 }
 
-func agentBuilderDraft(ctx context.Context, reader models.AgentBuilderDraftReader, filter AgentBuilderDraftFilter, conversation *models.Conversation) (AgentBuilderDraft, error) {
+func agentBuilderDraft(ctx context.Context, reader models.AgentBuilderDraftReader, filter DraftFilter, conversation *models.Conversation) (Draft, error) {
 	approvals, err := reader.ListApprovals(ctx, models.ApprovalFilter{
 		Scope: filter.Scope, ConversationID: conversation.ID, NewestFirst: true, Limit: agentBuilderDraftApprovalScan,
 	})
 	if err != nil {
-		return AgentBuilderDraft{}, err
+		return Draft{}, err
 	}
 	var newestCard, pendingCard *models.ApprovalCheckpoint
 	for _, approval := range approvals {
@@ -214,7 +214,7 @@ func agentBuilderDraft(ctx context.Context, reader models.AgentBuilderDraftReade
 		Order: models.AgentRunOrderCreatedDesc, Limit: agentBuilderDraftRunScan,
 	})
 	if err != nil {
-		return AgentBuilderDraft{}, err
+		return Draft{}, err
 	}
 	var run *models.AgentRun
 	for _, candidate := range runs {
@@ -227,15 +227,15 @@ func agentBuilderDraft(ctx context.Context, reader models.AgentBuilderDraftReade
 		Scope: filter.Scope, ConversationID: conversation.ID, Descending: true, Limit: agentBuilderDraftMessageScan,
 	})
 	if err != nil {
-		return AgentBuilderDraft{}, err
+		return Draft{}, err
 	}
 	question := pendingAgentBuilderQuestion(recent)
 
-	draft := AgentBuilderDraft{ConversationID: conversation.ID, SpaceID: conversation.SpaceID, UpdatedAt: conversation.UpdatedAt}
+	draft := Draft{ConversationID: conversation.ID, SpaceID: conversation.SpaceID, UpdatedAt: conversation.UpdatedAt}
 	draft.Title = agentBuilderCardDisplayName(newestCard)
 	if draft.Title == "" {
 		if draft.Title, err = agentBuilderParameterName(ctx, reader, filter.Scope, conversation.ID, recent); err != nil {
-			return AgentBuilderDraft{}, err
+			return Draft{}, err
 		}
 	}
 	if run != nil {
@@ -246,24 +246,24 @@ func agentBuilderDraft(ctx context.Context, reader models.AgentBuilderDraftReade
 	}
 	switch {
 	case run != nil && agentBuilderRunDrafting(run.Status):
-		draft.Status = AgentBuilderDraftDrafting
+		draft.Status = DraftDrafting
 	case pendingCard != nil:
-		draft.Status = AgentBuilderDraftNeedsApproval
+		draft.Status = DraftNeedsApproval
 		for _, eligible := range pendingCard.EligibleApprovers {
 			if eligible == filter.Principal {
-				draft.Status = AgentBuilderDraftReady
+				draft.Status = DraftReady
 				break
 			}
 		}
 	case question != nil:
-		draft.Status = AgentBuilderDraftNeedsInput
+		draft.Status = DraftNeedsInput
 		draft.QuestionMessageID = question.ID
 	case run != nil && run.Status == models.AgentRunStatusCanceled:
-		draft.Status = AgentBuilderDraftStopped
+		draft.Status = DraftStopped
 	case run != nil && run.Status == models.AgentRunStatusFailed:
-		draft.Status = AgentBuilderDraftFailed
+		draft.Status = DraftFailed
 	default:
-		draft.Status = AgentBuilderDraftIdle
+		draft.Status = DraftIdle
 	}
 	return draft, nil
 }

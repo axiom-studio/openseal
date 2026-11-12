@@ -27,15 +27,15 @@ type SkillSetupRequestReader func(ctx context.Context, scope models.Scope, deplo
 
 // SetSkillSetupRequestReader replaces the store read used for the
 // conversation's Skill setup request projection.
-func (s *ConversationChangeService) SetSkillSetupRequestReader(reader SkillSetupRequestReader) {
+func (s *ChangeService) SetSkillSetupRequestReader(reader SkillSetupRequestReader) {
 	if s != nil && reader != nil {
 		s.skillSetups = reader
 	}
 }
 
-// ConversationSkillSetupRequest is a setup request as placed in one
+// SkillSetupRequest is a setup request as placed in one
 // conversation view. ThreadRootMessageID is a projection, never authority.
-type ConversationSkillSetupRequest struct {
+type SkillSetupRequest struct {
 	models.SkillSetupRequest
 	ThreadRootMessageID string `json:"threadRootMessageId,omitempty"`
 }
@@ -43,7 +43,7 @@ type ConversationSkillSetupRequest struct {
 // listConversationApprovals projects approvals for the conversation's own
 // Runs (including connector-thread, delegated and task Runs) with their
 // conversation placement resolved here, so clients never read Run lineage.
-func (s *ConversationChangeService) listConversationApprovals(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun) ([]*models.ApprovalCheckpoint, error) {
+func (s *ChangeService) listConversationApprovals(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun) ([]*models.ApprovalCheckpoint, error) {
 	if s.approvals == nil || conversation == nil {
 		return []*models.ApprovalCheckpoint{}, nil
 	}
@@ -127,9 +127,9 @@ func (s *ConversationChangeService) listConversationApprovals(ctx context.Contex
 	return approvals, nil
 }
 
-func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun, viewer *models.ConversationViewer) ([]*ConversationSkillSetupRequest, error) {
+func (s *ChangeService) listConversationSkillSetupRequests(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun, viewer *models.ConversationViewer) ([]*SkillSetupRequest, error) {
 	if s.skillSetups == nil || conversation == nil {
-		return []*ConversationSkillSetupRequest{}, nil
+		return []*SkillSetupRequest{}, nil
 	}
 	// A request in a conversation is saved to its umbrella, or to the Agent
 	// the conversation's builder acted for; both cards are in this chat.
@@ -175,7 +175,7 @@ func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx conte
 			byRun[run.ID] = run
 		}
 	}
-	result := make([]*ConversationSkillSetupRequest, 0, len(candidates))
+	result := make([]*SkillSetupRequest, 0, len(candidates))
 	for _, request := range candidates {
 		trigger := messages[request.TriggerMessageID]
 		if viewer != nil && trigger == nil {
@@ -185,7 +185,7 @@ func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx conte
 		if thread == "" {
 			thread = models.ExternalConversationThreadRoot(conversation, trigger)
 		}
-		result = append(result, &ConversationSkillSetupRequest{SkillSetupRequest: *request, ThreadRootMessageID: thread})
+		result = append(result, &SkillSetupRequest{SkillSetupRequest: *request, ThreadRootMessageID: thread})
 	}
 	return result, nil
 }
@@ -244,7 +244,7 @@ func conversationRunLineageValue(run *models.AgentRun, runs map[string]*models.A
 	return ""
 }
 
-func (s *ConversationChangeService) loadConversationMessages(ctx context.Context, conversation *models.Conversation, ids []string) (map[string]*models.ChannelMessage, error) {
+func (s *ChangeService) loadConversationMessages(ctx context.Context, conversation *models.Conversation, ids []string) (map[string]*models.ChannelMessage, error) {
 	unique := make([]string, 0, len(ids))
 	seen := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -293,7 +293,7 @@ func conversationApprovalProjectionDigest(approvals []*models.ApprovalCheckpoint
 	return models.SHA256Digest(encoded), nil
 }
 
-func conversationSkillSetupProjectionDigest(requests []*ConversationSkillSetupRequest) (string, error) {
+func conversationSkillSetupProjectionDigest(requests []*SkillSetupRequest) (string, error) {
 	type entry struct {
 		ID       string `json:"id"`
 		Revision int64  `json:"revision"`

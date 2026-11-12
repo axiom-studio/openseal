@@ -121,7 +121,7 @@ func (p *timerStepProducer) Produce(_ context.Context, in agentrun.StepInput) (a
 
 func continuationRunFixture(t *testing.T, store *sqlite.Store, id string) (*models.AgentRun, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: id}
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{

@@ -34,24 +34,24 @@ func (s *gatewayVerificationStore) ReceiveExternalConversationEvent(ctx context.
 }
 
 type gatewayVerificationHost struct {
-	request              externalconversation.ExternalConversationGatewayHostRequest
-	result               *externalconversation.ExternalConversationGatewayHostResult
+	request              externalconversation.GatewayHostRequest
+	result               *externalconversation.GatewayHostResult
 	normalized, verified int
 }
 
-func (h *gatewayVerificationHost) NormalizeExternalConversationGateway(_ context.Context, request externalconversation.ExternalConversationGatewayHostRequest) (*externalconversation.ExternalConversationGatewayHostResult, error) {
+func (h *gatewayVerificationHost) NormalizeExternalConversationGateway(_ context.Context, request externalconversation.GatewayHostRequest) (*externalconversation.GatewayHostResult, error) {
 	h.normalized++
 	h.request = request
 	return h.result, nil
 }
 
-func (h *gatewayVerificationHost) VerifyExternalConversationGateway(_ context.Context, request externalconversation.ExternalConversationGatewayHostRequest) (*externalconversation.ExternalConversationGatewayHostResult, error) {
+func (h *gatewayVerificationHost) VerifyExternalConversationGateway(_ context.Context, request externalconversation.GatewayHostRequest) (*externalconversation.GatewayHostResult, error) {
 	h.verified++
 	h.request = request
 	return h.result, nil
 }
 
-func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *skill.Catalog, *externalconversation.ExternalConversationTransportService, *models.ExternalConversationGatewayRegistration, *models.ExternalConversationEndpoint) {
+func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *skill.Catalog, *externalconversation.TransportService, *models.ExternalConversationGatewayRegistration, *models.ExternalConversationEndpoint) {
 	t.Helper()
 	base, catalog, endpoint := externalconversationtest.EndpointFixture(t, t.Context(), "slack")
 	previousRevision := endpoint.Revision
@@ -62,7 +62,7 @@ func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *sk
 		t.Fatal(err)
 	}
 	store := &gatewayVerificationStore{Store: base}
-	registration, err := externalconversation.NewExternalConversationGatewayService(store, catalog).Create(t.Context(), externalconversation.CreateExternalConversationGatewayRequest{
+	registration, err := externalconversation.NewGatewayService(store, catalog).Create(t.Context(), externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "verification-gateway", Name: "Paused setup verification",
 		Gateway: models.ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123"},
 		Actor:   models.ActivityActor{Type: "user", ID: "operator"}, Reason: "Prepare provider setup",
@@ -70,12 +70,12 @@ func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *sk
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := externalconversation.NewExternalConversationTransportService(store, catalog)
+	service := externalconversation.NewTransportService(store, catalog)
 	return store, catalog, service, registration, endpoint
 }
 
-func gatewayVerificationMessage() externalconversation.ExternalConversationGatewayEvent {
-	return externalconversation.ExternalConversationGatewayEvent{
+func gatewayVerificationMessage() externalconversation.GatewayEvent {
+	return externalconversation.GatewayEvent{
 		InstallationID: "T123", ApplicationID: "A123", Address: "C123",
 		Event: models.NormalizedExternalConversationEvent{
 			ID: "Ev-verification", Type: capability.ConversationEventMessageReceived,
@@ -86,16 +86,16 @@ func gatewayVerificationMessage() externalconversation.ExternalConversationGatew
 }
 
 func TestPausedGatewayVerificationRequiresOptInAndNeverAcceptsEvents(t *testing.T) {
-	for name, result := range map[string]*externalconversation.ExternalConversationGatewayHostResult{
+	for name, result := range map[string]*externalconversation.GatewayHostResult{
 		"signed challenge":  {StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(`{"challenge":"challenge-value"}`)},
 		"invalid signature": {StatusCode: http.StatusUnauthorized, Body: []byte(`{"error":"invalid_signature"}`)},
-		"malicious event":   {StatusCode: http.StatusOK, Events: []externalconversation.ExternalConversationGatewayEvent{gatewayVerificationMessage()}},
+		"malicious event":   {StatusCode: http.StatusOK, Events: []externalconversation.GatewayEvent{gatewayVerificationMessage()}},
 		"invalid result":    {StatusCode: 999},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store, _, service, registration, _ := newGatewayVerificationFixture(t)
 			host := &gatewayVerificationHost{result: result}
-			response, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), externalconversation.ExternalConversationPublicIngressRequest{
+			response, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), externalconversation.PublicIngressRequest{
 				Route: registration.IngressRoute, Method: http.MethodPost, Headers: map[string][]string{"X-Slack-Signature": {"v0=provider-verifier-input"}}, Body: []byte(`{"type":"url_verification"}`),
 			}, host)
 			if name == "malicious event" {
@@ -124,8 +124,8 @@ func TestPausedGatewayVerificationRequiresOptInAndNeverAcceptsEvents(t *testing.
 	}
 	t.Run("legacy host never invoked", func(t *testing.T) {
 		_, _, service, registration, _ := newGatewayVerificationFixture(t)
-		host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{StatusCode: http.StatusOK}}
-		_, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), externalconversation.ExternalConversationPublicIngressRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`)}, host)
+		host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.GatewayHostResult{StatusCode: http.StatusOK}}
+		_, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), externalconversation.PublicIngressRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`)}, host)
 		if !errors.Is(err, models.ErrExternalConversationConflict) || host.Request.Request != nil {
 			t.Fatalf("paused route invoked non-opt-in host: %#v, %v", host.Request, err)
 		}
@@ -142,7 +142,7 @@ func TestGatewayVerificationPreservesActiveIngressAndRejectsUnavailableAuthority
 					status = models.ExternalConversationGatewayRetired
 				}
 				var err error
-				registration, err = externalconversation.NewExternalConversationGatewayService(store, catalog).Update(t.Context(), registration.Gateway.Scope, registration.ID, externalconversation.UpdateExternalConversationGatewayRequest{
+				registration, err = externalconversation.NewGatewayService(store, catalog).Update(t.Context(), registration.Gateway.Scope, registration.ID, externalconversation.UpdateExternalConversationGatewayRequest{
 					ExpectedRevision: registration.Revision, Status: &status, Actor: models.ActivityActor{Type: "user", ID: "operator"}, Reason: "Change gateway state",
 				})
 				if err != nil {
@@ -160,8 +160,8 @@ func TestGatewayVerificationPreservesActiveIngressAndRejectsUnavailableAuthority
 			if state == "missing" {
 				route = "unknown-route"
 			}
-			host := &gatewayVerificationHost{result: &externalconversation.ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []externalconversation.ExternalConversationGatewayEvent{gatewayVerificationMessage()}}}
-			response, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), externalconversation.ExternalConversationPublicIngressRequest{Route: route, Method: http.MethodPost, Body: []byte(`{"type":"event_callback"}`)}, host)
+			host := &gatewayVerificationHost{result: &externalconversation.GatewayHostResult{StatusCode: http.StatusOK, Events: []externalconversation.GatewayEvent{gatewayVerificationMessage()}}}
+			response, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), externalconversation.PublicIngressRequest{Route: route, Method: http.MethodPost, Body: []byte(`{"type":"event_callback"}`)}, host)
 			if state == "active" {
 				if err != nil || response == nil || len(response.Received) != 1 || !response.Received[0].Accepted || host.verified != 0 || host.normalized != 1 || host.request.VerificationOnly || store.routeLookups != 1 || store.received != 1 {
 					t.Fatalf("normal active intake changed: %#v, %v; host %#v; reads %d writes %d", response, err, host, store.routeLookups, store.received)
@@ -174,11 +174,11 @@ func TestGatewayVerificationPreservesActiveIngressAndRejectsUnavailableAuthority
 }
 
 func TestGatewayVerificationAuthorityIsNeverJSONInput(t *testing.T) {
-	encoded, err := json.Marshal(externalconversation.ExternalConversationGatewayHostRequest{VerificationOnly: true})
+	encoded, err := json.Marshal(externalconversation.GatewayHostRequest{VerificationOnly: true})
 	if err != nil || strings.Contains(string(encoded), "verification") || strings.Contains(string(encoded), "Verification") {
 		t.Fatalf("internal authority serialized: %s, %v", encoded, err)
 	}
-	var request externalconversation.ExternalConversationGatewayHostRequest
+	var request externalconversation.GatewayHostRequest
 	if err := json.Unmarshal([]byte(`{"verificationOnly":true,"VerificationOnly":true}`), &request); err != nil || request.VerificationOnly {
 		t.Fatalf("JSON supplied verification authority: %#v, %v", request, err)
 	}

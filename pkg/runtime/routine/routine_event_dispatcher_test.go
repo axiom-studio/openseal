@@ -46,7 +46,7 @@ func TestRoutineEventBatchHeader(t *testing.T) {
 	}
 	ids, values = records(strings.Repeat("é", 150))
 	got := routineEventBatchHeader(models.RoutineEventWebhook, &models.RoutineEventBatch{EventIDs: ids}, values)
-	if len(got) > RoutineEventHeaderMaxBytes || !strings.HasPrefix(strings.Repeat("é", 150), got) || len(got) != 200 {
+	if len(got) > EventHeaderMaxBytes || !strings.HasPrefix(strings.Repeat("é", 150), got) || len(got) != 200 {
 		t.Fatalf("long header has %d bytes: %q", len(got), got)
 	}
 }
@@ -64,9 +64,9 @@ func (s *passCountingStore) ListRoutineEventWorkScopes(ctx context.Context) ([]m
 
 func TestRoutineEventDispatcherCoalescesNudges(t *testing.T) {
 	store := &passCountingStore{Store: kerneltest.NewStore(t)}
-	matcher := NewRoutineEventMatcher(store)
+	matcher := NewEventMatcher(store)
 	t.Cleanup(matcher.Close)
-	dispatcher := NewRoutineEventDispatcher(store, matcher)
+	dispatcher := NewEventDispatcher(store, matcher)
 	dispatcher.minPassGap = 100 * time.Millisecond
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)

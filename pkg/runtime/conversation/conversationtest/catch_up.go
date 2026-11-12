@@ -20,11 +20,11 @@ type CatchUpStore interface {
 type CatchUpFixture struct {
 	T            *testing.T
 	Store        CatchUpStore
-	Service      *conversation.ConversationService
+	Service      *conversation.Service
 	Conversation *models.Conversation
 	AgentID      string
 	Now          time.Time
-	CatchUp      *conversation.ConversationCatchUp
+	CatchUp      *conversation.CatchUp
 }
 
 // ForCatchUpStores runs test with a fixture whose conversation is owned by
@@ -36,7 +36,7 @@ func ForCatchUpStores(t *testing.T, owner models.ObjectiveOwner, test func(*test
 		if !ok {
 			t.Fatalf("%T is not an agent session store", store)
 		}
-		service := conversation.NewConversationService(store)
+		service := conversation.NewService(store)
 		SeedSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "catch-up"})
 		created, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 			Scope: models.Scope{Kind: "tenant", ID: "catch-up"}, Owner: owner, Title: "Catch-up", IdempotencyKey: "catch-up",
@@ -47,7 +47,7 @@ func ForCatchUpStores(t *testing.T, owner models.ObjectiveOwner, test func(*test
 		test(t, &CatchUpFixture{
 			T: t, Store: sessions, Service: service, Conversation: created, AgentID: "agent",
 			Now:     time.Now().UTC().Truncate(time.Millisecond),
-			CatchUp: conversation.NewConversationCatchUp(service, store, nil),
+			CatchUp: conversation.NewCatchUp(service, store, nil),
 		})
 	})
 }
@@ -92,7 +92,7 @@ func (f *CatchUpFixture) LaneSessionID(threadRoot string) string {
 // worker w1. Runs are claimed as they are created, so the claim takes this one.
 func (f *CatchUpFixture) Run(sessionID string, claim bool) *models.AgentRun {
 	f.T.Helper()
-	runs := portfolio.NewPortfolioService(f.Store, models.WithClock(func() time.Time { return f.Now }))
+	runs := portfolio.NewService(f.Store, models.WithClock(func() time.Time { return f.Now }))
 	run, err := runs.CreateAgentRun(f.T.Context(), models.CreateAgentRunRequest{
 		Scope: f.Conversation.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: f.AgentID}, AssignedAgentID: f.AgentID,
 		Goal: "answer the chat", Source: models.RunSourceObjective, SessionID: sessionID,

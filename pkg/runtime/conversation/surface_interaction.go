@@ -34,7 +34,7 @@ type RecordSurfaceInteractionRequest struct {
 // earlier one with the same idempotency key. MessageID must name a message of
 // the conversation that references the surface artifact. Hosts validate the
 // surface, version, component and value shape before calling it.
-func (s *ConversationService) RecordSurfaceInteraction(ctx context.Context, req RecordSurfaceInteractionRequest) (*models.SurfaceInteraction, bool, error) {
+func (s *Service) RecordSurfaceInteraction(ctx context.Context, req RecordSurfaceInteractionRequest) (*models.SurfaceInteraction, bool, error) {
 	if s == nil || s.store == nil {
 		return nil, false, errors.New("conversation store is not configured")
 	}
@@ -73,7 +73,7 @@ func channelMessageReferencesArtifact(message *models.ChannelMessage, artifactID
 
 // filterVisibleSurfaceInteractions keeps the interactions viewer may read:
 // those whose card message the viewer can see.
-func (s *ConversationService) filterVisibleSurfaceInteractions(ctx context.Context, scope models.Scope, conversationID string, interactions []*models.SurfaceInteraction, viewer models.ConversationViewer) ([]*models.SurfaceInteraction, error) {
+func (s *Service) filterVisibleSurfaceInteractions(ctx context.Context, scope models.Scope, conversationID string, interactions []*models.SurfaceInteraction, viewer models.ConversationViewer) ([]*models.SurfaceInteraction, error) {
 	if err := viewer.Validate(); err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (s *ConversationService) filterVisibleSurfaceInteractions(ctx context.Conte
 
 // ListSurfaceInteractions pages interactions by Sequence. With a Viewer it
 // scans past hidden interactions so a page is not cut short by them.
-func (s *ConversationService) ListSurfaceInteractions(ctx context.Context, filter models.SurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
+func (s *Service) ListSurfaceInteractions(ctx context.Context, filter models.SurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
@@ -169,7 +169,7 @@ func (s *ConversationService) ListSurfaceInteractions(ctx context.Context, filte
 
 // ListLatestSurfaceInteractions resolves last-write-wins state of a surface.
 // With a Viewer it reduces only the interactions that viewer may read.
-func (s *ConversationService) ListLatestSurfaceInteractions(ctx context.Context, filter models.LatestSurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
+func (s *Service) ListLatestSurfaceInteractions(ctx context.Context, filter models.LatestSurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}

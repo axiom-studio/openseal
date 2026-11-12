@@ -71,14 +71,14 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	store := kerneltest.NewStore(t)
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "developer",
 		Goal: "Coordinate the release", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	service.teams = collaborationTeamStoreStub{
 		deployment: &kernelteam.Deployment{
 			ID: "delivery-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
@@ -161,14 +161,14 @@ func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "review-quorum"}
 	store := kerneltest.NewStore(t)
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "lead",
 		Goal: "Coordinate reviewed delivery", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	service.teams = collaborationTeamStoreStub{
 		deployment: &kernelteam.Deployment{
 			ID: "delivery-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
@@ -235,10 +235,10 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	newService := func(policy kernelteam.DelegationPolicy) (*sqlite.Store, *portfolio.PortfolioService, *CollaborationService) {
+	newService := func(policy kernelteam.DelegationPolicy) (*sqlite.Store, *portfolio.Service, *Service) {
 		store := kerneltest.NewStore(t)
-		portfolio := portfolio.NewPortfolioService(store)
-		service := NewCollaborationService(store)
+		portfolio := portfolio.NewService(store)
+		service := NewService(store)
 		service.teams = collaborationTeamStoreStub{
 			deployment: &kernelteam.Deployment{
 				ID: "delivery-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
@@ -248,7 +248,7 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 		}
 		return store, portfolio, service
 	}
-	createSource := func(t *testing.T, portfolio *portfolio.PortfolioService, assigned, key string, parent *models.AgentRun) *models.AgentRun {
+	createSource := func(t *testing.T, portfolio *portfolio.Service, assigned, key string, parent *models.AgentRun) *models.AgentRun {
 		t.Helper()
 		request := models.CreateAgentRunRequest{
 			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: assigned,
@@ -311,7 +311,7 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 		t.Fatal(err)
 	}
 	scope := models.Scope{Kind: "tenant", ID: "team-offers"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
 		Goal: "Coordinate release analysis", Source: models.RunSourceManual,
 	})
@@ -322,7 +322,7 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 		kernelteam.RosterAssignment{ID: "z", AgentDeploymentID: "z-agent"},
 		kernelteam.RosterAssignment{ID: "a", AgentDeploymentID: "a-agent"},
 		kernelteam.RosterAssignment{ID: "m", AgentDeploymentID: "m-agent"})
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	service.teams = teamStore
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
@@ -365,7 +365,7 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restarted.Close() })
-	restartedService := NewCollaborationService(restarted)
+	restartedService := NewService(restarted)
 	restartedService.teams = teamStore
 	accepted, err := restartedService.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: bid.Request.Revision,
@@ -397,7 +397,7 @@ func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 			"writer@1":  {ID: "writer", Version: "1", Authority: kernelagent.AuthorityPolicy{AllowedSkillIDs: []string{"writing"}}},
 		},
 	}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
 		Goal: "Coordinate analysis", Source: models.RunSourceManual,
@@ -413,7 +413,7 @@ func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	service.teams = collaborationTeamStoreStub{
 		deployment: &kernelteam.Deployment{
 			ID: "analysis", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analysis", ActiveVersion: "1",

@@ -40,7 +40,7 @@ func answerVisualArtifactID(runID, triggerID, participantID string) string {
 // the delivery. One-to-one and Team answers share it. The routines its
 // routine components show are linked to the conversation (also on a
 // replay, in case the first attempt stopped in between).
-func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *models.AgentRun, participantID, id string, visual presentation.Visual) (models.ConversationReference, error) {
+func (r *TurnRunner) storeAnswerVisual(ctx context.Context, run *models.AgentRun, participantID, id string, visual presentation.Visual) (models.ConversationReference, error) {
 	reference, err := r.storeAnswerVisualArtifact(ctx, run, participantID, id, visual)
 	if err != nil {
 		return models.ConversationReference{}, err
@@ -54,7 +54,7 @@ func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *
 	return reference, nil
 }
 
-func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Context, run *models.AgentRun, participantID, id string, visual presentation.Visual) (models.ConversationReference, error) {
+func (r *TurnRunner) storeAnswerVisualArtifact(ctx context.Context, run *models.AgentRun, participantID, id string, visual presentation.Visual) (models.ConversationReference, error) {
 	if r.artifacts == nil || r.config.AttachmentContent == nil {
 		return models.ConversationReference{}, errors.New("answer visuals require artifact and content storage")
 	}
@@ -100,7 +100,7 @@ func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Contex
 	if r.conversations != nil {
 		placement.Conversations = r.conversations
 	}
-	_, err = artifactcatalog.NewArtifactCatalog(r.artifacts, models.WithClock(r.now)).WithPlacement(placement).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
+	_, err = artifactcatalog.NewCatalog(r.artifacts, models.WithClock(r.now)).WithPlacement(placement).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
 		ID: id, Version: 1, Scope: run.Scope, Name: name,
 		Type: presentation.ArtifactType, MediaType: presentation.MediaType,
 		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: models.ArtifactClassificationInternal,

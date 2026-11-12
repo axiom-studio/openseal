@@ -625,7 +625,7 @@ func attachRunbookChildren(result *RunbookExecutionAudit, children []*models.Age
 		}
 	}
 	// A delegated step's AgentRequest id is derived from the parent Run and
-	// the step id (see ControlExecutor.Delegate), so each node maps to its
+	// the step id (see control.Executor.Delegate), so each node maps to its
 	// request without reading any Turn state.
 	for _, node := range result.Nodes {
 		stepID := strings.TrimSpace(node.StepID)

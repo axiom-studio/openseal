@@ -33,7 +33,7 @@ func (s *Server) handleListConversationRuns(w http.ResponseWriter, r *http.Reque
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	runs, err := portfolio.NewPortfolioService(s.store).ListAgentRuns(r.Context(), models.AgentRunFilter{
+	runs, err := portfolio.NewService(s.store).ListAgentRuns(r.Context(), models.AgentRunFilter{
 		Scope: scope, Owner: &channel.Owner, Kind: models.RunKindConversation,
 		ConversationID: channel.ID, Order: models.AgentRunOrderCreatedDesc,
 		Limit: limit, Offset: offset,

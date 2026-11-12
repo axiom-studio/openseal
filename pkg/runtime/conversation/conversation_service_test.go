@@ -16,7 +16,7 @@ func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 	t.Parallel()
 	store := kerneltest.NewStore(t)
 	conversationtest.SeedSpace(t, store, models.Scope{Kind: "tenant", ID: "one"})
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	origin := &models.ConversationReference{Kind: models.ConversationReferenceObjective, ID: "objective-reddit-research"}
 
 	conversation, replayed, err := service.CreateConversation(context.Background(), runtimeconversation.CreateConversationRequest{
@@ -37,7 +37,7 @@ func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 	t.Parallel()
 	store := kerneltest.NewStore(t)
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	conversationtest.SeedSpace(t, store, scope)
@@ -70,7 +70,7 @@ func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 
 func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "visibility"}
 	conversationtest.SeedSpace(t, store, scope)
@@ -136,7 +136,7 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 	t.Parallel()
 	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	service := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return now }))
+	service := runtimeconversation.NewService(store, models.WithClock(func() time.Time { return now }))
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	conversationtest.SeedSpace(t, store, scope)

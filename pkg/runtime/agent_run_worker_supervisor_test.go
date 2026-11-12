@@ -40,7 +40,7 @@ func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testi
 	ctx := context.Background()
 	scope1 := models.Scope{Kind: "tenant", ID: "1"}
 	scope2 := models.Scope{Kind: "tenant", ID: "2"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	conversationRuns := make([]*models.AgentRun, 0, 2)
 	for _, scope := range []models.Scope{scope1, scope2} {
 		run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{

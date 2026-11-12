@@ -28,7 +28,7 @@ func TestChatRunsActForThePersonWhoAsked(t *testing.T) {
 		"service initiator": {&models.ChannelMessage{ID: "m2", Scope: scope, ConversationID: "chat", Sender: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "coordinator"}, Initiator: &initiator}, "9"},
 		"agent":             {&models.ChannelMessage{ID: "m3", Scope: scope, ConversationID: "chat", Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "helper"}}, ""},
 	} {
-		if got := runtimeconversation.ConversationAgentRunRequest(conversation, test.message).ActingUser; got != test.want {
+		if got := runtimeconversation.AgentRunRequest(conversation, test.message).ActingUser; got != test.want {
 			t.Errorf("%s: ActingUser = %q, want %q", name, got, test.want)
 		}
 	}
@@ -77,7 +77,7 @@ func TestDelegatedAgentRunWorksWithoutAnyConnection(t *testing.T) {
 func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "steering"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", ActingUser: "7",
 		Goal: "Work for a person", Source: models.RunSourceManual,
 	})
@@ -85,20 +85,20 @@ func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := agentrun.NewRunCommandService(store)
-	command := func(kind agentrun.AgentRunCommandKind, actor models.ActivityActor) error {
+	command := func(kind agentrun.CommandKind, actor models.ActivityActor) error {
 		current, err := store.GetAgentRun(t.Context(), scope, run.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		instruction := ""
-		if kind == agentrun.AgentRunCommandIntervene {
+		if kind == agentrun.CommandIntervene {
 			instruction = "Do it differently"
 		}
-		_, err = commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: kind, Actor: actor, Instruction: instruction, Summary: "steer"})
+		_, err = commands.CommandAgentRun(t.Context(), agentrun.CommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: kind, Actor: actor, Instruction: instruction, Summary: "steer"})
 		return err
 	}
 	other := models.ActivityActor{Type: "user", ID: "8"}
-	for _, kind := range []agentrun.AgentRunCommandKind{agentrun.AgentRunCommandIntervene, agentrun.AgentRunCommandResolveHumanIntervention, agentrun.AgentRunCommandResume, agentrun.AgentRunCommandRetry} {
+	for _, kind := range []agentrun.CommandKind{agentrun.CommandIntervene, agentrun.CommandResolveHumanIntervention, agentrun.CommandResume, agentrun.CommandRetry} {
 		if err := command(kind, other); !errors.Is(err, agentrun.ErrRunCommandNotAuthorized) {
 			t.Errorf("%s by another user: err = %v", kind, err)
 		}
@@ -108,25 +108,25 @@ func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 			}
 		}
 	}
-	if err := command(agentrun.AgentRunCommandIntervene, models.ActivityActor{Type: "user", ID: "7"}); err != nil {
+	if err := command(agentrun.CommandIntervene, models.ActivityActor{Type: "user", ID: "7"}); err != nil {
 		t.Fatalf("the acting person's guidance: %v", err)
 	}
-	if err := command(agentrun.AgentRunCommandPause, other); err != nil {
+	if err := command(agentrun.CommandPause, other); err != nil {
 		t.Fatalf("another user's pause: %v", err)
 	}
-	if err := command(agentrun.AgentRunCommandCancel, other); err != nil {
+	if err := command(agentrun.CommandCancel, other); err != nil {
 		t.Fatalf("another user's cancel: %v", err)
 	}
 
 	// A run that acts for no person keeps today's rules.
-	nobody, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	nobody, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "Work for no one", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: scope, RunID: nobody.ID, ExpectedRevision: nobody.Revision, Kind: agentrun.AgentRunCommandIntervene, Actor: other, Instruction: "Do it", Summary: "steer"}); err != nil {
+	if _, err := commands.CommandAgentRun(t.Context(), agentrun.CommandRequest{Scope: scope, RunID: nobody.ID, ExpectedRevision: nobody.Revision, Kind: agentrun.CommandIntervene, Actor: other, Instruction: "Do it", Summary: "steer"}); err != nil {
 		t.Fatalf("guidance on a run without a person: %v", err)
 	}
 }
@@ -161,7 +161,7 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	}
 
 	// Someone else in the same chat.
-	intruder, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: run.Scope, Kind: models.RunKindConversation, Owner: run.Owner, AssignedAgentID: run.AssignedAgentID,
+	intruder, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: run.Scope, Kind: models.RunKindConversation, Owner: run.Owner, AssignedAgentID: run.AssignedAgentID,
 		ActingUser: "intruder", Goal: "Handle another request", Source: models.RunSourceChat, Context: maps.Clone(run.Context), IdempotencyKey: "intruder"})
 	if err != nil {
 		t.Fatal(err)

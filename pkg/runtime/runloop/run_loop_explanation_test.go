@@ -49,12 +49,12 @@ func explanationStores(t *testing.T, test func(*testing.T, models.KernelStore)) 
 
 // driveExplanation claims a Run that is in failure-explanation mode and
 // drives its explanation step with final as the delivery result.
-func driveExplanation(t *testing.T, store models.KernelStore, result agentrun.FinalDeliveryResult) (RunLoopExit, *models.AgentRun, *explanationFinal) {
+func driveExplanation(t *testing.T, store models.KernelStore, result agentrun.FinalDeliveryResult) (Exit, *models.AgentRun, *explanationFinal) {
 	t.Helper()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "explain"}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a", Goal: "work", Source: models.RunSourceObjective,
 	})
@@ -74,19 +74,19 @@ func driveExplanation(t *testing.T, store models.KernelStore, result agentrun.Fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	loop, err := NewRunLoop(store, nil, nil, RunLoopConfig{
+	loop, err := New(store, nil, nil, Config{
 		PlanToolEntries: func(*agentrun.TurnRunnerBinding, *models.AgentSession, *models.AgentTurn, *models.SessionEntry, []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
 			return nil, nil
 		},
-		PlainTextFinal: func(context.Context, agentrun.ControlContext, string) (control.ControlResult, error) {
-			return control.ControlResult{}, nil
+		PlainTextFinal: func(context.Context, agentrun.ControlContext, string) (control.Result, error) {
+			return control.Result{}, nil
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	final := &explanationFinal{result: result}
-	exit := loop.Drive(ctx, RunLoopClaim{Run: explaining, WorkerID: explanationWorker, Binding: &agentrun.TurnRunnerBinding{
+	exit := loop.Drive(ctx, Claim{Run: explaining, WorkerID: explanationWorker, Binding: &agentrun.TurnRunnerBinding{
 		Producer: explanationProducer{answer: "I could not build the report."}, Final: final,
 	}})
 	stored, err := store.GetAgentRun(ctx, scope, claimed.ID)
@@ -101,7 +101,7 @@ func TestRunLoopPostedExplanationEndsFailedExplained(t *testing.T) {
 		exit, run, final := driveExplanation(t, store, agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryFail, Output: map[string]interface{}{
 			"summary": "I could not build the report.", "conversationId": "c1", "triggerMessageId": "m1", "messageId": "m2", "replayed": false,
 		}})
-		if exit.Err != nil || exit.Reason != RunLoopExitFinal || final.calls != 1 {
+		if exit.Err != nil || exit.Reason != ExitFinal || final.calls != 1 {
 			t.Fatalf("exit = %#v, deliveries = %d; want final", exit, final.calls)
 		}
 		if run.Status != models.AgentRunStatusFailed || run.FailureExplanation == nil || !run.FailureExplanation.Explained || run.Error != "The report could not be built." {
@@ -118,7 +118,7 @@ func TestRunLoopUnpostedExplanationEndsFailedUnexplained(t *testing.T) {
 		exit, run, final := driveExplanation(t, store, agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryFail, Failure: &agentrun.LoopFailure{
 			Kind: conversation.RunFailureKindExecution, Code: runFailureCodeFinalDelivery, Message: "The agent's reply could not be posted.",
 		}})
-		if exit.Err != nil || exit.Reason != RunLoopExitFailed || final.calls != 1 {
+		if exit.Err != nil || exit.Reason != ExitFailed || final.calls != 1 {
 			t.Fatalf("exit = %#v, deliveries = %d; want failed", exit, final.calls)
 		}
 		if run.Status != models.AgentRunStatusFailed || run.FailureExplanation == nil || run.FailureExplanation.Explained {

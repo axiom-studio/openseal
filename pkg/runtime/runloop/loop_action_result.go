@@ -182,7 +182,7 @@ func renderGovernedDenial(call *models.ActionCall, approval *models.ApprovalChec
 			})
 		}
 	}
-	if call.Error == action.ActionBudgetExhaustedReason {
+	if call.Error == action.BudgetExhaustedReason {
 		return renderGovernedBudgetExhausted(call)
 	}
 	return models.ToolEntryError, governedJSONResult(models.ToolResultDenied, map[string]interface{}{
@@ -202,7 +202,7 @@ func renderGovernedBudgetExhausted(call *models.ActionCall) (models.ToolEntrySta
 
 // renderGovernedRejection renders a proposal the coordinator rejected before
 // any row existed.
-func renderGovernedRejection(rejection *action.ActionProposalRejection) (models.ToolEntryState, *models.ToolResult) {
+func renderGovernedRejection(rejection *action.ProposalRejection) (models.ToolEntryState, *models.ToolResult) {
 	return models.ToolEntryError, governedJSONResult(models.ToolResultRefused, map[string]interface{}{
 		"status": string(models.ToolResultRefused), "code": rejection.Code, "error": rejection.Message,
 	})

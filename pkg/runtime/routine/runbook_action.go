@@ -131,7 +131,7 @@ type RunbookActionStore interface {
 type RunbookActionValidator struct {
 	store          RunbookActionStore
 	routineTeams   collaboration.RoutineTeamCatalog
-	grantCatalog   RoutineGrantCatalog
+	grantCatalog   GrantCatalog
 	ownerAddresses models.RoutineOwnerAddressResolver
 	chatFiles      ChatFileResolver
 	events         routineEventActions
@@ -141,7 +141,7 @@ type RunbookActionValidator struct {
 // events, sources lists the host's own sources (Google) and hooksAvailable
 // says whether the host can serve webhooks. Without an offerer,
 // send_test_event is refused.
-func (v *RunbookActionValidator) SetRoutineEvents(offerer externalconversation.RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) {
+func (v *RunbookActionValidator) SetRoutineEvents(offerer externalconversation.RoutineEventOfferer, sources EventSourceCatalog, hooksAvailable bool) {
 	if v != nil {
 		v.events = newRoutineEventActions(offerer, sources, hooksAvailable)
 	}
@@ -156,7 +156,7 @@ func (v *RunbookActionValidator) SetChatFiles(files ChatFileResolver) {
 }
 
 // SetRoutineGrantCatalog lets routine briefs name the Agent's bound actions.
-func (v *RunbookActionValidator) SetRoutineGrantCatalog(catalog RoutineGrantCatalog) {
+func (v *RunbookActionValidator) SetRoutineGrantCatalog(catalog GrantCatalog) {
 	if v != nil {
 		v.grantCatalog = catalog
 	}
@@ -315,7 +315,7 @@ type RunbookActionDispatcher struct {
 
 // SetRoutineEvents lets routines start on events; see
 // RunbookActionValidator.SetRoutineEvents.
-func (d *RunbookActionDispatcher) SetRoutineEvents(offerer externalconversation.RoutineEventOfferer, sources RoutineEventSourceCatalog, hooksAvailable bool) {
+func (d *RunbookActionDispatcher) SetRoutineEvents(offerer externalconversation.RoutineEventOfferer, sources EventSourceCatalog, hooksAvailable bool) {
 	if d != nil {
 		d.events = newRoutineEventActions(offerer, sources, hooksAvailable)
 	}

@@ -60,9 +60,9 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	loop := actiontest.NewLoopProposalFixture(t, store, child.Run, "worker", time.Now().UTC())
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour,
+	coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{
+			Disposition: action.DispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
 	}), nil)
@@ -79,9 +79,9 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 	}
 	loop.ParkOnApproval(proposal.Approval.ID)
 
-	if _, err := runs.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+	if _, err := runs.CommandAgentRun(ctx, agentrun.CommandRequest{
 		Scope: scope, RunID: root.Run.ID, ExpectedRevision: root.Run.Revision,
-		Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: "operator"},
+		Kind: agentrun.CommandCancel, Actor: models.ActivityActor{Type: "user", ID: "operator"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -113,9 +113,9 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 		t.Fatal(err)
 	}
 	loop := actiontest.NewLoopProposalFixture(t, store, created.Run, "worker", now)
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionRequireApproval, Reason: "human review is required", ApprovalTTL: time.Hour,
+	coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{
+			Disposition: action.DispositionRequireApproval, Reason: "human review is required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
 	}), nil, models.WithClock(func() time.Time { return now }))
@@ -133,8 +133,8 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 	loop.ParkOnApproval(proposal.Approval.ID)
 	parked := loop.Current()
 
-	result, err := runs.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: scope, RunID: parked.ID, ExpectedRevision: parked.Revision, Kind: agentrun.AgentRunCommandCancel,
+	result, err := runs.CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: scope, RunID: parked.ID, ExpectedRevision: parked.Revision, Kind: agentrun.CommandCancel,
 		Actor: models.ActivityActor{Type: "user", ID: "operator"}, Summary: "Operator canceled the reviewed reply",
 	})
 	if err != nil {

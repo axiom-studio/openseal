@@ -10,9 +10,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// RoutineEventIndexRebuildInterval is how often the dispatcher loop rebuilds
+// EventIndexRebuildInterval is how often the dispatcher loop rebuilds
 // the matcher index from the store, as a backstop for lost change signals.
-const RoutineEventIndexRebuildInterval = 15 * time.Minute
+const EventIndexRebuildInterval = 15 * time.Minute
 
 type routineEventIndexKey struct {
 	kind      models.RoutineEventKind

@@ -160,7 +160,7 @@ func TestAcceptedRunInheritanceRejectsInvalidDelegationBeforeGroupAcceptance(t *
 			forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 				parent, parentPin := newAcceptedRunInheritanceParent(t, kernel, false)
 				wrapped := &acceptedRunInheritanceWriteStore{acceptedRunInheritanceStore: kernel}
-				service := collaboration.NewCollaborationService(wrapped)
+				service := collaboration.NewService(wrapped)
 				created := createAcceptedRunInheritanceRequestGroup(t, service, parent, map[string]interface{}{"runbookEntrypoint": "inspect", models.AcceptedRunExecutionContextKey: parentPin})
 				before, err := kernel.GetAgentRun(t.Context(), parent.Scope, parent.ID)
 				if err != nil {
@@ -223,7 +223,7 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 			forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 				parent, parentPin := newAcceptedRunInheritanceParent(t, kernel, false)
 				wrapped := &acceptedRunInheritanceWriteStore{acceptedRunInheritanceStore: kernel}
-				service := collaboration.NewCollaborationService(wrapped)
+				service := collaboration.NewService(wrapped)
 				shared := map[string]interface{}{"input": "retained", models.AcceptedRunExecutionContextKey: parentPin}
 				if delivery.invocation {
 					shared[agentrun.RunbookInvocationContextKey] = map[string]interface{}{"entrypoint": "inspect", "summary": "Requested target method"}
@@ -306,7 +306,7 @@ func TestAcceptedRunInheritanceReasonOnlyForkAndGenericDelegationStayUnpinned(t 
 			}
 		}
 		otherParent, _ := newAcceptedRunInheritanceParent(t, kernel, false)
-		service := collaboration.NewCollaborationService(kernel)
+		service := collaboration.NewService(kernel)
 		service.SetAcceptedRunExecutionPreparer(preparer)
 		group := createAcceptedRunInheritanceRequestGroup(t, service, otherParent, map[string]interface{}{
 			models.AcceptedRunExecutionContextKey: parentPin,
@@ -454,7 +454,7 @@ func newAcceptedRunInheritanceParent(t *testing.T, kernel models.KernelStore, cl
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err := portfolio.NewPortfolioService(kernel).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	parent, err := portfolio.NewService(kernel).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment.ID}, AssignedAgentID: deployment.ID,
 		Entrypoint: pin.Entrypoint, Goal: "Continue accepted work", Source: models.RunSourceManual,
 		Context:    map[string]interface{}{models.AcceptedRunExecutionContextKey: pin, "projectId": "accepted-project"},
@@ -484,7 +484,7 @@ func acceptedRunInheritanceForkRequest(parent *models.AgentRun) agentrun.CreateR
 		ContinuationCheckpoint: map[string]interface{}{"committed": "preserved", "waiting": "fan-in"}}
 }
 
-func createAcceptedRunInheritanceRequestGroup(t *testing.T, service *collaboration.CollaborationService, parent *models.AgentRun, shared map[string]interface{}) *collaboration.AgentRequestGroupResult {
+func createAcceptedRunInheritanceRequestGroup(t *testing.T, service *collaboration.Service, parent *models.AgentRun, shared map[string]interface{}) *collaboration.AgentRequestGroupResult {
 	t.Helper()
 	created, err := service.CreateAgentRequestGroup(t.Context(), collaboration.CreateAgentRequestGroupRequest{
 		Scope: parent.Scope, SourceRunID: parent.ID, ExpectedSourceRevision: parent.Revision,

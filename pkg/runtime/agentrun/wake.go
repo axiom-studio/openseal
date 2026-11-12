@@ -32,19 +32,19 @@ type WakeResult struct {
 	NextWakeAt *time.Time
 }
 
-type AgentRunWakeService struct {
+type WakeService struct {
 	portfolio models.PortfolioStore
 	activity  *activity.RunActivityService
 	now       func() time.Time
 }
 
-func NewAgentRunWakeService(portfolio models.PortfolioStore, activityStore models.RunActivityStore, opts ...models.ServiceOption) *AgentRunWakeService {
-	return &AgentRunWakeService{
+func NewWakeService(portfolio models.PortfolioStore, activityStore models.RunActivityStore, opts ...models.ServiceOption) *WakeService {
+	return &WakeService{
 		portfolio: portfolio, activity: activity.NewRunActivityService(portfolio, activityStore, opts...), now: models.ClockFrom(opts),
 	}
 }
 
-func (s *AgentRunWakeService) Wake(ctx context.Context, signal WakeSignal) (*WakeResult, error) {
+func (s *WakeService) Wake(ctx context.Context, signal WakeSignal) (*WakeResult, error) {
 	if s == nil || s.portfolio == nil || s.activity == nil {
 		return nil, errors.New("agent run wake service is not configured")
 	}
@@ -95,7 +95,7 @@ func (s *AgentRunWakeService) Wake(ctx context.Context, signal WakeSignal) (*Wak
 	return result, nil
 }
 
-func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope models.Scope, at time.Time) (*WakeResult, error) {
+func (s *WakeService) WakeDueTimers(ctx context.Context, scope models.Scope, at time.Time) (*WakeResult, error) {
 	if s == nil || s.portfolio == nil || s.activity == nil {
 		return nil, errors.New("agent run wake service is not configured")
 	}
@@ -150,7 +150,7 @@ func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope models.Sc
 	return result, nil
 }
 
-func (s *AgentRunWakeService) wakeOne(ctx context.Context, run *models.AgentRun, signal WakeSignal) (*models.AgentRun, *models.ActivityEvent, error) {
+func (s *WakeService) wakeOne(ctx context.Context, run *models.AgentRun, signal WakeSignal) (*models.AgentRun, *models.ActivityEvent, error) {
 	woken, event, err := s.activity.TransitionRun(ctx, signal.Scope, run.ID, activity.RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: models.AgentRunStatusQueued,
 		Summary: fmt.Sprintf("Run woken by %s signal", signal.Type), Actor: signal.Actor,

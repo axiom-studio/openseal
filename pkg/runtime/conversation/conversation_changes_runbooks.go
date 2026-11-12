@@ -12,37 +12,37 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-// ConversationRunbookStatus is a routine's state as a routine card shows it.
-type ConversationRunbookStatus string
+// RunbookStatus is a routine's state as a routine card shows it.
+type RunbookStatus string
 
 const (
-	ConversationRunbookActive  ConversationRunbookStatus = "active"
-	ConversationRunbookPaused  ConversationRunbookStatus = "paused"
-	ConversationRunbookStopped ConversationRunbookStatus = "stopped"
+	RunbookActive  RunbookStatus = "active"
+	RunbookPaused  RunbookStatus = "paused"
+	RunbookStopped RunbookStatus = "stopped"
 )
 
 // conversationRunbookRunLookback bounds the Objective's newest Runs read to
 // find a routine's last Run.
 const conversationRunbookRunLookback = 20
 
-// ConversationRunbook is the live state of one routine (a runbook
+// Runbook is the live state of one routine (a runbook
 // activation) shown in a conversation: the fields a routine card overlays.
-type ConversationRunbook struct {
+type Runbook struct {
 	ID          string `json:"id"`
 	ObjectiveID string `json:"objectiveId"`
 	// Title is the routine's Objective title.
 	Title string `json:"title"`
 	// Status is stopped once the activation or its Objective is retired or
 	// finished, paused when either is paused, and active otherwise.
-	Status ConversationRunbookStatus `json:"status"`
+	Status RunbookStatus `json:"status"`
 	// Schedule is the cron schedule of a scheduled routine.
 	Schedule *runbook.Schedule `json:"schedule,omitempty"`
 	// Trigger says what starts the routine.
-	Trigger *ConversationRunbookTrigger `json:"trigger,omitempty"`
+	Trigger *RunbookTrigger `json:"trigger,omitempty"`
 	// NextRunAt is the next scheduled run of a scheduled routine, or for an
 	// event routine at its hourly limit, when its waiting events run.
-	NextRunAt *time.Time              `json:"nextRunAt,omitempty"`
-	LastRun   *ConversationRunbookRun `json:"lastRun,omitempty"`
+	NextRunAt *time.Time  `json:"nextRunAt,omitempty"`
+	LastRun   *RunbookRun `json:"lastRun,omitempty"`
 	// LastFiredAt, FiredLast24h, FiredLastHour and Pending count an event
 	// routine's started runs and waiting events (test events not counted
 	// as runs).
@@ -55,12 +55,12 @@ type ConversationRunbook struct {
 	// Revision is the activation's revision.
 	Revision int64 `json:"revision"`
 	// Script is the chat script a script routine runs.
-	Script *ConversationRunbookScript `json:"script,omitempty"`
+	Script *RunbookScript `json:"script,omitempty"`
 }
 
-// ConversationRunbookTrigger is what starts a routine. When is set only for
+// RunbookTrigger is what starts a routine. When is set only for
 // event routines; the client words schedules itself.
-type ConversationRunbookTrigger struct {
+type RunbookTrigger struct {
 	Kind        runbook.TriggerKind     `json:"kind"`
 	EventKind   models.RoutineEventKind `json:"eventKind,omitempty"`
 	When        string                  `json:"when,omitempty"`
@@ -68,13 +68,13 @@ type ConversationRunbookTrigger struct {
 	MaxPerHour  int                     `json:"maxPerHour,omitempty"`
 }
 
-// ConversationRunbookScript names the chat file a script routine runs.
-type ConversationRunbookScript struct {
+// RunbookScript names the chat file a script routine runs.
+type RunbookScript struct {
 	Path string `json:"path"`
 }
 
-// ConversationRunbookRun is the newest Run a routine started.
-type ConversationRunbookRun struct {
+// RunbookRun is the newest Run a routine started.
+type RunbookRun struct {
 	ID          string                `json:"id"`
 	Status      models.AgentRunStatus `json:"status"`
 	CreatedAt   time.Time             `json:"createdAt"`
@@ -87,9 +87,9 @@ type ConversationRunbookRun struct {
 // (Task.ConversationID) that are still active or paused. Linked routines that no longer exist are left
 // out. Every viewer of the conversation's change stream sees them; the
 // routine endpoints authorize any command.
-func (s *ConversationChangeService) listConversationRunbooks(ctx context.Context, conversation *models.Conversation) ([]*ConversationRunbook, error) {
+func (s *ChangeService) listConversationRunbooks(ctx context.Context, conversation *models.Conversation) ([]*Runbook, error) {
 	if s.runbooks == nil || conversation == nil {
-		return []*ConversationRunbook{}, nil
+		return []*Runbook{}, nil
 	}
 	activations := make([]*models.RunbookActivation, 0, len(conversation.RunbookActivationIDs))
 	seen := map[string]bool{}
@@ -123,7 +123,7 @@ func (s *ConversationChangeService) listConversationRunbooks(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*ConversationRunbook, 0, len(activations))
+	result := make([]*Runbook, 0, len(activations))
 	for _, activation := range activations {
 		var stats *models.RoutineEventActivity
 		if value, ok := activity[activation.ID]; ok {
@@ -141,7 +141,7 @@ func (s *ConversationChangeService) listConversationRunbooks(ctx context.Context
 // conversationRoutineEventActivity reads the run counts of the event
 // routines among activations in one store call; none when there are no event
 // routines or the store keeps no routine events.
-func (s *ConversationChangeService) conversationRoutineEventActivity(ctx context.Context, scope models.Scope, activations []*models.RunbookActivation) (map[string]models.RoutineEventActivity, error) {
+func (s *ChangeService) conversationRoutineEventActivity(ctx context.Context, scope models.Scope, activations []*models.RunbookActivation) (map[string]models.RoutineEventActivity, error) {
 	events, ok := s.portfolio.(models.RoutineEventStore)
 	if !ok {
 		return nil, nil
@@ -158,10 +158,10 @@ func (s *ConversationChangeService) conversationRoutineEventActivity(ctx context
 	return events.RoutineEventActivity(ctx, scope, ids, s.now())
 }
 
-func (s *ConversationChangeService) projectConversationRunbook(ctx context.Context, activation *models.RunbookActivation, activity *models.RoutineEventActivity) (*ConversationRunbook, error) {
-	projected := &ConversationRunbook{
-		ID: activation.ID, ObjectiveID: activation.ObjectiveID, Revision: activation.Revision, Status: ConversationRunbookActive,
-		Trigger: &ConversationRunbookTrigger{Kind: activation.Trigger.Kind}, PausedReason: activation.PausedReason,
+func (s *ChangeService) projectConversationRunbook(ctx context.Context, activation *models.RunbookActivation, activity *models.RoutineEventActivity) (*Runbook, error) {
+	projected := &Runbook{
+		ID: activation.ID, ObjectiveID: activation.ObjectiveID, Revision: activation.Revision, Status: RunbookActive,
+		Trigger: &RunbookTrigger{Kind: activation.Trigger.Kind}, PausedReason: activation.PausedReason,
 	}
 	if activation.Trigger.Schedule != nil {
 		schedule := *activation.Trigger.Schedule
@@ -190,17 +190,17 @@ func (s *ConversationChangeService) projectConversationRunbook(ctx context.Conte
 	}
 	switch {
 	case activation.Status == models.RunbookActivationRetired:
-		projected.Status = ConversationRunbookStopped
+		projected.Status = RunbookStopped
 	case objective != nil && objective.Status != models.ObjectiveStatusActive && objective.Status != models.ObjectiveStatusDraft && objective.Status != models.ObjectiveStatusPaused:
-		projected.Status = ConversationRunbookStopped
+		projected.Status = RunbookStopped
 	case activation.Status == models.RunbookActivationPaused || objective != nil && objective.Status == models.ObjectiveStatusPaused:
-		projected.Status = ConversationRunbookPaused
+		projected.Status = RunbookPaused
 	}
 	if objective != nil {
 		projected.Title = strings.TrimSpace(objective.Title)
 	}
 	if activation.Task != nil && activation.Task.Script != nil {
-		projected.Script = &ConversationRunbookScript{Path: activation.Task.Script.Path}
+		projected.Script = &RunbookScript{Path: activation.Task.Script.Path}
 	}
 	if projected.Title == "" && activation.Task != nil {
 		projected.Title = strings.TrimSpace(activation.Task.Goal)
@@ -212,7 +212,7 @@ func (s *ConversationChangeService) projectConversationRunbook(ctx context.Conte
 	if event != nil && activity != nil {
 		next = activity.NextRunAt
 	}
-	if projected.Status == ConversationRunbookActive && next != nil {
+	if projected.Status == RunbookActive && next != nil {
 		value := *next
 		projected.NextRunAt = &value
 	}
@@ -229,7 +229,7 @@ func (s *ConversationChangeService) projectConversationRunbook(ctx context.Conte
 			continue
 		}
 		if id, _ := run.Context["runbookActivationId"].(string); strings.TrimSpace(id) == activation.ID {
-			last := &ConversationRunbookRun{ID: run.ID, Status: run.Status, CreatedAt: run.CreatedAt}
+			last := &RunbookRun{ID: run.ID, Status: run.Status, CreatedAt: run.CreatedAt}
 			if run.CompletedAt != nil {
 				completed := *run.CompletedAt
 				last.CompletedAt = &completed
@@ -241,7 +241,7 @@ func (s *ConversationChangeService) projectConversationRunbook(ctx context.Conte
 	return projected, nil
 }
 
-func conversationRunbookProjectionDigest(runbooks []*ConversationRunbook) (string, error) {
+func conversationRunbookProjectionDigest(runbooks []*Runbook) (string, error) {
 	encoded, err := json.Marshal(runbooks)
 	if err != nil {
 		return "", err

@@ -2,7 +2,7 @@ package collaboration
 
 import "github.com/axiom-studio/openseal/pkg/models"
 
-func (s *CollaborationService) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
+func (s *Service) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
 	if s != nil {
 		s.executionPreparer = preparer
 	}

@@ -24,7 +24,7 @@ import (
 
 // skillSetupTaskFixture also returns the test's own connection to the
 // store's file, for the rows the tests tamper with.
-func skillSetupTaskFixture(t *testing.T) (*skillbinding.SkillBindingActionDispatcher, *sqlite.Store, *sql.DB, *models.ConversationTaskResult) {
+func skillSetupTaskFixture(t *testing.T) (*skillbinding.ActionDispatcher, *sqlite.Store, *sql.DB, *models.ConversationTaskResult) {
 	t.Helper()
 	store, db := kerneltest.NewSQLiteFileStore(t)
 	start := skillSetupTaskStart(t, store)
@@ -33,7 +33,7 @@ func skillSetupTaskFixture(t *testing.T) (*skillbinding.SkillBindingActionDispat
 		t.Fatal(err)
 	}
 	catalog := skillbindingtest.SkillActionCatalog(t, t.Context(), start.Scope, "agent")
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reader", Readiness: skill.DiscoveryReadinessBindable}}}, nil
 	}))
 	if err != nil {
@@ -55,7 +55,7 @@ func skillSetupTaskStart(t *testing.T, store *sqlite.Store) conversationrun.Star
 	if _, err := portfolio.NewSpaceService(store).CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Home", Look: models.DefaultSpaceLook}); err != nil {
 		t.Fatalf("seed space: %v", err)
 	}
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
 	})
@@ -70,7 +70,7 @@ func skillSetupTaskStart(t *testing.T, store *sqlite.Store) conversationrun.Star
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

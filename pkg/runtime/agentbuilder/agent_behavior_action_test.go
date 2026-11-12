@@ -58,7 +58,7 @@ func TestAgentManagementExecutorAcceptsActivePreviousContractVersion(t *testing.
 func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := slackConversationCatalog(t, ctx)
-	endpoints := externalconversation.NewExternalConversationEndpointService(store, catalog)
+	endpoints := externalconversation.NewEndpointService(store, catalog)
 	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Agent approvals", Adapter: adapter,
@@ -97,7 +97,7 @@ func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing
 	}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"}, AssignedAgentID: "slack-agent", Goal: "Configure Slack", Source: models.RunSourceChat,
 	})
 	if err != nil {
@@ -107,10 +107,10 @@ func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing
 		t.Fatal(err)
 	}
 	validator, _ := NewAgentBehaviorActionValidator(agents, endpoints)
-	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
+	policy := action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
 	})
-	proposal, err := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
+	proposal, err := action.NewCoordinator(store, store, catalog, policy, []action.ProposalValidator{validator}).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "slack-agent",
 		SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion, Action: models.AgentActionConfigureChannel,
 		Arguments:      map[string]interface{}{"endpointId": endpoint.ID, "messageSelection": "all_messages", "replyMode": "thread", "purposes": []interface{}{"conversation", "approvals"}, "rationale": "Use Slack for work and approvals"},
@@ -127,7 +127,7 @@ func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing
 		t.Fatalf("resolve=%#v err=%v", resolved, err)
 	}
 	dispatcher, _ := NewAgentBehaviorActionDispatcher(store, agents, nil, endpoints)
-	executed, err := action.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
+	executed, err := action.NewWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil || executed.Call.Status != models.ActionCallStatusSucceeded {
 		t.Fatalf("execute status=%s callError=%q output=%#v err=%v", executed.Call.Status, executed.Call.Error, executed.Call.Output, err)
 	}
@@ -149,7 +149,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	agents := agentBehaviorActionRegistry(t, ctx, scope, nil)
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"},
 		AssignedAgentID: "researcher", Goal: "Become more evidence focused", Source: models.RunSourceChat,
 	})
@@ -167,13 +167,13 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionRequireApproval, Reason: "Agent behavior changes require review",
+	policy := action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{
+			Disposition: action.DispositionRequireApproval, Reason: "Agent behavior changes require review",
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator})
+	coordinator := action.NewCoordinator(store, store, catalog, policy, []action.ProposalValidator{validator})
 	proposal, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 		SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion, Action: models.AgentActionAmendBehavior,
@@ -214,7 +214,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := action.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
+	executed, err := action.NewWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	agents := agentBehaviorActionRegistry(t, ctx, scope, nil)
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research-team"},
 		AssignedAgentID: "researcher", Goal: "Rename yourself", Source: models.RunSourceChat,
 	})
@@ -280,14 +280,14 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionRequireApproval, Reason: "Agent behavior changes require review",
+	policy := action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{
+			Disposition: action.DispositionRequireApproval, Reason: "Agent behavior changes require review",
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
 	propose := func(key string) (*models.ActionProposalResult, error) {
-		return action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
+		return action.NewCoordinator(store, store, catalog, policy, []action.ProposalValidator{validator}).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 			Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 			SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion, Action: models.AgentActionAmendBehavior,
 			Arguments:      map[string]interface{}{"displayName": "Team Researcher", "rationale": "The user asked for the rename"},
@@ -323,7 +323,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := action.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
+	executed, err := action.NewWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil || executed == nil || executed.Call.Status != models.ActionCallStatusSucceeded {
 		t.Fatalf("execution = %#v, %v", executed, err)
 	}
@@ -345,7 +345,7 @@ func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T
 		AgentMayPropose: true, AllowedFields: []string{"systemPrompt"}, RequiresApproval: true,
 		ApproverPrincipals: []string{"user:definition-owner"},
 	})
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"},
 		AssignedAgentID: "researcher", Goal: "Rename the Agent", Source: models.RunSourceChat,
 	})
@@ -363,13 +363,13 @@ func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionRequireApproval, Reason: "Agent behavior changes require review",
+	policy := action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{
+			Disposition: action.DispositionRequireApproval, Reason: "Agent behavior changes require review",
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	proposal, err := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
+	proposal, err := action.NewCoordinator(store, store, catalog, policy, []action.ProposalValidator{validator}).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 		SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion, Action: models.AgentActionAmendBehavior,
 		Arguments:      map[string]interface{}{"displayName": "Agent 008", "rationale": "The user approved the rename"},
@@ -389,7 +389,7 @@ func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := action.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
+	executed, err := action.NewWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil || executed == nil || executed.Call.Status != models.ActionCallStatusSucceeded {
 		t.Fatalf("execution = %#v, %v", executed, err)
 	}
@@ -583,7 +583,7 @@ func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T)
 			ctx := t.Context()
 			store := kerneltest.NewStore(t)
 			conversation := conversationtest.ApprovalModeConversation(t, store)
-			conversationtest.SetApprovalMode(t, runtimeconversation.NewConversationApprovalModeService(store), conversation, models.ConversationApprovalSkip)
+			conversationtest.SetApprovalMode(t, runtimeconversation.NewApprovalModeService(store), conversation, models.ConversationApprovalSkip)
 			// Published versions predate review: always, so their stored
 			// definitions carry no review floor.
 			legacy := models.AgentManagementSkill()
@@ -607,12 +607,12 @@ func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T)
 				if err != nil || bound.Action.AlwaysReview() {
 					t.Fatalf("legacy %s binding = %#v, %v", name, bound, err)
 				}
-				var seen action.ActionPolicyInput
-				policy := action.ActionPolicyEvaluatorFunc(func(ctx context.Context, input action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+				var seen action.PolicyInput
+				policy := action.PolicyEvaluatorFunc(func(ctx context.Context, input action.PolicyInput) (action.PolicyDecision, error) {
 					seen = input
 					return action.NewDefaultActionPolicy().EvaluateAction(ctx, input)
 				})
-				run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+				run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 					Scope: conversation.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, AssignedAgentID: "assistant",
 					Goal: "Rename the agent", Source: models.RunSourceObjective, Context: map[string]interface{}{"conversationId": conversation.ID},
 				})
@@ -622,7 +622,7 @@ func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T)
 				if claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: conversation.Scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || claimed == nil || claimed.ID != run.ID {
 					t.Fatalf("claim: %#v %v", claimed, err)
 				}
-				result, err := action.NewActionCoordinator(store, store, catalog, policy, nil).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
+				result, err := action.NewCoordinator(store, store, catalog, policy, nil).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 					Scope: conversation.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "assistant",
 					SkillID: models.AgentManagementSkillID, SkillVersion: version, Action: name,
 					Arguments: legacyAgentManagementArguments[name], IdempotencyKey: "legacy-" + name, Summary: "Apply legacy " + name,

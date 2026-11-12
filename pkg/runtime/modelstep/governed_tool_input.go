@@ -51,7 +51,7 @@ func governedDirectiveOf(directive *agentrun.ToolCallDirective) *GovernedInputDi
 const governedReviewSummaryInvalidMessage = GovernedReviewSummaryField + " must be one sentence of 1 to 600 characters."
 
 // ParseGovernedToolInput decodes the model's (or a producer directive's)
-// tool input. Errors are *ActionProposalRejection (model-visible).
+// tool input. Errors are *action.ProposalRejection (model-visible).
 func ParseGovernedToolInput(action capability.ModelAction, raw json.RawMessage, directive *GovernedInputDirective) (GovernedToolInput, error) {
 	object, err := decodeGovernedObject(raw)
 	if err != nil {
@@ -77,7 +77,7 @@ func ParseGovernedToolInput(action capability.ModelAction, raw json.RawMessage, 
 func decodeGovernedObject(raw json.RawMessage) (map[string]interface{}, error) {
 	var object map[string]interface{}
 	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
-		return nil, &runtimeaction.ActionProposalRejection{Code: runtimeaction.ProposalRejectionToolArgumentsInvalid, Message: "The tool input must be a JSON object.", Cause: err}
+		return nil, &runtimeaction.ProposalRejection{Code: runtimeaction.ProposalRejectionToolArgumentsInvalid, Message: "The tool input must be a JSON object.", Cause: err}
 	}
 	return object, nil
 }
@@ -126,7 +126,7 @@ func governedPlainInput(action capability.ModelAction, arguments map[string]inte
 	text, _ := value.(string)
 	text = strings.TrimSpace(text)
 	if !present || !utf8.ValidString(text) || text == "" || utf8.RuneCountInString(text) > maxGovernedReviewSummaryRunes {
-		return GovernedToolInput{}, &runtimeaction.ActionProposalRejection{Code: runtimeaction.ProposalRejectionReviewInvalid, Message: governedReviewSummaryInvalidMessage}
+		return GovernedToolInput{}, &runtimeaction.ProposalRejection{Code: runtimeaction.ProposalRejectionReviewInvalid, Message: governedReviewSummaryInvalidMessage}
 	}
 	input.ReviewSummary = text
 	return input, nil
@@ -158,10 +158,10 @@ func governedDirectiveInput(action capability.ModelAction, arguments map[string]
 func checkGovernedExternalOperation(action capability.ModelAction, operation *activity.ExternalOperationIdentity) error {
 	switch {
 	case operation == nil && governedExternalOperationRequired(action):
-		return &runtimeaction.ActionProposalRejection{Code: runtimeaction.ProposalRejectionExternalIdentityInvalid,
+		return &runtimeaction.ProposalRejection{Code: runtimeaction.ProposalRejectionExternalIdentityInvalid,
 			Message: "This action needs externalOperation: the stable resource it changes and the operation it performs."}
 	case operation != nil && !governedExternalOperationOffered(action):
-		return &runtimeaction.ActionProposalRejection{Code: runtimeaction.ProposalRejectionExternalIdentityInvalid,
+		return &runtimeaction.ProposalRejection{Code: runtimeaction.ProposalRejectionExternalIdentityInvalid,
 			Message: "This action does not take externalOperation; call it again without it."}
 	case operation != nil:
 		if err := operation.Validate(); err != nil {

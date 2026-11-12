@@ -45,16 +45,16 @@ const (
 // messages exist that the session does not hold.
 const catchUpHistoryOmittedText = "Earlier messages of this chat are not shown here. Read them with read_conversation_history when the request depends on them."
 
-// ConversationCatchUp turns visible channel messages newer than the session
+// CatchUp turns visible channel messages newer than the session
 // watermark into user entries.
-type ConversationCatchUp struct {
-	conversations *ConversationService
+type CatchUp struct {
+	conversations *Service
 	runs          models.PortfolioStore
-	attachments   *ConversationAttachmentReader // nil: message text only
+	attachments   *AttachmentReader // nil: message text only
 }
 
-func NewConversationCatchUp(conversations *ConversationService, runs models.PortfolioStore, attachments *ConversationAttachmentReader) *ConversationCatchUp {
-	return &ConversationCatchUp{conversations: conversations, runs: runs, attachments: attachments}
+func NewCatchUp(conversations *Service, runs models.PortfolioStore, attachments *AttachmentReader) *CatchUp {
+	return &CatchUp{conversations: conversations, runs: runs, attachments: attachments}
 }
 
 type CatchUpRequest struct {
@@ -90,7 +90,7 @@ type CatchUpResult struct {
 
 // Collect reads the messages in (session watermark, Through] that the viewer
 // can see and builds their user entries.
-func (c *ConversationCatchUp) Collect(ctx context.Context, req CatchUpRequest) (*CatchUpResult, error) {
+func (c *CatchUp) Collect(ctx context.Context, req CatchUpRequest) (*CatchUpResult, error) {
 	if c == nil || c.conversations == nil || c.runs == nil {
 		return nil, errors.New("conversation catch-up is not configured")
 	}
@@ -139,7 +139,7 @@ func (c *ConversationCatchUp) Collect(ctx context.Context, req CatchUpRequest) (
 
 // filter is the visible-message read of the session's lane: the thread of a
 // thread session, the whole channel (thread replies included) otherwise.
-func (c *ConversationCatchUp) filter(req CatchUpRequest, after int64) models.ChannelMessageFilter {
+func (c *CatchUp) filter(req CatchUpRequest, after int64) models.ChannelMessageFilter {
 	viewer := req.Viewer
 	return models.ChannelMessageFilter{
 		Scope: req.Conversation.Scope, ConversationID: req.Conversation.ID, ThreadRootID: req.Session.ThreadRootID,
@@ -149,7 +149,7 @@ func (c *ConversationCatchUp) filter(req CatchUpRequest, after int64) models.Cha
 
 // seedStart is where a new session's catch-up starts: just before the oldest
 // of the newest seedMessageCount visible messages (§4.5).
-func (c *ConversationCatchUp) seedStart(ctx context.Context, req CatchUpRequest, from int64) (int64, bool, error) {
+func (c *CatchUp) seedStart(ctx context.Context, req CatchUpRequest, from int64) (int64, bool, error) {
 	filter := c.filter(req, from)
 	filter.Descending, filter.Limit = true, seedMessageCount+1
 	recent, err := c.conversations.ListChannelMessages(ctx, filter)
@@ -169,7 +169,7 @@ func (c *ConversationCatchUp) seedStart(ctx context.Context, req CatchUpRequest,
 // read pages the visible messages after from, drops the session's own and
 // keeps the newest maximumCatchUpMessages. It returns them ascending and the
 // number dropped by the cap.
-func (c *ConversationCatchUp) read(ctx context.Context, req CatchUpRequest, from int64) ([]*models.ChannelMessage, int, error) {
+func (c *CatchUp) read(ctx context.Context, req CatchUpRequest, from int64) ([]*models.ChannelMessage, int, error) {
 	own := make(map[string]bool, len(req.InheritedRuns))
 	for id := range req.InheritedRuns {
 		own[id] = true
@@ -207,7 +207,7 @@ func (c *ConversationCatchUp) read(ctx context.Context, req CatchUpRequest, from
 // kernel failure reply. People's messages are never skipped; neither is a
 // message of a Run bound to another session (a task report from a child
 // session, another thread's answer). cache maps run ids to the verdict.
-func (c *ConversationCatchUp) ownSessionMessage(ctx context.Context, session *models.AgentSession, message *models.ChannelMessage, cache map[string]bool) (bool, error) {
+func (c *CatchUp) ownSessionMessage(ctx context.Context, session *models.AgentSession, message *models.ChannelMessage, cache map[string]bool) (bool, error) {
 	if message == nil || message.Sender.Type == models.ConversationParticipantUser {
 		return false, nil
 	}
@@ -238,7 +238,7 @@ func (c *ConversationCatchUp) ownSessionMessage(ctx context.Context, session *mo
 // entries builds the user entries of messages, newest first within
 // catchUpAppendBytes, and returns them ascending with the number that did not
 // fit.
-func (c *ConversationCatchUp) entries(ctx context.Context, req CatchUpRequest, messages []*models.ChannelMessage) ([]*models.SessionEntry, int) {
+func (c *CatchUp) entries(ctx context.Context, req CatchUpRequest, messages []*models.ChannelMessage) ([]*models.SessionEntry, int) {
 	teamOwned := req.Conversation.Owner.Type == models.OwnerTypeTeam
 	out := make([]*models.SessionEntry, len(messages))
 	budget, first := catchUpAppendBytes, len(messages)

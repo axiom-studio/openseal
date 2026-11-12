@@ -54,7 +54,7 @@ func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *te
 			id      string
 			visible bool
 		}{{"kev", true}, {"other-user", false}} {
-			messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: run.Scope, ConversationID: trigger.ConversationID, ThreadRootID: trigger.ID, Limit: 20, Viewer: &models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: viewer.id}}})
+			messages, err := runtimeconversation.NewService(store).ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: run.Scope, ConversationID: trigger.ConversationID, ThreadRootID: trigger.ID, Limit: 20, Viewer: &models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: viewer.id}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -83,7 +83,7 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 			t.Fatalf("first attempt claim: %#v %v", claims, err)
 		}
 		commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
-		retry, err := commands.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: models.ActivityActor{Type: "user", ID: "kev"}})
+		retry, err := commands.RetryConversationRun(t.Context(), agentrun.CommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: models.ActivityActor{Type: "user", ID: "kev"}})
 		if err != nil || retry.Run.ID != first.ID {
 			t.Fatalf("explicit safe retry stopped working: %#v %v", retry, err)
 		}
@@ -131,7 +131,7 @@ func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t
 			t.Fatal("forged origin published an Agent answer")
 		}
 	}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: trigger.Sequence + 1,
 		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID}, Intent: models.MessageIntentAnswer, Content: "The saved explanation", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
 		References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}, IdempotencyKey: models.ConversationTaskFinalResponseKey(run)})
@@ -153,7 +153,7 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 		for _, startsThread := range []bool{false, true} {
 			scope := models.Scope{Kind: "tenant", ID: "canonical-scheduled-failure-" + uuid.NewString()}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
-			service := runtimeconversation.NewConversationService(store)
+			service := runtimeconversation.NewService(store)
 			seedTestSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Scheduled user question", IdempotencyKey: uuid.NewString()})
 			if err != nil {
@@ -168,7 +168,7 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 			if err != nil || posted.Message.RequiresResponse {
 				t.Fatalf("canonical source fixture unexpectedly opted into response flag: %#v %v", posted, err)
 			}
-			scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -196,7 +196,7 @@ func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	control, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
+	control, err := runtimeconversation.NewService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "kev"}, Intent: models.MessageIntentSystem,
 		Content: "Control projection", RequiresResponse: true, StartThread: true,
@@ -232,7 +232,7 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 		if message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run)); message != nil || !errors.Is(err, models.ErrChannelMessageNotFound) && err != nil {
 			t.Fatalf("an application chat received a failure answer for a credit stop: %#v %v", message, err)
 		}
-		retry, err := agentrun.NewRunCommandService(store).RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Actor: models.ActivityActor{Type: "user", ID: "kev"}})
+		retry, err := agentrun.NewRunCommandService(store).RetryConversationRun(t.Context(), agentrun.CommandRequest{Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Actor: models.ActivityActor{Type: "user", ID: "kev"}})
 		if err != nil || retry.Run.CreditError != nil || retry.Run.Status != models.AgentRunStatusQueued {
 			t.Fatalf("retry after adding credits kept the credit stop: %#v %v", retry, err)
 		}
@@ -251,7 +251,7 @@ func TestFailedConversationReplySkipsServiceWakeWithoutRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wake, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
+	wake, err := runtimeconversation.NewService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 		Sender: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "skill-setup-coordinator"}, Intent: models.MessageIntentUpdate,
 		Content: "Gmail is connected", StartThread: true,

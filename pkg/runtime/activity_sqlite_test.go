@@ -24,7 +24,7 @@ func TestSQLiteActivityIsOrderedAndDurable(t *testing.T) {
 	}
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
-	run, err := runtimeportfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := runtimeportfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "work", Source: models.RunSourceManual,
 	})
 	if err != nil {
@@ -125,7 +125,7 @@ func TestSQLiteMigratesAgentRunRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	loaded, err := runtimeportfolio.NewPortfolioService(store).GetAgentRun(context.Background(), run.Scope, run.ID)
+	loaded, err := runtimeportfolio.NewService(store).GetAgentRun(context.Background(), run.Scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestSQLiteRunTransitionIsAtomicAndDurable(t *testing.T) {
 	}
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
-	portfolio := runtimeportfolio.NewPortfolioService(store)
+	portfolio := runtimeportfolio.NewService(store)
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "work", Source: models.RunSourceManual,
 	})
@@ -188,7 +188,7 @@ func TestSQLiteRunTransitionIsAtomicAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	loaded, err := runtimeportfolio.NewPortfolioService(reopened).GetAgentRun(ctx, scope, run.ID)
+	loaded, err := runtimeportfolio.NewService(reopened).GetAgentRun(ctx, scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

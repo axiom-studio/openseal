@@ -18,8 +18,8 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	ctx := context.Background()
 	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
-	service := runtimeconversation.NewConversationApprovalModeService(store)
-	coordinator := action.NewActionCoordinator(store, store, conversationtest.ApprovalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
+	service := runtimeconversation.NewApprovalModeService(store)
+	coordinator := action.NewCoordinator(store, store, conversationtest.ApprovalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
 
 	occurrence := &models.AgentRun{ID: "occurrence", Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{

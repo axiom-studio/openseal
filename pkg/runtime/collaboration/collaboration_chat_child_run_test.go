@@ -57,5 +57,5 @@ var collaborationChildSource = map[models.AgentRequestKind]models.RunSource{mode
 func handOffRespondTo(source, run *models.AgentRun) string {
 	trigger := &models.ChannelMessage{ID: "ask", ConversationID: "chat", Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"}}
 	conversation := &models.Conversation{ID: "chat", Scope: source.Scope, Owner: source.Owner}
-	return runtimeconversation.RunContextRespondTo(runtimeconversation.ConversationContextInput{Run: run, Conversation: conversation, Trigger: trigger})
+	return runtimeconversation.RunContextRespondTo(runtimeconversation.ContextInput{Run: run, Conversation: conversation, Trigger: trigger})
 }

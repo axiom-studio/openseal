@@ -38,7 +38,7 @@ func (e RepeatEffect) Valid() bool {
 type LoopToolKind string
 
 const (
-	LoopToolGoverned LoopToolKind = "governed" // Skill/MCP action through ActionCoordinator
+	LoopToolGoverned LoopToolKind = "governed" // Skill/MCP action through action.Coordinator
 	LoopToolHost     LoopToolKind = "host"     // host tool (workspace.*) dispatched to the step host
 	LoopToolKernel   LoopToolKind = "kernel"   // kernel control tool (final, wait, fork, ...)
 )
@@ -138,7 +138,7 @@ type RepeatSubject struct {
 	//   kernel:   the kernel tool name
 	Identity string
 	// Arguments are the EXECUTED arguments: for governed calls the inner action
-	// arguments handed to ActionCoordinator (review envelope removed); for host
+	// arguments handed to action.Coordinator (review envelope removed); for host
 	// tools the tool args.
 	Arguments         map[string]interface{}
 	ExternalOperation *activity.ExternalOperationIdentity

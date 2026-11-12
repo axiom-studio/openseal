@@ -12,7 +12,7 @@ import (
 
 func TestChannelTimelineQueryRejectsAmbiguousValues(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	seedSpace(t, store, models.Scope{Kind: "tenant", ID: "one"}, "")
 	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"},

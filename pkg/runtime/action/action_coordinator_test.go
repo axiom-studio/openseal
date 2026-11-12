@@ -32,17 +32,17 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 		},
 		Attempt: 1, MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	})
-	policy := action.ActionPolicyEvaluatorFunc(func(_ context.Context, input action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+	policy := action.PolicyEvaluatorFunc(func(_ context.Context, input action.PolicyInput) (action.PolicyDecision, error) {
 		if input.Bound.Action.Name != "deploy" || input.Run.ID != run.ID {
 			t.Fatalf("policy input mismatch: %#v", input)
 		}
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionRequireApproval, Reason: "production change",
+		return action.PolicyDecision{
+			Disposition: action.DispositionRequireApproval, Reason: "production change",
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "release-manager"}}, ApprovalTTL: time.Hour,
 			ApprovalTimeout: models.ApprovalTimeoutApprove,
 		}, nil
 	})
-	coordinator := action.NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now.Add(time.Second) }))
+	coordinator := action.NewCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	ids := []string{"call", "approval", "event"}
 	coordinator.SetNewID(func() string {
 		id := ids[0]
@@ -106,15 +106,15 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 	catalog, scope := actiontest.GovernedCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := actiontest.ClaimedRun(t, store, scope, now, "worker")
-	decision := action.ActionDispositionAllow
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: decision, Reason: "test"}, nil
+	decision := action.DispositionAllow
+	coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: decision, Reason: "test"}, nil
 	}), nil, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	coordinator.SetNewID(func() string { return "id-" + string(decision) })
 	base := action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy"}
 	invalid := actiontest.LoopProposeRequest(base, "invalid")
 	invalid.Arguments = map[string]interface{}{"environment": 42}
-	var rejection *action.ActionProposalRejection
+	var rejection *action.ProposalRejection
 	if _, err := coordinator.Propose(ctx, invalid); !errors.As(err, &rejection) || rejection.Code != action.ProposalRejectionToolArgumentsInvalid {
 		t.Fatalf("invalid input schema error = %v", err)
 	}
@@ -147,9 +147,9 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 	store := kerneltest.NewStore(t)
 	catalog, scope := actiontest.GovernedCatalog(t)
 	policyEvaluations := 0
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+	coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
 		policyEvaluations++
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+		return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 	}), nil)
 	identity := &activity.ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}
 
@@ -184,11 +184,11 @@ func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	catalog, scope := externalOperationPolicyCatalog(t)
 	run := actiontest.ClaimedRun(t, store, scope, time.Now().UTC(), "worker")
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+	coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 	}), nil)
 	base := actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "browser-agent", SkillID: "browser", SkillVersion: "1.0.0", Arguments: map[string]interface{}{}}, "operation-policy")
-	var rejection *action.ActionProposalRejection
+	var rejection *action.ProposalRejection
 	forbidden := base
 	forbidden.Action = "click"
 	forbidden.ExternalOperation = &activity.ExternalOperationIdentity{Resource: "browser-session:one", Operation: "login"}

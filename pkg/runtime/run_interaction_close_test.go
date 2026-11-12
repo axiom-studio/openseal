@@ -46,7 +46,7 @@ func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
 		"kind": "payment_card", "reason": "Add your card so I can pay 319.00 INR on amazon.in"})
 	run := f.Run
-	executed := f.Execute(action.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+	executed := f.Execute(action.NewWorker(store, catalog, nil, dispatcher), call.ID)
 	card, _ := executed.Call.Output["credentialRequest"].(map[string]interface{})
 	requestID, _ := card["id"].(string)
 	if executed.Call.Status != models.ActionCallStatusSucceeded || requestID == "" {
@@ -63,8 +63,8 @@ func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := agentrun.NewRunCommandService(interactionCallsStore{store, []*models.ActionCall{interactionCall(scope, run.ID, "setup-call", agentrun.SkillActionRequestSetup, "setupRequest", "setup-1")}})
-	canceled, err := commands.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: parked.Revision,
-		Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: "user-1"}})
+	canceled, err := commands.CommandAgentRun(ctx, agentrun.CommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: parked.Revision,
+		Kind: agentrun.CommandCancel, Actor: models.ActivityActor{Type: "user", ID: "user-1"}})
 	if err != nil || canceled.Run.Status != models.AgentRunStatusCanceled {
 		t.Fatalf("cancel: %#v %v", canceled, err)
 	}
@@ -94,7 +94,7 @@ func TestCompletedRunKeepsSetupFormsButClosesCredentialRequests(t *testing.T) {
 func testFinishedRunKeepsSetupForms(t *testing.T, status models.AgentRunStatus) {
 	ctx, store, _, _, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 	now := time.Now().UTC()
-	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
+	created, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 		AssignedAgentID: "agent", Goal: "Reply in the chat", Source: models.RunSourceChat})
 	if err != nil {
 		t.Fatal(err)

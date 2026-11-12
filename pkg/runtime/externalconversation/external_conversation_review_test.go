@@ -63,7 +63,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 			if err != nil || len(deliveries) != 2 {
 				t.Fatalf("duplicate/missing review links: %#v %v", deliveries, err)
 			}
-			scheduler, err := conversationrun.NewConversationRunScheduler(fixture.store, fixture.store, conversationrun.ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewScheduler(fixture.store, fixture.store, conversationrun.SchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -174,7 +174,7 @@ func TestOriginApprovalDestinationRequiresDurableImportedTrigger(t *testing.T) {
 	}
 	run.Context = map[string]interface{}{"conversationId": fixture.conversation.ID, "triggerMessageId": fixture.inbound.ID}
 	saveReviewTestRun(t, fixture.store, run)
-	service := NewExternalConversationTransportService(fixture.store, fixture.catalog)
+	service := NewTransportService(fixture.store, fixture.catalog)
 	approval := &models.ApprovalCheckpoint{Scope: fixture.run.Scope, RunID: fixture.run.ID}
 	if allowed, err := service.approvalOriginDestination(t.Context(), approval, fixture.endpoint); err != nil || !allowed {
 		t.Fatalf("origin rejected %v %v", allowed, err)
@@ -222,7 +222,7 @@ func TestOriginApprovalConversationMembersMayDecide(t *testing.T) {
 			t.Fatal(err)
 		}
 		event := models.NormalizedExternalConversationEvent{ID: "decision", Type: capability.ConversationEventApprovalDecided, ExternalConversationID: "C123", ExternalMessageID: "171.003", OrderingKey: "C123:171.003", OccurredAt: now, ExternalParticipantID: "UANY", Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID, "invocationDigest": call.InvocationDigest, "decision": decision, "principalType": "external_participant", "principalId": "UOTHER"}}
-		service := NewExternalConversationTransportService(fixture.store, fixture.catalog)
+		service := NewTransportService(fixture.store, fixture.catalog)
 		if _, err := service.resolveExternalApprovalDecision(t.Context(), fixture.endpoint, event); err == nil {
 			t.Fatal("mismatched provider identity accepted")
 		}

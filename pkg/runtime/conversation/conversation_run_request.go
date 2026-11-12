@@ -7,13 +7,13 @@ import (
 )
 
 const (
-	ConversationRunContextTriggerSeq = "triggerSequence"
+	RunContextTriggerSeq = "triggerSequence"
 )
 
-// ConversationMessageInitiatingUser resolves only the canonical scoped human
+// MessageInitiatingUser resolves only the canonical scoped human
 // identity. A host-owned voice-call start may name its authenticated initiator;
 // arbitrary service metadata and copied Run context never grant that authority.
-func ConversationMessageInitiatingUser(conversation *models.Conversation, message *models.ChannelMessage) (models.ConversationParticipant, bool) {
+func MessageInitiatingUser(conversation *models.Conversation, message *models.ChannelMessage) (models.ConversationParticipant, bool) {
 	if conversation == nil || message == nil || message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
 		return models.ConversationParticipant{}, false
 	}
@@ -24,7 +24,7 @@ func ConversationMessageInitiatingUser(conversation *models.Conversation, messag
 	return actor, actor.Type == models.ConversationParticipantUser && actor.Validate() == nil
 }
 
-func ConversationAgentRunRequest(conversation *models.Conversation, message *models.ChannelMessage) models.CreateAgentRunRequest {
+func AgentRunRequest(conversation *models.Conversation, message *models.ChannelMessage) models.CreateAgentRunRequest {
 	goal := teamRoutingRunGoal
 	assignedAgentID := ""
 	visibility := models.ActivityVisibilityTeam
@@ -40,7 +40,7 @@ func ConversationAgentRunRequest(conversation *models.Conversation, message *mod
 		Context: map[string]interface{}{
 			models.ConversationRunConversationIDContextKey: conversation.ID,
 			models.ConversationRunTriggerIDContextKey:      message.ID,
-			ConversationRunContextTriggerSeq:               message.Sequence,
+			RunContextTriggerSeq:                           message.Sequence,
 		},
 		IdempotencyKey: conversationRunIdempotencyKey(conversation.Scope, conversation.ID, message.ID),
 		Actor:          models.ActivityActor{Type: "service", ID: models.ConversationRunSchedulerParticipant},
@@ -66,9 +66,9 @@ func conversationRunIdempotencyKey(scope models.Scope, conversationID, messageID
 	return "conversation-run:" + models.SHA256DigestString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+messageID)
 }
 
-// ConversationPlace is a place find_place found in a chat, as the Agent
+// Place is a place find_place found in a chat, as the Agent
 // sees it in its turn context.
-type ConversationPlace struct {
+type Place struct {
 	Place string  `json:"place"`
 	Name  string  `json:"name"`
 	Lat   float64 `json:"lat"`

@@ -14,11 +14,11 @@ import (
 
 // NewPool is an action worker pool for scope whose credentials always
 // resolve to a test token.
-func NewPool(t *testing.T, store models.KernelStore, catalog *skill.Catalog, scope models.Scope, interval time.Duration, concurrency int, dispatcher agentrun.ActionDispatcher) *action.ActionWorkerPool {
+func NewPool(t *testing.T, store models.KernelStore, catalog *skill.Catalog, scope models.Scope, interval time.Duration, concurrency int, dispatcher agentrun.ActionDispatcher) *action.WorkerPool {
 	t.Helper()
-	pool, err := action.NewActionWorkerPool(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+	pool, err := action.NewWorkerPool(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "test-secret"}, nil
-	}), dispatcher, nil, action.ActionWorkerConfig{Scope: scope, Concurrency: concurrency, PollInterval: interval, LeaseDuration: time.Second})
+	}), dispatcher, nil, action.WorkerConfig{Scope: scope, Concurrency: concurrency, PollInterval: interval, LeaseDuration: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func NewPool(t *testing.T, store models.KernelStore, catalog *skill.Catalog, sco
 func CreatePoolWork(t *testing.T, store models.KernelStore, catalog *skill.Catalog, scope models.Scope) *models.ActionProposalResult {
 	t.Helper()
 	now := time.Now().Add(-2 * time.Second)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,
 	})
@@ -51,8 +51,8 @@ func CreatePoolWork(t *testing.T, store models.KernelStore, catalog *skill.Catal
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+	coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 	}), nil, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	proposal, err := coordinator.Propose(t.Context(), action.ProposeActionRequest{
 		Scope: scope, RunID: claimed.ID, TurnID: step.ID, WorkerID: "agent-worker", DeploymentID: "release-agent", Origin: models.ActionOriginVM, OriginRef: "command-1",

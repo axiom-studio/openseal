@@ -36,7 +36,7 @@ func ScheduledTask(t *testing.T, store models.KernelStore, runbookDefinitions ..
 	scope := models.Scope{Kind: "tenant", ID: "task-test"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}
 	reader := store.(models.ConversationStore)
-	service := conversation.NewConversationService(reader)
+	service := conversation.NewService(reader)
 	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	c, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
 	if err != nil {
@@ -46,7 +46,7 @@ func ScheduledTask(t *testing.T, store models.KernelStore, runbookDefinitions ..
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: owner.ID, ActingUser: "user", Goal: "Handle request", Source: models.RunSourceChat, Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: c.ID, models.ConversationRunTriggerIDContextKey: posted.Message.ID}})
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: owner.ID, ActingUser: "user", Goal: "Handle request", Source: models.RunSourceChat, Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: c.ID, models.ConversationRunTriggerIDContextKey: posted.Message.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}

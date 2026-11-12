@@ -34,7 +34,7 @@ func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
 	}
 
 	// A create_team card gets the same policy as an agent card.
-	coordinator := NewActionCoordinator(kerneltest.NewStore(t), kerneltest.NewStore(t), skill.NewCatalog(), NewDefaultActionPolicy(), nil)
+	coordinator := NewCoordinator(kerneltest.NewStore(t), kerneltest.NewStore(t), skill.NewCatalog(), NewDefaultActionPolicy(), nil)
 	coordinator.newID = func() string { return "approval-team" }
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	team := bound(models.TeamManagementSkillID, "create_team")
@@ -43,8 +43,8 @@ func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
 	approval := coordinator.newApprovalCheckpoint(context.Background(),
 		ProposeActionRequest{Scope: models.Scope{Kind: "tenant", ID: "tenant-a"}}, &models.AgentRun{ID: "run-team"}, team, map[string]interface{}{},
 		map[string]interface{}{"resourceType": "team", "operation": "create_team"}, call,
-		ActionPolicyDecision{
-			Disposition: ActionDispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}},
+		PolicyDecision{
+			Disposition: DispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}},
 			ApprovalTTL: time.Hour, ApprovalTimeout: models.ApprovalTimeoutApprove, ApprovalDestinations: []models.ApprovalDestination{{EndpointID: "slack"}},
 		}, "Create the team", now)
 	if !approval.ExpiresAt.Equal(now.Add(agentBuilderApprovalTTL)) || approval.TimeoutDecision != models.ApprovalTimeoutExpire || len(approval.Destinations) != 0 {

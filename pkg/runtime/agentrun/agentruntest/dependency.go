@@ -63,15 +63,15 @@ func NewDependencyFixtureInScope(t *testing.T, store DependencyStore, scope mode
 func NewDependencyFixtureWithPolicy(t *testing.T, store DependencyStore, scope models.Scope, policy models.RunDependencyPolicy) *DependencyFixture {
 	t.Helper()
 	fixture := &DependencyFixture{Store: store, Scope: scope, ChildIDs: make(map[string]string), Now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
-	portfolioService := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return fixture.Now }))
+	portfolioService := portfolio.NewService(store, models.WithClock(func() time.Time { return fixture.Now }))
 	source, err := portfolioService.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: fixture.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead", Goal: "Join two independently running branches", Source: models.RunSourceManual, Checkpoint: map[string]interface{}{"committed": "preserve"}, Budget: &models.BudgetPolicy{MaxTurns: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture.SourceID = source.ID
 	schedulerClock := func() time.Time { return fixture.Now.Add(time.Second) }
-	scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return schedulerClock() }))
-	claimed, err := scheduler.ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: fixture.Scope, WorkerID: "source-worker", LeaseDuration: time.Minute})
+	scheduler := agentrun.NewScheduler(store, models.WithClock(func() time.Time { return schedulerClock() }))
+	claimed, err := scheduler.ClaimNext(t.Context(), agentrun.ClaimRequest{Scope: fixture.Scope, WorkerID: "source-worker", LeaseDuration: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != source.ID {
 		t.Fatalf("claim source=%#v, %v", claimed, err)
 	}
@@ -125,7 +125,7 @@ func NewDependencyFixtureWithPolicy(t *testing.T, store DependencyStore, scope m
 	}
 	schedulerClock = func() time.Time { return fixture.Now.Add(3 * time.Second) }
 	for range len(branches) {
-		child, err := scheduler.ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: fixture.Scope, WorkerID: "child-worker", LeaseDuration: time.Minute})
+		child, err := scheduler.ClaimNext(t.Context(), agentrun.ClaimRequest{Scope: fixture.Scope, WorkerID: "child-worker", LeaseDuration: time.Minute})
 		if err != nil || child == nil || child.ParentRunID != source.ID {
 			t.Fatalf("claim child=%#v, %v", child, err)
 		}
@@ -216,14 +216,14 @@ func (f *DependencyFixture) ResolveChild(t *testing.T, branch string, child *mod
 
 // Command applies an operator command to the source Run and returns it as
 // stored.
-func (f *DependencyFixture) Command(t *testing.T, kind agentrun.AgentRunCommandKind) *models.AgentRun {
+func (f *DependencyFixture) Command(t *testing.T, kind agentrun.CommandKind) *models.AgentRun {
 	t.Helper()
 	source, err := f.Store.GetAgentRun(t.Context(), f.Scope, f.SourceID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	commands := agentrun.NewRunCommandService(f.Store, models.WithClock(func() time.Time { return f.Now.Add(5 * time.Second) }))
-	result, err := commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: f.Scope, RunID: f.SourceID, ExpectedRevision: source.Revision, Kind: kind, Actor: models.ActivityActor{Type: "user", ID: "operator"}})
+	result, err := commands.CommandAgentRun(t.Context(), agentrun.CommandRequest{Scope: f.Scope, RunID: f.SourceID, ExpectedRevision: source.Revision, Kind: kind, Actor: models.ActivityActor{Type: "user", ID: "operator"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func (f *DependencyFixture) Command(t *testing.T, kind agentrun.AgentRunCommandK
 func (f *DependencyFixture) TerminateSource(t *testing.T, status models.AgentRunStatus) {
 	t.Helper()
 	if status == models.AgentRunStatusCanceled {
-		f.Command(t, agentrun.AgentRunCommandCancel)
+		f.Command(t, agentrun.CommandCancel)
 		return
 	}
 	service := activity.NewRunActivityService(f.Store, f.Store, models.WithClock(func() time.Time { return f.Now.Add(5 * time.Second) }))

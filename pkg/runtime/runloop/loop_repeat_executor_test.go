@@ -25,7 +25,7 @@ import (
 type repeatExecFixture struct {
 	*actiontest.LoopStore
 	sessions    models.AgentSessionStore
-	coordinator *action.ActionCoordinator
+	coordinator *action.Coordinator
 	step        int64
 }
 
@@ -43,7 +43,7 @@ func newRepeatExecFixture(t *testing.T) *repeatExecFixture {
 	if f.Run.SessionID == "" {
 		t.Fatal("the Run has no session")
 	}
-	coordinator := action.NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.Now }))
+	coordinator := action.NewCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.Now }))
 	return &repeatExecFixture{LoopStore: f, sessions: store, coordinator: coordinator}
 }
 

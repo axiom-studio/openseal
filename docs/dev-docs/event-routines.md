@@ -38,7 +38,7 @@ routines use only the creator's own Google sign-in.
 
 ## Matcher and index
 
-Producers hand a `RoutineEvent` to `RoutineEventMatcher`
+Producers hand a `RoutineEvent` to `routine.EventMatcher`
 (`routine_event_matcher.go`). The matcher never starts a Run and never calls a
 provider.
 
@@ -54,7 +54,7 @@ allocation (`BenchmarkRoutineEventOfferUnbound`,
 The index is kept current by signals, not polling:
 
 - `RunbookActivationService` refreshes the local scope after every committed
-  activation write and calls the host's `RoutineIndexPublisher`.
+  activation write and calls the host's `routine.IndexPublisher`.
 - Other processes receive the signal and call `Engine.RefreshRoutineIndex(scope)`
   (one indexed query). Cortex publishes on the Valkey channel
   `openseal:routine-index:v1`.
@@ -75,7 +75,7 @@ the routine's creator can send them.
 
 ## Dispatcher and caps
 
-`RoutineEventDispatcher` (`routine_event_dispatcher.go`) starts the Runs. Its
+`routine.EventDispatcher` (`routine_event_dispatcher.go`) starts the Runs. Its
 loop wakes on the matcher's nudge or a 10 second tick. The host runs it through
 `Engine.RunRoutineEventDispatcher(ctx, interval, leads)` and passes its sweep
 leader check, so only one process starts runs; a single-process host passes
@@ -88,7 +88,7 @@ For each routine with waiting events it:
 2. Waits while the routine already has a non-terminal Run (one active run per
    routine, the scheduler's `backpressured` rule).
 3. Skips the rest of the tenant's work for this pass when the tenant has 10
-   event Runs not yet finished (`RoutineEventTenantRunCap`, option
+   event Runs not yet finished (`routine.EventTenantRunCap`, option
    `WithRoutineEventTenantRunCap`).
 4. Retires the routine when its real batches reach `maximumOccurrences`, and
    claims only test events while it has started `maxPerHour` real batches in
@@ -107,7 +107,7 @@ The Run's session gets the brief plus one `routine_event` user entry
 (`routine_event_seed.go`). Its text is fixed kernel wording that says the
 events are outside data; the events themselves are one JSON part when they fit
 64 KiB, or a chat file `routine-events/<batchID>.json` through the host's
-`RoutineEventFileKeeper`. Event Runs always use manual approval mode, so only
+`routine.EventFileKeeper`. Event Runs always use manual approval mode, so only
 the brief's grants run without asking. A routine occurrence may finish with
 `silent: true` when it changed nothing; then nothing is posted.
 

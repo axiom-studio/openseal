@@ -135,7 +135,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 		t.Fatal(err)
 	}
 	store := &runbookAuditRecords{Store: kerneltest.NewStore(t)}
-	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+	objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Research", Goal: "Find evidence", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
@@ -149,7 +149,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, Entrypoint: "daily",
 		Goal: "Perform daily research", Source: models.RunSourceSchedule, Context: map[string]interface{}{"runbookActivationId": activation.ID},
 	})
@@ -267,7 +267,7 @@ func TestRunExecutionAuditProjectsConversationalRunAsOneGraph(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "conversation-audit"}
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	store := &runbookAuditRecords{Store: kerneltest.NewStore(t)}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"},
 		AssignedAgentID: "assistant", Goal: "Respond to an Agent channel message", Source: models.RunSourceRequest,
 		Context: map[string]interface{}{"conversationId": "conversation-one"},

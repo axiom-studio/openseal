@@ -26,7 +26,7 @@ func LoopProposeRequest(req action.ProposeActionRequest, toolCallID string) acti
 	return req
 }
 
-// ProposalValidatorFunc adapts a function to ActionProposalValidator.
+// ProposalValidatorFunc adapts a function to action.ProposalValidator.
 type ProposalValidatorFunc func(context.Context, agentrun.ActionProposalValidationInput) (map[string]interface{}, error)
 
 // ValidateActionProposal calls f.
@@ -35,7 +35,7 @@ func (f ProposalValidatorFunc) ValidateActionProposal(ctx context.Context, input
 }
 
 // ProposeLoopAction stores a ready loop call of step-1 for the Run's lease
-// owner workerID, as ActionCoordinator.Propose does for a governed loop tool
+// owner workerID, as action.Coordinator.Propose does for a governed loop tool
 // call: the Run is unchanged except for the action reservation of a budgeted
 // Run.
 func ProposeLoopAction(t *testing.T, store models.KernelStore, catalog agentrun.ActionExecutionCatalog, run *models.AgentRun, workerID string, now time.Time, spec LoopActionSpec) *models.ActionProposalResult {

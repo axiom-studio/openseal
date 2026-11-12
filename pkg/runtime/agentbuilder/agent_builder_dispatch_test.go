@@ -446,7 +446,7 @@ func TestAgentBuilderListAgents(t *testing.T) {
 
 func TestAgentBuilderDispatcherPassesOtherActionsOn(t *testing.T) {
 	f := agentbuildertest.NewDispatchFixture(t)
-	fallback := action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	fallback := action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"fallback": true}, nil
 	})
 	dispatcher, err := agentbuildertest.NewDispatcher(f.Store, f.Agents, f.Teams, f.Catalog, f.Provision, nil, fallback)
@@ -476,7 +476,7 @@ func TestAgentBuilderParkedRunDoesNotBlockNewChatRuns(t *testing.T) {
 		if f.Run.Status != models.AgentRunStatusWaitingForApproval {
 			t.Fatalf("parked Run = %s", f.Run.Status)
 		}
-		portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return f.Now }))
+		portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return f.Now }))
 		next, err := portfolio.CreateAgentRun(f.Ctx, models.CreateAgentRunRequest{
 			Scope: f.Scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 			AssignedAgentID: "agent", Goal: "Build another Agent", Source: models.RunSourceChat,

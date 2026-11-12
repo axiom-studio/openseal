@@ -51,7 +51,7 @@ func (c *participationCatalog) GetAgentDefinition(_ context.Context, id, version
 	}
 	return c.definitions[id], nil
 }
-func participationFixture() (*participationCatalog, conversation.ConversationParticipantQuery) {
+func participationFixture() (*participationCatalog, conversation.ParticipantQuery) {
 	scope := capability.ScopeReference{Kind: "local", ID: "default"}
 	c := &participationCatalog{
 		deployment: &team.Deployment{ID: "team", Scope: scope, DefinitionID: "team-definition", ActiveVersion: "1", Status: team.DeploymentActive, Revision: 1},
@@ -70,7 +70,7 @@ func participationFixture() (*participationCatalog, conversation.ConversationPar
 		c.agents[id] = &agent.AgentDeployment{ID: id, Scope: scope, DefinitionID: "definition-" + id, ActiveVersion: "1", RolloutStatus: agent.RolloutActive, Environment: "local", Revision: 1, Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: 1}}
 		c.definitions["definition-"+id] = &agent.AgentDefinition{ID: "definition-" + id, Version: "1", DisplayName: id, Purpose: "Review evidence", SystemPrompt: "Report uncertainty", Authority: agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1}}
 	}
-	query := conversation.ConversationParticipantQuery{Conversation: &models.Conversation{ID: "channel", Scope: models.Scope{Kind: "local", ID: "default"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Status: models.ConversationStatusActive}}
+	query := conversation.ParticipantQuery{Conversation: &models.Conversation{ID: "channel", Scope: models.Scope{Kind: "local", ID: "default"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Status: models.ConversationStatusActive}}
 	return c, query
 }
 func TestDesktopParticipationUsesCanonicalActiveRoster(t *testing.T) {
@@ -102,46 +102,46 @@ func TestDesktopParticipationUsesCanonicalActiveRoster(t *testing.T) {
 	}
 }
 func TestDesktopParticipationRejectsBrokenAuthority(t *testing.T) {
-	tests := map[string]func(*participationCatalog, *conversation.ConversationParticipantQuery){
-		"foreign-channel": func(_ *participationCatalog, q *conversation.ConversationParticipantQuery) {
+	tests := map[string]func(*participationCatalog, *conversation.ParticipantQuery){
+		"foreign-channel": func(_ *participationCatalog, q *conversation.ParticipantQuery) {
 			q.Conversation.Scope.ID = "other"
 		},
-		"archived-channel": func(_ *participationCatalog, q *conversation.ConversationParticipantQuery) {
+		"archived-channel": func(_ *participationCatalog, q *conversation.ParticipantQuery) {
 			q.Conversation.Status = models.ConversationStatusArchived
 		},
-		"foreign-trigger": func(_ *participationCatalog, q *conversation.ConversationParticipantQuery) {
+		"foreign-trigger": func(_ *participationCatalog, q *conversation.ParticipantQuery) {
 			q.Trigger = &models.ChannelMessage{Scope: q.Conversation.Scope, ConversationID: "other"}
 		},
-		"wrong-team-id": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) { c.deployment.ID = "other" },
-		"foreign-team": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"wrong-team-id": func(c *participationCatalog, _ *conversation.ParticipantQuery) { c.deployment.ID = "other" },
+		"foreign-team": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.deployment.Scope.ID = "other"
 		},
-		"team-version": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"team-version": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.definition.Version = "2"
 		},
-		"unknown-participation": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"unknown-participation": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.deployment.Roster[0].ChannelParticipation = "unknown"
 		},
-		"duplicate-member": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"duplicate-member": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.deployment.Roster[1].AgentDeploymentID = "z"
 		},
-		"foreign-agent": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"foreign-agent": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.agents["a"].Scope.ID = "other"
 		},
-		"wrong-agent-id": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"wrong-agent-id": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.agents["a"].ID = "other"
 		},
-		"missing-agent": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) { delete(c.agents, "a") },
-		"agent-version": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"missing-agent": func(c *participationCatalog, _ *conversation.ParticipantQuery) { delete(c.agents, "a") },
+		"agent-version": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.definitions["definition-a"].Version = "2"
 		},
-		"agent-definition": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"agent-definition": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.definitions["definition-a"].ID = "other"
 		},
-		"member-skill-requirement": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"member-skill-requirement": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.deployment.Roster[1].RequiredSkillIDs = []string{"missing"}
 		},
-		"model-credential": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+		"model-credential": func(c *participationCatalog, _ *conversation.ParticipantQuery) {
 			c.agents["a"].Credentials = map[string]capability.CredentialReference{agent.ModelProviderCredentialBinding: {Kind: "vault", ID: "private"}}
 		},
 	}

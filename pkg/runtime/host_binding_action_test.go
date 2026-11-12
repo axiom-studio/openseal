@@ -34,10 +34,10 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	// Another run in the workspace, e.g. another user's chat.
 	other := actiontest.ClaimedOwnedRun(t, store, scope, time.Now().UTC(), "worker", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"})
 	catalog := skillbindingtest.HostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})
-	allow := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow, Reason: "read-only"}, nil
+	allow := action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionAllow, Reason: "read-only"}, nil
 	})
-	coordinator := action.NewActionCoordinator(store, store, durableCatalog{catalog}, allow, nil)
+	coordinator := action.NewCoordinator(store, store, durableCatalog{catalog}, allow, nil)
 	propose := func(run *models.AgentRun, key string) (*models.ActionProposalResult, error) {
 		return coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 			Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", BindingID: "mcp:linear", BindingRevision: 1,
@@ -55,7 +55,7 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	}
 
 	dispatched := 0
-	worker := action.NewActionWorker(store, catalog, nil, action.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	worker := action.NewWorker(store, catalog, nil, action.DispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched++
 		if !input.Bound.Host || input.Bound.Binding.ID != "mcp:linear" || input.Arguments["tool"] != "search" {
 			t.Fatalf("dispatch = %#v", input.Bound)
@@ -160,7 +160,7 @@ func TestRoutineGrantsCoverHostBindingTools(t *testing.T) {
 	if pin := activation.Task.Grants[0].ToolArguments; pin["hash"] != "linear-create_issue" {
 		t.Fatalf("pin = %#v", pin)
 	}
-	coordinator := action.NewActionCoordinator(f.store, f.store, f.catalog, action.NewDefaultActionPolicy(), nil)
+	coordinator := action.NewCoordinator(f.store, f.store, f.catalog, action.NewDefaultActionPolicy(), nil)
 	occurrence := f.routineOccurrence(t, activation, "host-occurrence")
 	allowed[occurrence.ID] = true
 	proposeCreateIssue := func(run *models.AgentRun, toolCallID string) (*models.ActionProposalResult, error) {

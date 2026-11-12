@@ -36,7 +36,7 @@ func newTestPublisher(t *testing.T) (*TaskArtifactPublisher, models.ArtifactCont
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: artifactcatalog.NewArtifactCatalog(kerneltest.NewStore(t))}, content
+	return &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: artifactcatalog.NewCatalog(kerneltest.NewStore(t))}, content
 }
 
 func twoFiles(t *testing.T) map[string]json.RawMessage {

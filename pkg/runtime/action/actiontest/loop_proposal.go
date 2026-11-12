@@ -103,7 +103,7 @@ func (f *LoopProposalFixture) ParkOnApproval(approvalID string) {
 
 // Execute runs call inline for the Run's lease owner, as the loop's governed
 // executor does after a ready proposal.
-func (f *LoopProposalFixture) Execute(worker *action.ActionWorker, callID string) *models.ActionExecutionResult {
+func (f *LoopProposalFixture) Execute(worker *action.Worker, callID string) *models.ActionExecutionResult {
 	f.t.Helper()
 	result, err := worker.ExecuteOwnLoopCall(context.Background(), f.Run.Scope, callID, f.Worker)
 	if err != nil || result == nil {
@@ -132,7 +132,7 @@ func AsLoopCall(call *models.ActionCall) *models.ActionCall {
 	return call
 }
 
-// LoopProposalRecord is call's loop proposal as ActionCoordinator.Propose
+// LoopProposalRecord is call's loop proposal as action.Coordinator.Propose
 // records it: the Run is unchanged, fenced by worker's live lease at now.
 func LoopProposalRecord(call *models.ActionCall, run *models.AgentRun, worker string, now time.Time, event *models.ActivityEvent) models.ActionProposalRecord {
 	return models.ActionProposalRecord{

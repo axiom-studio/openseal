@@ -185,7 +185,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	activity, err := client.ListActivity(ctx, activity.ActivityFeedRequest{
+	activity, err := client.ListActivity(ctx, activity.FeedRequest{
 		Scope: scope, RunID: created.Run.ID, EventTypes: []string{"source_policy.authorized"},
 		Severities: []models.ActivitySeverity{models.ActivitySeverityInfo}, Visibilities: []models.ActivityVisibility{models.ActivityVisibilityScope},
 		Limit: 5, IncludeDetails: true,
@@ -231,7 +231,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 
 	paused, err := client.CommandAgentRun(ctx, scope, created.Run.ID, kernelapi.AgentRunCommandRequest{
-		ExpectedRevision: created.Run.Revision, Kind: agentrun.AgentRunCommandPause,
+		ExpectedRevision: created.Run.Revision, Kind: agentrun.CommandPause,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -663,7 +663,7 @@ func TestKernelHTTPClientUsesAgentBuilderContract(t *testing.T) {
 		requests = append(requests, r.Method+" "+r.URL.RequestURI()+" key="+r.Header.Get("Idempotency-Key"))
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/agent-builder/drafts" {
-			_ = json.NewEncoder(w).Encode(kernelapi.ListAgentBuilderDraftsResponse{Drafts: []agentbuilder.AgentBuilderDraft{{ConversationID: "conversation-one", Title: "Invoices"}}})
+			_ = json.NewEncoder(w).Encode(kernelapi.ListAgentBuilderDraftsResponse{Drafts: []agentbuilder.Draft{{ConversationID: "conversation-one", Title: "Invoices"}}})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(kernelapi.StartAgentBuilderConversationResponse{Conversation: &models.Conversation{ID: "conversation-one", Scope: scope}})

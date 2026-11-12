@@ -301,11 +301,11 @@ type (
 	ObjectiveStatus                      = models.ObjectiveStatus
 	ScheduledAgentTask                   = models.ScheduledAgentTask
 	RoutineGrant                         = models.RoutineGrant
-	RoutineBrief                         = routine.RoutineBrief
+	RoutineBrief                         = routine.Brief
 	RoutineOwnerAddressResolver          = models.RoutineOwnerAddressResolver
 	RevokeRoutineGrantsRequest           = routine.RevokeRoutineGrantsRequest
 	RoutineScript                        = models.RoutineScript
-	RoutineScriptStatus                  = routine.RoutineScriptStatus
+	RoutineScriptStatus                  = routine.ScriptStatus
 	ChatFile                             = routine.ChatFile
 	ChatFileResolver                     = routine.ChatFileResolver
 	WorkspaceCommandPin                  = workspace.CommandPin
@@ -345,16 +345,16 @@ type (
 	CreateObjectiveResult                = portfolio.CreateObjectiveResult
 	UpdateObjectiveRequest               = portfolio.UpdateObjectiveRequest
 	CreateAgentRunRequest                = models.CreateAgentRunRequest
-	AgentRunCommandKind                  = agentrun.AgentRunCommandKind
-	AgentRunCommandRequest               = agentrun.AgentRunCommandRequest
-	AgentRunCommandResult                = agentrun.AgentRunCommandResult
+	AgentRunCommandKind                  = agentrun.CommandKind
+	AgentRunCommandRequest               = agentrun.CommandRequest
+	AgentRunCommandResult                = agentrun.CommandResult
 	RunActivityStore                     = models.RunActivityStore
 	ActivityEvent                        = models.ActivityEvent
 	ActivityActor                        = models.ActivityActor
 	ActivityFilter                       = models.ActivityFilter
-	ActivityFeedRequest                  = activity.ActivityFeedRequest
+	ActivityFeedRequest                  = activity.FeedRequest
 	ActivityProjection                   = models.ActivityProjection
-	ActivityFeedPage                     = activity.ActivityFeedPage
+	ActivityFeedPage                     = activity.FeedPage
 	ActivitySeverity                     = models.ActivitySeverity
 	ActivityVisibility                   = models.ActivityVisibility
 	RunTransitionRequest                 = activity.RunTransitionRequest
@@ -385,10 +385,10 @@ type (
 	ConversationAudience                 = models.ConversationAudience
 	ConversationReferenceKind            = models.ConversationReferenceKind
 	ConversationReference                = models.ConversationReference
-	ConversationArchiveSource            = conversation.ConversationArchiveSource
-	ConversationArchiveMessage           = conversation.ConversationArchiveMessage
+	ConversationArchiveSource            = conversation.ArchiveSource
+	ConversationArchiveMessage           = conversation.ArchiveMessage
 	ImportConversationArchiveRequest     = conversation.ImportConversationArchiveRequest
-	ConversationArchiveImportResult      = conversation.ConversationArchiveImportResult
+	ConversationArchiveImportResult      = conversation.ArchiveImportResult
 	ChannelMessage                       = models.ChannelMessage
 	ChannelMessageQuote                  = models.ChannelMessageQuote
 	AgentBuilderParameters               = models.AgentBuilderParameters
@@ -406,27 +406,27 @@ type (
 	ConversationPresence                 = models.ConversationPresence
 	ConversationAddressing               = models.ConversationAddressing
 	ConversationResponder                = models.ConversationResponder
-	ConversationRouter                   = conversation.ConversationRouter
-	ConversationRouterFunc               = conversation.ConversationRouterFunc
-	ConversationRouteRequest             = conversation.ConversationRouteRequest
-	ConversationRouteDecision            = conversation.ConversationRouteDecision
+	ConversationRouter                   = conversation.Router
+	ConversationRouterFunc               = conversation.RouterFunc
+	ConversationRouteRequest             = conversation.RouteRequest
+	ConversationRouteDecision            = conversation.RouteDecision
 	RouteMember                          = conversation.RouteMember
-	ConversationRoutingRequest           = conversation.ConversationRoutingRequest
+	ConversationRoutingRequest           = conversation.RoutingRequest
 	CommitConversationRoutingRequest     = conversation.CommitConversationRoutingRequest
 	ParticipationRoundStatus             = models.ParticipationRoundStatus
 	ParticipationRound                   = models.ParticipationRound
-	ConversationParticipantBinding       = conversation.ConversationParticipantBinding
-	ConversationParticipantQuery         = conversation.ConversationParticipantQuery
-	ConversationParticipantSource        = conversation.ConversationParticipantSource
-	ConversationParticipantSourceFunc    = conversation.ConversationParticipantSourceFunc
-	ConversationCoordinatorConfig        = conversation.ConversationCoordinatorConfig
-	ConversationRunSchedulerConfig       = conversationrun.ConversationRunSchedulerConfig
-	ConversationRunTurnRunnerConfig      = conversationrun.ConversationRunTurnRunnerConfig
-	ConversationPlace                    = conversation.ConversationPlace
-	ConversationRunReconcilerConfig      = conversationrun.ConversationRunReconcilerConfig
-	ConversationRunReconcileResult       = conversationrun.ConversationRunReconcileResult
-	ConversationChangeRequest            = conversation.ConversationChangeRequest
-	ConversationChangeSet                = conversation.ConversationChangeSet
+	ConversationParticipantBinding       = conversation.ParticipantBinding
+	ConversationParticipantQuery         = conversation.ParticipantQuery
+	ConversationParticipantSource        = conversation.ParticipantSource
+	ConversationParticipantSourceFunc    = conversation.ParticipantSourceFunc
+	ConversationCoordinatorConfig        = conversation.CoordinatorConfig
+	ConversationRunSchedulerConfig       = conversationrun.SchedulerConfig
+	ConversationRunTurnRunnerConfig      = conversationrun.TurnRunnerConfig
+	ConversationPlace                    = conversation.Place
+	ConversationRunReconcilerConfig      = conversationrun.ReconcilerConfig
+	ConversationRunReconcileResult       = conversationrun.ReconcileResult
+	ConversationChangeRequest            = conversation.ChangeRequest
+	ConversationChangeSet                = conversation.ChangeSet
 	CreateConversationRequest            = conversation.CreateConversationRequest
 	UpdateConversationRequest            = conversation.UpdateConversationRequest
 	ConversationApprovalMode             = models.ConversationApprovalMode
@@ -487,7 +487,7 @@ type (
 	ArtifactEvidenceTargetKind           = models.EvidenceTargetKind
 	ArtifactFilter                       = models.ArtifactFilter
 	ArtifactStore                        = models.ArtifactStore
-	ArtifactCatalog                      = artifactcatalog.ArtifactCatalog
+	ArtifactCatalog                      = artifactcatalog.Catalog
 	RegisterArtifactRequest              = artifactcatalog.RegisterArtifactRequest
 	ArtifactRegistrationResult           = artifactcatalog.ArtifactRegistrationResult
 	ArtifactContentStore                 = models.ArtifactContentStore
@@ -554,7 +554,7 @@ type (
 	CapabilityInvocationStepProducer     = modelstep.CapabilityInvocationStepProducer
 	AgentRunScheduleStore                = models.AgentRunScheduleStore
 	AgentRunAdmissionStore               = models.AgentRunAdmissionStore
-	AgentRunClaimRequest                 = agentrun.AgentRunClaimRequest
+	AgentRunClaimRequest                 = agentrun.ClaimRequest
 	AgentRunAdmissionOutcome             = models.AgentRunAdmissionOutcome
 	AgentRunAdmissionReason              = models.AgentRunAdmissionReason
 	AgentRunAdmissionBlock               = models.AgentRunAdmissionBlock
@@ -692,12 +692,12 @@ type (
 	ExternalOperationConflictError       = models.ExternalOperationConflictError
 	ActionCallStatus                     = models.ActionCallStatus
 	ActionFilter                         = models.ActionFilter
-	ActionDisposition                    = action.ActionDisposition
-	ActionPolicyInput                    = action.ActionPolicyInput
-	ActionPolicyDecision                 = action.ActionPolicyDecision
-	ActionPolicyEvaluator                = action.ActionPolicyEvaluator
-	ActionPolicyEvaluatorFunc            = action.ActionPolicyEvaluatorFunc
-	ActionProposalValidator              = action.ActionProposalValidator
+	ActionDisposition                    = action.Disposition
+	ActionPolicyInput                    = action.PolicyInput
+	ActionPolicyDecision                 = action.PolicyDecision
+	ActionPolicyEvaluator                = action.PolicyEvaluator
+	ActionPolicyEvaluatorFunc            = action.PolicyEvaluatorFunc
+	ActionProposalValidator              = action.ProposalValidator
 	ActionProposalValidationInput        = agentrun.ActionProposalValidationInput
 	ProposeActionRequest                 = action.ProposeActionRequest
 	ActionProposalResult                 = models.ActionProposalResult
@@ -714,14 +714,14 @@ type (
 	CreateRunForkRequest                 = agentrun.CreateRunForkRequest
 	RunForkResult                        = agentrun.RunForkResult
 	RunForkCoordinator                   = agentrun.RunForkCoordinator
-	ActionWorkerConfig                   = action.ActionWorkerConfig
+	ActionWorkerConfig                   = action.WorkerConfig
 	DynamicActionWorkerConfig            = action.DynamicActionWorkerConfig
 	CredentialResolver                   = action.CredentialResolver
 	CredentialResolverFunc               = action.CredentialResolverFunc
 	CredentialResolutionRequest          = action.CredentialResolutionRequest
 	ActionDispatchInput                  = agentrun.ActionDispatchInput
 	ActionDispatcher                     = agentrun.ActionDispatcher
-	ActionDispatcherFunc                 = action.ActionDispatcherFunc
+	ActionDispatcherFunc                 = action.DispatcherFunc
 	ToolInvoker                          = modelstep.ToolInvoker
 	ToolInvokerFunc                      = modelstep.ToolInvokerFunc
 	ToolInvocation                       = models.ToolInvocation
@@ -736,8 +736,8 @@ type (
 	TeamMemberActionDispatcher           = collaboration.TeamMemberActionDispatcher
 	TeamSkillActionValidator             = skillbinding.TeamSkillActionValidator
 	TeamSkillAuthorityCatalog            = skillbinding.TeamSkillAuthorityCatalog
-	SkillBindingActionValidator          = skillbinding.SkillBindingActionValidator
-	SkillBindingActionDispatcher         = skillbinding.SkillBindingActionDispatcher
+	SkillBindingActionValidator          = skillbinding.ActionValidator
+	SkillBindingActionDispatcher         = skillbinding.ActionDispatcher
 	OpenClawSkillSource                  = skillopenclaw.Source
 	OpenClawSkillFile                    = skillopenclaw.File
 	OpenClawSkillBundle                  = skillopenclaw.Bundle
@@ -773,20 +773,20 @@ type (
 	CreateCallbackRegistrationRequest               = callback.CreateCallbackRegistrationRequest
 	UpdateCallbackRegistrationRequest               = callback.UpdateCallbackRegistrationRequest
 	CallbackRegistrationStore                       = models.CallbackRegistrationStore
-	CallbackAdapterResolver                         = callback.CallbackAdapterResolver
-	CallbackRegistry                                = callback.CallbackRegistry
-	CallbackPublicRequest                           = callback.CallbackPublicRequest
+	CallbackAdapterResolver                         = callback.AdapterResolver
+	CallbackRegistry                                = callback.Registry
+	CallbackPublicRequest                           = callback.PublicRequest
 	NormalizedCallbackEvent                         = callback.NormalizedCallbackEvent
-	CallbackHostRequest                             = callback.CallbackHostRequest
-	CallbackHostResult                              = callback.CallbackHostResult
-	CallbackAdapterHost                             = callback.CallbackAdapterHost
+	CallbackHostRequest                             = callback.HostRequest
+	CallbackHostResult                              = callback.HostResult
+	CallbackAdapterHost                             = callback.AdapterHost
 	CallbackEventReceiptStatus                      = models.CallbackEventReceiptStatus
 	CallbackEventReceipt                            = models.CallbackEventReceipt
 	CallbackEventStore                              = models.CallbackEventStore
-	CallbackEventConsumer                           = callback.CallbackEventConsumer
-	CallbackEventConsumerFunc                       = callback.CallbackEventConsumerFunc
-	CallbackIngressResult                           = callback.CallbackIngressResult
-	CallbackIngressService                          = callback.CallbackIngressService
+	CallbackEventConsumer                           = callback.EventConsumer
+	CallbackEventConsumerFunc                       = callback.EventConsumerFunc
+	CallbackIngressResult                           = callback.IngressResult
+	CallbackIngressService                          = callback.IngressService
 	ApprovalCallbackConsumer                        = externalconversation.ApprovalCallbackConsumer
 	ExternalConversationEndpointStatus              = models.ExternalConversationEndpointStatus
 	ExternalConversationHandlerKind                 = models.ExternalConversationHandlerKind
@@ -800,8 +800,8 @@ type (
 	CreateExternalConversationEndpointRequest       = externalconversation.CreateExternalConversationEndpointRequest
 	UpdateExternalConversationEndpointRequest       = externalconversation.UpdateExternalConversationEndpointRequest
 	ExternalConversationEndpointStore               = models.ExternalConversationEndpointStore
-	ExternalConversationAdapterResolver             = externalconversation.ExternalConversationAdapterResolver
-	ExternalConversationEndpointService             = externalconversation.ExternalConversationEndpointService
+	ExternalConversationAdapterResolver             = externalconversation.AdapterResolver
+	ExternalConversationEndpointService             = externalconversation.EndpointService
 	NormalizedExternalConversationEvent             = models.NormalizedExternalConversationEvent
 	ExternalConversationInboxStatus                 = models.ExternalConversationInboxStatus
 	ExternalConversationInboxItem                   = models.ExternalConversationInboxItem
@@ -819,13 +819,13 @@ type (
 	ReceiveExternalConversationEventResult          = externalconversation.ReceiveExternalConversationEventResult
 	EnqueueExternalConversationDeliveryRequest      = externalconversation.EnqueueExternalConversationDeliveryRequest
 	EnqueueExternalConversationDeliveryResult       = externalconversation.EnqueueExternalConversationDeliveryResult
-	ExternalConversationTransportService            = externalconversation.ExternalConversationTransportService
-	ExternalConversationIngressRequest              = externalconversation.ExternalConversationIngressRequest
-	ExternalConversationPublicIngressRequest        = externalconversation.ExternalConversationPublicIngressRequest
-	ExternalConversationIngressHostResult           = externalconversation.ExternalConversationIngressHostResult
-	ExternalConversationIngressHostRequest          = externalconversation.ExternalConversationIngressHostRequest
-	ExternalConversationIngressAdapterHost          = externalconversation.ExternalConversationIngressAdapterHost
-	ExternalConversationIngressResult               = externalconversation.ExternalConversationIngressResult
+	ExternalConversationTransportService            = externalconversation.TransportService
+	ExternalConversationIngressRequest              = externalconversation.IngressRequest
+	ExternalConversationPublicIngressRequest        = externalconversation.PublicIngressRequest
+	ExternalConversationIngressHostResult           = externalconversation.IngressHostResult
+	ExternalConversationIngressHostRequest          = externalconversation.IngressHostRequest
+	ExternalConversationIngressAdapterHost          = externalconversation.IngressAdapterHost
+	ExternalConversationIngressResult               = externalconversation.IngressResult
 	ExternalConversationIngressGateway              = models.ExternalConversationIngressGateway
 	ExternalConversationGatewayStatus               = models.ExternalConversationGatewayStatus
 	ExternalConversationGatewayRegistration         = models.ExternalConversationGatewayRegistration
@@ -833,34 +833,34 @@ type (
 	CreateExternalConversationGatewayRequest        = externalconversation.CreateExternalConversationGatewayRequest
 	UpdateExternalConversationGatewayRequest        = externalconversation.UpdateExternalConversationGatewayRequest
 	ExternalConversationGatewayStore                = models.ExternalConversationGatewayStore
-	ExternalConversationGatewayService              = externalconversation.ExternalConversationGatewayService
+	ExternalConversationGatewayService              = externalconversation.GatewayService
 	ExternalConversationVerifiedRoute               = models.ExternalConversationVerifiedRoute
-	ExternalConversationGatewayEvent                = externalconversation.ExternalConversationGatewayEvent
-	ExternalConversationGatewayHostRequest          = externalconversation.ExternalConversationGatewayHostRequest
-	ExternalConversationGatewayHostResult           = externalconversation.ExternalConversationGatewayHostResult
-	ExternalConversationGatewayAdapterHost          = externalconversation.ExternalConversationGatewayAdapterHost
-	ExternalConversationGatewayIngressResult        = externalconversation.ExternalConversationGatewayIngressResult
-	ExternalConversationDispatchRequest             = externalconversation.ExternalConversationDispatchRequest
-	ExternalConversationDispatchResult              = externalconversation.ExternalConversationDispatchResult
-	ExternalConversationDispatcher                  = externalconversation.ExternalConversationDispatcher
+	ExternalConversationGatewayEvent                = externalconversation.GatewayEvent
+	ExternalConversationGatewayHostRequest          = externalconversation.GatewayHostRequest
+	ExternalConversationGatewayHostResult           = externalconversation.GatewayHostResult
+	ExternalConversationGatewayAdapterHost          = externalconversation.GatewayAdapterHost
+	ExternalConversationGatewayIngressResult        = externalconversation.GatewayIngressResult
+	ExternalConversationDispatchRequest             = externalconversation.DispatchRequest
+	ExternalConversationDispatchResult              = externalconversation.DispatchResult
+	ExternalConversationDispatcher                  = externalconversation.Dispatcher
 	CanonicalExternalConversationDispatcher         = externalconversation.CanonicalExternalConversationDispatcher
-	ExternalConversationInboxWorkerConfig           = externalconversation.ExternalConversationInboxWorkerConfig
-	CallbackEventWorkerConfig                       = callback.CallbackEventWorkerConfig
-	ExternalConversationInboxWorker                 = externalconversation.ExternalConversationInboxWorker
-	ExternalConversationDeliveryHostRequest         = externalconversation.ExternalConversationDeliveryHostRequest
-	ExternalConversationAcknowledgementStatus       = externalconversation.ExternalConversationAcknowledgementStatus
-	ExternalConversationDeliveryAcknowledgement     = externalconversation.ExternalConversationDeliveryAcknowledgement
-	ExternalConversationDeliveryOutcome             = externalconversation.ExternalConversationDeliveryOutcome
-	ExternalConversationDeliveryHostResult          = externalconversation.ExternalConversationDeliveryHostResult
-	ExternalConversationAdapterHost                 = externalconversation.ExternalConversationAdapterHost
-	ExternalConversationDestination                 = externalconversation.ExternalConversationDestination
-	ExternalConversationDestinationPage             = externalconversation.ExternalConversationDestinationPage
-	ExternalConversationDestinationDiscoveryRequest = externalconversation.ExternalConversationDestinationDiscoveryRequest
-	ExternalConversationDestinationDiscoveryHost    = externalconversation.ExternalConversationDestinationDiscoveryHost
-	ExternalConversationDeliveryWorkerConfig        = externalconversation.ExternalConversationDeliveryWorkerConfig
-	ExternalConversationDeliveryWorker              = externalconversation.ExternalConversationDeliveryWorker
+	ExternalConversationInboxWorkerConfig           = externalconversation.InboxWorkerConfig
+	CallbackEventWorkerConfig                       = callback.EventWorkerConfig
+	ExternalConversationInboxWorker                 = externalconversation.InboxWorker
+	ExternalConversationDeliveryHostRequest         = externalconversation.DeliveryHostRequest
+	ExternalConversationAcknowledgementStatus       = externalconversation.AcknowledgementStatus
+	ExternalConversationDeliveryAcknowledgement     = externalconversation.DeliveryAcknowledgement
+	ExternalConversationDeliveryOutcome             = externalconversation.DeliveryOutcome
+	ExternalConversationDeliveryHostResult          = externalconversation.DeliveryHostResult
+	ExternalConversationAdapterHost                 = externalconversation.AdapterHost
+	ExternalConversationDestination                 = externalconversation.Destination
+	ExternalConversationDestinationPage             = externalconversation.DestinationPage
+	ExternalConversationDestinationDiscoveryRequest = externalconversation.DestinationDiscoveryRequest
+	ExternalConversationDestinationDiscoveryHost    = externalconversation.DestinationDiscoveryHost
+	ExternalConversationDeliveryWorkerConfig        = externalconversation.DeliveryWorkerConfig
+	ExternalConversationDeliveryWorker              = externalconversation.DeliveryWorker
 	ExternalConversationReplyStore                  = models.ExternalConversationReplyStore
-	ExternalConversationReplyWorker                 = externalconversation.ExternalConversationReplyWorker
+	ExternalConversationReplyWorker                 = externalconversation.ReplyWorker
 	RunProgressSnapshot                             = agentrun.RunProgressSnapshot
 	RunProgressAcknowledgementRequest               = agentrun.RunProgressAcknowledgementRequest
 	RunProgressAcknowledgementRenderer              = agentrun.RunProgressAcknowledgementRenderer
@@ -870,31 +870,31 @@ type (
 	RunProgressAcknowledgementWorkerConfig          = externalconversation.RunProgressAcknowledgementWorkerConfig
 	RunProgressAcknowledgementWorker                = externalconversation.RunProgressAcknowledgementWorker
 	TurnRunnerProgressAcknowledgementRenderer       = externalconversation.TurnRunnerProgressAcknowledgementRenderer
-	ExternalConversationSupervisor                  = externalconversation.ExternalConversationSupervisor
+	ExternalConversationSupervisor                  = externalconversation.Supervisor
 )
 
 // ExternalConversationGatewayVerificationAdapterHost opts in to handling
 // provider setup challenges while a saved gateway remains paused.
-type ExternalConversationGatewayVerificationAdapterHost = externalconversation.ExternalConversationGatewayVerificationAdapterHost
+type ExternalConversationGatewayVerificationAdapterHost = externalconversation.GatewayVerificationAdapterHost
 
 // Credential lease aliases are kept in their own group so extending the
 // security protocol does not reformat the facade's much larger alias catalog.
 type (
-	ActionCredentialLeaseIssuer            = action.ActionCredentialLeaseIssuer
-	ActionCredentialLeaseIssuerFunc        = action.ActionCredentialLeaseIssuerFunc
-	ActionCredentialLeaseIssueRequest      = action.ActionCredentialLeaseIssueRequest
+	ActionCredentialLeaseIssuer            = action.CredentialLeaseIssuer
+	ActionCredentialLeaseIssuerFunc        = action.CredentialLeaseIssuerFunc
+	ActionCredentialLeaseIssueRequest      = action.CredentialLeaseIssueRequest
 	ActionLeaseIdentity                    = models.ActionLeaseIdentity
 	ActionCredentialFieldReference         = models.ActionCredentialFieldReference
 	ActionCredentialLease                  = models.ActionCredentialLease
 	ActionCredentialLeaseSignature         = models.ActionCredentialLeaseSignature
 	SignedActionCredentialLease            = models.SignedActionCredentialLease
 	CreateActionCredentialLeaseRequest     = models.CreateActionCredentialLeaseRequest
-	ActionCredentialLeaseSigner            = action.ActionCredentialLeaseSigner
-	ActionCredentialLeaseSignatureVerifier = action.ActionCredentialLeaseSignatureVerifier
-	ActionCredentialLeaseValidationRequest = action.ActionCredentialLeaseValidationRequest
+	ActionCredentialLeaseSigner            = action.CredentialLeaseSigner
+	ActionCredentialLeaseSignatureVerifier = action.CredentialLeaseSignatureVerifier
+	ActionCredentialLeaseValidationRequest = action.CredentialLeaseValidationRequest
 	ActionCredentialLeaseRedemptionRequest = models.ActionCredentialLeaseRedemptionRequest
 	ActionCredentialLeaseRedeemer          = models.ActionCredentialLeaseRedeemer
-	ActionCredentialLeaseValidator         = action.ActionCredentialLeaseValidator
+	ActionCredentialLeaseValidator         = action.CredentialLeaseValidator
 )
 
 type (
@@ -1351,27 +1351,27 @@ var (
 	NewTeamSkillActionValidator         = skillbinding.NewTeamSkillActionValidator
 	AuthorizeTeamSkillActivation        = skillbinding.AuthorizeTeamSkillActivation
 	SkillManagementSkill                = skillbinding.SkillManagementSkill
-	NewSkillBindingActionValidator      = skillbinding.NewSkillBindingActionValidator
-	NewSkillBindingActionDispatcher     = skillbinding.NewSkillBindingActionDispatcher
+	NewSkillBindingActionValidator      = skillbinding.NewActionValidator
+	NewSkillBindingActionDispatcher     = skillbinding.NewActionDispatcher
 	NewHTTPActionExecutor               = httpaction.NewExecutor
 	DecodeHTTPActionInvocation          = httpaction.DecodeInvocation
 )
 
-var NewExternalConversationEndpointService = externalconversation.NewExternalConversationEndpointService
-var NewCallbackRegistry = callback.NewCallbackRegistry
-var NewCallbackIngressService = callback.NewCallbackIngressService
+var NewExternalConversationEndpointService = externalconversation.NewEndpointService
+var NewCallbackRegistry = callback.NewRegistry
+var NewCallbackIngressService = callback.NewIngressService
 var NewApprovalCallbackConsumer = externalconversation.NewApprovalCallbackConsumer
 var ConversationDestinationDiscoveryArguments = externalconversation.ConversationDestinationDiscoveryArguments
 var ProjectConversationDestinationPage = externalconversation.ProjectConversationDestinationPage
-var NewExternalConversationGatewayService = externalconversation.NewExternalConversationGatewayService
-var NewExternalConversationTransportService = externalconversation.NewExternalConversationTransportService
+var NewExternalConversationGatewayService = externalconversation.NewGatewayService
+var NewExternalConversationTransportService = externalconversation.NewTransportService
 var NewCanonicalExternalConversationDispatcher = externalconversation.NewCanonicalExternalConversationDispatcher
-var NewExternalConversationInboxWorker = externalconversation.NewExternalConversationInboxWorker
-var NewExternalConversationDeliveryWorker = externalconversation.NewExternalConversationDeliveryWorker
-var NewExternalConversationReplyWorker = externalconversation.NewExternalConversationReplyWorker
+var NewExternalConversationInboxWorker = externalconversation.NewInboxWorker
+var NewExternalConversationDeliveryWorker = externalconversation.NewDeliveryWorker
+var NewExternalConversationReplyWorker = externalconversation.NewReplyWorker
 var NewRunProgressAcknowledgementWorker = externalconversation.NewRunProgressAcknowledgementWorker
 var NewTurnRunnerProgressAcknowledgementRenderer = externalconversation.NewTurnRunnerProgressAcknowledgementRenderer
-var NewExternalConversationSupervisor = externalconversation.NewExternalConversationSupervisor
+var NewExternalConversationSupervisor = externalconversation.NewSupervisor
 var NewOAuthService = kerneloauth.NewService
 var NewOAuthMemoryStore = kerneloauth.NewMemoryStore
 var OAuthSessionIDFromState = kerneloauth.SessionIDFromState
@@ -1501,7 +1501,7 @@ func SignActionCredentialLease(ctx context.Context, lease ActionCredentialLease,
 }
 
 func NewActionCredentialLeaseValidator(verifier ActionCredentialLeaseSignatureVerifier, redeemer ActionCredentialLeaseRedeemer) (*ActionCredentialLeaseValidator, error) {
-	return action.NewActionCredentialLeaseValidator(verifier, redeemer)
+	return action.NewCredentialLeaseValidator(verifier, redeemer)
 }
 
 func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string, credentialFields map[string][]string) error {
@@ -1520,7 +1520,7 @@ func EvaluateBudget(policy BudgetPolicy, usage BudgetUsage) (BudgetState, []stri
 	return models.EvaluateBudget(policy, usage)
 }
 
-func DefaultConversationCoordinatorConfig() conversation.ConversationCoordinatorConfig {
+func DefaultConversationCoordinatorConfig() conversation.CoordinatorConfig {
 	return conversation.DefaultConversationCoordinatorConfig()
 }
 
@@ -1631,7 +1631,7 @@ const (
 	RunbookActionSetScript          = models.RunbookActionSetScript
 	ExpectedDigestArgument          = workspace.ExpectedDigestArgument
 	RefusedCommandResult            = workspace.RefusedResult
-	RoutineScriptContextKey         = routine.RoutineScriptContextKey
+	RoutineScriptContextKey         = routine.ScriptContextKey
 	MaximumRoutineScriptSeconds     = models.MaximumRoutineScriptSeconds
 	DefaultRoutineScriptSeconds     = routine.DefaultRoutineScriptSeconds
 	RunbookActionStart              = routine.RunbookActionStart
@@ -1722,12 +1722,12 @@ const (
 	BudgetStateWarning   = models.BudgetStateWarning
 	BudgetStateExhausted = models.BudgetStateExhausted
 
-	AgentRunCommandPause                    = agentrun.AgentRunCommandPause
-	AgentRunCommandResume                   = agentrun.AgentRunCommandResume
-	AgentRunCommandRetry                    = agentrun.AgentRunCommandRetry
-	AgentRunCommandCancel                   = agentrun.AgentRunCommandCancel
-	AgentRunCommandIntervene                = agentrun.AgentRunCommandIntervene
-	AgentRunCommandResolveHumanIntervention = agentrun.AgentRunCommandResolveHumanIntervention
+	AgentRunCommandPause                    = agentrun.CommandPause
+	AgentRunCommandResume                   = agentrun.CommandResume
+	AgentRunCommandRetry                    = agentrun.CommandRetry
+	AgentRunCommandCancel                   = agentrun.CommandCancel
+	AgentRunCommandIntervene                = agentrun.CommandIntervene
+	AgentRunCommandResolveHumanIntervention = agentrun.CommandResolveHumanIntervention
 
 	HumanInterventionStatusPending  = models.HumanInterventionStatusPending
 	HumanInterventionStatusResolved = models.HumanInterventionStatusResolved
@@ -2009,13 +2009,13 @@ const (
 	ExternalConversationDeliveryFailed    = models.ExternalConversationDeliveryFailed
 	ExternalConversationDeliveryCanceled  = models.ExternalConversationDeliveryCanceled
 
-	ExternalConversationAcknowledgementFound    = externalconversation.ExternalConversationAcknowledgementFound
-	ExternalConversationAcknowledgementNotFound = externalconversation.ExternalConversationAcknowledgementNotFound
-	ExternalConversationAcknowledgementUnknown  = externalconversation.ExternalConversationAcknowledgementUnknown
+	ExternalConversationAcknowledgementFound    = externalconversation.AcknowledgementFound
+	ExternalConversationAcknowledgementNotFound = externalconversation.AcknowledgementNotFound
+	ExternalConversationAcknowledgementUnknown  = externalconversation.AcknowledgementUnknown
 
-	ExternalConversationDeliveryOutcomeDelivered = externalconversation.ExternalConversationDeliveryOutcomeDelivered
-	ExternalConversationDeliveryOutcomeRetry     = externalconversation.ExternalConversationDeliveryOutcomeRetry
-	ExternalConversationDeliveryOutcomeFailed    = externalconversation.ExternalConversationDeliveryOutcomeFailed
+	ExternalConversationDeliveryOutcomeDelivered = externalconversation.DeliveryOutcomeDelivered
+	ExternalConversationDeliveryOutcomeRetry     = externalconversation.DeliveryOutcomeRetry
+	ExternalConversationDeliveryOutcomeFailed    = externalconversation.DeliveryOutcomeFailed
 )
 
 var (
@@ -2037,9 +2037,9 @@ const (
 	SkillRuntimeReady       = skill.RuntimePreparationReady
 	SkillRuntimeUnavailable = skill.RuntimePreparationUnavailable
 
-	ActionDispositionAllow           = action.ActionDispositionAllow
-	ActionDispositionDeny            = action.ActionDispositionDeny
-	ActionDispositionRequireApproval = action.ActionDispositionRequireApproval
+	ActionDispositionAllow           = action.DispositionAllow
+	ActionDispositionDeny            = action.DispositionDeny
+	ActionDispositionRequireApproval = action.DispositionRequireApproval
 
 	ActionCallStatusReady           = models.ActionCallStatusReady
 	ActionCallStatusWaitingApproval = models.ActionCallStatusWaitingApproval
@@ -2145,41 +2145,41 @@ type Engine struct {
 	// ownedStore is the in-memory store New opened, either as e.store or as
 	// the fallback for services a partial store lacks. Close frees it.
 	ownedStore                    *sqlite.Store
-	portfolio                     *portfolio.PortfolioService
+	portfolio                     *portfolio.Service
 	activity                      *activity.RunActivityService
 	dependencies                  *portfolio.DependencyCoordinator
-	conversations                 *conversation.ConversationService
+	conversations                 *conversation.Service
 	spaces                        *portfolio.SpaceService
 	embeds                        *conversation.EmbedSessionService
-	conversationCoordinator       *conversation.ConversationCoordinator
-	conversationParticipants      conversation.ConversationParticipantSource
-	conversationRouter            conversation.ConversationRouter
-	conversationCoordinatorConfig conversation.ConversationCoordinatorConfig
-	conversationRunScheduler      *conversationrun.ConversationRunScheduler
-	conversationRunReconciler     *conversationrun.ConversationRunReconciler
+	conversationCoordinator       *conversation.Coordinator
+	conversationParticipants      conversation.ParticipantSource
+	conversationRouter            conversation.Router
+	conversationCoordinatorConfig conversation.CoordinatorConfig
+	conversationRunScheduler      *conversationrun.Scheduler
+	conversationRunReconciler     *conversationrun.Reconciler
 	conversationRunConfig         *ConversationRunConfig
 	conversationRunScopes         workqueue.WorkerScopeSource
 	externalConversations         externalConversationRuntime
 	callbacks                     callbackRuntime
 	routineEvents                 routineEventRuntime
-	conversationChanges           *conversation.ConversationChangeService
-	collaboration                 *collaboration.CollaborationService
+	conversationChanges           *conversation.ChangeService
+	collaboration                 *collaboration.Service
 	turns                         *activity.AgentTurnService
-	runQueue                      *agentrun.AgentRunScheduler
-	wake                          *agentrun.AgentRunWakeService
-	actions                       *action.ActionCoordinator
+	runQueue                      *agentrun.Scheduler
+	wake                          *agentrun.WakeService
+	actions                       *action.Coordinator
 	approvals                     *action.ApprovalCoordinator
-	artifacts                     *artifactcatalog.ArtifactCatalog
+	artifacts                     *artifactcatalog.Catalog
 	runbookAudits                 *routine.RunbookExecutionAuditService
-	actionPolicy                  action.ActionPolicyEvaluator
+	actionPolicy                  action.PolicyEvaluator
 	routineOwnerAddresses         models.RoutineOwnerAddressResolver
 	chatFiles                     routine.ChatFileResolver
 	chatWorkspaces                modelstep.ChatWorkspaces
-	actionValidators              []action.ActionProposalValidator
+	actionValidators              []action.ProposalValidator
 	agentManagementActions        bool
-	agentBuilderHost              agentbuilder.AgentBuilderHost
+	agentBuilderHost              agentbuilder.Host
 	agentInstaller                *agentbuilder.AgentInstaller
-	agentBuilderCutoverHost       agentbuilder.AgentBuilderCutoverHost
+	agentBuilderCutoverHost       agentbuilder.CutoverHost
 	runbookManagementActions      bool
 	runManagementActions          bool
 	teamManagementActions         bool
@@ -2193,10 +2193,10 @@ type Engine struct {
 	agentSupervisorSpecs          []agentRunWorkerSupervisorSpec
 	agentSupervisors              []*runworker.AgentRunWorkerSupervisor
 	actionPoolSpecs               []actionWorkerSpec
-	actionPools                   []*action.ActionWorkerPool
+	actionPools                   []*action.WorkerPool
 	actionSupervisorSpecs         []actionWorkerSupervisorSpec
-	actionSupervisors             []*action.ActionWorkerSupervisor
-	governedWorker                *action.ActionWorker
+	actionSupervisors             []*action.WorkerSupervisor
+	governedWorker                *action.Worker
 	governedTools                 *runloop.GovernedToolExecutor
 	credentialAvailability        action.CredentialAvailabilityChecker
 	skills                        *skill.Catalog
@@ -2207,7 +2207,7 @@ type Engine struct {
 	logger                        *zap.SugaredLogger
 	workerLimiter                 *workqueue.WorkerLimiter
 	workSignals                   *workqueue.WorkSignalStatus
-	workQueue                     workqueue.WorkQueue
+	workQueue                     workqueue.Queue
 	workPublish                   func(context.Context)
 	workQueueCancel               context.CancelFunc
 	workQueueDone                 chan struct{}
@@ -2232,34 +2232,34 @@ type agentRunWorkerSupervisorSpec struct {
 // server-owned. Worker concurrency controls channels processed per scope;
 // each channel itself is always serialized across replicas.
 type ConversationRunConfig struct {
-	Scheduler  conversationrun.ConversationRunSchedulerConfig
-	Runner     conversationrun.ConversationRunTurnRunnerConfig
-	Reconciler conversationrun.ConversationRunReconcilerConfig
+	Scheduler  conversationrun.SchedulerConfig
+	Runner     conversationrun.TurnRunnerConfig
+	Reconciler conversationrun.ReconcilerConfig
 	Workers    runworker.DynamicAgentRunWorkerConfig
 }
 
-type ExternalConversationSupervisorConfig = externalconversation.ExternalConversationSupervisorConfig
+type ExternalConversationSupervisorConfig = externalconversation.SupervisorConfig
 
 type externalConversationRuntime struct {
-	transport  *externalconversation.ExternalConversationTransportService
-	endpoints  *externalconversation.ExternalConversationEndpointService
-	gateways   *externalconversation.ExternalConversationGatewayService
-	supervisor *externalconversation.ExternalConversationSupervisor
-	config     *externalconversation.ExternalConversationSupervisorConfig
+	transport  *externalconversation.TransportService
+	endpoints  *externalconversation.EndpointService
+	gateways   *externalconversation.GatewayService
+	supervisor *externalconversation.Supervisor
+	config     *externalconversation.SupervisorConfig
 	scopes     workqueue.WorkerScopeSource
-	host       externalconversation.ExternalConversationAdapterHost
+	host       externalconversation.AdapterHost
 }
 
 type callbackRuntime struct {
-	registry *callback.CallbackRegistry
-	ingress  *callback.CallbackIngressService
-	worker   *callback.CallbackEventWorker
+	registry *callback.Registry
+	ingress  *callback.IngressService
+	worker   *callback.EventWorker
 }
 
 type actionWorkerSpec struct {
-	config      action.ActionWorkerConfig
+	config      action.WorkerConfig
 	credentials action.CredentialResolver
-	leaseIssuer action.ActionCredentialLeaseIssuer
+	leaseIssuer action.CredentialLeaseIssuer
 	dispatcher  agentrun.ActionDispatcher
 }
 
@@ -2267,7 +2267,7 @@ type actionWorkerSupervisorSpec struct {
 	config      action.DynamicActionWorkerConfig
 	source      workqueue.WorkerScopeSource
 	credentials action.CredentialResolver
-	leaseIssuer action.ActionCredentialLeaseIssuer
+	leaseIssuer action.CredentialLeaseIssuer
 	dispatcher  agentrun.ActionDispatcher
 }
 
@@ -2315,7 +2315,7 @@ func New(opts ...Option) (_ *Engine, err error) {
 		return nil, err
 	}
 	if e.actionPolicy == nil {
-		e.actionPolicy = action.ActionPolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
+		e.actionPolicy = action.PolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
 	}
 	e.buildRoutineEvents()
 	if err := e.rebuildConversationCoordinator(); err != nil {
@@ -2527,9 +2527,9 @@ func WithPersistentStore(store PersistentKernelStore) Option {
 // authorized Agent roster and its router. The host keeps tenant, credential,
 // model, and deployment concerns behind these interfaces.
 func WithConversationCoordinator(
-	participants conversation.ConversationParticipantSource,
-	router conversation.ConversationRouter,
-	config conversation.ConversationCoordinatorConfig,
+	participants conversation.ParticipantSource,
+	router conversation.Router,
+	config conversation.CoordinatorConfig,
 ) Option {
 	return func(e *Engine) error {
 		e.conversationParticipants = participants
@@ -2558,9 +2558,9 @@ func WithDynamicConversationRuns(config ConversationRunConfig, scopes workqueue.
 // inbox, Runbook/Agent reply projection, and Skill-owned delivery outbox.
 // Provider adapters and credential redemption stay behind host.
 func WithExternalConversationTransport(
-	config externalconversation.ExternalConversationSupervisorConfig,
+	config externalconversation.SupervisorConfig,
 	scopes workqueue.WorkerScopeSource,
-	host externalconversation.ExternalConversationAdapterHost,
+	host externalconversation.AdapterHost,
 ) Option {
 	return func(e *Engine) error {
 		if scopes == nil || host == nil {
@@ -2578,7 +2578,7 @@ func (e *Engine) rebuildConversationCoordinator() error {
 	if e.conversationParticipants == nil && e.conversationRouter == nil {
 		return nil
 	}
-	coordinator, err := conversation.NewConversationCoordinator(
+	coordinator, err := conversation.NewCoordinator(
 		e.conversations, e.conversationParticipants, e.conversationRouter, e.conversationCoordinatorConfig,
 	)
 	if err != nil {
@@ -2620,19 +2620,19 @@ func (e *Engine) rebuildConversationRuns() error {
 	if strings.TrimSpace(config.Workers.WorkerIDPrefix) == "" {
 		config.Workers.WorkerIDPrefix = "conversation-run-worker"
 	}
-	scheduler, err := conversationrun.NewConversationRunScheduler(conversationStore, e.store, config.Scheduler)
+	scheduler, err := conversationrun.NewScheduler(conversationStore, e.store, config.Scheduler)
 	if err != nil {
 		return err
 	}
 	if e.embeds != nil {
 		scheduler.SetSessionContextResolver(e.embeds)
 	}
-	runner, err := conversationrun.NewConversationRunTurnRunner(conversationStore, e.conversationCoordinator, config.Runner)
+	runner, err := conversationrun.NewTurnRunner(conversationStore, e.conversationCoordinator, config.Runner)
 	if err != nil {
 		return err
 	}
 	runner.SetReactionProjector(e.ReactionProjector())
-	reconciler, err := conversationrun.NewConversationRunReconciler(scheduler, e.conversationRunScopes, e.logger, config.Reconciler)
+	reconciler, err := conversationrun.NewReconciler(scheduler, e.conversationRunScopes, e.logger, config.Reconciler)
 	if err != nil {
 		return err
 	}
@@ -2656,10 +2656,10 @@ func (e *Engine) rebuildExternalConversations() error {
 		}
 		return nil
 	}
-	e.externalConversations.transport = externalconversation.NewExternalConversationTransportService(store, e.skills)
+	e.externalConversations.transport = externalconversation.NewTransportService(store, e.skills)
 	e.externalConversations.transport.SetRoutineEventOfferer(e.routineEvents.matcher)
-	e.externalConversations.endpoints = externalconversation.NewExternalConversationEndpointService(store, e.skills)
-	e.externalConversations.gateways = externalconversation.NewExternalConversationGatewayService(store, e.skills)
+	e.externalConversations.endpoints = externalconversation.NewEndpointService(store, e.skills)
+	e.externalConversations.gateways = externalconversation.NewGatewayService(store, e.skills)
 	if e.externalConversations.config == nil && e.externalConversations.scopes == nil && e.externalConversations.host == nil {
 		return nil
 	}
@@ -2669,19 +2669,19 @@ func (e *Engine) rebuildExternalConversations() error {
 	}
 	dispatcher := externalconversation.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler)
 	inboxConfig := e.externalConversations.config.Inbox
-	if contextHost, ok := e.externalConversations.host.(externalconversation.ExternalConversationContextHost); ok {
+	if contextHost, ok := e.externalConversations.host.(externalconversation.ContextHost); ok {
 		inboxConfig.ContextHost = contextHost
 		inboxConfig.ContextCatalog = e.skills
 	}
-	if attachmentHost, ok := e.externalConversations.host.(externalconversation.ExternalConversationAttachmentHost); ok {
+	if attachmentHost, ok := e.externalConversations.host.(externalconversation.AttachmentHost); ok {
 		inboxConfig.AttachmentHost = attachmentHost
 		inboxConfig.ContextCatalog = e.skills
 	}
-	inbox, err := externalconversation.NewExternalConversationInboxWorker(store, dispatcher, inboxConfig)
+	inbox, err := externalconversation.NewInboxWorker(store, dispatcher, inboxConfig)
 	if err != nil {
 		return err
 	}
-	replies, err := externalconversation.NewExternalConversationReplyWorker(store, e.skills)
+	replies, err := externalconversation.NewReplyWorker(store, e.skills)
 	if err != nil {
 		return err
 	}
@@ -2699,7 +2699,7 @@ func (e *Engine) rebuildExternalConversations() error {
 	if err != nil {
 		return err
 	}
-	delivery, err := externalconversation.NewExternalConversationDeliveryWorker(
+	delivery, err := externalconversation.NewDeliveryWorker(
 		store, e.skills, e.externalConversations.host, e.externalConversations.config.Delivery,
 	)
 	if err != nil {
@@ -2710,7 +2710,7 @@ func (e *Engine) rebuildExternalConversations() error {
 		return fmt.Errorf("persistent store does not implement approval notification storage")
 	}
 	approvals := externalconversation.NewApprovalNotificationWorker(approvalStore, e.externalConversations.transport, e.skills)
-	e.externalConversations.supervisor, err = externalconversation.NewExternalConversationSupervisor(
+	e.externalConversations.supervisor, err = externalconversation.NewSupervisor(
 		inbox, replies, delivery, approvals, e.externalConversations.scopes, e.logger, *e.externalConversations.config,
 	)
 	if err == nil {
@@ -2732,8 +2732,8 @@ func (e *Engine) rebuildCallbacks() error {
 	if !ok || e.skills == nil {
 		return nil
 	}
-	e.callbacks.registry = callback.NewCallbackRegistry(store, e.skills)
-	e.callbacks.ingress = callback.NewCallbackIngressService(store, e.skills, map[string]callback.CallbackEventConsumer{
+	e.callbacks.registry = callback.NewRegistry(store, e.skills)
+	e.callbacks.ingress = callback.NewIngressService(store, e.skills, map[string]callback.EventConsumer{
 		"approvals": externalconversation.NewApprovalCallbackConsumer(store, e.externalConversations.transport),
 		"routines":  externalconversation.NewRoutineCallbackConsumer(e.routineEvents.matcher),
 	})
@@ -2742,7 +2742,7 @@ func (e *Engine) rebuildCallbacks() error {
 		if strings.TrimSpace(callbackConfig.WorkerID) == "" {
 			callbackConfig.WorkerID = strings.TrimSpace(e.externalConversations.config.Inbox.WorkerID) + "-callbacks"
 		}
-		worker, err := callback.NewCallbackEventWorker(store, e.callbacks.ingress, callbackConfig)
+		worker, err := callback.NewEventWorker(store, e.callbacks.ingress, callbackConfig)
 		if err != nil {
 			return err
 		}
@@ -2817,7 +2817,7 @@ func WithSkillCatalog(catalog *skill.Catalog) Option {
 	}
 }
 
-func WithActionPolicy(policy action.ActionPolicyEvaluator) Option {
+func WithActionPolicy(policy action.PolicyEvaluator) Option {
 	return func(e *Engine) error {
 		if policy == nil {
 			return fmt.Errorf("action policy is required")
@@ -2858,7 +2858,7 @@ func WithChatFileContent(content models.ArtifactContentStore) Option {
 // RoutineScriptStatus reports whether a script routine's chat file changed
 // since its script was approved. The routine keeps running the approved
 // version; the set_script action approves the current one.
-func (e *Engine) RoutineScriptStatus(ctx context.Context, scope models.Scope, activationID string) (*routine.RoutineScriptStatus, error) {
+func (e *Engine) RoutineScriptStatus(ctx context.Context, scope models.Scope, activationID string) (*routine.ScriptStatus, error) {
 	return routine.NewRunbookActivationService(e.store).RoutineScriptStatus(ctx, e.chatFiles, scope, activationID)
 }
 
@@ -2871,7 +2871,7 @@ func (e *Engine) RevokeRoutineGrants(ctx context.Context, scope models.Scope, ac
 // WithActionProposalValidators adds deterministic, kernel-owned validation to
 // the governed action proposal path. Validators run before policy evaluation
 // and before an ApprovalCheckpoint is persisted.
-func WithActionProposalValidators(validators ...action.ActionProposalValidator) Option {
+func WithActionProposalValidators(validators ...action.ProposalValidator) Option {
 	return func(e *Engine) error {
 		for _, validator := range validators {
 			if validator == nil {
@@ -2947,7 +2947,7 @@ func (e *Engine) configureSkillManagementActions() error {
 	if err := e.skills.Register(context.Background(), skillbinding.SkillManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 		return err
 	}
-	validator, err := skillbinding.NewSkillBindingActionValidator(e.skills, e)
+	validator, err := skillbinding.NewActionValidator(e.skills, e)
 	if err != nil {
 		return err
 	}
@@ -2957,7 +2957,7 @@ func (e *Engine) configureSkillManagementActions() error {
 		e.appCatalog = &skillbinding.AppCatalogRef{}
 	}
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := skillbinding.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionPoolSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
+		dispatcher, dispatchErr := skillbinding.NewActionDispatcher(e.store, e.skills, e.actionPoolSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
@@ -2966,7 +2966,7 @@ func (e *Engine) configureSkillManagementActions() error {
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := skillbinding.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionSupervisorSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
+		dispatcher, dispatchErr := skillbinding.NewActionDispatcher(e.store, e.skills, e.actionSupervisorSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
@@ -3132,7 +3132,7 @@ func (e *Engine) configureTeamManagementActions() error {
 	return nil
 }
 
-func WithActionWorkers(config action.ActionWorkerConfig, credentials action.CredentialResolver, dispatcher agentrun.ActionDispatcher) Option {
+func WithActionWorkers(config action.WorkerConfig, credentials action.CredentialResolver, dispatcher agentrun.ActionDispatcher) Option {
 	return func(e *Engine) error {
 		if dispatcher == nil {
 			return fmt.Errorf("action dispatcher is required")
@@ -3144,7 +3144,7 @@ func WithActionWorkers(config action.ActionWorkerConfig, credentials action.Cred
 
 // WithActionCredentialLeaseWorkers dispatches credentialed actions with a
 // signed opaque lease instead of resolving plaintext values inside OpenSeal.
-func WithActionCredentialLeaseWorkers(config action.ActionWorkerConfig, issuer action.ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher) Option {
+func WithActionCredentialLeaseWorkers(config action.WorkerConfig, issuer action.CredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher) Option {
 	return func(e *Engine) error {
 		if issuer == nil || dispatcher == nil {
 			return fmt.Errorf("action credential lease issuer and dispatcher are required")
@@ -3175,7 +3175,7 @@ func WithDynamicActionWorkers(config action.DynamicActionWorkerConfig, source wo
 // WithDynamicActionCredentialLeaseWorkers is the multi-tenant counterpart of
 // WithActionCredentialLeaseWorkers. Each scope keeps independent durable
 // action claims while the issuer derives one signed lease per execution.
-func WithDynamicActionCredentialLeaseWorkers(config action.DynamicActionWorkerConfig, source workqueue.WorkerScopeSource, issuer action.ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher) Option {
+func WithDynamicActionCredentialLeaseWorkers(config action.DynamicActionWorkerConfig, source workqueue.WorkerScopeSource, issuer action.CredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher) Option {
 	return func(e *Engine) error {
 		if source == nil || issuer == nil || dispatcher == nil {
 			return fmt.Errorf("action worker scope source, credential lease issuer, and dispatcher are required")
@@ -3198,20 +3198,20 @@ func WithApprovalAuthorizer(authorizer action.ApprovalAuthorizer) Option {
 }
 
 func (e *Engine) rebuildGovernance() {
-	e.actions = action.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy, e.actionValidators)
+	e.actions = action.NewCoordinator(e.store, e.store, e.skills, e.actionPolicy, e.actionValidators)
 	e.actions.SetRoutineOwnerAddresses(e.routineOwnerAddresses)
 	e.approvals = action.NewApprovalCoordinator(e.store, e.store, e.approvalAuth)
 }
 func (e *Engine) rebuildActionWorkerPools() error {
 
-	e.actionPools = make([]*action.ActionWorkerPool, 0, len(e.actionPoolSpecs))
+	e.actionPools = make([]*action.WorkerPool, 0, len(e.actionPoolSpecs))
 	for _, spec := range e.actionPoolSpecs {
-		var pool *action.ActionWorkerPool
+		var pool *action.WorkerPool
 		var err error
 		if spec.leaseIssuer != nil {
-			pool, err = action.NewActionCredentialLeaseWorkerPool(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, e.logger, spec.config)
+			pool, err = action.NewCredentialLeaseWorkerPool(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, e.logger, spec.config)
 		} else {
-			pool, err = action.NewActionWorkerPool(e.store, e.skills, spec.credentials, spec.dispatcher, e.logger, spec.config)
+			pool, err = action.NewWorkerPool(e.store, e.skills, spec.credentials, spec.dispatcher, e.logger, spec.config)
 		}
 		if err != nil {
 			return err
@@ -3224,14 +3224,14 @@ func (e *Engine) rebuildActionWorkerPools() error {
 }
 
 func (e *Engine) rebuildActionWorkerSupervisors() error {
-	e.actionSupervisors = make([]*action.ActionWorkerSupervisor, 0, len(e.actionSupervisorSpecs))
+	e.actionSupervisors = make([]*action.WorkerSupervisor, 0, len(e.actionSupervisorSpecs))
 	for _, spec := range e.actionSupervisorSpecs {
-		var supervisor *action.ActionWorkerSupervisor
+		var supervisor *action.WorkerSupervisor
 		var err error
 		if spec.leaseIssuer != nil {
-			supervisor, err = action.NewActionCredentialLeaseWorkerSupervisor(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, spec.source, e.logger, spec.config)
+			supervisor, err = action.NewCredentialLeaseWorkerSupervisor(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, spec.source, e.logger, spec.config)
 		} else {
-			supervisor, err = action.NewActionWorkerSupervisor(e.store, e.skills, spec.credentials, spec.dispatcher, spec.source, e.logger, spec.config)
+			supervisor, err = action.NewWorkerSupervisor(e.store, e.skills, spec.credentials, spec.dispatcher, spec.source, e.logger, spec.config)
 		}
 		if err != nil {
 			return err
@@ -3419,7 +3419,7 @@ func (e *Engine) UpdateRunbookActivation(ctx context.Context, scope models.Scope
 	return routine.NewRunbookActivationService(e.store).WithRoutineEventSources(e.routineEvents.sources).Update(ctx, scope, activationID, req)
 }
 
-func (e *Engine) StartRunbookActivation(ctx context.Context, scope models.Scope, activationID string, req routine.StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error) {
+func (e *Engine) StartRunbookActivation(ctx context.Context, scope models.Scope, activationID string, req routine.StartRunbookActivationRequest) (*agentrun.CommandResult, error) {
 	return routine.StartRunbookActivationWithExecutionPreparer(ctx, e.store, scope, activationID, req, e)
 }
 
@@ -3445,7 +3445,7 @@ func (e *Engine) CreateAgentRun(ctx context.Context, req models.CreateAgentRunRe
 
 // CreateAgentRunCommand returns both the durable run and its creation event.
 // Idempotent replays return the existing run with a nil event.
-func (e *Engine) CreateAgentRunCommand(ctx context.Context, req models.CreateAgentRunRequest) (*agentrun.AgentRunCommandResult, error) {
+func (e *Engine) CreateAgentRunCommand(ctx context.Context, req models.CreateAgentRunRequest) (*agentrun.CommandResult, error) {
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -3501,7 +3501,7 @@ func (e *Engine) ValidateAgentRunEntrypoint(ctx context.Context, scope models.Sc
 	return nil
 }
 
-func (e *Engine) CommandAgentRun(ctx context.Context, req agentrun.AgentRunCommandRequest) (*agentrun.AgentRunCommandResult, error) {
+func (e *Engine) CommandAgentRun(ctx context.Context, req agentrun.CommandRequest) (*agentrun.CommandResult, error) {
 	return agentrun.NewRunCommandService(e.store).CommandAgentRun(ctx, req)
 }
 
@@ -3623,7 +3623,7 @@ func (e *Engine) ListActivity(ctx context.Context, filter models.ActivityFilter)
 	return e.activity.ListActivity(ctx, filter)
 }
 
-func (e *Engine) ListActivityFeed(ctx context.Context, request activity.ActivityFeedRequest) (*activity.ActivityFeedPage, error) {
+func (e *Engine) ListActivityFeed(ctx context.Context, request activity.FeedRequest) (*activity.FeedPage, error) {
 	return e.activity.ListActivityFeed(ctx, request)
 }
 
@@ -3657,7 +3657,7 @@ func (e *Engine) SetConversationApprovalMode(ctx context.Context, request conver
 	if !ok || e.conversations == nil {
 		return nil, fmt.Errorf("conversation approval modes are not supported by this store")
 	}
-	return conversation.NewConversationApprovalModeService(store).SetApprovalMode(ctx, request)
+	return conversation.NewApprovalModeService(store).SetApprovalMode(ctx, request)
 }
 
 func (e *Engine) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
@@ -3899,7 +3899,7 @@ func (e *Engine) ConsumeEmbedSessionMessage(ctx context.Context, installation *m
 
 // ImportConversationArchive migrates user-visible historical collaboration
 // facts without scheduling new conversation Runs for old messages.
-func (e *Engine) ImportConversationArchive(ctx context.Context, request conversation.ImportConversationArchiveRequest) (*conversation.ConversationArchiveImportResult, error) {
+func (e *Engine) ImportConversationArchive(ctx context.Context, request conversation.ImportConversationArchiveRequest) (*conversation.ArchiveImportResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
@@ -3955,7 +3955,7 @@ func (e *Engine) GetVisibleChannelMessage(ctx context.Context, scope models.Scop
 	return e.conversations.GetVisibleChannelMessage(ctx, scope, conversationID, messageID, viewer)
 }
 
-func (e *Engine) ListConversationChanges(ctx context.Context, request conversation.ConversationChangeRequest) (*conversation.ConversationChangeSet, error) {
+func (e *Engine) ListConversationChanges(ctx context.Context, request conversation.ChangeRequest) (*conversation.ChangeSet, error) {
 	if e.conversationChanges == nil {
 		return nil, fmt.Errorf("conversation change service is not configured")
 	}
@@ -3996,9 +3996,9 @@ func (e *Engine) ReceiveExternalConversationEvent(
 
 func (e *Engine) NormalizeExternalConversationIngress(
 	ctx context.Context,
-	request externalconversation.ExternalConversationIngressRequest,
-	host externalconversation.ExternalConversationIngressAdapterHost,
-) (*externalconversation.ExternalConversationIngressResult, error) {
+	request externalconversation.IngressRequest,
+	host externalconversation.IngressAdapterHost,
+) (*externalconversation.IngressResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -4011,9 +4011,9 @@ func (e *Engine) NormalizeExternalConversationIngress(
 
 func (e *Engine) NormalizeExternalConversationPublicIngress(
 	ctx context.Context,
-	request externalconversation.ExternalConversationPublicIngressRequest,
-	host externalconversation.ExternalConversationIngressAdapterHost,
-) (*externalconversation.ExternalConversationIngressResult, error) {
+	request externalconversation.PublicIngressRequest,
+	host externalconversation.IngressAdapterHost,
+) (*externalconversation.IngressResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -4027,9 +4027,9 @@ func (e *Engine) NormalizeExternalConversationPublicIngress(
 func (e *Engine) NormalizeExternalConversationGatewayIngress(
 	ctx context.Context,
 	gateway models.ExternalConversationIngressGateway,
-	request externalconversation.ExternalConversationPublicIngressRequest,
-	host externalconversation.ExternalConversationGatewayAdapterHost,
-) (*externalconversation.ExternalConversationGatewayIngressResult, error) {
+	request externalconversation.PublicIngressRequest,
+	host externalconversation.GatewayAdapterHost,
+) (*externalconversation.GatewayIngressResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -4044,9 +4044,9 @@ func (e *Engine) NormalizeExternalConversationGatewayIngress(
 
 func (e *Engine) NormalizeExternalConversationRegisteredGatewayIngress(
 	ctx context.Context,
-	request externalconversation.ExternalConversationPublicIngressRequest,
-	host externalconversation.ExternalConversationGatewayAdapterHost,
-) (*externalconversation.ExternalConversationGatewayIngressResult, error) {
+	request externalconversation.PublicIngressRequest,
+	host externalconversation.GatewayAdapterHost,
+) (*externalconversation.GatewayIngressResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -4207,9 +4207,9 @@ func (e *Engine) UpdateCallbackRegistration(
 
 func (e *Engine) ReceiveCallback(
 	ctx context.Context,
-	request callback.CallbackPublicRequest,
-	host callback.CallbackAdapterHost,
-) (*callback.CallbackIngressResult, error) {
+	request callback.PublicRequest,
+	host callback.AdapterHost,
+) (*callback.IngressResult, error) {
 	if e == nil || e.callbacks.ingress == nil {
 		return nil, fmt.Errorf("callback ingress is not configured")
 	}
@@ -4455,15 +4455,15 @@ func (e *Engine) ListAgentTurns(ctx context.Context, filter models.AgentTurnFilt
 	return e.turns.ListTurns(ctx, filter)
 }
 
-func (e *Engine) ClaimNextAgentRun(ctx context.Context, req agentrun.AgentRunClaimRequest) (*models.AgentRun, error) {
+func (e *Engine) ClaimNextAgentRun(ctx context.Context, req agentrun.ClaimRequest) (*models.AgentRun, error) {
 	return e.runQueue.ClaimNext(ctx, req)
 }
 
-func (e *Engine) ClaimNextAgentRunDecision(ctx context.Context, req agentrun.AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
+func (e *Engine) ClaimNextAgentRunDecision(ctx context.Context, req agentrun.ClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	return e.runQueue.ClaimNextDecision(ctx, req)
 }
 
-func (e *Engine) InspectAgentRunAdmission(ctx context.Context, req agentrun.AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
+func (e *Engine) InspectAgentRunAdmission(ctx context.Context, req agentrun.ClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	return e.runQueue.Inspect(ctx, req)
 }
 

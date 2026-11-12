@@ -17,7 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func runbookIDs(runbooks []*conversation.ConversationRunbook) string {
+func runbookIDs(runbooks []*conversation.Runbook) string {
 	ids := make([]string, len(runbooks))
 	for index, value := range runbooks {
 		ids[index] = value.ID
@@ -31,8 +31,8 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 			f := newInteractionChangeFixture(t, testCase.store(t))
 			ctx, store, scope := f.ctx, f.store, f.scope
 			owner := f.conversation.Owner
-			conversations := conversation.NewConversationService(store.(models.ConversationStore))
-			objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+			conversations := conversation.NewService(store.(models.ConversationStore))
+			objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: owner, Title: "Morning news", Goal: "Summarise the news every morning", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
@@ -70,7 +70,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 			if !initial.RunbooksChanged || runbookIDs(initial.Runbooks) != "chat-task" {
 				t.Fatalf("initial runbooks = %s changed=%v", runbookIDs(initial.Runbooks), initial.RunbooksChanged)
 			}
-			if got := initial.Runbooks[0]; got.Title != "Morning news" || got.Status != conversation.ConversationRunbookActive || got.Schedule == nil || got.Schedule.Cron != "0 0 8 * * 1" ||
+			if got := initial.Runbooks[0]; got.Title != "Morning news" || got.Status != conversation.RunbookActive || got.Schedule == nil || got.Schedule.Cron != "0 0 8 * * 1" ||
 				got.Script == nil || got.Script.Path != "scripts/plan.py" {
 				t.Fatalf("task runbook = %#v", got)
 			}
@@ -114,7 +114,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 				t.Fatal(err)
 			}
 			paused := f.list(t, ran.Cursor)
-			if !paused.RunbooksChanged || paused.Runbooks[1].Status != conversation.ConversationRunbookPaused || paused.Runbooks[1].NextRunAt != nil {
+			if !paused.RunbooksChanged || paused.Runbooks[1].Status != conversation.RunbookPaused || paused.Runbooks[1].NextRunAt != nil {
 				t.Fatalf("paused runbook = %#v", paused.Runbooks)
 			}
 			current, _ = store.GetRunbookActivation(ctx, scope, daily.ID)
@@ -122,7 +122,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 				t.Fatal(err)
 			}
 			stopped := f.list(t, paused.Cursor)
-			if !stopped.RunbooksChanged || runbookIDs(stopped.Runbooks) != "chat-task,daily-news" || stopped.Runbooks[1].Status != conversation.ConversationRunbookStopped {
+			if !stopped.RunbooksChanged || runbookIDs(stopped.Runbooks) != "chat-task,daily-news" || stopped.Runbooks[1].Status != conversation.RunbookStopped {
 				t.Fatalf("stopped runbook = %#v", stopped.Runbooks)
 			}
 			if after := f.list(t, stopped.Cursor); after.RunbooksChanged || len(after.Runbooks) != 0 {
@@ -135,7 +135,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 func TestLinkRunbooks(t *testing.T) {
 	ctx := context.Background()
 	store := kerneltest.NewStore(t)
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: "links"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{
@@ -182,7 +182,7 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 			owner := f.conversation.Owner
 			now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 			f.clock = func() time.Time { return now }
-			objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+			objective, err := portfolio.NewService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: owner, Title: "Order notes", Goal: "Summarize each new order", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
@@ -208,7 +208,7 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 			}
 			got := initial.Runbooks[0]
 			wantWhen := models.DescribeRoutineEventTrigger(routine.Task.Event)
-			if got.Title != "Order notes" || got.Status != conversation.ConversationRunbookActive || got.Schedule != nil || got.Trigger == nil ||
+			if got.Title != "Order notes" || got.Status != conversation.RunbookActive || got.Schedule != nil || got.Trigger == nil ||
 				got.Trigger.Kind != runbook.TriggerEvent || got.Trigger.EventKind != models.RoutineEventWebhook || got.Trigger.When == "" ||
 				got.Trigger.When != wantWhen || got.Trigger.SourceLabel != "your shop" || got.Trigger.MaxPerHour != 2 ||
 				got.LastFiredAt != nil || got.FiredLast24h != 0 || got.Pending != 0 || got.NextRunAt != nil || got.LastRun != nil {
@@ -228,7 +228,7 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 				if err != nil || batch == nil {
 					t.Fatalf("claim = %#v, %v", batch, err)
 				}
-				lastRun, err = portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+				lastRun, err = portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 					Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, Goal: routine.Task.Goal, Source: models.RunSourceEvent,
 					Context: map[string]interface{}{"runbookActivationId": routine.ID}, IdempotencyKey: batch.ID,
 				})
@@ -270,7 +270,7 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 			if !paused.RunbooksChanged || len(paused.Runbooks) != 1 {
 				t.Fatalf("paused runbooks = %#v", paused.Runbooks)
 			}
-			if got := paused.Runbooks[0]; got.Status != conversation.ConversationRunbookPaused || got.PausedReason != models.RoutinePausedNeedsSignIn || got.NextRunAt != nil {
+			if got := paused.Runbooks[0]; got.Status != conversation.RunbookPaused || got.PausedReason != models.RoutinePausedNeedsSignIn || got.NextRunAt != nil {
 				t.Fatalf("paused event routine = %#v", got)
 			}
 		})

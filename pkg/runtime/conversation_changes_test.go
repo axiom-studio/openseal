@@ -34,7 +34,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "changes"}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			conversations := runtimeconversation.NewConversationService(conversationStore, models.WithClock(func() time.Time { return now }))
+			conversations := runtimeconversation.NewService(conversationStore, models.WithClock(func() time.Time { return now }))
 			seedTestSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
@@ -52,7 +52,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			scheduler, err := conversationrun.NewConversationRunScheduler(conversationStore, store, conversationrun.ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewScheduler(conversationStore, store, conversationrun.SchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -60,11 +60,11 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			changes, err := runtimeconversation.NewConversationChangeService(conversationStore, store, models.WithClock(func() time.Time { return now }))
+			changes, err := runtimeconversation.NewChangeService(conversationStore, store, models.WithClock(func() time.Time { return now }))
 			if err != nil {
 				t.Fatal(err)
 			}
-			initial, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+			initial, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, ActiveAt: now,
 			})
 			if err != nil || !initial.HasChanges || initial.HasMore || !initial.RunsChanged || !initial.ActivityChanged || !initial.PresenceChanged ||
@@ -75,7 +75,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 				len(initial.Presence) != 0 || initial.Cursor == "" {
 				t.Fatalf("initial changes = %#v, %v", initial, err)
 			}
-			unchanged, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+			unchanged, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor, ActiveAt: now,
 			})
 			if err != nil || unchanged.HasChanges || unchanged.RunsChanged || unchanged.ActivityChanged || unchanged.PresenceChanged ||
@@ -100,7 +100,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			working, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+			working, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor, ActiveAt: now,
 			})
 			if err != nil || !working.HasChanges || !working.RunsChanged || !working.ActivityChanged || !working.PresenceChanged ||
@@ -127,25 +127,25 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			if err != nil || round.Round.ConversationRevision != 3 || len(round.Messages) != 0 {
 				t.Fatalf("round = %#v, %v", round, err)
 			}
-			afterRound, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+			afterRound, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, Cursor: working.Cursor, ActiveAt: now,
 			})
 			if err != nil || !afterRound.HasChanges || len(afterRound.Rounds) != 1 || afterRound.Rounds[0].Round.ID != round.Round.ID ||
 				afterRound.Rounds[0].Round.Responders[0].Reason != "owns the ledger" {
 				t.Fatalf("round changes = %#v, %v", afterRound, err)
 			}
-			expired, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+			expired, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, Cursor: afterRound.Cursor, ActiveAt: now.Add(time.Minute),
 			})
 			if err != nil || !expired.HasChanges || !expired.PresenceChanged || len(expired.Presence) != 0 {
 				t.Fatalf("expired presence changes = %#v, %v", expired, err)
 			}
-			if _, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+			if _, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, Cursor: "not-a-cursor",
 			}); err == nil {
 				t.Fatal("invalid cursor was accepted")
 			}
-			if _, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+			if _, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{
 				Scope: scope, ConversationID: "another-channel", Cursor: initial.Cursor,
 			}); err == nil {
 				t.Fatal("cross-conversation cursor was accepted")
@@ -156,7 +156,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 
 func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "private-stream"}
 	seedTestSpace(t, store, scope)
@@ -175,7 +175,7 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changes, _ := runtimeconversation.NewConversationChangeService(store, store)
+	changes, _ := runtimeconversation.NewChangeService(store, store)
 	now := time.Now().UTC()
 	for _, run := range []*models.AgentRun{
 		{ID: "hidden-root", Kind: models.RunKindConversation, RootRunID: "hidden-root", ConcurrencyKey: conversation.ID, Context: map[string]interface{}{models.ConversationRunTriggerIDContextKey: hidden.Message.ID}},
@@ -188,7 +188,7 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	first, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Limit: 1, Viewer: &viewer})
+	first, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{Scope: scope, ConversationID: conversation.ID, Limit: 1, Viewer: &viewer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,11 +199,11 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 		t.Fatal("private execution leaked to a viewer without message access")
 	}
 	allowed := models.ConversationViewer{Participant: target}
-	private, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: &allowed})
+	private, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: &allowed})
 	if err != nil || len(private.Runs) != 2 {
 		t.Fatalf("authorized viewer lost execution: %#v, %v", private, err)
 	}
-	second, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: first.Cursor, Limit: 1, Viewer: &viewer})
+	second, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: first.Cursor, Limit: 1, Viewer: &viewer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,11 +216,11 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	afterHiddenChange, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: second.Cursor, Viewer: &viewer})
+	afterHiddenChange, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: second.Cursor, Viewer: &viewer})
 	if err != nil || afterHiddenChange.HasChanges || afterHiddenChange.Cursor != second.Cursor || len(afterHiddenChange.Activity) != 0 {
 		t.Fatalf("hidden work leaked through cursor or activity: %#v, %v", afterHiddenChange, err)
 	}
-	private, err = changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: &allowed})
+	private, err = changes.ListChanges(ctx, runtimeconversation.ChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: &allowed})
 	if err != nil || len(private.Activity) == 0 {
 		t.Fatalf("authorized viewer lost private activity: %#v, %v", private, err)
 	}
@@ -234,7 +234,7 @@ func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := models.Scope{Kind: "tenant", ID: "restart"}
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
@@ -251,11 +251,11 @@ func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changes, err := runtimeconversation.NewConversationChangeService(store, store)
+	changes, err := runtimeconversation.NewChangeService(store, store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	initial, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	initial, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(initial.Messages) != 1 || initial.Messages[0].ID != first.Message.ID {
 		t.Fatalf("initial changes = %#v, %v", initial, err)
 	}
@@ -267,7 +267,7 @@ func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	restartedConversations := runtimeconversation.NewConversationService(reopened)
+	restartedConversations := runtimeconversation.NewService(reopened)
 	current, err := restartedConversations.GetConversation(ctx, scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -280,11 +280,11 @@ func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restartedChanges, err := runtimeconversation.NewConversationChangeService(reopened, reopened)
+	restartedChanges, err := runtimeconversation.NewChangeService(reopened, reopened)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumed, err := restartedChanges.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
+	resumed, err := restartedChanges.ListChanges(ctx, runtimeconversation.ChangeRequest{
 		Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor,
 	})
 	if err != nil || len(resumed.Messages) != 1 || resumed.Messages[0].ID != second.Message.ID {

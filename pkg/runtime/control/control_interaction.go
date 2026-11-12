@@ -27,9 +27,9 @@ type reactControlArgs struct {
 
 type reactControlHandler struct{}
 
-func (reactControlHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
-	return ControlToolSpec{
-		Description: runtimeconversation.ConversationReactInstruction,
+func (reactControlHandler) Spec(agentrun.ControlAuthority) ToolSpec {
+	return ToolSpec{
+		Description: runtimeconversation.ReactInstruction,
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"messageId", "emoji"},
 			"properties": map[string]interface{}{
@@ -44,7 +44,7 @@ func (reactControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[reactControlArgs](raw)
 }
 
-func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (reactControlHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
 	args := cc.Arguments.(*reactControlArgs)
 	reaction := runtimeconversation.TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji}
 	if !models.IsValidOpaqueIdentifier(reaction.MessageID, 256) || models.ValidateReactionEmoji(reaction.Emoji) != nil {
@@ -53,7 +53,7 @@ func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agent
 	}
 	done, err := completedRunReactionEntries(ctx, x.Sessions, cc.Run)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	if len(done) >= runtimeconversation.MaximumTurnReactions {
 		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "reaction_limit",
@@ -61,7 +61,7 @@ func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agent
 	}
 	if err := x.addRunReaction(ctx, cc.Run, reaction); err != nil {
 		if errors.Is(err, models.ErrLeaseLost) {
-			return ControlResult{}, err
+			return Result{}, err
 		}
 		return x.refuse(ctx, cc, ErrorResult(models.ToolResultFailed, "reaction_failed",
 			"The reaction could not be added: "+err.Error()+".", nil))
@@ -73,7 +73,7 @@ func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agent
 
 // addRunReaction adds the reaction as the Agent answering in the Run's
 // conversation, on a message that Agent can see.
-func (x *ControlExecutor) addRunReaction(ctx context.Context, run *models.AgentRun, reaction runtimeconversation.TurnReaction) error {
+func (x *Executor) addRunReaction(ctx context.Context, run *models.AgentRun, reaction runtimeconversation.TurnReaction) error {
 	if x.Conversations == nil {
 		return errors.New("conversations are not configured")
 	}
@@ -85,7 +85,7 @@ func (x *ControlExecutor) addRunReaction(ctx context.Context, run *models.AgentR
 	if err != nil {
 		return err
 	}
-	agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
+	agentID := runtimeconversation.RunAgentID(conversation, run)
 	if agentID == "" {
 		return errors.New("this Run is not the answering Agent of its conversation")
 	}
@@ -141,8 +141,8 @@ type waitControlArgs struct {
 
 type waitControlHandler struct{}
 
-func (waitControlHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
-	return ControlToolSpec{
+func (waitControlHandler) Spec(agentrun.ControlAuthority) ToolSpec {
+	return ToolSpec{
 		Description: waitControlDescription,
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"seconds"},
@@ -167,25 +167,25 @@ func (waitControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return value, nil
 }
 
-func (waitControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (waitControlHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
 	args := cc.Arguments.(*waitControlArgs)
 	wakeAt := x.now().Add(time.Duration(args.Seconds) * time.Second)
 	entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryAwaitingEvent,
-		&models.ToolEntryWait{Reason: "timer"}, nil, &ControlEntryMeta{WakeAt: &wakeAt})
+		&models.ToolEntryWait{Reason: "timer"}, nil, &EntryMeta{WakeAt: &wakeAt})
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
-	return ControlResult{Kind: ControlParked, Entry: entry, Park: waitPark(entry.ID, wakeAt)}, nil
+	return Result{Kind: Parked, Entry: entry, Park: waitPark(entry.ID, wakeAt)}, nil
 }
 
-func (waitControlHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
+func (waitControlHandler) Resume(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Resume, error) {
 	args := cc.Arguments.(*waitControlArgs)
 	meta, err := DecodeControlEntryMeta(cc.Entry)
 	if err != nil {
-		return ControlResume{}, err
+		return Resume{}, err
 	}
 	if meta == nil || meta.WakeAt == nil {
-		return ControlResume{}, fmt.Errorf("wait entry %s has no wake time", cc.Entry.ID)
+		return Resume{}, fmt.Errorf("wait entry %s has no wake time", cc.Entry.ID)
 	}
 	wakeAt := meta.WakeAt.UTC()
 	now := x.now()
@@ -203,13 +203,13 @@ func (waitControlHandler) Resume(ctx context.Context, x *ControlExecutor, cc age
 	default:
 		// Nothing woke it (a crash between the entry park and the Run park):
 		// keep sleeping until the timer.
-		return ControlResume{Resolved: false, Park: waitPark(cc.Entry.ID, wakeAt)}, nil
+		return Resume{Resolved: false, Park: waitPark(cc.Entry.ID, wakeAt)}, nil
 	}
 	result, err := x.complete(ctx, cc, models.ControlJSONResult(models.ToolResultSucceeded, value), nil)
 	if err != nil {
-		return ControlResume{}, err
+		return Resume{}, err
 	}
-	return ControlResume{Resolved: true, Result: result}, nil
+	return Resume{Resolved: true, Result: result}, nil
 }
 
 func waitPark(entryID string, wakeAt time.Time) *agentrun.LoopPark {

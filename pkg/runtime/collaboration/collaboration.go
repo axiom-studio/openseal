@@ -167,7 +167,7 @@ type collaborationAgentStore interface {
 	GetDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
 }
 
-type CollaborationService struct {
+type Service struct {
 	store             models.CollaborationStore
 	runs              models.PortfolioStore
 	artifacts         models.ArtifactStore
@@ -178,13 +178,13 @@ type CollaborationService struct {
 	newID             func() string
 }
 
-func NewCollaborationService(store models.CollaborationKernelStore, opts ...models.ServiceOption) *CollaborationService {
-	service := &CollaborationService{store: store, runs: store, artifacts: store, dependencies: portfolio.NewDependencyCoordinator(store, opts...), now: models.ClockFrom(opts), newID: uuid.NewString}
+func NewService(store models.CollaborationKernelStore, opts ...models.ServiceOption) *Service {
+	service := &Service{store: store, runs: store, artifacts: store, dependencies: portfolio.NewDependencyCoordinator(store, opts...), now: models.ClockFrom(opts), newID: uuid.NewString}
 	service.teams = models.TeamRosterReaderOf(store)
 	return service
 }
 
-func (s *CollaborationService) resolveSourceDelegationPolicy(ctx context.Context, source *models.AgentRun) (*models.AgentRequestDelegationPolicy, error) {
+func (s *Service) resolveSourceDelegationPolicy(ctx context.Context, source *models.AgentRun) (*models.AgentRequestDelegationPolicy, error) {
 	if source == nil || source.Owner.Type != models.OwnerTypeTeam || s.teams == nil {
 		return nil, nil
 	}
@@ -225,7 +225,7 @@ func (s *CollaborationService) resolveSourceDelegationPolicy(ctx context.Context
 	}, nil
 }
 
-func (s *CollaborationService) sourceDelegationDepth(ctx context.Context, source *models.AgentRun) (int, error) {
+func (s *Service) sourceDelegationDepth(ctx context.Context, source *models.AgentRun) (int, error) {
 	depth := 0
 	current := source
 	for current != nil {
@@ -249,7 +249,7 @@ func (s *CollaborationService) sourceDelegationDepth(ctx context.Context, source
 	return depth, nil
 }
 
-func (s *CollaborationService) validateSourceDelegationPolicy(ctx context.Context, req CreateAgentRequestRequest, policy *models.AgentRequestDelegationPolicy) error {
+func (s *Service) validateSourceDelegationPolicy(ctx context.Context, req CreateAgentRequestRequest, policy *models.AgentRequestDelegationPolicy) error {
 	if policy == nil {
 		return nil
 	}
@@ -281,7 +281,7 @@ func validateAgentRequestSource(run *models.AgentRun) error {
 	return fmt.Errorf("%w: source run cannot start collaboration from %s", models.ErrInvalidAgentRequestState, status)
 }
 
-func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req CreateAgentRequestRequest) (*AgentRequestResult, error) {
+func (s *Service) CreateAgentRequest(ctx context.Context, req CreateAgentRequestRequest) (*AgentRequestResult, error) {
 	if s == nil || s.store == nil || s.runs == nil || s.artifacts == nil {
 		return nil, errors.New("collaboration store is not configured")
 	}
@@ -429,7 +429,7 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 // CreateAgentRequestGroup durably seals a complete fan-out before exposing its
 // collaboration requests. A stable idempotency key makes partial creation
 // recoverable after process or storage interruptions.
-func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req CreateAgentRequestGroupRequest) (*AgentRequestGroupResult, error) {
+func (s *Service) CreateAgentRequestGroup(ctx context.Context, req CreateAgentRequestGroupRequest) (*AgentRequestGroupResult, error) {
 	if s == nil || s.dependencies == nil {
 		return nil, errors.New("collaboration dependency store is not configured")
 	}
@@ -561,7 +561,7 @@ func ValidateTaskDelegationSource(ctx context.Context, store models.PortfolioSto
 	return nil
 }
 
-func (s *CollaborationService) groupedRequestDependency(ctx context.Context, request *models.AgentRequest, source *models.AgentRun, allowTerminalGroup bool) (*models.RunDependency, error) {
+func (s *Service) groupedRequestDependency(ctx context.Context, request *models.AgentRequest, source *models.AgentRun, allowTerminalGroup bool) (*models.RunDependency, error) {
 	if request == nil || source == nil || request.DependencyGroupID == "" || request.DependencyID == "" {
 		return nil, models.ErrInvalidAgentRequestState
 	}
@@ -587,7 +587,7 @@ func (s *CollaborationService) groupedRequestDependency(ctx context.Context, req
 	return nil, fmt.Errorf("%w: request %s is not linked to dependency %s", models.ErrInvalidAgentRequestState, request.ID, request.DependencyID)
 }
 
-func (s *CollaborationService) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
+func (s *Service) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
 	request, err := s.store.GetAgentRequest(ctx, scope, requestID)
 	if err != nil {
 		return nil, err
@@ -598,7 +598,7 @@ func (s *CollaborationService) GetAgentRequest(ctx context.Context, scope models
 	return request, nil
 }
 
-func (s *CollaborationService) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
+func (s *Service) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("collaboration store is not configured")
 	}
@@ -646,7 +646,7 @@ func buildCollaborationChildRun(source *models.AgentRun, request *models.AgentRe
 // same chat: the recipient answers there as an ordinary chat Run, in its own
 // lane, with the whole conversation, exactly as if the message reached it first.
 func collaborationChatPlacement(source *models.AgentRun, assignedAgent string, context map[string]interface{}) string {
-	for _, key := range []string{models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey, conversation.ConversationRunContextTriggerSeq, "threadRootMessageId", "responseMode"} {
+	for _, key := range []string{models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey, conversation.RunContextTriggerSeq, "threadRootMessageId", "responseMode"} {
 		if value, ok := source.Context[key]; ok {
 			context[key] = value
 		}
@@ -673,7 +673,7 @@ func validateChatDelegationSource(source *models.AgentRun) error {
 // hands work to the Team, which routes among its members, or to an Agent on
 // its current active roster. It is checked when the request is created and
 // again when it is accepted.
-func (s *CollaborationService) validateChatDelegation(ctx context.Context, source *models.AgentRun, recipient models.CollaborationParty) error {
+func (s *Service) validateChatDelegation(ctx context.Context, source *models.AgentRun, recipient models.CollaborationParty) error {
 	if err := validateChatDelegationSource(source); err != nil {
 		return err
 	}
@@ -698,7 +698,7 @@ func (s *CollaborationService) validateChatDelegation(ctx context.Context, sourc
 // verifyChatAssignment keeps accepted Team chat work on the chat's roster:
 // the child answers in that chat, so a member removed after the request was
 // made cannot accept it.
-func (s *CollaborationService) verifyChatAssignment(ctx context.Context, source *models.AgentRun, assignedAgentID string) error {
+func (s *Service) verifyChatAssignment(ctx context.Context, source *models.AgentRun, assignedAgentID string) error {
 	if source == nil || models.NormalizeRunKind(source.Kind) != models.RunKindConversation || source.Owner.Type != models.OwnerTypeTeam {
 		return nil
 	}

@@ -18,7 +18,7 @@ import (
 // hook key and public ingress, which the daemon has neither of.
 type desktopRoutineEventSources struct{}
 
-func (desktopRoutineEventSources) ListRoutineEventSources(context.Context, models.Scope, models.ObjectiveOwner, string) ([]routine.RoutineEventSourceOption, error) {
+func (desktopRoutineEventSources) ListRoutineEventSources(context.Context, models.Scope, models.ObjectiveOwner, string) ([]routine.EventSourceOption, error) {
 	return nil, nil
 }
 
@@ -39,7 +39,7 @@ func StartRoutineEventDispatcher(ctx context.Context, kernel *opensealkernel.Eng
 	done.Add(1)
 	go func() {
 		defer done.Done()
-		kernel.RunRoutineEventDispatcher(ctx, routine.RoutineEventDispatchInterval, nil)
+		kernel.RunRoutineEventDispatcher(ctx, routine.EventDispatchInterval, nil)
 	}()
 	return func() {
 		cancel()

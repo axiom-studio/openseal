@@ -40,7 +40,7 @@ type agentBehaviorActionArguments struct {
 // persistence. It cannot target another Agent.
 type AgentBehaviorActionValidator struct {
 	agents    *kernelagent.Registry
-	endpoints *externalconversation.ExternalConversationEndpointService
+	endpoints *externalconversation.EndpointService
 	teams     models.TeamRosterReader
 }
 
@@ -52,7 +52,7 @@ func (v *AgentBehaviorActionValidator) SetTeamRoster(teams models.TeamRosterRead
 	}
 }
 
-func NewAgentBehaviorActionValidator(agents *kernelagent.Registry, endpoints ...*externalconversation.ExternalConversationEndpointService) (*AgentBehaviorActionValidator, error) {
+func NewAgentBehaviorActionValidator(agents *kernelagent.Registry, endpoints ...*externalconversation.EndpointService) (*AgentBehaviorActionValidator, error) {
 	if agents == nil {
 		return nil, errors.New("agent registry is required")
 	}
@@ -152,11 +152,11 @@ func (v *AgentBehaviorActionValidator) ValidateActionProposal(ctx context.Contex
 type AgentBehaviorActionDispatcher struct {
 	store     models.KernelStore
 	agents    *kernelagent.Registry
-	endpoints *externalconversation.ExternalConversationEndpointService
+	endpoints *externalconversation.EndpointService
 	fallback  agentrun.ActionDispatcher
 }
 
-func NewAgentBehaviorActionDispatcher(store models.KernelStore, agents *kernelagent.Registry, fallback agentrun.ActionDispatcher, endpoints ...*externalconversation.ExternalConversationEndpointService) (*AgentBehaviorActionDispatcher, error) {
+func NewAgentBehaviorActionDispatcher(store models.KernelStore, agents *kernelagent.Registry, fallback agentrun.ActionDispatcher, endpoints ...*externalconversation.EndpointService) (*AgentBehaviorActionDispatcher, error) {
 	if store == nil || agents == nil {
 		return nil, errors.New("kernel store and agent registry are required")
 	}

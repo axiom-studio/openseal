@@ -33,7 +33,7 @@ const (
 // read newest first and the note is at most maximumCardStateLines lines. It
 // is best effort: a card that cannot be read is left out rather than failing
 // the turn.
-func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, conversation *models.Conversation, viewer models.ConversationViewer, participantID string, messages []*models.ChannelMessage) []string {
+func (r *TurnRunner) conversationCardState(ctx context.Context, conversation *models.Conversation, viewer models.ConversationViewer, participantID string, messages []*models.ChannelMessage) []string {
 	if r == nil || r.conversations == nil || r.artifacts == nil || r.config.AttachmentContent == nil || conversation == nil {
 		return nil
 	}
@@ -82,7 +82,7 @@ func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, c
 // cardStateLines returns the state lines of one card whose non-waking
 // interactions changed at or after since. names maps participants to display
 // names.
-func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversation *models.Conversation, viewer models.ConversationViewer, reference models.ConversationReference, since time.Time, names map[models.ConversationParticipant]string) []string {
+func (r *TurnRunner) cardStateLines(ctx context.Context, conversation *models.Conversation, viewer models.ConversationViewer, reference models.ConversationReference, since time.Time, names map[models.ConversationParticipant]string) []string {
 	latest, err := r.conversations.ListLatestSurfaceInteractions(ctx, models.LatestSurfaceInteractionFilter{
 		Scope: conversation.Scope, ConversationID: conversation.ID, SurfaceID: reference.ID, AcrossActors: true, Viewer: &viewer,
 	})
@@ -199,7 +199,7 @@ func flashcardStateLines(component presentation.Component, latest []*models.Surf
 }
 
 // pollStateLine tallies everyone's latest vote on a poll component.
-func (r *ConversationRunTurnRunner) pollStateLine(ctx context.Context, conversation *models.Conversation, component presentation.Component, latest []*models.SurfaceInteraction) (string, bool) {
+func (r *TurnRunner) pollStateLine(ctx context.Context, conversation *models.Conversation, component presentation.Component, latest []*models.SurfaceInteraction) (string, bool) {
 	votes := PollVotes(component.ID, latest)
 	var participants []string
 	if r.config.HumanParticipants != nil {
@@ -247,7 +247,7 @@ func containsParticipant(list []models.ConversationParticipant, participant mode
 	return false
 }
 
-func (r *ConversationRunTurnRunner) loadCardSurface(ctx context.Context, scope models.Scope, reference models.ConversationReference) *presentation.Surface {
+func (r *TurnRunner) loadCardSurface(ctx context.Context, scope models.Scope, reference models.ConversationReference) *presentation.Surface {
 	artifact, err := r.artifacts.GetArtifact(ctx, scope, reference.ID, reference.Version)
 	if err != nil || artifact == nil || artifact.Type != presentation.ArtifactType {
 		return nil

@@ -36,7 +36,7 @@ func TestSetupListReportsSavedBindingAccessWithoutCredentials(t *testing.T) {
 		if err := store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
 			t.Fatal(err)
 		}
-		d, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil)
+		d, err := skillbinding.NewActionDispatcher(store, catalog, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -50,7 +50,7 @@ func validateArtifactReferenceIntents(requirements []models.ArtifactRequirement,
 	return nil
 }
 
-func (s *CollaborationService) resolveArtifactReferences(ctx context.Context, scope models.Scope, requirements []models.ArtifactRequirement, references []models.ArtifactReference) ([]models.ArtifactReference, error) {
+func (s *Service) resolveArtifactReferences(ctx context.Context, scope models.Scope, requirements []models.ArtifactRequirement, references []models.ArtifactReference) ([]models.ArtifactReference, error) {
 	if err := validateArtifactReferenceIntents(requirements, references); err != nil {
 		return nil, err
 	}

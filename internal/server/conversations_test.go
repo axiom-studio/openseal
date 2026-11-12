@@ -62,7 +62,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	if err := json.NewDecoder(questionResponse.Body).Decode(&question); err != nil {
 		t.Fatal(err)
 	}
-	round, err := runtimeconversation.NewConversationService(store).CommitConversationRouting(t.Context(), runtimeconversation.CommitConversationRoutingRequest{
+	round, err := runtimeconversation.NewService(store).CommitConversationRouting(t.Context(), runtimeconversation.CommitConversationRoutingRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "one"}, ConversationID: conversation.ID, ExpectedRevision: 2,
 		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
 		Responders: []models.ConversationResponder{{
@@ -102,7 +102,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	if changesResponse.Code != http.StatusOK {
 		t.Fatalf("changes status = %d, body = %s", changesResponse.Code, changesResponse.Body.String())
 	}
-	var changes runtimeconversation.ConversationChangeSet
+	var changes runtimeconversation.ChangeSet
 	if err := json.NewDecoder(changesResponse.Body).Decode(&changes); err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestConversationWithNoSpaceUsesTheLocalOperatorsDefaultSpace(t *testing.T) 
 	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), models.ErrNoDefaultSpace.Error()) {
 		t.Fatalf("create with no space: %d %s", refused.Code, refused.Body.String())
 	}
-	conversations, err := runtimeconversation.NewConversationService(bare).ListConversations(t.Context(), models.ConversationFilter{Scope: scope})
+	conversations, err := runtimeconversation.NewService(bare).ListConversations(t.Context(), models.ConversationFilter{Scope: scope})
 	if err != nil || len(conversations) != 0 {
 		t.Fatalf("conversations after a refused create = %+v, err = %v", conversations, err)
 	}

@@ -83,38 +83,38 @@ func (f CredentialResolverFunc) ResolveCredentials(ctx context.Context, request 
 	return f(ctx, request)
 }
 
-// ActionCredentialLeaseIssuer creates a signed, one-time opaque credential
+// CredentialLeaseIssuer creates a signed, one-time opaque credential
 // lease for a remote execution host. It receives durable identity and opaque
 // references only; implementations select exact fields and sign through the
 // ActionCredentialLease contract.
-type ActionCredentialLeaseIssuer interface {
-	IssueActionCredentialLease(context.Context, ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error)
+type CredentialLeaseIssuer interface {
+	IssueActionCredentialLease(context.Context, CredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error)
 }
 
-type ActionCredentialLeaseIssuerFunc func(context.Context, ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error)
+type CredentialLeaseIssuerFunc func(context.Context, CredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error)
 
-func (f ActionCredentialLeaseIssuerFunc) IssueActionCredentialLease(ctx context.Context, request ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
+func (f CredentialLeaseIssuerFunc) IssueActionCredentialLease(ctx context.Context, request CredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
 	return f(ctx, request)
 }
 
-type ActionCredentialLeaseIssueRequest struct {
+type CredentialLeaseIssueRequest struct {
 	Call       *models.ActionCall
 	Run        *models.AgentRun
 	References map[string]skill.CredentialReference
 	Transport  string
 }
 
-type ActionDispatcherFunc func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error)
+type DispatcherFunc func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error)
 
-func (f ActionDispatcherFunc) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+func (f DispatcherFunc) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	return f(ctx, input)
 }
 
-type ActionWorker struct {
+type Worker struct {
 	store       models.KernelStore
 	catalog     agentrun.ActionExecutionCatalog
 	credentials CredentialResolver
-	leaseIssuer ActionCredentialLeaseIssuer
+	leaseIssuer CredentialLeaseIssuer
 	dispatcher  agentrun.ActionDispatcher
 	now         func() time.Time
 	newID       func() string
@@ -132,12 +132,12 @@ type ActionWorker struct {
 	loopLease time.Duration
 }
 
-func NewActionWorker(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, dispatcher agentrun.ActionDispatcher, opts ...models.ServiceOption) *ActionWorker {
-	return &ActionWorker{store: store, catalog: catalog, credentials: credentials, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString, teams: models.TeamRosterReaderOf(store)}
+func NewWorker(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, dispatcher agentrun.ActionDispatcher, opts ...models.ServiceOption) *Worker {
+	return &Worker{store: store, catalog: catalog, credentials: credentials, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString, teams: models.TeamRosterReaderOf(store)}
 }
 
-func NewActionWorkerWithCredentialLeaseIssuer(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, opts ...models.ServiceOption) *ActionWorker {
-	return &ActionWorker{store: store, catalog: catalog, leaseIssuer: issuer, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString, teams: models.TeamRosterReaderOf(store)}
+func NewWorkerWithCredentialLeaseIssuer(store models.KernelStore, catalog agentrun.ActionExecutionCatalog, issuer CredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, opts ...models.ServiceOption) *Worker {
+	return &Worker{store: store, catalog: catalog, leaseIssuer: issuer, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString, teams: models.TeamRosterReaderOf(store)}
 }
 
 // ErrLoopActionNotClaimable is returned by ExecuteOwnLoopCall when the call is
@@ -172,7 +172,7 @@ func (e *LoopActionMaintenanceError) Unwrap() error { return models.ErrSkillRunt
 // RunOnce is the pool entry point. A pool worker executes nested calls of a
 // running step; it closes, without dispatch, the host calls their host
 // abandoned and the loop calls whose Run ended.
-func (w *ActionWorker) RunOnce(ctx context.Context, scope models.Scope, workerID string, leaseDuration time.Duration) (*models.ActionExecutionResult, error) {
+func (w *Worker) RunOnce(ctx context.Context, scope models.Scope, workerID string, leaseDuration time.Duration) (*models.ActionExecutionResult, error) {
 	if w == nil || w.store == nil || w.catalog == nil || w.dispatcher == nil {
 		return nil, errors.New("action worker is not configured")
 	}
@@ -208,7 +208,7 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope models.Scope, workerID
 // ErrLoopActionNotClaimable when the call is not ready and not a running call
 // with an expired lease, and *LoopActionMaintenanceError when Skill runtime
 // maintenance holds it.
-func (w *ActionWorker) ExecuteOwnLoopCall(ctx context.Context, scope models.Scope, actionCallID, workerID string) (*models.ActionExecutionResult, error) {
+func (w *Worker) ExecuteOwnLoopCall(ctx context.Context, scope models.Scope, actionCallID, workerID string) (*models.ActionExecutionResult, error) {
 	if w == nil || w.store == nil || w.catalog == nil || w.dispatcher == nil {
 		return nil, errors.New("action worker is not configured")
 	}
@@ -244,7 +244,7 @@ func (w *ActionWorker) ExecuteOwnLoopCall(ctx context.Context, scope models.Scop
 	return result, err
 }
 
-func (w *ActionWorker) loopMaintenance(call *models.ActionCall, cause error) error {
+func (w *Worker) loopMaintenance(call *models.ActionCall, cause error) error {
 	var held *models.SkillRuntimeMaintenanceError
 	if !errors.As(cause, &held) {
 		return cause
@@ -260,7 +260,7 @@ func (w *ActionWorker) loopMaintenance(call *models.ActionCall, cause error) err
 //
 // A loop call held by maintenance is deferred back to ready and its result
 // is returned together with the *SkillRuntimeMaintenanceError.
-func (w *ActionWorker) executeClaimed(ctx context.Context, call *models.ActionCall, workerID string, leaseDuration time.Duration) (*models.ActionExecutionResult, error) {
+func (w *Worker) executeClaimed(ctx context.Context, call *models.ActionCall, workerID string, leaseDuration time.Duration) (*models.ActionExecutionResult, error) {
 	executionCtx, stopLease := w.holdActionLease(ctx, call, workerID, leaseDuration)
 	// An ActionCall may outlive the Run step or wait that made it. Reconcile it
 	// before touching provider authority.
@@ -323,7 +323,7 @@ func (w *ActionWorker) executeClaimed(ctx context.Context, call *models.ActionCa
 				executionErr = fmt.Errorf("delegated credential lease transport: %w", transportErr)
 			} else {
 				credentialReferences = maps.Clone(call.CredentialRefs)
-				credentialLease, executionErr = w.leaseIssuer.IssueActionCredentialLease(executionCtx, ActionCredentialLeaseIssueRequest{
+				credentialLease, executionErr = w.leaseIssuer.IssueActionCredentialLease(executionCtx, CredentialLeaseIssueRequest{
 					Call: models.CloneActionCall(call), Run: models.CloneAgentRun(sourceRun), References: maps.Clone(call.CredentialRefs), Transport: credentialTransport,
 				})
 			}
@@ -397,7 +397,7 @@ func (w *ActionWorker) executeClaimed(ctx context.Context, call *models.ActionCa
 // persistMaintenanceOutcome defers a call that maintenance held before
 // dispatch. A deferred loop call also returns the maintenance error, so its
 // loop parks the tool entry instead of waiting on the pool.
-func (w *ActionWorker) persistMaintenanceOutcome(ctx context.Context, call *models.ActionCall, cause error, workerID string) (*models.ActionExecutionResult, error) {
+func (w *Worker) persistMaintenanceOutcome(ctx context.Context, call *models.ActionCall, cause error, workerID string) (*models.ActionExecutionResult, error) {
 	result, err := w.persistOutcome(ctx, call, nil, nil, nil, cause, workerID, false)
 	if err != nil || call.Origin != models.ActionOriginLoop || result == nil || result.Call == nil || result.Call.Status != models.ActionCallStatusReady {
 		return result, err
@@ -405,7 +405,7 @@ func (w *ActionWorker) persistMaintenanceOutcome(ctx context.Context, call *mode
 	return result, cause
 }
 
-func (w *ActionWorker) holdActionLease(parent context.Context, call *models.ActionCall, workerID string, leaseDuration time.Duration) (context.Context, func() (*models.ActionCall, error)) {
+func (w *Worker) holdActionLease(parent context.Context, call *models.ActionCall, workerID string, leaseDuration time.Duration) (context.Context, func() (*models.ActionCall, error)) {
 	executionCtx, cancelExecution := context.WithCancel(parent)
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(context.Background())
 	interval := leaseDuration / 3
@@ -490,7 +490,7 @@ func actionSkillRuntimeMaintenanceError(ctx context.Context, store interface{}, 
 // call needs its Run running under the lease that claimed the call; a nested
 // call needs its step to still be the Run's running step. Calls of any other
 // origin have no owner.
-func (w *ActionWorker) callOwnedByRun(ctx context.Context, run *models.AgentRun, call *models.ActionCall) (bool, error) {
+func (w *Worker) callOwnedByRun(ctx context.Context, run *models.AgentRun, call *models.ActionCall) (bool, error) {
 	if call == nil {
 		return false, nil
 	}
@@ -510,7 +510,7 @@ func loopActionOwned(run *models.AgentRun, call *models.ActionCall, now time.Tim
 		run.LeaseOwner != "" && run.LeaseOwner == call.LeaseOwner && run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(now)
 }
 
-func (w *ActionWorker) persistOutcome(ctx context.Context, call *models.ActionCall, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string, dispatched bool) (*models.ActionExecutionResult, error) {
+func (w *Worker) persistOutcome(ctx context.Context, call *models.ActionCall, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string, dispatched bool) (*models.ActionExecutionResult, error) {
 	// Retry the outcome, not the external operation, when an operator updates
 	// the Run between our observation and its atomic completion transaction.
 	const maximumPersistenceAttempts = 8
@@ -549,7 +549,7 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *models.ActionCa
 	return nil, models.ErrRevisionConflict
 }
 
-func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *models.ActionCall, sourceRun *models.AgentRun, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string, dispatched bool, eventID, humanInterventionID string) (models.ActionExecutionRecord, error) {
+func (w *Worker) prepareActionOutcome(ctx context.Context, call *models.ActionCall, sourceRun *models.AgentRun, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string, dispatched bool, eventID, humanInterventionID string) (models.ActionExecutionRecord, error) {
 	now := w.now().UTC()
 	nested := call.Origin == models.ActionOriginVM
 	ownsDependency, err := w.callOwnedByRun(ctx, sourceRun, call)

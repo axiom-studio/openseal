@@ -46,7 +46,7 @@ func agentTrialRunID(parentRunID, callID string) string {
 
 // tryAgent starts the trial child Run and returns at once; the parent parks
 // on the agent_trial card.
-func (d *AgentBuilderActionDispatcher) tryAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
+func (d *ActionDispatcher) tryAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	args, err := resolveAgentTry(ctx, d.host, call.Scope, input.Arguments)
 	if err != nil {

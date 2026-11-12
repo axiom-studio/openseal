@@ -111,7 +111,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 		return nil, taskErr
 	}
 	if existing != nil {
-		verified, sourceReport, err := conversation.ConversationTaskForReport(ctx, s.store, source)
+		verified, sourceReport, err := conversation.TaskForReport(ctx, s.store, source)
 		if err != nil {
 			return nil, err
 		}
@@ -360,7 +360,7 @@ func (s *ConversationTaskService) Get(ctx context.Context, req GetConversationTa
 		return nil, agentrun.ErrConversationTaskNotFound
 	}
 	if req.Viewer != nil {
-		_, getErr := conversation.NewConversationService(s.store, models.WithClock(s.now)).GetVisibleChannelMessage(ctx, req.Scope, task.ConversationID, task.SourceMessageID, *req.Viewer)
+		_, getErr := conversation.NewService(s.store, models.WithClock(s.now)).GetVisibleChannelMessage(ctx, req.Scope, task.ConversationID, task.SourceMessageID, *req.Viewer)
 		if getErr != nil {
 			if errors.Is(getErr, models.ErrChannelMessageNotFound) {
 				return nil, agentrun.ErrConversationTaskNotFound
@@ -423,8 +423,8 @@ func (s *ConversationTaskService) Cancel(ctx context.Context, req CancelConversa
 	if req.ExpectedWorkRunRevision < 1 {
 		return nil, models.ErrInvalidConversationTask
 	}
-	command, err := agentrun.NewRunCommandService(store, models.WithClock(s.now)).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: req.Scope, RunID: result.WorkRun.ID,
-		ExpectedRevision: req.ExpectedWorkRunRevision, Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: string(req.Actor.Type), ID: req.Actor.ID}, Summary: req.Summary})
+	command, err := agentrun.NewRunCommandService(store, models.WithClock(s.now)).CommandAgentRun(ctx, agentrun.CommandRequest{Scope: req.Scope, RunID: result.WorkRun.ID,
+		ExpectedRevision: req.ExpectedWorkRunRevision, Kind: agentrun.CommandCancel, Actor: models.ActivityActor{Type: string(req.Actor.Type), ID: req.Actor.ID}, Summary: req.Summary})
 	if err != nil {
 		return nil, err
 	}

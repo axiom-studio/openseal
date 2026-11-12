@@ -16,16 +16,16 @@ const (
 	CatchUpReservedAppendEntries = catchUpReservedAppendEntries
 )
 
-func LoadConversationThreadBackdrop(ctx context.Context, service *ConversationService, conversation *models.Conversation, trigger *models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
+func LoadConversationThreadBackdrop(ctx context.Context, service *Service, conversation *models.Conversation, trigger *models.ChannelMessage, viewer models.ConversationViewer) ([]*models.ChannelMessage, error) {
 	return loadConversationThreadBackdrop(ctx, service, conversation, trigger, viewer)
 }
 
-func (s *ConversationChangeService) FilterVisibleRuns(ctx context.Context, scope models.Scope, conversationID string, runs []*models.AgentRun, viewer models.ConversationViewer) ([]*models.AgentRun, error) {
+func (s *ChangeService) FilterVisibleRuns(ctx context.Context, scope models.Scope, conversationID string, runs []*models.AgentRun, viewer models.ConversationViewer) ([]*models.AgentRun, error) {
 	return s.filterVisibleRuns(ctx, scope, conversationID, runs, viewer)
 }
 
 // Approvals is the approval coordinator the service resolves approvals
 // through.
-func (s *ConversationApprovalModeService) Approvals() *action.ApprovalCoordinator {
+func (s *ApprovalModeService) Approvals() *action.ApprovalCoordinator {
 	return s.approvals
 }

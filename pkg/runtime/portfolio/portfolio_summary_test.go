@@ -26,7 +26,7 @@ func TestPortfolioSummarizesRunsByRequestedOwner(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			service := portfolio.NewPortfolioService(test.store(t))
+			service := portfolio.NewService(test.store(t))
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "one"}
 			first := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "38"}

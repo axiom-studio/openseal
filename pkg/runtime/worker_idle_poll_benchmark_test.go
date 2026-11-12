@@ -34,7 +34,7 @@ func BenchmarkActionWorkerIdleClaims(b *testing.B) {
 				for range b.N {
 					store := &countingActionPoolStore{Store: kerneltest.NewStore(b)}
 					catalog := skill.NewCatalog()
-					dispatcher := action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+					dispatcher := action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 						return nil, errors.New("idle benchmark cannot dispatch")
 					})
 					scope := models.Scope{Kind: "tenant", ID: "idle-benchmark"}
@@ -42,15 +42,15 @@ func BenchmarkActionWorkerIdleClaims(b *testing.B) {
 					var stop func()
 					started := time.Now()
 					if coalesced {
-						pool, err := action.NewActionWorkerPool(store, catalog, nil, dispatcher, nil,
-							action.ActionWorkerConfig{Scope: scope, Concurrency: workers, PollInterval: interval})
+						pool, err := action.NewWorkerPool(store, catalog, nil, dispatcher, nil,
+							action.WorkerConfig{Scope: scope, Concurrency: workers, PollInterval: interval})
 						if err != nil {
 							b.Fatal(err)
 						}
 						pool.Start(ctx)
 						stop = pool.Stop
 					} else {
-						worker := action.NewActionWorker(store, catalog, nil, dispatcher)
+						worker := action.NewWorker(store, catalog, nil, dispatcher)
 						var wg sync.WaitGroup
 						for index := range workers {
 							wg.Add(1)

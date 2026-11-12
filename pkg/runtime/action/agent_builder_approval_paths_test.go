@@ -30,7 +30,7 @@ import (
 //   - externalconversation/approval_notification_worker.go:
 //     EligibleApprovalAuthorizer, ResolveTimeout.
 //   - conversation/conversation_approval_mode.go: nil, ResolveByApprovalMode.
-//   - conversationrun/conversation_run.go (ConversationRunScheduler): nil.
+//   - conversationrun/conversation_run.go (conversationrun.Scheduler): nil.
 //   - conversation/conversation_team_responder.go (team follow-ups): nil.
 //   - pkg/openseal Engine: the host's WithApprovalAuthorizer, default
 //     EligibleApprovalAuthorizer (cortex passes its Casbin authorizer).
@@ -196,8 +196,8 @@ func TestAgentBuilderApprovalPathsChangesRequestedAndCancel(t *testing.T) {
 
 		// run_commands.go: canceling the Run cancels the pending card.
 		g, pending := cardApproval(t, store, "cancel", createAgentCard(), models.ApprovalTimeoutExpire)
-		canceled, err := agentrun.NewRunCommandService(store).CommandAgentRun(g.Ctx, agentrun.AgentRunCommandRequest{
-			Scope: g.Scope, RunID: g.Run.ID, ExpectedRevision: g.CurrentRun().Revision, Kind: agentrun.AgentRunCommandCancel,
+		canceled, err := agentrun.NewRunCommandService(store).CommandAgentRun(g.Ctx, agentrun.CommandRequest{
+			Scope: g.Scope, RunID: g.Run.ID, ExpectedRevision: g.CurrentRun().Revision, Kind: agentrun.CommandCancel,
 			Actor: models.ActivityActor{Type: "user", ID: "user"},
 		})
 		if err != nil || canceled.Run.Status != models.AgentRunStatusCanceled {

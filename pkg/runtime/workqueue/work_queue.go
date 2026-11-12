@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// WorkQueue is the shared, process-independent schedule of scope passes.
+// Queue is the shared, process-independent schedule of scope passes.
 // Every replica publishes into it and consumes from it, so idle scopes cost
 // nothing: no loop, no timer and no query exists for a scope until an item
 // for it becomes due.
@@ -22,7 +22,7 @@ import (
 // ctx ends, delivering each due item to exactly one consumer through handle,
 // serially. It reports WorkSignalConnected once it is consuming, with Rebuild
 // set when the queue's schedule was lost and must be rebuilt from the store.
-type WorkQueue interface {
+type Queue interface {
 	PublishWork(ctx context.Context, items []models.WorkItem) error
 	ConsumeWork(ctx context.Context, handle func(WorkSignal)) error
 }
@@ -37,14 +37,14 @@ type WorkScopeChecker interface {
 // workPublisher coalesces scheduled items in process and publishes them in
 // batches, so many pools finishing at once cost one queue round trip.
 type workPublisher struct {
-	queue  WorkQueue
+	queue  Queue
 	logger *zap.SugaredLogger
 	mu     sync.Mutex
 	items  map[models.WorkItemKey]time.Time
 	ready  chan struct{}
 }
 
-func newWorkPublisher(queue WorkQueue, logger *zap.SugaredLogger) *workPublisher {
+func newWorkPublisher(queue Queue, logger *zap.SugaredLogger) *workPublisher {
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
@@ -115,7 +115,7 @@ func (p *workPublisher) run(ctx context.Context) {
 	}
 }
 
-// MemoryWorkQueue is a process-local WorkQueue. It suits a single replica, and
+// MemoryWorkQueue is a process-local Queue. It suits a single replica, and
 // tests. Every replica that uses one handles the work its own commits create.
 type MemoryWorkQueue struct {
 	mu      sync.Mutex
@@ -341,7 +341,7 @@ const PoolRetireAfter = time.Minute
 // BindQueue makes status schedule loop passes into queue. Call before the
 // loops start. The returned function publishes scheduled passes until its
 // context ends.
-func (s *WorkSignalStatus) BindQueue(queue WorkQueue, logger *zap.SugaredLogger) func(context.Context) {
+func (s *WorkSignalStatus) BindQueue(queue Queue, logger *zap.SugaredLogger) func(context.Context) {
 	publisher := newWorkPublisher(queue, logger)
 	s.bindPublisher(publisher)
 	return publisher.run

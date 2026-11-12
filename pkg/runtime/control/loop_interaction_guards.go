@@ -152,7 +152,7 @@ func TypedSourceFailure(view GovernedToolView) (limited, relevant bool) {
 	return failure.HasRateLimitedSource(), true
 }
 
-// RefuseLiveBrowserWhileRateLimited runs before ActionCoordinator.Propose for a
+// RefuseLiveBrowserWhileRateLimited runs before action.Coordinator.Propose for a
 // governed call whose action name starts with "live-browser-". The tool list
 // is never changed (prefix cache); the call is refused with an is_error result
 // instead, and the governed executor moves the entry to error and records the

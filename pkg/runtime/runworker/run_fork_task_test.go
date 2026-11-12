@@ -117,7 +117,7 @@ func TestTaskWorkRejectsDelegationBeforeRequestOrGroupCommit(t *testing.T) {
 		for _, grouped := range []bool{false, true} {
 			t.Run(target+map[bool]string{false: "/singular", true: "/grouped"}[grouped], func(t *testing.T) {
 				store, source, _ := claimedForkTaskFixture(t)
-				service := collaboration.NewCollaborationService(store)
+				service := collaboration.NewService(store)
 				requester := models.CollaborationParty{Type: source.Owner.Type, ID: source.Owner.ID}
 				recipient := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: target}
 				var err error
@@ -175,7 +175,7 @@ func TestRunForkTaskRejectsBranchProvenanceReplacement(t *testing.T) {
 
 func TestRunForkTaskRejectsContextOnlySelfRoot(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "forged-task-fork"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 		AssignedAgentID: "agent", Goal: "Forged task source", Context: map[string]interface{}{models.ConversationTaskContextKey: "forged-task"},
 	})
@@ -220,8 +220,8 @@ func TestRunForkTaskSourceCascadeIsIndependentAndWorkCascadeOwnsChildren(t *test
 	if err != nil || child.Status != models.AgentRunStatusQueued {
 		t.Fatalf("source completion canceled task fork: %#v %v", child, err)
 	}
-	if _, err := commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
-		Scope: source.Scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: agentrun.AgentRunCommandCancel,
+	if _, err := commands.CommandAgentRun(t.Context(), agentrun.CommandRequest{
+		Scope: source.Scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: agentrun.CommandCancel,
 		Actor: models.ActivityActor{Type: "user", ID: accepted.Task.AuthenticatedActor.ID}, Summary: "Stop the task",
 	}); err != nil {
 		t.Fatal(err)

@@ -20,7 +20,7 @@ func RoutineEventIdempotencyKey(batchID string) string {
 	return routineEventIdempotencyKey(batchID)
 }
 
-func StartActivationOccurrence(ctx context.Context, store models.RunCommandStore, reportingStore models.ConversationStore, activation *models.RunbookActivation, objective *models.Objective, source models.RunSource, idempotencyKey string, extraContext map[string]interface{}, actor models.ActivityActor, visibility models.ActivityVisibility, preparer models.AcceptedRunExecutionPreparer) (*agentrun.AgentRunCommandResult, error) {
+func StartActivationOccurrence(ctx context.Context, store models.RunCommandStore, reportingStore models.ConversationStore, activation *models.RunbookActivation, objective *models.Objective, source models.RunSource, idempotencyKey string, extraContext map[string]interface{}, actor models.ActivityActor, visibility models.ActivityVisibility, preparer models.AcceptedRunExecutionPreparer) (*agentrun.CommandResult, error) {
 	return startActivationOccurrence(ctx, store, reportingStore, activation, objective, source, idempotencyKey, extraContext, actor, visibility, preparer)
 }
 

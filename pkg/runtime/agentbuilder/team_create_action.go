@@ -90,7 +90,7 @@ func isTeamCreateAction(bound *skill.BoundAction) bool {
 // TeamCreateActionValidator checks create_team before a card exists and
 // returns the secret-free preview the review card renders.
 type TeamCreateActionValidator struct {
-	builder *AgentBuilderActionValidator
+	builder *ActionValidator
 }
 
 // NewTeamCreateActionValidator needs the Agent and Team registries and the
@@ -106,7 +106,7 @@ func NewTeamCreateActionValidator(
 	if agents == nil || teams == nil || spaces == nil {
 		return nil, errors.New("team create validator requires the Agent and Team registries and spaces")
 	}
-	return &TeamCreateActionValidator{builder: &AgentBuilderActionValidator{
+	return &TeamCreateActionValidator{builder: &ActionValidator{
 		agents: agents, teams: teams, spaces: spaces, conversations: conversations, runs: runs,
 	}}, nil
 }
@@ -334,7 +334,7 @@ func teamMembersMaximumRisk(members []resolvedTeamMember) capability.RiskLevel {
 
 // createTeam runs an approved create_team. Ids come from the call, so a
 // retry or a crash-resumed execution converges on the same Team.
-func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
+func (d *ActionDispatcher) createTeam(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	approval, err := approvedAgentBuilderCheckpoint(ctx, d.store, call)
 	if err != nil {
@@ -402,7 +402,7 @@ func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input age
 
 // registerTeamBuilderDefinition registers definition, or returns the one an
 // earlier attempt of the same call registered.
-func (d *AgentBuilderActionDispatcher) registerTeamBuilderDefinition(ctx context.Context, definition *kernelteam.Definition) (*kernelteam.Definition, error) {
+func (d *ActionDispatcher) registerTeamBuilderDefinition(ctx context.Context, definition *kernelteam.Definition) (*kernelteam.Definition, error) {
 	sameCall := func(existing *kernelteam.Definition) bool {
 		return existing != nil && existing.Provenance.Source == agentBuilderProvenanceSource &&
 			existing.Provenance.Reference == definition.Provenance.Reference
@@ -430,7 +430,7 @@ func (d *AgentBuilderActionDispatcher) registerTeamBuilderDefinition(ctx context
 
 // teamSpace resolves the reviewed space at execution. A space deleted while
 // the card waited fails the call.
-func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope models.Scope, spaceID string) (*models.Space, error) {
+func (d *ActionDispatcher) teamSpace(ctx context.Context, scope models.Scope, spaceID string) (*models.Space, error) {
 	if spaceID == "" {
 		return nil, errors.New("create_team requires a space")
 	}
@@ -449,7 +449,7 @@ func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope mode
 // placeTeamInSpace adds the Team to the reviewed space. The create placed it
 // there; a replay whose create committed without the membership gets it
 // here.
-func (d *AgentBuilderActionDispatcher) placeTeamInSpace(ctx context.Context, scope models.Scope, space *models.Space, teamID string) error {
+func (d *ActionDispatcher) placeTeamInSpace(ctx context.Context, scope models.Scope, space *models.Space, teamID string) error {
 	_, _, err := d.provision.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{
 		Scope: scope, SpaceID: space.ID, Type: models.SpaceMemberTeam, MemberID: teamID,
 	})

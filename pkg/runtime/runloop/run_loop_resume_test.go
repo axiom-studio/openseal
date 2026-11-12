@@ -270,7 +270,7 @@ type resumeHarness struct {
 	clock    *loopClock
 	scope    models.Scope
 	runID    string
-	loop     *RunLoop
+	loop     *Loop
 	producer *resumeProducer
 	tools    *resumeTools
 	final    *resumeFinal
@@ -288,7 +288,7 @@ func newResumeHarness(t *testing.T, raw models.KernelStore, budget *models.Budge
 		producer: &resumeProducer{replies: replies}, final: &resumeFinal{},
 	}
 	h.tools = &resumeTools{h: h}
-	portfolio := portfolio.NewPortfolioService(raw, models.WithClock(h.clock.Now))
+	portfolio := portfolio.NewService(raw, models.WithClock(h.clock.Now))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: h.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a",
 		Goal: "resume work", Source: models.RunSourceObjective, Budget: budget,
@@ -297,10 +297,10 @@ func newResumeHarness(t *testing.T, raw models.KernelStore, budget *models.Budge
 		t.Fatal(err)
 	}
 	h.runID = run.ID
-	loop, err := NewRunLoop(h.store, nil, nil, RunLoopConfig{
+	loop, err := New(h.store, nil, nil, Config{
 		StepLeaseDuration: stepLease, Now: h.clock.Now, PlanToolEntries: h.tools.plan,
-		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (control.ControlResult, error) {
-			return control.ControlResult{Kind: control.ControlFinal, Final: &agentrun.FinalAnswer{
+		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (control.Result, error) {
+			return control.Result{Kind: control.Final, Final: &agentrun.FinalAnswer{
 				StepID: cc.Step.ID, PlainText: true, Answer: text, Output: map[string]interface{}{"summary": text},
 			}}, nil
 		},
@@ -314,7 +314,7 @@ func newResumeHarness(t *testing.T, raw models.KernelStore, budget *models.Budge
 
 // drive claims the Run as worker and drives one claim. The first claim
 // creates the Run's session.
-func (h *resumeHarness) drive(worker string) RunLoopExit {
+func (h *resumeHarness) drive(worker string) Exit {
 	h.t.Helper()
 	ctx := context.Background()
 	claimed, err := h.raw.ClaimNextAgentRun(ctx, models.AgentRunClaim{
@@ -339,16 +339,16 @@ func (h *resumeHarness) drive(worker string) RunLoopExit {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	return h.loop.Drive(ctx, RunLoopClaim{Run: claimed, WorkerID: worker, Binding: &agentrun.TurnRunnerBinding{
+	return h.loop.Drive(ctx, Claim{Run: claimed, WorkerID: worker, Binding: &agentrun.TurnRunnerBinding{
 		Producer: h.producer, Session: session, Tools: h.tools, Final: h.final,
 	}})
 }
 
 // crashed checks that the first claim died on the armed store, then revives
 // the store and lets every lease expire.
-func (h *resumeHarness) crashed(exit RunLoopExit) {
+func (h *resumeHarness) crashed(exit Exit) {
 	h.t.Helper()
-	if exit.Reason != RunLoopExitFailed || !errors.Is(exit.Err, errLoopCrash) {
+	if exit.Reason != ExitFailed || !errors.Is(exit.Err, errLoopCrash) {
 		h.t.Fatalf("crashed claim exit = %s, %v; want the simulated crash", exit.Reason, exit.Err)
 	}
 	h.store.disarm()
@@ -386,9 +386,9 @@ func (h *resumeHarness) entries(types ...models.SessionEntryType) []*models.Sess
 	return entries
 }
 
-func (h *resumeHarness) expectCompleted(exit RunLoopExit, answer string) *models.AgentRun {
+func (h *resumeHarness) expectCompleted(exit Exit, answer string) *models.AgentRun {
 	h.t.Helper()
-	if exit.Err != nil || exit.Reason != RunLoopExitFinal {
+	if exit.Err != nil || exit.Reason != ExitFinal {
 		h.t.Fatalf("exit = %s, %v; want final", exit.Reason, exit.Err)
 	}
 	run := h.runNow()
@@ -530,7 +530,7 @@ func TestRunLoopResumeStaleStepLeaseRequeues(t *testing.T) {
 		expires := *rows[0].LeaseExpiresAt
 		h.clock.Advance(2 * resumeLease) // the Run lease expired, the step lease did not
 		exit := h.drive(resumeWorkerB)
-		if exit.Err != nil || exit.Reason != RunLoopExitRequeued {
+		if exit.Err != nil || exit.Reason != ExitRequeued {
 			t.Fatalf("exit = %s, %v; want requeued", exit.Reason, exit.Err)
 		}
 		run := h.runNow()

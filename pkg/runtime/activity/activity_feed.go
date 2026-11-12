@@ -15,10 +15,10 @@ const (
 	maximumActivityFeedLimit = 100
 )
 
-// ActivityFeedRequest selects one portable activity projection. At least one
+// FeedRequest selects one portable activity projection. At least one
 // resource selector is required so callers cannot accidentally request an
 // unbounded scope-wide audit dump.
-type ActivityFeedRequest struct {
+type FeedRequest struct {
 	Scope          models.Scope
 	RunID          string
 	AgentID        string
@@ -32,7 +32,7 @@ type ActivityFeedRequest struct {
 	IncludeDetails bool
 }
 
-type ActivityFeedPage struct {
+type FeedPage struct {
 	Items      []models.ActivityProjection `json:"items"`
 	NextCursor string                      `json:"nextCursor,omitempty"`
 	HasMore    bool                        `json:"hasMore"`
@@ -40,7 +40,7 @@ type ActivityFeedPage struct {
 
 // ListActivityFeed returns a stable newest-first projection. Payload and
 // correlation detail are omitted unless explicitly requested.
-func (s *RunActivityService) ListActivityFeed(ctx context.Context, request ActivityFeedRequest) (*ActivityFeedPage, error) {
+func (s *RunActivityService) ListActivityFeed(ctx context.Context, request FeedRequest) (*FeedPage, error) {
 	if s == nil || s.activity == nil {
 		return nil, errors.New("run activity service is not configured")
 	}
@@ -85,7 +85,7 @@ func (s *RunActivityService) ListActivityFeed(ctx context.Context, request Activ
 	for _, event := range events {
 		items = append(items, models.ProjectActivityEvent(event, request.IncludeDetails))
 	}
-	page := &ActivityFeedPage{Items: items, HasMore: hasMore}
+	page := &FeedPage{Items: items, HasMore: hasMore}
 	if hasMore && len(events) > 0 {
 		page.NextCursor, err = models.EncodeActivityFeedCursor(events[len(events)-1])
 		if err != nil {

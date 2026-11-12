@@ -287,7 +287,7 @@ func (i *AgentInstaller) PlanSharedAgentInstall(ctx context.Context, request Sha
 				plan.Slots = append(plan.Slots, sharedAgentPlannedSlot(shared, slot, bindingID))
 			}
 		}
-		candidate := skillbinding.SkillBindingCandidate(reference, plan.DeploymentID, sharedSkillBindingArguments(bindingID, shared.grant.grant), nil)
+		candidate := skillbinding.Candidate(reference, plan.DeploymentID, sharedSkillBindingArguments(bindingID, shared.grant.grant), nil)
 		candidate.Credentials = maps.Clone(shared.grant.credentials)
 		plan.Bindings = append(plan.Bindings, candidate)
 	}
@@ -599,8 +599,8 @@ func sharedAgentPlannedSlot(shared sharedSkill, slot, bindingID string) SharedAg
 	return planned
 }
 
-func sharedSkillBindingArguments(bindingID string, grant models.AgentSkillGrant) skillbinding.SkillBindingUpsertArguments {
-	return skillbinding.SkillBindingUpsertArguments{
+func sharedSkillBindingArguments(bindingID string, grant models.AgentSkillGrant) skillbinding.UpsertArguments {
+	return skillbinding.UpsertArguments{
 		BindingID: bindingID, SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, SourceIdentity: grant.SourceIdentity,
 		AllowedActions: grant.AllowedActions, EnablePrompt: grant.EnablePrompt, MaximumRisk: grant.MaximumRisk,
 	}

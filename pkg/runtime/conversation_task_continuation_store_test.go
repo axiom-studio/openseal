@@ -34,7 +34,7 @@ func conversationContinuationFixture(t *testing.T, store conversationContinuatio
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "continuation"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "continuation-agent"}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Continuation", IdempotencyKey: "continuation"})
 	if err != nil {
@@ -50,7 +50,7 @@ func conversationContinuationFixture(t *testing.T, store conversationContinuatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond) }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond) }))
 	run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: owner, AssignedAgentID: owner.ID,
 		ConcurrencyKey: models.ConversationRunLane(conversation.ID, "", owner.ID), Goal: "Respond to an Agent channel message", Source: models.RunSourceChat, Budget: &models.BudgetPolicy{MaxTurns: 20, MaxAttempts: 30, MaxDurationMS: 600000},
 		Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID, models.ConversationRunTriggerIDContextKey: posted.Message.ID},
@@ -134,7 +134,7 @@ func TestConversationTaskContinuationStorePreservesExecutionAndAcknowledgesAtomi
 func TestConversationTaskContinuationStoreFinalAnswerWinsHandoff(t *testing.T) {
 	forConversationContinuationStores(t, func(t *testing.T, store conversationContinuationTestStore, _ func(*testing.T) conversationContinuationTestStore) {
 		source, conversation, trigger := conversationContinuationFixture(t, store, models.AgentRunStatusRunning, false)
-		_, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: source.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		_, err := runtimeconversation.NewService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: source.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: source.AssignedAgentID}, Intent: models.MessageIntentAnswer, Content: "The result is complete.",
 			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
 			References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: source.ID}}, IdempotencyKey: models.ConversationTaskFinalResponseKey(source)})

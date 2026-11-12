@@ -32,17 +32,17 @@ func (e *Engine) wireStore() error {
 	}
 	store := e.store
 
-	e.portfolio = portfolio.NewPortfolioService(store)
+	e.portfolio = portfolio.NewService(store)
 	e.activity = activity.NewRunActivityService(store, store)
 	e.turns = activity.NewAgentTurnService(store, store)
-	e.runQueue = agentrun.NewAgentRunScheduler(store)
-	e.wake = agentrun.NewAgentRunWakeService(store, store)
+	e.runQueue = agentrun.NewScheduler(store)
+	e.wake = agentrun.NewWakeService(store, store)
 	if dependencyStore, ok := store.(models.DependencyKernelStore); ok {
 		e.dependencies = portfolio.NewDependencyCoordinator(dependencyStore)
 	}
 	if conversationStore, ok := store.(models.ConversationStore); ok {
-		e.conversations = conversation.NewConversationService(conversationStore)
-		e.conversationChanges, _ = conversation.NewConversationChangeService(conversationStore, store)
+		e.conversations = conversation.NewService(conversationStore)
+		e.conversationChanges, _ = conversation.NewChangeService(conversationStore, store)
 		e.conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
 		if embedStore, ok := store.(models.EmbedStore); ok {
 			e.embeds, _ = conversation.NewEmbedSessionService(embedStore, conversationStore)
@@ -52,11 +52,11 @@ func (e *Engine) wireStore() error {
 		e.spaces = portfolio.NewSpaceService(spaceStore)
 	}
 	if collaborationStore, ok := store.(models.CollaborationKernelStore); ok {
-		e.collaboration = collaboration.NewCollaborationService(collaborationStore)
+		e.collaboration = collaboration.NewService(collaborationStore)
 		e.collaboration.SetAcceptedRunExecutionPreparer(e)
 	}
 	if artifactStore, ok := store.(models.ArtifactStore); ok {
-		e.artifacts = artifactcatalog.NewArtifactCatalog(artifactStore).WithPlacement(artifactcatalog.NewStoreArtifactPlacement(store))
+		e.artifacts = artifactcatalog.NewCatalog(artifactStore).WithPlacement(artifactcatalog.NewStoreArtifactPlacement(store))
 	}
 
 	if err := e.wireRegistries(); err != nil {

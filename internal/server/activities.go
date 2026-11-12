@@ -34,7 +34,7 @@ func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	request := activity.ActivityFeedRequest{
+	request := activity.FeedRequest{
 		Scope: scope, RunID: strings.TrimSpace(r.URL.Query().Get("runId")), AgentID: strings.TrimSpace(r.URL.Query().Get("agentId")),
 		ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), TeamID: strings.TrimSpace(r.URL.Query().Get("teamId")),
 		EventTypes: cleanQueryValues(r.URL.Query()["eventType"]), Cursor: strings.TrimSpace(r.URL.Query().Get("cursor")),

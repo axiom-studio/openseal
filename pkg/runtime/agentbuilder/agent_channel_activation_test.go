@@ -28,13 +28,13 @@ type channelActionFixture struct {
 	store       *sqlite.Store
 	db          *sql.DB
 	agents      *kernelagent.Registry
-	endpoints   *externalconversation.ExternalConversationEndpointService
+	endpoints   *externalconversation.EndpointService
 	resolver    *switchableAdapterResolver
 	catalog     *skill.Catalog
 	scope       models.Scope
 	endpoint    *models.ExternalConversationEndpoint
 	run         *models.AgentRun
-	coordinator *action.ActionCoordinator
+	coordinator *action.Coordinator
 	dispatcher  *AgentBehaviorActionDispatcher
 }
 
@@ -49,8 +49,8 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	t.Cleanup(func() { _ = store.Close() })
 	db := kerneltest.OpenSQLiteDB(t, path)
 	_, catalog, scope, adapter := slackConversationCatalog(t, ctx)
-	resolver := &switchableAdapterResolver{ExternalConversationAdapterResolver: catalog}
-	endpoints := externalconversation.NewExternalConversationEndpointService(store, resolver)
+	resolver := &switchableAdapterResolver{AdapterResolver: catalog}
+	endpoints := externalconversation.NewEndpointService(store, resolver)
 	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
@@ -87,7 +87,7 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"}, AssignedAgentID: "slack-agent", Goal: "Configure Slack", Source: models.RunSourceChat,
 	})
 	if err != nil {
@@ -100,15 +100,15 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
+	policy := action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
 	})
 	dispatcher, err := NewAgentBehaviorActionDispatcher(store, agents, nil, endpoints)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &channelActionFixture{store: store, db: db, agents: agents, endpoints: endpoints, resolver: resolver, catalog: catalog, scope: scope, endpoint: endpoint, run: run,
-		coordinator: action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}), dispatcher: dispatcher}
+		coordinator: action.NewCoordinator(store, store, catalog, policy, []action.ProposalValidator{validator}), dispatcher: dispatcher}
 }
 
 func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{}) (*models.ActionProposalResult, error) {

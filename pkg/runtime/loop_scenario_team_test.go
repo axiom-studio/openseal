@@ -64,7 +64,7 @@ func convMemberAgentBinding(f *looptest.Fixture, run *models.AgentRun) *agentrun
 		f.T.Fatalf("open conversation session: %v", err)
 	}
 	session := opened.Session
-	control, err := control.ResolveControlAuthority(f.Ctx, control.ControlAuthorityInput{
+	control, err := control.ResolveControlAuthority(f.Ctx, control.AuthorityInput{
 		Run: run, DeploymentID: run.AssignedAgentID, Runs: f.Store, Conversations: f.Chats, Catalog: convTeamCatalog{},
 	})
 	if err != nil {
@@ -74,7 +74,7 @@ func convMemberAgentBinding(f *looptest.Fixture, run *models.AgentRun) *agentrun
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 	})
 	host := looptest.FakeStepHost{ScriptedModel: f.Model, FakeHostTools: f.Tools}
-	producer, err := modelstep.NewModelStepProducer(host, preparer, f.Store)
+	producer, err := modelstep.NewProducer(host, preparer, f.Store)
 	if err != nil {
 		f.T.Fatal(err)
 	}
@@ -105,8 +105,8 @@ func convDriveNextMember(f *looptest.Fixture) *models.AgentRun {
 		if binding.Session != nil && claimed.SessionID != binding.Session.ID {
 			claimed = f.MustRun(claimed.ID)
 		}
-		exit := f.Loop.Drive(f.Ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.WorkerID, Binding: binding})
-		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
+		exit := f.Loop.Drive(f.Ctx, runloop.Claim{Run: claimed, WorkerID: f.WorkerID, Binding: binding})
+		if exit.Err != nil && exit.Reason != runloop.ExitRequeued {
 			f.T.Fatalf("member %s exited %s: %v", claimed.ID, exit.Reason, exit.Err)
 		}
 		run := f.MustRun(claimed.ID)
@@ -136,7 +136,7 @@ func convRoute(f *looptest.Fixture, conversationID string, trigger *models.Chann
 	if err != nil {
 		f.T.Fatal(err)
 	}
-	if exit := f.Loop.Drive(f.Ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.WorkerID, Binding: binding}); exit.Reason != runloop.RunLoopExitFinal {
+	if exit := f.Loop.Drive(f.Ctx, runloop.Claim{Run: claimed, WorkerID: f.WorkerID, Binding: binding}); exit.Reason != runloop.ExitFinal {
 		f.T.Fatalf("routing exit = %#v", exit)
 	}
 	return f.MustRun(routing.ID)

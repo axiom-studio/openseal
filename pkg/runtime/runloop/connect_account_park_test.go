@@ -28,10 +28,10 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	var checks []action.CredentialAvailabilityRequest
 	var resolutions []action.CredentialResolutionRequest
 	dispatches := 0
-	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(_ context.Context, req action.CredentialResolutionRequest) (map[string]string, error) {
+	worker := action.NewWorker(store, catalog, action.CredentialResolverFunc(func(_ context.Context, req action.CredentialResolutionRequest) (map[string]string, error) {
 		resolutions = append(resolutions, req)
 		return map[string]string{"google": "token"}, nil
-	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"sent": true}, nil
 	}))

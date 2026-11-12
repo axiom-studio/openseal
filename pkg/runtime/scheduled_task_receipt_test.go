@@ -23,9 +23,9 @@ func TestCreateTaskApprovalNamesItsActivation(t *testing.T) {
 		t.Fatalf("claim=%#v,%v", claimed, err)
 	}
 	validator, _ := routine.NewRunbookActionValidator(store)
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
-	}), []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
+	coordinator := action.NewCoordinator(store, store, catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+		return action.PolicyDecision{Disposition: action.DispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
+	}), []action.ProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
 	result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: models.RunbookActionCreateTask, Arguments: args, IdempotencyKey: " routine-key ", Summary: "Create recurring research", Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 	if err != nil || result.Approval == nil {
 		t.Fatalf("result=%#v err=%v", result, err)

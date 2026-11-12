@@ -9,7 +9,7 @@ import (
 )
 
 func TestPortfolioModelsRequireScopeAndOwner(t *testing.T) {
-	service := portfolio.NewPortfolioService(&stubPortfolioStore{})
+	service := portfolio.NewService(&stubPortfolioStore{})
 	_, err := service.CreateObjective(context.Background(), portfolio.CreateObjectiveRequest{Title: "Ship", Goal: "Ship product"})
 	if !errors.Is(err, models.ErrInvalidScope) {
 		t.Fatalf("error = %v, want ErrInvalidScope", err)

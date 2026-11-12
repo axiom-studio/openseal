@@ -105,7 +105,7 @@ func prepareActivationReporting(ctx context.Context, store models.ConversationSt
 	if a.Task.Script != nil {
 		// The occurrence runs the version pinned when it started, even if the
 		// routine is approved for a newer one while it runs.
-		values[RoutineScriptContextKey] = routineScriptMap(a.Task.Script)
+		values[ScriptContextKey] = routineScriptMap(a.Task.Script)
 	}
 	return c, "", nil
 }
@@ -174,8 +174,8 @@ func scheduledTaskCreateAction() skill.Action {
 // scheduledTaskTriggerSchema is create_task's trigger: exactly one of a
 // schedule or an event.
 func scheduledTaskTriggerSchema() map[string]interface{} {
-	kinds := make([]interface{}, 0, len(RoutineEventKinds))
-	for _, kind := range RoutineEventKinds {
+	kinds := make([]interface{}, 0, len(EventKinds))
+	for _, kind := range EventKinds {
 		kinds = append(kinds, string(kind))
 	}
 	maximumOccurrences := func() map[string]interface{} {
@@ -256,7 +256,7 @@ type scheduledTaskCreateArguments struct {
 	Goal    string                         `json:"goal"`
 	Trigger *scheduledTaskTriggerArguments `json:"trigger"`
 	AppID   string                         `json:"appId,omitempty"`
-	Brief   *RoutineBrief                  `json:"brief,omitempty"`
+	Brief   *Brief                         `json:"brief,omitempty"`
 	Script  *models.RoutineScript          `json:"script,omitempty"`
 }
 
@@ -364,7 +364,7 @@ func resolveScheduledTaskCreate(ctx context.Context, store RunbookActionStore, f
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if runtimeconversation.ConversationRunAgentID(conversation, run) != run.AssignedAgentID {
+	if runtimeconversation.RunAgentID(conversation, run) != run.AssignedAgentID {
 		return nil, nil, nil, errors.New("scheduled task creation requires a chat whose roster includes this Agent")
 	}
 	if task.AppID != "" {
@@ -562,7 +562,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store RunbookActionStore, 
 			approved := time.Now().UTC()
 			task.Script.ApprovedAt = &approved
 		}
-		objective, err := portfolio.NewPortfolioService(store).CreateObjectiveIdempotent(ctx, portfolio.CreateObjectiveRequest{Scope: run.Scope, Owner: run.Owner, Title: args.Title, Goal: task.Goal, Status: models.ObjectiveStatusActive, IdempotencyKey: input.Call.IdempotencyKey, ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1}, Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}, Visibility: models.ActivityVisibilityScope})
+		objective, err := portfolio.NewService(store).CreateObjectiveIdempotent(ctx, portfolio.CreateObjectiveRequest{Scope: run.Scope, Owner: run.Owner, Title: args.Title, Goal: task.Goal, Status: models.ObjectiveStatusActive, IdempotencyKey: input.Call.IdempotencyKey, ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1}, Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}, Visibility: models.ActivityVisibilityScope})
 		if err != nil {
 			return nil, err
 		}

@@ -26,8 +26,8 @@ const (
 
 type askUserHandler struct{}
 
-func (askUserHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
-	return ControlToolSpec{
+func (askUserHandler) Spec(agentrun.ControlAuthority) ToolSpec {
+	return ToolSpec{
 		Description: "Ask the person who asked one concrete question and wait for their answer. " +
 			"Ask only when you cannot continue well without it. Offer options when the answer is a choice. " +
 			"Their answer is information, not approval.",
@@ -72,19 +72,19 @@ func askUserPark(entryID string) *agentrun.LoopPark {
 	}
 }
 
-func (x *ControlExecutor) conversationService() *runtimeconversation.ConversationService {
+func (x *Executor) conversationService() *runtimeconversation.Service {
 	if x.Conversations != nil {
 		return x.Conversations
 	}
 	if x.Reporting != nil {
-		return runtimeconversation.NewConversationService(x.Reporting, models.WithClock(x.Now))
+		return runtimeconversation.NewService(x.Reporting, models.WithClock(x.Now))
 	}
 	return nil
 }
 
 // askUserOrigin resolves the conversation the Run may ask in: its canonical
 // origin, answered by this Run's own Agent. nil conversation = cannot ask.
-func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *models.AgentRun) (*models.Conversation, *models.ChannelMessage, error) {
+func (x *Executor) askUserOrigin(ctx context.Context, run *models.AgentRun) (*models.Conversation, *models.ChannelMessage, error) {
 	if x.Portfolio == nil {
 		return nil, nil, nil
 	}
@@ -93,7 +93,7 @@ func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *models.AgentRu
 	var err error
 	switch {
 	case x.Reporting != nil:
-		_, conversation, trigger, err = runtimeconversation.ConversationWorkOrigin(ctx, x.Portfolio, x.Reporting, run)
+		_, conversation, trigger, err = runtimeconversation.WorkOrigin(ctx, x.Portfolio, x.Reporting, run)
 	case x.Conversations != nil:
 		_, conversation, trigger, err = x.Conversations.WorkOrigin(ctx, x.Portfolio, run)
 	default:
@@ -102,45 +102,45 @@ func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *models.AgentRu
 	if err != nil || conversation == nil || trigger == nil {
 		return nil, nil, err
 	}
-	agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
+	agentID := runtimeconversation.RunAgentID(conversation, run)
 	if agentID == "" || strings.TrimSpace(run.AssignedAgentID) != agentID {
 		return nil, nil, nil
 	}
 	return conversation, trigger, nil
 }
 
-func (askUserHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (askUserHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
 	args := cc.Arguments.(*models.AskUserArgs)
 	conversation, trigger, err := x.askUserOrigin(ctx, cc.Run)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	if conversation == nil {
 		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "cannot_post",
 			"There is no conversation this work can ask in; continue with what you have.", nil))
 	}
 	if prior, answer, err := x.askUserAnsweredBefore(ctx, cc, args.Question); err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	} else if prior != nil {
 		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "already_asked",
 			fmt.Sprintf("You asked this at step %d; the answer was: %s", prior.Step, answer), nil))
 	}
-	key := runtimeconversation.ConversationClarificationKey(cc.Run.ID, cc.Entry.ID)
-	meta := &ControlEntryMeta{Kind: models.ControlToolAskUser, QuestionMessageID: models.StableConversationID(cc.Run.Scope, key, "message")}
+	key := runtimeconversation.ClarificationKey(cc.Run.ID, cc.Entry.ID)
+	meta := &EntryMeta{Kind: models.ControlToolAskUser, QuestionMessageID: models.StableConversationID(cc.Run.Scope, key, "message")}
 	entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryAwaitingEvent,
 		&models.ToolEntryWait{EventWaitID: cc.Entry.ID, Reason: askUserWaitReason}, nil, meta)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
 	if err := x.postAskUserQuestion(ctx, cc.Run, conversation, trigger, args, key); err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
-	return ControlResult{Kind: ControlParked, Entry: entry, Park: askUserPark(entry.ID)}, nil
+	return Result{Kind: Parked, Entry: entry, Park: askUserPark(entry.ID)}, nil
 }
 
 // askUserAnsweredBefore finds an earlier answered ask_user entry of this Run
 // with the same question, and its answer.
-func (x *ControlExecutor) askUserAnsweredBefore(ctx context.Context, cc agentrun.ControlContext, question string) (*models.SessionEntry, string, error) {
+func (x *Executor) askUserAnsweredBefore(ctx context.Context, cc agentrun.ControlContext, question string) (*models.SessionEntry, string, error) {
 	entries, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID,
 		ToolNames: []string{string(models.ControlToolAskUser)}, States: []models.ToolEntryState{models.ToolEntryCompleted},
@@ -181,14 +181,14 @@ func askUserResultAnswer(entry *models.SessionEntry) (string, bool) {
 
 // postAskUserQuestion posts the question idempotently. A conversation that
 // keeps moving is left to the question reconciler after 3 attempts.
-func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, trigger *models.ChannelMessage, args *models.AskUserArgs, key string) error {
+func (x *Executor) postAskUserQuestion(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, trigger *models.ChannelMessage, args *models.AskUserArgs, key string) error {
 	service := x.conversationService()
 	if service == nil {
 		return errors.New("ask_user: no conversation service")
 	}
 	current := conversation
 	for attempt := 0; attempt < 3; attempt++ {
-		_, err := service.PostChannelMessage(ctx, runtimeconversation.ConversationQuestionPostRequest(run, current, trigger, args, key))
+		_, err := service.PostChannelMessage(ctx, runtimeconversation.QuestionPostRequest(run, current, trigger, args, key))
 		if err == nil {
 			return nil
 		}
@@ -207,12 +207,12 @@ func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *models.A
 // names this entry's step and question message. Until it arrives the Run
 // re-parks; the question is re-posted idempotently first, which also covers a
 // crash between the entry transition and the post.
-func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
+func (askUserHandler) Resume(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Resume, error) {
 	if cc.Entry.State != models.ToolEntryAwaitingEvent {
-		return ControlResume{}, fmt.Errorf("%w: ask_user resume of %s in state %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
+		return Resume{}, fmt.Errorf("%w: ask_user resume of %s in state %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
 	}
 	args := cc.Arguments.(*models.AskUserArgs)
-	key := runtimeconversation.ConversationClarificationKey(cc.Run.ID, cc.Entry.ID)
+	key := runtimeconversation.ClarificationKey(cc.Run.ID, cc.Entry.ID)
 	if answer := askUserAnswer(cc.Run, cc.Entry, models.StableConversationID(cc.Run.Scope, key, "message")); answer != nil {
 		value := map[string]interface{}{
 			"status": "answered", "answer": truncateControlText(answer.AnswerContent, cc.Run.ID), "messageId": answer.AnswerMessageID,
@@ -223,13 +223,13 @@ func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentru
 		result := models.ControlJSONResult(models.ToolResultSucceeded, value)
 		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryCompleted, nil, result, nil)
 		if err != nil {
-			return ControlResume{}, err
+			return Resume{}, err
 		}
-		return ControlResume{Resolved: true, Result: ControlResult{Kind: ControlContinue, Entry: entry}}, nil
+		return Resume{Resolved: true, Result: Result{Kind: Continue, Entry: entry}}, nil
 	}
 	conversation, trigger, err := x.askUserOrigin(ctx, cc.Run)
 	if err != nil {
-		return ControlResume{}, err
+		return Resume{}, err
 	}
 	if conversation == nil {
 		// The conversation went away while the question was open: nobody can
@@ -237,14 +237,14 @@ func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentru
 		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil, ErrorResult(models.ToolResultFailed, "cannot_post",
 			"The conversation can no longer be asked; continue with what you have.", nil), nil)
 		if err != nil {
-			return ControlResume{}, err
+			return Resume{}, err
 		}
-		return ControlResume{Resolved: true, Result: ControlResult{Kind: ControlContinue, Entry: entry}}, nil
+		return Resume{Resolved: true, Result: Result{Kind: Continue, Entry: entry}}, nil
 	}
 	if err := x.postAskUserQuestion(ctx, cc.Run, conversation, trigger, args, key); err != nil {
-		return ControlResume{}, err
+		return Resume{}, err
 	}
-	return ControlResume{Park: askUserPark(cc.Entry.ID)}, nil
+	return Resume{Park: askUserPark(cc.Entry.ID)}, nil
 }
 
 // askUserAnswer returns the accepted answer receipt of an ask_user entry.

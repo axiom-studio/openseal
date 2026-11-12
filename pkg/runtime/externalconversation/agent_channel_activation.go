@@ -17,7 +17,7 @@ type ChannelActivationStore interface {
 // ChannelActivationCommit joins the endpoint CAS to the registry's activation
 // transaction. Separate databases and unknown stores fail closed rather than
 // activating a definition whose channel could not be materialized.
-func (s *ExternalConversationEndpointService) ChannelActivationCommit(next *models.ExternalConversationEndpoint, expectedRevision, expectedDeploymentRevision int64) kernelagent.AmendmentActivationCommit {
+func (s *EndpointService) ChannelActivationCommit(next *models.ExternalConversationEndpoint, expectedRevision, expectedDeploymentRevision int64) kernelagent.AmendmentActivationCommit {
 	return func(ctx context.Context, registryStore kernelagent.Store, amendment *kernelagent.DefinitionAmendment, amendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, deploymentRevision int64, activation kernelagent.DefinitionActivation) error {
 		if deploymentRevision != expectedDeploymentRevision {
 			return kernelagent.ErrRevisionConflict

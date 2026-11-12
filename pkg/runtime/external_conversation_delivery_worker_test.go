@@ -28,16 +28,16 @@ type ephemeralRetryHost struct {
 
 func (h *ephemeralRetryHost) LookupExternalConversationDelivery(
 	context.Context,
-	externalconversation.ExternalConversationDeliveryHostRequest,
-) (*externalconversation.ExternalConversationDeliveryAcknowledgement, error) {
+	externalconversation.DeliveryHostRequest,
+) (*externalconversation.DeliveryAcknowledgement, error) {
 	h.lookups++
-	return &externalconversation.ExternalConversationDeliveryAcknowledgement{Status: externalconversation.ExternalConversationAcknowledgementUnknown}, nil
+	return &externalconversation.DeliveryAcknowledgement{Status: externalconversation.AcknowledgementUnknown}, nil
 }
 
 func (h *ephemeralRetryHost) DeliverExternalConversation(
 	_ context.Context,
-	req externalconversation.ExternalConversationDeliveryHostRequest,
-) (*externalconversation.ExternalConversationDeliveryHostResult, error) {
+	req externalconversation.DeliveryHostRequest,
+) (*externalconversation.DeliveryHostResult, error) {
 	h.deliveries++
 	if req.Delivery.Operation != capability.ConversationDeliveryTypingIndicator {
 		return nil, errors.New("expected typing indicator")
@@ -45,32 +45,32 @@ func (h *ephemeralRetryHost) DeliverExternalConversation(
 	if h.deliveries == 1 {
 		return nil, errors.New("temporary provider failure")
 	}
-	return &externalconversation.ExternalConversationDeliveryHostResult{
-		Outcome: externalconversation.ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: req.Delivery.ExternalThreadID,
+	return &externalconversation.DeliveryHostResult{
+		Outcome: externalconversation.DeliveryOutcomeDelivered, ProviderMessageID: req.Delivery.ExternalThreadID,
 	}, nil
 }
 
 func (h *acknowledgementRecoveryHost) LookupExternalConversationDelivery(
 	_ context.Context,
-	req externalconversation.ExternalConversationDeliveryHostRequest,
-) (*externalconversation.ExternalConversationDeliveryAcknowledgement, error) {
+	req externalconversation.DeliveryHostRequest,
+) (*externalconversation.DeliveryAcknowledgement, error) {
 	h.lookups++
 	if req.Adapter.Adapter.Provider != h.provider || req.Endpoint.Provider != h.provider {
 		return nil, errors.New("wrong provider adapter")
 	}
 	providerMessageID := h.acknowledged[req.Delivery.IdempotencyKey]
 	if providerMessageID == "" {
-		return &externalconversation.ExternalConversationDeliveryAcknowledgement{Status: externalconversation.ExternalConversationAcknowledgementNotFound}, nil
+		return &externalconversation.DeliveryAcknowledgement{Status: externalconversation.AcknowledgementNotFound}, nil
 	}
-	return &externalconversation.ExternalConversationDeliveryAcknowledgement{
-		Status: externalconversation.ExternalConversationAcknowledgementFound, ProviderMessageID: providerMessageID,
+	return &externalconversation.DeliveryAcknowledgement{
+		Status: externalconversation.AcknowledgementFound, ProviderMessageID: providerMessageID,
 	}, nil
 }
 
 func (h *acknowledgementRecoveryHost) DeliverExternalConversation(
 	_ context.Context,
-	req externalconversation.ExternalConversationDeliveryHostRequest,
-) (*externalconversation.ExternalConversationDeliveryHostResult, error) {
+	req externalconversation.DeliveryHostRequest,
+) (*externalconversation.DeliveryHostResult, error) {
 	h.deliveries++
 	h.address = req.Endpoint.Address
 	if req.Adapter.Adapter.Provider != h.provider || req.Message.Content != "Canonical answer" ||
@@ -95,7 +95,7 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
 		t.Fatal(err)
 	}
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack mention",
 		IdempotencyKey: "installation-wide-origin",
@@ -112,7 +112,7 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = externalconversation.NewExternalConversationTransportService(store, catalog).Enqueue(ctx, externalconversation.EnqueueExternalConversationDeliveryRequest{
+	_, err = externalconversation.NewTransportService(store, catalog).Enqueue(ctx, externalconversation.EnqueueExternalConversationDeliveryRequest{
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID,
 		ExternalConversationID: "C-origin", MaximumAttempts: 1,
@@ -121,7 +121,7 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 		t.Fatal(err)
 	}
 	host := &acknowledgementRecoveryHost{provider: "slack", acknowledged: map[string]string{}}
-	worker, err := externalconversation.NewExternalConversationDeliveryWorker(store, catalog, host, externalconversation.ExternalConversationDeliveryWorkerConfig{WorkerID: "origin-worker"})
+	worker, err := externalconversation.NewDeliveryWorker(store, catalog, host, externalconversation.DeliveryWorkerConfig{WorkerID: "origin-worker"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	store, catalog, endpoint := externalconversationtest.EndpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack progress", IdempotencyKey: "typing-retry",
 	})
@@ -156,7 +156,7 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = externalconversation.NewExternalConversationTransportService(store, catalog).Enqueue(ctx, externalconversation.EnqueueExternalConversationDeliveryRequest{
+	_, err = externalconversation.NewTransportService(store, catalog).Enqueue(ctx, externalconversation.EnqueueExternalConversationDeliveryRequest{
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryTypingIndicator,
 		ConversationID: conversation.ID, ChannelMessageID: message.Message.ID, ExternalThreadID: "thread-1",
 		Parameters: map[string]interface{}{"status": "Checking now."}, MaximumAttempts: 3,
@@ -175,7 +175,7 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	}
 	host := &ephemeralRetryHost{}
 	workerClock := time.Now
-	worker, err := externalconversation.NewExternalConversationDeliveryWorker(store, catalog, host, externalconversation.ExternalConversationDeliveryWorkerConfig{
+	worker, err := externalconversation.NewDeliveryWorker(store, catalog, host, externalconversation.DeliveryWorkerConfig{
 		WorkerID: "typing-worker", BaseRetry: time.Nanosecond, MaximumRetry: time.Second,
 	}, models.WithClock(func() time.Time { return workerClock() }))
 	if err != nil {
@@ -205,7 +205,7 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 		t.Run(provider, func(t *testing.T) {
 			ctx := context.Background()
 			store, catalog, endpoint := externalconversationtest.EndpointFixture(t, ctx, provider)
-			conversations := runtimeconversation.NewConversationService(store)
+			conversations := runtimeconversation.NewService(store)
 			conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 				Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "External support",
 				Origin: &models.ConversationReference{
@@ -225,7 +225,7 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 			if err != nil {
 				t.Fatal(err)
 			}
-			enqueued, err := externalconversation.NewExternalConversationTransportService(store, catalog).Enqueue(
+			enqueued, err := externalconversation.NewTransportService(store, catalog).Enqueue(
 				ctx,
 				externalconversation.EnqueueExternalConversationDeliveryRequest{
 					Scope: endpoint.Scope, EndpointID: endpoint.ID,
@@ -239,11 +239,11 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 			}
 			host := &acknowledgementRecoveryHost{provider: provider, acknowledged: map[string]string{}}
 			workerClock := time.Now
-			worker, err := externalconversation.NewExternalConversationDeliveryWorker(
+			worker, err := externalconversation.NewDeliveryWorker(
 				store,
 				catalog,
 				host,
-				externalconversation.ExternalConversationDeliveryWorkerConfig{
+				externalconversation.DeliveryWorkerConfig{
 					WorkerID: "delivery-worker", LeaseDuration: time.Minute,
 					BaseRetry: time.Second, MaximumRetry: time.Minute,
 				},

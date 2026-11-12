@@ -17,7 +17,7 @@ type skillRuntimeMaintenanceWaiterStore interface {
 	ListCompletedSkillRuntimeMaintenanceWaiters(context.Context, models.Scope, int) ([]*models.AgentRun, error)
 }
 
-func (s *AgentRunWakeService) wakeCompletedSkillRuntimeMaintenances(ctx context.Context, scope models.Scope, at time.Time) (*WakeResult, error) {
+func (s *WakeService) wakeCompletedSkillRuntimeMaintenances(ctx context.Context, scope models.Scope, at time.Time) (*WakeResult, error) {
 	store, ok := s.portfolio.(skillRuntimeMaintenanceWaiterStore)
 	if !ok {
 		return &WakeResult{}, nil

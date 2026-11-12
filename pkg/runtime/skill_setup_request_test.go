@@ -98,7 +98,7 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 	if err := catalog.Bind(ctx, &skill.Binding{ID: "setup-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, AllowedActions: []string{agentrun.SkillActionRequestSetup, skillbinding.SkillActionListSetupRequests}, MaximumRisk: skill.RiskLevelRead}); err != nil {
 		t.Fatal(err)
 	}
-	created, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Connect Reddit", Source: models.RunSourceChat, Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
+	created, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Connect Reddit", Source: models.RunSourceChat, Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,8 +106,8 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 	if err != nil || run.ID != created.ID {
 		t.Fatal(err)
 	}
-	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, store)
-	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
+	validator, _ := skillbinding.NewActionValidator(catalog, store)
+	coordinator := action.NewCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ProposalValidator{validator})
 	step, err := activity.NewAgentTurnService(store, store).BeginTurn(ctx, activity.BeginAgentTurnRequest{Scope: scope, RunID: run.ID, SessionID: run.SessionID, Producer: models.StepProducerModel, WorkerID: "worker", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatal(err)
@@ -123,8 +123,8 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 	provider := skill.DiscoveryProviderFunc(func(context.Context, skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable}}}, nil
 	})
-	dispatcher, _ := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
-	executed, err := action.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "worker")
+	dispatcher, _ := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
+	executed, err := action.NewWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "worker")
 	if err != nil {
 		t.Fatal(err)
 	}

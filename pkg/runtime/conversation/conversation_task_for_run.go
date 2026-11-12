@@ -7,7 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
-func ConversationTaskForReport(ctx context.Context, store models.ConversationStore, run *models.AgentRun) (*models.ConversationTask, bool, error) {
+func TaskForReport(ctx context.Context, store models.ConversationStore, run *models.AgentRun) (*models.ConversationTask, bool, error) {
 	if run == nil {
 		return nil, false, nil
 	}

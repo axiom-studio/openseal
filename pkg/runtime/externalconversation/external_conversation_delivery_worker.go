@@ -13,37 +13,37 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-type ExternalConversationDeliveryHostRequest struct {
-	Attachments []ExternalConversationAttachmentContent `json:"attachments,omitempty"`
-	Endpoint    *models.ExternalConversationEndpoint    `json:"endpoint"`
-	Adapter     *skill.BoundConversationAdapter         `json:"adapter"`
-	Delivery    *models.ExternalConversationDelivery    `json:"delivery"`
-	Message     *models.ChannelMessage                  `json:"message"`
+type DeliveryHostRequest struct {
+	Attachments []AttachmentContent                  `json:"attachments,omitempty"`
+	Endpoint    *models.ExternalConversationEndpoint `json:"endpoint"`
+	Adapter     *skill.BoundConversationAdapter      `json:"adapter"`
+	Delivery    *models.ExternalConversationDelivery `json:"delivery"`
+	Message     *models.ChannelMessage               `json:"message"`
 }
 
-type ExternalConversationAcknowledgementStatus string
+type AcknowledgementStatus string
 
 const (
-	ExternalConversationAcknowledgementFound    ExternalConversationAcknowledgementStatus = "found"
-	ExternalConversationAcknowledgementNotFound ExternalConversationAcknowledgementStatus = "not_found"
-	ExternalConversationAcknowledgementUnknown  ExternalConversationAcknowledgementStatus = "unknown"
+	AcknowledgementFound    AcknowledgementStatus = "found"
+	AcknowledgementNotFound AcknowledgementStatus = "not_found"
+	AcknowledgementUnknown  AcknowledgementStatus = "unknown"
 )
 
-type ExternalConversationDeliveryAcknowledgement struct {
-	Status            ExternalConversationAcknowledgementStatus `json:"status"`
-	ProviderMessageID string                                    `json:"providerMessageId,omitempty"`
+type DeliveryAcknowledgement struct {
+	Status            AcknowledgementStatus `json:"status"`
+	ProviderMessageID string                `json:"providerMessageId,omitempty"`
 }
 
-func (a *ExternalConversationDeliveryAcknowledgement) Validate() error {
+func (a *DeliveryAcknowledgement) Validate() error {
 	if a == nil {
 		return fmt.Errorf("%w: acknowledgement is required", models.ErrInvalidExternalConversation)
 	}
 	switch a.Status {
-	case ExternalConversationAcknowledgementFound:
+	case AcknowledgementFound:
 		if !models.IsValidExternalConversationReference(a.ProviderMessageID, 1024) {
 			return fmt.Errorf("%w: found acknowledgement requires a provider message id", models.ErrInvalidExternalConversation)
 		}
-	case ExternalConversationAcknowledgementNotFound, ExternalConversationAcknowledgementUnknown:
+	case AcknowledgementNotFound, AcknowledgementUnknown:
 		if a.ProviderMessageID != "" {
 			return fmt.Errorf("%w: unresolved acknowledgement cannot include a provider message id", models.ErrInvalidExternalConversation)
 		}
@@ -53,24 +53,24 @@ func (a *ExternalConversationDeliveryAcknowledgement) Validate() error {
 	return nil
 }
 
-type ExternalConversationDeliveryOutcome string
+type DeliveryOutcome string
 
 const (
-	ExternalConversationDeliveryOutcomeDelivered ExternalConversationDeliveryOutcome = "delivered"
-	ExternalConversationDeliveryOutcomeRetry     ExternalConversationDeliveryOutcome = "retry"
-	ExternalConversationDeliveryOutcomeFailed    ExternalConversationDeliveryOutcome = "failed"
+	DeliveryOutcomeDelivered DeliveryOutcome = "delivered"
+	DeliveryOutcomeRetry     DeliveryOutcome = "retry"
+	DeliveryOutcomeFailed    DeliveryOutcome = "failed"
 )
 
-type ExternalConversationDeliveryHostResult struct {
-	Progress          map[string]interface{}              `json:"progress,omitempty"`
-	Outcome           ExternalConversationDeliveryOutcome `json:"outcome"`
-	ProviderMessageID string                              `json:"providerMessageId,omitempty"`
-	RetryAfter        time.Duration                       `json:"retryAfter,omitempty"`
-	ErrorCode         string                              `json:"errorCode,omitempty"`
-	Summary           string                              `json:"summary,omitempty"`
+type DeliveryHostResult struct {
+	Progress          map[string]interface{} `json:"progress,omitempty"`
+	Outcome           DeliveryOutcome        `json:"outcome"`
+	ProviderMessageID string                 `json:"providerMessageId,omitempty"`
+	RetryAfter        time.Duration          `json:"retryAfter,omitempty"`
+	ErrorCode         string                 `json:"errorCode,omitempty"`
+	Summary           string                 `json:"summary,omitempty"`
 }
 
-func (r *ExternalConversationDeliveryHostResult) Validate() error {
+func (r *DeliveryHostResult) Validate() error {
 	if r == nil || r.RetryAfter < 0 || len(r.ErrorCode) > 128 || len(r.Summary) > 1024 ||
 		strings.ContainsAny(r.ErrorCode, "\r\n") || strings.ContainsAny(r.Summary, "\r\n") {
 		return fmt.Errorf("%w: invalid delivery host result", models.ErrInvalidExternalConversation)
@@ -79,15 +79,15 @@ func (r *ExternalConversationDeliveryHostResult) Validate() error {
 		return err
 	}
 	switch r.Outcome {
-	case ExternalConversationDeliveryOutcomeDelivered:
+	case DeliveryOutcomeDelivered:
 		if !models.IsValidExternalConversationReference(r.ProviderMessageID, 1024) || r.ErrorCode != "" || r.RetryAfter != 0 {
 			return fmt.Errorf("%w: delivered result is incomplete", models.ErrInvalidExternalConversation)
 		}
-	case ExternalConversationDeliveryOutcomeRetry:
+	case DeliveryOutcomeRetry:
 		if r.ProviderMessageID != "" || r.ErrorCode == "" {
 			return fmt.Errorf("%w: retry result requires a safe error code", models.ErrInvalidExternalConversation)
 		}
-	case ExternalConversationDeliveryOutcomeFailed:
+	case DeliveryOutcomeFailed:
 		if r.ProviderMessageID != "" || r.ErrorCode == "" || r.RetryAfter != 0 {
 			return fmt.Errorf("%w: failed result requires a safe error code", models.ErrInvalidExternalConversation)
 		}
@@ -97,22 +97,22 @@ func (r *ExternalConversationDeliveryHostResult) Validate() error {
 	return nil
 }
 
-// ExternalConversationAdapterHost is the only executable provider boundary.
+// AdapterHost is the only executable provider boundary.
 // Adapter code and credential redemption belong to the Skill host. Requests
 // carry the exact immutable Skill binding with opaque credential references;
 // no secret values enter OpenSeal state or this protocol.
-type ExternalConversationAdapterHost interface {
+type AdapterHost interface {
 	LookupExternalConversationDelivery(
 		context.Context,
-		ExternalConversationDeliveryHostRequest,
-	) (*ExternalConversationDeliveryAcknowledgement, error)
+		DeliveryHostRequest,
+	) (*DeliveryAcknowledgement, error)
 	DeliverExternalConversation(
 		context.Context,
-		ExternalConversationDeliveryHostRequest,
-	) (*ExternalConversationDeliveryHostResult, error)
+		DeliveryHostRequest,
+	) (*DeliveryHostResult, error)
 }
 
-type ExternalConversationDeliveryWorkerConfig struct {
+type DeliveryWorkerConfig struct {
 	AttachmentContent models.ArtifactContentStore
 	WorkerID          string
 	LeaseDuration     time.Duration
@@ -120,10 +120,10 @@ type ExternalConversationDeliveryWorkerConfig struct {
 	MaximumRetry      time.Duration
 }
 
-func (c ExternalConversationDeliveryWorkerConfig) normalize() (ExternalConversationDeliveryWorkerConfig, error) {
+func (c DeliveryWorkerConfig) normalize() (DeliveryWorkerConfig, error) {
 	c.WorkerID = strings.TrimSpace(c.WorkerID)
 	if !models.IsValidOpaqueIdentifier(c.WorkerID, 256) {
-		return ExternalConversationDeliveryWorkerConfig{}, fmt.Errorf("%w: worker id is invalid", models.ErrInvalidExternalConversation)
+		return DeliveryWorkerConfig{}, fmt.Errorf("%w: worker id is invalid", models.ErrInvalidExternalConversation)
 	}
 	if c.LeaseDuration == 0 {
 		c.LeaseDuration = time.Minute
@@ -135,26 +135,26 @@ func (c ExternalConversationDeliveryWorkerConfig) normalize() (ExternalConversat
 		c.MaximumRetry = 5 * time.Minute
 	}
 	if c.LeaseDuration <= 0 || c.BaseRetry <= 0 || c.MaximumRetry < c.BaseRetry {
-		return ExternalConversationDeliveryWorkerConfig{}, fmt.Errorf("%w: worker durations are invalid", models.ErrInvalidExternalConversation)
+		return DeliveryWorkerConfig{}, fmt.Errorf("%w: worker durations are invalid", models.ErrInvalidExternalConversation)
 	}
 	return c, nil
 }
 
-type ExternalConversationDeliveryWorker struct {
+type DeliveryWorker struct {
 	store    models.ExternalConversationStore
-	resolver ExternalConversationAdapterResolver
-	host     ExternalConversationAdapterHost
-	config   ExternalConversationDeliveryWorkerConfig
+	resolver AdapterResolver
+	host     AdapterHost
+	config   DeliveryWorkerConfig
 	now      func() time.Time
 }
 
-func NewExternalConversationDeliveryWorker(
+func NewDeliveryWorker(
 	store models.ExternalConversationStore,
-	resolver ExternalConversationAdapterResolver,
-	host ExternalConversationAdapterHost,
-	config ExternalConversationDeliveryWorkerConfig,
+	resolver AdapterResolver,
+	host AdapterHost,
+	config DeliveryWorkerConfig,
 	opts ...models.ServiceOption,
-) (*ExternalConversationDeliveryWorker, error) {
+) (*DeliveryWorker, error) {
 	if store == nil || resolver == nil || host == nil {
 		return nil, errors.New("external conversation store, adapter resolver, and host are required")
 	}
@@ -162,12 +162,12 @@ func NewExternalConversationDeliveryWorker(
 	if err != nil {
 		return nil, err
 	}
-	return &ExternalConversationDeliveryWorker{
+	return &DeliveryWorker{
 		store: store, resolver: resolver, host: host, config: normalized, now: models.ClockFrom(opts),
 	}, nil
 }
 
-func (w *ExternalConversationDeliveryWorker) ProcessOne(ctx context.Context, scope models.Scope) (*models.ExternalConversationDelivery, error) {
+func (w *DeliveryWorker) ProcessOne(ctx context.Context, scope models.Scope) (*models.ExternalConversationDelivery, error) {
 	if w == nil || w.store == nil || w.resolver == nil || w.host == nil {
 		return nil, errors.New("external conversation delivery worker is not configured")
 	}
@@ -185,7 +185,7 @@ func (w *ExternalConversationDeliveryWorker) ProcessOne(ctx context.Context, sco
 	return delivery, nil
 }
 
-func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalConversationDelivery) error {
+func (w *DeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalConversationDelivery) error {
 	if delivery.Status != models.ExternalConversationDeliveryLeased || delivery.LeaseOwner != w.config.WorkerID {
 		return models.ErrExternalConversationLeaseLost
 	}
@@ -238,7 +238,7 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 	effectiveDelivery.Adapter = externalConversationResolvedAdapterReference(adapter)
 	effectiveDelivery.EndpointRevision = endpoint.Revision
 	deliveryEndpoint.Adapter = effectiveDelivery.Adapter
-	request := ExternalConversationDeliveryHostRequest{
+	request := DeliveryHostRequest{
 		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: effectiveDelivery, Message: message,
 	}
 	if containsConversationFeature(adapter.Adapter.Features, capability.ConversationFeatureAttachments) && delivery.Operation == capability.ConversationDeliveryMessageSend {
@@ -258,7 +258,7 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 			if validateErr := acknowledgement.Validate(); validateErr != nil {
 				return validateErr
 			}
-			if acknowledgement.Status == ExternalConversationAcknowledgementFound {
+			if acknowledgement.Status == AcknowledgementFound {
 				return w.markDelivered(ctx, delivery, acknowledgement.ProviderMessageID)
 			}
 		}
@@ -276,21 +276,21 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 		delivery.Progress = maps.Clone(result.Progress)
 	}
 	switch result.Outcome {
-	case ExternalConversationDeliveryOutcomeDelivered:
+	case DeliveryOutcomeDelivered:
 		return w.markDelivered(ctx, delivery, result.ProviderMessageID)
-	case ExternalConversationDeliveryOutcomeRetry:
+	case DeliveryOutcomeRetry:
 		if result.RetryAfter > 0 && !adapter.Adapter.Delivery.SupportsRetryAfter {
 			return fmt.Errorf("%w: adapter returned undeclared retry-after", models.ErrInvalidExternalConversation)
 		}
 		return w.recordFailure(ctx, delivery, errors.New("adapter requested retry"), result.ErrorCode, result.Summary, result.RetryAfter)
-	case ExternalConversationDeliveryOutcomeFailed:
+	case DeliveryOutcomeFailed:
 		return w.markFailed(ctx, delivery, result.ErrorCode, result.Summary)
 	default:
 		return models.ErrInvalidExternalConversation
 	}
 }
 
-func (w *ExternalConversationDeliveryWorker) resolve(
+func (w *DeliveryWorker) resolve(
 	ctx context.Context,
 	delivery *models.ExternalConversationDelivery,
 ) (*models.ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {
@@ -316,7 +316,7 @@ func (w *ExternalConversationDeliveryWorker) resolve(
 	return endpoint, adapter, nil
 }
 
-func (w *ExternalConversationDeliveryWorker) markDelivered(
+func (w *DeliveryWorker) markDelivered(
 	ctx context.Context,
 	delivery *models.ExternalConversationDelivery,
 	providerMessageID string,
@@ -366,7 +366,7 @@ func (w *ExternalConversationDeliveryWorker) markDelivered(
 	return nil
 }
 
-func (w *ExternalConversationDeliveryWorker) markFailed(
+func (w *DeliveryWorker) markFailed(
 	ctx context.Context,
 	delivery *models.ExternalConversationDelivery,
 	code, summary string,
@@ -388,7 +388,7 @@ func (w *ExternalConversationDeliveryWorker) markFailed(
 	return nil
 }
 
-func (w *ExternalConversationDeliveryWorker) recordFailure(
+func (w *DeliveryWorker) recordFailure(
 	ctx context.Context,
 	delivery *models.ExternalConversationDelivery,
 	processingErr error,

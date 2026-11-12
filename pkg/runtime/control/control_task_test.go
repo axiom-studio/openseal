@@ -63,7 +63,7 @@ type startTaskFixture struct {
 	entries      map[string]*models.SessionEntry // by call id
 	conversation *models.Conversation
 	message      *models.ChannelMessage
-	exec         *ControlExecutor
+	exec         *Executor
 	authority    agentrun.ControlAuthority
 }
 
@@ -79,7 +79,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...models
 	}
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "start-task-" + uuid.NewString()[:8]}
-	conversations := conversation.NewConversationService(store)
+	conversations := conversation.NewService(store)
 	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "start-task-chat",
@@ -89,7 +89,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...models
 	}
 	message := conversationruntest.PostMessage(t, conversations, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion,
 		"Review the release in the background", "start-task-message")
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...models
 	}
 	f.authority = agentrun.ControlAuthority{AgentID: run.AssignedAgentID,
 		TaskStart: &models.HostedConversationTaskContext{ConversationID: conversation.ID, ThreadRootID: thread, CanStart: true}}
-	f.exec = &ControlExecutor{Portfolio: store, Sessions: store, Tasks: conversationrun.NewConversationTaskService(store)}
+	f.exec = &Executor{Portfolio: store, Sessions: store, Tasks: conversationrun.NewConversationTaskService(store)}
 	return f
 }
 
@@ -176,13 +176,13 @@ func (f *startTaskFixture) storedEntry(id string) *models.SessionEntry {
 }
 
 func (f *startTaskFixture) context(callID string) agentrun.ControlContext {
-	return NewControlContext(agentrun.StepToolsInput{
+	return NewContext(agentrun.StepToolsInput{
 		Run: f.run, Step: f.step, Session: f.session, WorkerID: startTaskTestWorker, Assistant: f.assistant,
 		Binding: &agentrun.TurnRunnerBinding{Authority: f.authority},
 	}, f.entries[callID])
 }
 
-func (f *startTaskFixture) settle(callID string) ControlResult {
+func (f *startTaskFixture) settle(callID string) Result {
 	f.t.Helper()
 	result, err := f.exec.Settle(f.t.Context(), f.context(callID))
 	if err != nil {
@@ -228,7 +228,7 @@ func TestStartTaskCompletesForegroundWithAcknowledgmentAtomically(t *testing.T) 
 	forStartTaskStores(t, func(t *testing.T, store startTaskTestStore) {
 		f := newStartTaskFixture(t, store)
 		result := f.settle("call-task")
-		if result.Kind != ControlEnded || result.Run == nil || result.Run.Status != models.AgentRunStatusCompleted {
+		if result.Kind != Ended || result.Run == nil || result.Run.Status != models.AgentRunStatusCompleted {
 			t.Fatalf("result = %#v", result)
 		}
 		source, err := store.GetAgentRun(t.Context(), f.run.Scope, f.run.ID)
@@ -335,9 +335,9 @@ func TestStartTaskRefusedWhenSteeringUnconsumed(t *testing.T) {
 		reloaded, _ := f.store.GetAgentRun(t.Context(), f.run.Scope, f.run.ID)
 		return reloaded
 	}
-	check := func(t *testing.T, f *startTaskFixture, result ControlResult) {
+	check := func(t *testing.T, f *startTaskFixture, result Result) {
 		t.Helper()
-		if result.Kind != ControlContinue {
+		if result.Kind != Continue {
 			t.Fatalf("result = %#v", result)
 		}
 		entry := f.storedEntry(f.entries["call-task"].ID)
@@ -442,7 +442,7 @@ func TestStartTaskNotAloneIsRefused(t *testing.T) {
 	result := f.settle("call-task")
 	entry := f.storedEntry(f.entries["call-task"].ID)
 	value := controlResultValue(t, entry)
-	if result.Kind != ControlContinue || entry.State != models.ToolEntryError || value["error"] != controlTaskNotAloneCode ||
+	if result.Kind != Continue || entry.State != models.ToolEntryError || value["error"] != controlTaskNotAloneCode ||
 		value["message"] != "Call conversation_start_task alone; other work belongs inside the task." {
 		t.Fatalf("result = %#v value = %v", result, value)
 	}
@@ -515,14 +515,14 @@ func TestOldTaskWithoutToolEntryStillValidates(t *testing.T) {
 
 func TestStartTaskSpecAndArguments(t *testing.T) {
 	authority := agentrun.ControlAuthority{TaskStart: &models.HostedConversationTaskContext{ConversationID: "c", CanStart: true}}
-	var spec *ControlToolSpec
+	var spec *ToolSpec
 	for _, s := range builtinControlSpecs(authority) {
 		if s.Name == models.ControlToolStartTask {
 			s := s
 			spec = &s
 		}
 	}
-	if spec == nil || spec.Phase != ControlPhaseSettle {
+	if spec == nil || spec.Phase != PhaseSettle {
 		t.Fatalf("spec = %#v", spec)
 	}
 	properties := spec.InputSchema["properties"].(map[string]interface{})

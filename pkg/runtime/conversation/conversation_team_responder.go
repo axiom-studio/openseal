@@ -30,7 +30,7 @@ func IsTeamRoutingRun(run *models.AgentRun) bool {
 		strings.TrimSpace(run.AssignedAgentID) == ""
 }
 
-func ConversationRoutingKey(scope models.Scope, conversationID, triggerID string) string {
+func RoutingKey(scope models.Scope, conversationID, triggerID string) string {
 	return "participation-round:" + models.SHA256DigestString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+triggerID)
 }
 
@@ -40,7 +40,7 @@ func TeamMemberRunRequest(routing *models.AgentRun, conversation *models.Convers
 	context := map[string]interface{}{
 		models.ConversationRunConversationIDContextKey: conversation.ID,
 		models.ConversationRunTriggerIDContextKey:      trigger.ID,
-		ConversationRunContextTriggerSeq:               trigger.Sequence,
+		RunContextTriggerSeq:                           trigger.Sequence,
 		// The client's link from the routing Run to the answers it started.
 		TeamRoutingRunContextKey: routing.ID,
 	}
@@ -84,7 +84,7 @@ type agentConversationTeamMember struct {
 
 // AgentTeam is the team context of the Agent you: the routing notes and
 // every member who may answer, by binding.
-func (roster ConversationTeamRoster) AgentTeam(bindings []ConversationParticipantBinding, you string) *AgentConversationTeam {
+func (roster TeamRoster) AgentTeam(bindings []ParticipantBinding, you string) *AgentConversationTeam {
 	team := &AgentConversationTeam{Notes: roster.notes, Roster: make([]agentConversationTeamMember, 0, len(bindings))}
 	for _, binding := range bindings {
 		info := roster.members[binding.Participant.ID]
@@ -97,14 +97,14 @@ func (roster ConversationTeamRoster) AgentTeam(bindings []ConversationParticipan
 	return team
 }
 
-func teamMemberName(info conversationTeamMember, binding ConversationParticipantBinding) string {
+func teamMemberName(info conversationTeamMember, binding ParticipantBinding) string {
 	if info.name != "" {
 		return info.name
 	}
 	return binding.Participant.ID
 }
 
-func FindHandoffMentions(content, sender string, roster ConversationTeamRoster, bindings []ConversationParticipantBinding) []models.ConversationParticipant {
+func FindHandoffMentions(content, sender string, roster TeamRoster, bindings []ParticipantBinding) []models.ConversationParticipant {
 	lower := strings.ToLower(content)
 	type found struct {
 		at          int

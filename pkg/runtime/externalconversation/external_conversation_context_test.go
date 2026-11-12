@@ -18,11 +18,11 @@ import (
 )
 
 type contextHistoryResolver struct {
-	ExternalConversationAdapterResolver
+	AdapterResolver
 }
 
 func (r contextHistoryResolver) ResolveConversationAdapterBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID, adapterID string) (*skill.BoundConversationAdapter, error) {
-	resolved, err := r.ExternalConversationAdapterResolver.ResolveConversationAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
+	resolved, err := r.AdapterResolver.ResolveConversationAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
 	if err != nil {
 		return nil, err
 	}
@@ -32,13 +32,13 @@ func (r contextHistoryResolver) ResolveConversationAdapterBinding(ctx context.Co
 }
 
 type recordingContextHost struct {
-	requests  []ExternalConversationContextHostRequest
-	result    *ExternalConversationContextResult
+	requests  []ContextHostRequest
+	result    *ContextResult
 	err       error
 	afterRead func()
 }
 
-func (h *recordingContextHost) ReadExternalConversationContext(_ context.Context, req ExternalConversationContextHostRequest) (*ExternalConversationContextResult, error) {
+func (h *recordingContextHost) ReadExternalConversationContext(_ context.Context, req ContextHostRequest) (*ContextResult, error) {
 	h.requests = append(h.requests, req)
 	if h.afterRead != nil {
 		h.afterRead()
@@ -65,8 +65,8 @@ func receiveContextTestEvent(t *testing.T, store *sqlite.Store, endpoint *models
 	return item
 }
 
-func contextTestHistory(event models.NormalizedExternalConversationEvent) *ExternalConversationContextResult {
-	return &ExternalConversationContextResult{Status: conversation.ExternalConversationContextComplete, Messages: []ExternalConversationContextMessage{
+func contextTestHistory(event models.NormalizedExternalConversationEvent) *ContextResult {
+	return &ContextResult{Status: conversation.ExternalConversationContextComplete, Messages: []ContextMessage{
 		{ExternalConversationID: event.ExternalConversationID, ExternalThreadID: event.ExternalThreadID,
 			ExternalMessageID: "earlier-reply", ExternalParticipantID: "human-two", ParticipantDisplayName: "Piyush",
 			Text: "The photo book is my favorite.", OccurredAt: event.OccurredAt.Add(-time.Minute)},
@@ -76,14 +76,14 @@ func contextTestHistory(event models.NormalizedExternalConversationEvent) *Exter
 	}}
 }
 
-func newContextTestWorker(t *testing.T, store *sqlite.Store, resolver ExternalConversationAdapterResolver, host ExternalConversationContextHost, crash bool, opts ...models.ServiceOption) (*ExternalConversationInboxWorker, *crashAfterDispatch) {
+func newContextTestWorker(t *testing.T, store *sqlite.Store, resolver AdapterResolver, host ContextHost, crash bool, opts ...models.ServiceOption) (*InboxWorker, *crashAfterDispatch) {
 	t.Helper()
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	dispatcher := &crashAfterDispatch{next: NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: crash}
-	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
+	worker, err := NewInboxWorker(store, dispatcher, InboxWorkerConfig{
 		WorkerID: "context-worker", BaseRetry: time.Second, MaximumRetry: time.Minute,
 		ContextHost: host, ContextCatalog: resolver,
 	}, opts...)
@@ -168,7 +168,7 @@ func TestExternalConversationContextRefreshesMissingRepliesAndKeepsThreadsSepara
 	firstRoot := firstMessages[0].ID
 	second := receiveContextTestEvent(t, store, endpoint, "first-thread-next-mention", "mention-two", "parent-one", now.Add(time.Minute))
 	host.result = contextTestHistory(first.Event)
-	host.result.Messages = append(host.result.Messages, ExternalConversationContextMessage{
+	host.result.Messages = append(host.result.Messages, ContextMessage{
 		ExternalConversationID: first.Event.ExternalConversationID, ExternalThreadID: first.Event.ExternalThreadID,
 		ExternalMessageID: "missed-reply", ExternalParticipantID: "human-three", Text: "I can supply photos.", OccurredAt: now.Add(time.Second),
 	})
@@ -247,7 +247,7 @@ func TestExternalConversationContextPermissionCodeIsSafeAndPreserved(t *testing.
 			now := time.Now().UTC().Truncate(time.Millisecond)
 			receiveContextTestEvent(t, store, endpoint, "permission-context", "mention", "parent", now)
 			worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, &recordingContextHost{
-				result: &ExternalConversationContextResult{Status: conversation.ExternalConversationContextUnavailable, ErrorCode: code},
+				result: &ContextResult{Status: conversation.ExternalConversationContextUnavailable, ErrorCode: code},
 			}, false, models.WithClock(func() time.Time { return now }))
 			applied, err := worker.ProcessOne(t.Context(), endpoint.Scope)
 			if err != nil {
@@ -334,7 +334,7 @@ func TestExternalConversationContextRejectsCrossDestinationAndOversizedResults(t
 			case "oversized-message":
 				result.Messages[0].Text = strings.Repeat("x", 64*1024+1)
 			case "oversized-batch":
-				result.Messages = make([]ExternalConversationContextMessage, conversation.MaximumExternalConversationContextMessages+1)
+				result.Messages = make([]ContextMessage, conversation.MaximumExternalConversationContextMessages+1)
 			case "oversized-total":
 				for i := 0; i < 5; i++ {
 					message := result.Messages[0]
@@ -396,8 +396,8 @@ func TestExternalConversationContextRequiresFeatureDeclaration(t *testing.T) {
 func TestQuotedPhotoContextRejectsInvalidOriginAndUnboundedFiles(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	event := models.NormalizedExternalConversationEvent{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:8", ReplyToExternalMessageID: "chat:7", OccurredAt: now}
-	parent := ExternalConversationContextMessage{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:7", ExternalParticipantID: "user", OccurredAt: now, Attachments: []models.ExternalConversationAttachment{{ID: "photo", Name: "photo.jpg", MediaType: "image/jpeg", SizeBytes: 20}}}
-	result := &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []ExternalConversationContextMessage{parent}}
+	parent := ContextMessage{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:7", ExternalParticipantID: "user", OccurredAt: now, Attachments: []models.ExternalConversationAttachment{{ID: "photo", Name: "photo.jpg", MediaType: "image/jpeg", SizeBytes: 20}}}
+	result := &ContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []ContextMessage{parent}}
 	messages, _, ok := normalizeExternalConversationContext(result, event)
 	if !ok || len(messages) != 1 {
 		t.Fatal("same-second quoted photo lost")

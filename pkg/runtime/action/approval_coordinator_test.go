@@ -171,8 +171,8 @@ func TestApprovalCoordinatorExpiresApprovalAfterRunLeavesWaitingState(t *testing
 	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
-	paused, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
-		Scope: proposal.Run.Scope, RunID: proposal.Run.ID, ExpectedRevision: proposal.Run.Revision, Kind: agentrun.AgentRunCommandPause,
+	paused, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.CommandRequest{
+		Scope: proposal.Run.Scope, RunID: proposal.Run.ID, ExpectedRevision: proposal.Run.Revision, Kind: agentrun.CommandPause,
 		Actor: models.ActivityActor{Type: "user", ID: "operator"},
 	})
 	if err != nil || paused.Run.Status != models.AgentRunStatusPaused {
@@ -285,7 +285,7 @@ func createApprovalForStoreWithTimeout(t *testing.T, store models.KernelStore, n
 	t.Helper()
 	ctx := context.Background()
 	_, scope := actiontest.GovernedCatalog(t)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,
 		Budget: &models.BudgetPolicy{MaxActions: 1},

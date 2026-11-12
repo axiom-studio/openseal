@@ -32,7 +32,7 @@ func TestPostgresDependencyFanInIsConcurrentRecoverableAndIsolated(t *testing.T)
 	}
 
 	scope := models.Scope{Kind: "tenant", ID: "fan-in"}
-	portfolio := runtimeportfolio.NewPortfolioService(primary)
+	portfolio := runtimeportfolio.NewService(primary)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, AssignedAgentID: "lead",
 		Goal: "Coordinate market research", Source: models.RunSourceManual,
@@ -180,7 +180,7 @@ func TestPostgresDependencyFanInPreservesIndependentMultiObjectiveProgress(t *te
 	const objectiveCount = 8
 	groupIDs := make([]string, objectiveCount)
 	for index := 0; index < objectiveCount; index++ {
-		source, err := runtimeportfolio.NewPortfolioService(primary).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		source, err := runtimeportfolio.NewService(primary).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: fmt.Sprintf("agent-%d", index)},
 			AssignedAgentID: fmt.Sprintf("agent-%d", index), Goal: fmt.Sprintf("Objective %d", index), Source: models.RunSourceObjective,
 		})

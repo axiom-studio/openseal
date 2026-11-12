@@ -24,7 +24,7 @@ type nestedActionFixture struct {
 	run         *models.AgentRun
 	turn        *models.AgentTurn
 	catalog     *skill.Catalog
-	coordinator *action.ActionCoordinator
+	coordinator *action.Coordinator
 	clock       func() time.Time // the coordinator's clock
 	binding     *agentrun.TurnRunnerBinding
 	closeTurn   func()
@@ -78,7 +78,7 @@ func newNestedActionFixtureWith(t *testing.T, store models.KernelStore, definiti
 	if len(binding.ModelActions) != 2 {
 		t.Fatalf("offered actions = %#v", binding.ModelActions)
 	}
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "check the repo", Source: models.RunSourceObjective,
 	})
@@ -97,18 +97,18 @@ func newNestedActionFixtureWith(t *testing.T, store models.KernelStore, definiti
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := action.ActionPolicyEvaluatorFunc(func(_ context.Context, input action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+	policy := action.PolicyEvaluatorFunc(func(_ context.Context, input action.PolicyInput) (action.PolicyDecision, error) {
 		if input.Bound.Action.SideEffect == skill.SideEffectRead {
-			return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+			return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 		}
-		return action.ActionPolicyDecision{
-			Disposition: action.ActionDispositionRequireApproval, Reason: "writes need review",
+		return action.PolicyDecision{
+			Disposition: action.DispositionRequireApproval, Reason: "writes need review",
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
 	fixture := &nestedActionFixture{store: store, scope: scope, now: now, run: run, turn: turn, catalog: catalog, binding: binding}
 	fixture.clock = func() time.Time { return now.Add(time.Second) }
-	fixture.coordinator = action.NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return fixture.clock() }))
+	fixture.coordinator = action.NewCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return fixture.clock() }))
 	fixture.closeTurn = fixture.coordinator.OpenNestedActionTurn(run, turn, binding)
 	t.Cleanup(fixture.closeTurn)
 	return fixture
@@ -156,8 +156,8 @@ func (f *nestedActionFixture) request(capability, key string) action.NestedActio
 	}
 }
 
-func (f *nestedActionFixture) worker(t *testing.T) *action.ActionWorker {
-	worker := action.NewActionWorker(f.store, f.catalog, nil, action.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+func (f *nestedActionFixture) worker(t *testing.T) *action.Worker {
+	worker := action.NewWorker(f.store, f.catalog, nil, action.DispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		if input.Call.Origin != models.ActionOriginVM || input.Run == nil || input.Run.Status != models.AgentRunStatusRunning {
 			t.Fatalf("nested dispatch input = %#v", input)
 		}
@@ -277,7 +277,7 @@ func TestNestedActionRequiresTheRunsRunningStep(t *testing.T) {
 			if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-2")); !errors.Is(err, models.ErrNestedTurnNotActive) {
 				t.Fatalf("finished step err = %v", err)
 			}
-			worker := action.NewActionWorker(f.store, f.catalog, nil, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+			worker := action.NewWorker(f.store, f.catalog, nil, action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				t.Fatal("a nested call of a finished step was dispatched")
 				return nil, nil
 			}), models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))

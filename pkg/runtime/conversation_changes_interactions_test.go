@@ -25,7 +25,7 @@ type interactionChangeFixture struct {
 	conversation *models.Conversation
 	trigger      *models.ChannelMessage
 	run          *models.AgentRun
-	changes      *runtimeconversation.ConversationChangeService
+	changes      *runtimeconversation.ChangeService
 	clock        func() time.Time // the change service's clock
 }
 
@@ -52,7 +52,7 @@ func newInteractionChangeFixture(t *testing.T, store models.KernelStore) *intera
 	t.Helper()
 	f := &interactionChangeFixture{ctx: context.Background(), store: store, scope: models.Scope{Kind: "tenant", ID: "interactions"}, clock: time.Now}
 	conversationStore := store.(models.ConversationStore)
-	conversations := runtimeconversation.NewConversationService(conversationStore)
+	conversations := runtimeconversation.NewService(conversationStore)
 	seedTestSpace(t, store.(models.SpaceStore), f.scope)
 	conversation, _, err := conversations.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
@@ -69,7 +69,7 @@ func newInteractionChangeFixture(t *testing.T, store models.KernelStore) *intera
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := conversationrun.NewConversationRunScheduler(conversationStore, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(conversationStore, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func newInteractionChangeFixture(t *testing.T, store models.KernelStore) *intera
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.changes, err = runtimeconversation.NewConversationChangeService(conversationStore, store, models.WithClock(func() time.Time { return f.clock() }))
+	f.changes, err = runtimeconversation.NewChangeService(conversationStore, store, models.WithClock(func() time.Time { return f.clock() }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,9 +85,9 @@ func newInteractionChangeFixture(t *testing.T, store models.KernelStore) *intera
 	return f
 }
 
-func (f *interactionChangeFixture) list(t *testing.T, cursor string) *runtimeconversation.ConversationChangeSet {
+func (f *interactionChangeFixture) list(t *testing.T, cursor string) *runtimeconversation.ChangeSet {
 	t.Helper()
-	changes, err := f.changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor})
+	changes, err := f.changes.ListChanges(f.ctx, runtimeconversation.ChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func (p teamRosterPortfolio) GetTeamDeployment(_ context.Context, scope capabili
 // one saved to a member's own umbrella never shows in the Team chat.
 func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	ctx, store, scope := context.Background(), kerneltest.NewStore(t), models.Scope{Kind: "tenant", ID: "team-requests"}
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "gtm"}, Title: "Team", IdempotencyKey: "team",
@@ -284,7 +284,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	}
 	team := &kernelteam.Deployment{ID: "gtm", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "a", AgentDeploymentID: "member"}, {ID: "b", AgentDeploymentID: "other"}}}
-	changes, err := runtimeconversation.NewConversationChangeService(store, teamRosterPortfolio{Store: store, team: team})
+	changes, err := runtimeconversation.NewChangeService(store, teamRosterPortfolio{Store: store, team: team})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	set, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	set, err := changes.ListChanges(ctx, runtimeconversation.ChangeRequest{Scope: scope, ConversationID: conversation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	}
 	// A paused Team's members keep their pending requests in the chat.
 	team.Status = kernelteam.DeploymentPaused
-	set, err = changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	set, err = changes.ListChanges(ctx, runtimeconversation.ChangeRequest{Scope: scope, ConversationID: conversation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

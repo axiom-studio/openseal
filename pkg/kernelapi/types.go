@@ -300,7 +300,7 @@ type StartAgentBuilderConversationResponse struct {
 }
 
 type ListAgentBuilderDraftsResponse struct {
-	Drafts []agentbuilder.AgentBuilderDraft `json:"drafts"`
+	Drafts []agentbuilder.Draft `json:"drafts"`
 }
 
 type CreateTeamDeploymentRequest struct {
@@ -848,14 +848,14 @@ type UpdateExternalConversationGatewayRequest struct {
 }
 
 type AgentRunCommandRequest struct {
-	ExpectedRevision    int64                        `json:"expectedRevision"`
-	Kind                agentrun.AgentRunCommandKind `json:"kind"`
-	Actor               models.ActivityActor         `json:"actor,omitempty"`
-	Summary             string                       `json:"summary,omitempty"`
-	Instruction         string                       `json:"instruction,omitempty"`
-	InterventionID      string                       `json:"interventionId,omitempty"`
-	HumanInterventionID string                       `json:"humanInterventionId,omitempty"`
-	Visibility          models.ActivityVisibility    `json:"visibility,omitempty"`
+	ExpectedRevision    int64                     `json:"expectedRevision"`
+	Kind                agentrun.CommandKind      `json:"kind"`
+	Actor               models.ActivityActor      `json:"actor,omitempty"`
+	Summary             string                    `json:"summary,omitempty"`
+	Instruction         string                    `json:"instruction,omitempty"`
+	InterventionID      string                    `json:"interventionId,omitempty"`
+	HumanInterventionID string                    `json:"humanInterventionId,omitempty"`
+	Visibility          models.ActivityVisibility `json:"visibility,omitempty"`
 }
 
 type ResolveArtifactContentRequest struct {

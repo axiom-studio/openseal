@@ -12,7 +12,7 @@ import (
 
 func TestLocalConversationThreadScopesFollowUpsAndPreservesIndependentWork(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: "local-threads"}
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
@@ -56,7 +56,7 @@ func TestLocalConversationThreadScopesFollowUpsAndPreservesIndependentWork(t *te
 	ordinary := schedule(post("ordinary request", "", models.ConversationParticipantUser))
 	one := schedule(post("first call request", rootOne.ID, models.ConversationParticipantUser))
 	two := schedule(post("other call request", rootTwo.ID, models.ConversationParticipantUser))
-	independent, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	independent, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindAgentWork, Owner: conversation.Owner, AssignedAgentID: "agent", Goal: "Continue independent work",
 		Source: models.RunSourceChat, ConcurrencyKey: "task:independent", Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID, "threadRootMessageId": rootOne.ID},
 	})

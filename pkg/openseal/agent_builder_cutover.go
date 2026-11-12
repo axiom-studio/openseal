@@ -14,7 +14,7 @@ import (
 )
 
 type (
-	AgentBuilderCutoverHost  = agentbuilder.AgentBuilderCutoverHost
+	AgentBuilderCutoverHost  = agentbuilder.CutoverHost
 	AgentBuilderCutoverDraft = models.AgentBuilderCutoverDraft
 )
 

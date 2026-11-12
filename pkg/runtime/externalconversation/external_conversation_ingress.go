@@ -14,10 +14,10 @@ import (
 
 const MaximumExternalConversationIngressBytes = 1 << 20
 
-// ExternalConversationIngressRequest is the bounded provider request passed to
+// IngressRequest is the bounded provider request passed to
 // the exact Skill-owned ingress entrypoint. The kernel never interprets
 // provider signatures or event payloads.
-type ExternalConversationIngressRequest struct {
+type IngressRequest struct {
 	Scope      models.Scope        `json:"scope"`
 	EndpointID string              `json:"endpointId"`
 	Method     string              `json:"method"`
@@ -25,28 +25,28 @@ type ExternalConversationIngressRequest struct {
 	Body       []byte              `json:"body"`
 }
 
-// ExternalConversationPublicIngressRequest is the provider-facing form. Its
+// PublicIngressRequest is the provider-facing form. Its
 // opaque route is globally unique but is not an authentication secret; the
 // exact installed Skill still verifies the provider signature before any
 // event can enter the durable inbox.
-type ExternalConversationPublicIngressRequest struct {
+type PublicIngressRequest struct {
 	Route   string              `json:"route"`
 	Method  string              `json:"method"`
 	Headers map[string][]string `json:"headers,omitempty"`
 	Body    []byte              `json:"body"`
 }
 
-func (r *ExternalConversationPublicIngressRequest) Validate() error {
+func (r *PublicIngressRequest) Validate() error {
 	if r == nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(r.Route), 128) {
 		return models.ErrInvalidExternalConversation
 	}
-	return (&ExternalConversationIngressRequest{
+	return (&IngressRequest{
 		Scope:      models.Scope{Kind: "tenant", ID: "route-validation"},
 		EndpointID: "route-validation", Method: r.Method, Headers: r.Headers, Body: r.Body,
 	}).Validate()
 }
 
-func (r *ExternalConversationIngressRequest) Validate() error {
+func (r *IngressRequest) Validate() error {
 	if r == nil || r.Scope.Validate() != nil || !models.IsValidOpaqueIdentifier(r.EndpointID, 256) ||
 		r.Method != http.MethodPost || len(r.Body) == 0 || len(r.Body) > MaximumExternalConversationIngressBytes ||
 		len(r.Headers) > 64 {
@@ -67,17 +67,17 @@ func (r *ExternalConversationIngressRequest) Validate() error {
 	return nil
 }
 
-// ExternalConversationIngressHostResult contains verified canonical events
+// IngressHostResult contains verified canonical events
 // plus the bounded response the provider expects (for example a Slack URL
 // verification challenge). Non-2xx results cannot carry accepted events.
-type ExternalConversationIngressHostResult struct {
+type IngressHostResult struct {
 	StatusCode  int                                          `json:"statusCode"`
 	ContentType string                                       `json:"contentType,omitempty"`
 	Body        []byte                                       `json:"body,omitempty"`
 	Events      []models.NormalizedExternalConversationEvent `json:"events,omitempty"`
 }
 
-func (r *ExternalConversationIngressHostResult) Validate() error {
+func (r *IngressHostResult) Validate() error {
 	if r == nil || r.StatusCode < 200 || r.StatusCode > 599 ||
 		len(r.ContentType) > 256 || strings.ContainsAny(r.ContentType, "\r\n") ||
 		len(r.Body) > MaximumExternalConversationIngressBytes || len(r.Events) > 100 {
@@ -94,36 +94,36 @@ func (r *ExternalConversationIngressHostResult) Validate() error {
 	return nil
 }
 
-type ExternalConversationIngressHostRequest struct {
+type IngressHostRequest struct {
 	Endpoint *models.ExternalConversationEndpoint `json:"endpoint"`
 	Adapter  *skill.BoundConversationAdapter      `json:"adapter"`
-	Request  *ExternalConversationIngressRequest  `json:"request"`
+	Request  *IngressRequest                      `json:"request"`
 }
 
-type ExternalConversationGatewayEvent struct {
+type GatewayEvent struct {
 	InstallationID string                                     `json:"installationId"`
 	ApplicationID  string                                     `json:"applicationId,omitempty"`
 	Address        string                                     `json:"address"`
 	Event          models.NormalizedExternalConversationEvent `json:"event"`
 }
 
-type ExternalConversationGatewayHostRequest struct {
+type GatewayHostRequest struct {
 	Gateway models.ExternalConversationIngressGateway `json:"gateway"`
 	Adapter *skill.BoundConversationAdapter           `json:"adapter"`
-	Request *ExternalConversationPublicIngressRequest `json:"request"`
+	Request *PublicIngressRequest                     `json:"request"`
 	// VerificationOnly is internal authority to answer a provider setup
 	// challenge without accepting events. It cannot be supplied over JSON.
 	VerificationOnly bool `json:"-"`
 }
 
-type ExternalConversationGatewayHostResult struct {
-	StatusCode  int                                `json:"statusCode"`
-	ContentType string                             `json:"contentType,omitempty"`
-	Body        []byte                             `json:"body,omitempty"`
-	Events      []ExternalConversationGatewayEvent `json:"events,omitempty"`
+type GatewayHostResult struct {
+	StatusCode  int            `json:"statusCode"`
+	ContentType string         `json:"contentType,omitempty"`
+	Body        []byte         `json:"body,omitempty"`
+	Events      []GatewayEvent `json:"events,omitempty"`
 }
 
-func (r *ExternalConversationGatewayHostResult) Validate() error {
+func (r *GatewayHostResult) Validate() error {
 	if r == nil || r.StatusCode < 200 || r.StatusCode > 599 ||
 		len(r.ContentType) > 256 || strings.ContainsAny(r.ContentType, "\r\n") ||
 		len(r.Body) > MaximumExternalConversationIngressBytes || len(r.Events) > 100 {
@@ -146,53 +146,53 @@ func (r *ExternalConversationGatewayHostResult) Validate() error {
 	return nil
 }
 
-type ExternalConversationGatewayAdapterHost interface {
+type GatewayAdapterHost interface {
 	NormalizeExternalConversationGateway(
 		context.Context,
-		ExternalConversationGatewayHostRequest,
-	) (*ExternalConversationGatewayHostResult, error)
+		GatewayHostRequest,
+	) (*GatewayHostResult, error)
 }
 
-// ExternalConversationGatewayVerificationAdapterHost explicitly opts in to
+// GatewayVerificationAdapterHost explicitly opts in to
 // verification while a saved gateway is paused. Implementations must admit
 // only supported setup challenges and must not process ordinary events or
 // perform provider mutations. The kernel rejects any emitted events before
 // route lookup, observation publication, or durable intake.
-type ExternalConversationGatewayVerificationAdapterHost interface {
+type GatewayVerificationAdapterHost interface {
 	VerifyExternalConversationGateway(
 		context.Context,
-		ExternalConversationGatewayHostRequest,
-	) (*ExternalConversationGatewayHostResult, error)
+		GatewayHostRequest,
+	) (*GatewayHostResult, error)
 }
 
-// ExternalConversationIngressAdapterHost executes provider verification and
+// IngressAdapterHost executes provider verification and
 // normalization from the installed Skill. It is intentionally separate from
 // delivery so send-only and receive-only adapters remain composable.
-type ExternalConversationIngressAdapterHost interface {
+type IngressAdapterHost interface {
 	NormalizeExternalConversation(
 		context.Context,
-		ExternalConversationIngressHostRequest,
-	) (*ExternalConversationIngressHostResult, error)
+		IngressHostRequest,
+	) (*IngressHostResult, error)
 }
 
-type ExternalConversationIngressResult struct {
-	Response *ExternalConversationIngressHostResult    `json:"response"`
+type IngressResult struct {
+	Response *IngressHostResult                        `json:"response"`
 	Received []*ReceiveExternalConversationEventResult `json:"received,omitempty"`
 }
 
-type ExternalConversationGatewayIngressResult struct {
-	Response *ExternalConversationGatewayHostResult    `json:"response"`
+type GatewayIngressResult struct {
+	Response *GatewayHostResult                        `json:"response"`
 	Received []*ReceiveExternalConversationEventResult `json:"received,omitempty"`
 }
 
 // NormalizeExternalConversationIngress resolves the endpoint's immutable
 // Skill adapter, delegates provider verification, then persists only verified
 // canonical events through the ordinary durable inbox service.
-func (s *ExternalConversationTransportService) NormalizeExternalConversationIngress(
+func (s *TransportService) NormalizeExternalConversationIngress(
 	ctx context.Context,
-	request ExternalConversationIngressRequest,
-	host ExternalConversationIngressAdapterHost,
-) (*ExternalConversationIngressResult, error) {
+	request IngressRequest,
+	host IngressAdapterHost,
+) (*IngressResult, error) {
 	if s == nil || s.store == nil || s.resolver == nil || host == nil {
 		return nil, errors.New("external conversation ingress is not configured")
 	}
@@ -205,7 +205,7 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationIngr
 	}
 	effectiveEndpoint := models.CloneExternalConversationEndpoint(endpoint)
 	effectiveEndpoint.Adapter = externalConversationResolvedAdapterReference(adapter)
-	result, err := host.NormalizeExternalConversation(ctx, ExternalConversationIngressHostRequest{
+	result, err := host.NormalizeExternalConversation(ctx, IngressHostRequest{
 		Endpoint: effectiveEndpoint, Adapter: adapter, Request: &request,
 	})
 	if err != nil {
@@ -236,17 +236,17 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationIngr
 		}
 		received = append(received, persisted)
 	}
-	return &ExternalConversationIngressResult{Response: result, Received: received}, nil
+	return &IngressResult{Response: result, Received: received}, nil
 }
 
 // NormalizeExternalConversationPublicIngress resolves the opaque host route
 // to its authoritative scope and endpoint before invoking Skill-owned
 // verification. No provider-controlled tenant or endpoint input is trusted.
-func (s *ExternalConversationTransportService) NormalizeExternalConversationPublicIngress(
+func (s *TransportService) NormalizeExternalConversationPublicIngress(
 	ctx context.Context,
-	request ExternalConversationPublicIngressRequest,
-	host ExternalConversationIngressAdapterHost,
-) (*ExternalConversationIngressResult, error) {
+	request PublicIngressRequest,
+	host IngressAdapterHost,
+) (*IngressResult, error) {
 	if s == nil || s.store == nil || host == nil {
 		return nil, errors.New("external conversation ingress is not configured")
 	}
@@ -260,7 +260,7 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationPubl
 	if endpoint == nil {
 		return nil, models.ErrExternalConversationEndpointNotFound
 	}
-	return s.NormalizeExternalConversationIngress(ctx, ExternalConversationIngressRequest{
+	return s.NormalizeExternalConversationIngress(ctx, IngressRequest{
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: request.Method,
 		Headers: request.Headers, Body: request.Body,
 	}, host)
@@ -270,28 +270,28 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationPubl
 // shared provider request through one exact Skill verifier before performing
 // any cross-scope endpoint lookup. Verified installation/application/address
 // claims are then fanned out through the ordinary per-endpoint durable inbox.
-func (s *ExternalConversationTransportService) NormalizeExternalConversationGatewayIngress(
+func (s *TransportService) NormalizeExternalConversationGatewayIngress(
 	ctx context.Context,
 	gateway models.ExternalConversationIngressGateway,
-	request ExternalConversationPublicIngressRequest,
-	host ExternalConversationGatewayAdapterHost,
-) (*ExternalConversationGatewayIngressResult, error) {
+	request PublicIngressRequest,
+	host GatewayAdapterHost,
+) (*GatewayIngressResult, error) {
 	return s.normalizeExternalConversationGatewayIngress(ctx, gateway, request, host, false)
 }
 
-func (s *ExternalConversationTransportService) normalizeExternalConversationGatewayIngress(
+func (s *TransportService) normalizeExternalConversationGatewayIngress(
 	ctx context.Context,
 	gateway models.ExternalConversationIngressGateway,
-	request ExternalConversationPublicIngressRequest,
-	host ExternalConversationGatewayAdapterHost,
+	request PublicIngressRequest,
+	host GatewayAdapterHost,
 	verificationOnly bool,
-) (*ExternalConversationGatewayIngressResult, error) {
+) (*GatewayIngressResult, error) {
 	if s == nil || s.store == nil || s.resolver == nil || host == nil {
 		return nil, errors.New("external conversation gateway ingress is not configured")
 	}
 	normalize := host.NormalizeExternalConversationGateway
 	if verificationOnly {
-		verifier, ok := host.(ExternalConversationGatewayVerificationAdapterHost)
+		verifier, ok := host.(GatewayVerificationAdapterHost)
 		if !ok {
 			return nil, fmt.Errorf("%w: gateway verification while paused is unavailable", models.ErrExternalConversationConflict)
 		}
@@ -318,7 +318,7 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 	}
 	effectiveGateway := gateway
 	effectiveGateway.Adapter = externalConversationResolvedAdapterReference(adapter)
-	result, err := normalize(ctx, ExternalConversationGatewayHostRequest{
+	result, err := normalize(ctx, GatewayHostRequest{
 		Gateway: effectiveGateway, Adapter: adapter, Request: &request, VerificationOnly: verificationOnly,
 	})
 	if err != nil {
@@ -331,10 +331,10 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 		if len(result.Events) != 0 {
 			return nil, fmt.Errorf("%w: paused gateway verification cannot accept events", models.ErrExternalConversationConflict)
 		}
-		return &ExternalConversationGatewayIngressResult{Response: result}, nil
+		return &GatewayIngressResult{Response: result}, nil
 	}
 	type verifiedEventRoute struct {
-		event     ExternalConversationGatewayEvent
+		event     GatewayEvent
 		endpoints []*models.ExternalConversationEndpoint
 	}
 	routes := make([]verifiedEventRoute, 0, len(result.Events))
@@ -453,18 +453,18 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 			received = append(received, persisted)
 		}
 	}
-	return &ExternalConversationGatewayIngressResult{Response: result, Received: received}, nil
+	return &GatewayIngressResult{Response: result, Received: received}, nil
 }
 
 // NormalizeExternalConversationRegisteredGatewayIngress resolves a durable
 // gateway registration by its public route before invoking the exact pinned
 // Skill verifier. Hosts therefore do not need a parallel environment-backed
 // provider routing table.
-func (s *ExternalConversationTransportService) NormalizeExternalConversationRegisteredGatewayIngress(
+func (s *TransportService) NormalizeExternalConversationRegisteredGatewayIngress(
 	ctx context.Context,
-	request ExternalConversationPublicIngressRequest,
-	host ExternalConversationGatewayAdapterHost,
-) (*ExternalConversationGatewayIngressResult, error) {
+	request PublicIngressRequest,
+	host GatewayAdapterHost,
+) (*GatewayIngressResult, error) {
 	if s == nil || s.store == nil || host == nil {
 		return nil, errors.New("external conversation gateway ingress is not configured")
 	}

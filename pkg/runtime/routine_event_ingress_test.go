@@ -42,7 +42,7 @@ func routineConnectionFixture(t *testing.T, h *routinetest.EventHarness, provide
 	if err := catalog.Bind(h.Ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := externalconversation.NewExternalConversationEndpointService(h.Store, catalog).Create(h.Ctx, externalconversation.CreateExternalConversationEndpointRequest{
+	endpoint, err := externalconversation.NewEndpointService(h.Store, catalog).Create(h.Ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: provider + "-endpoint", Scope: scope, Owner: h.Owner, DeploymentID: h.Owner.ID, Name: provider + " endpoint",
 		Adapter: models.ExternalConversationAdapterReference{
 			SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
@@ -116,7 +116,7 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	// reply; the routine hears them anyway (E14).
 	catalog, endpoint := routineConnectionFixture(t, h, "slack", models.ExternalConversationSelectMentions)
 	activation := conversationRoutine(h, endpoint, models.RoutineEventSlackMessage, "channel")
-	gateways := externalconversation.NewExternalConversationGatewayService(h.Store, nil)
+	gateways := externalconversation.NewGatewayService(h.Store, nil)
 	registration := externalconversationtest.CreateActiveGateway(t, h.Ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "acme-slack", Name: "Acme Slack", Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "pinned tenant gateway",
 		Gateway: models.ExternalConversationIngressGateway{
@@ -126,17 +126,17 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	})
 	human := slackRoutineMessage("171.001", "U1", "Ana Ruiz", "The invoice\nis late", false)
 	bot := slackRoutineMessage("171.002", "B1", "Deploy bot", "Deployed", true)
-	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
+	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.GatewayHostResult{
 		StatusCode: http.StatusOK,
-		Events: []externalconversation.ExternalConversationGatewayEvent{
+		Events: []externalconversation.GatewayEvent{
 			{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: human},
 			{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: bot},
 		},
 	}}
-	service := externalconversation.NewExternalConversationTransportService(h.Store, catalog)
+	service := externalconversation.NewTransportService(h.Store, catalog)
 	service.SetRoutineEventOfferer(h.Matcher)
 
-	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.Ctx, externalconversation.ExternalConversationPublicIngressRequest{
+	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.Ctx, externalconversation.PublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"team_id":"T123"}`),
 	}, host)
 	if err != nil || len(result.Received) != 2 || result.Received[0].Accepted || result.Received[1].Accepted {
@@ -167,7 +167,7 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	}
 
 	// A retry of the same provider request is absorbed by dedupe.
-	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.Ctx, externalconversation.ExternalConversationPublicIngressRequest{
+	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.Ctx, externalconversation.PublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"team_id":"T123"}`),
 	}, host); err != nil {
 		t.Fatal(err)
@@ -183,12 +183,12 @@ func TestSlackRoutineIgnoresDirectMessages(t *testing.T) {
 	activation := conversationRoutine(h, endpoint, models.RoutineEventSlackMessage, "channel")
 	direct := slackRoutineMessage("172.001", "U1", "Ana Ruiz", "private note", false)
 	direct.Direct = true
-	host := &externalconversationtest.IngressHostStub{Result: &externalconversation.ExternalConversationIngressHostResult{
+	host := &externalconversationtest.IngressHostStub{Result: &externalconversation.IngressHostResult{
 		StatusCode: http.StatusOK, Events: []models.NormalizedExternalConversationEvent{direct},
 	}}
-	service := externalconversation.NewExternalConversationTransportService(h.Store, catalog)
+	service := externalconversation.NewTransportService(h.Store, catalog)
 	service.SetRoutineEventOfferer(h.Matcher)
-	request := externalconversation.ExternalConversationIngressRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: http.MethodPost, Body: []byte(`{}`)}
+	request := externalconversation.IngressRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: http.MethodPost, Body: []byte(`{}`)}
 
 	if _, err := service.NormalizeExternalConversationIngress(h.Ctx, request, host); err != nil {
 		t.Fatal(err)
@@ -221,21 +221,21 @@ func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
 		Attributes:  map[string]interface{}{"chatTitle": "Support desk", "participantUsername": "ana_r"},
 	}
 	// An unpinned gateway: authority comes from each mapped endpoint.
-	gateways := externalconversation.NewExternalConversationGatewayService(h.Store, nil)
+	gateways := externalconversation.NewGatewayService(h.Store, nil)
 	registration := externalconversationtest.CreateActiveGateway(t, h.Ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "telegram-bot", Name: "Telegram bot", Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "unpinned gateway",
 		Gateway: models.ExternalConversationIngressGateway{
 			Scope: endpoint.Scope, Owner: h.Owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: "telegram",
 		},
 	})
-	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
+	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.GatewayHostResult{
 		StatusCode: http.StatusOK,
-		Events:     []externalconversation.ExternalConversationGatewayEvent{{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: message}},
+		Events:     []externalconversation.GatewayEvent{{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: message}},
 	}}
-	service := externalconversation.NewExternalConversationTransportService(h.Store, catalog)
+	service := externalconversation.NewTransportService(h.Store, catalog)
 	service.SetRoutineEventOfferer(h.Matcher)
 
-	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.Ctx, externalconversation.ExternalConversationPublicIngressRequest{
+	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.Ctx, externalconversation.PublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"update_id":991}`),
 	}, host)
 	if err != nil || len(result.Received) != 1 {

@@ -9,7 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
-// ConversationRunAgentID is the Agent a chat Run speaks as in conversation:
+// RunAgentID is the Agent a chat Run speaks as in conversation:
 // the owner of an Agent's chat, or the assigned member of a Team's. It is ""
 // when the Run cannot speak there. A Team member is the same Agent its 1:1
 // chat has, so everything keyed by "the Agent in this chat" uses this.
@@ -17,7 +17,7 @@ import (
 // It names the acting Agent only and is not an authorization proof: Team
 // membership is proved when the member Run is created (verifyTeamMemberRun),
 // and the current roster is checked by AgentOnChatRoster.
-func ConversationRunAgentID(conversation *models.Conversation, run *models.AgentRun) string {
+func RunAgentID(conversation *models.Conversation, run *models.AgentRun) string {
 	if conversation == nil || run == nil || run.Owner != conversation.Owner {
 		return ""
 	}
@@ -51,7 +51,7 @@ func VerifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversa
 		return false, nil
 	}
 	routingID, _ := run.Context[TeamRoutingRunContextKey].(string)
-	expected := ConversationAgentRunRequest(conversation, trigger)
+	expected := AgentRunRequest(conversation, trigger)
 	if routingID == "" || routingID != agentrun.RunIDForIdempotencyKey(conversation.Scope, expected.IdempotencyKey) {
 		return false, nil
 	}

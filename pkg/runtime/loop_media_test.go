@@ -86,7 +86,7 @@ func newMediaFixture(t *testing.T, store models.KernelStore, vision bool, rules 
 	t.Helper()
 	f := &mediaFixture{Fixture: looptest.NewFixture(t, store, looptest.WithRules(rules...)), content: &mediaContent{byRef: map[string][]byte{}}, vision: vision}
 	// The kit's conversation turn runner, reading attachments from content.
-	runner, err := conversationrun.NewConversationRunTurnRunner(f.Chats, f.Coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewTurnRunner(f.Chats, f.Coordinator(), conversationrun.TurnRunnerConfig{
 		AttachmentContent: f.content, AgentTurns: runtimeconversation.TurnRunnerResolverFunc(f.AgentBinding),
 	}, models.WithClock(f.Clock.Now))
 	if err != nil {
@@ -142,12 +142,12 @@ func (f *mediaFixture) startChatWithAttachments(text string, refs ...models.Conv
 // bind gives the claim's model producer the artifact sources and the
 // fixture's image modality, as the catalog resolver does from the catalog.
 func (f *mediaFixture) bind(binding *agentrun.TurnRunnerBinding) {
-	producer, ok := binding.Producer.(*modelstep.ModelStepProducer)
+	producer, ok := binding.Producer.(*modelstep.Producer)
 	if !ok {
 		f.T.Fatalf("producer is %T", binding.Producer)
 	}
 	vision := f.vision
-	producer.Media = modelstep.ModelStepMedia{
+	producer.Media = modelstep.Media{
 		Artifacts: f.Raw.(models.ArtifactStore), Content: f.content,
 		ImageInput: func(context.Context, agentrun.StepInput, models.ModelStepRequest) bool { return vision },
 	}
@@ -158,7 +158,7 @@ func (f *mediaFixture) drive(runID string, maxClaims int) *models.AgentRun {
 	f.T.Helper()
 	for i := 0; i < maxClaims; i++ {
 		exit, run := f.RunClaimWith(f.Ctx, runID, f.bind)
-		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
+		if exit.Err != nil && exit.Reason != runloop.ExitRequeued {
 			f.T.Fatalf("claim %d exited %s: %v", i+1, exit.Reason, exit.Err)
 		}
 		if run.Status != models.AgentRunStatusQueued {

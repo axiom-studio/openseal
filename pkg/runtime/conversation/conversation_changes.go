@@ -20,7 +20,7 @@ const (
 	conversationActivityRunBatchSize = 200
 )
 
-type ConversationChangeRequest struct {
+type ChangeRequest struct {
 	Scope          models.Scope
 	ConversationID string
 	Cursor         string
@@ -29,7 +29,7 @@ type ConversationChangeRequest struct {
 	Viewer         *models.ConversationViewer
 }
 
-// ConversationChangeSet is a portable, transport-neutral projection for
+// ChangeSet is a portable, transport-neutral projection for
 // reconnect-safe channel observation. Messages and rounds are durable deltas;
 // Runs, summary-first Activity projections, leased presence, action approvals
 // and Skill setup requests are authoritative current projections when their
@@ -37,7 +37,7 @@ type ConversationChangeRequest struct {
 // merge by stable identity and revision. Raw Activity payloads never travel on
 // the reconnecting channel stream (except the {from, to} of an approval mode
 // change); detail remains available from the bounded canonical Activity feed.
-type ConversationChangeSet struct {
+type ChangeSet struct {
 	Conversation *models.Conversation               `json:"conversation"`
 	Messages     []*models.ChannelMessage           `json:"messages"`
 	Rounds       []*models.ParticipationRoundResult `json:"rounds"`
@@ -49,13 +49,13 @@ type ConversationChangeSet struct {
 	Approvals []*models.ApprovalCheckpoint `json:"approvals"`
 	// SkillSetupRequests are every pending setup request for this
 	// conversation plus the most recently resolved or dismissed ones.
-	SkillSetupRequests []*ConversationSkillSetupRequest `json:"skillSetupRequests"`
+	SkillSetupRequests []*SkillSetupRequest `json:"skillSetupRequests"`
 	// CredentialRequests are every pending in-chat credential request for
 	// this conversation plus the most recently settled ones.
-	CredentialRequests []*ConversationCredentialRequest `json:"credentialRequests"`
+	CredentialRequests []*CredentialRequest `json:"credentialRequests"`
 	// Runbooks are the live state of the routines shown by routine visuals
 	// in this conversation and of the scheduled tasks created from it.
-	Runbooks []*ConversationRunbook `json:"runbooks"`
+	Runbooks []*Runbook `json:"runbooks"`
 	// ReactionEvents are durable deltas like Messages: conversation.reaction
 	// added/removed events stored after the cursor, in Sequence order, on
 	// messages the viewer can see. Each carries its message's current
@@ -95,8 +95,8 @@ type conversationChangeCursor struct {
 	RunbookDigest        string `json:"runbookDigest,omitempty"`
 }
 
-type ConversationChangeService struct {
-	conversations *ConversationService
+type ChangeService struct {
+	conversations *Service
 	portfolio     models.PortfolioStore
 	activity      models.RunActivityStore
 	approvals     conversationApprovalStore
@@ -106,11 +106,11 @@ type ConversationChangeService struct {
 	now           func() time.Time
 }
 
-func NewConversationChangeService(conversationStore models.ConversationStore, portfolio models.PortfolioStore, opts ...models.ServiceOption) (*ConversationChangeService, error) {
+func NewChangeService(conversationStore models.ConversationStore, portfolio models.PortfolioStore, opts ...models.ServiceOption) (*ChangeService, error) {
 	if conversationStore == nil || portfolio == nil {
 		return nil, errors.New("conversation and portfolio stores are required")
 	}
-	service := &ConversationChangeService{conversations: NewConversationService(conversationStore, opts...), portfolio: portfolio, now: models.ClockFrom(opts)}
+	service := &ChangeService{conversations: NewService(conversationStore, opts...), portfolio: portfolio, now: models.ClockFrom(opts)}
 	service.activity, _ = portfolio.(models.RunActivityStore)
 	service.approvals, _ = portfolio.(conversationApprovalStore)
 	if store, ok := portfolio.(models.SkillSetupRequestStore); ok {
@@ -121,7 +121,7 @@ func NewConversationChangeService(conversationStore models.ConversationStore, po
 	return service, nil
 }
 
-func (s *ConversationChangeService) ListChanges(ctx context.Context, req ConversationChangeRequest) (*ConversationChangeSet, error) {
+func (s *ChangeService) ListChanges(ctx context.Context, req ChangeRequest) (*ChangeSet, error) {
 	if s == nil || s.conversations == nil || s.portfolio == nil {
 		return nil, errors.New("conversation change service is not configured")
 	}
@@ -276,7 +276,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	}
 	skillSetupsChanged := initial || skillSetupDigest != cursor.SkillSetupDigest
 	if !skillSetupsChanged {
-		skillSetups = []*ConversationSkillSetupRequest{}
+		skillSetups = []*SkillSetupRequest{}
 	}
 	credentialRequests, err := s.listConversationCredentialRequests(ctx, conversation, runs, req.Viewer)
 	if err != nil {
@@ -288,7 +288,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	}
 	credentialsChanged := initial || credentialDigest != cursor.CredentialDigest
 	if !credentialsChanged {
-		credentialRequests = []*ConversationCredentialRequest{}
+		credentialRequests = []*CredentialRequest{}
 	}
 
 	runbooks, err := s.listConversationRunbooks(ctx, conversation)
@@ -301,7 +301,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	}
 	runbooksChanged := initial || runbookDigest != cursor.RunbookDigest
 	if !runbooksChanged {
-		runbooks = []*ConversationRunbook{}
+		runbooks = []*Runbook{}
 	}
 
 	activeAt := req.ActiveAt
@@ -334,7 +334,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	}
 	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 || len(interactions) > 0 || len(reactionEvents) > 0 ||
 		runsChanged || activityChanged || presenceChanged || approvalsChanged || skillSetupsChanged || credentialsChanged || runbooksChanged
-	return &ConversationChangeSet{
+	return &ChangeSet{
 		Conversation: models.CloneConversation(conversation), Messages: models.CloneChannelMessages(messages), Rounds: cloneParticipationRoundResults(rounds),
 		Runs: cloneAgentRuns(projectedRuns), Activity: cloneConversationActivity(projectedActivity), Presence: cloneConversationPresences(projectedPresence),
 		Approvals: approvals, SkillSetupRequests: skillSetups, CredentialRequests: credentialRequests, Runbooks: runbooks,
@@ -366,7 +366,7 @@ func withoutOthersOutcomes(interactions []*models.SurfaceInteraction, viewer mod
 // A child inherits its originating message's visibility, not its assigned
 // agent's identity. Filter before computing digests or projecting activity so
 // hidden work cannot leak through either payloads or change notifications.
-func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope models.Scope, conversationID string, runs []*models.AgentRun, viewer models.ConversationViewer) ([]*models.AgentRun, error) {
+func (s *ChangeService) filterVisibleRuns(ctx context.Context, scope models.Scope, conversationID string, runs []*models.AgentRun, viewer models.ConversationViewer) ([]*models.AgentRun, error) {
 	visibleRoots := make(map[string]bool)
 	var batchedMessages map[string]bool
 	if batch, ok := s.conversations.store.(models.ChannelMessageBatchStore); ok {
@@ -459,7 +459,7 @@ func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope
 	return visible, nil
 }
 
-func (s *ConversationChangeService) filterVisibleRounds(ctx context.Context, scope models.Scope, conversationID string, rounds []*models.ParticipationRoundResult, viewer models.ConversationViewer) ([]*models.ParticipationRoundResult, error) {
+func (s *ChangeService) filterVisibleRounds(ctx context.Context, scope models.Scope, conversationID string, rounds []*models.ParticipationRoundResult, viewer models.ConversationViewer) ([]*models.ParticipationRoundResult, error) {
 	visible := make([]*models.ParticipationRoundResult, 0, len(rounds))
 	for _, result := range rounds {
 		if result == nil || result.Round == nil {
@@ -484,7 +484,7 @@ func (s *ConversationChangeService) filterVisibleRounds(ctx context.Context, sco
 	return visible, nil
 }
 
-func (s *ConversationChangeService) listRoundsAfter(
+func (s *ChangeService) listRoundsAfter(
 	ctx context.Context,
 	scope models.Scope,
 	conversationID string,
@@ -526,7 +526,7 @@ func (s *ConversationChangeService) listRoundsAfter(
 	return all, hasMore, nextRevision, nil
 }
 
-func (s *ConversationChangeService) listConversationRuns(ctx context.Context, conversation *models.Conversation, viewers ...*models.ConversationViewer) ([]*models.AgentRun, error) {
+func (s *ChangeService) listConversationRuns(ctx context.Context, conversation *models.Conversation, viewers ...*models.ConversationViewer) ([]*models.AgentRun, error) {
 	const pageSize = 500
 	all := make([]*models.AgentRun, 0)
 	for offset := 0; ; offset += pageSize {
@@ -698,7 +698,7 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	return result, nil
 }
 
-func (s *ConversationChangeService) listConversationTaskRuns(ctx context.Context, conversation *models.Conversation, viewer *models.ConversationViewer) ([]*models.AgentRun, map[string]*models.AgentRun, error) {
+func (s *ChangeService) listConversationTaskRuns(ctx context.Context, conversation *models.Conversation, viewer *models.ConversationViewer) ([]*models.AgentRun, map[string]*models.AgentRun, error) {
 	sources := make(map[string]*models.AgentRun)
 	tasks, ok := s.portfolio.(models.ConversationTaskStore)
 	if !ok || s.conversations == nil {
@@ -749,7 +749,7 @@ type conversationChangeTaskProofStore struct {
 // A task is its own run root. Its source, actor, thread, and message visibility
 // must therefore be proven from persisted task identity rather than inferred
 // from a copied conversation/task context on arbitrary work.
-func (s *ConversationChangeService) ProveConversationTaskRun(ctx context.Context, conversation *models.Conversation, task *models.ConversationTask, work *models.AgentRun, viewer *models.ConversationViewer) (*models.AgentRun, error) {
+func (s *ChangeService) ProveConversationTaskRun(ctx context.Context, conversation *models.Conversation, task *models.ConversationTask, work *models.AgentRun, viewer *models.ConversationViewer) (*models.AgentRun, error) {
 	if task == nil || work == nil || task.Validate() != nil || task.Scope != conversation.Scope || task.Owner != conversation.Owner ||
 		task.ConversationID != conversation.ID || !models.ConversationTaskMatchesWorkRun(task, work) ||
 		task.Mode != models.ConversationTaskModeContinuation && work.Context["threadRootMessageId"] != task.ThreadRootID ||
@@ -761,7 +761,7 @@ func (s *ConversationChangeService) ProveConversationTaskRun(ctx context.Context
 		return nil, nil
 	}
 	proofStore := conversationChangeTaskProofStore{ConversationStore: s.conversations.store, ConversationTaskStore: tasks, PortfolioStore: s.portfolio}
-	workTask, sourceReport, err := ConversationTaskForReport(ctx, proofStore, work)
+	workTask, sourceReport, err := TaskForReport(ctx, proofStore, work)
 	if errors.Is(err, models.ErrInvalidConversationTask) || errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 		return nil, nil
 	}
@@ -789,7 +789,7 @@ func (s *ConversationChangeService) ProveConversationTaskRun(ctx context.Context
 		if source.Status != models.AgentRunStatusCompleted || source.LastAppliedTurn != task.SourceTurnNumber || models.ValidateConversationRun(source) != nil {
 			return nil, nil
 		}
-		sourceTask, sourceReport, err := ConversationTaskForReport(ctx, proofStore, source)
+		sourceTask, sourceReport, err := TaskForReport(ctx, proofStore, source)
 		if errors.Is(err, models.ErrInvalidConversationTask) || errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 			return nil, nil
 		}
@@ -833,7 +833,7 @@ func (s *ConversationChangeService) ProveConversationTaskRun(ctx context.Context
 	return source, nil
 }
 
-func (s *ConversationChangeService) listConversationActivity(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun) ([]models.ActivityProjection, error) {
+func (s *ChangeService) listConversationActivity(ctx context.Context, conversation *models.Conversation, runs []*models.AgentRun) ([]models.ActivityProjection, error) {
 	if s.activity == nil || conversation == nil {
 		return []models.ActivityProjection{}, nil
 	}
@@ -878,7 +878,7 @@ func (s *ConversationChangeService) listConversationActivity(ctx context.Context
 		projection := models.ProjectActivityEvent(event, false)
 		// An approval mode change carries only the two mode names, which the
 		// conversation view renders; other payloads stay on the Activity feed.
-		if event.EventType == ConversationApprovalModeChangedEvent {
+		if event.EventType == ApprovalModeChangedEvent {
 			projection.Payload = map[string]interface{}{"from": event.Payload["from"], "to": event.Payload["to"]}
 		}
 		projected = append(projected, projection)

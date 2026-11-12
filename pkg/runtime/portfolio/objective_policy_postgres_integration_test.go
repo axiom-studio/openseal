@@ -27,7 +27,7 @@ func TestPostgresObjectiveExecutionPolicySerializesReplicaClaims(t *testing.T) {
 	defer replica.Close()
 	scope := models.Scope{Kind: "tenant", ID: "postgres-objective-policy"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "portfolio-team"}
-	portfolio := runtimeportfolio.NewPortfolioService(primary)
+	portfolio := runtimeportfolio.NewService(primary)
 	limited, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Limited", Goal: "Run one occurrence at a time", Status: models.ObjectiveStatusActive,
 		ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},

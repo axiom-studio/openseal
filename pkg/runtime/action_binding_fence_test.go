@@ -107,8 +107,8 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 						t.Fatal(err)
 					}
 				}
-				coordinator := action.NewActionCoordinator(fixture.store, intercepted, fixture.catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-					return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+				coordinator := action.NewCoordinator(fixture.store, intercepted, fixture.catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+					return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 				}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
 				result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
@@ -233,8 +233,8 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 		for index, run := range runs {
 			go func(index int, run *models.AgentRun) {
 				defer proposals.Done()
-				coordinator := action.NewActionCoordinator(fixture.store, fixture.store, fixture.catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-					return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+				coordinator := action.NewCoordinator(fixture.store, fixture.store, fixture.catalog, action.PolicyEvaluatorFunc(func(context.Context, action.PolicyInput) (action.PolicyDecision, error) {
+					return action.PolicyDecision{Disposition: action.DispositionAllow}, nil
 				}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
 				<-start
 				outcomes[index], failures[index] = coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
@@ -361,7 +361,7 @@ func newActionBindingFenceFixture(t *testing.T, kernel models.KernelStore) *acti
 
 func newActionBindingFenceRunningRun(t *testing.T, store models.KernelStore, scope models.Scope, now time.Time) *models.AgentRun {
 	t.Helper()
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "Deploy safely", Source: models.RunSourceObjective,
 	})
@@ -380,9 +380,9 @@ func completeActionBindingFenceFixture(t *testing.T, fixture *actionBindingFence
 	if _, err := fixture.store.CreateActionProposal(t.Context(), fixture.proposal); err != nil {
 		t.Fatal(err)
 	}
-	worker := action.NewActionWorker(fixture.store, fixture.catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
+	worker := action.NewWorker(fixture.store, fixture.catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "secret"}, nil
-	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.DispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"providerResult": "delivered"}, nil
 	}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
 	completed, err := worker.ExecuteOwnLoopCall(t.Context(), fixture.proposal.Call.Scope, fixture.proposal.Call.ID, "agent-worker")

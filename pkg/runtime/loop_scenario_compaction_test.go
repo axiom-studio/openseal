@@ -1,7 +1,7 @@
 package runtime
 
 // Compaction and overflow journeys (run-loop section 12 §5.5, tests-T09).
-// The real RunLoop drives the kernel LoopCompactor, which the fixture's
+// The real runloop.Loop drives the kernel LoopCompactor, which the fixture's
 // binding wires as the catalog resolver does (budget included); only the
 // model, the host tools and the action dispatcher are fakes. Tool results are sized through the kernel estimate
 // (estimateEntryTokens), so the thresholds the scenarios cross are exact.
@@ -385,7 +385,7 @@ func TestLoopLengthRejectionCompactsAndRetriesOnce(t *testing.T) {
 }
 
 // requireCapabilityNotesThroughProducer checks the capabilities note the real
-// ModelStepProducer writes: one full note, the last entry of the first
+// modelstep.Producer writes: one full note, the last entry of the first
 // request; none on later steps; one full note again after the compaction
 // summarized the first, the last entry of the retry; never a duplicate.
 func requireCapabilityNotesThroughProducer(t *testing.T, f *looptest.Fixture, runID string, requests []models.ModelStepRequest, compaction *models.SessionEntry) {

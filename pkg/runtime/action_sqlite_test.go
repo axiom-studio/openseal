@@ -23,7 +23,7 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release-team"}, Goal: "deploy", Source: models.RunSourceManual,
 	})
 	if err != nil {
@@ -120,7 +120,7 @@ func TestSQLiteActionProposalRollsBackEveryRecordOnActivityFailure(t *testing.T)
 	}
 	defer store.Close()
 	scope := models.Scope{Kind: "local", ID: "rollback"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "deploy", Source: models.RunSourceManual,
 	})
 	if err != nil {
@@ -157,7 +157,7 @@ func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(
 		t.Fatal(err)
 	}
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	firstRun, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	firstRun, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}, Goal: "comment once", Source: models.RunSourceObjective,
 	})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(
 	if err != nil || receipt.ID != first.Call.ID {
 		t.Fatalf("restarted receipt = %#v, %v", receipt, err)
 	}
-	secondRun, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	secondRun, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}, Goal: "comment once again", Source: models.RunSourceObjective,
 	})
 	if err != nil {

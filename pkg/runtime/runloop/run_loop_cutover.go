@@ -12,36 +12,36 @@ import (
 	"github.com/google/uuid"
 )
 
-// RunLoopCutoverCode names the cutover: the FailureExplanation.Code of every
+// CutoverCode names the cutover: the FailureExplanation.Code of every
 // Run it cancels (SPEC §2.8) and the actor of its adopt and cancel events.
-const RunLoopCutoverCode = "run_loop_cutover"
+const CutoverCode = "run_loop_cutover"
 
-// RunLoopCutoverMessage answers each unanswered chat request the cutover
+// CutoverMessage answers each unanswered chat request the cutover
 // stopped. It is also the canceled Run's FailureExplanation.Message.
-const RunLoopCutoverMessage = "This request was stopped by a platform update. Send it again to continue."
+const CutoverMessage = "This request was stopped by a platform update. Send it again to continue."
 
 // runLoopCutoverRetries bounds the re-reads after a revision race on one Run
 // or one conversation.
 const runLoopCutoverRetries = 5
 
-// RunLoopCutoverConversations posts the visible cancel message. It is
-// satisfied by *ConversationService.
-type RunLoopCutoverConversations interface {
+// CutoverConversations posts the visible cancel message. It is
+// satisfied by *conversation.Service.
+type CutoverConversations interface {
 	GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error)
 	GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error)
 	ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error)
 	PostChannelMessage(ctx context.Context, req runtimeconversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error)
 }
 
-// RunLoopCutoverReport counts what one cutover pass did.
-type RunLoopCutoverReport struct {
+// CutoverReport counts what one cutover pass did.
+type CutoverReport struct {
 	Adopted  int
 	Canceled int
 	Messages int
 	Skipped  int
 }
 
-// RunLoopCutover moves the store onto the run loop (A16, SPEC §4.8). It must
+// Cutover moves the store onto the run loop (A16, SPEC §4.8). It must
 // run before any worker starts. Every non-terminal Run without an Engine
 // marker is either adopted (queued, never claimed, no step row: the loop can
 // start it fresh) or canceled through CommandAgentRun, which closes its
@@ -54,8 +54,8 @@ type RunLoopCutoverReport struct {
 //
 // It is idempotent: after a full pass no Run qualifies. It fails closed: any
 // error is returned and the caller must not start workers.
-func RunLoopCutover(ctx context.Context, store models.RunLoopCutoverStore, conversations RunLoopCutoverConversations) (RunLoopCutoverReport, error) {
-	var report RunLoopCutoverReport
+func Cutover(ctx context.Context, store models.RunLoopCutoverStore, conversations CutoverConversations) (CutoverReport, error) {
+	var report CutoverReport
 	if store == nil {
 		return report, errors.New("run loop cutover: store is required")
 	}
@@ -80,16 +80,16 @@ func RunLoopCutover(ctx context.Context, store models.RunLoopCutoverStore, conve
 
 type runLoopCutover struct {
 	store         models.RunLoopCutoverStore
-	conversations RunLoopCutoverConversations
+	conversations CutoverConversations
 	commands      *agentrun.RunCommandService
 	// posted holds the requests answered in this pass, so a lane whose
 	// request also reached a child Run gets one message.
 	posted map[string]bool
 }
 
-var runLoopCutoverActor = models.ActivityActor{Type: "runtime", ID: RunLoopCutoverCode}
+var runLoopCutoverActor = models.ActivityActor{Type: "runtime", ID: CutoverCode}
 
-func (c *runLoopCutover) cutRun(ctx context.Context, ref models.RunLoopCutoverRef, report *RunLoopCutoverReport) error {
+func (c *runLoopCutover) cutRun(ctx context.Context, ref models.RunLoopCutoverRef, report *CutoverReport) error {
 	for attempt := 0; ; attempt++ {
 		run, err := c.store.GetAgentRun(ctx, ref.Scope, ref.ID)
 		if err != nil {
@@ -159,7 +159,7 @@ func (c *runLoopCutover) adopt(ctx context.Context, current *models.AgentRun) er
 		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.engine_adopted", Severity: models.ActivitySeverityInfo,
 		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, ParentRunID: run.ParentRunID, TeamID: models.TeamIDForRun(run),
 		Actor: runLoopCutoverActor, Summary: "Run moved to the updated agent runtime", Visibility: models.ActivityVisibilityPrivate, CreatedAt: now,
-		Payload: map[string]interface{}{"engine": models.RunEngineLoop, "code": RunLoopCutoverCode, "sessionId": run.SessionID},
+		Payload: map[string]interface{}{"engine": models.RunEngineLoop, "code": CutoverCode, "sessionId": run.SessionID},
 	}
 	_, err := c.store.UpdateAgentRunWithEvent(ctx, run, current.Revision, event, nil)
 	return err
@@ -173,13 +173,13 @@ func needsLaneSession(run *models.AgentRun) bool {
 }
 
 func runLoopCutoverExplanation() *models.RunFailureExplanation {
-	return &models.RunFailureExplanation{Kind: "execution", Code: RunLoopCutoverCode, Message: RunLoopCutoverMessage}
+	return &models.RunFailureExplanation{Kind: "execution", Code: CutoverCode, Message: CutoverMessage}
 }
 
 // cancel posts the lane's message first and then cancels the Run, so a pass
 // interrupted between the two still leaves the message: the next pass finds
 // the request answered and only cancels.
-func (c *runLoopCutover) cancel(ctx context.Context, run *models.AgentRun, report *RunLoopCutoverReport) error {
+func (c *runLoopCutover) cancel(ctx context.Context, run *models.AgentRun, report *CutoverReport) error {
 	posted, err := c.postMessage(ctx, run)
 	if err != nil {
 		return fmt.Errorf("post cutover message: %w", err)
@@ -187,7 +187,7 @@ func (c *runLoopCutover) cancel(ctx context.Context, run *models.AgentRun, repor
 	if posted {
 		report.Messages++
 	}
-	if run.FailureExplanation == nil || run.FailureExplanation.Code != RunLoopCutoverCode {
+	if run.FailureExplanation == nil || run.FailureExplanation.Code != CutoverCode {
 		// Record the cause first; the cancel keeps it. A pass interrupted
 		// here cancels the Run on the next pass.
 		marked, err := c.markCanceledByCutover(ctx, run)
@@ -196,8 +196,8 @@ func (c *runLoopCutover) cancel(ctx context.Context, run *models.AgentRun, repor
 		}
 		run = marked
 	}
-	if _, err := c.commands.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.AgentRunCommandCancel,
+	if _, err := c.commands.CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.CommandCancel,
 		Actor: runLoopCutoverActor, Summary: "Stopped by a platform update", Visibility: models.ActivityVisibilityScope,
 	}); err != nil {
 		return err
@@ -215,7 +215,7 @@ func (c *runLoopCutover) markCanceledByCutover(ctx context.Context, current *mod
 		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.cutover_stopping", Severity: models.ActivitySeverityInfo,
 		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, ParentRunID: run.ParentRunID, TeamID: models.TeamIDForRun(run),
 		Actor: runLoopCutoverActor, Summary: "Run is being stopped by a platform update", Visibility: models.ActivityVisibilityPrivate, CreatedAt: now,
-		Payload: map[string]interface{}{"code": RunLoopCutoverCode},
+		Payload: map[string]interface{}{"code": CutoverCode},
 	}
 	if _, err := c.store.UpdateAgentRunWithEvent(ctx, run, current.Revision, event, nil); err != nil {
 		return nil, err
@@ -270,7 +270,7 @@ func (c *runLoopCutover) postMessage(ctx context.Context, run *models.AgentRun) 
 		result, err := c.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 			Sender: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "openseal.conversation"},
-			Intent: models.MessageIntentSystem, Content: RunLoopCutoverMessage, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
+			Intent: models.MessageIntentSystem, Content: CutoverMessage, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
 			References:     []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}},
 			IdempotencyKey: "conversation-run-canceled-result:" + run.ID,

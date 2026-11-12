@@ -53,11 +53,11 @@ func TestSignedActionCredentialLeaseBindsExactDurableAuthority(t *testing.T) {
 	redeemer := &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request models.ActionCredentialLeaseRedemptionRequest) error {
 		return models.MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields)
 	}}
-	validator, err := action.NewActionCredentialLeaseValidator(signer, redeemer)
+	validator, err := action.NewCredentialLeaseValidator(signer, redeemer)
 	if err != nil {
 		t.Fatal(err)
 	}
-	validated, err := validator.Validate(t.Context(), action.ActionCredentialLeaseValidationRequest{
+	validated, err := validator.Validate(t.Context(), action.CredentialLeaseValidationRequest{
 		Envelope: envelope, TenantID: "tenant-7", Scope: call.Scope, TrustedIssuer: "control-plane", Audience: "execution-host", Now: now.Add(time.Second),
 		Transport: actiontest.CredentialLeaseTransport, CredentialFields: fields,
 	})
@@ -67,7 +67,7 @@ func TestSignedActionCredentialLeaseBindsExactDurableAuthority(t *testing.T) {
 	if validated.ActionLease.ID == "" || validated.ActionLease.ActionCallRevision != call.Revision || validated.BindingOwnerID != "team-marketing" || validated.AssignedAgentID != "agent-researcher" || len(validated.Credentials) != 1 || validated.Credentials[0].Fields[0] != "api.token" || validated.Credentials[0].Reference.ID != "opaque://tenant-7/reddit" {
 		t.Fatalf("validated lease = %+v", validated)
 	}
-	if _, err := validator.Validate(t.Context(), action.ActionCredentialLeaseValidationRequest{
+	if _, err := validator.Validate(t.Context(), action.CredentialLeaseValidationRequest{
 		Envelope: envelope, TenantID: "tenant-7", Scope: call.Scope, TrustedIssuer: "control-plane", Audience: "execution-host", Now: now.Add(2 * time.Second),
 		Transport: actiontest.CredentialLeaseTransport, CredentialFields: fields,
 	}); err == nil {
@@ -93,32 +93,32 @@ func TestActionCredentialLeaseValidationFailsClosed(t *testing.T) {
 		}
 		return envelope, signer
 	}
-	request := func(envelope *models.SignedActionCredentialLease) action.ActionCredentialLeaseValidationRequest {
-		return action.ActionCredentialLeaseValidationRequest{Envelope: envelope, TenantID: "tenant-7", Scope: call.Scope, TrustedIssuer: "control-plane", Audience: "execution-host", Now: now.Add(time.Second), Transport: actiontest.CredentialLeaseTransport, CredentialFields: fields}
+	request := func(envelope *models.SignedActionCredentialLease) action.CredentialLeaseValidationRequest {
+		return action.CredentialLeaseValidationRequest{Envelope: envelope, TenantID: "tenant-7", Scope: call.Scope, TrustedIssuer: "control-plane", Audience: "execution-host", Now: now.Add(time.Second), Transport: actiontest.CredentialLeaseTransport, CredentialFields: fields}
 	}
 	for _, test := range []struct {
 		name   string
-		mutate func(*models.SignedActionCredentialLease, *action.ActionCredentialLeaseValidationRequest)
+		mutate func(*models.SignedActionCredentialLease, *action.CredentialLeaseValidationRequest)
 	}{
-		{"cross tenant", func(_ *models.SignedActionCredentialLease, req *action.ActionCredentialLeaseValidationRequest) {
+		{"cross tenant", func(_ *models.SignedActionCredentialLease, req *action.CredentialLeaseValidationRequest) {
 			req.TenantID = "tenant-8"
 		}},
-		{"wrong scope", func(_ *models.SignedActionCredentialLease, req *action.ActionCredentialLeaseValidationRequest) {
+		{"wrong scope", func(_ *models.SignedActionCredentialLease, req *action.CredentialLeaseValidationRequest) {
 			req.Scope.ID = "tenant-8"
 		}},
-		{"wrong issuer", func(_ *models.SignedActionCredentialLease, req *action.ActionCredentialLeaseValidationRequest) {
+		{"wrong issuer", func(_ *models.SignedActionCredentialLease, req *action.CredentialLeaseValidationRequest) {
 			req.TrustedIssuer = "other-control-plane"
 		}},
-		{"wrong audience", func(_ *models.SignedActionCredentialLease, req *action.ActionCredentialLeaseValidationRequest) {
+		{"wrong audience", func(_ *models.SignedActionCredentialLease, req *action.CredentialLeaseValidationRequest) {
 			req.Audience = "other-host"
 		}},
-		{"expired", func(_ *models.SignedActionCredentialLease, req *action.ActionCredentialLeaseValidationRequest) {
+		{"expired", func(_ *models.SignedActionCredentialLease, req *action.CredentialLeaseValidationRequest) {
 			req.Now = now.Add(2 * time.Minute)
 		}},
-		{"signature drift", func(envelope *models.SignedActionCredentialLease, _ *action.ActionCredentialLeaseValidationRequest) {
+		{"signature drift", func(envelope *models.SignedActionCredentialLease, _ *action.CredentialLeaseValidationRequest) {
 			envelope.Lease.Action = "delete"
 		}},
-		{"lease identity drift", func(envelope *models.SignedActionCredentialLease, _ *action.ActionCredentialLeaseValidationRequest) {
+		{"lease identity drift", func(envelope *models.SignedActionCredentialLease, _ *action.CredentialLeaseValidationRequest) {
 			envelope.Lease.ActionLease.Attempt++
 		}},
 	} {
@@ -126,7 +126,7 @@ func TestActionCredentialLeaseValidationFailsClosed(t *testing.T) {
 			envelope, signer := newEnvelope(t)
 			req := request(envelope)
 			test.mutate(envelope, &req)
-			validator, err := action.NewActionCredentialLeaseValidator(signer, &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request models.ActionCredentialLeaseRedemptionRequest) error {
+			validator, err := action.NewCredentialLeaseValidator(signer, &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request models.ActionCredentialLeaseRedemptionRequest) error {
 				return models.MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields)
 			}})
 			if err != nil {
@@ -172,10 +172,10 @@ func TestActionCredentialLeaseAuthorityRejectsSignedExtraFieldsAndBindingDrift(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			validator, _ := action.NewActionCredentialLeaseValidator(signer, &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request models.ActionCredentialLeaseRedemptionRequest) error {
+			validator, _ := action.NewCredentialLeaseValidator(signer, &testCredentialLeaseRedeemer{seen: map[string]bool{}, authorize: func(request models.ActionCredentialLeaseRedemptionRequest) error {
 				return models.MatchActionCredentialLease(request.Lease, durable, run, request.Transport, request.CredentialFields)
 			}})
-			if _, err := validator.Validate(t.Context(), action.ActionCredentialLeaseValidationRequest{Envelope: envelope, TenantID: "tenant-7", Scope: call.Scope, TrustedIssuer: "control-plane", Audience: "execution-host", Now: now.Add(time.Second), Transport: actiontest.CredentialLeaseTransport, CredentialFields: fields}); err == nil {
+			if _, err := validator.Validate(t.Context(), action.CredentialLeaseValidationRequest{Envelope: envelope, TenantID: "tenant-7", Scope: call.Scope, TrustedIssuer: "control-plane", Audience: "execution-host", Now: now.Add(time.Second), Transport: actiontest.CredentialLeaseTransport, CredentialFields: fields}); err == nil {
 				t.Fatal("signed authority drift was accepted")
 			}
 		})

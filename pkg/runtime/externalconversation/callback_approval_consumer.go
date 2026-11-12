@@ -22,14 +22,14 @@ type ApprovalCallbackConsumer struct {
 		models.ActionStore
 	}
 	notifications models.ApprovalNotificationStore
-	transport     *ExternalConversationTransportService
+	transport     *TransportService
 	now           func() time.Time
 }
 
 func NewApprovalCallbackConsumer(store interface {
 	models.PortfolioStore
 	models.ActionStore
-}, transport *ExternalConversationTransportService, opts ...models.ServiceOption) *ApprovalCallbackConsumer {
+}, transport *TransportService, opts ...models.ServiceOption) *ApprovalCallbackConsumer {
 	consumer := &ApprovalCallbackConsumer{store: store, transport: transport, now: models.ClockFrom(opts)}
 	consumer.notifications, _ = store.(models.ApprovalNotificationStore)
 	return consumer

@@ -17,8 +17,8 @@ import (
 func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) {
 	conversationtest.ForThreadStartStores(t, func(t *testing.T, store conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
 		conversation := conversationtest.ThreadStartConversation(t, store)
-		service := runtimeconversation.NewConversationService(store)
-		scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+		service := runtimeconversation.NewService(store)
+		scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,19 +101,19 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 			t.Fatalf("retained ancestry merged independent threads: ids=%v err=%v", conversationtest.ThreadStartMessageIDs(thread), err)
 		}
 		viewer := models.ConversationViewer{Participant: initiator}
-		page, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{Limit: 2}, rootOne.ID)
+		page, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.HistoryReadRequest{Limit: 2}, rootOne.ID)
 		if err != nil || page == nil || !reflect.DeepEqual(conversationtest.ThreadStartHistoryIDs(page), []string{nextOne.ID, one.ID}) || page.NextBeforeSequence != one.Sequence {
 			t.Fatalf("trusted local root did not page its own replies: page=%#v err=%v", page, err)
 		}
-		older, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{BeforeSequence: page.NextBeforeSequence, Limit: 2}, rootOne.ID)
+		older, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.HistoryReadRequest{BeforeSequence: page.NextBeforeSequence, Limit: 2}, rootOne.ID)
 		if err != nil || older == nil || !reflect.DeepEqual(conversationtest.ThreadStartHistoryIDs(older), []string{rootOne.ID}) {
 			t.Fatalf("trusted local history omitted its root or crossed lanes: page=%#v err=%v", older, err)
 		}
-		if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{MessageID: two.ID}, rootOne.ID); err == nil {
+		if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.HistoryReadRequest{MessageID: two.ID}, rootOne.ID); err == nil {
 			t.Fatal("exact message history escaped its trusted local root")
 		}
 		for _, invalidRoot := range []string{"missing-root", one.ID} {
-			if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{}, invalidRoot); err == nil {
+			if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.HistoryReadRequest{}, invalidRoot); err == nil {
 				t.Fatalf("trusted history accepted missing/nonroot message %s", invalidRoot)
 			}
 		}
@@ -123,7 +123,7 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 func TestConversationStartsThreadReplayJSONCloneAndRestart(t *testing.T) {
 	conversationtest.ForThreadStartStores(t, func(t *testing.T, store conversationtest.ThreadStartStore, reopen func(*testing.T) conversationtest.ThreadStartStore) {
 		conversation := conversationtest.ThreadStartConversation(t, store)
-		service := runtimeconversation.NewConversationService(store)
+		service := runtimeconversation.NewService(store)
 		legacy := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "legacy-parent"})
 		current, _ := service.GetConversation(t.Context(), conversation.Scope, conversation.ID)
 		initiator := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user"}
@@ -201,7 +201,7 @@ func TestConversationStartsThreadReplayJSONCloneAndRestart(t *testing.T) {
 func TestConversationStartsThreadPreservesPrivateAncestryForScalarAndBatchReads(t *testing.T) {
 	conversationtest.ForThreadStartStores(t, func(t *testing.T, store conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
 		conversation := conversationtest.ThreadStartConversation(t, store)
-		service := runtimeconversation.NewConversationService(store)
+		service := runtimeconversation.NewService(store)
 		allowed := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "allowed"}}
 		foreign := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "foreign"}}
 		private := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
@@ -229,10 +229,10 @@ func TestConversationStartsThreadPreservesPrivateAncestryForScalarAndBatchReads(
 				t.Fatal("fixture requires public descendants whose ancestry restricts visibility")
 			}
 		}
-		if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, foreign, runtimeconversation.ConversationHistoryReadRequest{}, root.ID); err == nil {
+		if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, foreign, runtimeconversation.HistoryReadRequest{}, root.ID); err == nil {
 			t.Fatal("trusted local history bypassed private root ancestry")
 		}
-		allowedPage, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, allowed, runtimeconversation.ConversationHistoryReadRequest{}, root.ID)
+		allowedPage, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, allowed, runtimeconversation.HistoryReadRequest{}, root.ID)
 		if err != nil || !reflect.DeepEqual(conversationtest.ThreadStartHistoryIDs(allowedPage), []string{answer.ID, utterance.ID, root.ID}) {
 			t.Fatalf("authorized local history lost canonical root descendants: page=%#v err=%v", allowedPage, err)
 		}
@@ -245,7 +245,7 @@ func TestConversationStartsThreadPreservesPrivateAncestryForScalarAndBatchReads(
 					countedBatch = conversationtest.NewCountedBatchStore(store)
 					readStore = countedBatch
 				}
-				reader := runtimeconversation.NewConversationService(readStore)
+				reader := runtimeconversation.NewService(readStore)
 				for _, message := range []*models.ChannelMessage{directRoot, root, utterance, answer} {
 					if _, err := reader.GetVisibleChannelMessage(t.Context(), conversation.Scope, conversation.ID, message.ID, foreign); !errors.Is(err, models.ErrChannelMessageNotFound) {
 						t.Fatalf("thread boundary leaked %s: %v", message.ID, err)
@@ -304,7 +304,7 @@ func TestConversationStartsThreadMissingCyclicAndDeepAnchorsFailClosed(t *testin
 					countedBatch = conversationtest.NewCountedBatchStore(store)
 					readStore = countedBatch
 				}
-				reader := runtimeconversation.NewConversationService(readStore)
+				reader := runtimeconversation.NewService(readStore)
 				if message, err := reader.GetVisibleChannelMessage(t.Context(), conversation.Scope, conversation.ID, "deep-anchor-15", viewer); err != nil || message == nil {
 					t.Fatalf("16 structurally valid thread anchors were hidden: %#v, %v", message, err)
 				}
@@ -322,7 +322,7 @@ func TestConversationStartsThreadMissingCyclicAndDeepAnchorsFailClosed(t *testin
 				}
 			})
 		}
-		service := runtimeconversation.NewConversationService(store)
+		service := runtimeconversation.NewService(store)
 		current, _ := service.GetConversation(t.Context(), conversation.Scope, conversation.ID)
 		if _, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 			Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,

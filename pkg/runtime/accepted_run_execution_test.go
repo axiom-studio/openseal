@@ -44,7 +44,7 @@ func TestAcceptedRunExecutionRetainsFutureRunbookActionBeforeFirstCallAcrossStor
 		request := runSkillDependencyRequest(scope)
 		request.Entrypoint = "manual"
 		request.Context = map[string]interface{}{models.AcceptedRunExecutionContextKey: pin}
-		run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), request)
+		run, err := portfolio.NewService(store).CreateAgentRun(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -18,7 +18,7 @@ import (
 
 func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
@@ -53,17 +53,17 @@ func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	page, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{Limit: 2})
+	page, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.HistoryReadRequest{Limit: 2})
 	if err != nil || len(page.Messages) != 2 || page.Messages[1].ID != longID || page.NextBeforeSequence != 2 {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
-	older, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{BeforeSequence: page.NextBeforeSequence, Limit: 2})
+	older, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.HistoryReadRequest{BeforeSequence: page.NextBeforeSequence, Limit: 2})
 	if err != nil || len(older.Messages) != 1 || older.Messages[0].Sequence != 1 {
 		t.Fatalf("older=%+v err=%v", older, err)
 	}
 	var reconstructed strings.Builder
 	for offset := 0; ; {
-		page, err = runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{MessageID: longID, OffsetBytes: offset})
+		page, err = runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.HistoryReadRequest{MessageID: longID, OffsetBytes: offset})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -80,17 +80,17 @@ func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
 	if reconstructed.String() != original {
 		t.Fatal("could not recover exact original")
 	}
-	for _, request := range []runtimeconversation.ConversationHistoryReadRequest{{MessageID: privateID}, {MessageID: longID, OffsetBytes: 4096}, {OffsetBytes: 1}, {Limit: 11}} {
+	for _, request := range []runtimeconversation.HistoryReadRequest{{MessageID: privateID}, {MessageID: longID, OffsetBytes: 4096}, {OffsetBytes: 1}, {Limit: 11}} {
 		if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, request); err == nil {
 			t.Fatalf("invalid/private read accepted: %+v", request)
 		}
 	}
 	owner.ID = "other"
-	if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{}); err == nil {
+	if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.HistoryReadRequest{}); err == nil {
 		t.Fatal("foreign owner accepted")
 	}
 	scope.ID = "other"
-	if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{}); err == nil {
+	if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.HistoryReadRequest{}); err == nil {
 		t.Fatal("foreign tenant accepted")
 	}
 }
@@ -131,7 +131,7 @@ func testConversationHistory(t *testing.T, store interface {
 }) {
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	create := func(scope models.Scope, owner models.ObjectiveOwner, conversation, parent string) *models.AgentRun {
 		t.Helper()
 		context := map[string]interface{}{}

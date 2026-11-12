@@ -32,7 +32,7 @@ func TestTeamOwnedRunEventsPopulateCanonicalTeamProjection(t *testing.T) {
 			defer closeStore()
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "acme"}
-			run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "gtm"}, AssignedAgentID: "marketing",
 				Goal: "Launch the release", Source: models.RunSourceManual,
 			})
@@ -49,7 +49,7 @@ func TestTeamOwnedRunEventsPopulateCanonicalTeamProjection(t *testing.T) {
 			if event.TeamID != "gtm" {
 				t.Fatalf("event team id = %q", event.TeamID)
 			}
-			feed, err := activity.NewRunActivityService(store, store).ListActivityFeed(ctx, activity.ActivityFeedRequest{
+			feed, err := activity.NewRunActivityService(store, store).ListActivityFeed(ctx, activity.FeedRequest{
 				Scope: scope, TeamID: "gtm", Limit: 10,
 			})
 			if err != nil || len(feed.Items) != 1 || feed.Items[0].TeamID != "gtm" || feed.Items[0].Summary != "Planning the launch" {

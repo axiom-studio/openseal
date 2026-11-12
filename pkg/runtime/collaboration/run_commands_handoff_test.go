@@ -43,8 +43,8 @@ type handoffCommandFixture struct {
 	store         handoffCommandTestStore
 	scope         models.Scope
 	now           time.Time
-	portfolio     *portfolio.PortfolioService
-	collaboration *CollaborationService
+	portfolio     *portfolio.Service
+	collaboration *Service
 	commands      *agentrun.RunCommandService
 	sourceID      string
 	childID       string
@@ -63,7 +63,7 @@ func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestSt
 		now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
 	}
 	clock := models.WithClock(func() time.Time { return f.now })
-	f.portfolio, f.collaboration, f.commands = portfolio.NewPortfolioService(store, clock), NewCollaborationService(store, clock), agentrun.NewRunCommandService(store, clock)
+	f.portfolio, f.collaboration, f.commands = portfolio.NewService(store, clock), NewService(store, clock), agentrun.NewRunCommandService(store, clock)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}
 	if teamOwned {
 		owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}
@@ -307,8 +307,8 @@ func TestRunCommandsHandoffDirectCancellationStillOwnsSubtree(t *testing.T) {
 		child := f.claimChild()
 		grandchild := f.childOf(child.ID, "marketing-helper")
 		source := f.run(f.sourceID)
-		if _, err := f.commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
-			Scope: f.scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: agentrun.AgentRunCommandCancel,
+		if _, err := f.commands.CommandAgentRun(t.Context(), agentrun.CommandRequest{
+			Scope: f.scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: agentrun.CommandCancel,
 			Actor: models.ActivityActor{Type: "user", ID: "recipient"},
 		}); err != nil {
 			t.Fatal(err)
@@ -571,7 +571,7 @@ func (s *handoffAfterChildSnapshotStore) ListAgentRuns(ctx context.Context, filt
 
 func TestRunCommandsHandoffAcceptanceDuringRecursiveDiscoveryUsesCanonicalSource(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		portfolio := portfolio.NewPortfolioService(store)
+		portfolio := portfolio.NewService(store)
 		scope := models.Scope{Kind: "tenant", ID: "handoff-ownership"}
 		outer, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
@@ -627,7 +627,7 @@ func TestRunCommandsHandoffGroupedReceiptDoesNotTransferOwnershipAfterQuorum(t *
 			now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
 		}
 		clock := models.WithClock(func() time.Time { return f.now })
-		f.portfolio, f.collaboration, f.commands = portfolio.NewPortfolioService(store, clock), NewCollaborationService(store, clock), agentrun.NewRunCommandService(store, clock)
+		f.portfolio, f.collaboration, f.commands = portfolio.NewService(store, clock), NewService(store, clock), agentrun.NewRunCommandService(store, clock)
 		source, err := f.portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 			Scope: f.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 			Goal: "Accept the first adequate result", Source: models.RunSourceManual,

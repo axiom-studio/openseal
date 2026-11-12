@@ -51,7 +51,7 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				binding.ModelCredential == nil || binding.ModelCredential.ID != "model-account" {
 				t.Fatalf("failure explanation lost verified Agent identity: %#v", binding)
 			}
-			if _, ok := binding.Producer.(*modelstep.ModelStepProducer); !ok {
+			if _, ok := binding.Producer.(*modelstep.Producer); !ok {
 				t.Fatalf("failure explanation producer = %T", binding.Producer)
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutPaused

@@ -207,7 +207,7 @@ func (w *RunProgressAcknowledgementWorker) projectAnswerStream(ctx context.Conte
 // finish. Without a declared delete it reports false and leaves the message.
 func deleteAnswerStream(
 	ctx context.Context,
-	transport *ExternalConversationTransportService,
+	transport *TransportService,
 	item *models.ExternalConversationInboxItem,
 	replyID string,
 	endpoint *models.ExternalConversationEndpoint,
@@ -230,7 +230,7 @@ func deleteAnswerStream(
 
 // retireAnswerStream deletes the stream of an answer that is not sent (a
 // canceled Run or a superseded failure).
-func (w *ExternalConversationReplyWorker) retireAnswerStream(ctx context.Context, item *models.ExternalConversationInboxItem, replyID string) error {
+func (w *ReplyWorker) retireAnswerStream(ctx context.Context, item *models.ExternalConversationInboxItem, replyID string) error {
 	stream, err := loadExternalAnswerStream(ctx, w.store, item, replyID)
 	if err != nil || stream == nil {
 		return err

@@ -69,7 +69,7 @@ func TestTerminalFailurePostgres59RollbackRejectsMultipleAttemptReceipts(t *test
 	first, _, _ := conversationruntest.TerminalFailureConversation(t, store, now, false)
 	first = conversationruntest.FailTerminalConversation(t, store, first, now, "provider_rate_limited")
 	commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
-	retry, err := commands.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: models.ActivityActor{Type: "user", ID: "kev"}})
+	retry, err := commands.RetryConversationRun(t.Context(), agentrun.CommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: models.ActivityActor{Type: "user", ID: "kev"}})
 	if err != nil {
 		t.Fatal(err)
 	}

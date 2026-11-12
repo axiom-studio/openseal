@@ -45,7 +45,7 @@ const reconcileTurnPage = 8
 // reconcile applies finished but unapplied step rows and claims a running
 // one. A running row whose dead owner's lease is still live requeues the Run
 // at its expiry.
-func (d *drive) reconcile(ctx context.Context) (*resumedStep, *RunLoopExit) {
+func (d *drive) reconcile(ctx context.Context) (*resumedStep, *Exit) {
 	rows, err := d.l.turns.ListTurns(ctx, models.AgentTurnFilter{
 		Scope: d.run.Scope, RunID: d.run.ID, AfterSequence: d.run.LastAppliedTurn, Limit: reconcileTurnPage,
 	})
@@ -132,7 +132,7 @@ func stepRowProduced(step *models.AgentTurn) bool {
 // before the settle phase, a pending final entry is settled by the next
 // step's phase 2 (ResumeOpenTools re-runs §3.3 from step 1), and a reply
 // already posted is replayed by its delivery key.
-func (d *drive) resumePlainFinal(ctx context.Context, row *models.AgentTurn) (*RunLoopExit, bool) {
+func (d *drive) resumePlainFinal(ctx context.Context, row *models.AgentTurn) (*Exit, bool) {
 	if row.Status != models.AgentTurnStatusCompleted || !row.Final || row.ToolCallCount > 0 || d.session == nil {
 		return nil, false
 	}

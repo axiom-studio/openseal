@@ -87,7 +87,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 			store := kerneltest.NewStore(t)
 			source, turn, conversation, _ := settledWorkerTaskFixture(t, store)
 			if cancel {
-				_, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: source.Scope, RunID: source.ID, ExpectedRevision: source.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: "sender-user"}, Summary: "Cancel pending foreground"})
+				_, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.CommandRequest{Scope: source.Scope, RunID: source.ID, ExpectedRevision: source.Revision, Kind: agentrun.CommandCancel, Actor: models.ActivityActor{Type: "user", ID: "sender-user"}, Summary: "Cancel pending foreground"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -142,7 +142,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 	for _, threaded := range []bool{false, true} {
 		t.Run(map[bool]string{false: "directed question", true: "private thread"}[threaded], func(t *testing.T) {
 			store := kerneltest.NewStore(t)
-			service := runtimeconversation.NewConversationService(store)
+			service := runtimeconversation.NewService(store)
 			scope := models.Scope{Kind: "tenant", ID: "private-task"}
 			conversationtest.SeedSpace(t, store, scope)
 			conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Private question", IdempotencyKey: "private-task"})
@@ -235,7 +235,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err != nil || held == nil || held.ID != first.WorkRun.ID {
 		t.Fatalf("hold background: %#v %v", held, err)
 	}
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	scheduler := conversationruntest.NewScheduler(t, store)
 	post := func(key, content string) *models.AgentRun {
 		t.Helper()

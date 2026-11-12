@@ -23,9 +23,9 @@ func NewDefaultActionPolicy() *DefaultActionPolicy {
 	return &DefaultActionPolicy{Approvers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}}, ApprovalTTL: 24 * time.Hour}
 }
 
-func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
+func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input PolicyInput) (PolicyDecision, error) {
 	if input.Bound == nil || input.Bound.Definition == nil || input.Bound.Binding == nil {
-		return ActionPolicyDecision{}, errors.New("bound action is required")
+		return PolicyDecision{}, errors.New("bound action is required")
 	}
 	action := input.Bound.Action
 	// The host-native profile tool can only replace the executing Agent's
@@ -33,10 +33,10 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	// interrupt a requested cosmetic change with an approval checkpoint.
 	if input.Bound.Definition.ID == builtin.SkillID && action.Name == builtin.GenerateProfileImage &&
 		action.Risk == skill.RiskLevelWrite && action.SideEffect == skill.SideEffectWrite {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "self profile picture change"}, nil
+		return PolicyDecision{Disposition: DispositionAllow, Reason: "self profile picture change"}, nil
 	}
 	if !action.AlwaysReview() && action.Risk == skill.RiskLevelRead && (action.SideEffect == skill.SideEffectNone || action.SideEffect == skill.SideEffectRead) {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only action"}, nil
+		return PolicyDecision{Disposition: DispositionAllow, Reason: "read-only action"}, nil
 	}
 	// Creating a routine always shows its brief, in every approval mode, and
 	// so does making it run a new version of its script.
@@ -57,15 +57,15 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	// A routine run performs what the user approved in its brief without
 	// asking, whatever the conversation's mode. review: always never waives.
 	if input.RoutineGrant != nil && !action.AlwaysReview() {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "approved in the routine's brief: " + input.RoutineGrant.Label}, nil
+		return PolicyDecision{Disposition: DispositionAllow, Reason: "approved in the routine's brief: " + input.RoutineGrant.Label}, nil
 	}
 	// The conversation's approval mode is the user's review boundary: auto
 	// allows read and write risk work, skip allows everything, and manual (or
 	// a Run acting for no conversation) keeps every side effect under review.
 	// A manifest-declared review: always action is reviewed in every mode.
 	if ApprovalModeAllowsAction(input.ApprovalMode, action.Review, action.Risk, action.SideEffect) {
-		return ActionPolicyDecision{
-			Disposition: ActionDispositionAllow,
+		return PolicyDecision{
+			Disposition: DispositionAllow,
 			Reason:      fmt.Sprintf("approval mode %s allows %s risk action with %s side effects", input.ApprovalMode, action.Risk, action.SideEffect),
 		}, nil
 	}
@@ -76,16 +76,16 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	return p.requireApproval(reason)
 }
 
-func (p *DefaultActionPolicy) requireApproval(reason string) (ActionPolicyDecision, error) {
+func (p *DefaultActionPolicy) requireApproval(reason string) (PolicyDecision, error) {
 	if p == nil || len(p.Approvers) == 0 {
-		return ActionPolicyDecision{}, errors.New("side-effecting actions require configured approvers")
+		return PolicyDecision{}, errors.New("side-effecting actions require configured approvers")
 	}
 	ttl := p.ApprovalTTL
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
 	}
-	return ActionPolicyDecision{
-		Disposition:       ActionDispositionRequireApproval,
+	return PolicyDecision{
+		Disposition:       DispositionRequireApproval,
 		Reason:            reason,
 		EligibleApprovers: append([]models.ApprovalPrincipal(nil), p.Approvers...), ApprovalTTL: ttl,
 		ApprovalTimeout: p.ApprovalTimeout,

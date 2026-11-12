@@ -24,19 +24,19 @@ type (
 	RoutineCalendarTiming      = models.RoutineCalendarTiming
 	RoutineWebhook             = models.RoutineWebhook
 	RoutinePausedReason        = models.RoutinePausedReason
-	RoutineEventSourceCatalog  = routine.RoutineEventSourceCatalog
-	RoutineEventSourceOption   = routine.RoutineEventSourceOption
-	RoutineIndexPublisher      = routine.RoutineIndexPublisher
-	RoutineEventStats          = routine.RoutineEventStats
-	RoutineEventBatchView      = routine.RoutineEventBatchView
-	RoutineEventView           = routine.RoutineEventView
+	RoutineEventSourceCatalog  = routine.EventSourceCatalog
+	RoutineEventSourceOption   = routine.EventSourceOption
+	RoutineIndexPublisher      = routine.IndexPublisher
+	RoutineEventStats          = routine.EventStats
+	RoutineEventBatchView      = routine.EventBatchView
+	RoutineEventView           = routine.EventView
 	RoutineEventActivity       = models.RoutineEventActivity
 	RoutineEventSubscription   = models.RoutineEventSubscription
-	RoutineEventDispatchResult = routine.RoutineEventDispatchResult
-	RoutineEventFileKeeper     = routine.RoutineEventFileKeeper
+	RoutineEventDispatchResult = routine.EventDispatchResult
+	RoutineEventFileKeeper     = routine.EventFileKeeper
 	Hook                       = models.Hook
 
-	RoutineSourceUnavailableError = routine.RoutineSourceUnavailableError
+	RoutineSourceUnavailableError = routine.SourceUnavailableError
 )
 
 const (
@@ -51,9 +51,9 @@ const (
 	RoutinePausedSourceRemoved = models.RoutinePausedSourceRemoved
 	RoutinePausedUnverified    = models.RoutinePausedUnverified
 
-	RoutineEventSourceNeedsSignIn            = routine.RoutineEventSourceNeedsSignIn
-	RoutineEventSourceNotConfigured          = routine.RoutineEventSourceNotConfigured
-	RoutineEventSourceSharedSignInNotAllowed = routine.RoutineEventSourceSharedSignInNotAllowed
+	RoutineEventSourceNeedsSignIn            = routine.EventSourceNeedsSignIn
+	RoutineEventSourceNotConfigured          = routine.EventSourceNotConfigured
+	RoutineEventSourceSharedSignInNotAllowed = routine.EventSourceSharedSignInNotAllowed
 
 	RoutineEventBatchContextKey  = models.RoutineEventBatchContextKey
 	RoutineEventCountContextKey  = models.RoutineEventCountContextKey
@@ -61,8 +61,8 @@ const (
 	RoutineEventHeaderContextKey = models.RoutineEventHeaderContextKey
 	RoutineEventTestContextKey   = models.RoutineEventTestContextKey
 
-	RoutineEventTenantRunCap     = routine.RoutineEventTenantRunCap
-	RoutineEventDispatchInterval = routine.RoutineEventDispatchInterval
+	RoutineEventTenantRunCap     = routine.EventTenantRunCap
+	RoutineEventDispatchInterval = routine.EventDispatchInterval
 	RoutineEventPayloadMaxBytes  = models.RoutineEventPayloadMaxBytes
 )
 
@@ -86,15 +86,15 @@ var (
 )
 
 // The matcher is what actions and ingress offer events to.
-var _ externalconversation.RoutineEventOfferer = (*routine.RoutineEventMatcher)(nil)
+var _ externalconversation.RoutineEventOfferer = (*routine.EventMatcher)(nil)
 
 // routineEventRuntime is the Engine's matcher and dispatcher plus what the
 // host set for the routine actions.
 type routineEventRuntime struct {
-	matcher        *routine.RoutineEventMatcher
-	dispatcher     *routine.RoutineEventDispatcher
+	matcher        *routine.EventMatcher
+	dispatcher     *routine.EventDispatcher
 	tenantRunCap   int
-	sources        routine.RoutineEventSourceCatalog
+	sources        routine.EventSourceCatalog
 	hooksAvailable bool
 	validators     []*routine.RunbookActionValidator
 	dispatchers    []*routine.RunbookActionDispatcher
@@ -116,11 +116,11 @@ func WithRoutineEventTenantRunCap(n int) Option {
 // store. The matcher follows activation writes through that exact store
 // value, so it must not be a wrapper of it.
 func (e *Engine) buildRoutineEvents() {
-	matcher := routine.NewRoutineEventMatcher(e.store)
-	dispatcher := routine.NewRoutineEventDispatcher(e.store, matcher)
+	matcher := routine.NewEventMatcher(e.store)
+	dispatcher := routine.NewEventDispatcher(e.store, matcher)
 	dispatcher.SetAcceptedRunExecutionPreparer(e)
 	dispatcher.TenantRunCap = e.routineEvents.tenantRunCap
-	dispatcher.SourceChecker = routine.NewRoutineEventSourceChecker(e.store)
+	dispatcher.SourceChecker = routine.NewEventSourceChecker(e.store)
 	e.routineEvents.matcher = matcher
 	e.routineEvents.dispatcher = dispatcher
 }
@@ -148,7 +148,7 @@ func (e *Engine) applyRoutineEvents() {
 
 // SetRoutineEventSourceCatalog sets the host's own sources (Google) for
 // event_sources and create_task. Call it before Start.
-func (e *Engine) SetRoutineEventSourceCatalog(catalog routine.RoutineEventSourceCatalog) {
+func (e *Engine) SetRoutineEventSourceCatalog(catalog routine.EventSourceCatalog) {
 	e.routineEvents.sources = catalog
 	e.applyRoutineEvents()
 }
@@ -162,7 +162,7 @@ func (e *Engine) SetHooksAvailable(available bool) {
 
 // SetRoutineIndexPublisher sets the signal that tells other processes a
 // scope's event routines changed. Call it before Start.
-func (e *Engine) SetRoutineIndexPublisher(publisher routine.RoutineIndexPublisher) {
+func (e *Engine) SetRoutineIndexPublisher(publisher routine.IndexPublisher) {
 	e.routineEvents.matcher.SetRoutineIndexPublisher(publisher)
 }
 
@@ -199,7 +199,7 @@ func (e *Engine) RebuildRoutineIndex(ctx context.Context) error {
 }
 
 // RoutineEventStats returns the matcher's and dispatcher's counters.
-func (e *Engine) RoutineEventStats() routine.RoutineEventStats {
+func (e *Engine) RoutineEventStats() routine.EventStats {
 	return e.routineEvents.matcher.RoutineEventStats()
 }
 
@@ -214,7 +214,7 @@ func (e *Engine) RunRoutineEventDispatcher(ctx context.Context, interval time.Du
 }
 
 // ReconcileAllRoutineEvents runs one dispatcher pass over every scope.
-func (e *Engine) ReconcileAllRoutineEvents(ctx context.Context, limitPerScope int) (*routine.RoutineEventDispatchResult, error) {
+func (e *Engine) ReconcileAllRoutineEvents(ctx context.Context, limitPerScope int) (*routine.EventDispatchResult, error) {
 	return e.routineEvents.dispatcher.ReconcileAll(ctx, limitPerScope)
 }
 
@@ -255,7 +255,7 @@ func (e *Engine) UpdateHook(ctx context.Context, scope models.Scope, hookID stri
 
 // GetRoutineEventBatchView returns the facts of the events that started one
 // occurrence, never their payloads.
-func (e *Engine) GetRoutineEventBatchView(ctx context.Context, scope models.Scope, activationID, batchID string) (*routine.RoutineEventBatchView, error) {
+func (e *Engine) GetRoutineEventBatchView(ctx context.Context, scope models.Scope, activationID, batchID string) (*routine.EventBatchView, error) {
 	batch, records, err := e.store.GetRoutineEventBatch(ctx, scope, strings.TrimSpace(batchID))
 	if err != nil {
 		if errors.Is(err, models.ErrRoutineEventBatchNotFound) {
@@ -266,7 +266,7 @@ func (e *Engine) GetRoutineEventBatchView(ctx context.Context, scope models.Scop
 	if batch == nil || batch.ActivationID != strings.TrimSpace(activationID) {
 		return nil, models.ErrRoutineEventBatchNotFound
 	}
-	return routine.NewRoutineEventBatchView(batch, records), nil
+	return routine.NewEventBatchView(batch, records), nil
 }
 
 // ListRoutineEventSubscriptions lists active event routines across scopes,

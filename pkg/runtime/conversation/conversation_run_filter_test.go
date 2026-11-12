@@ -53,7 +53,7 @@ func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 				}
 			}
 			counted := &countedConversationPortfolio{PortfolioStore: store}
-			service := &ConversationChangeService{portfolio: counted}
+			service := &ChangeService{portfolio: counted}
 			runs, err := service.listConversationRuns(t.Context(), &models.Conversation{ID: "selected", Scope: scope, Owner: owner})
 			if err != nil {
 				t.Fatal(err)
@@ -101,7 +101,7 @@ func TestConversationRunsIncludeTeamMemberLanes(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			service := &ConversationChangeService{portfolio: store}
+			service := &ChangeService{portfolio: store}
 			runs, err := service.listConversationRuns(t.Context(), &models.Conversation{ID: "room", Scope: scope, Owner: owner})
 			if err != nil {
 				t.Fatal(err)

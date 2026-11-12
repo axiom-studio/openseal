@@ -10,7 +10,7 @@ import (
 // delivery mode. An upgrade must keep those committed receipts unchanged.
 // Only answer projection calls this after a conflict; the general message
 // admission boundary continues to compare every request field strictly.
-func (s *ConversationService) ReplayLegacySpokenResponse(ctx context.Context, request PostChannelMessageRequest) (*models.ChannelMessage, error) {
+func (s *Service) ReplayLegacySpokenResponse(ctx context.Context, request PostChannelMessageRequest) (*models.ChannelMessage, error) {
 	if request.Intent != models.MessageIntentAnswer || request.ResponseMode != "spoken" {
 		return nil, nil
 	}

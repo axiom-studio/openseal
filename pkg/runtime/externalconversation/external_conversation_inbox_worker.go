@@ -16,39 +16,39 @@ import (
 
 const externalConversationActorID = "openseal.external-conversation"
 
-// ExternalConversationDispatchRequest is the provider-neutral wake contract
+// DispatchRequest is the provider-neutral wake contract
 // between durable conversation ingress and a cognitive handler. Implementations
 // must use IdempotencyKey when creating work so a crash after dispatch but
 // before inbox completion cannot create a second Run.
-type ExternalConversationDispatchRequest struct {
+type DispatchRequest struct {
 	Endpoint       *models.ExternalConversationEndpoint `json:"endpoint"`
 	Conversation   *models.Conversation                 `json:"conversation"`
 	Message        *models.ChannelMessage               `json:"message"`
 	IdempotencyKey string                               `json:"idempotencyKey"`
 }
 
-type ExternalConversationDispatchResult struct {
+type DispatchResult struct {
 	RunID string `json:"runId,omitempty"`
 }
 
-type ExternalConversationDispatcher interface {
-	DispatchExternalConversation(context.Context, ExternalConversationDispatchRequest) (*ExternalConversationDispatchResult, error)
+type Dispatcher interface {
+	DispatchExternalConversation(context.Context, DispatchRequest) (*DispatchResult, error)
 }
 
 // CanonicalExternalConversationDispatcher hands Agent and Team handlers to
 // the canonical Conversation scheduler.
 type CanonicalExternalConversationDispatcher struct {
-	scheduler *conversationrun.ConversationRunScheduler
+	scheduler *conversationrun.Scheduler
 }
 
-func NewCanonicalExternalConversationDispatcher(scheduler *conversationrun.ConversationRunScheduler) *CanonicalExternalConversationDispatcher {
+func NewCanonicalExternalConversationDispatcher(scheduler *conversationrun.Scheduler) *CanonicalExternalConversationDispatcher {
 	return &CanonicalExternalConversationDispatcher{scheduler: scheduler}
 }
 
 func (d *CanonicalExternalConversationDispatcher) DispatchExternalConversation(
 	ctx context.Context,
-	req ExternalConversationDispatchRequest,
-) (*ExternalConversationDispatchResult, error) {
+	req DispatchRequest,
+) (*DispatchResult, error) {
 	if req.Endpoint == nil || req.Conversation == nil || req.Message == nil || strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("%w: complete dispatch context is required", models.ErrInvalidExternalConversation)
 	}
@@ -64,27 +64,27 @@ func (d *CanonicalExternalConversationDispatcher) DispatchExternalConversation(
 		if result == nil || result.Run == nil {
 			return nil, errors.New("conversation message did not create a handler Run")
 		}
-		return &ExternalConversationDispatchResult{RunID: result.Run.ID}, nil
+		return &DispatchResult{RunID: result.Run.ID}, nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported handler kind", models.ErrInvalidExternalConversation)
 	}
 }
 
-type ExternalConversationInboxWorkerConfig struct {
-	AttachmentHost    ExternalConversationAttachmentHost
+type InboxWorkerConfig struct {
+	AttachmentHost    AttachmentHost
 	AttachmentContent models.ArtifactContentStore
 	WorkerID          string
 	LeaseDuration     time.Duration
 	BaseRetry         time.Duration
 	MaximumRetry      time.Duration
-	ContextHost       ExternalConversationContextHost
-	ContextCatalog    ExternalConversationAdapterResolver
+	ContextHost       ContextHost
+	ContextCatalog    AdapterResolver
 }
 
-func (c ExternalConversationInboxWorkerConfig) normalize() (ExternalConversationInboxWorkerConfig, error) {
+func (c InboxWorkerConfig) normalize() (InboxWorkerConfig, error) {
 	c.WorkerID = strings.TrimSpace(c.WorkerID)
 	if !models.IsValidOpaqueIdentifier(c.WorkerID, 256) {
-		return ExternalConversationInboxWorkerConfig{}, fmt.Errorf("%w: worker id is invalid", models.ErrInvalidExternalConversation)
+		return InboxWorkerConfig{}, fmt.Errorf("%w: worker id is invalid", models.ErrInvalidExternalConversation)
 	}
 	if c.LeaseDuration == 0 {
 		c.LeaseDuration = time.Minute
@@ -96,29 +96,29 @@ func (c ExternalConversationInboxWorkerConfig) normalize() (ExternalConversation
 		c.MaximumRetry = 5 * time.Minute
 	}
 	if c.LeaseDuration <= 0 || c.BaseRetry <= 0 || c.MaximumRetry < c.BaseRetry {
-		return ExternalConversationInboxWorkerConfig{}, fmt.Errorf("%w: worker durations are invalid", models.ErrInvalidExternalConversation)
+		return InboxWorkerConfig{}, fmt.Errorf("%w: worker durations are invalid", models.ErrInvalidExternalConversation)
 	}
 	return c, nil
 }
 
-// ExternalConversationInboxWorker turns normalized provider events into
+// InboxWorker turns normalized provider events into
 // canonical Conversation facts and dispatches exactly one replay-safe handler
 // Run. Every intermediate identity is deterministic and durably mapped, so a
 // worker may restart after any write without duplicating the visible message.
-type ExternalConversationInboxWorker struct {
+type InboxWorker struct {
 	store         models.ExternalConversationStore
-	conversations *runtimeconversation.ConversationService
-	dispatcher    ExternalConversationDispatcher
-	config        ExternalConversationInboxWorkerConfig
+	conversations *runtimeconversation.Service
+	dispatcher    Dispatcher
+	config        InboxWorkerConfig
 	now           func() time.Time
 }
 
-func NewExternalConversationInboxWorker(
+func NewInboxWorker(
 	store models.ExternalConversationStore,
-	dispatcher ExternalConversationDispatcher,
-	config ExternalConversationInboxWorkerConfig,
+	dispatcher Dispatcher,
+	config InboxWorkerConfig,
 	opts ...models.ServiceOption,
-) (*ExternalConversationInboxWorker, error) {
+) (*InboxWorker, error) {
 	if store == nil || dispatcher == nil {
 		return nil, errors.New("external conversation store and dispatcher are required")
 	}
@@ -126,14 +126,14 @@ func NewExternalConversationInboxWorker(
 	if err != nil {
 		return nil, err
 	}
-	return &ExternalConversationInboxWorker{
-		store: store, conversations: runtimeconversation.NewConversationService(store, opts...), dispatcher: dispatcher, config: normalized, now: models.ClockFrom(opts),
+	return &InboxWorker{
+		store: store, conversations: runtimeconversation.NewService(store, opts...), dispatcher: dispatcher, config: normalized, now: models.ClockFrom(opts),
 	}, nil
 }
 
 // ProcessOne leases and applies at most one due inbox item in a scope. A nil
 // result means no work was due.
-func (w *ExternalConversationInboxWorker) ProcessOne(ctx context.Context, scope models.Scope) (*models.ExternalConversationInboxItem, error) {
+func (w *InboxWorker) ProcessOne(ctx context.Context, scope models.Scope) (*models.ExternalConversationInboxItem, error) {
 	if w == nil || w.store == nil || w.conversations == nil || w.dispatcher == nil {
 		return nil, errors.New("external conversation inbox worker is not configured")
 	}
@@ -151,7 +151,7 @@ func (w *ExternalConversationInboxWorker) ProcessOne(ctx context.Context, scope 
 	return item, nil
 }
 
-func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *models.ExternalConversationInboxItem) error {
+func (w *InboxWorker) apply(ctx context.Context, item *models.ExternalConversationInboxItem) error {
 	if item.Status != models.ExternalConversationInboxLeased || item.LeaseOwner != w.config.WorkerID {
 		return models.ErrExternalConversationLeaseLost
 	}
@@ -204,7 +204,7 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *model
 	if message.Historical {
 		return w.complete(ctx, item, conversation.ID, message.ID, "")
 	}
-	dispatch, err := w.dispatcher.DispatchExternalConversation(ctx, ExternalConversationDispatchRequest{
+	dispatch, err := w.dispatcher.DispatchExternalConversation(ctx, DispatchRequest{
 		Endpoint: endpoint, Conversation: conversation, Message: message,
 		IdempotencyKey: "external-conversation-dispatch:" + item.ID,
 	})
@@ -217,7 +217,7 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *model
 	return w.complete(ctx, item, conversation.ID, message.ID, dispatch.RunID)
 }
 
-func (w *ExternalConversationInboxWorker) ensureConversation(
+func (w *InboxWorker) ensureConversation(
 	ctx context.Context,
 	endpoint *models.ExternalConversationEndpoint,
 	event models.NormalizedExternalConversationEvent,
@@ -302,7 +302,7 @@ func (w *ExternalConversationInboxWorker) ensureConversation(
 // A provider may identify each reply chain by its immediate parent instead of
 // a stable thread ID. Reuse the canonical root only through the authorized
 // endpoint's message mapping, and never import a parent from another chat.
-func (w *ExternalConversationInboxWorker) existingReplyThreadRoot(
+func (w *InboxWorker) existingReplyThreadRoot(
 	ctx context.Context,
 	endpoint *models.ExternalConversationEndpoint,
 	conversation *models.Conversation,
@@ -343,7 +343,7 @@ func (w *ExternalConversationInboxWorker) existingReplyThreadRoot(
 	return "", nil
 }
 
-func (w *ExternalConversationInboxWorker) ensureParticipant(
+func (w *InboxWorker) ensureParticipant(
 	ctx context.Context,
 	endpoint *models.ExternalConversationEndpoint,
 	event models.NormalizedExternalConversationEvent,
@@ -390,7 +390,7 @@ func (w *ExternalConversationInboxWorker) ensureParticipant(
 	return current, nil
 }
 
-func (w *ExternalConversationInboxWorker) ensureInboundMessage(
+func (w *InboxWorker) ensureInboundMessage(
 	ctx context.Context,
 	endpoint *models.ExternalConversationEndpoint,
 	conversation *models.Conversation,
@@ -490,7 +490,7 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 	return nil, models.ErrRevisionConflict
 }
 
-func (w *ExternalConversationInboxWorker) ensureInboundMessageMapping(
+func (w *InboxWorker) ensureInboundMessageMapping(
 	ctx context.Context,
 	endpoint *models.ExternalConversationEndpoint,
 	externalMessageID string,
@@ -524,7 +524,7 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessageMapping(
 	return nil
 }
 
-func (w *ExternalConversationInboxWorker) ensureThreadRoot(
+func (w *InboxWorker) ensureThreadRoot(
 	ctx context.Context,
 	current *models.ExternalConversationMapping,
 	messageID string,
@@ -548,7 +548,7 @@ func (w *ExternalConversationInboxWorker) ensureThreadRoot(
 	return next, nil
 }
 
-func (w *ExternalConversationInboxWorker) complete(
+func (w *InboxWorker) complete(
 	ctx context.Context,
 	item *models.ExternalConversationInboxItem,
 	conversationID, messageID, runID string,
@@ -571,7 +571,7 @@ func (w *ExternalConversationInboxWorker) complete(
 	return nil
 }
 
-func (w *ExternalConversationInboxWorker) recordFailure(
+func (w *InboxWorker) recordFailure(
 	ctx context.Context,
 	item *models.ExternalConversationInboxItem,
 	processingErr error,

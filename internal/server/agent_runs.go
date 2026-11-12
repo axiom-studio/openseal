@@ -58,7 +58,7 @@ func (s *Server) handleListAgentRuns(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	runs, err := portfolio.NewPortfolioService(s.store).ListAgentRuns(r.Context(), filter)
+	runs, err := portfolio.NewService(s.store).ListAgentRuns(r.Context(), filter)
 	if err != nil {
 		s.respondAgentRunError(w, err)
 		return
@@ -72,7 +72,7 @@ func (s *Server) handleInspectAgentRunAdmission(w http.ResponseWriter, r *http.R
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	request := agentrun.AgentRunClaimRequest{
+	request := agentrun.ClaimRequest{
 		Scope: scope, Kind: models.RunKind(strings.TrimSpace(r.URL.Query().Get("kind"))),
 		AssignedAgentID: strings.TrimSpace(r.URL.Query().Get("assignedAgentId")),
 	}
@@ -87,7 +87,7 @@ func (s *Server) handleInspectAgentRunAdmission(w http.ResponseWriter, r *http.R
 		}
 		*target = value
 	}
-	decision, err := agentrun.NewAgentRunScheduler(s.store).Inspect(r.Context(), request)
+	decision, err := agentrun.NewScheduler(s.store).Inspect(r.Context(), request)
 	if err != nil {
 		s.respondAgentRunError(w, err)
 		return
@@ -101,7 +101,7 @@ func (s *Server) handleGetAgentRun(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	run, err := portfolio.NewPortfolioService(s.store).GetAgentRun(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
+	run, err := portfolio.NewService(s.store).GetAgentRun(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
 		s.respondAgentRunError(w, err)
 		return
@@ -144,7 +144,7 @@ func (s *Server) handleCommandAgentRun(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	result, err := agentrun.NewRunCommandService(s.store).CommandAgentRun(r.Context(), agentrun.AgentRunCommandRequest{
+	result, err := agentrun.NewRunCommandService(s.store).CommandAgentRun(r.Context(), agentrun.CommandRequest{
 		Scope: scope, RunID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
 		Kind: payload.Kind, Actor: payload.Actor, Summary: payload.Summary, Instruction: payload.Instruction, InterventionID: payload.InterventionID,
 		HumanInterventionID: payload.HumanInterventionID, Visibility: payload.Visibility,

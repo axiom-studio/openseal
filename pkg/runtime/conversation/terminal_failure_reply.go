@@ -283,7 +283,7 @@ const maximumFailedActionCauseBytes = 300
 // failedActionCause names the tool whose action failed and what it answered,
 // for the kernel's reply when no model explained the failure. Transport
 // wrappers around the answer are dropped; credentials were already removed at
-// the ActionWorker boundary.
+// the action.Worker boundary.
 func failedActionCause(call *models.ActionCall) string {
 	if call == nil || call.Status != models.ActionCallStatusFailed || call.ErrorCode != "" {
 		// A typed failure has its own exact wording.

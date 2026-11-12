@@ -29,7 +29,7 @@ import (
 type childFixture struct {
 	*looptest.Fixture
 	forks    *agentrun.RunForkCoordinator
-	collab   *collaboration.CollaborationService
+	collab   *collaboration.Service
 	inbox    *collaboration.AgentRequestInboxReconciler
 	runbooks map[string]*runbook.Definition // by definition id
 	// authority adjusts a model Run's control authority before its claim (a
@@ -101,7 +101,7 @@ func newChildFixture(t *testing.T, store models.KernelStore, opts ...looptest.Op
 		t.Fatalf("%T lacks the dependency and collaboration stores", f.Raw)
 	}
 	teams := childTeamStore{childTestStore: stores, childTeamCatalog: childTeamCatalog{scope: capability.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}}}
-	collab := collaboration.NewCollaborationService(teams, models.WithClock(f.Clock.Now))
+	collab := collaboration.NewService(teams, models.WithClock(f.Clock.Now))
 	inbox, err := collaboration.NewAgentRequestInboxReconciler(teams, models.WithClock(f.Clock.Now))
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +167,7 @@ func (c *childFixture) claimNext() *models.AgentRun {
 }
 
 // drive claims runID (it must be the next queued Run) and drives one claim.
-func (c *childFixture) drive(runID string) (runloop.RunLoopExit, *models.AgentRun) {
+func (c *childFixture) drive(runID string) (runloop.Exit, *models.AgentRun) {
 	c.T.Helper()
 	claimed := c.claimNext()
 	if claimed == nil || claimed.ID != runID {
@@ -182,14 +182,14 @@ func (c *childFixture) drive(runID string) (runloop.RunLoopExit, *models.AgentRu
 	return c.driveClaimed(claimed)
 }
 
-func (c *childFixture) driveClaimed(claimed *models.AgentRun) (runloop.RunLoopExit, *models.AgentRun) {
+func (c *childFixture) driveClaimed(claimed *models.AgentRun) (runloop.Exit, *models.AgentRun) {
 	c.T.Helper()
 	c.claims[claimed.ID]++
 	binding := c.bindingFor(claimed)
 	// The resolver may create the run session at first claim.
 	claimed = c.MustRun(claimed.ID)
-	exit := c.Loop.Drive(c.Ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: c.WorkerID, Binding: binding})
-	if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
+	exit := c.Loop.Drive(c.Ctx, runloop.Claim{Run: claimed, WorkerID: c.WorkerID, Binding: binding})
+	if exit.Err != nil && exit.Reason != runloop.ExitRequeued {
 		after := c.MustRun(claimed.ID)
 		c.T.Logf("after: status %s lease %q output %v", after.Status, after.LeaseOwner, after.Output)
 		c.T.Fatalf("claim of %s exited %s: %v\nlog: %v", claimed.ID, exit.Reason, exit.Err, c.entryTypesOf(claimed.ID))
@@ -295,7 +295,7 @@ func (c *childFixture) bindingFor(run *models.AgentRun) *agentrun.TurnRunnerBind
 		copied.Owner = models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: run.AssignedAgentID}
 		authorityRun = &copied
 	}
-	control, err := control.ResolveControlAuthority(c.Ctx, control.ControlAuthorityInput{
+	control, err := control.ResolveControlAuthority(c.Ctx, control.AuthorityInput{
 		Run: authorityRun, DeploymentID: run.AssignedAgentID, Runs: c.Store, Conversations: c.Chats,
 	})
 	if err != nil {
@@ -308,7 +308,7 @@ func (c *childFixture) bindingFor(run *models.AgentRun) *agentrun.TurnRunnerBind
 	preparer := runloop.NewCatalogModelStepPreparer(runloop.CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 	})
-	producer, err := modelstep.NewModelStepProducer(host, preparer, c.Store)
+	producer, err := modelstep.NewProducer(host, preparer, c.Store)
 	if err != nil {
 		c.T.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func (c *childFixture) runbookBinding(run *models.AgentRun) *agentrun.TurnRunner
 	if err != nil {
 		c.T.Fatal(err)
 	}
-	control, err := control.ResolveControlAuthority(c.Ctx, control.ControlAuthorityInput{Run: run, DeploymentID: run.AssignedAgentID, Deterministic: true})
+	control, err := control.ResolveControlAuthority(c.Ctx, control.AuthorityInput{Run: run, DeploymentID: run.AssignedAgentID, Deterministic: true})
 	if err != nil {
 		c.T.Fatal(err)
 	}

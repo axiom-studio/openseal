@@ -193,7 +193,7 @@ func teamRequestFixture(t *testing.T) (context.Context, *sqlite.Store, *Engine, 
 		t.Fatal(err)
 	}
 	crew := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
-	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
+	run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
 		Owner: crew, AssignedAgentID: "member", Goal: "Order a cable", Source: models.RunSourceChat,
 		Context: map[string]interface{}{"conversationId": "team-chat", "triggerMessageId": "message"}})
 	if err != nil {

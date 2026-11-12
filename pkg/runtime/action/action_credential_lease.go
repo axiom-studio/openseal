@@ -12,15 +12,15 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-type ActionCredentialLeaseSigner interface {
+type CredentialLeaseSigner interface {
 	SignActionCredentialLease(context.Context, []byte) (models.ActionCredentialLeaseSignature, error)
 }
 
-type ActionCredentialLeaseSignatureVerifier interface {
+type CredentialLeaseSignatureVerifier interface {
 	VerifyActionCredentialLease(context.Context, []byte, models.ActionCredentialLeaseSignature) error
 }
 
-func SignActionCredentialLease(ctx context.Context, lease models.ActionCredentialLease, signer ActionCredentialLeaseSigner) (*models.SignedActionCredentialLease, error) {
+func SignActionCredentialLease(ctx context.Context, lease models.ActionCredentialLease, signer CredentialLeaseSigner) (*models.SignedActionCredentialLease, error) {
 	if signer == nil {
 		return nil, errors.New("action credential lease signer is required")
 	}
@@ -38,7 +38,7 @@ func SignActionCredentialLease(ctx context.Context, lease models.ActionCredentia
 	return &models.SignedActionCredentialLease{Lease: lease, Signature: cloneActionCredentialLeaseSignature(signature)}, nil
 }
 
-type ActionCredentialLeaseValidationRequest struct {
+type CredentialLeaseValidationRequest struct {
 	Envelope      *models.SignedActionCredentialLease
 	TenantID      string
 	Scope         models.Scope
@@ -55,23 +55,23 @@ type ActionCredentialLeaseValidationRequest struct {
 	HostBinding *skill.Binding
 }
 
-type ActionCredentialLeaseValidator struct {
-	verifier ActionCredentialLeaseSignatureVerifier
+type CredentialLeaseValidator struct {
+	verifier CredentialLeaseSignatureVerifier
 	redeemer models.ActionCredentialLeaseRedeemer
 }
 
-func NewActionCredentialLeaseValidator(verifier ActionCredentialLeaseSignatureVerifier, redeemer models.ActionCredentialLeaseRedeemer) (*ActionCredentialLeaseValidator, error) {
+func NewCredentialLeaseValidator(verifier CredentialLeaseSignatureVerifier, redeemer models.ActionCredentialLeaseRedeemer) (*CredentialLeaseValidator, error) {
 	if verifier == nil || redeemer == nil {
 		return nil, errors.New("action credential lease signature verifier and atomic redeemer are required")
 	}
-	return &ActionCredentialLeaseValidator{verifier: verifier, redeemer: redeemer}, nil
+	return &CredentialLeaseValidator{verifier: verifier, redeemer: redeemer}, nil
 }
 
 // Validate authenticates the signed envelope, checks the receiving tenant,
 // scope, issuer, audience, and expiry, then atomically revalidates durable
 // authority and consumes the nonce through the redeemer. Redemption is last so
 // malformed or unauthenticated traffic cannot burn a valid lease.
-func (v *ActionCredentialLeaseValidator) Validate(ctx context.Context, request ActionCredentialLeaseValidationRequest) (*models.ActionCredentialLease, error) {
+func (v *CredentialLeaseValidator) Validate(ctx context.Context, request CredentialLeaseValidationRequest) (*models.ActionCredentialLease, error) {
 	if v == nil || v.verifier == nil || v.redeemer == nil || request.Envelope == nil {
 		return nil, errors.New("action credential lease validator is not configured")
 	}

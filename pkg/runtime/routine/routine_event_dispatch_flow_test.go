@@ -321,7 +321,7 @@ func TestRoutineEventOccurrenceCountSurvivesCrash(t *testing.T) {
 	h.Pass()
 	h.FinishRuns()
 	// A new process: the count comes from the started batch rows.
-	restarted := routine.NewRoutineEventDispatcher(h.Store, h.Matcher, models.WithClock(h.Clock))
+	restarted := routine.NewEventDispatcher(h.Store, h.Matcher, models.WithClock(h.Clock))
 	h.Dispatcher = restarted
 	h.Offer(activation, 1)
 	// It creates the Run and stops before marking the batch.
@@ -370,7 +370,7 @@ func TestRoutineEventArchivedChatPausesOnlyThatRoutine(t *testing.T) {
 	}
 	h.Offer(broken, 2)
 	h.Offer(healthy, 1)
-	conversations := conversation.NewConversationService(h.Store)
+	conversations := conversation.NewService(h.Store)
 	chat, err := conversations.GetConversation(h.Ctx, h.Scope, brokenChat)
 	if err != nil {
 		t.Fatal(err)

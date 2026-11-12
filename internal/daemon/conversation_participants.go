@@ -40,12 +40,12 @@ func NewDesktopConversationParticipants(catalog DesktopConversationCatalog, scop
 // and exact active definitions on every round. Observe-only and disabled members
 // never invoke a model. Inactive Agents are excluded; broken canonical identities
 // or unsatisfied member requirements fail closed instead of inventing a roster.
-func (s *DesktopConversationParticipants) ResolveConversationParticipants(ctx context.Context, query conversation.ConversationParticipantQuery) ([]conversation.ConversationParticipantBinding, error) {
+func (s *DesktopConversationParticipants) ResolveConversationParticipants(ctx context.Context, query conversation.ParticipantQuery) ([]conversation.ParticipantBinding, error) {
 	members, err := s.resolve(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	bindings := make([]conversation.ConversationParticipantBinding, 0, len(members))
+	bindings := make([]conversation.ParticipantBinding, 0, len(members))
 	for _, member := range members {
 		bindings = append(bindings, member.binding)
 	}
@@ -53,12 +53,12 @@ func (s *DesktopConversationParticipants) ResolveConversationParticipants(ctx co
 }
 
 type desktopConversationMember struct {
-	binding        conversation.ConversationParticipantBinding
+	binding        conversation.ParticipantBinding
 	definition     *agent.AgentDefinition
 	teamDefinition *team.Definition
 }
 
-func (s *DesktopConversationParticipants) resolve(ctx context.Context, query conversation.ConversationParticipantQuery) ([]desktopConversationMember, error) {
+func (s *DesktopConversationParticipants) resolve(ctx context.Context, query conversation.ParticipantQuery) ([]desktopConversationMember, error) {
 	channel := query.Conversation
 	if channel == nil || channel.Scope != s.scope || channel.Owner.Type != models.OwnerTypeTeam || channel.Owner.ID == "" || channel.Status != models.ConversationStatusActive {
 		return nil, errors.New("desktop participation requires an active team channel in this workspace")
@@ -111,7 +111,7 @@ func (s *DesktopConversationParticipants) resolve(ctx context.Context, query con
 				return nil, errors.New("a participation agent no longer satisfies its member skill requirement")
 			}
 		}
-		binding := conversation.ConversationParticipantBinding{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: member.ID}, SemanticRoles: []string{assignment.ID}}
+		binding := conversation.ParticipantBinding{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: member.ID}, SemanticRoles: []string{assignment.ID}}
 		if err := binding.Validate(); err != nil {
 			return nil, err
 		}

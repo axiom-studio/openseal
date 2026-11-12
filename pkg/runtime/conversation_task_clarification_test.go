@@ -17,8 +17,8 @@ import (
 
 type conversationTaskClarificationFixture struct {
 	store        controltest.Store
-	service      *runtimeconversation.ConversationService
-	scheduler    *conversationrun.ConversationRunScheduler
+	service      *runtimeconversation.Service
+	scheduler    *conversationrun.Scheduler
 	conversation *models.Conversation
 	trigger      *models.ChannelMessage
 	task         *models.ConversationTask
@@ -29,7 +29,7 @@ type conversationTaskClarificationFixture struct {
 
 func newConversationTaskClarificationFixture(t *testing.T, store controltest.Store, threaded bool) *conversationTaskClarificationFixture {
 	t.Helper()
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	seedTestSpace(t, store.(models.SpaceStore), models.Scope{Kind: "organization", ID: "task-clarification"})
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: models.Scope{Kind: "organization", ID: "task-clarification"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "writer"},
@@ -86,7 +86,7 @@ func (f *conversationTaskClarificationFixture) ask(t *testing.T, question string
 func (f *conversationTaskClarificationFixture) resetScheduler(t *testing.T) {
 	t.Helper()
 	var err error
-	f.scheduler, err = conversationrun.NewConversationRunScheduler(f.store, f.store, conversationrun.ConversationRunSchedulerConfig{MessagePageSize: 2})
+	f.scheduler, err = conversationrun.NewScheduler(f.store, f.store, conversationrun.SchedulerConfig{MessagePageSize: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestConversationTaskClarificationRejectsExplicitAnswersOutsideAuthority(t *
 func TestConversationTaskClarificationOriginRequiresCanonicalProvenance(t *testing.T) {
 	controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
 		f := newConversationTaskClarificationFixture(t, store, false)
-		source, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(t.Context(), store, store, f.work)
+		source, conversation, trigger, err := runtimeconversation.WorkOrigin(t.Context(), store, store, f.work)
 		if err != nil || source == nil || source.ID != f.source.ID || source.Status != models.AgentRunStatusCompleted ||
 			conversation == nil || conversation.ID != f.conversation.ID || trigger == nil || trigger.ID != f.trigger.ID {
 			t.Fatalf("canonical independent task lost its completed source: %#v, %#v, %#v, %v", source, conversation, trigger, err)
@@ -393,7 +393,7 @@ func TestConversationTaskClarificationOriginRequiresCanonicalProvenance(t *testi
 				forged := models.CloneAgentRun(f.work)
 				tc.mutate(forged)
 				for _, replay := range []bool{false, true} {
-					source, conversation, trigger, err := runtimeconversation.ConversationWorkOriginForState(t.Context(), store, store, forged, replay)
+					source, conversation, trigger, err := runtimeconversation.WorkOriginForState(t.Context(), store, store, forged, replay)
 					if source != nil || conversation != nil || trigger != nil {
 						t.Fatalf("forged provenance resolved an origin (replay=%v): %#v, %#v, %#v, %v", replay, source, conversation, trigger, err)
 					}
@@ -468,8 +468,8 @@ func TestConversationTaskClarificationReplayDoesNotAnswerLaterQuestion(t *testin
 func TestConversationTaskGenericInterventionDoesNotMintAnswerReceipt(t *testing.T) {
 	controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
 		f := newConversationTaskClarificationFixture(t, store, true)
-		result, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
-			Scope: f.task.Scope, RunID: f.work.ID, ExpectedRevision: f.work.Revision, Kind: agentrun.AgentRunCommandIntervene,
+		result, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.CommandRequest{
+			Scope: f.task.Scope, RunID: f.work.ID, ExpectedRevision: f.work.Revision, Kind: agentrun.CommandIntervene,
 			Actor: models.ActivityActor{Type: "user", ID: f.task.AuthenticatedActor.ID}, InterventionID: models.StableConversationID(f.task.Scope, "generic-guidance", "intervention"),
 			Instruction: "Answer to your clarification:\nYes, proceed.",
 		})

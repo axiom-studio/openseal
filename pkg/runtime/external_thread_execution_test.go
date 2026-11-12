@@ -16,11 +16,11 @@ import (
 func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	ctx := t.Context()
 	store, _, endpoint := externalconversationtest.EndpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := externalconversation.NewExternalConversationInboxWorker(store, externalconversation.NewCanonicalExternalConversationDispatcher(scheduler), externalconversation.ExternalConversationInboxWorkerConfig{WorkerID: "thread-inbox"})
+	worker, err := externalconversation.NewInboxWorker(store, externalconversation.NewCanonicalExternalConversationDispatcher(scheduler), externalconversation.InboxWorkerConfig{WorkerID: "thread-inbox"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,24 +77,24 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	if blocked, err := store.ClaimNextAgentRun(ctx, claim); err != nil || blocked != nil {
 		t.Fatalf("thread follow-up created another Run: %#v %v", blocked, err)
 	}
-	conversations := conversation.NewConversationService(store)
+	conversations := conversation.NewService(store)
 	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.Owner.ID}}
 	root, _ := first.Context["threadRootMessageId"].(string)
-	page, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.ConversationHistoryReadRequest{}, root)
+	page, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.HistoryReadRequest{}, root)
 	if err != nil || len(page.Messages) != 2 {
 		t.Fatalf("thread history=%#v %v", page, err)
 	}
 	after := int64(0)
-	forward, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.ConversationHistoryReadRequest{AfterSequence: &after, Limit: 1}, root)
+	forward, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.HistoryReadRequest{AfterSequence: &after, Limit: 1}, root)
 	if err != nil || len(forward.Messages) != 1 || forward.Messages[0].ID != root || forward.NextAfterSequence == 0 {
 		t.Fatalf("forward thread history=%#v %v", forward, err)
 	}
-	if _, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.ConversationHistoryReadRequest{MessageID: applied[1].ChannelMessageID}, root); err == nil {
+	if _, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.HistoryReadRequest{MessageID: applied[1].ChannelMessageID}, root); err == nil {
 		t.Fatal("explicit message lookup escaped its thread")
 	}
 	// Explicit cancellation remains available. A later message in the thread
 	// of a terminal Run starts a new Run rather than reviving the old one.
-	if _, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: endpoint.Scope, RunID: a.ID, ExpectedRevision: a.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: "human"}}); err != nil {
+	if _, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.CommandRequest{Scope: endpoint.Scope, RunID: a.ID, ExpectedRevision: a.Revision, Kind: agentrun.CommandCancel, Actor: models.ActivityActor{Type: "user", ID: "human"}}); err != nil {
 		t.Fatal(err)
 	}
 	canceled, _ := store.GetAgentRun(ctx, endpoint.Scope, a.ID)

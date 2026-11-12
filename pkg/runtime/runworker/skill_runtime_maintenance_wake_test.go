@@ -21,7 +21,7 @@ func TestSkillRuntimeMaintenanceResolverErrorParksBeforeStartingTurn(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return request.Now }))
+		portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return request.Now }))
 		run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: request.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher", Goal: "Continue the original conversation", Source: models.RunSourceManual})
 		if err != nil {
 			t.Fatal(err)
@@ -45,7 +45,7 @@ func TestSkillRuntimeMaintenanceResolverErrorParksBeforeStartingTurn(t *testing.
 		if _, err := store.(models.SkillRuntimeMaintenanceStore).CompleteSkillRuntimeMaintenance(t.Context(), workerMaintenanceCompletion(gate, request.Now.Add(time.Second))); err != nil {
 			t.Fatal(err)
 		}
-		result, err := agentrun.NewAgentRunWakeService(store, store).WakeDueTimers(t.Context(), request.Scope, request.Now.Add(2*time.Second))
+		result, err := agentrun.NewWakeService(store, store).WakeDueTimers(t.Context(), request.Scope, request.Now.Add(2*time.Second))
 		if err != nil || len(result.Runs) != 1 || result.Runs[0].Run.ID != run.ID || result.Runs[0].Run.Status != models.AgentRunStatusQueued || result.Runs[0].Run.Goal != run.Goal {
 			t.Fatalf("resolver wait did not resume original request: %#v %v", result, err)
 		}

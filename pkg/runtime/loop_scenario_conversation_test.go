@@ -3,9 +3,9 @@ package runtime
 // Conversation journeys (run-loop section 12 §5.9): Team member sessions,
 // catch-up with attribution, the seed of a new session, the run_context note
 // that carries the ephemeral chat facts, and the react and participation
-// tools. The Runs are driven by the real RunLoop through the loop fixture,
+// tools. The Runs are driven by the real runloop.Loop through the loop fixture,
 // whose chat bindings carry the production conversation seams (resolved
-// through ConversationRunTurnRunner). These replace the Goal-builder tests of
+// through conversationrun.TurnRunner). These replace the Goal-builder tests of
 // conversation_card_state_test.go, conversation_places_test.go,
 // conversation_image_style_test.go and the thread, Telegram, participation
 // and spoken-mode coverage of the old conversation runner.
@@ -32,13 +32,13 @@ import (
 // config (Places, ImageStyle, HumanParticipants, participation opt-in), on
 // the fixture's clock. It resolves the Agent's own binding through the
 // fixture, as the fixture's runner does.
-func convRunner(f *looptest.Fixture, config conversationrun.ConversationRunTurnRunnerConfig) {
+func convRunner(f *looptest.Fixture, config conversationrun.TurnRunnerConfig) {
 	f.T.Helper()
 	if config.AttachmentContent == nil {
 		config.AttachmentContent = &looptest.AnswerVisualContent{}
 	}
 	config.AgentTurns = runtimeconversation.TurnRunnerResolverFunc(f.AgentBinding)
-	runner, err := conversationrun.NewConversationRunTurnRunner(f.Chats, f.Coordinator(), config, models.WithClock(f.Clock.Now))
+	runner, err := conversationrun.NewTurnRunner(f.Chats, f.Coordinator(), config, models.WithClock(f.Clock.Now))
 	if err != nil {
 		f.T.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	t.Run("card_state", func(t *testing.T) {
 		looptest.EachStore(t, "conv-cards", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store)
-			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{})
+			convRunner(f, conversationrun.TurnRunnerConfig{})
 			first := true
 			f.Model.Add(&looptest.ModelRule{Name: "card", Reply: func(v looptest.StepView) models.ModelStepResult {
 				if first {
@@ -247,7 +247,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 
 	t.Run("flashcards_and_recipe", func(t *testing.T) {
 		f := looptest.NewFixture(t, kerneltest.NewStore(t))
-		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{})
+		convRunner(f, conversationrun.TurnRunnerConfig{})
 		first := true
 		f.Model.Add(&looptest.ModelRule{Name: "card", Reply: func(v looptest.StepView) models.ModelStepResult {
 			if first {
@@ -286,7 +286,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	t.Run("poll", func(t *testing.T) {
 		f := looptest.NewFixture(t, kerneltest.NewStore(t))
 		people := []models.ConversationParticipant{convActor("ana"), convActor("ben"), convActor("cy")}
-		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{
+		convRunner(f, conversationrun.TurnRunnerConfig{
 			HumanParticipants: func(_ context.Context, _ *models.Conversation) ([]models.ConversationParticipant, error) {
 				return people, nil
 			},
@@ -335,15 +335,15 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 
 	t.Run("places", func(t *testing.T) {
 		f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(convAnswer("ok: ")))
-		found := map[string][]runtimeconversation.ConversationPlace{}
-		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{Places: func(_ context.Context, run *models.AgentRun) []runtimeconversation.ConversationPlace {
+		found := map[string][]runtimeconversation.Place{}
+		convRunner(f, conversationrun.TurnRunnerConfig{Places: func(_ context.Context, run *models.AgentRun) []runtimeconversation.Place {
 			conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 			return found[conversationID]
 		}})
 		// A chat that already found places lists them, capped.
 		conversation, run := f.StartChat("Driving directions please")
 		for i := 0; i < runtimeconversation.MaximumConversationPlaces+5; i++ {
-			found[conversation.ID] = append(found[conversation.ID], runtimeconversation.ConversationPlace{Place: fmt.Sprintf("place:%012x", i), Name: fmt.Sprintf("Stop %d", i), Lat: 37.4, Lon: -121.9})
+			found[conversation.ID] = append(found[conversation.ID], runtimeconversation.Place{Place: fmt.Sprintf("place:%012x", i), Name: fmt.Sprintf("Stop %d", i), Lat: 37.4, Lon: -121.9})
 		}
 		convDrive(f, run.ID)
 		request := convFirstStep(f, run.ID)
@@ -375,7 +375,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(convAnswer("ok: ")))
 		// The host reads the style saved by the sender of the Run's trigger.
 		styles := map[string]string{"Draw a fox": " cartoon "}
-		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{ImageStyle: func(_ context.Context, run *models.AgentRun) string {
+		convRunner(f, conversationrun.TurnRunnerConfig{ImageStyle: func(_ context.Context, run *models.AgentRun) string {
 			conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 			triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
 			message, err := f.Convs.GetChannelMessage(f.Ctx, f.Scope, conversationID, triggerID)
@@ -792,7 +792,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 
 	t.Run("participation_opt_in", func(t *testing.T) {
 		f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(convAnswer("ok: ")))
-		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
+		convRunner(f, conversationrun.TurnRunnerConfig{RequireParticipationOptIn: true})
 		conversation := convChat(f, models.ObjectiveOwner{}, nil)
 
 		// Not opted in: the Run ends at once, with no model call and no post.
@@ -824,7 +824,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 	t.Run("participation_opt_out_discards_the_answer", func(t *testing.T) {
 		looptest.EachStore(t, "conv-optout", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store)
-			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
+			convRunner(f, conversationrun.TurnRunnerConfig{RequireParticipationOptIn: true})
 			conversation := convChat(f, models.ObjectiveOwner{}, nil)
 			convParticipation(f, conversation.ID, true)
 			f.Dispatch.On("list_items", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {

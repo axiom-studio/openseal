@@ -327,7 +327,7 @@ func TestLoopTestkitCrashStoreRefusesWritesAfterArm(t *testing.T) {
 		scope := models.Scope{Kind: "tenant", ID: "kit-crash"}
 		now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 		store := looptest.NewCrashStore(t, base)
-		portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+		portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 		create := func() (*models.AgentRun, error) {
 			return portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}, AssignedAgentID: "finn",

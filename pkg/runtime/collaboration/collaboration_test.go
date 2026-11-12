@@ -40,7 +40,7 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 			defer closeStore()
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "atomic"}
-			portfolio := portfolio.NewPortfolioService(store)
+			portfolio := portfolio.NewService(store)
 			sources := make([]*models.AgentRun, 2)
 			for index := range sources {
 				var err error
@@ -69,7 +69,7 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 				go func(index int, source *models.AgentRun) {
 					defer group.Done()
 					<-start
-					service := NewCollaborationService(store)
+					service := NewService(store)
 					service.teams = teamStore
 					_, errorsByIndex[index] = service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 						Scope: scope, Kind: models.AgentRequestKindRequest,
@@ -108,7 +108,7 @@ func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T)
 	}
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "review"}
-	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, AssignedAgentID: "author",
 		Goal: "Produce reviewed work", Source: models.RunSourceManual,
 	})
@@ -124,7 +124,7 @@ func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T)
 			MaximumDepth: 2, MaximumConcurrent: 2, AllowPeerDelegation: true, RequireAcceptance: true, RequireCompletionReview: true,
 		}},
 	}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	service.teams = teamStore
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "author"},
@@ -157,7 +157,7 @@ func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T)
 		t.Fatal(err)
 	}
 	defer restarted.Close()
-	reviewed, err := NewCollaborationService(restarted).ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
+	reviewed, err := NewService(restarted).ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
 		Scope: scope, RequestID: submitted.Request.ID, ExpectedRevision: submitted.Request.Revision,
 		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
 		Approve: true, Summary: "Restarted reviewer approved", IdempotencyKey: "portable-review-decision",
@@ -191,7 +191,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			defer closeStore()
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "acme"}
-			portfolio := portfolio.NewPortfolioService(store)
+			portfolio := portfolio.NewService(store)
 			source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
 				Goal: "Ship the release", Source: models.RunSourceManual,
@@ -201,7 +201,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			service := NewCollaborationService(store)
+			service := NewService(store)
 			create := CreateAgentRequestRequest{
 				Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
 				Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
@@ -292,7 +292,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			if err != nil || child.AssignedAgentID != "marketing" {
 				t.Fatalf("persisted child = %#v, %v", child, err)
 			}
-			_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
+			_, err = artifactcatalog.NewCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
 				ID: "artifact-launch-brief", Version: 1, Scope: scope, Name: "launch-brief.md",
 				Type: "document", MediaType: "text/markdown", ContentRef: "artifact-store:launch-brief-v1",
 				Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SizeBytes: 2048,
@@ -346,7 +346,7 @@ func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "Ship feature", Source: models.RunSourceManual,
@@ -354,7 +354,7 @@ func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	service.teams = activeCollaborationTeam(scope, "gtm",
 		kernelteam.RosterAssignment{ID: "marketer", AgentDeploymentID: "marketing-agent"},
 		kernelteam.RosterAssignment{ID: "marketer-two", AgentDeploymentID: "marketing-agent-two"})
@@ -417,9 +417,9 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 	}
 
 	store := kerneltest.NewStore(t)
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	activity := runtimeactivity.NewRunActivityService(store, store)
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}
@@ -492,7 +492,7 @@ func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *test
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "work", Source: models.RunSourceManual,
@@ -500,7 +500,7 @@ func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	base := CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
@@ -528,7 +528,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "gtm"}, AssignedAgentID: "developer",
 		Goal: "Launch", Source: models.RunSourceManual,
@@ -536,7 +536,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	service.teams = activeCollaborationTeam(scope, "marketing", kernelteam.RosterAssignment{ID: "editor", AgentDeploymentID: "marketing-editor"})
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
@@ -575,7 +575,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 			Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
 		},
 	} {
-		if _, err := artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); err != nil {
+		if _, err := artifactcatalog.NewCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -636,7 +636,7 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 	}
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "work", Source: models.RunSourceManual,
@@ -644,7 +644,7 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := NewCollaborationService(store).CreateAgentRequest(ctx, CreateAgentRequestRequest{
+	created, err := NewService(store).CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
 		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "analyst"}, Goal: "measure launch impact",
@@ -660,7 +660,7 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	restored, err := NewCollaborationService(reopened).GetAgentRequest(ctx, scope, created.Request.ID)
+	restored, err := NewService(reopened).GetAgentRequest(ctx, scope, created.Request.ID)
 	if err != nil || restored.Goal != "measure launch impact" || restored.Revision != 1 {
 		t.Fatalf("restored request = %#v, %v", restored, err)
 	}
@@ -670,7 +670,7 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "Build the feature", Source: models.RunSourceManual,
@@ -678,7 +678,7 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindHandoff, SourceRunID: source.ID,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
@@ -732,7 +732,7 @@ func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *tes
 	store := kerneltest.NewStore(t)
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "artifact-delegation"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "Ship the release", Source: models.RunSourceManual,
@@ -740,7 +740,7 @@ func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
+	service := NewService(store)
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
@@ -757,7 +757,7 @@ func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
+	_, err = artifactcatalog.NewCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
 		ID: "launch-report", Version: 1, Scope: scope, Name: "launch-report.pdf", Type: "report", MediaType: "application/pdf",
 		ContentRef: "artifact-store:launch-report", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		SizeBytes: 4096, Classification: models.ArtifactClassificationInternal,

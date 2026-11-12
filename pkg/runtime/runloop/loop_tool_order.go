@@ -329,7 +329,7 @@ func (r *stepToolRun) endOfSettle(ctx context.Context) (agentrun.StepToolsOutcom
 //   - host entries: pending runs; running is the D14 rule (reads run again,
 //     writes become interrupted);
 //   - capability and inline control entries: run again (pure or idempotent);
-//   - control entries awaiting a child or an event: ControlExecutor.Resume;
+//   - control entries awaiting a child or an event: control.Executor.Resume;
 //   - a pending/running settle-phase control entry: Settle again with its own
 //     (finished, applied) step once the step's other entries are terminal,
 //     unless an earlier call was denied, superseded or expired.

@@ -28,7 +28,7 @@ type taskFailureReportingStore interface {
 func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore, threaded bool) (*models.ConversationTaskResult, *models.ChannelMessage) {
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "safe-task-failure"}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Private task", IdempotencyKey: "failure-thread"})
 	if err != nil {
@@ -50,7 +50,7 @@ func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore,
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 					if len(answers) != 2 || answers[0].Content != accepted.Task.Acknowledgment || answers[1].Content != expected {
 						t.Fatalf("wrong acknowledgment/final sequence: %#v", answers)
 					}
-					service := runtimeconversation.NewConversationService(store)
+					service := runtimeconversation.NewService(store)
 					for _, message := range answers {
 						if message.Scope != work.Scope || message.ReplyToMessageID != trigger.ID || message.ThreadRootID != accepted.Task.ThreadRootID || message.BroadcastToChannel == threaded {
 							t.Fatalf("failure widened origin: %#v", message)

@@ -24,9 +24,9 @@ const (
 	// DefaultRoutineScriptSeconds applies when the proposal names no timeout.
 	DefaultRoutineScriptSeconds = 300
 
-	// RoutineScriptContextKey carries an occurrence's pinned script in its
+	// ScriptContextKey carries an occurrence's pinned script in its
 	// Run context, written once by the kernel when the occurrence starts.
-	RoutineScriptContextKey = "routineScript"
+	ScriptContextKey = "routineScript"
 	// routineScriptFailureKind is the final-failure kind of a script that
 	// failed or did not run.
 	routineScriptFailureKind = "script"
@@ -175,10 +175,10 @@ func DecodeScript(value interface{}) (*models.RoutineScript, error) {
 	return &script, nil
 }
 
-// RoutineScriptStatus is a script routine's pinned version beside the chat
+// ScriptStatus is a script routine's pinned version beside the chat
 // file's current one. Changed is true when the file now holds other content
 // (or is gone); the routine keeps running the pinned version either way.
-type RoutineScriptStatus struct {
+type ScriptStatus struct {
 	ActivationID string                `json:"activationId"`
 	Revision     int64                 `json:"revision"`
 	Pinned       *models.RoutineScript `json:"pinned"`
@@ -195,7 +195,7 @@ var ErrRoutineHasNoScript = errors.New("this routine does not run a script")
 
 // ResolveRoutineScriptStatus compares a script routine's pinned version with
 // its chat file now.
-func ResolveRoutineScriptStatus(ctx context.Context, files ChatFileResolver, activation *models.RunbookActivation) (*RoutineScriptStatus, error) {
+func ResolveRoutineScriptStatus(ctx context.Context, files ChatFileResolver, activation *models.RunbookActivation) (*ScriptStatus, error) {
 	if activation == nil || activation.Task == nil || activation.Task.Script == nil {
 		return nil, ErrRoutineHasNoScript
 	}
@@ -203,7 +203,7 @@ func ResolveRoutineScriptStatus(ctx context.Context, files ChatFileResolver, act
 		return nil, errors.New("routines cannot run scripts on this host")
 	}
 	pinned := activation.Task.Script
-	status := &RoutineScriptStatus{ActivationID: activation.ID, Revision: activation.Revision, Pinned: models.CloneRoutineScript(pinned)}
+	status := &ScriptStatus{ActivationID: activation.ID, Revision: activation.Revision, Pinned: models.CloneRoutineScript(pinned)}
 	file, err := files.ResolveChatFile(ctx, activation.Scope, activation.Owner, activation.Task.ConversationID, pinned.Path, 0)
 	switch {
 	case errors.Is(err, ErrChatFileNotFound) || err == nil && file == nil:
@@ -217,9 +217,9 @@ func ResolveRoutineScriptStatus(ctx context.Context, files ChatFileResolver, act
 	return status, nil
 }
 
-// RoutineScriptStatus reports whether a script routine's chat file changed
+// ScriptStatus reports whether a script routine's chat file changed
 // since its script was approved.
-func (s *RunbookActivationService) RoutineScriptStatus(ctx context.Context, files ChatFileResolver, scope models.Scope, id string) (*RoutineScriptStatus, error) {
+func (s *RunbookActivationService) RoutineScriptStatus(ctx context.Context, files ChatFileResolver, scope models.Scope, id string) (*ScriptStatus, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("Runbook activation store is not configured")
 	}
@@ -381,7 +381,7 @@ func routineScriptChangePreview(ctx context.Context, store RunbookActionStore, a
 		preview["title"] = objective.Title
 	}
 	if len(a.Task.Grants) > 0 {
-		preview["grants"] = routineBriefPreview(&RoutineBrief{Grants: a.Task.Grants})["grants"]
+		preview["grants"] = routineBriefPreview(&Brief{Grants: a.Task.Grants})["grants"]
 	}
 	return preview, nil
 }

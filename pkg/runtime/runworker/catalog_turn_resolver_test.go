@@ -151,7 +151,7 @@ func claimedBindingRun(t *testing.T, store *sqlite.Store, run *models.AgentRun) 
 // prepareBindingStep is the model request of the binding's first step.
 func prepareBindingStep(t *testing.T, binding *agentrun.TurnRunnerBinding, run *models.AgentRun) models.ModelStepRequest {
 	t.Helper()
-	if _, ok := binding.Producer.(*modelstep.ModelStepProducer); !ok {
+	if _, ok := binding.Producer.(*modelstep.Producer); !ok {
 		t.Fatalf("binding producer = %T, want the model step producer", binding.Producer)
 	}
 	// The compactor builds its summary requests with the producer's own
@@ -211,7 +211,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 		{name: "agent work", run: models.AgentRun{Goal: "Summarize the forum"},
 			producer: "model", fork: true, actions: 1, goalKind: "routine"},
 		{name: "routine", run: models.AgentRun{Goal: "Report the weekly numbers", Source: models.RunSourceSchedule, Context: map[string]interface{}{
-			models.ConversationRunConversationIDContextKey: "chat-1", routine.RoutineScriptContextKey: script,
+			models.ConversationRunConversationIDContextKey: "chat-1", routine.ScriptContextKey: script,
 		}}, producer: "model", fork: true, actions: 1, goalKind: "routine", hostTools: true},
 		{name: "task work", run: models.AgentRun{Goal: "Research in the background", Source: models.RunSourceFork, Context: map[string]interface{}{
 			models.ConversationTaskContextKey: "task-1",
@@ -250,7 +250,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			}
 			switch tc.producer {
 			case "model":
-				if _, ok := binding.Producer.(*modelstep.ModelStepProducer); !ok {
+				if _, ok := binding.Producer.(*modelstep.Producer); !ok {
 					t.Fatalf("producer = %T", binding.Producer)
 				}
 			case "capability":

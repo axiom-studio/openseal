@@ -15,25 +15,25 @@ const (
 	MaximumConversationDestinationLimit = 200
 )
 
-// ExternalConversationDestination is a secret-free, operator-facing provider
+// Destination is a secret-free, operator-facing provider
 // destination. ID is persisted only after selection; display metadata remains
 // contextual and can be refreshed from the Skill.
-type ExternalConversationDestination struct {
+type Destination struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
 	Description string `json:"description,omitempty"`
 }
 
-type ExternalConversationDestinationPage struct {
-	Items      []ExternalConversationDestination      `json:"items"`
+type DestinationPage struct {
+	Items      []Destination                          `json:"items"`
 	NextCursor string                                 `json:"nextCursor,omitempty"`
 	Connection *capability.CredentialExternalIdentity `json:"connection,omitempty"`
 }
 
-// ExternalConversationDestinationDiscoveryRequest identifies one exact bound
+// DestinationDiscoveryRequest identifies one exact bound
 // adapter and carries only search/pagination input. Credential resolution and
 // action invocation remain host responsibilities.
-type ExternalConversationDestinationDiscoveryRequest struct {
+type DestinationDiscoveryRequest struct {
 	Scope                 models.Scope                         `json:"scope"`
 	DeploymentID          string                               `json:"deploymentId"`
 	ExecutionDeploymentID string                               `json:"executionDeploymentId"`
@@ -44,7 +44,7 @@ type ExternalConversationDestinationDiscoveryRequest struct {
 	Limit                 int                                  `json:"limit,omitempty"`
 }
 
-func (r *ExternalConversationDestinationDiscoveryRequest) Validate() error {
+func (r *DestinationDiscoveryRequest) Validate() error {
 	if r == nil || r.Scope.Validate() != nil || !models.IsValidAgentReference(strings.TrimSpace(r.DeploymentID), 256) ||
 		!models.IsValidAgentReference(strings.TrimSpace(r.ExecutionDeploymentID), 256) ||
 		r.Adapter == nil || r.Adapter.Definition == nil || r.Adapter.Binding == nil ||
@@ -59,16 +59,16 @@ func (r *ExternalConversationDestinationDiscoveryRequest) Validate() error {
 	return nil
 }
 
-// ExternalConversationDestinationDiscoveryHost invokes the exact read-only
+// DestinationDiscoveryHost invokes the exact read-only
 // Skill action declared by the adapter and returns its already-projected page.
-type ExternalConversationDestinationDiscoveryHost interface {
-	DiscoverExternalConversationDestinations(context.Context, ExternalConversationDestinationDiscoveryRequest) (*ExternalConversationDestinationPage, error)
+type DestinationDiscoveryHost interface {
+	DiscoverExternalConversationDestinations(context.Context, DestinationDiscoveryRequest) (*DestinationPage, error)
 }
 
 // ConversationDestinationDiscoveryArguments deterministically creates action
 // inputs from the adapter mapping. The operator cannot inject arbitrary action
 // arguments through destination search.
-func ConversationDestinationDiscoveryArguments(request ExternalConversationDestinationDiscoveryRequest) (capability.ConversationDestinationDiscovery, map[string]interface{}, error) {
+func ConversationDestinationDiscoveryArguments(request DestinationDiscoveryRequest) (capability.ConversationDestinationDiscovery, map[string]interface{}, error) {
 	if err := request.Validate(); err != nil {
 		return capability.ConversationDestinationDiscovery{}, nil, err
 	}
@@ -93,7 +93,7 @@ func ConversationDestinationDiscoveryArguments(request ExternalConversationDesti
 // ProjectConversationDestinationPage copies only fields selected by the
 // validated manifest mapping. All other provider output—including accidental
 // credentials or internal metadata—is discarded.
-func ProjectConversationDestinationPage(discovery capability.ConversationDestinationDiscovery, output map[string]interface{}) (*ExternalConversationDestinationPage, error) {
+func ProjectConversationDestinationPage(discovery capability.ConversationDestinationDiscovery, output map[string]interface{}) (*DestinationPage, error) {
 	rawItems, ok := valueAtConversationPath(output, discovery.ItemsPath)
 	if !ok {
 		return nil, errors.New("conversation destination output has no items")
@@ -102,7 +102,7 @@ func ProjectConversationDestinationPage(discovery capability.ConversationDestina
 	if !ok || len(items) > MaximumConversationDestinationLimit {
 		return nil, errors.New("conversation destination output items are invalid")
 	}
-	page := &ExternalConversationDestinationPage{Items: make([]ExternalConversationDestination, 0, len(items))}
+	page := &DestinationPage{Items: make([]Destination, 0, len(items))}
 	seen := make(map[string]bool, len(items))
 	for index, raw := range items {
 		item, ok := raw.(map[string]interface{})
@@ -117,7 +117,7 @@ func ProjectConversationDestinationPage(discovery capability.ConversationDestina
 			return nil, fmt.Errorf("conversation destination item %d has invalid identity or display metadata", index)
 		}
 		seen[id] = true
-		page.Items = append(page.Items, ExternalConversationDestination{ID: id, DisplayName: displayName, Description: description})
+		page.Items = append(page.Items, Destination{ID: id, DisplayName: displayName, Description: description})
 	}
 	if discovery.NextCursorPath != "" {
 		page.NextCursor = conversationPathString(output, discovery.NextCursorPath)

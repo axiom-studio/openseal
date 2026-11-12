@@ -45,7 +45,7 @@ func seedTestSpaceFor(t testing.TB, store models.SpaceStore, scope models.Scope,
 	return space
 }
 
-func threadStartPost(t *testing.T, service *ConversationService, conversation *models.Conversation, req PostChannelMessageRequest) *models.ChannelMessage {
+func threadStartPost(t *testing.T, service *Service, conversation *models.Conversation, req PostChannelMessageRequest) *models.ChannelMessage {
 	t.Helper()
 	current, err := service.GetConversation(t.Context(), conversation.Scope, conversation.ID)
 	if err != nil {

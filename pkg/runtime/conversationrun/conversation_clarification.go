@@ -19,7 +19,7 @@ func clarificationQuestionKey(run *models.AgentRun) string {
 	if run == nil || run.WakeCondition == nil {
 		return ""
 	}
-	return runtimeconversation.ConversationClarificationKey(run.ID, run.WakeCondition.Reference)
+	return runtimeconversation.ClarificationKey(run.ID, run.WakeCondition.Reference)
 }
 func isConversationQuestionWait(run *models.AgentRun) bool {
 	return run != nil && run.Status == models.AgentRunStatusWaitingForEvent && run.WakeCondition != nil && run.WakeCondition.Type == "user_message" &&
@@ -28,7 +28,7 @@ func isConversationQuestionWait(run *models.AgentRun) bool {
 
 // Reconciliation re-posts the question of every Run parked on an ask_user
 // entry, from the entry's question argument (idempotent with the settle post).
-func (s *ConversationRunScheduler) reconcileConversationQuestions(ctx context.Context, scope models.Scope, result *ConversationRunReconcileResult) error {
+func (s *Scheduler) reconcileConversationQuestions(ctx context.Context, scope models.Scope, result *ReconcileResult) error {
 	for _, kind := range []models.RunKind{models.RunKindAgentWork, models.RunKindConversation} {
 		if err := s.reconcileConversationQuestionsForKind(ctx, scope, result, kind); err != nil {
 			return err
@@ -37,7 +37,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestions(ctx context.Co
 	return nil
 }
 
-func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx context.Context, scope models.Scope, result *ConversationRunReconcileResult, kind models.RunKind) error {
+func (s *Scheduler) reconcileConversationQuestionsForKind(ctx context.Context, scope models.Scope, result *ReconcileResult, kind models.RunKind) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
 		runs, err := s.runStore.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: kind, Statuses: []models.AgentRunStatus{models.AgentRunStatusWaitingForEvent}, Limit: pageSize, Offset: offset})
@@ -48,11 +48,11 @@ func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx con
 			if !isConversationQuestionWait(run) {
 				continue
 			}
-			_, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
+			_, conversation, trigger, err := runtimeconversation.WorkOrigin(ctx, s.runStore, s.conversationStore, run)
 			if err != nil {
 				return err
 			}
-			if conversation == nil || trigger == nil || runtimeconversation.ConversationRunAgentID(conversation, run) == "" {
+			if conversation == nil || trigger == nil || runtimeconversation.RunAgentID(conversation, run) == "" {
 				continue
 			}
 			if s.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
@@ -65,7 +65,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx con
 			if entry == nil {
 				continue
 			}
-			posted, postErr := s.conversations.PostChannelMessage(ctx, runtimeconversation.ConversationQuestionPostRequest(run, conversation, trigger, models.AskUserEntryArgs(entry), clarificationQuestionKey(run)))
+			posted, postErr := s.conversations.PostChannelMessage(ctx, runtimeconversation.QuestionPostRequest(run, conversation, trigger, models.AskUserEntryArgs(entry), clarificationQuestionKey(run)))
 			if errors.Is(postErr, models.ErrRevisionConflict) {
 				continue
 			}
@@ -92,7 +92,7 @@ type conversationQuestion struct {
 // Answers target an explicit question (or its unambiguous thread). An unthreaded
 // answer may address the single immediately preceding pending question. Never
 // broadcast an answer across concurrent tasks.
-func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context, conversation *models.Conversation, answer *models.ChannelMessage) (*agentrun.AgentRunCommandResult, bool, error) {
+func (s *Scheduler) resumeConversationAnswer(ctx context.Context, conversation *models.Conversation, answer *models.ChannelMessage) (*agentrun.CommandResult, bool, error) {
 	taskTargeted, err := s.targetsRootClarificationQuestion(ctx, conversation, answer)
 	if err != nil {
 		return nil, false, err
@@ -100,7 +100,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 	if (conversation.Owner.Type != models.OwnerTypeAgent && conversation.Owner.Type != models.OwnerTypeTeam) || answer.Sender.Type != models.ConversationParticipantUser {
 		return nil, taskTargeted, nil
 	}
-	actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, answer)
+	actor, valid := runtimeconversation.MessageInitiatingUser(conversation, answer)
 	if !valid {
 		return nil, taskTargeted, nil
 	}
@@ -128,14 +128,14 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				}
 				// A Team's question is its asking member's; another member
 				// never receives an answer to it.
-				if agentID := runtimeconversation.ConversationRunAgentID(conversation, run); run == nil || agentID == "" || agentID != question.Sender.ID {
+				if agentID := runtimeconversation.RunAgentID(conversation, run); run == nil || agentID == "" || agentID != question.Sender.ID {
 					continue
 				}
-				source, origin, trigger, err := runtimeconversation.ConversationWorkOriginForState(ctx, s.runStore, s.conversationStore, run, true)
+				source, origin, trigger, err := runtimeconversation.WorkOriginForState(ctx, s.runStore, s.conversationStore, run, true)
 				if err != nil {
 					return nil, false, err
 				}
-				originalActor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, trigger)
+				originalActor, valid := runtimeconversation.MessageInitiatingUser(conversation, trigger)
 				if origin == nil || origin.ID != conversation.ID || !valid || originalActor != actor {
 					continue
 				}
@@ -154,7 +154,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if !isConversationQuestionWait(run) || clarificationQuestionKey(run) != question.IdempotencyKey {
 					continue
 				}
-				_, origin, _, err = runtimeconversation.ConversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
+				_, origin, _, err = runtimeconversation.WorkOrigin(ctx, s.runStore, s.conversationStore, run)
 				if err != nil {
 					return nil, false, err
 				}
@@ -239,7 +239,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 	return result, true, err
 }
 
-func (s *ConversationRunScheduler) conversationAnswerAccepted(ctx context.Context, run *models.AgentRun, answerID string) (bool, error) {
+func (s *Scheduler) conversationAnswerAccepted(ctx context.Context, run *models.AgentRun, answerID string) (bool, error) {
 	const pageSize = 100
 	for after := int64(0); ; {
 		events, err := s.runStore.ListActivity(ctx, models.ActivityFilter{Scope: run.Scope, RunID: run.ID, EventTypes: []string{conversationAnswerEvent}, AfterSequence: after, Limit: pageSize})
@@ -257,17 +257,17 @@ func (s *ConversationRunScheduler) conversationAnswerAccepted(ctx context.Contex
 		after = events[len(events)-1].Sequence
 	}
 }
-func (s *ConversationRunScheduler) acknowledgeConversationAnswer(ctx context.Context, conversation *models.Conversation, answer *models.ChannelMessage, run *models.AgentRun) (*agentrun.AgentRunCommandResult, bool, error) {
+func (s *Scheduler) acknowledgeConversationAnswer(ctx context.Context, conversation *models.Conversation, answer *models.ChannelMessage, run *models.AgentRun) (*agentrun.CommandResult, bool, error) {
 	current, err := s.conversations.GetConversation(ctx, conversation.Scope, conversation.ID)
 	if err != nil {
 		return nil, false, err
 	}
 	_, err = s.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: runtimeconversation.ConversationRunAgentID(conversation, run)}, Intent: models.MessageIntentAcknowledgment,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: runtimeconversation.RunAgentID(conversation, run)}, Intent: models.MessageIntentAcknowledgment,
 		Content: "Your answer has been passed to the task.", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
-		ReplyToMessageID: answer.ID, ResolvesMessageID: answer.ID, References: runtimeconversation.ConversationClarificationReferences(run),
+		ReplyToMessageID: answer.ID, ResolvesMessageID: answer.ID, References: runtimeconversation.ClarificationReferences(run),
 		IdempotencyKey: "conversation-answer-received:" + answer.ID,
 	})
-	return &agentrun.AgentRunCommandResult{Run: run}, true, err
+	return &agentrun.CommandResult{Run: run}, true, err
 }

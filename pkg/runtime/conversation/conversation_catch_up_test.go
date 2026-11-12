@@ -213,7 +213,7 @@ func TestSeedThreadSessionIncludesBackdropOnce(t *testing.T) {
 		if later.Backdrop != nil || !reflect.DeepEqual(conversationtest.CatchUpMessageIDs(later.Entries), []string{utterance.ID}) {
 			t.Fatalf("later thread catch-up = backdrop %v entries %v", conversationtest.ThreadStartMessageIDs(later.Backdrop), conversationtest.CatchUpMessageIDs(later.Entries))
 		}
-		history, err := runtimeconversation.ReadConversationHistory(t.Context(), f.Service, f.Conversation.Scope, f.Conversation.Owner, f.Conversation.ID, f.Viewer(), runtimeconversation.ConversationHistoryReadRequest{}, root.ID)
+		history, err := runtimeconversation.ReadConversationHistory(t.Context(), f.Service, f.Conversation.Scope, f.Conversation.Owner, f.Conversation.ID, f.Viewer(), runtimeconversation.HistoryReadRequest{}, root.ID)
 		if err != nil || !reflect.DeepEqual(conversationtest.ThreadStartHistoryIDs(history), []string{utterance.ID, root.ID}) {
 			t.Fatalf("backdrop widened thread history: page=%#v err=%v", history, err)
 		}
@@ -251,10 +251,10 @@ func TestCatchUpCapsToOneAppendWithOmittedNote(t *testing.T) {
 
 func TestCatchUpCapsByAppendBytes(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversation := conversationtest.ThreadStartConversation(t, store)
 	f := &conversationtest.CatchUpFixture{T: t, Store: store, Service: service, Conversation: conversation, AgentID: conversation.Owner.ID,
-		Now: time.Now().UTC().Truncate(time.Millisecond), CatchUp: runtimeconversation.NewConversationCatchUp(service, store, nil)}
+		Now: time.Now().UTC().Truncate(time.Millisecond), CatchUp: runtimeconversation.NewCatchUp(service, store, nil)}
 	run, session := f.Open("")
 	big := strings.Repeat("x", 60<<10)
 	var last *models.ChannelMessage

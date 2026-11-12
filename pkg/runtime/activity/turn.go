@@ -31,10 +31,10 @@ type TurnAction struct {
 	PreparedRuntime *skill.PreparedRuntime `json:"preparedRuntime,omitempty"`
 }
 
-// ActivityEventTurnNarration is the public activity event carrying a step's
+// EventTurnNarration is the public activity event carrying a step's
 // narration. It is written in the same transaction as the step's
 // OutputSummary and is never posted by connectors.
-const ActivityEventTurnNarration = "turn.narration"
+const EventTurnNarration = "turn.narration"
 
 type BeginAgentTurnRequest struct {
 	Scope             models.Scope
@@ -237,7 +237,7 @@ func (s *AgentTurnService) RecordStepModel(ctx context.Context, scope models.Sco
 		events = append(events, &models.ActivityEvent{
 			ID: uuid.NewString(), Scope: scope, RunID: turn.RunID, TurnID: turn.ID,
 			AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: models.TeamIDForRun(run),
-			EventType: ActivityEventTurnNarration, Severity: models.ActivitySeverityInfo,
+			EventType: EventTurnNarration, Severity: models.ActivitySeverityInfo,
 			Actor:      models.ActivityActor{Type: "worker", ID: req.WorkerID},
 			Summary:    narration,
 			Payload:    map[string]interface{}{"stepSequence": turn.Sequence},

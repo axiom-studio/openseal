@@ -193,7 +193,7 @@ func DescribeMessages(messages []*models.ChannelMessage) string {
 
 // RunClaimWith claims the Run, lets mutate adjust the resolved binding (a
 // compactor, a deterministic producer) and drives one claim.
-func (f *Fixture) RunClaimWith(ctx context.Context, runID string, mutate func(*agentrun.TurnRunnerBinding)) (runloop.RunLoopExit, *models.AgentRun) {
+func (f *Fixture) RunClaimWith(ctx context.Context, runID string, mutate func(*agentrun.TurnRunnerBinding)) (runloop.Exit, *models.AgentRun) {
 	f.T.Helper()
 	claimed := f.Claim(runID)
 	binding := f.Binding(claimed)
@@ -203,7 +203,7 @@ func (f *Fixture) RunClaimWith(ctx context.Context, runID string, mutate func(*a
 	if mutate != nil {
 		mutate(binding)
 	}
-	exit := f.Loop.Drive(ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.WorkerID, Binding: binding})
+	exit := f.Loop.Drive(ctx, runloop.Claim{Run: claimed, WorkerID: f.WorkerID, Binding: binding})
 	return exit, f.MustRun(runID)
 }
 
@@ -429,8 +429,8 @@ func (f *Fixture) CancelRun(run *models.AgentRun) *models.AgentRun {
 	f.T.Helper()
 	current := f.MustRun(run.ID)
 	commands := agentrun.NewRunCommandService(f.Chats, models.WithClock(f.Clock.Now))
-	result, err := commands.CommandAgentRun(f.Ctx, agentrun.AgentRunCommandRequest{
-		Scope: f.Scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: agentrun.AgentRunCommandCancel,
+	result, err := commands.CommandAgentRun(f.Ctx, agentrun.CommandRequest{
+		Scope: f.Scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: agentrun.CommandCancel,
 		Actor: models.ActivityActor{Type: "user", ID: FixtureUser},
 	})
 	if err != nil {
@@ -506,11 +506,11 @@ func (s *AnswerVisualContent) Open(context.Context, models.Scope, string) (io.Re
 	return io.NopCloser(bytes.NewReader(s.Data)), nil
 }
 
-func (f *Fixture) CommandRun(runID string, kind agentrun.AgentRunCommandKind) *models.AgentRun {
+func (f *Fixture) CommandRun(runID string, kind agentrun.CommandKind) *models.AgentRun {
 	f.T.Helper()
 	current := f.MustRun(runID)
 	commands := agentrun.NewRunCommandService(f.Chats, models.WithClock(f.Clock.Now))
-	result, err := commands.CommandAgentRun(f.Ctx, agentrun.AgentRunCommandRequest{
+	result, err := commands.CommandAgentRun(f.Ctx, agentrun.CommandRequest{
 		Scope: f.Scope, RunID: runID, ExpectedRevision: current.Revision, Kind: kind,
 		Actor: models.ActivityActor{Type: "user", ID: FixtureUser},
 	})

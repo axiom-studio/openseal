@@ -89,7 +89,7 @@ func TestRoutineRunsPostOnlyToPinnedDestinationsWithoutAsking(t *testing.T) {
 		t.Fatalf("persisted grants = %#v, %v", stored.Task, err)
 	}
 	f.reviewEverything(t, activation)
-	coordinator := action.NewActionCoordinator(f.store, f.store, f.catalog, action.NewDefaultActionPolicy(), nil)
+	coordinator := action.NewCoordinator(f.store, f.store, f.catalog, action.NewDefaultActionPolicy(), nil)
 	for index, tc := range []struct {
 		name      string
 		arguments map[string]interface{}

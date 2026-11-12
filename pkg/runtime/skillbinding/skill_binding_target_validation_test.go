@@ -34,7 +34,7 @@ func TestSkillBindingTargetRefusesInvalidTargets(t *testing.T) {
 		t.Fatal("a conversation task Run acted for another Agent")
 	}
 	// A host without the Agent registry refuses every target.
-	bare, _ := skillbinding.NewSkillBindingActionValidator(f.Catalog, f.Store)
+	bare, _ := skillbinding.NewActionValidator(f.Catalog, f.Store)
 	if _, err := bare.ValidateActionProposal(f.Ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: f.Bound(t, "finn", skillbinding.SkillActionUpsertBinding), Arguments: skillbindingtest.ReaderUpsertArguments("researcher"),
 	}); err == nil {

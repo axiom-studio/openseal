@@ -71,7 +71,7 @@ func TestAgentBuilderConversationOriginValidates(t *testing.T) {
 	}
 	store := kerneltest.NewStore(t)
 	conversationtest.SeedSpace(t, store, models.Scope{Kind: "organization", ID: "builder"})
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	origin := &models.ConversationReference{Kind: models.ConversationReferenceAgentBuilder, ID: "k"}
 	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: models.Scope{Kind: "organization", ID: "builder"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "builder-agent"},

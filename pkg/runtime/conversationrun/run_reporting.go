@@ -74,7 +74,7 @@ func EnsureRunReportingChannel(
 	if store == nil {
 		return nil, errors.New("run reporting requires a conversation store")
 	}
-	channel, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
+	channel, _, err := conversation.NewService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: strings.TrimSpace(policy.Title), CreatedBy: person,
 		IdempotencyKey: runReportingChannelKey(owner, policy),
 	})
@@ -93,7 +93,7 @@ func ProjectRunReportingStart(
 	if store == nil || channel == nil || run == nil || messageKey == "" || !models.RunReportsMilestone(run, runbook.ReportingStarted) {
 		return nil
 	}
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	_, err := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 		Scope: channel.Scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision,
 		Sender:            models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID},
@@ -135,7 +135,7 @@ func ProjectConversationRunbookStart(ctx context.Context, store models.Conversat
 	if conversationID == "" || triggerID == "" {
 		return nil
 	}
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	channel, err := service.GetConversation(ctx, source.Scope, conversationID)
 	if err != nil {
 		return err
@@ -172,7 +172,7 @@ func ProjectTerminalRunReporting(ctx context.Context, store models.ConversationS
 		return ProjectFailedConversationReply(ctx, store, run)
 	}
 	if run.Kind == models.RunKindConversation && run.Context[models.ConversationTaskContextKey] != nil {
-		task, sourceReport, err := conversation.ConversationTaskForReport(ctx, store, run)
+		task, sourceReport, err := conversation.TaskForReport(ctx, store, run)
 		if err != nil {
 			return err
 		}
@@ -213,7 +213,7 @@ func ProjectTerminalRunReporting(ctx context.Context, store models.ConversationS
 	if !models.RunReportsMilestone(run, milestone) {
 		return nil
 	}
-	task, sourceTaskReport, taskErr := conversation.ConversationTaskForReport(ctx, store, run)
+	task, sourceTaskReport, taskErr := conversation.TaskForReport(ctx, store, run)
 	if taskErr != nil {
 		return taskErr
 	}
@@ -236,7 +236,7 @@ func ProjectTerminalRunReporting(ctx context.Context, store models.ConversationS
 			if sourceRun == nil || sourceRun.Status != models.AgentRunStatusCompleted {
 				return models.ErrInvalidConversationTask
 			}
-			verified, sourceReport, err := conversation.ConversationTaskForReport(ctx, store, sourceRun)
+			verified, sourceReport, err := conversation.TaskForReport(ctx, store, sourceRun)
 			if err != nil || verified == nil || verified.ID != task.ID || !sourceReport {
 				if err != nil {
 					return err
@@ -277,7 +277,7 @@ func ProjectTerminalRunReporting(ctx context.Context, store models.ConversationS
 		// chat the routine was created from, not inside the creating thread.
 		replyTo, broadcast = "", false
 	}
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	channel, err := service.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
 		return err
@@ -346,7 +346,7 @@ func ProjectRunReportingStartForRun(ctx context.Context, store models.Conversati
 	if strings.TrimSpace(rootRunID) != run.ID || strings.TrimSpace(conversationID) == "" {
 		return nil
 	}
-	channel, err := conversation.NewConversationService(store).GetConversation(ctx, run.Scope, conversationID)
+	channel, err := conversation.NewService(store).GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
 		return err
 	}

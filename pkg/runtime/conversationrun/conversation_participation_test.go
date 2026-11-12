@@ -16,7 +16,7 @@ type participationTestStore interface {
 
 func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := conversation.NewConversationService(store)
+	service := conversation.NewService(store)
 	scope := models.Scope{Kind: "local", ID: "default"}
 	conversationtest.SeedSpace(t, store, scope)
 	channel, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, Title: "Research", IdempotencyKey: "archive"})

@@ -13,7 +13,7 @@ import (
 func TestPortfolioSupportsMultipleObjectivesAndRunLineage(t *testing.T) {
 	ctx := context.Background()
 	store := kerneltest.NewStore(t)
-	service := portfolio.NewPortfolioService(store)
+	service := portfolio.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "marketing"}
 
@@ -57,7 +57,7 @@ func TestPortfolioSupportsMultipleObjectivesAndRunLineage(t *testing.T) {
 
 func TestPortfolioFailsClosedAcrossScopesAndOnStaleRevision(t *testing.T) {
 	ctx := context.Background()
-	service := portfolio.NewPortfolioService(kerneltest.NewStore(t))
+	service := portfolio.NewService(kerneltest.NewStore(t))
 	scopeA := models.Scope{Kind: "tenant", ID: "a"}
 	scopeB := models.Scope{Kind: "tenant", ID: "b"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}

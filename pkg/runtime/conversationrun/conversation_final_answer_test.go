@@ -52,12 +52,12 @@ type finalDeliveryFixture struct {
 	t            *testing.T
 	ctx          context.Context
 	store        finalDeliveryStore
-	service      *runtimeconversation.ConversationService
+	service      *runtimeconversation.Service
 	conversation *models.Conversation
 	trigger      *models.ChannelMessage
 	run          *models.AgentRun
 	session      *models.AgentSession
-	runner       *ConversationRunTurnRunner
+	runner       *TurnRunner
 	actions      *fakeActionCalls
 	handler      *conversationFinalHandler
 	content      *visualTestContent
@@ -69,7 +69,7 @@ type finalDeliveryOptions struct {
 	team          bool
 	responseMode  string
 	participation bool // RequireParticipationOptIn with participation disabled
-	coordinator   func(*testing.T, *runtimeconversation.ConversationService) *runtimeconversation.ConversationCoordinator
+	coordinator   func(*testing.T, *runtimeconversation.Service) *runtimeconversation.Coordinator
 	visualChecks  func(*models.AgentRun) presentation.ValidateOptions
 }
 
@@ -89,7 +89,7 @@ func newFinalDeliveryFixture(t *testing.T, base conversationtest.ThreadStartStor
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	scope := models.Scope{Kind: "tenant", ID: "final-" + uuid.NewString()[:8]}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}
 	if options.team {
 		owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-1"}
@@ -114,14 +114,14 @@ func newFinalDeliveryFixture(t *testing.T, base conversationtest.ThreadStartStor
 	if conversation, err = service.GetConversation(ctx, scope, conversation.ID); err != nil {
 		t.Fatal(err)
 	}
-	request := runtimeconversation.ConversationAgentRunRequest(conversation, trigger)
+	request := runtimeconversation.AgentRunRequest(conversation, trigger)
 	if options.team {
 		request.AssignedAgentID = "agent-1"
 		request.ConcurrencyKey = models.ConversationRunLane(conversation.ID, "", "agent-1")
 		request.SessionID = models.ConversationSessionID(scope, request.ConcurrencyKey)
 		request.IdempotencyKey = "member-" + trigger.ID
 	}
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, request)
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -142,7 +142,7 @@ func newFinalDeliveryFixture(t *testing.T, base conversationtest.ThreadStartStor
 		coordinator = options.coordinator
 	}
 	content := &visualTestContent{}
-	runner, err := NewConversationRunTurnRunner(store, coordinator(t, service), ConversationRunTurnRunnerConfig{
+	runner, err := NewTurnRunner(store, coordinator(t, service), TurnRunnerConfig{
 		AttachmentContent: content, RequireParticipationOptIn: options.participation, VisualChecks: options.visualChecks,
 	})
 	if err != nil {
@@ -597,18 +597,18 @@ func TestUnconsumedInterventionBlocksPostAndContinues(t *testing.T) {
 }
 
 func TestTeamHandoffMentionsFromFinalAnswer(t *testing.T) {
-	team := func(t *testing.T, service *runtimeconversation.ConversationService) *runtimeconversation.ConversationCoordinator {
+	team := func(t *testing.T, service *runtimeconversation.Service) *runtimeconversation.Coordinator {
 		t.Helper()
-		participants := runtimeconversation.ConversationParticipantSourceFunc(func(context.Context, runtimeconversation.ConversationParticipantQuery) ([]runtimeconversation.ConversationParticipantBinding, error) {
-			return []runtimeconversation.ConversationParticipantBinding{
+		participants := runtimeconversation.ParticipantSourceFunc(func(context.Context, runtimeconversation.ParticipantQuery) ([]runtimeconversation.ParticipantBinding, error) {
+			return []runtimeconversation.ParticipantBinding{
 				{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent-1"}},
 				{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent-2"}},
 			}, nil
 		})
-		router := runtimeconversation.ConversationRouterFunc(func(context.Context, runtimeconversation.ConversationRouteRequest) (runtimeconversation.ConversationRouteDecision, error) {
-			return runtimeconversation.ConversationRouteDecision{AgentID: "agent-1"}, nil
+		router := runtimeconversation.RouterFunc(func(context.Context, runtimeconversation.RouteRequest) (runtimeconversation.RouteDecision, error) {
+			return runtimeconversation.RouteDecision{AgentID: "agent-1"}, nil
 		})
-		coordinator, err := runtimeconversation.NewConversationCoordinator(service, participants, router, runtimeconversation.DefaultConversationCoordinatorConfig())
+		coordinator, err := runtimeconversation.NewCoordinator(service, participants, router, runtimeconversation.DefaultConversationCoordinatorConfig())
 		if err != nil {
 			t.Fatal(err)
 		}

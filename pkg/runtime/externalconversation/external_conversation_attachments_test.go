@@ -41,10 +41,10 @@ type externalFileHost struct {
 	origin string
 }
 
-func (h *externalFileHost) ReadExternalConversationAttachment(_ context.Context, req ExternalConversationAttachmentHostRequest) (*ExternalConversationAttachmentContent, error) {
+func (h *externalFileHost) ReadExternalConversationAttachment(_ context.Context, req AttachmentHostRequest) (*AttachmentContent, error) {
 	h.calls++
 	h.origin = req.Endpoint.Address
-	return &ExternalConversationAttachmentContent{ID: req.Attachment.ID, Name: req.Attachment.Name, MediaType: "text/plain", Data: []byte("real contents"), Status: "supplied"}, nil
+	return &AttachmentContent{ID: req.Attachment.ID, Name: req.Attachment.Name, MediaType: "text/plain", Data: []byte("real contents"), Status: "supplied"}, nil
 }
 func fileConversationFixture(t *testing.T) (*sqlite.Store, *skill.Catalog, *models.ExternalConversationEndpoint) {
 	t.Helper()
@@ -73,12 +73,12 @@ func TestExternalConversationImportsFileOnceAndScopesArtifact(t *testing.T) {
 	store, catalog, endpoint := fileConversationFixture(t)
 	content := &externalFileContentStore{}
 	host := &externalFileHost{}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "files", IdempotencyKey: "files"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := &ExternalConversationInboxWorker{store: store, config: ExternalConversationInboxWorkerConfig{ContextCatalog: catalog, AttachmentHost: host, AttachmentContent: content}}
+	worker := &InboxWorker{store: store, config: InboxWorkerConfig{ContextCatalog: catalog, AttachmentHost: host, AttachmentContent: content}}
 	event := models.NormalizedExternalConversationEvent{ID: "event1", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C-origin", ExternalThreadID: "171.1", ExternalMessageID: "171.2", ExternalParticipantID: "U1", OccurredAt: time.Now().UTC(), OrderingKey: "171.2", Attachments: []models.ExternalConversationAttachment{{ID: "F1", Name: "note.txt", MediaType: "text/plain", SizeBytes: 13}}}
 	if err := event.Validate(); err != nil {
 		t.Fatal(err)
@@ -112,22 +112,22 @@ func TestExternalConversationImportsFileOnceAndScopesArtifact(t *testing.T) {
 
 type checkpointConversationHost struct{ calls int }
 
-func (h *checkpointConversationHost) LookupExternalConversationDelivery(context.Context, ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryAcknowledgement, error) {
-	return &ExternalConversationDeliveryAcknowledgement{Status: ExternalConversationAcknowledgementNotFound}, nil
+func (h *checkpointConversationHost) LookupExternalConversationDelivery(context.Context, DeliveryHostRequest) (*DeliveryAcknowledgement, error) {
+	return &DeliveryAcknowledgement{Status: AcknowledgementNotFound}, nil
 }
-func (h *checkpointConversationHost) DeliverExternalConversation(_ context.Context, req ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryHostResult, error) {
+func (h *checkpointConversationHost) DeliverExternalConversation(_ context.Context, req DeliveryHostRequest) (*DeliveryHostResult, error) {
 	h.calls++
 	if h.calls == 1 {
-		return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeRetry, ErrorCode: "file_upload_ready", Progress: map[string]interface{}{"providerFileId": "F-uploaded"}}, nil
+		return &DeliveryHostResult{Outcome: DeliveryOutcomeRetry, ErrorCode: "file_upload_ready", Progress: map[string]interface{}{"providerFileId": "F-uploaded"}}, nil
 	}
 	if req.Delivery.Progress["providerFileId"] != "F-uploaded" {
 		return nil, models.ErrExternalConversationConflict
 	}
-	return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: "file:F-uploaded"}, nil
+	return &DeliveryHostResult{Outcome: DeliveryOutcomeDelivered, ProviderMessageID: "file:F-uploaded"}, nil
 }
 func TestExternalConversationDeliveryPersistsCheckpointAcrossWorkerRestart(t *testing.T) {
 	store, catalog, endpoint := endpointFixture(t, t.Context(), "slack")
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "files", IdempotencyKey: "checkpoint"})
 	if err != nil {
 		t.Fatal(err)
@@ -136,14 +136,14 @@ func TestExternalConversationDeliveryPersistsCheckpointAcrossWorkerRestart(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewExternalConversationTransportService(store, catalog).Enqueue(t.Context(), EnqueueExternalConversationDeliveryRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend, ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.1", MaximumAttempts: 3})
+	_, err = NewTransportService(store, catalog).Enqueue(t.Context(), EnqueueExternalConversationDeliveryRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend, ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.1", MaximumAttempts: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	host := &checkpointConversationHost{}
-	config := ExternalConversationDeliveryWorkerConfig{WorkerID: "worker-one", BaseRetry: time.Nanosecond, MaximumRetry: time.Second}
+	config := DeliveryWorkerConfig{WorkerID: "worker-one", BaseRetry: time.Nanosecond, MaximumRetry: time.Second}
 	now := time.Now().UTC().Add(time.Second)
-	worker, err := NewExternalConversationDeliveryWorker(store, catalog, host, config, models.WithClock(func() time.Time { return now }))
+	worker, err := NewDeliveryWorker(store, catalog, host, config, models.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestExternalConversationDeliveryPersistsCheckpointAcrossWorkerRestart(t *te
 		t.Fatalf("checkpoint=%#v %v", result, err)
 	}
 	config.WorkerID = "worker-restarted"
-	worker, err = NewExternalConversationDeliveryWorker(store, catalog, host, config, models.WithClock(func() time.Time { return now.Add(time.Second) }))
+	worker, err = NewDeliveryWorker(store, catalog, host, config, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	if err != nil {
 		t.Fatal(err)
 	}

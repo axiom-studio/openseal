@@ -56,7 +56,7 @@ func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
 func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *testing.T) {
 	kernel := kerneltest.NewStore(t)
 	source, _, _, _ := conversationruntest.SettledTaskSource(t, kernel)
-	child, err := portfolio.NewPortfolioService(kernel).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	child, err := portfolio.NewService(kernel).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: source.Scope, Owner: source.Owner, Kind: models.RunKindAgentWork, ParentRunID: source.ID, AssignedAgentID: source.AssignedAgentID,
 		Goal: "Ordinary delegated operation", Source: models.RunSourceFork, Context: maps.Clone(source.Context),
 	})
@@ -81,7 +81,7 @@ func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *models.Con
 	if _, _, err := store.CreateConversation(t.Context(), conversation, "catalog-task-page"); err != nil {
 		t.Fatal(err)
 	}
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	if _, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		ID: "thread", Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requester"}, Intent: models.MessageIntentQuestion,
@@ -177,7 +177,7 @@ func TestCatalogConversationTaskContextPrioritizesIndependentRootWithoutWidening
 func TestCatalogConversationTaskContextDoesNotPrioritizeForkRoot(t *testing.T) {
 	store, _, admitted := catalogTaskPageFixture(t, 13)
 	root := admitted[0].WorkRun
-	child, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+	child, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: root.Scope, Owner: root.Owner, Kind: models.RunKindAgentWork, ParentRunID: root.ID, AssignedAgentID: root.AssignedAgentID,
 		Goal: "Complete this fork's partial goal", Source: models.RunSourceFork, Context: maps.Clone(root.Context),
 	})

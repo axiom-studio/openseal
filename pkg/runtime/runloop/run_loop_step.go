@@ -28,12 +28,12 @@ const (
 type stepResult struct {
 	kind     stepResultKind
 	produced bool // the producer was called in this claim (fairness count)
-	exit     RunLoopExit
+	exit     Exit
 }
 
-func exitResult(exit RunLoopExit) stepResult { return stepResult{kind: stepExit, exit: exit} }
+func exitResult(exit Exit) stepResult { return stepResult{kind: stepExit, exit: exit} }
 
-func exitResultPtr(exit *RunLoopExit) stepResult { return exitResult(*exit) }
+func exitResultPtr(exit *Exit) stepResult { return exitResult(*exit) }
 
 // stepState is what the loop knows about the running step.
 type stepState struct {
@@ -514,11 +514,11 @@ func (d *drive) checkRunAfterProduce(ctx context.Context, st *stepState) (stepRe
 	if models.IsTerminalAgentRunStatus(run.Status) {
 		d.run = run
 		d.endStep(cleanup, st)
-		return exitResult(RunLoopExit{Run: run, Reason: RunLoopExitEnded}), true
+		return exitResult(Exit{Run: run, Reason: ExitEnded}), true
 	}
 	if run.Status != models.AgentRunStatusRunning || run.LeaseOwner != d.workerID || st.lease.lost.Load() || ctx.Err() != nil {
 		d.run = run
-		return exitResult(RunLoopExit{Run: run, Reason: RunLoopExitLeaseLost, Err: models.ErrLeaseLost}), true
+		return exitResult(Exit{Run: run, Reason: ExitLeaseLost, Err: models.ErrLeaseLost}), true
 	}
 	return stepResult{}, false
 }
@@ -754,7 +754,7 @@ func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) 
 			Output: map[string]interface{}{"summary": text},
 		}, "")
 	}
-	cc := control.NewControlContext(d.toolsInput(st, nil), nil)
+	cc := control.NewContext(d.toolsInput(st, nil), nil)
 	result, err := d.l.config.PlainTextFinal(st.durCtx, cc, text)
 	if err != nil {
 		return d.stepError(ctx, st, err, StepFailureProducerFailed)
@@ -763,15 +763,15 @@ func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) 
 		d.run = models.CloneAgentRun(result.Run)
 	}
 	switch result.Kind {
-	case control.ControlFinal:
+	case control.Final:
 		return d.finishFinal(ctx, st, result.Final, "")
-	case control.ControlContinue:
+	case control.Continue:
 		return d.continueAfter(ctx, st, stepFinalRejected)
-	case control.ControlFailed:
+	case control.Failed:
 		return d.fail(ctx, st, *result.Failure, nil, "")
-	case control.ControlParked:
+	case control.Parked:
 		return d.park(ctx, st, *result.Park)
-	case control.ControlEnded:
+	case control.Ended:
 		return d.endedByTool(ctx, st, result.Run)
 	}
 	return d.stepError(ctx, st, fmt.Errorf("plain-text final returned %q", result.Kind), StepFailureProducerFailed)

@@ -195,7 +195,7 @@ func NewRoutineCallbackConsumer(offerer RoutineEventOfferer) *RoutineCallbackCon
 	return &RoutineCallbackConsumer{offerer: offerer}
 }
 
-var _ callback.CallbackEventConsumer = (*RoutineCallbackConsumer)(nil)
+var _ callback.EventConsumer = (*RoutineCallbackConsumer)(nil)
 
 // ConsumeCallbackEvent offers one GitHub event. Events of other providers
 // are not routine events and are skipped. An offer error fails the receipt,

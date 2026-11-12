@@ -52,7 +52,7 @@ func newDesktopLoop(t *testing.T, provider *fakeProvider, wrap func(models.Artif
 	}
 	resolver := &DesktopTurnResolver{
 		Scope: localScope, Host: provider.host(t, 0),
-		Publisher: &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: artifactcatalog.NewArtifactCatalog(store)},
+		Publisher: &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: artifactcatalog.NewCatalog(store)},
 	}
 	scopes := workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) { return []models.Scope{localScope}, nil })
 	kernel, err := opensealkernel.New(
@@ -282,8 +282,8 @@ func TestDesktopTaskLoopResumesPublicationWithoutModelReinvocation(t *testing.T)
 	if len(loop.artifacts(t, created.ID)) != 0 {
 		t.Fatal("a failed publication registered an artifact")
 	}
-	if _, err := loop.kernel.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
-		Scope: localScope, RunID: paused.ID, ExpectedRevision: paused.Revision, Kind: agentrun.AgentRunCommandResume,
+	if _, err := loop.kernel.CommandAgentRun(t.Context(), agentrun.CommandRequest{
+		Scope: localScope, RunID: paused.ID, ExpectedRevision: paused.Revision, Kind: agentrun.CommandResume,
 		Actor: models.ActivityActor{Type: "user", ID: "local-operator"},
 	}); err != nil {
 		t.Fatal(err)
@@ -337,8 +337,8 @@ func TestDesktopTaskLoopCanceledStepPublishesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loop.kernel.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
-		Scope: localScope, RunID: current.ID, ExpectedRevision: current.Revision, Kind: agentrun.AgentRunCommandCancel,
+	if _, err := loop.kernel.CommandAgentRun(t.Context(), agentrun.CommandRequest{
+		Scope: localScope, RunID: current.ID, ExpectedRevision: current.Revision, Kind: agentrun.CommandCancel,
 		Actor: models.ActivityActor{Type: "user", ID: "local-operator"}, Summary: "Stop",
 	}); err != nil {
 		t.Fatal(err)

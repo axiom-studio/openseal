@@ -12,12 +12,12 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
-func (s *Server) conversationService() (*conversation.ConversationService, bool) {
+func (s *Server) conversationService() (*conversation.Service, bool) {
 	store, ok := s.store.(models.ConversationStore)
 	if !ok {
 		return nil, false
 	}
-	return conversation.NewConversationService(store), true
+	return conversation.NewService(store), true
 }
 
 func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +185,7 @@ func (s *Server) handleSetConversationApprovalMode(w http.ResponseWriter, r *htt
 	if !s.authorizeDesktopChannelWrite(w, payload.Scope, &actor) {
 		return
 	}
-	result, err := conversation.NewConversationApprovalModeService(store).SetApprovalMode(r.Context(), conversation.SetConversationApprovalModeRequest{
+	result, err := conversation.NewApprovalModeService(store).SetApprovalMode(r.Context(), conversation.SetConversationApprovalModeRequest{
 		Scope: payload.Scope, ConversationID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
 		Mode: payload.Mode, Actor: payload.Actor, CorrelationID: strings.TrimSpace(r.Header.Get("X-Correlation-ID")),
 	})
@@ -308,12 +308,12 @@ func (s *Server) handleListConversationChanges(w http.ResponseWriter, r *http.Re
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	service, err := conversation.NewConversationChangeService(conversationStore, s.store)
+	service, err := conversation.NewChangeService(conversationStore, s.store)
 	if err != nil {
 		s.respondConversationError(w, err)
 		return
 	}
-	changes, err := service.ListChanges(r.Context(), conversation.ConversationChangeRequest{
+	changes, err := service.ListChanges(r.Context(), conversation.ChangeRequest{
 		Scope: scope, ConversationID: conversationID, Cursor: strings.TrimSpace(r.URL.Query().Get("cursor")), Limit: limit,
 	})
 	if err != nil {
@@ -505,7 +505,7 @@ func (s *Server) handleListConversationPresence(w http.ResponseWriter, r *http.R
 	s.respondJSON(w, http.StatusOK, values)
 }
 
-func (s *Server) conversationRequestContext(w http.ResponseWriter, r *http.Request) (*conversation.ConversationService, models.Scope, string, bool) {
+func (s *Server) conversationRequestContext(w http.ResponseWriter, r *http.Request) (*conversation.Service, models.Scope, string, bool) {
 	service, ok := s.conversationService()
 	if !ok {
 		s.respondError(w, http.StatusNotImplemented, "team channels are unavailable")
@@ -519,7 +519,7 @@ func (s *Server) conversationRequestContext(w http.ResponseWriter, r *http.Reque
 	return service, scope, strings.TrimSpace(r.PathValue("id")), true
 }
 
-func (s *Server) conversationRequestContextFromBodyStore(w http.ResponseWriter, r *http.Request) (*conversation.ConversationService, models.Scope, string, bool) {
+func (s *Server) conversationRequestContextFromBodyStore(w http.ResponseWriter, r *http.Request) (*conversation.Service, models.Scope, string, bool) {
 	service, ok := s.conversationService()
 	if !ok {
 		s.respondError(w, http.StatusNotImplemented, "team channels are unavailable")

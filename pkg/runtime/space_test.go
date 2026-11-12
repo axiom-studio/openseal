@@ -67,7 +67,7 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	clock := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
 	tick := models.WithClock(func() time.Time { clock = clock.Add(time.Second); return clock })
 	spaces := portfolio.NewSpaceService(store, tick)
-	conversations := conversation.NewConversationService(store, tick)
+	conversations := conversation.NewService(store, tick)
 	scope := models.Scope{Kind: "tenant", ID: "spaces-" + strings.ReplaceAll(t.Name(), "/", "-")}
 
 	const owner = "7"
@@ -278,7 +278,7 @@ func assertSpaceOrder(t *testing.T, spaces *portfolio.SpaceService, scope models
 	}
 }
 
-func assertSpaceConversations(t *testing.T, conversations *conversation.ConversationService, scope models.Scope, spaceID string, ids ...string) {
+func assertSpaceConversations(t *testing.T, conversations *conversation.Service, scope models.Scope, spaceID string, ids ...string) {
 	t.Helper()
 	listed, err := conversations.ListConversations(context.Background(), models.ConversationFilter{Scope: scope, SpaceID: spaceID})
 	if err != nil {
@@ -311,7 +311,7 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	agentOnly := models.Scope{Kind: "tenant", ID: "agents-only"}
 	// The conversation needs a space to be created; the rewind below drops it.
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
+	conversation, _, err := conversation.NewService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {
@@ -364,7 +364,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	if _, _, err := store.PutSpaceMember(ctx, scope, &models.SpaceMember{SpaceID: seeded.ID, Type: models.SpaceMemberAgent, ID: "helper", AddedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
+	conversation, _, err := conversation.NewService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {

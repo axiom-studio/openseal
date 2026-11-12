@@ -20,10 +20,10 @@ const (
 	proposalRejectionDefaultMessage               = "The action was not accepted."
 )
 
-// ActionProposalRejection is a proposal the kernel refused for a reason the
+// ProposalRejection is a proposal the kernel refused for a reason the
 // model can correct. It is returned to the model as a refused tool result and
 // never persisted.
-type ActionProposalRejection struct {
+type ProposalRejection struct {
 	// Code is one of the ProposalRejection* codes.
 	Code string
 	// Message is model-visible, at most 1024 bytes.
@@ -31,9 +31,9 @@ type ActionProposalRejection struct {
 	Cause   error
 }
 
-func (e *ActionProposalRejection) Error() string { return e.Message }
+func (e *ProposalRejection) Error() string { return e.Message }
 
-func (e *ActionProposalRejection) Unwrap() error { return e.Cause }
+func (e *ProposalRejection) Unwrap() error { return e.Cause }
 
 // RejectProposal turns err into a model-visible rejection with code. It is
 // nil-safe and keeps an existing rejection unchanged.
@@ -41,11 +41,11 @@ func RejectProposal(code string, err error) error {
 	if err == nil {
 		return nil
 	}
-	var existing *ActionProposalRejection
+	var existing *ProposalRejection
 	if errors.As(err, &existing) {
 		return err
 	}
-	return &ActionProposalRejection{Code: code, Message: boundProposalRejectionMessage(err.Error()), Cause: err}
+	return &ProposalRejection{Code: code, Message: boundProposalRejectionMessage(err.Error()), Cause: err}
 }
 
 // boundProposalRejectionMessage trims message and cuts it on a rune

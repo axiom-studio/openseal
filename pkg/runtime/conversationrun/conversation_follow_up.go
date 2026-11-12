@@ -68,10 +68,10 @@ func conversationFollowUpRunEligible(ctx context.Context, store models.Portfolio
 // ingests the message into its session through catch-up (a user entry, once).
 // One Run handles the whole exchange instead of parallel Runs competing for
 // the lane. A nil result means no Run absorbed the message.
-func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
+func (s *Scheduler) deliverToActiveConversationRun(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (*agentrun.CommandResult, error) {
 	switch conversation.Owner.Type {
 	case models.OwnerTypeAgent:
-		return s.deliverToConversationLane(ctx, conversation, message, runtimeconversation.ConversationAgentRunRequest(conversation, message).ConcurrencyKey)
+		return s.deliverToConversationLane(ctx, conversation, message, runtimeconversation.AgentRunRequest(conversation, message).ConcurrencyKey)
 	case models.OwnerTypeTeam:
 		return s.deliverToWorkingMembers(ctx, conversation, message)
 	}
@@ -86,7 +86,7 @@ func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Co
 // message to its own session. An
 // addressed message is routed; a member it names who is working takes it as
 // a follow-up there (routeTeamMessage).
-func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
+func (s *Scheduler) deliverToWorkingMembers(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (*agentrun.CommandResult, error) {
 	root := models.ExternalConversationThreadRoot(conversation, message)
 	if message.Sender.Type != models.ConversationParticipantUser || len(message.Mentions) > 0 || runtimeconversation.QuotedMessageID(message.Quote) != "" ||
 		(message.Audience.Kind != "" && message.Audience.Kind != models.ConversationAudienceChannel) ||
@@ -100,7 +100,7 @@ func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	var first *agentrun.AgentRunCommandResult
+	var first *agentrun.CommandResult
 	lanes := map[string]bool{}
 	for _, run := range runs {
 		if !models.IsTeamMemberRun(run) || models.IsTerminalAgentRunStatus(run.Status) {
@@ -125,11 +125,11 @@ func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, 
 // deliverToConversationLane is deliverToActiveConversationRun for one lane:
 // an Agent channel's, or a Team member's lane in a Team channel, so a member
 // already answering the same person takes the new message as a follow-up.
-func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, lane string) (*agentrun.AgentRunCommandResult, error) {
+func (s *Scheduler) deliverToConversationLane(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, lane string) (*agentrun.CommandResult, error) {
 	if message.Sender.Type != models.ConversationParticipantUser {
 		return nil, nil
 	}
-	actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, message)
+	actor, valid := runtimeconversation.MessageInitiatingUser(conversation, message)
 	if !valid {
 		return nil, nil
 	}
@@ -153,7 +153,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 					if superseded != nil {
 						run = superseded.Run
 					}
-					return &agentrun.AgentRunCommandResult{Run: run}, nil
+					return &agentrun.CommandResult{Run: run}, nil
 				}
 			}
 		}
@@ -177,7 +177,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 			if err != nil {
 				return nil, err
 			}
-			if triggerActor, ok := runtimeconversation.ConversationMessageInitiatingUser(conversation, trigger); ok && triggerActor == actor {
+			if triggerActor, ok := runtimeconversation.MessageInitiatingUser(conversation, trigger); ok && triggerActor == actor {
 				target = run
 				break
 			}
@@ -222,7 +222,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 		if superseded != nil {
 			run = superseded.Run
 		}
-		return &agentrun.AgentRunCommandResult{Run: run, Event: event}, nil
+		return &agentrun.CommandResult{Run: run, Event: event}, nil
 	}
 	return nil, models.ErrRevisionConflict
 }
@@ -253,7 +253,7 @@ func conversationFollowUpInstruction(message *models.ChannelMessage) string {
 // Agent, preferring the already loaded recent history, in channel order. It
 // serves only the old goal-building path in conversation_run.go and goes with
 // it; loop Runs read follow-ups from their session (catch-up).
-func (r *ConversationRunTurnRunner) conversationFollowUpMessages(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, viewer models.ConversationViewer, recent []*models.ChannelMessage) ([]*models.ChannelMessage, error) {
+func (r *TurnRunner) conversationFollowUpMessages(ctx context.Context, run *models.AgentRun, conversation *models.Conversation, viewer models.ConversationViewer, recent []*models.ChannelMessage) ([]*models.ChannelMessage, error) {
 	deliveries := models.ConversationRunFollowUps(run)
 	if len(deliveries) == 0 {
 		return nil, nil
@@ -293,7 +293,7 @@ func (r *ConversationRunTurnRunner) conversationFollowUpMessages(ctx context.Con
 // person pressed Accept or Decline) is kept: the message then reaches the Run
 // as an ordinary follow-up when it resumes. It returns the resolution, or nil
 // when nothing was superseded.
-func (s *ConversationRunScheduler) supersedeApprovalForMessage(ctx context.Context, run *models.AgentRun, message *models.ChannelMessage) (*models.ApprovalResolutionResult, error) {
+func (s *Scheduler) supersedeApprovalForMessage(ctx context.Context, run *models.AgentRun, message *models.ChannelMessage) (*models.ApprovalResolutionResult, error) {
 	if run == nil || message == nil || !conversationRunHasFollowUp(run, message.ID) {
 		return nil, nil
 	}
@@ -302,7 +302,7 @@ func (s *ConversationRunScheduler) supersedeApprovalForMessage(ctx context.Conte
 
 // replaceApprovalWithMessage closes the Run's pending approval as replaced by
 // the message, whether or not the message was delivered to the Run.
-func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Context, run *models.AgentRun, message *models.ChannelMessage) (*models.ApprovalResolutionResult, error) {
+func (s *Scheduler) replaceApprovalWithMessage(ctx context.Context, run *models.AgentRun, message *models.ChannelMessage) (*models.ApprovalResolutionResult, error) {
 	if run == nil || message == nil || run.Status != models.AgentRunStatusWaitingForApproval || run.WakeCondition == nil ||
 		run.WakeCondition.Type != "approval" || run.WakeCondition.Reference == "" {
 		return nil, nil
@@ -342,11 +342,11 @@ func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Contex
 // replaced by the message, like a 1:1 chat's. Those Runs then stop without a
 // reply (conversationLoop.replacedTeamApproval); the routed member answers
 // the message.
-func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, root string, routed map[string]bool) error {
+func (s *Scheduler) replaceOtherMemberApprovals(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage, root string, routed map[string]bool) error {
 	if conversation.Owner.Type != models.OwnerTypeTeam || message.Sender.Type != models.ConversationParticipantUser {
 		return nil
 	}
-	actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, message)
+	actor, valid := runtimeconversation.MessageInitiatingUser(conversation, message)
 	if !valid {
 		return nil
 	}
@@ -375,7 +375,7 @@ func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		if triggerActor, ok := runtimeconversation.ConversationMessageInitiatingUser(conversation, trigger); !ok || triggerActor != actor {
+		if triggerActor, ok := runtimeconversation.MessageInitiatingUser(conversation, trigger); !ok || triggerActor != actor {
 			continue
 		}
 		if _, err := s.replaceApprovalWithMessage(ctx, run, message); err != nil {

@@ -5,7 +5,7 @@ package runtime
 // the model, a terminal failure is a typed Run.FailureExplanation with a
 // visible chat message, the final answer checks answer with tool errors the
 // model repairs, and the final answer tool carries visuals, silence,
-// broadcast and generated files. Every scenario drives the real RunLoop
+// broadcast and generated files. Every scenario drives the real runloop.Loop
 // through the loop fixture; only the model, the dispatcher, the host tools,
 // the visual host checks and the evidence reviewer are fakes.
 
@@ -218,7 +218,7 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 			f.Dispatch.On("lookup", bigLookup)
 			conversation, run := f.StartChat("check issues 1 to 5")
 			exit, failed := f.RunClaimWith(f.Ctx, run.ID, f.WithLoopCompactor)
-			if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil {
+			if exit.Reason != runloop.ExitFailed || exit.Err != nil {
 				t.Fatalf("exit = %s (%v), want failed", exit.Reason, exit.Err)
 			}
 			f.MustStatus(failed, models.AgentRunStatusFailed)
@@ -314,7 +314,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				return looptest.FinalAnswer(map[string]any{"answer": "Revenue is up.", "visual": failurePortVisual()})
 			}}))
 			content := &looptest.AnswerVisualContent{}
-			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{AttachmentContent: content})
+			convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content})
 			conversation, run := f.StartChat("how is revenue?")
 			trigger := f.Messages(conversation.ID)[0]
 			done := f.DriveToRest(run.ID, 3)
@@ -356,7 +356,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				return looptest.FinalAnswer(map[string]any{"answer": "Revenue is up.", "visual": bound})
 			}}))
 			content := &looptest.AnswerVisualContent{}
-			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{AttachmentContent: content, VisualChecks: func(*models.AgentRun) presentation.ValidateOptions {
+			convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content, VisualChecks: func(*models.AgentRun) presentation.ValidateOptions {
 				return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error {
 					return errors.New("not in this chat")
 				})}

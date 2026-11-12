@@ -156,13 +156,13 @@ func TestRoutineEventIndexRefreshOnActivationChange(t *testing.T) {
 	}
 
 	// A peer's signal and the backstop rebuild read the store.
-	peer := routine.NewRoutineEventMatcher(h.Store)
+	peer := routine.NewEventMatcher(h.Store)
 	defer peer.Close()
 	other := h.Routine("other", nil)
 	if !peer.Listening(h.Scope, models.RoutineEventGmailMessage, other.Task.Event.SourceRef) {
 		t.Fatal("a second matcher on the same store did not follow the write")
 	}
-	cold := routine.NewRoutineEventMatcher(&routineEventStoreOnly{RoutineEventStore: h.Store, activations: h.Store})
+	cold := routine.NewEventMatcher(&routineEventStoreOnly{RoutineEventStore: h.Store, activations: h.Store})
 	defer cold.Close()
 	if cold.Listening(h.Scope, models.RoutineEventGmailMessage, other.Task.Event.SourceRef) {
 		t.Fatal("a cold matcher listens before its first rebuild")
@@ -199,7 +199,7 @@ func (s *routineEventStoreOnly) GetRunbookActivation(ctx context.Context, scope 
 func TestRoutineEventOverflowStoresNoPayload(t *testing.T) {
 	h, db := routinetest.NewEventRowsHarness(t)
 	activation := h.Routine("busy", nil)
-	h.Offer(activation, routine.RoutineEventMaxPendingPerRoutine)
+	h.Offer(activation, routine.EventMaxPendingPerRoutine)
 	h.Serial++
 	overflowID := fmt.Sprintf("gmail:%06d", h.Serial)
 	offer, err := h.Matcher.OfferRoutineEvent(h.Ctx, h.Event(activation, overflowID))
@@ -260,7 +260,7 @@ func TestRoutineEventStats(t *testing.T) {
 	if stats.QueueDepth != 3 {
 		t.Fatalf("queue depth = %d, want 3 (one test and two real events read in the pass)", stats.QueueDepth)
 	}
-	if len(stats.MatchLatencyBuckets) != len(routine.RoutineEventLatencyBuckets) || len(stats.MatchLatencyCounts) != len(routine.RoutineEventLatencyBuckets) {
+	if len(stats.MatchLatencyBuckets) != len(routine.EventLatencyBuckets) || len(stats.MatchLatencyCounts) != len(routine.EventLatencyBuckets) {
 		t.Fatalf("latency buckets %#v counts %#v", stats.MatchLatencyBuckets, stats.MatchLatencyCounts)
 	}
 	if last := stats.MatchLatencyCounts[len(stats.MatchLatencyCounts)-1]; last != 5 {
@@ -308,7 +308,7 @@ func TestRoutineTestEventDoesNotConsumeOccurrence(t *testing.T) {
 	// Test events are capped per hour.
 	h2 := routinetest.NewEventHarness(t)
 	capped := h2.Routine("capped", nil)
-	for i := 0; i < routine.RoutineTestEventsPerHour; i++ {
+	for i := 0; i < routine.TestEventsPerHour; i++ {
 		if _, _, err := h2.Matcher.OfferRoutineTestEvent(h2.Ctx, h2.Scope, capped.ID, "user-1", json.RawMessage(`{"n":1}`)); err != nil {
 			t.Fatal(err)
 		}

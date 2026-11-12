@@ -82,19 +82,19 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 // durable store is authoritative; the wake channel is only a latency hint.
 type AgentRunWorkerPool struct {
 	config               AgentRunWorkerConfig
-	scheduler            *agentrun.AgentRunScheduler
+	scheduler            *agentrun.Scheduler
 	portfolio            models.PortfolioStore
-	loop                 *runloop.RunLoop
-	wakeService          *agentrun.AgentRunWakeService
+	loop                 *runloop.Loop
+	wakeService          *agentrun.WakeService
 	activity             *activity.RunActivityService
-	actions              *action.ActionCoordinator
+	actions              *action.Coordinator
 	runFinalizer         agentrun.RunTerminalFinalizer
 	runCommands          *agentrun.RunCommandService
 	lastFinalizationScan time.Time
 	dependencyCursor     string
 	forks                *agentrun.RunForkCoordinator
 	dependencies         *portfolio.DependencyCoordinator // pages waiting fork groups; nil unless the store indexes them
-	collaboration        *collaboration.CollaborationService
+	collaboration        *collaboration.Service
 	conversationTasks    *conversationrun.ConversationTaskService
 	requestInbox         *collaboration.AgentRequestInboxReconciler
 	reportingStore       models.ConversationStore
@@ -117,8 +117,8 @@ type AgentRunWorkerPool struct {
 }
 
 // SetActionCoordinator opens each step's nested-action window (a running
-// command's governed calls) on the pool's ActionCoordinator.
-func (p *AgentRunWorkerPool) SetActionCoordinator(actions *action.ActionCoordinator) {
+// command's governed calls) on the pool's action.Coordinator.
+func (p *AgentRunWorkerPool) SetActionCoordinator(actions *action.Coordinator) {
 	p.actions = actions
 	p.loop.SetActionCoordinator(actions)
 }
@@ -144,7 +144,7 @@ func (p *AgentRunWorkerPool) IdleFor(now time.Time) time.Duration {
 }
 
 func NewAgentRunWorkerPool(store models.KernelStore, resolver conversation.TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
-	return newAgentRunWorkerPool(store, resolver, logger, config, runloop.RunLoopMaxStepsPerClaim, opts...)
+	return newAgentRunWorkerPool(store, resolver, logger, config, runloop.MaxStepsPerClaim, opts...)
 }
 
 // newAgentRunWorkerPool is NewAgentRunWorkerPool with the number of steps
@@ -160,7 +160,7 @@ func newAgentRunWorkerPool(store models.KernelStore, resolver conversation.TurnR
 		logger = zap.NewNop().Sugar()
 	}
 	clock := models.ClockFrom(opts)
-	loop, err := runloop.NewRunLoop(store, nil, logger, runloop.RunLoopConfig{
+	loop, err := runloop.New(store, nil, logger, runloop.Config{
 		StepLeaseDuration: config.TurnLeaseDuration, MaxStepsPerClaim: maxStepsPerClaim, Now: clock,
 		PlanToolEntries: workerPlanToolEntries(store), PlainTextFinal: workerPlainTextFinal,
 	})
@@ -168,8 +168,8 @@ func newAgentRunWorkerPool(store models.KernelStore, resolver conversation.TurnR
 		return nil, err
 	}
 	pool := &AgentRunWorkerPool{
-		config: config, scheduler: agentrun.NewAgentRunScheduler(store, opts...), portfolio: store, loop: loop,
-		wakeService: agentrun.NewAgentRunWakeService(store, store, opts...), activity: activity.NewRunActivityService(store, store, opts...),
+		config: config, scheduler: agentrun.NewScheduler(store, opts...), portfolio: store, loop: loop,
+		wakeService: agentrun.NewWakeService(store, store, opts...), activity: activity.NewRunActivityService(store, store, opts...),
 		runCommands: agentrun.NewRunCommandService(store, opts...), now: clock,
 		resolver: resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: workqueue.NewWorkerPollSignal(),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
@@ -183,7 +183,7 @@ func newAgentRunWorkerPool(store models.KernelStore, resolver conversation.TurnR
 		}
 	}
 	if collaborationStore, ok := store.(models.CollaborationKernelStore); ok {
-		pool.collaboration = collaboration.NewCollaborationService(collaborationStore, opts...)
+		pool.collaboration = collaboration.NewService(collaborationStore, opts...)
 	}
 	if taskStore, ok := store.(models.ConversationTaskKernelStore); ok {
 		pool.conversationTasks = conversationrun.NewConversationTaskService(taskStore, opts...)
@@ -253,7 +253,7 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			p.usage.End()
 			return
 		}
-		run, err := p.scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{
+		run, err := p.scheduler.ClaimNext(ctx, agentrun.ClaimRequest{
 			Scope: p.config.Scope, Kind: p.config.Kind, WorkerID: workerID, AssignedAgentID: p.config.AssignedAgentID,
 			LeaseDuration: p.config.LeaseDuration, AgingInterval: p.config.AgingInterval,
 			MaxActiveForAgent:                 p.config.MaxActiveForAgent,
@@ -351,11 +351,11 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	claimCtx, cancelClaim := context.WithCancel(ctx)
 	heartbeatDone := make(chan error, 1)
 	go p.heartbeatRunLease(claimCtx, cancelClaim, workerID, run, heartbeatDone)
-	exit := p.loop.Drive(claimCtx, runloop.RunLoopClaim{Run: run, WorkerID: workerID, Binding: binding})
+	exit := p.loop.Drive(claimCtx, runloop.Claim{Run: run, WorkerID: workerID, Binding: binding})
 	cancelClaim()
-	if heartbeatErr := <-heartbeatDone; heartbeatErr != nil && exit.Reason != runloop.RunLoopExitLeaseLost {
+	if heartbeatErr := <-heartbeatDone; heartbeatErr != nil && exit.Reason != runloop.ExitLeaseLost {
 		p.logger.Warnw("agent Run lease was lost during its claim", "runId", run.ID, "exit", exit.Reason, "error", heartbeatErr)
-		exit.Reason = runloop.RunLoopExitLeaseLost
+		exit.Reason = runloop.ExitLeaseLost
 	}
 	if exit.Err != nil {
 		p.logger.Warnw("agent run claim ended with an error", "runId", run.ID, "exit", exit.Reason, "steps", exit.Steps, "error", exit.Err)
@@ -364,7 +364,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	case exit.Run != nil && models.IsTerminalAgentRunStatus(exit.Run.Status):
 		p.finishTerminalRun(ctx, exit.Run)
 		p.Wake()
-	case exit.Reason == runloop.RunLoopExitYielded || exit.Reason == runloop.RunLoopExitRequeued || exit.Reason == runloop.RunLoopExitParked:
+	case exit.Reason == runloop.ExitYielded || exit.Reason == runloop.ExitRequeued || exit.Reason == runloop.ExitParked:
 		p.Wake()
 	}
 }
@@ -379,7 +379,7 @@ func (p *AgentRunWorkerPool) finishTerminalRun(ctx context.Context, run *models.
 	p.resolveCollaborationChild(ctx, run)
 }
 
-// workerPlanToolEntries is the pool's RunLoopConfig.PlanToolEntries: the
+// workerPlanToolEntries is the pool's runloop.Config.PlanToolEntries: the
 // dispatcher's planners over the binding's claim executor.
 func workerPlanToolEntries(store models.PortfolioStore) runloop.StepToolEntryPlanner {
 	return func(binding *agentrun.TurnRunnerBinding, session *models.AgentSession, step *models.AgentTurn, assistant *models.SessionEntry, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
@@ -400,17 +400,17 @@ func workerPlanToolEntries(store models.PortfolioStore) runloop.StepToolEntryPla
 	}
 }
 
-// workerPlainTextFinal is the pool's RunLoopConfig.PlainTextFinal: the
+// workerPlainTextFinal is the pool's runloop.Config.PlainTextFinal: the
 // control executor of the binding's claim executor judges the text.
-func workerPlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (runtimecontrol.ControlResult, error) {
-	var control *runtimecontrol.ControlExecutor
+func workerPlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (runtimecontrol.Result, error) {
+	var control *runtimecontrol.Executor
 	if cc.Binding != nil {
 		if tools, ok := cc.Binding.Tools.(*runloop.ClaimToolExecutor); ok {
 			control = tools.ControlExecutor()
 		}
 	}
 	if control == nil {
-		return runtimecontrol.ControlResult{}, errors.New("plain-text final needs a binding whose tool executor has a control executor")
+		return runtimecontrol.Result{}, errors.New("plain-text final needs a binding whose tool executor has a control executor")
 	}
 	return control.PlainTextFinal(ctx, cc, text)
 }

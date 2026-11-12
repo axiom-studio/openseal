@@ -16,7 +16,7 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
 		Goal: "Ship the release", Source: models.RunSourceManual,
@@ -25,7 +25,7 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := collaboration.NewCollaborationService(store)
+	service := collaboration.NewService(store)
 	created, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
@@ -74,7 +74,7 @@ func TestAgentRequestNegotiationAndSafety(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	portfolio := portfolio.NewPortfolioService(store)
+	portfolio := portfolio.NewService(store)
 	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 		Goal: "Ship", Source: models.RunSourceManual,
@@ -82,7 +82,7 @@ func TestAgentRequestNegotiationAndSafety(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := collaboration.NewCollaborationService(store)
+	service := collaboration.NewService(store)
 	base := collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},

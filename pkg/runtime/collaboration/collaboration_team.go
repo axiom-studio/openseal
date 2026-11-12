@@ -13,7 +13,7 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context, request *models.AgentRequest) ([]models.AgentRequestCandidate, error) {
+func (s *Service) resolveTeamRequestCandidates(ctx context.Context, request *models.AgentRequest) ([]models.AgentRequestCandidate, error) {
 	if s.teams == nil {
 		return nil, fmt.Errorf("%w: Team roster assignment is unavailable", models.ErrAgentRequestAssignment)
 	}
@@ -104,7 +104,7 @@ func agentDefinitionProvidesSkills(definition *kernelagent.AgentDefinition, requ
 	return true
 }
 
-func (s *CollaborationService) SubmitAgentRequestBid(ctx context.Context, req SubmitAgentRequestBidRequest) (*AgentRequestResult, error) {
+func (s *Service) SubmitAgentRequestBid(ctx context.Context, req SubmitAgentRequestBidRequest) (*AgentRequestResult, error) {
 	if s == nil || s.store == nil || s.runs == nil {
 		return nil, errors.New("collaboration store is not configured")
 	}
@@ -158,7 +158,7 @@ func (s *CollaborationService) SubmitAgentRequestBid(ctx context.Context, req Su
 	return &AgentRequestResult{Request: updated, Source: source, Events: []*models.ActivityEvent{persisted}}, nil
 }
 
-func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, request *models.AgentRequest, assignedAgentID string) (string, error) {
+func (s *Service) resolveRequestAssignment(ctx context.Context, request *models.AgentRequest, assignedAgentID string) (string, error) {
 	assignedAgentID = strings.TrimSpace(assignedAgentID)
 	if request.Recipient.Type == models.OwnerTypeAgent {
 		if assignedAgentID != "" && assignedAgentID != request.Recipient.ID {

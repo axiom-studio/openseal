@@ -20,8 +20,8 @@ import (
 
 type startTaskHandler struct{}
 
-func (startTaskHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
-	return ControlToolSpec{
+func (startTaskHandler) Spec(agentrun.ControlAuthority) ToolSpec {
+	return ToolSpec{
 		Description: "Start one durable background task for substantial requested work and reply with a brief acknowledgment. " +
 			"Call it alone; it ends your reply to this message.",
 		InputSchema: map[string]interface{}{
@@ -57,7 +57,7 @@ func startTaskNewMessage() *models.ToolResult {
 		"A new message arrived before the task started; read it and decide again.", nil)
 }
 
-func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
+func (startTaskHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
 	args := cc.Arguments.(*models.StartTaskArgs)
 	// Rule 1 (§7.2): the only tool call of its assistant entry. The loop
 	// refuses mixed entries before the inline phase; this keeps a resumed
@@ -80,7 +80,7 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 		}
 		budget, err := modelstep.ControlRunBudget(run, "")
 		if err != nil {
-			return ControlResult{}, err
+			return Result{}, err
 		}
 		result, err := x.Tasks.Start(ctx, conversationrun.StartConversationTaskRequest{
 			Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: cc.WorkerID,
@@ -98,10 +98,10 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 			// revision under the claim (a heartbeat, a steering append).
 			reloaded, getErr := x.Portfolio.GetAgentRun(ctx, run.Scope, run.ID)
 			if getErr != nil {
-				return ControlResult{}, getErr
+				return Result{}, getErr
 			}
 			if reloaded == nil || reloaded.Status != models.AgentRunStatusRunning || reloaded.LeaseOwner != cc.WorkerID {
-				return ControlResult{}, models.ErrLeaseLost
+				return Result{}, models.ErrLeaseLost
 			}
 			run = reloaded
 			cc.Run = reloaded
@@ -109,7 +109,7 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 		case errors.Is(err, models.ErrInvalidConversationTask), errors.Is(err, models.ErrConversationTaskConflict):
 			return x.refuse(ctx, cc, startTaskRejected("The task could not be started: "+err.Error()+". Answer in this conversation instead."))
 		default:
-			return ControlResult{}, err
+			return Result{}, err
 		}
 	}
 }
@@ -118,20 +118,20 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 // independent task ended the source Run in its transaction. A replayed
 // continuation means this Run was already promoted to background work: the
 // redundant call gets an error result and the Run continues as that work.
-func (x *ControlExecutor) startTaskResult(ctx context.Context, cc agentrun.ControlContext, result *models.ConversationTaskResult) (ControlResult, error) {
+func (x *Executor) startTaskResult(ctx context.Context, cc agentrun.ControlContext, result *models.ConversationTaskResult) (Result, error) {
 	if result == nil || result.Task == nil {
-		return ControlResult{}, errors.New("conversation task admission returned no task")
+		return Result{}, errors.New("conversation task admission returned no task")
 	}
 	if result.Task.Mode == models.ConversationTaskModeContinuation {
 		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "already_background",
 			"This conversation already continues as a background task; keep working on it here.", map[string]interface{}{"taskId": result.Task.ID}))
 	}
 	if result.SourceRun == nil || result.SourceRun.Status != models.AgentRunStatusCompleted {
-		return ControlResult{}, errors.New("conversation task admission returned no committed source completion")
+		return Result{}, errors.New("conversation task admission returned no committed source completion")
 	}
 	entry, err := x.Sessions.GetSessionEntry(ctx, cc.Run.Scope, cc.Entry.ID)
 	if err != nil {
-		return ControlResult{}, err
+		return Result{}, err
 	}
-	return ControlResult{Kind: ControlEnded, Run: result.SourceRun, Entry: entry}, nil
+	return Result{Kind: Ended, Run: result.SourceRun, Entry: entry}, nil
 }

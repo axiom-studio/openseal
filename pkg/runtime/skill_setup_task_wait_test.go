@@ -70,7 +70,7 @@ type skillSetupTaskWaitFixture struct {
 func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *models.ConversationTaskResult {
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "task-sql"}
-	conversations := conversation.NewConversationService(store)
+	conversations := conversation.NewService(store)
 	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "task-agent"}, Title: "Task setup", IdempotencyKey: "task-setup-chat",
@@ -79,7 +79,7 @@ func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *model
 		t.Fatal(err)
 	}
 	message := conversationruntest.PostMessage(t, conversations, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Read the community in the background", "task-setup-source")
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	}); err != nil {
 		t.Fatal(err)
 	}
-	validator, err := skillbinding.NewSkillBindingActionValidator(catalog, models.TeamRosterReaderOf(store))
+	validator, err := skillbinding.NewActionValidator(catalog, models.TeamRosterReaderOf(store))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal, err := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator}).Propose(t.Context(), action.ProposeActionRequest{
+	proposal, err := action.NewCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ProposalValidator{validator}).Propose(t.Context(), action.ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: step.ID, WorkerID: "setup-worker", DeploymentID: run.AssignedAgentID,
 		SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup,
 		Arguments: arguments,
@@ -206,11 +206,11 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 		}
 		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{candidate}}, nil
 	})
-	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := action.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(t.Context(), run.Scope, proposal.Call.ID, "setup-worker")
+	executed, err := action.NewWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(t.Context(), run.Scope, proposal.Call.ID, "setup-worker")
 	if err != nil || executed == nil || executed.Call.Status != models.ActionCallStatusSucceeded {
 		if executed != nil && executed.Call != nil {
 			t.Fatalf("canonical setup execution: status=%s action error=%s worker error=%v", executed.Call.Status, executed.Call.Error, err)
@@ -279,9 +279,9 @@ func (f *skillSetupTaskWaitFixture) resolve(t *testing.T, status string) {
 	f.request = request
 }
 
-func (f *skillSetupTaskWaitFixture) reconcile(t *testing.T) (*agentrun.AgentRunCommandResult, bool, error) {
+func (f *skillSetupTaskWaitFixture) reconcile(t *testing.T) (*agentrun.CommandResult, bool, error) {
 	t.Helper()
-	scheduler, err := conversationrun.NewConversationRunScheduler(f.store, f.store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(f.store, f.store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,12 +304,12 @@ func skillSetupCompletionEvents(t *testing.T, store skillSetupTaskTestStore, run
 }
 
 func TestSkillSetupTaskResolutionPreservesOperatorPauseAndCancel(t *testing.T) {
-	for _, command := range []agentrun.AgentRunCommandKind{agentrun.AgentRunCommandPause, agentrun.AgentRunCommandCancel} {
+	for _, command := range []agentrun.CommandKind{agentrun.CommandPause, agentrun.CommandCancel} {
 		t.Run(string(command), func(t *testing.T) {
 			forSkillSetupTaskStores(t, func(t *testing.T, store skillSetupTaskTestStore, restart func() skillSetupTaskTestStore) {
 				f := newSkillSetupTaskFixture(t, store)
 				waiting := f.wait(t)
-				changed, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
+				changed, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.CommandRequest{
 					Scope: waiting.Scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: command,
 					Actor: models.ActivityActor{Type: "user", ID: f.task.Task.AuthenticatedActor.ID},
 				})
@@ -320,7 +320,7 @@ func TestSkillSetupTaskResolutionPreservesOperatorPauseAndCancel(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if command == agentrun.AgentRunCommandCancel {
+				if command == agentrun.CommandCancel {
 					// Canceling closes the Run's open setup form; it can no longer
 					// be completed for this Run.
 					closed, err := store.GetSkillSetupRequest(t.Context(), f.request.Scope, f.request.ID)
@@ -353,7 +353,7 @@ func TestSkillSetupTaskReconciliationRecoversResolutionBeforeWait(t *testing.T) 
 		}
 		waiting := f.wait(t)
 		f.store = restart()
-		scheduler, err := conversationrun.NewConversationRunScheduler(f.store, f.store, conversationrun.ConversationRunSchedulerConfig{})
+		scheduler, err := conversationrun.NewScheduler(f.store, f.store, conversationrun.SchedulerConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -557,7 +557,7 @@ func TestSkillSetupTaskOrdinaryConfigurationCannotForgeBindingRebase(t *testing.
 						request.ResolvedBindingID, request.ResolvedBindingRevision = "", 0
 					}
 				}}
-				scheduler, err := conversationrun.NewConversationRunScheduler(proof, proof, conversationrun.ConversationRunSchedulerConfig{})
+				scheduler, err := conversationrun.NewScheduler(proof, proof, conversationrun.SchedulerConfig{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -599,7 +599,7 @@ func TestSkillSetupTaskUpgradeRejectsUnversionedOrRepurposedTarget(t *testing.T)
 						request.SourceIdentity = "https://unrelated.example::reddit.reader"
 					}
 				}}
-				scheduler, err := conversationrun.NewConversationRunScheduler(proof, proof, conversationrun.ConversationRunSchedulerConfig{})
+				scheduler, err := conversationrun.NewScheduler(proof, proof, conversationrun.SchedulerConfig{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -623,7 +623,7 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 		if err != nil {
 			t.Fatal(err)
 		}
-		dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, f.catalog, nil)
+		dispatcher, err := skillbinding.NewActionDispatcher(store, f.catalog, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -655,7 +655,7 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 }
 
 // dispatch runs one SkillManagement action of run as a call of that run.
-func (f *skillSetupTaskWaitFixture) dispatch(t *testing.T, dispatcher *skillbinding.SkillBindingActionDispatcher, run *models.AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
+func (f *skillSetupTaskWaitFixture) dispatch(t *testing.T, dispatcher *skillbinding.ActionDispatcher, run *models.AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
 	t.Helper()
 	bound, err := f.catalog.Resolve(t.Context(), skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, run.AssignedAgentID, models.SkillManagementSkillID, skillbinding.SkillManagementSkillVersion, action)
 	if err != nil {
@@ -748,7 +748,7 @@ func TestSkillSetupTaskResolutionRejectsForgedProvenance(t *testing.T) {
 						}
 					}
 				}
-				scheduler, err := conversationrun.NewConversationRunScheduler(proof, proof, conversationrun.ConversationRunSchedulerConfig{})
+				scheduler, err := conversationrun.NewScheduler(proof, proof, conversationrun.SchedulerConfig{})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -21,7 +21,7 @@ func teamRoutingAgent(id string) models.ConversationParticipant {
 
 func TestTeamRoutingAddressingOrder(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := NewConversationService(store)
+	service := NewService(store)
 	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "routing"})
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "routing"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "launch"},
@@ -30,20 +30,20 @@ func TestTeamRoutingAddressingOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-		return []ConversationParticipantBinding{
+	participants := ParticipantSourceFunc(func(context.Context, ParticipantQuery) ([]ParticipantBinding, error) {
+		return []ParticipantBinding{
 			{Participant: teamRoutingAgent("maya"), SemanticRoles: []string{"pricing"}},
 			{Participant: teamRoutingAgent("otto"), SemanticRoles: []string{"press"}},
 			{Participant: teamRoutingAgent("rio"), SemanticRoles: []string{"writer"}},
 		}, nil
 	})
-	var routed []ConversationRouteRequest
+	var routed []RouteRequest
 	routerErr := error(nil)
-	router := ConversationRouterFunc(func(_ context.Context, req ConversationRouteRequest) (ConversationRouteDecision, error) {
+	router := RouterFunc(func(_ context.Context, req RouteRequest) (RouteDecision, error) {
 		routed = append(routed, req)
-		return ConversationRouteDecision{AgentID: "rio", Reason: "  owns the\nlaunch copy "}, routerErr
+		return RouteDecision{AgentID: "rio", Reason: "  owns the\nlaunch copy "}, routerErr
 	})
-	coordinator, err := NewConversationCoordinator(service, participants, router, DefaultConversationCoordinatorConfig())
+	coordinator, err := NewCoordinator(service, participants, router, DefaultConversationCoordinatorConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestTeamRoutingAddressingOrder(t *testing.T) {
 	}
 	route := func(trigger *models.ChannelMessage) []models.ConversationResponder {
 		t.Helper()
-		result, err := coordinator.Coordinate(t.Context(), ConversationRoutingRequest{
+		result, err := coordinator.Coordinate(t.Context(), RoutingRequest{
 			Scope: conversation.Scope, ConversationID: conversation.ID, TriggerMessageID: trigger.ID, IdempotencyKey: "route:" + trigger.ID,
 		})
 		if err != nil {
@@ -143,7 +143,7 @@ func TestTeamRoutingFallbackOrder(t *testing.T) {
 		{"first free", "", "", "otto", members},
 		{"everyone busy", "", "", "maya", []RouteMember{{AgentID: "maya", Busy: true}, {AgentID: "otto", Busy: true}}},
 	} {
-		got := fallbackConversationResponder(ConversationRouteRequest{LastAgentWithUser: tc.last, Lead: tc.lead, Members: tc.members})
+		got := fallbackConversationResponder(RouteRequest{LastAgentWithUser: tc.last, Lead: tc.lead, Members: tc.members})
 		if got.Participant.ID != tc.want || got.Addressed != models.ConversationAddressedRouted || got.Validate() != nil {
 			t.Fatalf("%s: %#v", tc.name, got)
 		}
@@ -151,10 +151,10 @@ func TestTeamRoutingFallbackOrder(t *testing.T) {
 }
 
 func TestFindHandoffMentions(t *testing.T) {
-	roster := ConversationTeamRoster{members: map[string]conversationTeamMember{
+	roster := TeamRoster{members: map[string]conversationTeamMember{
 		"maya": {name: "Maya"}, "otto": {name: "Otto Bell"}, "rio": {name: "Rio"},
 	}}
-	bindings := []ConversationParticipantBinding{{Participant: teamRoutingAgent("maya")}, {Participant: teamRoutingAgent("otto")}, {Participant: teamRoutingAgent("rio")}}
+	bindings := []ParticipantBinding{{Participant: teamRoutingAgent("maya")}, {Participant: teamRoutingAgent("otto")}, {Participant: teamRoutingAgent("rio")}}
 	got := FindHandoffMentions("Draft is up. @otto bell can you check the list, then @Maya the pricing? @Riot and @everyone ignored.", "rio", roster, bindings)
 	if !reflect.DeepEqual(got, []models.ConversationParticipant{teamRoutingAgent("otto"), teamRoutingAgent("maya")}) {
 		t.Fatalf("mentions = %#v", got)

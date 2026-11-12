@@ -38,7 +38,7 @@ func newTeamChannelFixture(t *testing.T, operations ...capability.ConversationDe
 	store := kerneltest.NewStore(t)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "support-team"}
 	catalog, endpoint := endpointFixtureOwnedBy(t, ctx, store, "slack", operations, owner)
-	conversations := runtimeconversation.NewConversationService(store)
+	conversations := runtimeconversation.NewService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: owner, Title: "Support channel",
 		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
@@ -59,7 +59,7 @@ func newTeamChannelFixture(t *testing.T, operations ...capability.ConversationDe
 	}
 	f := &teamChannelFixture{t: t, store: store, catalog: catalog, endpoint: endpoint, conversation: conversation, inbound: inbound.Message, members: map[string]*models.AgentRun{}, now: time.Now().UTC()}
 	commands := agentrun.NewRunCommandService(store)
-	routing, err := commands.CreateAgentRun(ctx, runtimeconversation.ConversationAgentRunRequest(conversation, inbound.Message))
+	routing, err := commands.CreateAgentRun(ctx, runtimeconversation.AgentRunRequest(conversation, inbound.Message))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func (f *teamChannelFixture) answer(member, text string) *models.ChannelMessage 
 	f.t.Helper()
 	ctx := f.t.Context()
 	run := f.members[member]
-	conversations := runtimeconversation.NewConversationService(f.store)
+	conversations := runtimeconversation.NewService(f.store)
 	current, _ := conversations.GetConversation(ctx, f.endpoint.Scope, f.conversation.ID)
 	posted, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.endpoint.Scope, ConversationID: f.conversation.ID, ExpectedRevision: current.Revision,
@@ -143,7 +143,7 @@ func (f *teamChannelFixture) deliveries(operation capability.ConversationDeliver
 
 func TestExternalTeamChannelDeliversEachMemberAnswer(t *testing.T) {
 	f := newTeamChannelFixture(t, capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator)
-	worker, err := NewExternalConversationReplyWorker(f.store, f.catalog)
+	worker, err := NewReplyWorker(f.store, f.catalog)
 	if err != nil {
 		t.Fatal(err)
 	}

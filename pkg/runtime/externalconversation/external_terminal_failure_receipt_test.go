@@ -66,7 +66,7 @@ func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	normal, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
+	normal, err := runtimeconversation.NewService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID}, Intent: models.MessageIntentAnswer,
 		Content: "The saved normal answer", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: trigger.ID,
@@ -75,7 +75,7 @@ func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := &ExternalConversationReplyWorker{store: store}
+	worker := &ReplyWorker{store: store}
 	message, err := worker.findCanonicalReply(t.Context(), &models.ExternalConversationInboxItem{Scope: run.Scope, ConversationID: conversation.ID, ChannelMessageID: trigger.ID}, run)
 	if err != nil || message == nil || message.ID != normal.Message.ID {
 		t.Fatalf("history scan selected an older failed attempt instead of the exact normal answer: %#v %v", message, err)
@@ -118,7 +118,7 @@ func TestExternalTerminalFailureRejectsReceiptIdentityDrift(t *testing.T) {
 
 func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *testing.T) {
 	store, catalog, endpoint := endpointFixture(t, t.Context(), "slack")
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Original inbox", Origin: &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}, IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *
 	if _, err := store.UpdateAgentRunWithEvent(t.Context(), changed, run.Revision, &models.ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: run.ID, EventType: "run.metadata_updated", Summary: "Changed metadata", CreatedAt: changed.UpdatedAt}, nil); err != nil {
 		t.Fatal(err)
 	}
-	worker, err := NewExternalConversationReplyWorker(store, catalog)
+	worker, err := NewReplyWorker(store, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -262,12 +262,12 @@ func (s *Server) handleResolveArtifactContent(w http.ResponseWriter, r *http.Req
 	s.respondJSON(w, http.StatusOK, resolution)
 }
 
-func (s *Server) artifactCatalog() (*artifactcatalog.ArtifactCatalog, bool) {
+func (s *Server) artifactCatalog() (*artifactcatalog.Catalog, bool) {
 	store, ok := s.store.(models.ArtifactStore)
 	if !ok {
 		return nil, false
 	}
-	return artifactcatalog.NewArtifactCatalog(store).WithPlacement(artifactcatalog.NewStoreArtifactPlacement(s.store)), true
+	return artifactcatalog.NewCatalog(store).WithPlacement(artifactcatalog.NewStoreArtifactPlacement(s.store)), true
 }
 
 func (s *Server) respondArtifactError(w http.ResponseWriter, err error) {

@@ -82,8 +82,8 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 				t.Fatalf("concurrency key replay conflict = %v", err)
 			}
 
-			paused, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: agentrun.AgentRunCommandPause,
+			paused, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
+				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: agentrun.CommandPause,
 				Actor: models.ActivityActor{Type: "user", ID: "7"},
 			})
 			if err != nil {
@@ -92,14 +92,14 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			if paused.Run.Status != models.AgentRunStatusPaused || paused.Run.PausedFrom != models.AgentRunStatusQueued || paused.Event.EventType != "run.paused" {
 				t.Fatalf("paused result = %#v", paused)
 			}
-			if _, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: agentrun.AgentRunCommandResume,
+			if _, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
+				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: agentrun.CommandResume,
 			}); !errors.Is(err, models.ErrRevisionConflict) {
 				t.Fatalf("stale command error = %v", err)
 			}
 
-			intervened, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-				Scope: scope, RunID: paused.Run.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.AgentRunCommandIntervene,
+			intervened, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
+				Scope: scope, RunID: paused.Run.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.CommandIntervene,
 				Actor: models.ActivityActor{Type: "user", ID: "7"}, Instruction: "Prioritize the database check",
 			})
 			if err != nil {
@@ -109,8 +109,8 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 				t.Fatalf("intervened result = %#v", intervened)
 			}
 
-			resumed, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-				Scope: scope, RunID: paused.Run.ID, ExpectedRevision: intervened.Run.Revision, Kind: agentrun.AgentRunCommandResume,
+			resumed, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
+				Scope: scope, RunID: paused.Run.ID, ExpectedRevision: intervened.Run.Revision, Kind: agentrun.CommandResume,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -119,8 +119,8 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 				t.Fatalf("resumed result = %#v", resumed)
 			}
 
-			canceled, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-				Scope: scope, RunID: resumed.Run.ID, ExpectedRevision: resumed.Run.Revision, Kind: agentrun.AgentRunCommandCancel,
+			canceled, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
+				Scope: scope, RunID: resumed.Run.ID, ExpectedRevision: resumed.Run.Revision, Kind: agentrun.CommandCancel,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -177,8 +177,8 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 				ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted,
 			})
 
-			result, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-				Scope: scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: agentrun.AgentRunCommandCancel,
+			result, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
+				Scope: scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: agentrun.CommandCancel,
 				Actor: models.ActivityActor{Type: "user", ID: "operator"},
 			})
 			if err != nil {
@@ -250,8 +250,8 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := models.ActivityActor{Type: "user", ID: "operator"}
-	resolved, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
+	resolved, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: agentrun.CommandResolveHumanIntervention,
 		HumanInterventionID: request.ID, Instruction: "CAPTCHA completed in the retained Browser session", Actor: actor,
 	})
 	if err != nil {
@@ -266,8 +266,8 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 	if len(resolved.Run.PendingInterventions) != 1 || resolved.Run.PendingInterventions[0].Instruction == "" {
 		t.Fatalf("operator context was not queued for the next turn: %#v", resolved.Run.PendingInterventions)
 	}
-	if _, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-		Scope: scope, RunID: resolved.Run.ID, ExpectedRevision: resolved.Run.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
+	if _, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: scope, RunID: resolved.Run.ID, ExpectedRevision: resolved.Run.Revision, Kind: agentrun.CommandResolveHumanIntervention,
 		HumanInterventionID: request.ID, Instruction: "replay", Actor: actor,
 	}); err == nil {
 		t.Fatal("resolved human intervention was accepted twice")
@@ -311,8 +311,8 @@ func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 			}
 			want = models.AgentRunStatusQueued
 		}
-		resolved, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
-			Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
+		resolved, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{
+			Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.CommandResolveHumanIntervention,
 			HumanInterventionID: request.ID, Instruction: "CAPTCHA completed", Actor: actor,
 		})
 		if err != nil {
@@ -354,11 +354,11 @@ func TestRunPausePreservesWaitingCondition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paused, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: agentrun.AgentRunCommandPause})
+	paused, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: agentrun.CommandPause})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumed, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: scope, RunID: waiting.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.AgentRunCommandResume})
+	resumed, err := service.CommandAgentRun(ctx, agentrun.CommandRequest{Scope: scope, RunID: waiting.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.CommandResume})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -88,7 +88,7 @@ func TestApprovalClaimOnceThenFailsRun(t *testing.T) {
 		t.Fatalf("message = %v", value["message"])
 	}
 	result := f.settleFinal("second", agentrun.ControlAuthority{})
-	if result.Kind != ControlFailed || result.Failure == nil || result.Failure.Code != finalUnverifiedApprovalCode ||
+	if result.Kind != Failed || result.Failure == nil || result.Failure.Code != finalUnverifiedApprovalCode ||
 		result.Failure.Kind != conversation.RunFailureKindExecution || result.Entry == nil || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("second = %#v", result)
 	}
@@ -97,7 +97,7 @@ func TestApprovalClaimOnceThenFailsRun(t *testing.T) {
 	g := newFinalFixture(t)
 	requireRejectionNote(t, g.plain("step-2", 2, agentrun.ControlAuthority{}, "Pending approval from your admin."), "step-2", finalApprovalClaimCode)
 	failed := g.plain("step-3", 3, agentrun.ControlAuthority{}, "Awaiting approval.")
-	if failed.Kind != ControlFailed || failed.Failure == nil || failed.Failure.Code != finalUnverifiedApprovalCode {
+	if failed.Kind != Failed || failed.Failure == nil || failed.Failure.Code != finalUnverifiedApprovalCode {
 		t.Fatalf("plain second = %#v", failed)
 	}
 	// Saying something was approved is not a pending-approval claim.

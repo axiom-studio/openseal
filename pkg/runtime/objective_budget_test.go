@@ -31,7 +31,7 @@ func TestObjectiveBudgetAllocatesConcurrentTopLevelRunsAtomically(t *testing.T) 
 			defer closeStore()
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "objective-budget"}
-			portfolio := runtimeportfolio.NewPortfolioService(store)
+			portfolio := runtimeportfolio.NewService(store)
 			objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, Title: "Research", Goal: "Track the market",
 				Status: models.ObjectiveStatusActive, Budget: &models.BudgetPolicy{MaxTurns: 10, MaxTotalTokens: 1000},
@@ -97,7 +97,7 @@ func TestObjectiveBudgetRejectsConcurrentOverAllocation(t *testing.T) {
 			defer closeStore()
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "objective-budget-race"}
-			objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+			objective, err := runtimeportfolio.NewService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Bounded", Goal: "Run concurrently",
 				Budget: &models.BudgetPolicy{MaxTurns: 10},
 			})
@@ -133,7 +133,7 @@ func TestObjectiveBudgetRejectsConcurrentOverAllocation(t *testing.T) {
 					t.Fatalf("unexpected concurrent error: %v", err)
 				}
 			}
-			loaded, err := runtimeportfolio.NewPortfolioService(store).GetObjective(ctx, scope, objective.ID)
+			loaded, err := runtimeportfolio.NewService(store).GetObjective(ctx, scope, objective.ID)
 			if err != nil || succeeded != 1 || exhausted != 1 || len(loaded.BudgetAllocations) != 1 {
 				t.Fatalf("concurrent outcome success=%d exhausted=%d objective=%#v err=%v", succeeded, exhausted, loaded, err)
 			}

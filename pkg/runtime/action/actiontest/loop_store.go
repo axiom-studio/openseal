@@ -211,7 +211,7 @@ func NewLoopStore(t *testing.T, store models.KernelStore) *LoopStore {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "loop-" + uuid.NewString()[:8]}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "check the repo", Source: models.RunSourceObjective,
 	})

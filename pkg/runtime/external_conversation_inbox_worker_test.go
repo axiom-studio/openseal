@@ -35,7 +35,7 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 	if _, replayed, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil || replayed {
 		t.Fatalf("receive = replayed %v, %v", replayed, err)
 	}
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewScheduler(store, store, conversationrun.SchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 		Next: externalconversation.NewCanonicalExternalConversationDispatcher(scheduler), CrashOnce: true,
 	}
 	workerClock := time.Now
-	worker, err := externalconversation.NewExternalConversationInboxWorker(store, dispatcher, externalconversation.ExternalConversationInboxWorkerConfig{
+	worker, err := externalconversation.NewInboxWorker(store, dispatcher, externalconversation.InboxWorkerConfig{
 		WorkerID: "inbox-worker", LeaseDuration: time.Minute, BaseRetry: time.Second, MaximumRetry: time.Minute,
 	}, models.WithClock(func() time.Time { return workerClock() }))
 	if err != nil {
@@ -114,7 +114,7 @@ func TestCanonicalExternalConversationDispatcherRefusesRunbookHandler(t *testing
 	if err := handler.Validate(models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "support"}); !errors.Is(err, models.ErrInvalidExternalConversation) {
 		t.Fatalf("Runbook handler validated: %v", err)
 	}
-	result, err := externalconversation.NewCanonicalExternalConversationDispatcher(nil).DispatchExternalConversation(t.Context(), externalconversation.ExternalConversationDispatchRequest{
+	result, err := externalconversation.NewCanonicalExternalConversationDispatcher(nil).DispatchExternalConversation(t.Context(), externalconversation.DispatchRequest{
 		Endpoint: &models.ExternalConversationEndpoint{Handler: handler}, Conversation: &models.Conversation{ID: "conversation"},
 		Message: &models.ChannelMessage{ID: "message"}, IdempotencyKey: "dispatch-key",
 	})

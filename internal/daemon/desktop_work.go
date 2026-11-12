@@ -107,13 +107,13 @@ func desktopLoopBindingConfig(engine DesktopKernel, content models.ArtifactConte
 		return runworker.LoopBindingConfig{}, errors.New("desktop loop wiring requires the kernel store")
 	}
 	store := engine.Store()
-	control := &control.ControlExecutor{Portfolio: store, Sessions: store, Activity: activity.NewRunActivityService(store, store)}
+	control := &control.Executor{Portfolio: store, Sessions: store, Activity: activity.NewRunActivityService(store, store)}
 	if forks, ok := store.(models.RunForkStore); ok {
 		control.Forks = agentrun.NewRunForkCoordinator(forks)
 		control.Forks.SetAcceptedRunExecutionPreparer(engine)
 	}
 	if collaboration, ok := store.(models.CollaborationKernelStore); ok {
-		control.Collaboration = runtimecollaboration.NewCollaborationService(collaboration)
+		control.Collaboration = runtimecollaboration.NewService(collaboration)
 		control.Collaboration.SetAcceptedRunExecutionPreparer(engine)
 	}
 	if tasks, ok := store.(models.ConversationTaskKernelStore); ok {
@@ -124,20 +124,20 @@ func desktopLoopBindingConfig(engine DesktopKernel, content models.ArtifactConte
 	if reporting, ok := store.(models.ConversationStore); ok {
 		conversations = reporting
 		control.Reporting = reporting
-		control.Conversations = conversation.NewConversationService(reporting)
+		control.Conversations = conversation.NewService(reporting)
 		control.Conversations.SetReactionProjector(engine.ReactionProjector())
 	}
 	tools, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{
 		Sessions: store, Turns: store, Actions: store,
 		// Only the refused row of a repeat refusal goes through this
 		// coordinator; proposals go through the engine's.
-		Coordinator: action.NewActionCoordinator(store, store, nil, nil, nil),
+		Coordinator: action.NewCoordinator(store, store, nil, nil, nil),
 		Governed:    engine.GovernedTools(), Control: control, Logger: logger,
 	})
 	if err != nil {
 		return runworker.LoopBindingConfig{}, err
 	}
-	media := modelstep.ModelStepMedia{Content: content}
+	media := modelstep.Media{Content: content}
 	if artifacts, ok := store.(models.ArtifactStore); ok {
 		media.Artifacts = artifacts
 	}

@@ -25,7 +25,7 @@ func newLoopApprovalFixture(t *testing.T, store models.KernelStore, budget *mode
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "loop-" + uuid.NewString()[:8]}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "push the fix", Source: models.RunSourceObjective,
 		Budget: budget,
@@ -314,8 +314,8 @@ func TestLoopPausedParkedApprovalResolvesToPausedQueued(t *testing.T) {
 				f := actiontest.NewLoopStore(t, store)
 				_, approval := f.ProposeLoopApproval("push", actiontest.LoopApprovalOptions{})
 				f.ParkOn(approval.ID)
-				paused, err := agentrun.NewRunCommandService(store).CommandAgentRun(f.Ctx, agentrun.AgentRunCommandRequest{
-					Scope: f.Scope, RunID: f.Run.ID, ExpectedRevision: f.Run.Revision, Kind: agentrun.AgentRunCommandPause,
+				paused, err := agentrun.NewRunCommandService(store).CommandAgentRun(f.Ctx, agentrun.CommandRequest{
+					Scope: f.Scope, RunID: f.Run.ID, ExpectedRevision: f.Run.Revision, Kind: agentrun.CommandPause,
 					Actor: models.ActivityActor{Type: "user", ID: "operator"},
 				})
 				if err != nil || paused.Run.Status != models.AgentRunStatusPaused || paused.Run.PausedFrom != models.AgentRunStatusWaitingForApproval {

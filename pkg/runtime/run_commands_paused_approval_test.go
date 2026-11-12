@@ -29,7 +29,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 				f := newApprovalScenario(t, store)
 				_, run := f.ParkedApproval()
 				approval, call := assertParkedOnApproval(t, f, run)
-				paused := f.CommandRun(run.ID, agentrun.AgentRunCommandPause)
+				paused := f.CommandRun(run.ID, agentrun.CommandPause)
 				if paused.Status != models.AgentRunStatusPaused || paused.PausedFrom != models.AgentRunStatusWaitingForApproval || paused.PausedWakeCondition == nil {
 					t.Fatalf("paused = %#v", paused)
 				}
@@ -39,7 +39,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 						t.Fatalf("expiry while paused = %#v", result.Run)
 					}
 				}
-				canceled := f.CommandRun(run.ID, agentrun.AgentRunCommandCancel)
+				canceled := f.CommandRun(run.ID, agentrun.CommandCancel)
 				if canceled.Status != models.AgentRunStatusCanceled || canceled.PausedWakeCondition != nil || canceled.PausedFrom != "" || len(canceled.BudgetReservations) != 0 {
 					t.Fatalf("canceled = %#v", canceled)
 				}
@@ -86,7 +86,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 		looptest.EachStore(t, "loop_paused_approval_expiry", func(t *testing.T, store models.KernelStore) {
 			f := newApprovalScenario(t, store)
 			conversation, run := f.ParkedApproval()
-			f.CommandRun(run.ID, agentrun.AgentRunCommandPause)
+			f.CommandRun(run.ID, agentrun.CommandPause)
 			result := f.ExpireApproval(run.ID)
 			if result.Approval.Status != models.ApprovalStatusExpired || result.Call.Status != models.ActionCallStatusDenied ||
 				result.Run.Status != models.AgentRunStatusPaused || result.Run.PausedFrom != models.AgentRunStatusQueued ||
@@ -97,7 +97,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 			if claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, models.AgentRunClaim{Scope: f.Scope, WorkerID: f.WorkerID, Now: f.Clock.Now(), LeaseDuration: looptest.FixtureLease, AgingInterval: time.Minute}); err != nil || claimed != nil {
 				t.Fatalf("claimed a paused Run: %#v, %v", claimed, err)
 			}
-			resumed := f.CommandRun(run.ID, agentrun.AgentRunCommandResume)
+			resumed := f.CommandRun(run.ID, agentrun.CommandResume)
 			if resumed.Status != models.AgentRunStatusQueued || resumed.WakeCondition != nil || resumed.PausedWakeCondition != nil {
 				t.Fatalf("resume restored the expired wait: %#v", resumed)
 			}

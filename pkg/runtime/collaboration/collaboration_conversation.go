@@ -17,8 +17,8 @@ const agentRequestProjectionCacheLimit = 10000
 // AgentRequest lifecycle into linked channels. Messages are idempotent
 // projections: conversations never own or advance collaboration state.
 type AgentRequestConversationProjector struct {
-	collaboration *CollaborationService
-	conversations *runtimeconversation.ConversationService
+	collaboration *Service
+	conversations *runtimeconversation.Service
 	mu            sync.Mutex
 	completed     map[string]struct{}
 	completedFIFO []string
@@ -32,8 +32,8 @@ func NewAgentRequestConversationProjector(store interface {
 		return nil, errors.New("collaboration conversation store is required")
 	}
 	return &AgentRequestConversationProjector{
-		collaboration: NewCollaborationService(store, opts...),
-		conversations: runtimeconversation.NewConversationService(store, opts...),
+		collaboration: NewService(store, opts...),
+		conversations: runtimeconversation.NewService(store, opts...),
 		completed:     make(map[string]struct{}),
 	}, nil
 }

@@ -9,7 +9,7 @@ import (
 )
 
 // RunLoopCutoverReport counts what one cutover pass did.
-type RunLoopCutoverReport = runloop.RunLoopCutoverReport
+type RunLoopCutoverReport = runloop.CutoverReport
 
 // RunLoopCutover moves the Engine's store onto the run loop (D16, A16): Runs
 // created before the loop are adopted when they never started and canceled
@@ -23,9 +23,9 @@ func (e *Engine) RunLoopCutover(ctx context.Context) (RunLoopCutoverReport, erro
 	if !ok {
 		return RunLoopCutoverReport{}, errors.New("run loop cutover: the kernel store does not support the cutover")
 	}
-	var conversations runloop.RunLoopCutoverConversations
+	var conversations runloop.CutoverConversations
 	if e.conversations != nil {
 		conversations = e.conversations
 	}
-	return runloop.RunLoopCutover(ctx, store, conversations)
+	return runloop.Cutover(ctx, store, conversations)
 }

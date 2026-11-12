@@ -16,7 +16,7 @@ import (
 func TestFindAppsRunsThroughTheActionWorker(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope, _ := skillbindingtest.ConnectAppFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, skillbinding.SkillActionFindApps, map[string]interface{}{"query": "neon", "limit": 3})
-	executed := f.Execute(action.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+	executed := f.Execute(action.NewWorker(store, catalog, nil, dispatcher), call.ID)
 	apps, _ := executed.Call.Output["apps"].([]interface{})
 	if executed.Call.Status != models.ActionCallStatusSucceeded || len(apps) != 1 || apps[0].(map[string]interface{})["slug"] != "neondatabase/mcp-server-neon" {
 		t.Fatalf("find_apps: %#v", executed.Call)
@@ -30,7 +30,7 @@ func TestFindAppsRunsThroughTheActionWorker(t *testing.T) {
 func TestRequestConnectionParksTheRunOnOneConnectCard(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope, connected := skillbindingtest.ConnectAppFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", "reason": "Connect Linear so I can list your issues"})
-	executed := f.Execute(action.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+	executed := f.Execute(action.NewWorker(store, catalog, nil, dispatcher), call.ID)
 	if executed.Call.Status != models.ActionCallStatusSucceeded || executed.Call.Output["setupRequest"] == nil {
 		t.Fatalf("request_connection: %#v", executed.Call)
 	}
@@ -71,7 +71,7 @@ func TestRequestConnectionParksTheRunOnOneConnectCard(t *testing.T) {
 
 // dispatchSkillManagementAction dispatches one SkillManagement action of the
 // Agent's run as a call of that run.
-func dispatchSkillManagementAction(t *testing.T, ctx context.Context, catalog *skill.Catalog, dispatcher *skillbinding.SkillBindingActionDispatcher, run *models.AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
+func dispatchSkillManagementAction(t *testing.T, ctx context.Context, catalog *skill.Catalog, dispatcher *skillbinding.ActionDispatcher, run *models.AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
 	t.Helper()
 	bound, err := catalog.Resolve(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, "agent", models.SkillManagementSkillID, skillbinding.SkillManagementSkillVersion, action)
 	if err != nil {

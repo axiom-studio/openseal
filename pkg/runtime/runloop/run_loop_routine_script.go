@@ -57,7 +57,7 @@ func PrepareRoutineScript(run *models.AgentRun, hostTools []modelstep.HostToolSp
 	if run == nil || run.Context == nil {
 		return nil, nil
 	}
-	raw, ok := run.Context[routine.RoutineScriptContextKey]
+	raw, ok := run.Context[routine.ScriptContextKey]
 	if !ok || raw == nil {
 		return nil, nil
 	}

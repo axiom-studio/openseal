@@ -26,7 +26,7 @@ func TestListActivityAppliesEveryFilterInBothDirections(t *testing.T) {
 			store := open(t)
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "filters"}
-			run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			run, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "x"}, AssignedAgentID: "x",
 				Goal: "work", Source: models.RunSourceManual,
 			})

@@ -30,8 +30,8 @@ type loopFakeControlHandler struct {
 	calls int
 }
 
-func (h *loopFakeControlHandler) Spec(agentrun.ControlAuthority) control.ControlToolSpec {
-	return control.ControlToolSpec{Description: "fake", InputSchema: map[string]interface{}{"type": "object"}}
+func (h *loopFakeControlHandler) Spec(agentrun.ControlAuthority) control.ToolSpec {
+	return control.ToolSpec{Description: "fake", InputSchema: map[string]interface{}{"type": "object"}}
 }
 
 func (h *loopFakeControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
@@ -40,12 +40,12 @@ func (h *loopFakeControlHandler) Decode(raw json.RawMessage) (interface{}, error
 	}](raw)
 }
 
-func (h *loopFakeControlHandler) Run(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResult, error) {
+func (h *loopFakeControlHandler) Run(ctx context.Context, x *control.Executor, cc agentrun.ControlContext) (control.Result, error) {
 	h.calls++
 	result := models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{"status": "done"})
-	meta, err := json.Marshal(&control.ControlEntryMeta{Kind: cc.ToolName(), ForkID: "fork-" + cc.Entry.ID})
+	meta, err := json.Marshal(&control.EntryMeta{Kind: cc.ToolName(), ForkID: "fork-" + cc.Entry.ID})
 	if err != nil {
-		return control.ControlResult{}, err
+		return control.Result{}, err
 	}
 	now := x.Now()
 	moved, err := x.Sessions.TransitionToolEntry(ctx, models.ToolEntryTransitionRequest{
@@ -55,9 +55,9 @@ func (h *loopFakeControlHandler) Run(ctx context.Context, x *control.ControlExec
 		Tokens: modelstep.EstimateEntryTokens(control.WithToolResult(cc.Entry, models.ToolEntryCompleted, result)),
 	})
 	if err != nil {
-		return control.ControlResult{}, err
+		return control.Result{}, err
 	}
-	return control.ControlResult{Kind: control.ControlContinue, Entry: moved.Entry}, nil
+	return control.Result{Kind: control.Continue, Entry: moved.Entry}, nil
 }
 
 // toolExecFixture is a claimed Run with a run session in an in-memory store and
@@ -71,7 +71,7 @@ type toolExecFixture struct {
 	now      time.Time
 	run      *models.AgentRun
 	host     *scriptedHost
-	control  *control.ControlExecutor
+	control  *control.Executor
 	handlers map[models.ControlToolName]*loopFakeControlHandler
 	binding  *agentrun.TurnRunnerBinding
 }
@@ -97,7 +97,7 @@ func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real 
 	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tools-" + uuid.NewString()[:8]}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, AssignedAgentID: "agent-1",
 		Goal: "work", Source: models.RunSourceObjective,
@@ -118,7 +118,7 @@ func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real 
 	f.run = f.currentRun()
 	registry, handlers := fakeLoopControls(real...)
 	f.handlers = handlers
-	f.control = &control.ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }}
+	f.control = &control.Executor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }}
 	f.control.UseTools(registry)
 	dispatcher, err := NewStepToolDispatcher(StepToolDispatcherConfig{
 		Sessions: store, Turns: store, Actions: store, Control: f.control,
@@ -468,13 +468,13 @@ type committedForkHandler struct {
 	settles int
 }
 
-func (h *committedForkHandler) Run(ctx context.Context, x *control.ControlExecutor, cc agentrun.ControlContext) (control.ControlResult, error) {
+func (h *committedForkHandler) Run(ctx context.Context, x *control.Executor, cc agentrun.ControlContext) (control.Result, error) {
 	h.settles++
 	key := "fork-" + cc.Entry.ID
 	h.groups[key]++
-	meta, err := json.Marshal(&control.ControlEntryMeta{Kind: models.ControlToolFork, ForkID: key, GroupID: key})
+	meta, err := json.Marshal(&control.EntryMeta{Kind: models.ControlToolFork, ForkID: key, GroupID: key})
 	if err != nil {
-		return control.ControlResult{}, err
+		return control.Result{}, err
 	}
 	now := x.Now()
 	moved, err := x.Sessions.TransitionToolEntry(ctx, models.ToolEntryTransitionRequest{
@@ -483,10 +483,10 @@ func (h *committedForkHandler) Run(ctx context.Context, x *control.ControlExecut
 		Wait: &models.ToolEntryWait{GroupID: key}, Kernel: &models.ToolEntryKernelPatch{Control: meta}, Now: now,
 	})
 	if err != nil {
-		return control.ControlResult{}, err
+		return control.Result{}, err
 	}
 	entry := moved.Entry
-	return control.ControlResult{Kind: control.ControlParked, Entry: entry, Park: &agentrun.LoopPark{
+	return control.Result{Kind: control.Parked, Entry: entry, Park: &agentrun.LoopPark{
 		Status: models.AgentRunStatusWaitingForDependency, Wake: &models.WakeCondition{Type: "run_dependencies", Reference: key},
 		Summary: "Waiting for the branches", Committed: true,
 	}}, nil
@@ -495,7 +495,7 @@ func (h *committedForkHandler) Run(ctx context.Context, x *control.ControlExecut
 // TestResumeControlEntryWithoutGroupResettles covers a settle-phase control
 // entry left pending (the group was never created): the resume settles it
 // again. An awaiting_child entry whose group/request is missing goes to
-// ControlExecutor.Resume, whose resumers own that row of SPEC §3.7 (CTL-5b,
+// control.Executor.Resume, whose resumers own that row of SPEC §3.7 (CTL-5b,
 // CTL-6b).
 func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 	fork := &committedForkHandler{groups: map[string]int{}}

@@ -25,10 +25,10 @@ func slackRoutineMessage(id, participant, name, text string, bot bool) models.No
 
 // newUnboundRoutineEventMatcher is a routine event matcher whose scope has a
 // routine on another connection only.
-func newUnboundRoutineEventMatcher(tb testing.TB) (*routine.RoutineEventMatcher, *countingRoutineEventStore) {
+func newUnboundRoutineEventMatcher(tb testing.TB) (*routine.EventMatcher, *countingRoutineEventStore) {
 	tb.Helper()
 	store := &countingRoutineEventStore{}
-	matcher := routine.NewRoutineEventMatcher(store)
+	matcher := routine.NewEventMatcher(store)
 	tb.Cleanup(matcher.Close)
 	// The scope has a routine, but on another connection.
 	if err := matcher.RefreshRoutineIndex(context.Background(), models.Scope{Kind: "tenant", ID: "busy"}); err != nil {

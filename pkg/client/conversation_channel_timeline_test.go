@@ -15,7 +15,7 @@ import (
 
 func TestKernelHTTPClientChannelTimelineRoundTrip(t *testing.T) {
 	store := kerneltest.NewStore(t)
-	service := runtimeconversation.NewConversationService(store)
+	service := runtimeconversation.NewService(store)
 	scope := models.Scope{Kind: "tenant", ID: "timeline"}
 	// The kernel creates no space: a conversation made with no person goes
 	// to the empty owner's default space, so the test seeds it.

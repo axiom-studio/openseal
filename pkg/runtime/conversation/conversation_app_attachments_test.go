@@ -74,7 +74,7 @@ func TestConversationAppAttachmentIsTheReferencedVersion(t *testing.T) {
 	for version, label := range []string{"first", "second", "third"} {
 		storeConversationApp(t, store, content, scope, int64(version+1), []appproject.File{appEntry(label), {Path: "src/styles.css", Content: "h1 { color: teal; }"}})
 	}
-	reader := &ConversationAttachmentReader{artifacts: store, content: content}
+	reader := &AttachmentReader{artifacts: store, content: content}
 	conversation := &models.Conversation{ID: "chat", Scope: scope}
 
 	// Every edit is its own message; each one is ingested with its own version,
@@ -99,7 +99,7 @@ func TestConversationAppAttachmentRespectsItsBudget(t *testing.T) {
 		files = append(files, appproject.File{Path: "src/" + name + ".ts", Content: "export const " + name + " = `" + strings.Repeat(name, 20<<10) + "`;\n"})
 	}
 	storeConversationApp(t, store, content, scope, 1, files)
-	reader := &ConversationAttachmentReader{artifacts: store, content: content}
+	reader := &AttachmentReader{artifacts: store, content: content}
 	text := appMessageText(t, reader.parts(t.Context(), &models.Conversation{ID: "chat", Scope: scope}, appMessage("trigger", scope, 1), models.MaxUserEntryContentBytes))
 	body := strings.TrimSuffix(text[strings.Index(text, ">\n")+2:], "\n</attachment>")
 	if len(body) > conversationAppAttachmentBudget {
@@ -123,7 +123,7 @@ func TestConversationAppAttachmentRejectsOtherScopes(t *testing.T) {
 	for version := int64(1); version <= 3; version++ {
 		storeConversationApp(t, store, content, other, version, []appproject.File{appEntry("foreign")})
 	}
-	reader := &ConversationAttachmentReader{artifacts: store, content: content}
+	reader := &AttachmentReader{artifacts: store, content: content}
 	conversation := &models.Conversation{ID: "chat", Scope: home}
 
 	text := appMessageText(t, reader.parts(t.Context(), conversation, appMessage("m", home, 1), models.MaxUserEntryContentBytes))

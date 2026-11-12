@@ -157,25 +157,25 @@ func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 	fake.add("archived", at(9), agentBuilderDraftRequester)
 	fake.conversations[len(fake.conversations)-1].Status = models.ConversationStatusArchived
 
-	drafts, err := ListAgentBuilderDrafts(t.Context(), fake, AgentBuilderDraftFilter{
+	drafts, err := ListAgentBuilderDrafts(t.Context(), fake, DraftFilter{
 		Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester, Principal: agentBuilderDraftPrincipal,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	type want struct {
-		status            AgentBuilderDraftStatus
+		status            DraftStatus
 		title, run, card  string
 		questionMessageID string
 	}
 	wants := map[string]want{
-		"drafting":       {AgentBuilderDraftDrafting, "Card drafting-card", "run-drafting", "drafting-card", ""},
-		"ready":          {AgentBuilderDraftReady, "Card ready-card", "run-ready", "ready-card", ""},
-		"needs-approval": {AgentBuilderDraftNeedsApproval, "Card na-card", "run-na", "na-card", ""},
-		"needs-input":    {AgentBuilderDraftNeedsInput, "Press needs-input", "run-ni", "", "q1"},
-		"answered":       {AgentBuilderDraftIdle, "Renamed", "", "", ""},
-		"stopped":        {AgentBuilderDraftStopped, "Press stopped", "run-stopped", "", ""},
-		"failed":         {AgentBuilderDraftFailed, "Card failed-card", "run-failed", "", ""},
+		"drafting":       {DraftDrafting, "Card drafting-card", "run-drafting", "drafting-card", ""},
+		"ready":          {DraftReady, "Card ready-card", "run-ready", "ready-card", ""},
+		"needs-approval": {DraftNeedsApproval, "Card na-card", "run-na", "na-card", ""},
+		"needs-input":    {DraftNeedsInput, "Press needs-input", "run-ni", "", "q1"},
+		"answered":       {DraftIdle, "Renamed", "", "", ""},
+		"stopped":        {DraftStopped, "Press stopped", "run-stopped", "", ""},
+		"failed":         {DraftFailed, "Card failed-card", "run-failed", "", ""},
 	}
 	order := []string{"drafting", "ready", "needs-approval", "needs-input", "answered", "stopped", "failed"}
 	if len(drafts) != len(order) {
@@ -206,7 +206,7 @@ func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 
 	// The store pages; only the page is read for status.
 	fake.statusReads = nil
-	page, err := ListAgentBuilderDrafts(t.Context(), fake, AgentBuilderDraftFilter{
+	page, err := ListAgentBuilderDrafts(t.Context(), fake, DraftFilter{
 		Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester, Principal: agentBuilderDraftPrincipal, Limit: 2, Offset: 3,
 	})
 	if err != nil || len(page) != 2 || page[0].ConversationID != "needs-input" || page[1].ConversationID != "answered" {
@@ -216,7 +216,7 @@ func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 		!reflect.DeepEqual(fake.statusReads, []string{"needs-input", "answered"}) {
 		t.Fatalf("page filters = %#v, status reads = %v", fake.filters, fake.statusReads)
 	}
-	for _, bad := range []AgentBuilderDraftFilter{
+	for _, bad := range []DraftFilter{
 		{Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester, Limit: 101},
 		{Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester, Offset: -1},
 		{Scope: agentBuilderDraftScope, Requester: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "x"}},
@@ -236,7 +236,7 @@ func TestAgentBuilderDraftsTitleFromFirstMessagePastTheNewestPage(t *testing.T) 
 	for sequence := int64(2); sequence <= agentBuilderDraftMessageScan+1; sequence++ {
 		fake.messages["long"] = append(fake.messages["long"], &models.ChannelMessage{ID: "update", Sequence: sequence, Sender: agent, Intent: models.MessageIntentUpdate})
 	}
-	drafts, err := ListAgentBuilderDrafts(t.Context(), fake, AgentBuilderDraftFilter{Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester})
+	drafts, err := ListAgentBuilderDrafts(t.Context(), fake, DraftFilter{Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester})
 	if err != nil || len(drafts) != 1 || drafts[0].Title != "Press long" {
 		t.Fatalf("drafts = %#v, %v", drafts, err)
 	}
@@ -246,7 +246,7 @@ func TestAgentBuilderDraftsTitleFromFirstMessagePastTheNewestPage(t *testing.T) 
 func TestAgentBuilderDraftsFilterBySpace(t *testing.T) {
 	fake := &agentBuilderDraftFake{}
 	fake.add("work", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), agentBuilderDraftRequester)
-	if _, err := ListAgentBuilderDrafts(t.Context(), fake, AgentBuilderDraftFilter{
+	if _, err := ListAgentBuilderDrafts(t.Context(), fake, DraftFilter{
 		Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester, Principal: agentBuilderDraftPrincipal, SpaceID: " space-work ",
 	}); err != nil {
 		t.Fatal(err)

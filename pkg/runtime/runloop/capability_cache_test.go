@@ -48,7 +48,7 @@ func (f *prepareFixture) ensureNote(step string) bool {
 	host := &modelsteptest.RecordingStepHost{Reply: func(req models.ModelStepRequest) models.ModelStepResult {
 		return modelsteptest.StepResult(req, "Done.")
 	}}
-	producer, err := modelstep.NewModelStepProducer(host, f.preparer, fixtureNoteSessions{fixtureNoteAppender{f.render}})
+	producer, err := modelstep.NewProducer(host, f.preparer, fixtureNoteSessions{fixtureNoteAppender{f.render}})
 	if err != nil {
 		f.t.Fatal(err)
 	}

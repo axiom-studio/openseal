@@ -29,7 +29,7 @@ func ForThreadStartStores(t *testing.T, test func(*testing.T, ThreadStartStore, 
 func ThreadStartConversation(t *testing.T, store models.ConversationStore) *models.Conversation {
 	t.Helper()
 	SeedSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "thread-start"})
-	created, _, err := conversation.NewConversationService(store).CreateConversation(t.Context(), conversation.CreateConversationRequest{
+	created, _, err := conversation.NewService(store).CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "thread-start"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 		Title: "Thread start contracts", IdempotencyKey: "thread-start",
 	})
@@ -42,7 +42,7 @@ func ThreadStartConversation(t *testing.T, store models.ConversationStore) *mode
 // ThreadStartPost posts req to the conversation at its current revision.
 // Unset fields default to a channel question from user "user" whose ID and
 // content are its idempotency key.
-func ThreadStartPost(t *testing.T, service *conversation.ConversationService, target *models.Conversation, req conversation.PostChannelMessageRequest) *models.ChannelMessage {
+func ThreadStartPost(t *testing.T, service *conversation.Service, target *models.Conversation, req conversation.PostChannelMessageRequest) *models.ChannelMessage {
 	t.Helper()
 	current, err := service.GetConversation(t.Context(), target.Scope, target.ID)
 	if err != nil {
@@ -82,7 +82,7 @@ func ThreadStartMessageIDs(messages []*models.ChannelMessage) []string {
 
 // ThreadStartHistoryIDs lists the IDs of the messages of a history page in
 // order; a nil page has none.
-func ThreadStartHistoryIDs(page *conversation.ConversationHistoryReadResult) []string {
+func ThreadStartHistoryIDs(page *conversation.HistoryReadResult) []string {
 	if page == nil {
 		return nil
 	}
