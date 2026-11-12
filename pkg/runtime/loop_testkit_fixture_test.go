@@ -12,12 +12,13 @@ package runtime
 // run-level engine state (TestLoopTestkitHasNoCheckpointAccess).
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -976,171 +977,6 @@ func (f *loopFixture) mustStatus(run *AgentRun, want AgentRunStatus) {
 // ---------------------------------------------------------------------------
 // Kit self-tests of the fixture
 
-// TestLoopTestkitHasNoCheckpointAccess keeps the kit and the scenarios on
-// what the model sees: none of them may touch run-level engine state or the
-// old hosted turn form. The child scenario drives runbook engine state and is
-// exempt by name.
-func TestLoopTestkitHasNoCheckpointAccess(t *testing.T) {
-	forbidden := []string{
-		"Continuation" + "Checkpoint",
-		".Check" + "point[",
-		"HostedTurn" + "Form",
-		"_open" + "seal",
-		"_at" + "las",
-	}
-	exempt := map[string]bool{"loop_scenario_child_test.go": true}
-	var files []string
-	for _, pattern := range []string{"loop_testkit_*_test.go", "loop_testkit_test.go", "loop_scenario_*_test.go"} {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			t.Fatal(err)
-		}
-		files = append(files, matches...)
-	}
-	if len(files) < 3 {
-		t.Fatalf("kit files = %v, want at least the model, fixture and self-test files", files)
-	}
-	for _, name := range files {
-		if exempt[name] {
-			continue
-		}
-		raw, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, needle := range forbidden {
-			if strings.Contains(string(raw), needle) {
-				t.Errorf("%s contains %q: the kit must not read old-path state", name, needle)
-			}
-		}
-	}
-}
-
-func TestLoopTestkitFixtureObjectiveRunReadsThenAnswers(t *testing.T) {
-	eachStore(t, "kit_fixture_objective", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", times: 1,
-				reply: func(v stepView) ModelStepResult {
-					return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "7"}))
-				}},
-			&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
-				for _, e := range v.ToolResultsSinceUser() {
-					if strings.Contains(kitPartsText(e.Tool.Result.Content), "Issue 7") {
-						return finalAnswer(map[string]any{"answer": "Issue 7 is open."})
-					}
-				}
-				return say("I could not find it.")
-			}},
-		))
-		run := f.startRun(RunKindAgentWork, "Check issue 7")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
-		if got, want := strings.Join(f.entryTypes(run.ID), ","), "user,assistant,tool:completed,assistant,tool:completed"; got != want {
-			t.Fatalf("log = %s, want %s", got, want)
-		}
-		if f.dispatch.count("lookup") != 1 {
-			t.Fatalf("lookup dispatched %d times, want 1", f.dispatch.count("lookup"))
-		}
-		if calls := f.calls(run.ID); len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded {
-			t.Fatalf("action calls = %#v", calls)
-		}
-		if steps := f.steps(run.ID); len(steps) != 2 {
-			t.Fatalf("steps = %d, want 2", len(steps))
-		}
-		if len(f.events(run.ID, "turn.narration")) != 1 {
-			t.Fatalf("narration events = %d, want 1", len(f.events(run.ID, "turn.narration")))
-		}
-		if users := f.model.calls(ModelStepPurposeStep)[0]; !strings.Contains(stepView{req: users}.LastUserText(), "Check issue 7") {
-			t.Fatalf("first step did not see the goal: %s", stepView{req: users}.describe())
-		}
-	})
-}
-
-func TestLoopTestkitFixtureChatPostsTheAnswer(t *testing.T) {
-	eachStore(t, "kit_fixture_chat", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withRules(&modelRule{name: "hello",
-			when:  func(v stepView) bool { return strings.Contains(v.LastUserText(), "hello") },
-			reply: func(stepView) ModelStepResult { return say("Hi Ana.") }}))
-		conversation, run := f.startChat("hello finn")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
-		messages := f.messages(conversation.ID)
-		if len(messages) != 2 || messages[1].Sender.ID != loopFixtureAgent || !strings.Contains(messages[1].Content, "Hi Ana.") {
-			t.Fatalf("channel = %s", kitDescribeMessages(messages))
-		}
-		if first := (stepView{req: f.model.calls(ModelStepPurposeStep)[0]}); !strings.Contains(first.LastUserText(), "hello finn") {
-			t.Fatalf("first step did not see the trigger: %s", first.describe())
-		}
-	})
-}
-
-func TestLoopTestkitFixtureApprovalParksAndResumes(t *testing.T) {
-	eachStore(t, "kit_fixture_approval", func(t *testing.T, store KernelStore) {
-		f := newLoopFixture(t, store, withApprovalForWrites(), withRules(
-			&modelRule{name: "update", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Closing it.", reviewedCall(kitGovernedTool(v, "update_status"), map[string]any{"id": "7", "status": "closed"}, "Close issue 7"))
-			}},
-			&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Closed issue 7."}) }},
-		))
-		run := f.startRun(RunKindAgentWork, "Close issue 7")
-		parked := f.driveToRest(run.ID, 3)
-		f.mustStatus(parked, AgentRunStatusWaitingForApproval)
-		if f.dispatch.count("update_status") != 0 {
-			t.Fatal("the write ran before approval")
-		}
-		f.decide(run.ID, ApprovalDecisionApprove, "go ahead")
-		done := f.driveToRest(run.ID, 3)
-		f.mustStatus(done, AgentRunStatusCompleted)
-		if f.dispatch.count("update_status") != 1 {
-			t.Fatalf("update_status dispatched %d times, want 1", f.dispatch.count("update_status"))
-		}
-	})
-}
-
-func TestLoopTestkitFixtureCrashResumesOnSecondWorker(t *testing.T) {
-	eachStore(t, "kit_fixture_crash", func(t *testing.T, store KernelStore) {
-		entered := make(chan struct{})
-		f := newLoopFixture(t, store, withRules(
-			&modelRule{name: "lookup", times: 1, reply: func(v stepView) ModelStepResult {
-				return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "9"}))
-			}},
-			&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Issue 9 is open."}) }},
-		))
-		release := f.dispatch.hold("lookup")
-		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
-			return map[string]interface{}{"id": "9", "status": "open", "title": "Issue 9"}, nil
-		})
-		go func() {
-			for f.dispatch.count("lookup") == 0 {
-				time.Sleep(time.Millisecond)
-			}
-			close(entered)
-		}()
-		run := f.startRun(RunKindAgentWork, "Check issue 9")
-		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			f.runClaimContext(ctx, run.ID)
-		}()
-		select {
-		case <-entered:
-		case <-time.After(5 * time.Second):
-			t.Fatal("dispatch never started")
-		}
-		f.crash(cancel, done)
-		close(release)
-		if f.workerID != loopFixtureWorker2 {
-			t.Fatalf("worker after crash = %s", f.workerID)
-		}
-		final := f.driveToRest(run.ID, 4)
-		f.mustStatus(final, AgentRunStatusCompleted)
-		if final.LeaseOwner != "" && final.LeaseOwner != loopFixtureWorker2 {
-			t.Fatalf("lease owner = %s", final.LeaseOwner)
-		}
-	})
-}
-
 // reviewedCall calls an external (reviewed) governed action: its arguments go
 // in the review envelope the governed schema offers, with summary as the
 // review summary and content.
@@ -1172,4 +1008,348 @@ func kitDescribeMessages(messages []*ChannelMessage) string {
 		parts[i] = string(raw)
 	}
 	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// runClaimWith claims the Run, lets mutate adjust the resolved binding (a
+// compactor, a deterministic producer) and drives one claim.
+func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate func(*agentrun.TurnRunnerBinding)) (runloop.RunLoopExit, *AgentRun) {
+	f.t.Helper()
+	claimed := f.claim(runID)
+	binding := f.binding(claimed)
+	if binding.Session != nil && claimed.SessionID != binding.Session.ID {
+		claimed = f.mustRun(runID)
+	}
+	if mutate != nil {
+		mutate(binding)
+	}
+	exit := f.loop.Drive(ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
+	return exit, f.mustRun(runID)
+}
+
+// withLoopCompactor attaches the production compactor the catalog resolver
+// builds: the step host, the session store, the step's own preparer as the
+// request builder and the Run activity budget.
+func (f *loopFixture) withLoopCompactor(binding *agentrun.TurnRunnerBinding) {
+	f.t.Helper()
+	built, ok := binding.Compactor.(*modelstep.LoopCompactor)
+	if !ok {
+		f.t.Fatalf("binding compactor is %T, want the loop compactor", binding.Compactor)
+	}
+	activity := NewRunActivityService(f.store, f.store, models.WithClock(f.clock.Now))
+	binding.Compactor = &modelstep.LoopCompactor{
+		Host: binding.Host, Sessions: f.store.(AgentSessionStore), Requests: built.Requests,
+		Budget: modelstep.NewRunActivityCompactionBudget(f.store, activity, f.clock.Now), Now: f.clock.Now,
+	}
+}
+
+// startBoundedRun creates an objective Run for finn with a budget.
+func (f *loopFixture) startBoundedRun(goal string, budget BudgetPolicy) *AgentRun {
+	f.t.Helper()
+	created, err := f.portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
+		Scope: f.scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent},
+		AssignedAgentID: loopFixtureAgent, Goal: goal, Source: RunSourceObjective, Budget: &budget,
+	})
+	if err != nil {
+		f.t.Fatalf("create bounded run: %v", err)
+	}
+	return created
+}
+
+// sortedSteps is the Run's step rows by sequence.
+func (f *loopFixture) sortedSteps(runID string) []*AgentTurn {
+	f.t.Helper()
+	steps := f.steps(runID)
+	sort.Slice(steps, func(i, j int) bool { return steps[i].Sequence < steps[j].Sequence })
+	return steps
+}
+
+// runningStep is the Run's running step row (the loop holds at most one).
+func (f *loopFixture) runningStep(runID string) *AgentTurn {
+	f.t.Helper()
+	var running *AgentTurn
+	for _, step := range f.steps(runID) {
+		if step.Status == AgentTurnStatusRunning {
+			if running != nil {
+				f.t.Fatalf("run %s has two running steps: %s and %s", runID, running.ID, step.ID)
+			}
+			running = step
+		}
+	}
+	return running
+}
+
+// entriesOfType counts session entries of one type ("note:<kind>" for notes).
+func (f *loopFixture) entriesOfType(runID, kind string) []*SessionEntry {
+	f.t.Helper()
+	var out []*SessionEntry
+	for _, entry := range f.entries(runID) {
+		switch {
+		case entry.Type == SessionEntryNote && entry.Note != nil && kind == "note:"+string(entry.Note.Kind):
+			out = append(out, entry)
+		case string(entry.Type) == kind:
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// stepTransitions are the run.transitioned events that applied stepID.
+func (f *loopFixture) stepTransitions(runID, stepID string) []*ActivityEvent {
+	f.t.Helper()
+	var out []*ActivityEvent
+	for _, event := range f.events(runID) {
+		if event.TurnID == stepID && strings.HasPrefix(event.EventType, "run.") {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
+const scriptedLookupCallID = "det-lookup"
+
+// scriptedRunbookProducer is a deterministic producer: step 1 calls the
+// governed lookup, step 2 reads its result from the session and finishes
+// (or parks when park is set). Each step writes its engine state.
+type scriptedRunbookProducer struct {
+	f      *loopFixture
+	lookup capability.ModelAction
+	park   bool
+	steps  []map[string]interface{} // Run.Checkpoint as each step saw it
+	result *modelstep.LoopToolResult
+}
+
+func (p *scriptedRunbookProducer) Kind() StepProducerKind { return StepProducerDeterministic }
+
+func (p *scriptedRunbookProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
+	p.steps = append(p.steps, maps.Clone(in.Run.Checkpoint))
+	if p.park {
+		return agentrun.StepOutput{
+			Park:        &agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: &WakeCondition{Type: "user_message"}, Summary: "Waiting for the requester"},
+			KernelState: map[string]interface{}{"phase": "waiting"},
+		}, nil
+	}
+	result, _, err := modelstep.ProducerToolResult(ctx, p.f.raw, in.Run, in.Path, scriptedLookupCallID)
+	if err != nil {
+		return agentrun.StepOutput{}, err
+	}
+	if result == nil {
+		call, err := modelstep.ProducerGovernedToolCall(scriptedLookupCallID, &p.lookup, map[string]interface{}{"id": "5"},
+			&agentrun.ToolCallDirective{IdempotencyKey: "scripted:" + in.Run.ID + ":lookup", Summary: "Look up issue 5"})
+		if err != nil {
+			return agentrun.StepOutput{}, err
+		}
+		return agentrun.StepOutput{ToolCalls: []agentrun.LoopToolCall{call}, KernelState: map[string]interface{}{"phase": "lookup"}}, nil
+	}
+	p.result = result
+	title, _ := result.Output["title"].(string)
+	return agentrun.StepOutput{
+		Final:       &agentrun.LoopFinal{Answer: title + " is open.", Output: map[string]interface{}{"title": title}},
+		KernelState: map[string]interface{}{"phase": "done"},
+	}, nil
+}
+
+func (f *loopFixture) scriptedRunbook(park bool) *scriptedRunbookProducer {
+	f.t.Helper()
+	for _, action := range f.offered {
+		if action.Action == "lookup" {
+			return &scriptedRunbookProducer{f: f, lookup: action, park: park}
+		}
+	}
+	f.t.Fatal("fixture offers no lookup")
+	return nil
+}
+
+// previewFrame is one turn.answer_preview event of a Run, read from its
+// payload.
+type previewFrame struct {
+	attempt  string
+	sequence string
+	text     string
+	reset    bool
+}
+
+func (p previewFrame) String() string {
+	if p.reset {
+		return fmt.Sprintf("reset(%s#%s)", p.attempt, p.sequence)
+	}
+	return fmt.Sprintf("text(%s#%s %q)", p.attempt, p.sequence, p.text)
+}
+
+func (f *loopFixture) previewFrames(runID string) []previewFrame {
+	f.t.Helper()
+	var out []previewFrame
+	for _, event := range f.events(runID, "turn.answer_preview") {
+		frame := previewFrame{
+			attempt: fmt.Sprint(event.Payload["attemptId"]), sequence: fmt.Sprint(event.Payload["sequence"]),
+		}
+		frame.text, _ = event.Payload["text"].(string)
+		frame.reset, _ = event.Payload["reset"].(bool)
+		out = append(out, frame)
+	}
+	return out
+}
+
+const approvalScenarioTrigger = "Please close issue 6815"
+
+// parkedApproval starts the chat and drives it to the approval park.
+func (f *loopFixture) parkedApproval() (*Conversation, *AgentRun) {
+	f.t.Helper()
+	conversation, run := f.startChat(approvalScenarioTrigger)
+	parked := f.driveToRest(run.ID, 3)
+	f.mustStatus(parked, AgentRunStatusWaitingForApproval)
+	return conversation, parked
+}
+
+func (f *loopFixture) approvals(runID string) []*ApprovalCheckpoint {
+	f.t.Helper()
+	approvals, err := f.raw.ListApprovals(f.ctx, ApprovalFilter{Scope: f.scope, RunID: runID})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return approvals
+}
+
+// toolEntries is the Run's tool entries in log order.
+func (f *loopFixture) toolEntries(runID string) []*SessionEntry {
+	f.t.Helper()
+	var out []*SessionEntry
+	for _, entry := range f.entries(runID) {
+		if entry.Type == SessionEntryTool {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func (f *loopFixture) agentReplies(conversationID string) []string {
+	f.t.Helper()
+	var out []string
+	for _, message := range f.messages(conversationID) {
+		if message.Sender.Type == ConversationParticipantAgent {
+			out = append(out, message.Content)
+		}
+	}
+	return out
+}
+
+// lastStepRequest is the newest model step request.
+func (f *loopFixture) lastStepRequest() stepView {
+	f.t.Helper()
+	requests := f.model.calls(ModelStepPurposeStep)
+	if len(requests) == 0 {
+		f.t.Fatal("no model step ran")
+	}
+	return stepView{req: requests[len(requests)-1]}
+}
+
+func (f *loopFixture) cancelRun(run *AgentRun) *AgentRun {
+	f.t.Helper()
+	current := f.mustRun(run.ID)
+	commands := agentrun.NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
+	result, err := commands.CommandAgentRun(f.ctx, agentrun.AgentRunCommandRequest{
+		Scope: f.scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: agentrun.AgentRunCommandCancel,
+		Actor: ActivityActor{Type: "user", ID: loopFixtureUser},
+	})
+	if err != nil {
+		f.t.Fatalf("cancel run: %v", err)
+	}
+	return result.Run
+}
+
+func (f *loopFixture) conversationRuns(conversationID string) []*AgentRun {
+	f.t.Helper()
+	runs, err := f.raw.ListAgentRuns(f.ctx, AgentRunFilter{Scope: f.scope, Limit: 100})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var out []*AgentRun
+	for _, run := range runs {
+		if id, _ := run.Context[conversationRunContextConversationID].(string); id == conversationID {
+			out = append(out, run)
+		}
+	}
+	return out
+}
+
+// onlyRunID is the scope's single Run.
+func (f *loopFixture) onlyRunID() string {
+	f.t.Helper()
+	runs, err := f.raw.ListAgentRuns(f.ctx, AgentRunFilter{Scope: f.scope, Limit: 10})
+	if err != nil || len(runs) != 1 {
+		f.t.Fatalf("runs = %d, %v", len(runs), err)
+	}
+	return runs[0].ID
+}
+
+// startChatWith is startChat with a hook that sees the conversation before
+// the trigger is posted, and a trigger that may require a response.
+func (f *loopFixture) startChatWith(text string, created func(*Conversation), requiresResponse bool) (*Conversation, *AgentRun) {
+	f.t.Helper()
+	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
+		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}, Title: "Loop fixture chat",
+		IdempotencyKey: "loop-chat-with",
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if created != nil {
+		created(conversation)
+	}
+	posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
+		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser}, Intent: MessageIntentQuestion,
+		Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: requiresResponse,
+		IdempotencyKey: "loop-chat-with-trigger",
+	})
+	if err != nil {
+		f.t.Fatalf("post trigger: %v", err)
+	}
+	return conversation, f.chatRun(conversation, posted.Message)
+}
+
+// answerVisualContent is the artifact content store visuals are written to.
+type answerVisualContent struct {
+	puts int
+	data []byte
+}
+
+func (s *answerVisualContent) Put(_ context.Context, req ArtifactContentWrite) (ArtifactStoredContent, error) {
+	s.puts++
+	s.data, _ = io.ReadAll(req.Reader)
+	return ArtifactStoredContent{ContentRef: "visual-content", SizeBytes: int64(len(s.data)), Digest: hashBytes(s.data)}, nil
+}
+
+func (s *answerVisualContent) Open(context.Context, Scope, string) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(s.data)), nil
+}
+
+func (f *loopFixture) commandRun(runID string, kind agentrun.AgentRunCommandKind) *AgentRun {
+	f.t.Helper()
+	current := f.mustRun(runID)
+	commands := agentrun.NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
+	result, err := commands.CommandAgentRun(f.ctx, agentrun.AgentRunCommandRequest{
+		Scope: f.scope, RunID: runID, ExpectedRevision: current.Revision, Kind: kind,
+		Actor: ActivityActor{Type: "user", ID: loopFixtureUser},
+	})
+	if err != nil {
+		f.t.Fatalf("%s run: %v", kind, err)
+	}
+	return result.Run
+}
+
+// expireApproval lets the Run's single approval run out and resolves it the
+// way the approval sweep does.
+func (f *loopFixture) expireApproval(runID string) *ApprovalResolutionResult {
+	f.t.Helper()
+	approvals := f.approvals(runID)
+	if len(approvals) != 1 {
+		f.t.Fatalf("approvals = %d, want 1", len(approvals))
+	}
+	approval := approvals[0]
+	f.clock.Advance(approval.ExpiresAt.Sub(f.clock.Now()) + time.Second)
+	result, err := f.approve.ResolveTimeout(f.ctx, f.scope, approval.ID, approval.Revision, approval.ID)
+	if err != nil {
+		f.t.Fatalf("expire approval: %v", err)
+	}
+	return result
 }

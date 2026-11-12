@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	approvalScenarioTrigger = "Please close issue 6815"
 	approvalScenarioSummary = "Close issue 6815"
 )
 
@@ -70,52 +69,11 @@ func newApprovalScenario(t *testing.T, store KernelStore, opts ...loopOption) *l
 	return newLoopFixture(t, store, append([]loopOption{withApprovalForWrites(), withRules(approvalScenarioRules()...)}, opts...)...)
 }
 
-// parkedApproval starts the chat and drives it to the approval park.
-func (f *loopFixture) parkedApproval() (*Conversation, *AgentRun) {
-	f.t.Helper()
-	conversation, run := f.startChat(approvalScenarioTrigger)
-	parked := f.driveToRest(run.ID, 3)
-	f.mustStatus(parked, AgentRunStatusWaitingForApproval)
-	return conversation, parked
-}
-
-func (f *loopFixture) approvals(runID string) []*ApprovalCheckpoint {
-	f.t.Helper()
-	approvals, err := f.raw.ListApprovals(f.ctx, ApprovalFilter{Scope: f.scope, RunID: runID})
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	return approvals
-}
-
-// toolEntries is the Run's tool entries in log order.
-func (f *loopFixture) toolEntries(runID string) []*SessionEntry {
-	f.t.Helper()
-	var out []*SessionEntry
-	for _, entry := range f.entries(runID) {
-		if entry.Type == SessionEntryTool {
-			out = append(out, entry)
-		}
-	}
-	return out
-}
-
 func toolEntryText(entry *SessionEntry) string {
 	if entry == nil || entry.Tool == nil || entry.Tool.Result == nil {
 		return ""
 	}
 	return kitPartsText(entry.Tool.Result.Content)
-}
-
-func (f *loopFixture) agentReplies(conversationID string) []string {
-	f.t.Helper()
-	var out []string
-	for _, message := range f.messages(conversationID) {
-		if message.Sender.Type == ConversationParticipantAgent {
-			out = append(out, message.Content)
-		}
-	}
-	return out
 }
 
 func logTail(types []string, n int) string {
@@ -160,16 +118,6 @@ func assertParkedOnApproval(t *testing.T, f *loopFixture, run *AgentRun) (*Appro
 		t.Fatal("the write ran before approval")
 	}
 	return approvals[0], calls[0]
-}
-
-// lastStepRequest is the newest model step request.
-func (f *loopFixture) lastStepRequest() stepView {
-	f.t.Helper()
-	requests := f.model.calls(ModelStepPurposeStep)
-	if len(requests) == 0 {
-		f.t.Fatal("no model step ran")
-	}
-	return stepView{req: requests[len(requests)-1]}
 }
 
 // ---------------------------------------------------------------------------
@@ -707,71 +655,6 @@ func TestLoopReviewerGuidanceReachesTheModel(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Helpers
-
-func (f *loopFixture) cancelRun(run *AgentRun) *AgentRun {
-	f.t.Helper()
-	current := f.mustRun(run.ID)
-	commands := agentrun.NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
-	result, err := commands.CommandAgentRun(f.ctx, agentrun.AgentRunCommandRequest{
-		Scope: f.scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: agentrun.AgentRunCommandCancel,
-		Actor: ActivityActor{Type: "user", ID: loopFixtureUser},
-	})
-	if err != nil {
-		f.t.Fatalf("cancel run: %v", err)
-	}
-	return result.Run
-}
-
-func (f *loopFixture) conversationRuns(conversationID string) []*AgentRun {
-	f.t.Helper()
-	runs, err := f.raw.ListAgentRuns(f.ctx, AgentRunFilter{Scope: f.scope, Limit: 100})
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	var out []*AgentRun
-	for _, run := range runs {
-		if id, _ := run.Context[conversationRunContextConversationID].(string); id == conversationID {
-			out = append(out, run)
-		}
-	}
-	return out
-}
-
-// onlyRunID is the scope's single Run.
-func (f *loopFixture) onlyRunID() string {
-	f.t.Helper()
-	runs, err := f.raw.ListAgentRuns(f.ctx, AgentRunFilter{Scope: f.scope, Limit: 10})
-	if err != nil || len(runs) != 1 {
-		f.t.Fatalf("runs = %d, %v", len(runs), err)
-	}
-	return runs[0].ID
-}
-
-// startChatWith is startChat with a hook that sees the conversation before
-// the trigger is posted, and a trigger that may require a response.
-func (f *loopFixture) startChatWith(text string, created func(*Conversation), requiresResponse bool) (*Conversation, *AgentRun) {
-	f.t.Helper()
-	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
-		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}, Title: "Loop fixture chat",
-		IdempotencyKey: "loop-chat-with",
-	})
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	if created != nil {
-		created(conversation)
-	}
-	posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
-		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser}, Intent: MessageIntentQuestion,
-		Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: requiresResponse,
-		IdempotencyKey: "loop-chat-with-trigger",
-	})
-	if err != nil {
-		f.t.Fatalf("post trigger: %v", err)
-	}
-	return conversation, f.chatRun(conversation, posted.Message)
-}
 
 // approvalHooks is a store wrapper around the fixture's crash store: it runs
 // barriers right after an action proposal commits and around the loop's

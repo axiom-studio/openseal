@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -372,6 +374,171 @@ func TestLoopTestkitCrashStoreRefusesWritesAfterArm(t *testing.T) {
 		claimed, err := store.ClaimNextAgentRun(ctx, claim)
 		if err != nil || claimed == nil || claimed.ID != run.ID {
 			t.Fatalf("claim after disarm = %#v, %v", claimed, err)
+		}
+	})
+}
+
+// TestLoopTestkitHasNoCheckpointAccess keeps the kit and the scenarios on
+// what the model sees: none of them may touch run-level engine state or the
+// old hosted turn form. The child scenario drives runbook engine state and is
+// exempt by name.
+func TestLoopTestkitHasNoCheckpointAccess(t *testing.T) {
+	forbidden := []string{
+		"Continuation" + "Checkpoint",
+		".Check" + "point[",
+		"HostedTurn" + "Form",
+		"_open" + "seal",
+		"_at" + "las",
+	}
+	exempt := map[string]bool{"loop_scenario_child_test.go": true}
+	var files []string
+	for _, pattern := range []string{"loop_testkit_*_test.go", "loop_testkit_test.go", "loop_scenario_*_test.go"} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, matches...)
+	}
+	if len(files) < 3 {
+		t.Fatalf("kit files = %v, want at least the model, fixture and self-test files", files)
+	}
+	for _, name := range files {
+		if exempt[name] {
+			continue
+		}
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, needle := range forbidden {
+			if strings.Contains(string(raw), needle) {
+				t.Errorf("%s contains %q: the kit must not read old-path state", name, needle)
+			}
+		}
+	}
+}
+
+func TestLoopTestkitFixtureObjectiveRunReadsThenAnswers(t *testing.T) {
+	eachStore(t, "kit_fixture_objective", func(t *testing.T, store KernelStore) {
+		f := newLoopFixture(t, store, withRules(
+			&modelRule{name: "lookup", times: 1,
+				reply: func(v stepView) ModelStepResult {
+					return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "7"}))
+				}},
+			&modelRule{name: "answer", reply: func(v stepView) ModelStepResult {
+				for _, e := range v.ToolResultsSinceUser() {
+					if strings.Contains(kitPartsText(e.Tool.Result.Content), "Issue 7") {
+						return finalAnswer(map[string]any{"answer": "Issue 7 is open."})
+					}
+				}
+				return say("I could not find it.")
+			}},
+		))
+		run := f.startRun(RunKindAgentWork, "Check issue 7")
+		done := f.driveToRest(run.ID, 3)
+		f.mustStatus(done, AgentRunStatusCompleted)
+		if got, want := strings.Join(f.entryTypes(run.ID), ","), "user,assistant,tool:completed,assistant,tool:completed"; got != want {
+			t.Fatalf("log = %s, want %s", got, want)
+		}
+		if f.dispatch.count("lookup") != 1 {
+			t.Fatalf("lookup dispatched %d times, want 1", f.dispatch.count("lookup"))
+		}
+		if calls := f.calls(run.ID); len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded {
+			t.Fatalf("action calls = %#v", calls)
+		}
+		if steps := f.steps(run.ID); len(steps) != 2 {
+			t.Fatalf("steps = %d, want 2", len(steps))
+		}
+		if len(f.events(run.ID, "turn.narration")) != 1 {
+			t.Fatalf("narration events = %d, want 1", len(f.events(run.ID, "turn.narration")))
+		}
+		if users := f.model.calls(ModelStepPurposeStep)[0]; !strings.Contains(stepView{req: users}.LastUserText(), "Check issue 7") {
+			t.Fatalf("first step did not see the goal: %s", stepView{req: users}.describe())
+		}
+	})
+}
+
+func TestLoopTestkitFixtureChatPostsTheAnswer(t *testing.T) {
+	eachStore(t, "kit_fixture_chat", func(t *testing.T, store KernelStore) {
+		f := newLoopFixture(t, store, withRules(&modelRule{name: "hello",
+			when:  func(v stepView) bool { return strings.Contains(v.LastUserText(), "hello") },
+			reply: func(stepView) ModelStepResult { return say("Hi Ana.") }}))
+		conversation, run := f.startChat("hello finn")
+		done := f.driveToRest(run.ID, 3)
+		f.mustStatus(done, AgentRunStatusCompleted)
+		messages := f.messages(conversation.ID)
+		if len(messages) != 2 || messages[1].Sender.ID != loopFixtureAgent || !strings.Contains(messages[1].Content, "Hi Ana.") {
+			t.Fatalf("channel = %s", kitDescribeMessages(messages))
+		}
+		if first := (stepView{req: f.model.calls(ModelStepPurposeStep)[0]}); !strings.Contains(first.LastUserText(), "hello finn") {
+			t.Fatalf("first step did not see the trigger: %s", first.describe())
+		}
+	})
+}
+
+func TestLoopTestkitFixtureApprovalParksAndResumes(t *testing.T) {
+	eachStore(t, "kit_fixture_approval", func(t *testing.T, store KernelStore) {
+		f := newLoopFixture(t, store, withApprovalForWrites(), withRules(
+			&modelRule{name: "update", times: 1, reply: func(v stepView) ModelStepResult {
+				return act("Closing it.", reviewedCall(kitGovernedTool(v, "update_status"), map[string]any{"id": "7", "status": "closed"}, "Close issue 7"))
+			}},
+			&modelRule{name: "done", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Closed issue 7."}) }},
+		))
+		run := f.startRun(RunKindAgentWork, "Close issue 7")
+		parked := f.driveToRest(run.ID, 3)
+		f.mustStatus(parked, AgentRunStatusWaitingForApproval)
+		if f.dispatch.count("update_status") != 0 {
+			t.Fatal("the write ran before approval")
+		}
+		f.decide(run.ID, ApprovalDecisionApprove, "go ahead")
+		done := f.driveToRest(run.ID, 3)
+		f.mustStatus(done, AgentRunStatusCompleted)
+		if f.dispatch.count("update_status") != 1 {
+			t.Fatalf("update_status dispatched %d times, want 1", f.dispatch.count("update_status"))
+		}
+	})
+}
+
+func TestLoopTestkitFixtureCrashResumesOnSecondWorker(t *testing.T) {
+	eachStore(t, "kit_fixture_crash", func(t *testing.T, store KernelStore) {
+		entered := make(chan struct{})
+		f := newLoopFixture(t, store, withRules(
+			&modelRule{name: "lookup", times: 1, reply: func(v stepView) ModelStepResult {
+				return act("Looking it up.", call(kitGovernedTool(v, "lookup"), map[string]any{"id": "9"}))
+			}},
+			&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Issue 9 is open."}) }},
+		))
+		release := f.dispatch.hold("lookup")
+		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+			return map[string]interface{}{"id": "9", "status": "open", "title": "Issue 9"}, nil
+		})
+		go func() {
+			for f.dispatch.count("lookup") == 0 {
+				time.Sleep(time.Millisecond)
+			}
+			close(entered)
+		}()
+		run := f.startRun(RunKindAgentWork, "Check issue 9")
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			f.runClaimContext(ctx, run.ID)
+		}()
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("dispatch never started")
+		}
+		f.crash(cancel, done)
+		close(release)
+		if f.workerID != loopFixtureWorker2 {
+			t.Fatalf("worker after crash = %s", f.workerID)
+		}
+		final := f.driveToRest(run.ID, 4)
+		f.mustStatus(final, AgentRunStatusCompleted)
+		if final.LeaseOwner != "" && final.LeaseOwner != loopFixtureWorker2 {
+			t.Fatalf("lease owner = %s", final.LeaseOwner)
 		}
 	})
 }

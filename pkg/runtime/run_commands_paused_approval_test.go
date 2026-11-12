@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -16,37 +15,6 @@ import (
 // TestLoopPausedApprovalCancelAndExpiry): an operator pauses a Run parked
 // on an approval; canceling closes the approval, its call and the tool entry
 // together, and an expiry while paused is the tool result once resumed.
-
-func (f *loopFixture) commandRun(runID string, kind agentrun.AgentRunCommandKind) *AgentRun {
-	f.t.Helper()
-	current := f.mustRun(runID)
-	commands := agentrun.NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
-	result, err := commands.CommandAgentRun(f.ctx, agentrun.AgentRunCommandRequest{
-		Scope: f.scope, RunID: runID, ExpectedRevision: current.Revision, Kind: kind,
-		Actor: ActivityActor{Type: "user", ID: loopFixtureUser},
-	})
-	if err != nil {
-		f.t.Fatalf("%s run: %v", kind, err)
-	}
-	return result.Run
-}
-
-// expireApproval lets the Run's single approval run out and resolves it the
-// way the approval sweep does.
-func (f *loopFixture) expireApproval(runID string) *ApprovalResolutionResult {
-	f.t.Helper()
-	approvals := f.approvals(runID)
-	if len(approvals) != 1 {
-		f.t.Fatalf("approvals = %d, want 1", len(approvals))
-	}
-	approval := approvals[0]
-	f.clock.Advance(approval.ExpiresAt.Sub(f.clock.Now()) + time.Second)
-	result, err := f.approve.ResolveTimeout(f.ctx, f.scope, approval.ID, approval.Revision, approval.ID)
-	if err != nil {
-		f.t.Fatalf("expire approval: %v", err)
-	}
-	return result
-}
 
 func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 	for _, expired := range []bool{false, true} {

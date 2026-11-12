@@ -10,14 +10,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -26,89 +23,6 @@ import (
 
 // ---------------------------------------------------------------------------
 // Scenario helpers
-
-// runClaimWith claims the Run, lets mutate adjust the resolved binding (a
-// compactor, a deterministic producer) and drives one claim.
-func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate func(*agentrun.TurnRunnerBinding)) (runloop.RunLoopExit, *AgentRun) {
-	f.t.Helper()
-	claimed := f.claim(runID)
-	binding := f.binding(claimed)
-	if binding.Session != nil && claimed.SessionID != binding.Session.ID {
-		claimed = f.mustRun(runID)
-	}
-	if mutate != nil {
-		mutate(binding)
-	}
-	exit := f.loop.Drive(ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
-	return exit, f.mustRun(runID)
-}
-
-// withLoopCompactor attaches the production compactor the catalog resolver
-// builds: the step host, the session store, the step's own preparer as the
-// request builder and the Run activity budget.
-func (f *loopFixture) withLoopCompactor(binding *agentrun.TurnRunnerBinding) {
-	f.t.Helper()
-	built, ok := binding.Compactor.(*modelstep.LoopCompactor)
-	if !ok {
-		f.t.Fatalf("binding compactor is %T, want the loop compactor", binding.Compactor)
-	}
-	activity := NewRunActivityService(f.store, f.store, models.WithClock(f.clock.Now))
-	binding.Compactor = &modelstep.LoopCompactor{
-		Host: binding.Host, Sessions: f.store.(AgentSessionStore), Requests: built.Requests,
-		Budget: modelstep.NewRunActivityCompactionBudget(f.store, activity, f.clock.Now), Now: f.clock.Now,
-	}
-}
-
-// startBoundedRun creates an objective Run for finn with a budget.
-func (f *loopFixture) startBoundedRun(goal string, budget BudgetPolicy) *AgentRun {
-	f.t.Helper()
-	created, err := f.portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
-		Scope: f.scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent},
-		AssignedAgentID: loopFixtureAgent, Goal: goal, Source: RunSourceObjective, Budget: &budget,
-	})
-	if err != nil {
-		f.t.Fatalf("create bounded run: %v", err)
-	}
-	return created
-}
-
-// sortedSteps is the Run's step rows by sequence.
-func (f *loopFixture) sortedSteps(runID string) []*AgentTurn {
-	f.t.Helper()
-	steps := f.steps(runID)
-	sort.Slice(steps, func(i, j int) bool { return steps[i].Sequence < steps[j].Sequence })
-	return steps
-}
-
-// runningStep is the Run's running step row (the loop holds at most one).
-func (f *loopFixture) runningStep(runID string) *AgentTurn {
-	f.t.Helper()
-	var running *AgentTurn
-	for _, step := range f.steps(runID) {
-		if step.Status == AgentTurnStatusRunning {
-			if running != nil {
-				f.t.Fatalf("run %s has two running steps: %s and %s", runID, running.ID, step.ID)
-			}
-			running = step
-		}
-	}
-	return running
-}
-
-// entriesOfType counts session entries of one type ("note:<kind>" for notes).
-func (f *loopFixture) entriesOfType(runID, kind string) []*SessionEntry {
-	f.t.Helper()
-	var out []*SessionEntry
-	for _, entry := range f.entries(runID) {
-		switch {
-		case entry.Type == SessionEntryNote && entry.Note != nil && kind == "note:"+string(entry.Note.Kind):
-			out = append(out, entry)
-		case string(entry.Type) == kind:
-			out = append(out, entry)
-		}
-	}
-	return out
-}
 
 // lookupRule calls the governed lookup with the step number as the id, so
 // repeated steps never trip the repeat guard.
@@ -125,18 +39,6 @@ func purposeIs(purpose ModelStepPurpose) func(stepView) bool {
 
 func stepAtMost(n int) func(stepView) bool {
 	return func(v stepView) bool { return v.Purpose() == ModelStepPurposeStep && v.Step() <= n }
-}
-
-// stepTransitions are the run.transitioned events that applied stepID.
-func (f *loopFixture) stepTransitions(runID, stepID string) []*ActivityEvent {
-	f.t.Helper()
-	var out []*ActivityEvent
-	for _, event := range f.events(runID) {
-		if event.TurnID == stepID && strings.HasPrefix(event.EventType, "run.") {
-			out = append(out, event)
-		}
-	}
-	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -949,60 +851,6 @@ func TestRunLoopLeaseLostWritesNothing(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Deterministic producers
-
-const scriptedLookupCallID = "det-lookup"
-
-// scriptedRunbookProducer is a deterministic producer: step 1 calls the
-// governed lookup, step 2 reads its result from the session and finishes
-// (or parks when park is set). Each step writes its engine state.
-type scriptedRunbookProducer struct {
-	f      *loopFixture
-	lookup capability.ModelAction
-	park   bool
-	steps  []map[string]interface{} // Run.Checkpoint as each step saw it
-	result *modelstep.LoopToolResult
-}
-
-func (p *scriptedRunbookProducer) Kind() StepProducerKind { return StepProducerDeterministic }
-
-func (p *scriptedRunbookProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
-	p.steps = append(p.steps, maps.Clone(in.Run.Checkpoint))
-	if p.park {
-		return agentrun.StepOutput{
-			Park:        &agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: &WakeCondition{Type: "user_message"}, Summary: "Waiting for the requester"},
-			KernelState: map[string]interface{}{"phase": "waiting"},
-		}, nil
-	}
-	result, _, err := modelstep.ProducerToolResult(ctx, p.f.raw, in.Run, in.Path, scriptedLookupCallID)
-	if err != nil {
-		return agentrun.StepOutput{}, err
-	}
-	if result == nil {
-		call, err := modelstep.ProducerGovernedToolCall(scriptedLookupCallID, &p.lookup, map[string]interface{}{"id": "5"},
-			&agentrun.ToolCallDirective{IdempotencyKey: "scripted:" + in.Run.ID + ":lookup", Summary: "Look up issue 5"})
-		if err != nil {
-			return agentrun.StepOutput{}, err
-		}
-		return agentrun.StepOutput{ToolCalls: []agentrun.LoopToolCall{call}, KernelState: map[string]interface{}{"phase": "lookup"}}, nil
-	}
-	p.result = result
-	title, _ := result.Output["title"].(string)
-	return agentrun.StepOutput{
-		Final:       &agentrun.LoopFinal{Answer: title + " is open.", Output: map[string]interface{}{"title": title}},
-		KernelState: map[string]interface{}{"phase": "done"},
-	}, nil
-}
-
-func (f *loopFixture) scriptedRunbook(park bool) *scriptedRunbookProducer {
-	f.t.Helper()
-	for _, action := range f.offered {
-		if action.Action == "lookup" {
-			return &scriptedRunbookProducer{f: f, lookup: action, park: park}
-		}
-	}
-	f.t.Fatal("fixture offers no lookup")
-	return nil
-}
 
 func TestRunLoopDeterministicProducerKernelState(t *testing.T) {
 	eachStore(t, "rl_deterministic", func(t *testing.T, store KernelStore) {

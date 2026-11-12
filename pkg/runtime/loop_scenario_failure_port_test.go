@@ -10,10 +10,8 @@ package runtime
 // the visual host checks and the evidence reviewer are fakes.
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -32,22 +30,6 @@ import (
 // stored.
 func portVisualArtifactID(runID, triggerID string) string {
 	return "visual-" + strings.TrimPrefix(models.SHA256DigestString(runID+"\x00"+triggerID), "sha256:")[:40]
-}
-
-// answerVisualContent is the artifact content store visuals are written to.
-type answerVisualContent struct {
-	puts int
-	data []byte
-}
-
-func (s *answerVisualContent) Put(_ context.Context, req ArtifactContentWrite) (ArtifactStoredContent, error) {
-	s.puts++
-	s.data, _ = io.ReadAll(req.Reader)
-	return ArtifactStoredContent{ContentRef: "visual-content", SizeBytes: int64(len(s.data)), Digest: hashBytes(s.data)}, nil
-}
-
-func (s *answerVisualContent) Open(context.Context, Scope, string) (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(s.data)), nil
 }
 
 // ---------------------------------------------------------------------------

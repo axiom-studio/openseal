@@ -245,36 +245,6 @@ func eachExternalStore(t *testing.T, prefix string, test func(t *testing.T, stor
 	})
 }
 
-// previewFrame is one turn.answer_preview event of a Run, read from its
-// payload.
-type previewFrame struct {
-	attempt  string
-	sequence string
-	text     string
-	reset    bool
-}
-
-func (p previewFrame) String() string {
-	if p.reset {
-		return fmt.Sprintf("reset(%s#%s)", p.attempt, p.sequence)
-	}
-	return fmt.Sprintf("text(%s#%s %q)", p.attempt, p.sequence, p.text)
-}
-
-func (f *loopFixture) previewFrames(runID string) []previewFrame {
-	f.t.Helper()
-	var out []previewFrame
-	for _, event := range f.events(runID, "turn.answer_preview") {
-		frame := previewFrame{
-			attempt: fmt.Sprint(event.Payload["attemptId"]), sequence: fmt.Sprint(event.Payload["sequence"]),
-		}
-		frame.text, _ = event.Payload["text"].(string)
-		frame.reset, _ = event.Payload["reset"].(bool)
-		out = append(out, frame)
-	}
-	return out
-}
-
 // lastAgentMessage is the newest channel message sent by an Agent with intent.
 func lastAgentMessage(messages []*ChannelMessage, intent ConversationMessageIntent) *ChannelMessage {
 	for i := len(messages) - 1; i >= 0; i-- {
