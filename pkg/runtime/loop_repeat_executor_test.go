@@ -292,7 +292,7 @@ func TestRepeatGuardReadNoteRefusalThenFailure(t *testing.T) {
 	requireGuardRefusal(t, fifth[0], RefusedLoopCallRepeatLimit, 5, ToolResultRefused, repeatLimitText(5))
 	requireGuardRefusal(t, fifth[1], ToolGuardRunStopping, 0, ToolResultRefused, repeatRunStoppingText)
 	if failure == nil || failure.Kind != RunFailureKindRepeatLimit || failure.Code != RunFailureCodeRepeatLimit || !failure.Explainable ||
-		failure.Message != runFailureMessageRepeatLimit {
+		failure.Message != repeatLimitRunError {
 		t.Fatalf("5th failure = %#v", failure)
 	}
 	if len(f.notes()) != 1 {
@@ -562,3 +562,6 @@ func TestRepeatGuardObserveIsConcurrent(t *testing.T) {
 		t.Fatalf("finish = %#v, %v", failure, err)
 	}
 }
+
+// repeatLimitRunError is the exact Run.Error of a repeat-limit stop.
+const repeatLimitRunError = "The agent repeated the same call without making progress, so the run was stopped."
