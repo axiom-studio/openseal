@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -19,9 +20,9 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_grouped_collaboration_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	stores := []*PostgresStore{primary, replica}
+	stores := []*postgres.PostgresStore{primary, replica}
 	accepted := make([]*AgentRequestResult, len(created.Requests))
 	for index, request := range created.Requests {
 		result, err := NewCollaborationService(stores[index%len(stores)]).RespondAgentRequest(ctx, RespondAgentRequestRequest{
@@ -91,7 +92,7 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 		t.Fatalf("completion failures = %d, observed wakes = %d", failures.Load(), wakes.Load())
 	}
 
-	restarted, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	restarted, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,9 +115,9 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_team_bids_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stores := []*PostgresStore{primary, replica}
+	stores := []*postgres.PostgresStore{primary, replica}
 	var successes atomic.Int32
 	var wait sync.WaitGroup
 	for index, agentID := range []string{"reviewer-a", "reviewer-b"} {
@@ -194,7 +195,7 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	if successes.Load() != 1 {
 		t.Fatalf("concurrent successful bids = %d, want 1", successes.Load())
 	}
-	restarted, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	restarted, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

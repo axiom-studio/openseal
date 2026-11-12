@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // fakeSessionEntryLister serves SessionEntryFilter pages from a fixed entry
@@ -59,7 +60,7 @@ func (l *errorStreakLog) step(step int64, results ...bool) {
 			Type: SessionEntryTool, Step: step, StepID: fmt.Sprintf("step-%d", step), State: state,
 			ToolCallID: fmt.Sprintf("call-%d-%d", step, i),
 			Tool: &ToolEntry{Name: "linear_get_issue", Result: &ToolResult{Status: status, IsError: isError,
-				Content: []ContentPart{testTextPart("result")}}},
+				Content: []ContentPart{storetest.TextPart("result")}}},
 		})
 	}
 }

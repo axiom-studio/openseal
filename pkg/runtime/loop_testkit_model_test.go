@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // ---------------------------------------------------------------------------
@@ -543,7 +545,7 @@ func kernelStoreMatrix(t *testing.T, prefix string) []kernelStoreCase {
 	t.Helper()
 	cases := []kernelStoreCase{
 		{name: "sqlite", open: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), prefix+".db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), prefix+".db"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestGatewayAuthorityPinsRejectForeignProviderInstallation(t *testing.T) {
@@ -121,7 +122,7 @@ func TestSQLiteGatewayAuthorityBackfillSurvivesRestartAndRejectsAmbiguity(t *tes
 		Actor:   ActivityActor{Type: "test", ID: "operator"}, Reason: "Create pre-migration provider routing",
 	})
 	path := filepath.Join(t.TempDir(), "authority.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestSQLiteGatewayAuthorityBackfillSurvivesRestartAndRejectsAmbiguity(t *tes
 		t.Fatal(err)
 	}
 	for restart := 0; restart < 2; restart++ {
-		store, err = NewSQLiteStore(path)
+		store, err = sqlite.NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}

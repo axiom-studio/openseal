@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -18,7 +19,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "approval.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "approval.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +120,7 @@ func TestApprovalCoordinatorAppliesReviewedTimeoutApprovalAcrossStores(t *testin
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "approval-timeout.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "approval-timeout.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -194,7 +195,7 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "approval-rejection.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "approval-rejection.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

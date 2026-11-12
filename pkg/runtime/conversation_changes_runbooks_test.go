@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func runbookIDs(runbooks []*ConversationRunbook) string {
@@ -184,14 +185,14 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			routine := routineEventTestActivation(scope, "shop-orders", now.Add(-2*time.Hour))
+			routine := storetest.RoutineEventActivation(scope, "shop-orders", now.Add(-2*time.Hour))
 			routine.Owner, routine.ObjectiveID, routine.AssignedAgentID = owner, objective.ID, owner.ID
 			routine.Task.ConversationID, routine.Task.SourceMessageID = f.conversation.ID, f.trigger.ID
 			if err := store.CreateRunbookActivation(ctx, routine); err != nil {
 				t.Fatal(err)
 			}
 			// An event routine from another chat is not shown here.
-			other := routineEventTestActivation(scope, "elsewhere", now.Add(-2*time.Hour))
+			other := storetest.RoutineEventActivation(scope, "elsewhere", now.Add(-2*time.Hour))
 			other.Owner, other.ObjectiveID, other.AssignedAgentID = owner, objective.ID, owner.ID
 			other.Task.ConversationID = "other-chat"
 			if err := store.CreateRunbookActivation(ctx, other); err != nil {
@@ -216,7 +217,7 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 			var lastRun *AgentRun
 			for index, ago := range []time.Duration{40 * time.Minute, 10 * time.Minute} {
 				at := now.Add(-ago)
-				event := routineTestEvent(scope, routine, fmt.Sprintf("order-%d", index), at)
+				event := storetest.RoutineEventFor(scope, routine, fmt.Sprintf("order-%d", index), at)
 				if _, err := events.InsertRoutineEvent(ctx, &RoutineEventRecord{Scope: scope, ActivationID: routine.ID, Event: event, State: RoutineEventPending, ReceivedAt: at}); err != nil {
 					t.Fatal(err)
 				}
@@ -235,7 +236,7 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			waiting := routineTestEvent(scope, routine, "order-waiting", now.Add(-time.Minute))
+			waiting := storetest.RoutineEventFor(scope, routine, "order-waiting", now.Add(-time.Minute))
 			if _, err := events.InsertRoutineEvent(ctx, &RoutineEventRecord{Scope: scope, ActivationID: routine.ID, Event: waiting, State: RoutineEventPending, ReceivedAt: now.Add(-time.Minute)}); err != nil {
 				t.Fatal(err)
 			}

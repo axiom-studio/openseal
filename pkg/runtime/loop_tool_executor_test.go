@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"github.com/google/uuid"
 )
@@ -21,7 +22,7 @@ const toolExecWorker = "tool-exec-worker"
 type toolExecFixture struct {
 	t        *testing.T
 	ctx      context.Context
-	store    *SQLiteStore
+	store    *sqlite.SQLiteStore
 	scope    Scope
 	now      time.Time
 	run      *AgentRun

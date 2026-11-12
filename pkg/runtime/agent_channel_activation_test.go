@@ -12,12 +12,13 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 type channelActionFixture struct {
-	store       *SQLiteStore
+	store       *sqlite.SQLiteStore
 	db          *sql.DB
 	agents      *kernelagent.Registry
 	endpoints   *ExternalConversationEndpointService
@@ -34,7 +35,7 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	t.Helper()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "channels.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

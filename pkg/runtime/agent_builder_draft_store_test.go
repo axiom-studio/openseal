@@ -6,6 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // agentBuilderDraftSeed is one scope's builder conversations: ana's "made"
@@ -163,7 +167,7 @@ func TestAgentBuilderDraftsAreSelectedByTheStore(t *testing.T) {
 func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "drafts.db")
-		store, err := NewSQLiteStore(path)
+		store, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,7 +178,7 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
-		reopened, err := NewSQLiteStore(path)
+		reopened, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -182,33 +186,33 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 		assertAgentBuilderDrafts(t, reopened, seed)
 	})
 	t.Run("postgres", func(t *testing.T) {
-		pgSchema := newTestPostgresSchema(t, "openseal_builder_drafts_")
-		dsn := pgSchema.dsn
-		schema := pgSchema.name
+		pgSchema := storetest.NewPostgresSchema(t, "openseal_builder_drafts_")
+		dsn := pgSchema.DSN
+		schema := pgSchema.Name
 		ctx := context.Background()
-		store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+		store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+			_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 			_ = store.Close()
 		})
 		seed := seedAgentBuilderDrafts(t, store)
 		// The migration ledger names the migration that added the column.
 		var draftMigration int64
-		if err := pgSchema.db.QueryRowContext(ctx, `SELECT version FROM `+pgSchema.table("schema_migrations")+` WHERE name = 'agent builder draft requester'`).Scan(&draftMigration); err != nil {
+		if err := pgSchema.DB.QueryRowContext(ctx, `SELECT version FROM `+pgSchema.Table("schema_migrations")+` WHERE name = 'agent builder draft requester'`).Scan(&draftMigration); err != nil {
 			t.Fatal(err)
 		}
 		if err := store.RollbackPostgresMigrations(ctx, draftMigration-1); err != nil {
 			t.Fatal(err)
 		}
 		var columns int
-		if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+		if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
 			WHERE table_schema = $1 AND table_name = 'conversations' AND column_name = 'builder_draft_requester'`, schema).Scan(&columns); err != nil || columns != 0 {
 			t.Fatalf("rollback kept the column: %d, %v", columns, err)
 		}
-		reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+		reopened, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}

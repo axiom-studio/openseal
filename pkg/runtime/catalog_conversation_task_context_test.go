@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type countedCatalogTaskContextStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	runReads, taskReads, taskLists int
 }
 
@@ -61,7 +63,7 @@ func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *test
 	}
 }
 
-func catalogTaskPageFixture(t *testing.T, count int) (*SQLiteStore, *Conversation, []*ConversationTaskResult) {
+func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.SQLiteStore, *Conversation, []*ConversationTaskResult) {
 	t.Helper()
 	store := newTestKernelStore(t)
 	base := time.Now().UTC().Add(-time.Hour)

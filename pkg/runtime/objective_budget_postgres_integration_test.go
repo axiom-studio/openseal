@@ -8,15 +8,17 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_budget_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,13 +31,13 @@ func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stores := []*PostgresStore{primary, replica}
+	stores := []*postgres.PostgresStore{primary, replica}
 	start := make(chan struct{})
 	results := make(chan error, len(stores))
 	var wait sync.WaitGroup
 	for index, store := range stores {
 		wait.Add(1)
-		go func(index int, store *PostgresStore) {
+		go func(index int, store *postgres.PostgresStore) {
 			defer wait.Done()
 			<-start
 			_, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{

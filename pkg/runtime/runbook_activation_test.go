@@ -10,6 +10,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
@@ -121,7 +122,7 @@ func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 
 func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 	ctx := t.Context()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "verification.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "verification.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +314,7 @@ func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T)
 func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +346,7 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := NewSQLiteStore(path)
+	restarted, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +467,7 @@ func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 
 // eventTaskFixture creates an Objective and a chat with a user request that an
 // event Task can report to, and returns a create request for a webhook routine.
-func eventTaskFixture(t *testing.T, store *SQLiteStore) (Scope, CreateRunbookActivationRequest) {
+func eventTaskFixture(t *testing.T, store *sqlite.SQLiteStore) (Scope, CreateRunbookActivationRequest) {
 	t.Helper()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "event-task"}

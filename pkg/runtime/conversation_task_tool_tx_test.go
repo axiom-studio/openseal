@@ -6,6 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 type conversationTaskToolTestStore interface {
@@ -18,7 +22,7 @@ type conversationTaskToolTestStore interface {
 func forConversationTaskToolStores(t *testing.T, test func(*testing.T, conversationTaskToolTestStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-task-tool.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-task-tool.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -26,9 +30,9 @@ func forConversationTaskToolStores(t *testing.T, test func(*testing.T, conversat
 		test(t, store)
 	})
 	t.Run("postgres", func(t *testing.T) {
-		pgSchema := newTestPostgresSchema(t, "openseal_task_tool_")
-		dsn := pgSchema.dsn
-		store, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(pgSchema.name))
+		pgSchema := storetest.NewPostgresSchema(t, "openseal_task_tool_")
+		dsn := pgSchema.DSN
+		store, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(pgSchema.Name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +72,7 @@ func conversationTaskToolRecord(t *testing.T, store conversationTaskToolTestStor
 	callID := "call-" + suffix
 	user := &SessionEntry{ID: SessionEntryID(sessionID, "message:m-"+suffix), RunID: task.SourceRunID, Type: SessionEntryUser,
 		SourceKey: "message:m-" + suffix, User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: "requester"},
-			Content: []ContentPart{testTextPart("Please prepare the result.")}, MessageID: "m-" + suffix}}
+			Content: []ContentPart{storetest.TextPart("Please prepare the result.")}, MessageID: "m-" + suffix}}
 	assistant := &SessionEntry{ID: SessionEntryID(sessionID, AssistantEntryKey(task.SourceTurnID)), RunID: task.SourceRunID,
 		StepID: task.SourceTurnID, Step: task.SourceTurnNumber, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
 			Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,

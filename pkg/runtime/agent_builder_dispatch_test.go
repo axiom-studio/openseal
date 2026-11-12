@@ -9,6 +9,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -16,7 +17,7 @@ import (
 
 // agentBuilderDispatchStore serves the approvals the test decides.
 type agentBuilderDispatchStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	approvals map[string]*ApprovalCheckpoint
 }
 

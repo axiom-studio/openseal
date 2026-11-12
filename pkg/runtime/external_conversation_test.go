@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -592,7 +593,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	}
 }
 
-func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*SQLiteStore, *skill.Catalog, Scope, ExternalConversationAdapterReference) {
+func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite.SQLiteStore, *skill.Catalog, Scope, ExternalConversationAdapterReference) {
 	t.Helper()
 	store := newTestKernelStore(t)
 	catalog := skill.NewCatalog()
@@ -619,7 +620,7 @@ func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*SQLite
 	}
 }
 
-func activeExternalConversationTestEndpoint(t *testing.T, ctx context.Context) (*SQLiteStore, *ExternalConversationEndpoint) {
+func activeExternalConversationTestEndpoint(t *testing.T, ctx context.Context) (*sqlite.SQLiteStore, *ExternalConversationEndpoint) {
 	t.Helper()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	endpoint, err := NewExternalConversationEndpointService(store, catalog).Create(ctx, CreateExternalConversationEndpointRequest{

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -620,7 +621,7 @@ func TestNoMessageAfterAGovernedToolSavesFiles(t *testing.T) {
 			}
 			f.actions.calls[actionID] = &ActionCall{ID: actionID, Scope: run.Scope, RunID: run.ID, Status: ActionCallStatusSucceeded,
 				Output: map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": artifact.ID, "version": 1}}}}
-			done := f.settle(run, entries[id], ToolEntryCompleted, actionID, &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{testTextPart("saved")}})
+			done := f.settle(run, entries[id], ToolEntryCompleted, actionID, &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{storetest.TextPart("saved")}})
 			for range 2 { // the hook is replay-safe
 				if err := binding.AfterTool(f.ctx, StepToolsInput{Run: f.run(run.ID), Binding: binding}, done); err != nil {
 					t.Fatal(err)

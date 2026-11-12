@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func conversationTaskChangeStore(t *testing.T, backend string) KernelStore {
 	t.Helper()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "task-changes.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "task-changes.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

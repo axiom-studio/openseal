@@ -6,10 +6,12 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type conversationActorFixture struct {
-	store        *SQLiteStore
+	store        *sqlite.SQLiteStore
 	service      *ConversationService
 	scheduler    *ConversationRunScheduler
 	conversation *Conversation

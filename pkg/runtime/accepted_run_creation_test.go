@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -53,7 +54,7 @@ func (p *acceptedCreationTestPreparer) PrepareAcceptedRunExecution(_ context.Con
 func acceptedCreationStores(t *testing.T, test func(*testing.T, KernelStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "accepted-creation.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "accepted-creation.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

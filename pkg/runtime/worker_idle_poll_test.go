@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 type countingActionPoolStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	claims    atomic.Int64
 	empty     atomic.Int64
 	hydration atomic.Int64

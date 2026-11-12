@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -352,7 +353,7 @@ func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 // routineTestStore is a SQLite kernel store for routine action tests.
 func routineTestStore(t *testing.T, kind string) KernelStore {
 	t.Helper()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "routines.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "routines.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

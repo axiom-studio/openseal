@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -62,7 +63,7 @@ func (s *repeatSim) user(text string) {
 	s.seq++
 	s.store(&SessionEntry{
 		ID: fmt.Sprintf("e_%d", s.seq), Scope: s.scope, SessionID: "session-1", RunID: "run-1", Sequence: s.seq,
-		Type: SessionEntryUser, User: &UserEntry{Origin: "steering", Content: []ContentPart{testTextPart(text)}},
+		Type: SessionEntryUser, User: &UserEntry{Origin: "steering", Content: []ContentPart{storetest.TextPart(text)}},
 	})
 }
 
@@ -104,13 +105,13 @@ func (s *repeatSim) step(step int64, waitOffered bool, calls ...simCall) ([]simO
 		switch {
 		case call.interrupted:
 			next.State = ToolEntryInterrupted
-			tool.Result = &ToolResult{Status: ToolResultInterrupted, IsError: true, Content: []ContentPart{testTextPart("interrupted")}}
+			tool.Result = &ToolResult{Status: ToolResultInterrupted, IsError: true, Content: []ContentPart{storetest.TextPart("interrupted")}}
 		case call.failed:
 			next.State = ToolEntryError
-			tool.Result = &ToolResult{Status: ToolResultFailed, IsError: true, Content: []ContentPart{testTextPart(call.result)}}
+			tool.Result = &ToolResult{Status: ToolResultFailed, IsError: true, Content: []ContentPart{storetest.TextPart(call.result)}}
 		default:
 			next.State = ToolEntryCompleted
-			tool.Result = &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{testTextPart(call.result)}}
+			tool.Result = &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{storetest.TextPart(call.result)}}
 		}
 		tool.Parked = call.parked
 		tool.ResultDigest = toolResultDigest(tool.Result)

@@ -9,38 +9,29 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
-
-func externalConversationGatewayFixture(scope Scope) ExternalConversationIngressGateway {
-	return ExternalConversationIngressGateway{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "skill-deployment-1"}, DeploymentID: "skill-deployment-1", Provider: "slack",
-		Adapter: ExternalConversationAdapterReference{
-			SkillID: "skill-slack", SkillVersion: "2.0.0",
-			SourceIdentity: "oci://example/slack@sha256:abc", BindingID: "binding-1",
-			BindingRevision: 1, AdapterID: "conversations",
-		},
-	}
-}
 
 func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "tenant-1"}
 	service := NewExternalConversationGatewayService(store)
 	if _, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
-		ID: "unsafe-active", Name: "Unsafe active", Gateway: externalConversationGatewayFixture(scope),
+		ID: "unsafe-active", Name: "Unsafe active", Gateway: storetest.IngressGateway(scope),
 		Status: ExternalConversationGatewayActive,
 		Actor:  ActivityActor{Type: "test", ID: "operator"}, Reason: "prove review-first creation",
 	}); !errors.Is(err, ErrInvalidExternalConversation) {
 		t.Fatalf("active creation error = %v", err)
 	}
 	created, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
-		ID: "shared-slack", Name: "Shared Slack", Gateway: externalConversationGatewayFixture(scope),
+		ID: "shared-slack", Name: "Shared Slack", Gateway: storetest.IngressGateway(scope),
 		Status: ExternalConversationGatewayPaused,
 		Actor:  ActivityActor{Type: "test", ID: "operator"}, Reason: "create shared Slack routing",
 	})
@@ -59,7 +50,7 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +143,7 @@ func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T
 func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "synthetic-conversation.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +221,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) {
@@ -13,7 +15,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 		store func(*testing.T) KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-changes.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-changes.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -224,7 +226,7 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "conversation-change-restart.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +259,7 @@ func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

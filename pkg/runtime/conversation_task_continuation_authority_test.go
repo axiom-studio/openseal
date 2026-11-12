@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func promotedContinuationAuthorityFixture(t *testing.T, id string) (*SQLiteStore, *ConversationTaskResult, *Conversation, *ChannelMessage) {
+func promotedContinuationAuthorityFixture(t *testing.T, id string) (*sqlite.SQLiteStore, *ConversationTaskResult, *Conversation, *ChannelMessage) {
 	t.Helper()
 	store, db := newTestSQLiteStore(t)
 	run, conversation, message := continuationLifecycleFixture(t, store, id)
@@ -23,7 +24,7 @@ func promotedContinuationAuthorityFixture(t *testing.T, id string) (*SQLiteStore
 	return store, result, conversation, message
 }
 
-func finishContinuationAuthorityRun(t *testing.T, store *SQLiteStore, run *AgentRun, status AgentRunStatus) *AgentRun {
+func finishContinuationAuthorityRun(t *testing.T, store *sqlite.SQLiteStore, run *AgentRun, status AgentRunStatus) *AgentRun {
 	t.Helper()
 	current, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
 	if err != nil {

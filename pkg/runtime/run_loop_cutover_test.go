@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
 
@@ -27,7 +28,7 @@ func cutoverStores() []struct {
 		open func(*testing.T) cutoverTestStore
 	}{
 		{name: "sqlite", open: func(t *testing.T) cutoverTestStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cutover.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "cutover.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -20,7 +21,7 @@ func TestCancelWaitingApprovalClosesAction(t *testing.T) {
 		store func(*testing.T) cancellationStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) cancellationStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cancel.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "cancel.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

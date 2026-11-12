@@ -10,6 +10,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -29,7 +30,7 @@ func agentTrialArguments() map[string]interface{} {
 // putAgentTrialRun stores run in whatever state it is in, bypassing
 // transition rules: it creates the Run, or saves it as the next revision of
 // the stored one and sets run.Revision to that revision.
-func putAgentTrialRun(t *testing.T, store *SQLiteStore, run *AgentRun) *AgentRun {
+func putAgentTrialRun(t *testing.T, store *sqlite.SQLiteStore, run *AgentRun) *AgentRun {
 	t.Helper()
 	ctx := context.Background()
 	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
@@ -250,7 +251,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 
 // agentTrialFinalizerFixture is a builder Run waiting on its trial child.
 type agentTrialFinalizerFixture struct {
-	store  *SQLiteStore
+	store  *sqlite.SQLiteStore
 	scope  Scope
 	parent *AgentRun
 	child  *AgentRun

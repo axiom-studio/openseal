@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestCreateAgentRunInitializesDurableQueueMetadata(t *testing.T) {
@@ -34,7 +36,7 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "portfolio-capacity.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "portfolio-capacity.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +154,7 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-policy.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-policy.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -229,7 +231,7 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "admission-decision.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "admission-decision.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -301,7 +303,7 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-resources.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-resources.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

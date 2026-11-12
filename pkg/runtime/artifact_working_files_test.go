@@ -7,6 +7,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // A Run's reply hands over some of the files it saved. The rest are working
@@ -14,7 +16,7 @@ import (
 // the moment a later reply hands them over.
 func TestWorkingFilesAreLeftOutOfResultsUntilHandedOver(t *testing.T) {
 	ctx := context.Background()
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

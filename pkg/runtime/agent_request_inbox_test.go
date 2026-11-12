@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 type agentRequestInboxTeamStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	deployment *kernelteam.Deployment
 	definition *kernelteam.Definition
 }

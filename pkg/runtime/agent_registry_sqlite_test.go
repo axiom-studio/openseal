@@ -11,11 +11,12 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestSQLiteAgentDefinitionActivationAdvancesRunbookAtomicallyAndRollsBack(t *testing.T) {
 	ctx := context.Background()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "runbook-activation.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "runbook-activation.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +128,7 @@ func TestAgentRunbookActivationSyncUsesActiveScheduleReplacement(t *testing.T) {
 
 func TestSQLiteAgentDefinitionsDeploymentsAndActivationsSurviveRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agents.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +154,7 @@ func TestSQLiteAgentDefinitionsDeploymentsAndActivationsSurviveRestart(t *testin
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +180,7 @@ func TestSQLiteAgentDefinitionsDeploymentsAndActivationsSurviveRestart(t *testin
 
 func TestSQLiteAgentDefinitionCompilationsSurviveRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "compilations.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +197,7 @@ func TestSQLiteAgentDefinitionCompilationsSurviveRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +209,7 @@ func TestSQLiteAgentDefinitionCompilationsSurviveRestart(t *testing.T) {
 }
 
 func TestSQLiteAgentDeploymentRevisionRaceHasOneWinner(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "race.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "race.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +260,7 @@ func TestSQLiteAgentDeploymentRevisionRaceHasOneWinner(t *testing.T) {
 }
 
 func TestSQLiteAgentDeploymentAndActivationRollbackAtomically(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "atomic.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "atomic.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func TestSQLiteAgentDeploymentAndActivationRollbackAtomically(t *testing.T) {
 
 func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "amendments.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +332,7 @@ func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testi
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

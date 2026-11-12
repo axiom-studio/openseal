@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
 
@@ -87,7 +88,7 @@ func TestTerminalRunFailureReplyReadsTheNewestFailedToolEntry(t *testing.T) {
 	sequence := int64(0)
 	entry := func(id string, state ToolEntryState, callID string) *SessionEntry {
 		sequence++
-		e := testToolEntry(id, "step", "call-"+id, state)
+		e := storetest.ToolSessionEntry(id, "step", "call-"+id, state)
 		e.Scope, e.SessionID, e.RunID, e.ActionCallID, e.Sequence = scope, "session", "run", callID, sequence
 		return e
 	}
@@ -166,7 +167,7 @@ func TestTerminalRunFailureReplyIgnoresAFailureTheRunMovedPast(t *testing.T) {
 	sequence := int64(0)
 	entry := func(id, step string, state ToolEntryState, callID string) *SessionEntry {
 		sequence++
-		e := testToolEntry(id, step, "call-"+id, state)
+		e := storetest.ToolSessionEntry(id, step, "call-"+id, state)
 		e.Scope, e.SessionID, e.RunID, e.ActionCallID, e.Sequence = scope, "session", "run", callID, sequence
 		return e
 	}

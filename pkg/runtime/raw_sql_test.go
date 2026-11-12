@@ -8,7 +8,7 @@ import (
 )
 
 // The raw-SQL helpers work on a connection the test owns (newTestSQLiteStore,
-// testPostgresSchema.db), never on a store's own connection. They are for the
+// storetest.PostgresSchema.DB), never on a store's own connection. They are for the
 // rows no store method reads or writes: a tampered payload, a row count, a
 // projection the store keeps to itself.
 
@@ -21,7 +21,7 @@ func execSQL(t testing.TB, db *sql.DB, query string, args ...any) {
 }
 
 // countRows counts the rows of table; table is used as given, so a
-// Postgres test passes testPostgresSchema.table(name).
+// Postgres test passes storetest.PostgresSchema.Table(name).
 func countRows(t testing.TB, db *sql.DB, table string) int {
 	t.Helper()
 	var count int

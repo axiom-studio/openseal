@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -24,7 +25,7 @@ func forSkillSetupTaskStores(t *testing.T, test func(*testing.T, skillSetupTaskT
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "setup-task.db")
-		var current *SQLiteStore
+		var current *sqlite.SQLiteStore
 		open := func() skillSetupTaskTestStore {
 			if current != nil {
 				if err := current.Close(); err != nil {
@@ -32,7 +33,7 @@ func forSkillSetupTaskStores(t *testing.T, test func(*testing.T, skillSetupTaskT
 				}
 			}
 			var err error
-			current, err = NewSQLiteStore(path)
+			current, err = sqlite.NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}

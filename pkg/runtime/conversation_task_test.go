@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -174,7 +175,7 @@ func ensureStartTaskToolEntry(t *testing.T, store taskStartFixtureStore, source 
 	args, _ := json.Marshal(map[string]string{"goal": goal, "acknowledgment": ack})
 	user := &SessionEntry{ID: SessionEntryID(current.SessionID, "message:"+triggerID), RunID: current.ID, Type: SessionEntryUser,
 		SourceKey: "message:" + triggerID, User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: "requester"},
-			Content: []ContentPart{testTextPart("Please do this in the background.")}, MessageID: triggerID}}
+			Content: []ContentPart{storetest.TextPart("Please do this in the background.")}, MessageID: triggerID}}
 	assistant := &SessionEntry{ID: SessionEntryID(current.SessionID, AssistantEntryKey(turn.ID)), RunID: current.ID, StepID: turn.ID, Step: turn.Sequence,
 		Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,
 			ToolCalls: []ModelToolCall{{ID: taskStartFixtureCallID, Name: string(ControlToolStartTask), Arguments: args}}}}

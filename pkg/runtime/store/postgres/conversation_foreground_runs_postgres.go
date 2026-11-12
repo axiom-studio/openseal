@@ -1,0 +1,35 @@
+package postgres
+
+import (
+	"context"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+)
+
+func (s *PostgresStore) ListConversationForegroundRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit, offset int) ([]*models.AgentRun, error) {
+	if err := models.ValidateConversationForegroundRunsQuery(scope, owner, conversationID, limit, offset); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload,created_at,id FROM (SELECT payload,created_at,id FROM `+s.table("agent_runs")+`
+		WHERE scope_kind=$1 AND scope_id=$2 AND payload->'owner'->>'type'=$3 AND payload->'owner'->>'id'=$4
+		AND payload->>'kind'='conversation' AND payload->>'concurrencyKey'=$5
+		ORDER BY created_at DESC,id DESC LIMIT $8) legacy
+		UNION ALL
+		SELECT payload,created_at,id FROM (SELECT payload,created_at,id FROM `+s.table("agent_runs")+`
+		WHERE scope_kind=$1 AND scope_id=$2 AND payload->'owner'->>'type'=$3 AND payload->'owner'->>'id'=$4
+		AND payload->>'kind'='conversation' AND payload->'context'->>'conversationId'=$5
+		AND payload->>'concurrencyKey'<>$5
+		AND payload->>'concurrencyKey'=(payload->'context'->>'conversationId')
+			||CASE WHEN jsonb_typeof(payload->'context'->'threadRootMessageId')='string' AND payload->'context'->>'threadRootMessageId'<>''
+				THEN ':thread:'||(payload->'context'->>'threadRootMessageId') ELSE '' END
+			||CASE WHEN COALESCE(payload->>'assignedAgentId','')<>''
+				THEN ':agent:'||(payload->>'assignedAgentId') ELSE '' END
+		ORDER BY created_at DESC,id DESC LIMIT $8) lanes
+		ORDER BY created_at DESC,id DESC LIMIT $6 OFFSET $7`, scope.Kind, scope.ID, owner.Type, owner.ID, conversationID, limit, offset, sqlstore.ConversationForegroundPageSize(limit, offset))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return sqlstore.ScanConversationForegroundRuns(rows)
+}

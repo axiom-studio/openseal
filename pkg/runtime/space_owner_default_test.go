@@ -10,11 +10,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestSQLiteOwnerDefaultSpaces(t *testing.T) {
 	t.Parallel()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "owner-default.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "owner-default.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +29,7 @@ func TestSQLiteOwnerDefaultSpaces(t *testing.T) {
 // SQLite and PostgreSQL stores: nothing creates a space but
 // CreateSpace, an owner's first space in a scope is their default space, and
 // what a deleted space held goes to its owner's default space only.
-func exerciseOwnerDefaultSpaces(t *testing.T, store spaceConversationStore) {
+func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationStore) {
 	t.Helper()
 	ctx := context.Background()
 	clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
@@ -236,7 +239,7 @@ type ownerDefaultSpaceRow struct {
 func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "owner-default-migration.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +255,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		createdAt time.Time
 	}{
 		// The scope's one legacy Default space, owned by no person.
-		{scope, legacyDefaultSpaceID(scope), legacyDefaultSpaceOwner, true, hour(0)},
+		{scope, storetest.LegacyDefaultSpaceID(scope), storetest.LegacyDefaultSpaceOwner, true, hour(0)},
 		// The oldest space wins, whatever the id and position say.
 		{scope, "ana-newer", "7", false, hour(3)},
 		{scope, "ana-oldest", "7", false, hour(1)},
@@ -278,7 +281,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	}
 	for position, row := range rows {
 		access := SpaceAccessOwner
-		if row.owner == legacyDefaultSpaceOwner {
+		if row.owner == storetest.LegacyDefaultSpaceOwner {
 			access = SpaceAccessEveryone
 		}
 		if _, err := sqlDB.Exec(`INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, ?, 'tidepool', ?, ?, ?, ?, ?, ?)`,
@@ -291,12 +294,12 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantDefaults := []string{
-		"legacy-other/ana-other-default", "legacy/" + legacyDefaultSpaceID(scope), "legacy/ana-oldest", "legacy/ben-a", "legacy/solo-older",
+		"legacy-other/ana-other-default", "legacy/" + storetest.LegacyDefaultSpaceID(scope), "legacy/ana-oldest", "legacy/ben-a", "legacy/solo-older",
 	}
 	slices.Sort(wantDefaults)
 	assertSQLiteOwnerDefaults(t, sqlDB, len(rows), wantDefaults)
@@ -305,8 +308,8 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	if changed := snapshotDifferences(legacySnapshot, migrated); !slices.Equal(changed, []string{"legacy/ana-oldest", "legacy/ben-a", "legacy/solo-older"}) {
 		t.Fatalf("rows changed by the migration = %v", changed)
 	}
-	legacyKey := "legacy/" + legacyDefaultSpaceID(scope)
-	if migrated[legacyKey] != legacySnapshot[legacyKey] || !strings.Contains(migrated[legacyKey], "|"+legacyDefaultSpaceOwner+"|") {
+	legacyKey := "legacy/" + storetest.LegacyDefaultSpaceID(scope)
+	if migrated[legacyKey] != legacySnapshot[legacyKey] || !strings.Contains(migrated[legacyKey], "|"+storetest.LegacyDefaultSpaceOwner+"|") {
 		t.Fatalf("legacy Default space = %q, was %q", migrated[legacyKey], legacySnapshot[legacyKey])
 	}
 	var indexes string
@@ -315,7 +318,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		t.Fatalf("default space indexes = %q, err = %v", indexes, err)
 	}
 	ctx := context.Background()
-	for owner, want := range map[string]string{"7": "ana-oldest", "8": "ben-a", "": "solo-older", legacyDefaultSpaceOwner: legacyDefaultSpaceID(scope)} {
+	for owner, want := range map[string]string{"7": "ana-oldest", "8": "ben-a", "": "solo-older", storetest.LegacyDefaultSpaceOwner: storetest.LegacyDefaultSpaceID(scope)} {
 		if space, err := reopened.DefaultSpace(ctx, scope, owner); err != nil || space.ID != want {
 			t.Fatalf("default space of %q = %+v, err = %v; want %s", owner, space, err, want)
 		}
@@ -328,7 +331,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	}
 
 	// The migration runs on every open.
-	again, err := NewSQLiteStore(path)
+	again, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +424,7 @@ func assertSQLiteOwnerDefaults(t *testing.T, db *sql.DB, wantRows int, wantDefau
 // A space that changes hands leaves each owner with the oldest space they own
 // as their default: the legacy scope-wide default becomes its real owner's.
 func TestSetSpaceOwnerGivesEachOwnerTheirOldestSpaceAsDefault(t *testing.T) {
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "owner-change.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "owner-change.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

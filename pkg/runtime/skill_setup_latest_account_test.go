@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -18,7 +19,7 @@ type latestSetupTestLocation struct {
 type latestSetupTestFixture struct {
 	ctx        context.Context
 	scope      Scope
-	store      *SQLiteStore
+	store      *sqlite.SQLiteStore
 	catalog    *skill.Catalog
 	run        *AgentRun
 	dispatcher *SkillBindingActionDispatcher

@@ -7,14 +7,16 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	store, pgSchema := openTestPostgresStore(t, "openseal_approval_mode_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	scope := Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
@@ -26,17 +28,17 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	// Simulate a conversation stored before the approval mode migration (61)
 	// and re-run it. The ledger names the migration.
 	var approvalModeMigration int64
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT version FROM `+pgSchema.table("schema_migrations")+` WHERE name = 'conversation approval mode'`).Scan(&approvalModeMigration); err != nil {
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT version FROM `+pgSchema.Table("schema_migrations")+` WHERE name = 'conversation approval mode'`).Scan(&approvalModeMigration); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.RollbackPostgresMigrations(ctx, approvalModeMigration-1); err != nil {
 		t.Fatal(err)
 	}
 	var raw string
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COALESCE(payload->>'approvalMode', '') FROM `+pgSchema.table("conversations")).Scan(&raw); err != nil || raw != "" {
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COALESCE(payload->>'approvalMode', '') FROM `+pgSchema.Table("conversations")).Scan(&raw); err != nil || raw != "" {
 		t.Fatalf("rolled back approval mode = %q, %v", raw, err)
 	}
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +46,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT payload->>'approvalMode' FROM `+pgSchema.table("conversations")).Scan(&raw); err != nil || raw != "auto" {
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT payload->>'approvalMode' FROM `+pgSchema.Table("conversations")).Scan(&raw); err != nil || raw != "auto" {
 		t.Fatalf("migrated approval mode = %q, %v", raw, err)
 	}
 	service := NewConversationApprovalModeService(reopened)

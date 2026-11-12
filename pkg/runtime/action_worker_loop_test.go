@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -445,7 +446,7 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 		t.Run(boundary, func(t *testing.T) {
 			forActionLifecycleBackends(t, func(t *testing.T, store KernelStore, backend actionLifecycleBackend) {
 				if boundary == "before_claim" {
-					if _, ok := store.(*SQLiteStore); !ok {
+					if _, ok := store.(*sqlite.SQLiteStore); !ok {
 						t.Skip("the store-side claim gate is seeded through the SQLite store")
 					}
 				}

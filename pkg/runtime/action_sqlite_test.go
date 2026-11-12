@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "actions.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = NewSQLiteStore(path)
+	store, err = sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 
 func TestSQLiteActionProposalRollsBackEveryRecordOnActivityFailure(t *testing.T) {
 	ctx := context.Background()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "rollback.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "rollback.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +150,7 @@ func TestSQLiteActionProposalRollsBackEveryRecordOnActivityFailure(t *testing.T)
 func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "external-receipts.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = NewSQLiteStore(path)
+	store, err = sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

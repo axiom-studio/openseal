@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func checkApplicationRouteMatching(t *testing.T, store ExternalConversationEndpointStore) {
@@ -40,7 +41,7 @@ func checkApplicationRouteMatching(t *testing.T, store ExternalConversationEndpo
 }
 
 func TestSQLiteApplicationRouteMatching(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "routes.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "routes.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

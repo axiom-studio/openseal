@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // Count authoritative reads while retaining the canonical SQLiteStore paths.
 // These benchmarks measure reconciliation work, not SQL latency or serving CPU.
 type idleConversationBenchmarkStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	messageReads uint64
 	roundReads   uint64
 	roundRows    uint64

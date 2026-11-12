@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -22,7 +24,7 @@ import (
 func BenchmarkConversationTaskSQLiteActiveHistory(b *testing.B) {
 	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) (conversationTaskSQLTestStore, conversationTaskBenchmarkExplainPlans) {
 		path := filepath.Join(b.TempDir(), "tasks.db")
-		store, err := NewSQLiteStore(path)
+		store, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -45,13 +47,13 @@ func BenchmarkConversationTaskPostgresActiveHistory(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		schema := testPostgresSchema{dsn: dsn, name: fmt.Sprintf("conversation_task_benchmark_%x", time.Now().UnixNano()), db: db}
-		store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(schema.name))
+		schema := storetest.PostgresSchema{DSN: dsn, Name: fmt.Sprintf("conversation_task_benchmark_%x", time.Now().UnixNano()), DB: db}
+		store, err := postgres.NewPostgresStore(context.Background(), dsn, postgres.WithPostgresSchema(schema.Name))
 		if err != nil {
 			b.Fatal(err)
 		}
 		b.Cleanup(func() {
-			if _, err := db.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS "+schema.quoted()+" CASCADE"); err != nil {
+			if _, err := db.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS "+schema.Quoted()+" CASCADE"); err != nil {
 				b.Error(err)
 			}
 			_ = store.Close()
@@ -328,12 +330,12 @@ func conversationActiveRunsBenchmarkExplain(t testing.TB, db *sql.DB, filter Con
 	}
 }
 
-func conversationTaskPostgresBenchmarkExplain(t testing.TB, schema testPostgresSchema, filter ConversationTaskFilter, history int) {
+func conversationTaskPostgresBenchmarkExplain(t testing.TB, schema storetest.PostgresSchema, filter ConversationTaskFilter, history int) {
 	t.Helper()
 	// This is an isolated fixture: refreshing its planner statistics performs no
 	// work against platform/application tables and is excluded from timings.
 	for _, table := range []string{"conversation_tasks", "agent_runs", "conversation_active_runs"} {
-		if _, err := schema.db.ExecContext(context.Background(), "ANALYZE "+schema.table(table)); err != nil {
+		if _, err := schema.DB.ExecContext(context.Background(), "ANALYZE "+schema.Table(table)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -342,20 +344,20 @@ func conversationTaskPostgresBenchmarkExplain(t testing.TB, schema testPostgresS
 		sql  string
 		args []interface{}
 	}{
-		{"task", `SELECT t.payload,r.payload FROM ` + schema.table("conversation_tasks") + ` t
-		JOIN ` + schema.table("agent_runs") + ` r ON r.scope_kind=t.scope_kind AND r.scope_id=t.scope_id AND r.id=t.work_run_id
+		{"task", `SELECT t.payload,r.payload FROM ` + schema.Table("conversation_tasks") + ` t
+		JOIN ` + schema.Table("agent_runs") + ` r ON r.scope_kind=t.scope_kind AND r.scope_id=t.scope_id AND r.id=t.work_run_id
 		WHERE t.scope_kind=$1 AND t.scope_id=$2 AND t.conversation_id=$3 AND t.owner_type=$4 AND t.owner_id=$5
 		AND t.actor_type=$6 AND t.actor_id=$7 AND t.thread_root_id=$8 AND t.is_active
 		ORDER BY t.created_at DESC,t.id DESC LIMIT $9`, []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, filter.Owner.Type, filter.Owner.ID, filter.AuthenticatedActor.Type, filter.AuthenticatedActor.ID, filter.ThreadRootID, filter.Limit}},
 		{"active_child", `WITH linked AS MATERIALIZED (
-		SELECT * FROM ` + schema.table("conversation_active_runs") + `
+		SELECT * FROM ` + schema.Table("conversation_active_runs") + `
 		WHERE scope_kind=$1 AND scope_id=$2 AND owner_type=$3 AND owner_id=$4 AND conversation_id=$5
 		ORDER BY created_at DESC,id DESC LIMIT $6
 		)
 		SELECT child.payload FROM linked
-		CROSS JOIN LATERAL (SELECT payload,id,root_run_id,status FROM ` + schema.table("agent_runs") + `
+		CROSS JOIN LATERAL (SELECT payload,id,root_run_id,status FROM ` + schema.Table("agent_runs") + `
 		WHERE scope_kind=linked.scope_kind AND scope_id=linked.scope_id AND id=linked.id OFFSET 0) child
-		CROSS JOIN LATERAL (SELECT payload,id FROM ` + schema.table("agent_runs") + `
+		CROSS JOIN LATERAL (SELECT payload,id FROM ` + schema.Table("agent_runs") + `
 		WHERE scope_kind=linked.scope_kind AND scope_id=linked.scope_id AND id=linked.root_run_id OFFSET 0) root
 		WHERE child.root_run_id=root.id AND child.id<>root.id AND root.payload->>'kind'='conversation'
 		AND root.payload->'owner'->>'type'=linked.owner_type AND root.payload->'owner'->>'id'=linked.owner_id
@@ -366,7 +368,7 @@ func conversationTaskPostgresBenchmarkExplain(t testing.TB, schema testPostgresS
 	}
 	for _, query := range queries {
 		var raw []byte
-		if err := schema.db.QueryRowContext(context.Background(), "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) "+query.sql, query.args...).Scan(&raw); err != nil {
+		if err := schema.DB.QueryRowContext(context.Background(), "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) "+query.sql, query.args...).Scan(&raw); err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("Postgres %s plan: %s", query.name, raw)

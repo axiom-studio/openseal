@@ -11,6 +11,8 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -18,9 +20,9 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_team_registry_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +50,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	}
 	primaryTeams := kernelteam.NewRegistryWithStore(primary, primaryAgents)
 	for _, version := range []string{"1", "2"} {
-		if _, err := primaryTeams.RegisterDefinition(ctx, sqliteTeamDefinition(version)); err != nil {
+		if _, err := primaryTeams.RegisterDefinition(ctx, storetest.TeamDefinition(version)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -92,7 +94,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	if activated.Load() != 1 {
 		t.Fatalf("successful concurrent activations = %d, want 1", activated.Load())
 	}
-	candidate := sqliteTeamDefinition("3")
+	candidate := storetest.TeamDefinition("3")
 	candidate.Purpose = "Produce independently reviewed evidence-backed findings"
 	amendment, err := primaryTeams.ProposeAmendment(ctx, kernelteam.ProposeAmendmentRequest{
 		Scope: scope, DeploymentID: deploymentInput.ID, Candidate: candidate, ProposerType: "user", ProposerID: "operator", Rationale: "Independent review",
@@ -121,7 +123,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 		t.Fatalf("successful concurrent amendment activations = %d, want 1", amendmentActivated.Load())
 	}
 
-	restarted, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	restarted, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

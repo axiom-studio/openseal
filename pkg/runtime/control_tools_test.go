@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -212,7 +214,7 @@ func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
 type controlFixture struct {
 	t        *testing.T
 	ctx      context.Context
-	store    *SQLiteStore
+	store    *sqlite.SQLiteStore
 	records  *controlRecords
 	run      *AgentRun
 	session  *AgentSession
@@ -315,7 +317,7 @@ func newControlFixture(t *testing.T, calls []LoopToolCall) *controlFixture {
 // test gives those records here instead of driving them through the action
 // and task workflows. The store itself holds no action calls or tasks.
 type controlRecords struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	actions actionCallRecords
 	tasks   []*ConversationTask
 }
@@ -509,7 +511,7 @@ func TestControlDispatcherPhaseAndStateRules(t *testing.T) {
 
 func TestControlSettleEntryPicksOpenSettleCall(t *testing.T) {
 	entries := []*SessionEntry{
-		testToolEntry("t1", "s1", "c1", ToolEntryPending),
+		storetest.ToolSessionEntry("t1", "s1", "c1", ToolEntryPending),
 		{ID: "t2", Type: SessionEntryTool, State: ToolEntryCompleted, Tool: &ToolEntry{Name: "control_fork"}},
 		{ID: "t3", Type: SessionEntryTool, State: ToolEntryPending, Tool: &ToolEntry{Name: "react"}},
 		{ID: "t4", Type: SessionEntryTool, State: ToolEntryPending, Tool: &ToolEntry{Name: "ask_user"}},

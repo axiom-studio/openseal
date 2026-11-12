@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -112,8 +114,8 @@ func testEntryView(entry *SessionEntry) SessionEntryView {
 // Fixture
 
 type compactionFixture struct {
-	*sessionConformance
-	store     *SQLiteStore
+	*storetest.SessionFixture
+	store     *sqlite.SQLiteStore
 	runID     string
 	sessionID string
 	host      *fakeSummaryHost
@@ -124,43 +126,43 @@ type compactionFixture struct {
 func newCompactionFixture(t *testing.T) *compactionFixture {
 	t.Helper()
 	store := newTestKernelStore(t)
-	f := &sessionConformance{
-		t: t, ctx: context.Background(), store: store,
-		scope: Scope{Kind: "tenant", ID: "compact-" + uuid.NewString()[:8]},
-		now:   time.Now().UTC().Truncate(time.Millisecond),
+	f := &storetest.SessionFixture{
+		T: t, Ctx: context.Background(), Store: store,
+		Scope: Scope{Kind: "tenant", ID: "compact-" + uuid.NewString()[:8]},
+		Now:   time.Now().UTC().Truncate(time.Millisecond),
 	}
-	run, session := f.conversationRun("agent-a")
+	run, session := f.ConversationRun("agent-a")
 	host := &fakeSummaryHost{t: t}
-	fx := &compactionFixture{sessionConformance: f, store: store, runID: run.ID, sessionID: session.ID, host: host}
+	fx := &compactionFixture{SessionFixture: f, store: store, runID: run.ID, sessionID: session.ID, host: host}
 	ids := 0
 	fx.compactor = &LoopCompactor{
 		Host: host, Sessions: store, Requests: fakeStepRequests{},
-		Now:   func() time.Time { return f.now },
+		Now:   func() time.Time { return f.Now },
 		NewID: func() string { ids++; return fmt.Sprintf("cmp-%d", ids) },
 	}
 	return fx
 }
 
 func (fx *compactionFixture) user(id string, tokens int64) *SessionEntry {
-	return withTokens(testUserEntry(id, "message "+id), tokens)
+	return storetest.WithTokens(storetest.UserSessionEntry(id, "message "+id), tokens)
 }
 
 func (fx *compactionFixture) note(id string, tokens int64) *SessionEntry {
-	return withTokens(noteEntry(id, NoteRunContext), tokens)
+	return storetest.WithTokens(storetest.NoteSessionEntry(id, NoteRunContext), tokens)
 }
 
 // stepWithTool is one model step that called one tool, recorded with the
 // given action call id.
 func (fx *compactionFixture) stepWithTool(id, actionCallID string, assistantTokens, toolTokens int64) []*SessionEntry {
 	stepID := "step-" + id
-	assistant := withTokens(&SessionEntry{ID: "a-" + id, StepID: stepID, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
+	assistant := storetest.WithTokens(&SessionEntry{ID: "a-" + id, StepID: stepID, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
 		Provider: ModelStepProviderAnthropic, Model: "claude-x", Text: "checking", StopReason: ModelStopToolCalls,
 		ToolCalls: []ModelToolCall{{ID: "call-" + id, Name: "read_file", Arguments: json.RawMessage(`{"path":"a"}`)}},
 	}}, assistantTokens)
-	tool := withTokens(&SessionEntry{ID: "t-" + id, StepID: stepID, Type: SessionEntryTool, State: ToolEntryCompleted,
+	tool := storetest.WithTokens(&SessionEntry{ID: "t-" + id, StepID: stepID, Type: SessionEntryTool, State: ToolEntryCompleted,
 		ToolCallID: "call-" + id, ActionCallID: actionCallID, Tool: &ToolEntry{
 			Name: "read_file", Arguments: json.RawMessage(`{"path":"a"}`), SideEffect: ToolSideEffectRead,
-			Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{testTextPart("contents " + id)}},
+			Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{storetest.TextPart("contents " + id)}},
 		}}, toolTokens)
 	return []*SessionEntry{assistant, tool}
 }
@@ -168,7 +170,7 @@ func (fx *compactionFixture) stepWithTool(id, actionCallID string, assistantToke
 // finalStep is a model step without tool calls that carries the window and
 // its real prompt size (the estimate's anchor).
 func (fx *compactionFixture) finalStep(id string, tokens, promptTokens int64, limits bool) *SessionEntry {
-	entry := withTokens(&SessionEntry{ID: "a-" + id, StepID: "step-" + id, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
+	entry := storetest.WithTokens(&SessionEntry{ID: "a-" + id, StepID: "step-" + id, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
 		Provider: ModelStepProviderAnthropic, Model: "claude-x", Text: "done " + id, StopReason: ModelStopEnd,
 	}}, tokens)
 	if limits {
@@ -178,8 +180,8 @@ func (fx *compactionFixture) finalStep(id string, tokens, promptTokens int64, li
 }
 
 func (fx *compactionFixture) add(entries ...*SessionEntry) {
-	fx.t.Helper()
-	fx.mustAppend(fx.sessionID, fx.runID, entries...)
+	fx.T.Helper()
+	fx.MustAppend(fx.sessionID, fx.runID, entries...)
 }
 
 // history appends the standard path (64k window, anchor 45000 + 5000 after):
@@ -195,31 +197,31 @@ func (fx *compactionFixture) history(limits bool) {
 }
 
 func (fx *compactionFixture) input() StepInput {
-	fx.t.Helper()
+	fx.T.Helper()
 	fx.step++
-	run := fx.run(fx.runID)
-	path := fx.path(fx.sessionID)
+	run := fx.Run(fx.runID)
+	path := fx.Path(fx.sessionID)
 	return StepInput{
-		Run: run, Step: &AgentTurn{ID: fmt.Sprintf("step-now-%d", fx.step), Scope: fx.scope, RunID: fx.runID, Sequence: int64(10 + fx.step), Status: AgentTurnStatusRunning},
+		Run: run, Step: &AgentTurn{ID: fmt.Sprintf("step-now-%d", fx.step), Scope: fx.Scope, RunID: fx.runID, Sequence: int64(10 + fx.step), Status: AgentTurnStatusRunning},
 		Session: path.Session, Path: path, Binding: &TurnRunnerBinding{Model: "claude-x"},
-		Mode: StepModeNormal, WorkerID: conformanceWorker,
+		Mode: StepModeNormal, WorkerID: storetest.SessionWorker,
 	}
 }
 
 func (fx *compactionFixture) compactions() []*SessionEntry {
-	fx.t.Helper()
-	entries, err := fx.store.ListAgentSessionEntries(fx.ctx, SessionEntryFilter{Scope: fx.scope, SessionID: fx.sessionID, Types: []SessionEntryType{SessionEntryCompaction}})
+	fx.T.Helper()
+	entries, err := fx.store.ListAgentSessionEntries(fx.Ctx, SessionEntryFilter{Scope: fx.Scope, SessionID: fx.sessionID, Types: []SessionEntryType{SessionEntryCompaction}})
 	if err != nil {
-		fx.t.Fatalf("list compactions: %v", err)
+		fx.T.Fatalf("list compactions: %v", err)
 	}
 	return entries
 }
 
 func (fx *compactionFixture) compactedEvents() []*ActivityEvent {
-	fx.t.Helper()
-	events, err := fx.store.ListActivity(fx.ctx, ActivityFilter{Scope: fx.scope, RunID: fx.runID, EventTypes: []string{compactionEventType}, Limit: 100})
+	fx.T.Helper()
+	events, err := fx.store.ListActivity(fx.Ctx, ActivityFilter{Scope: fx.Scope, RunID: fx.runID, EventTypes: []string{compactionEventType}, Limit: 100})
 	if err != nil {
-		fx.t.Fatalf("list activity: %v", err)
+		fx.T.Fatalf("list activity: %v", err)
 	}
 	return events
 }
@@ -254,9 +256,9 @@ func TestCompactThresholdSendsStepRequestAsSummary(t *testing.T) {
 	if !fx.compactor.Due(in) {
 		t.Fatal("Due = false, want true over the 48000-token threshold")
 	}
-	step, _ := fakeStepRequests{}.PrepareModelStep(fx.ctx, in)
+	step, _ := fakeStepRequests{}.PrepareModelStep(fx.Ctx, in)
 
-	usage, err := fx.compactor.CompactIfNeeded(fx.ctx, in)
+	usage, err := fx.compactor.CompactIfNeeded(fx.Ctx, in)
 	if err != nil {
 		t.Fatalf("CompactIfNeeded: %v", err)
 	}
@@ -280,7 +282,7 @@ func TestCompactThresholdSendsStepRequestAsSummary(t *testing.T) {
 		t.Fatalf("usage = %+v", usage)
 	}
 
-	path := fx.path(fx.sessionID)
+	path := fx.Path(fx.sessionID)
 	if path.Compaction == nil {
 		t.Fatal("no compaction on the path")
 	}
@@ -295,7 +297,7 @@ func TestCompactThresholdSendsStepRequestAsSummary(t *testing.T) {
 	if path.Compaction.StepID != in.Step.ID || path.Compaction.Step != in.Step.Sequence || path.Compaction.Tokens != estimateEntryTokens(path.Compaction) {
 		t.Fatalf("compaction envelope step=%s/%d tokens=%d", path.Compaction.StepID, path.Compaction.Step, path.Compaction.Tokens)
 	}
-	if got := idsOf(path.Entries); got != "a-s2,t-s2,a-s3,u5" {
+	if got := storetest.EntryIDs(path.Entries); got != "a-s2,t-s2,a-s3,u5" {
 		t.Fatalf("kept path = %s", got)
 	}
 	// One step has to run on the new compaction before another threshold one.
@@ -308,7 +310,7 @@ func TestCompactThresholdSkipsWhenNothingToCompact(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.add(fx.user("u0", 1000))
 	fx.add(fx.finalStep("s1", 1000, 60000, true))
-	usage, err := fx.compactor.Compact(fx.ctx, fx.input(), false)
+	usage, err := fx.compactor.Compact(fx.Ctx, fx.input(), false)
 	if err != nil || usage != (ModelStepUsage{}) || len(fx.host.requests) != 0 || len(fx.compactions()) != 0 {
 		t.Fatalf("usage=%+v err=%v calls=%d", usage, err, len(fx.host.requests))
 	}
@@ -318,7 +320,7 @@ func TestCompactThresholdSkipsWhenTheSummaryDoesNotFit(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.history(true)
 	fx.host.script = append(fx.host.script, summaryHostFailure(TurnHostContextExceeded))
-	usage, err := fx.compactor.CompactIfNeeded(fx.ctx, fx.input())
+	usage, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
 	if err != nil || usage != (ModelStepUsage{}) || len(fx.compactions()) != 0 {
 		t.Fatalf("usage=%+v err=%v compactions=%d", usage, err, len(fx.compactions()))
 	}
@@ -329,7 +331,7 @@ func TestCompactAppendsEntryAndEventUnderLease(t *testing.T) {
 	fx.history(true)
 	fx.host.script = append(fx.host.script, summaryAnswer("summary", 100, 10), summaryAnswer("summary", 100, 10))
 
-	if _, err := fx.compactor.CompactIfNeeded(fx.ctx, fx.input()); err != nil {
+	if _, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input()); err != nil {
 		t.Fatalf("CompactIfNeeded: %v", err)
 	}
 	events := fx.compactedEvents()
@@ -355,7 +357,7 @@ func TestCompactAppendsEntryAndEventUnderLease(t *testing.T) {
 	fx.add(fx.finalStep("s7", 1000, 60000, true))
 	in := fx.input()
 	in.WorkerID = "other-worker"
-	_, err := fx.compactor.Compact(fx.ctx, in, false)
+	_, err := fx.compactor.Compact(fx.Ctx, in, false)
 	if !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("lost lease err = %v", err)
 	}
@@ -369,7 +371,7 @@ func TestCompactInvalidSummaryRetriesOnceThenFails(t *testing.T) {
 		fx := newCompactionFixture(t)
 		fx.history(true)
 		fx.host.script = append(fx.host.script, summaryAnswer("   ", 100, 1), summaryHostFailure(modelStepSummaryFailed))
-		usage, err := fx.compactor.CompactIfNeeded(fx.ctx, fx.input())
+		usage, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
 		requireLoopFailure(t, err, RunFailureKindContextOverflow, RunFailureCodeCompactionFailed)
 		if len(fx.host.requests) != 2 || !reflect.DeepEqual(fx.host.requests[0], fx.host.requests[1]) {
 			t.Fatalf("calls = %d (want 2 identical)", len(fx.host.requests))
@@ -382,7 +384,7 @@ func TestCompactInvalidSummaryRetriesOnceThenFails(t *testing.T) {
 		fx := newCompactionFixture(t)
 		fx.history(true)
 		fx.host.script = append(fx.host.script, summaryAnswer(strings.Repeat("x", MaxCompactionSummaryBytes+1), 100, 16384), summaryAnswer("good", 120, 20))
-		usage, err := fx.compactor.CompactIfNeeded(fx.ctx, fx.input())
+		usage, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
 		if err != nil {
 			t.Fatalf("CompactIfNeeded: %v", err)
 		}
@@ -399,7 +401,7 @@ func TestCompactInvalidSummaryRetriesOnceThenFails(t *testing.T) {
 		fx.host.script = append(fx.host.script, func(ModelStepRequest) (ModelStepResult, error) {
 			return ModelStepResult{}, NewTurnHostFailure(StepHostFailureUnreachable, "down", true)
 		})
-		_, err := fx.compactor.CompactIfNeeded(fx.ctx, fx.input())
+		_, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
 		if !errors.Is(err, ErrTurnHostUnavailable) {
 			t.Fatalf("err = %v, want the host error", err)
 		}
@@ -410,21 +412,21 @@ func TestCompactEntryActionCallIDsAreUnionOfPreviousAndSpan(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.history(true)
 	fx.host.script = append(fx.host.script, summaryAnswer("first", 100, 10), summaryAnswer("second", 100, 10))
-	if _, err := fx.compactor.CompactIfNeeded(fx.ctx, fx.input()); err != nil {
+	if _, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input()); err != nil {
 		t.Fatalf("first compaction: %v", err)
 	}
 	fx.add(fx.stepWithTool("s6", "ac_3", 1000, 20000)...)
 	fx.add(fx.finalStep("s7", 1000, 46000, true))
 	fx.add(fx.user("u8", 2000))
 	in := fx.input()
-	if _, err := fx.compactor.CompactIfNeeded(fx.ctx, in); err != nil {
+	if _, err := fx.compactor.CompactIfNeeded(fx.Ctx, in); err != nil {
 		t.Fatalf("second compaction: %v", err)
 	}
 	// The second summary call reads the first compaction plus the whole path.
 	if got := viewIDs(fx.host.requests[1].Entries); got != "cmp-1,a-s2,t-s2,a-s3,u5,a-s6,t-s6,a-s7,u8" {
 		t.Fatalf("second summary entries = %s", got)
 	}
-	path := fx.path(fx.sessionID)
+	path := fx.Path(fx.sessionID)
 	c := path.Compaction.Compaction
 	if c.Summary != "second" || c.FirstKeptEntryID != "a-s6" || !reflect.DeepEqual(c.ActionCallIDs, []string{"ac_1", "ac_2"}) {
 		t.Fatalf("second compaction = %+v", c)
@@ -438,7 +440,7 @@ func TestCompactOverflowSendsOnlySummarizedSpan(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.history(true)
 	fx.host.script = append(fx.host.script, summaryAnswer("overflow summary", 30000, 500))
-	ctx := withCompactionPressure(fx.ctx, &HostedContextPressure{EstimatedTokens: 70000, LimitTokens: 60000})
+	ctx := withCompactionPressure(fx.Ctx, &HostedContextPressure{EstimatedTokens: 70000, LimitTokens: 60000})
 	in := fx.input()
 	in.Attempt = 0
 	if _, err := fx.compactor.Compact(ctx, in, true); err != nil {
@@ -451,11 +453,11 @@ func TestCompactOverflowSendsOnlySummarizedSpan(t *testing.T) {
 	if got := viewIDs(req.Entries); got != "u0,a-s1,t-s1,u2" {
 		t.Fatalf("overflow entries = %s, want only the summarized span", got)
 	}
-	step, _ := fakeStepRequests{}.PrepareModelStep(fx.ctx, in)
+	step, _ := fakeStepRequests{}.PrepareModelStep(fx.Ctx, in)
 	if !reflect.DeepEqual(req.System, step.System) || !reflect.DeepEqual(req.Tools, step.Tools) || req.Purpose != ModelStepPurposeSummary {
 		t.Fatal("overflow summary must keep the step's system and tools")
 	}
-	c := fx.path(fx.sessionID).Compaction.Compaction
+	c := fx.Path(fx.sessionID).Compaction.Compaction
 	if c.Trigger != CompactionTriggerOverflow || c.FirstKeptEntryID != "a-s2" || c.Summary != "overflow summary" {
 		t.Fatalf("compaction = %+v", c)
 	}
@@ -481,7 +483,7 @@ func TestCompactOverflowFoldsChunks(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.foldHistory()
 	fx.host.script = append(fx.host.script, summaryAnswer("part one", 30000, 400), summaryAnswer("parts one and two", 40000, 600))
-	usage, err := fx.compactor.Compact(foldPressure(fx.ctx), fx.input(), true)
+	usage, err := fx.compactor.Compact(foldPressure(fx.Ctx), fx.input(), true)
 	if err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
@@ -501,7 +503,7 @@ func TestCompactOverflowFoldsChunks(t *testing.T) {
 	if usage.InputTokens != 70000 || usage.OutputTokens != 1000 {
 		t.Fatalf("usage = %+v, want both calls", usage)
 	}
-	c := fx.path(fx.sessionID).Compaction.Compaction
+	c := fx.Path(fx.sessionID).Compaction.Compaction
 	if c.Summary != "parts one and two" || c.FirstKeptEntryID != "a-s2" || c.Usage.InputTokens != 70000 ||
 		!reflect.DeepEqual(c.ActionCallIDs, []string{"ac_1"}) {
 		t.Fatalf("compaction = %+v", c)
@@ -514,7 +516,7 @@ func TestCompactOverflowSplitsARejectedChunkOnce(t *testing.T) {
 	fx.host.script = append(fx.host.script,
 		summaryAnswer("one", 1, 1), summaryHostFailure(TurnHostContextExceeded),
 		summaryAnswer("two", 1, 1), summaryAnswer("three", 1, 1))
-	if _, err := fx.compactor.Compact(foldPressure(fx.ctx), fx.input(), true); err != nil {
+	if _, err := fx.compactor.Compact(foldPressure(fx.Ctx), fx.input(), true); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
 	if len(fx.host.requests) != 4 {
@@ -523,7 +525,7 @@ func TestCompactOverflowSplitsARejectedChunkOnce(t *testing.T) {
 	if a, b := viewIDs(fx.host.requests[2].Entries[1:]), viewIDs(fx.host.requests[3].Entries[1:]); a != "a-s1,t-s1" || b != "u2" {
 		t.Fatalf("halves = %s | %s", a, b)
 	}
-	if c := fx.path(fx.sessionID).Compaction.Compaction; c.Summary != "three" {
+	if c := fx.Path(fx.sessionID).Compaction.Compaction; c.Summary != "three" {
 		t.Fatalf("summary = %q", c.Summary)
 	}
 
@@ -532,7 +534,7 @@ func TestCompactOverflowSplitsARejectedChunkOnce(t *testing.T) {
 	fx2.foldHistory()
 	fx2.host.script = append(fx2.host.script,
 		summaryAnswer("one", 1, 1), summaryHostFailure(TurnHostContextExceeded), summaryHostFailure(TurnHostContextExceeded))
-	_, err := fx2.compactor.Compact(foldPressure(fx2.ctx), fx2.input(), true)
+	_, err := fx2.compactor.Compact(foldPressure(fx2.Ctx), fx2.input(), true)
 	requireLoopFailure(t, err, RunFailureKindContextOverflow, TurnHostContextExceeded)
 	if len(fx2.compactions()) != 0 {
 		t.Fatal("a failed compaction was appended")
@@ -546,7 +548,7 @@ func TestCompactOverflowFoldLimitFails(t *testing.T) {
 	}
 	fx.add(fx.stepWithTool("s1", "ac_1", 1000, 4000)...)
 	fx.add(fx.finalStep("s2", 1000, 0, false))
-	_, err := fx.compactor.Compact(foldPressure(fx.ctx), fx.input(), true)
+	_, err := fx.compactor.Compact(foldPressure(fx.Ctx), fx.input(), true)
 	requireLoopFailure(t, err, RunFailureKindContextOverflow, TurnHostContextExceeded)
 	if len(fx.host.requests) != 0 || len(fx.compactions()) != 0 {
 		t.Fatalf("calls=%d compactions=%d", len(fx.host.requests), len(fx.compactions()))
@@ -557,7 +559,7 @@ func TestCompactOverflowImpossibleForSingleStep(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.add(fx.user("u0", 50000))
 	fx.add(fx.finalStep("s1", 1000, 0, false))
-	_, err := fx.compactor.Compact(foldPressure(fx.ctx), fx.input(), true)
+	_, err := fx.compactor.Compact(foldPressure(fx.Ctx), fx.input(), true)
 	requireLoopFailure(t, err, RunFailureKindContextOverflow, TurnHostContextExceeded)
 	failure := err.(*LoopFailureError).Failure
 	if failure.Message != runFailureMessageContextExceeded || failure.Explainable {
@@ -573,7 +575,7 @@ func TestCompactOverflowSingleEntryChunkIsContextOverflow(t *testing.T) {
 	fx.add(fx.stepWithTool("s1", "ac_1", 1000, 20000)...)
 	fx.add(fx.stepWithTool("s2", "ac_2", 1000, 1000)...)
 	fx.add(fx.finalStep("s3", 1000, 0, false))
-	_, err := fx.compactor.Compact(foldPressure(fx.ctx), fx.input(), true)
+	_, err := fx.compactor.Compact(foldPressure(fx.Ctx), fx.input(), true)
 	if err == nil {
 		t.Fatalf("compacted a span whose first chunk is one entry")
 	}
@@ -591,18 +593,18 @@ func TestCompactOverflowSingleEntryChunkIsContextOverflow(t *testing.T) {
 func TestCompactChargesBudgetNotTurns(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.history(true)
-	fx.updateRun(fx.runID, func(run *AgentRun) {
+	fx.UpdateRun(fx.runID, func(run *AgentRun) {
 		run.Budget = &BudgetPolicy{MaxTurns: 10, MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000}
 	})
-	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.now })
+	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
 	fx.host.script = append(fx.host.script, summaryAnswer("summary", 50500, 900))
 	in := fx.input()
 	before := in.Run.Revision
-	usage, err := fx.compactor.CompactIfNeeded(fx.ctx, in)
+	usage, err := fx.compactor.CompactIfNeeded(fx.Ctx, in)
 	if err != nil {
 		t.Fatalf("CompactIfNeeded: %v", err)
 	}
-	run := fx.run(fx.runID)
+	run := fx.Run(fx.runID)
 	if run.BudgetUsage.InputTokens != 50500 || run.BudgetUsage.OutputTokens != 900 || run.BudgetUsage.Turns != 0 || run.BudgetUsage.CostMicros != 10000 {
 		t.Fatalf("budget usage = %+v", run.BudgetUsage)
 	}
@@ -615,7 +617,7 @@ func TestCompactChargesBudgetNotTurns(t *testing.T) {
 	if usage.InputTokens != 50500 {
 		t.Fatalf("usage = %+v", usage)
 	}
-	steps, err := fx.store.ListAgentTurns(fx.ctx, AgentTurnFilter{Scope: fx.scope, RunID: fx.runID})
+	steps, err := fx.store.ListAgentTurns(fx.Ctx, AgentTurnFilter{Scope: fx.Scope, RunID: fx.runID})
 	if err != nil || len(steps) != 0 {
 		t.Fatalf("compaction wrote %d agent_turns rows", len(steps))
 	}
@@ -624,27 +626,27 @@ func TestCompactChargesBudgetNotTurns(t *testing.T) {
 func TestCompactSettlesBudgetAfterAHeartbeatDuringTheSummary(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.history(true)
-	fx.updateRun(fx.runID, func(run *AgentRun) {
+	fx.UpdateRun(fx.runID, func(run *AgentRun) {
 		run.Budget = &BudgetPolicy{MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000}
 	})
-	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.now })
+	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
 	in := fx.input()
 	// The Run moved on after the step read it: a heartbeat before the
 	// reservation, and another while the summary call runs.
-	if _, err := fx.store.RenewAgentRunLease(fx.ctx, fx.scope, fx.runID, conformanceWorker, fx.now, time.Hour); err != nil {
+	if _, err := fx.store.RenewAgentRunLease(fx.Ctx, fx.Scope, fx.runID, storetest.SessionWorker, fx.Now, time.Hour); err != nil {
 		t.Fatalf("renew: %v", err)
 	}
 	answer := summaryAnswer("summary", 50500, 900)
 	fx.host.script = append(fx.host.script, func(req ModelStepRequest) (ModelStepResult, error) {
-		if _, err := fx.store.RenewAgentRunLease(fx.ctx, fx.scope, fx.runID, conformanceWorker, fx.now, time.Hour); err != nil {
+		if _, err := fx.store.RenewAgentRunLease(fx.Ctx, fx.Scope, fx.runID, storetest.SessionWorker, fx.Now, time.Hour); err != nil {
 			t.Fatalf("renew: %v", err)
 		}
 		return answer(req)
 	})
-	if _, err := fx.compactor.CompactIfNeeded(fx.ctx, in); err != nil {
+	if _, err := fx.compactor.CompactIfNeeded(fx.Ctx, in); err != nil {
 		t.Fatalf("CompactIfNeeded: %v", err)
 	}
-	run := fx.run(fx.runID)
+	run := fx.Run(fx.runID)
 	if len(run.BudgetReservations) != 0 {
 		t.Fatalf("reservations = %v", run.BudgetReservations)
 	}
@@ -654,7 +656,7 @@ func TestCompactSettlesBudgetAfterAHeartbeatDuringTheSummary(t *testing.T) {
 	if in.Run.Revision != run.Revision || len(fx.compactions()) != 1 {
 		t.Fatalf("in.Run revision %d, stored %d, compactions %d", in.Run.Revision, run.Revision, len(fx.compactions()))
 	}
-	events, err := fx.store.ListActivity(fx.ctx, ActivityFilter{Scope: fx.scope, RunID: fx.runID, EventTypes: []string{"budget.settled"}, Limit: 10})
+	events, err := fx.store.ListActivity(fx.Ctx, ActivityFilter{Scope: fx.Scope, RunID: fx.runID, EventTypes: []string{"budget.settled"}, Limit: 10})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("settled events = %d, %v", len(events), err)
 	}
@@ -666,11 +668,11 @@ func TestCompactSettlesBudgetAfterAHeartbeatDuringTheSummary(t *testing.T) {
 func TestCompactBudgetExhaustedFailsWithoutCalling(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.history(true)
-	fx.updateRun(fx.runID, func(run *AgentRun) {
+	fx.UpdateRun(fx.runID, func(run *AgentRun) {
 		run.Budget = &BudgetPolicy{MaxOutputTokens: 1000}
 	})
-	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.now })
-	_, err := fx.compactor.CompactIfNeeded(fx.ctx, fx.input())
+	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
+	_, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
 	requireLoopFailure(t, err, "budget", "budget_exhausted")
 	if len(fx.host.requests) != 0 || len(fx.compactions()) != 0 {
 		t.Fatalf("calls=%d compactions=%d", len(fx.host.requests), len(fx.compactions()))

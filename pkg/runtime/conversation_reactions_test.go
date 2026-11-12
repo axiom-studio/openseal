@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type recordingReactionProjector struct{ events []*ConversationReactionEvent }
@@ -19,7 +21,7 @@ func TestConversationReactionsAcrossStores(t *testing.T) {
 	t.Parallel()
 	stores := map[string]func(t *testing.T) ConversationStore{
 		"sqlite": func(t *testing.T) ConversationStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "reactions.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "reactions.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

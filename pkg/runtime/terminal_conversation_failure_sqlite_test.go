@@ -4,11 +4,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reporting-upgrade.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +44,7 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = NewSQLiteStore(path)
+	store, err = sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +66,7 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = NewSQLiteStore(path)
+	store, err = sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,12 +4,14 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestObjectiveLifecycleIsAtomicallyAudited(t *testing.T) {
 	stores := map[string]func(*testing.T) KernelStore{
 		"sqlite": func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

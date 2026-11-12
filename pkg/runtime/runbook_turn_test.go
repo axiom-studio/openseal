@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func runbookLiteral(value interface{}) runbook.Value {
@@ -483,7 +484,7 @@ const runbookLoopWorker = "runbook-loop-worker"
 type runbookLoopFixture struct {
 	t        *testing.T
 	ctx      context.Context
-	store    *SQLiteStore
+	store    *sqlite.SQLiteStore
 	scope    Scope
 	control  *ControlExecutor
 	tools    *StepToolDispatcher

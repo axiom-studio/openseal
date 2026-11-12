@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestActionClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
@@ -16,7 +18,7 @@ func TestActionClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "claims.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "claims.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

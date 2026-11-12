@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -27,13 +28,13 @@ func TestPostgresActionCredentialLeaseSerializesWithProposalWithoutDeadlock(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocker, err := pgSchema.db.BeginTx(ctx, nil)
+	blocker, err := pgSchema.DB.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer blocker.Rollback()
 	var revision int64
-	if err := blocker.QueryRowContext(ctx, `SELECT revision FROM `+pgSchema.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, run.Scope.Kind, run.Scope.ID, run.ID).Scan(&revision); err != nil {
+	if err := blocker.QueryRowContext(ctx, `SELECT revision FROM `+pgSchema.Table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, run.Scope.Kind, run.Scope.ID, run.ID).Scan(&revision); err != nil {
 		t.Fatal(err)
 	}
 	redeemed := make(chan error, 1)
@@ -81,13 +82,13 @@ func TestPostgresActionCredentialLeaseSerializesWithProposalWithoutDeadlock(t *t
 	}
 }
 
-func waitForBlockedPostgresActionRunQueries(t *testing.T, ctx context.Context, pgSchema testPostgresSchema, minimum int) {
+func waitForBlockedPostgresActionRunQueries(t *testing.T, ctx context.Context, pgSchema storetest.PostgresSchema, minimum int) {
 	t.Helper()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		var blocked int
-		if err := pgSchema.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND strpos(query,$1)>0 AND strpos(query,'FOR UPDATE')>0 AND pid<>pg_backend_pid()`, pgSchema.table("agent_runs")).Scan(&blocked); err != nil {
+		if err := pgSchema.DB.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND strpos(query,$1)>0 AND strpos(query,'FOR UPDATE')>0 AND pid<>pg_backend_pid()`, pgSchema.Table("agent_runs")).Scan(&blocked); err != nil {
 			t.Fatal(err)
 		}
 		if blocked >= minimum {

@@ -6,14 +6,17 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestPostgresSkillReferenceUpgradeMovesEveryBindingAtTheVersionTogether(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "openseal_group_upgrade_")
-	dsn := pgSchema.dsn
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_group_upgrade_")
+	dsn := pgSchema.DSN
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

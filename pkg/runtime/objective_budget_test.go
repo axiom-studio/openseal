@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestObjectiveBudgetAllocatesConcurrentTopLevelRunsAtomically(t *testing.T) {
@@ -14,7 +16,7 @@ func TestObjectiveBudgetAllocatesConcurrentTopLevelRunsAtomically(t *testing.T) 
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-budget.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-budget.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +82,7 @@ func TestObjectiveBudgetRejectsConcurrentOverAllocation(t *testing.T) {
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-budget-race.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-budget-race.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

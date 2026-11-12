@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/google/uuid"
 )
@@ -108,14 +109,14 @@ func failedSourceCall(t *testing.T, store KernelStore, sessions AgentSessionStor
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tool := testToolEntry(id+":tool", step, "call-"+step, ToolEntryError)
+	tool := storetest.ToolSessionEntry(id+":tool", step, "call-"+step, ToolEntryError)
 	tool.ActionCallID = id
 	appendSourceStep(t, sessions, run, step, at, tool)
 }
 
 func appendSourceStep(t *testing.T, sessions AgentSessionStore, run *AgentRun, step string, at time.Time, tool *SessionEntry) {
 	t.Helper()
-	assistant := testAssistantEntry(run.ID+":"+step+":assistant", step, tool.ToolCallID)
+	assistant := storetest.AssistantSessionEntry(run.ID+":"+step+":assistant", step, tool.ToolCallID)
 	if _, err := sessions.AppendAgentSessionEntries(t.Context(), AppendAgentSessionEntriesRequest{
 		Scope: run.Scope, SessionID: run.SessionID, RunID: run.ID, Lease: &AgentRunLeaseGuard{WorkerID: "w", Now: at}, Now: at,
 		Entries: []*SessionEntry{assistant, tool},
@@ -161,7 +162,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 					explanation = beginRunFailureExplanation(run, RunFailureKindExecution, "action_failed", "A tool failed.", "", "")
 				case "recovered rate limit":
 					// The model moved past the 429 and later steps succeeded.
-					appendSourceStep(t, sessions, run, "step-2", now, testToolEntry(run.ID+":step-2:tool", "step-2", "call-step-2", ToolEntryCompleted))
+					appendSourceStep(t, sessions, run, "step-2", now, storetest.ToolSessionEntry(run.ID+":step-2:tool", "step-2", "call-step-2", ToolEntryCompleted))
 				}
 				current, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
 				if err != nil {

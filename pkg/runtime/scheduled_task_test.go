@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -108,7 +109,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 			t.Run(kind+"/"+limit, func(t *testing.T) {
 				var store KernelStore = newTestKernelStore(t)
 				if kind == "sqlite" {
-					s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "tasks.db"))
+					s, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "tasks.db"))
 					if err != nil {
 						t.Fatal(err)
 					}

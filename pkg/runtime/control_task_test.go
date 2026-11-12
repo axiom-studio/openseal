@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -23,7 +25,7 @@ type startTaskTestStore interface {
 func forStartTaskStores(t *testing.T, test func(*testing.T, startTaskTestStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "start-task.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "start-task.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +110,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 	sessionID := run.SessionID
 	user := &SessionEntry{ID: SessionEntryID(sessionID, "message:"+message.ID), RunID: run.ID, Type: SessionEntryUser,
 		SourceKey: "message:" + message.ID, User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: message.Sender.ID},
-			Content: []ContentPart{testTextPart(message.Content)}, MessageID: message.ID}}
+			Content: []ContentPart{storetest.TextPart(message.Content)}, MessageID: message.ID}}
 	assistant := &SessionEntry{ID: SessionEntryID(sessionID, AssistantEntryKey(step.ID)), RunID: run.ID, StepID: step.ID, Step: step.Sequence,
 		Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x",
 			StopReason: ModelStopToolCalls, ToolCalls: calls}}

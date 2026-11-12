@@ -6,17 +6,20 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // The store scenarios of action_loop_store_test.go run on Postgres through
 // nestedActionStores when OPENSEAL_TEST_POSTGRES_DSN is set. This file holds
 // the checks only the Postgres store has.
 
-func openLoopActionPostgresStore(t *testing.T) *PostgresStore {
+func openLoopActionPostgresStore(t *testing.T) *postgres.PostgresStore {
 	t.Helper()
-	pgSchema := newTestPostgresSchema(t, "openseal_loop_actions_")
-	dsn := pgSchema.dsn
-	store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(pgSchema.name))
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_loop_actions_")
+	dsn := pgSchema.DSN
+	store, err := postgres.NewPostgresStore(context.Background(), dsn, postgres.WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +51,7 @@ func TestNextActionDeadlineIgnoresLoopCalls(t *testing.T) {
 	worker.Origin, worker.Execution, worker.AvailableAt = ActionOriginVM, "", f.now.Add(2*time.Hour)
 	worker.InvocationDigest = ComputeActionInvocationDigest(worker)
 	worker.SemanticDigest = ComputeActionSemanticDigest(worker)
-	seedActionCall(t, store, worker)
+	storetest.SeedActionCall(t, store, worker)
 	deadline, err = store.NextActionDeadline(ctx, f.scope, f.now)
 	if err != nil || deadline == nil || !deadline.Equal(worker.AvailableAt) {
 		t.Fatalf("deadline = %v, %v; want the worker call's %v", deadline, err, worker.AvailableAt)

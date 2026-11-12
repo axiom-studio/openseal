@@ -10,6 +10,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -21,7 +24,7 @@ type turnStepBackend struct {
 func turnStepBackends() []turnStepBackend {
 	return []turnStepBackend{
 		{name: "sqlite", open: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "turn-steps.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "turn-steps.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -29,18 +32,18 @@ func turnStepBackends() []turnStepBackend {
 			return store
 		}},
 		{name: "postgres", open: func(t *testing.T) KernelStore {
-			pgSchema := newTestPostgresSchema(t, "openseal_turn_steps_")
-			dsn := pgSchema.dsn
+			pgSchema := storetest.NewPostgresSchema(t, "openseal_turn_steps_")
+			dsn := pgSchema.DSN
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+			store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+				_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 				_ = store.Close()
 			})
 			return store

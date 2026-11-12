@@ -8,11 +8,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestSQLiteSpaceAccess(t *testing.T) {
 	t.Parallel()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "access.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "access.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +308,7 @@ func exerciseSpaceAccessState(t *testing.T, spaces *SpaceService, scope, other S
 func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "legacy.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +327,7 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := sqlDB.Exec(`INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, 'Default', 'tidepool', 0, 1, 'everyone', ?, ?, ?)`,
-		legacyDefaultSpaceID(scope), scope.Kind, scope.ID, legacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour), work.CreatedAt.Add(-time.Hour)); err != nil {
+		storetest.LegacyDefaultSpaceID(scope), scope.Kind, scope.ID, storetest.LegacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour), work.CreatedAt.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
@@ -342,42 +345,13 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		reopened, err := NewSQLiteStore(path)
+		reopened, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertSpaceAccessBackfilled(t, reopened, scope, work.ID)
+		storetest.AssertSpaceAccessBackfilled(t, reopened, scope, work.ID)
 		if err := reopened.Close(); err != nil {
 			t.Fatal(err)
 		}
-	}
-}
-
-// assertSpaceAccessBackfilled checks a migrated database that had the legacy
-// Default space and one space a person made. Migration 85 then leaves the
-// legacy space as it is and makes the person's space their default.
-func assertSpaceAccessBackfilled(t *testing.T, store SpaceStore, scope Scope, workID string) {
-	t.Helper()
-	ctx := context.Background()
-	listed, err := store.ListSpaces(ctx, scope)
-	if err != nil || len(listed) != 2 {
-		t.Fatalf("spaces = %+v, err = %v", listed, err)
-	}
-	if listed[0].ID != legacyDefaultSpaceID(scope) || listed[0].Access != SpaceAccessOwner || listed[0].OwnerID != legacyDefaultSpaceOwner ||
-		!listed[0].IsDefault || listed[0].Name != "Default" {
-		t.Fatalf("Default = %+v", listed[0])
-	}
-	if listed[1].ID != workID || listed[1].Access != SpaceAccessOwner || listed[1].OwnerID != "7" || !listed[1].IsDefault {
-		t.Fatalf("work = %+v", listed[1])
-	}
-	if owned, err := store.DefaultSpace(ctx, scope, "7"); err != nil || owned.ID != workID {
-		t.Fatalf("default space of the person = %+v, err = %v", owned, err)
-	}
-	if people, err := store.ListSpacePeople(ctx, scope, workID); err != nil || len(people) != 0 {
-		t.Fatalf("people = %+v, err = %v", people, err)
-	}
-	// Nothing was shared before the migration, so another person sees none.
-	if visible, err := store.VisibleSpaces(ctx, scope, "8"); err != nil || len(visible) != 0 {
-		t.Fatalf("visible to another person = %v, err = %v", visible, err)
 	}
 }

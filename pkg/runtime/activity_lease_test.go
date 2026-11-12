@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestRunTransitionsRejectStaleLeaseOwners(t *testing.T) {
@@ -14,7 +16,7 @@ func TestRunTransitionsRejectStaleLeaseOwners(t *testing.T) {
 		store func(*testing.T) KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "lease.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "lease.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

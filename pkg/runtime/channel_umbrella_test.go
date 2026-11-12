@@ -7,12 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "tenant-1"}
-	gateway := externalConversationGatewayFixture(scope)
+	gateway := storetest.IngressGateway(scope)
 	for name, mutate := range map[string]func(*ExternalConversationIngressGateway){
 		"no owner":           func(g *ExternalConversationIngressGateway) { g.Owner = ObjectiveOwner{} },
 		"another deployment": func(g *ExternalConversationIngressGateway) { g.Owner.ID = "other" },
@@ -25,7 +27,7 @@ func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 		}
 	}
 	for _, store := range []ExternalConversationGatewayStore{newTestKernelStore(t), func() ExternalConversationGatewayStore {
-		sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "gateways.db"))
+		sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "gateways.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -51,13 +53,13 @@ func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 
 func TestSQLiteChannelUmbrellaBackfill(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "tenant-1"}
 	if _, err := NewExternalConversationGatewayService(store).Create(context.Background(), CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
-		Gateway: externalConversationGatewayFixture(scope), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
+		Gateway: storetest.IngressGateway(scope), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -71,7 +73,7 @@ func TestSQLiteChannelUmbrellaBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

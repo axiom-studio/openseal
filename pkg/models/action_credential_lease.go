@@ -400,3 +400,55 @@ func riskLevelRank(value skill.RiskLevel) int {
 		return -1
 	}
 }
+
+type CreateActionCredentialLeaseRequest struct {
+	TenantID         string
+	Call             *ActionCall
+	Run              *AgentRun
+	CredentialFields map[string][]string
+	Transport        string
+	Issuer           string
+	Audience         string
+	IssuedAt         time.Time
+	ExpiresAt        time.Time
+	Nonce            string
+}
+
+// NewActionCredentialLease derives every authority field from the durable Run
+// and currently claimed ActionCall. Credential workers supply Transport from
+// the already resolved BoundAction; callers cannot substitute Skill, binding,
+// owner, or Agent identity.
+func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*ActionCredentialLease, error) {
+	call, run := request.Call, request.Run
+	if call == nil || run == nil || call.Status != ActionCallStatusRunning || strings.TrimSpace(call.LeaseOwner) == "" || call.LeaseExpiresAt == nil {
+		return nil, fmt.Errorf("%w: a running, claimed ActionCall and its Run are required", ErrActionCredentialLeaseInvalid)
+	}
+	if call.Scope != run.Scope || call.RunID != run.ID || strings.TrimSpace(run.AssignedAgentID) == "" {
+		return nil, fmt.Errorf("%w: ActionCall and Run authority do not match", ErrActionCredentialLeaseMismatch)
+	}
+	issuedAt, expiresAt := CanonicalLeaseTime(request.IssuedAt), CanonicalLeaseTime(request.ExpiresAt)
+	actionExpiry := CanonicalLeaseTime(*call.LeaseExpiresAt)
+	if expiresAt.After(actionExpiry) {
+		return nil, fmt.Errorf("%w: credential expiry exceeds the durable action lease", ErrActionCredentialLeaseInvalid)
+	}
+	credentials, err := ActionCredentialFieldReferences(call.CredentialRefs, request.CredentialFields)
+	if err != nil {
+		return nil, err
+	}
+	actionLease := ActionLeaseIdentity{
+		ActionCallRevision: call.Revision, Attempt: call.Attempt, WorkerID: strings.TrimSpace(call.LeaseOwner), ExpiresAt: actionExpiry,
+	}
+	actionLease.ID = ComputeActionLeaseIdentity(call.Scope, call.ID, call.RunID, actionLease)
+	lease := &ActionCredentialLease{
+		Version: ActionCredentialLeaseVersion, TenantID: strings.TrimSpace(request.TenantID), Scope: call.Scope,
+		RunID: call.RunID, ActionCallID: call.ID, ActionLease: actionLease,
+		SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: call.Action, Transport: strings.TrimSpace(request.Transport),
+		BindingOwnerID: call.DeploymentID, BindingID: call.BindingID, BindingRevision: call.BindingRevision,
+		AssignedAgentID: run.AssignedAgentID, ActingUser: run.ActingUser, Credentials: credentials,
+		Issuer: strings.TrimSpace(request.Issuer), Audience: strings.TrimSpace(request.Audience), IssuedAt: issuedAt, ExpiresAt: expiresAt, Nonce: strings.TrimSpace(request.Nonce),
+	}
+	if err := lease.Validate(); err != nil {
+		return nil, err
+	}
+	return lease, nil
+}

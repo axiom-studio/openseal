@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type batchedConversationRunsStore struct {
@@ -58,7 +60,7 @@ func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var store KernelStore = newTestKernelStore(t)
 			if backend == "sqlite" {
-				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "children.db"))
+				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "children.db"))
 				if err != nil {
 					t.Fatal(err)
 				}

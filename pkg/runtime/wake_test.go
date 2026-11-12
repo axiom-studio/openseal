@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestWakeSignalsRequeueRunsExactlyOnce(t *testing.T) {
@@ -15,7 +17,7 @@ func TestWakeSignalsRequeueRunsExactlyOnce(t *testing.T) {
 		store func(*testing.T) KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "wake.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "wake.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,7 +138,7 @@ func TestWakeConditionHonorsDueTimeReferenceAndPredicate(t *testing.T) {
 
 func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wake-restart.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +173,7 @@ func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

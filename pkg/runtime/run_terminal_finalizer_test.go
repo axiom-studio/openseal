@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
@@ -14,7 +15,7 @@ import (
 // test states (the finalizer only lists a Run's calls), and which records the
 // activity filters the finalizer asks for.
 type terminalFinalizerStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	actions         actionCallRecords
 	activityFilters []ActivityFilter
 }

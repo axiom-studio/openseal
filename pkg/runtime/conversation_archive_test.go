@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing.T) {
@@ -13,7 +15,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 		store func(*testing.T) KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-archive.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-archive.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

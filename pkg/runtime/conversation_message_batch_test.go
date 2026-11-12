@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type countedPointConversationStore struct {
@@ -56,7 +58,7 @@ func newCountedBatchConversationStore(store ConversationStore) *countedBatchConv
 func channelMessageBatchStores(t *testing.T, test func(*testing.T, KernelStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "message-batch.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "message-batch.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +222,7 @@ func (r *countedChannelMessageSQLReader) QueryContext(ctx context.Context, query
 
 func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "exact-batch.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +274,7 @@ func TestConversationMessageBatchChunksAndDeduplicatesExactIDs(t *testing.T) {
 }
 
 func BenchmarkConversationMessageVisibilityHistory(b *testing.B) {
-	store, err := NewSQLiteStore(filepath.Join(b.TempDir(), "poll-batch.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(b.TempDir(), "poll-batch.db"))
 	if err != nil {
 		b.Fatal(err)
 	}

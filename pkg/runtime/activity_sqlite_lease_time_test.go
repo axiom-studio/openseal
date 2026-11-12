@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestSQLiteRunTransitionLeaseUsesAbsoluteTimeAndExactExpiry(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "lease-offset.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "lease-offset.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

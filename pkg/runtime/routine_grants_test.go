@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -21,7 +22,7 @@ func (r routineOwnerAddressesForTest) RoutineOwnerAddresses(_ context.Context, _
 }
 
 type routineGrantFixtureState struct {
-	store     *SQLiteStore
+	store     *sqlite.SQLiteStore
 	run       *AgentRun
 	catalog   *skill.Catalog
 	bound     *skill.BoundAction

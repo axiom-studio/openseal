@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -230,7 +233,7 @@ func forActionLifecycleBackends(t *testing.T, test func(*testing.T, KernelStore,
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, actionLifecycleBackend) {
 			path := filepath.Join(t.TempDir(), "action-lifecycle.db")
-			store, err := NewSQLiteStore(path)
+			store, err := sqlite.NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -239,7 +242,7 @@ func forActionLifecycleBackends(t *testing.T, test func(*testing.T, KernelStore,
 				if err := store.Close(); err != nil {
 					t.Fatal(err)
 				}
-				reopened, err := NewSQLiteStore(path)
+				reopened, err := sqlite.NewSQLiteStore(path)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -248,22 +251,22 @@ func forActionLifecycleBackends(t *testing.T, test func(*testing.T, KernelStore,
 			}}
 		}},
 		{name: "postgres", open: func(t *testing.T) (KernelStore, actionLifecycleBackend) {
-			pgSchema := newTestPostgresSchema(t, "openseal_action_lifecycle_")
-			dsn := pgSchema.dsn
+			pgSchema := storetest.NewPostgresSchema(t, "openseal_action_lifecycle_")
+			dsn := pgSchema.DSN
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+			store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+				_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 				_ = store.Close()
 			})
-			return store, actionLifecycleBackend{postgres: true, db: pgSchema.db, table: pgSchema.table, reopen: func(t *testing.T) KernelStore {
-				return pgSchema.open(t)
+			return store, actionLifecycleBackend{postgres: true, db: pgSchema.DB, table: pgSchema.Table, reopen: func(t *testing.T) KernelStore {
+				return openPostgresStoreOn(t, pgSchema)
 			}}
 		}},
 	} {

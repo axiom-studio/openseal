@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type placementRuns map[string]*AgentRun
@@ -123,7 +126,7 @@ func TestArtifactPlacementFailsOnConversationLookupErrors(t *testing.T) {
 
 func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 	ctx := context.Background()
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,12 +214,12 @@ func TestArtifactRejectsInvalidPlacementIdentifiers(t *testing.T) {
 }
 
 func TestKernelStoresProvideArtifactPlacementLookups(t *testing.T) {
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	for name, store := range map[string]any{"sqlite": sqlite, "postgres": &PostgresStore{}} {
+	for name, store := range map[string]any{"sqlite": sqlite, "postgres": &postgres.PostgresStore{}} {
 		if placement := NewStoreArtifactPlacement(store); placement.Runs == nil || placement.Conversations == nil {
 			t.Fatalf("%s store placement = %#v", name, placement)
 		}

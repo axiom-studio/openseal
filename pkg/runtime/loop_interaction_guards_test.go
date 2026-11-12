@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 type guardFixture struct {
@@ -340,7 +342,7 @@ func TestGovernedToolViewsReadsRunCallsInPathOrder(t *testing.T) {
 	// The store-backed loader returns the same views.
 	store := newTestKernelStore(t)
 	for _, call := range f.calls {
-		seedActionCall(t, store, call)
+		storetest.SeedActionCall(t, store, call)
 	}
 	loaded, err := loadGovernedToolViews(context.Background(), store, f.run.Scope, f.path, f.run.ID)
 	if err != nil {

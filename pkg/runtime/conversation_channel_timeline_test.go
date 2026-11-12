@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestChannelTimelineStoresPaginateRootsAndBroadcastsBeforeLimiting(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "channel-timeline.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "channel-timeline.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestTeamOwnedRunEventsPopulateCanonicalTeamProjection(t *testing.T) {
@@ -13,7 +15,7 @@ func TestTeamOwnedRunEventsPopulateCanonicalTeamProjection(t *testing.T) {
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "team-activity.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "team-activity.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

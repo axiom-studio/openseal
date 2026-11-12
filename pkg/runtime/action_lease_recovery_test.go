@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestActionClaimPersistsRunningRecoveryProvenance(t *testing.T) {
@@ -68,7 +70,7 @@ func TestActionReadyDeferralIsNotRunningRecovery(t *testing.T) {
 
 func TestActionRunningRecoveryProvenanceSurvivesSQLiteRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "action-recovery.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +93,7 @@ func TestActionRunningRecoveryProvenanceSurvivesSQLiteRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

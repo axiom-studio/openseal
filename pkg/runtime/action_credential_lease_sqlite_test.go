@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -18,16 +20,16 @@ import (
 func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "credential-redemption.db")
-	primary, err := NewSQLiteStore(path)
+	primary, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replica, err := NewSQLiteStore(path)
+	replica, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	db := openTestSQLiteDB(t, path)
-	request, _ := createSQLiteActionCredentialLeaseFixture(t, ctx, primary, "nonce-sqlite-concurrent-0001")
+	request, _ := storetest.ActionCredentialLeaseFixture(t, ctx, primary, "nonce-sqlite-concurrent-0001")
 	cutoff := time.Now().UTC().Add(-time.Minute)
 	for index := 0; index < 130; index++ {
 		if _, err := db.ExecContext(ctx, `INSERT INTO action_credential_lease_redemptions
@@ -37,12 +39,12 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 		}
 	}
 
-	stores := []*SQLiteStore{primary, replica}
+	stores := []*sqlite.SQLiteStore{primary, replica}
 	results := make(chan error, len(stores))
 	var wait sync.WaitGroup
 	for _, store := range stores {
 		wait.Add(1)
-		go func(store *SQLiteStore) {
+		go func(store *sqlite.SQLiteStore) {
 			defer wait.Done()
 			results <- store.RedeemActionCredentialLease(ctx, request)
 		}(store)
@@ -85,7 +87,7 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 	if err := primary.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := NewSQLiteStore(path)
+	restarted, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,9 +100,9 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing.T) {
 	for _, test := range []struct {
 		name  string
-		drift func(*testing.T, context.Context, *SQLiteStore, *sql.DB, *skill.Binding, ActionCredentialLeaseRedemptionRequest)
+		drift func(*testing.T, context.Context, *sqlite.SQLiteStore, *sql.DB, *skill.Binding, ActionCredentialLeaseRedemptionRequest)
 	}{
-		{"action lease owner", func(t *testing.T, ctx context.Context, _ *SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"action lease owner", func(t *testing.T, ctx context.Context, _ *sqlite.SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
 			var payload string
 			if err := db.QueryRowContext(ctx, `SELECT payload FROM action_calls WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.ActionCallID).Scan(&payload); err != nil {
 				t.Fatal(err)
@@ -115,7 +117,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 				t.Fatal(err)
 			}
 		}},
-		{"assigned agent", func(t *testing.T, ctx context.Context, _ *SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"assigned agent", func(t *testing.T, ctx context.Context, _ *sqlite.SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
 			var payload string
 			if err := db.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.RunID).Scan(&payload); err != nil {
 				t.Fatal(err)
@@ -130,7 +132,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 				t.Fatal(err)
 			}
 		}},
-		{"binding revision", func(t *testing.T, ctx context.Context, store *SQLiteStore, _ *sql.DB, binding *skill.Binding, _ ActionCredentialLeaseRedemptionRequest) {
+		{"binding revision", func(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore, _ *sql.DB, binding *skill.Binding, _ ActionCredentialLeaseRedemptionRequest) {
 			catalog := skill.NewCatalogWithStore(store)
 			if _, err := catalog.DisableBinding(ctx, skill.DisableBindingRequest{
 				Scope: binding.Scope, DeploymentID: binding.DeploymentID, BindingID: binding.ID, ExpectedRevision: binding.Revision,
@@ -143,13 +145,13 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "authority.db")
-			store, err := NewSQLiteStore(path)
+			store, err := sqlite.NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer store.Close()
 			db := openTestSQLiteDB(t, path)
-			request, binding := createSQLiteActionCredentialLeaseFixture(t, ctx, store, "nonce-sqlite-drift-"+uuid.NewString())
+			request, binding := storetest.ActionCredentialLeaseFixture(t, ctx, store, "nonce-sqlite-drift-"+uuid.NewString())
 			test.drift(t, ctx, store, db, binding, request)
 			if err := store.RedeemActionCredentialLease(ctx, request); !errors.Is(err, ErrActionCredentialLeaseMismatch) {
 				t.Fatalf("authority drift error = %v, want %v", err, ErrActionCredentialLeaseMismatch)
@@ -165,66 +167,4 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 	}
 }
 
-// createSQLiteActionCredentialLeaseFixture binds a credentialed skill, has
-// runtime-worker claim a call of it through the store's commands, and issues
-// that call's lease.
-func createSQLiteActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *SQLiteStore, nonce string) (ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
-	t.Helper()
-	now := time.Now().UTC().Round(0)
-	scope := Scope{Kind: "tenant", ID: "tenant-credential-lease"}
-	const deploymentID = "research-agent"
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, AssignedAgentID: deploymentID,
-		Goal: "Research safely", Source: RunSourceManual,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	definition := &skill.Definition{
-		ID: "reddit.reader", Version: "1.0.0", Name: "Reddit Reader",
-		Transport: skill.TransportReference{Kind: "tool", Endpoint: "reddit_http"},
-		Actions: map[string]skill.Action{"read": {
-			Name: "read", Description: "Read Reddit posts", InputSchema: map[string]interface{}{"type": "object"},
-			Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported,
-			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, Credentials: []skill.CredentialRequirement{{Name: "reddit", Kind: "reddit-oauth"}},
-		}},
-	}
-	catalog := skill.NewCatalogWithStore(store)
-	if err := catalog.Register(ctx, definition); err != nil {
-		t.Fatal(err)
-	}
-	binding := &skill.Binding{
-		ID: "reddit-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID,
-		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead,
-		Credentials: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "opaque://tenant/reddit"}}, Revision: 1,
-	}
-	if err := catalog.Bind(ctx, binding); err != nil {
-		t.Fatal(err)
-	}
-	// The call is a step's nested call, admitted under its claimed Run's
-	// lease, which runtime-worker then claims.
-	if run, err = store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "run-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute}); err != nil || run == nil {
-		t.Fatalf("claim run = %#v, %v", run, err)
-	}
-	seedActionCall(t, store, &ActionCall{
-		ID: uuid.NewString(), Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: deploymentID, BindingID: binding.ID, BindingRevision: binding.Revision,
-		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: ActionCallStatusReady, Origin: ActionOriginVM,
-		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, CredentialRefs: binding.Credentials,
-		MaxAttempts: 3, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	})
-	call, err := store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: "runtime-worker", Now: now, LeaseDuration: 2 * time.Minute})
-	if err != nil || call == nil {
-		t.Fatalf("claim call = %#v, %v", call, err)
-	}
-	fields := map[string][]string{"reddit": {"oauth.access_token"}}
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
-		TenantID: scope.ID, Call: call, Run: run, CredentialFields: fields, Transport: definition.Transport.Endpoint,
-		Issuer: "credential-authority", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: nonce,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ActionCredentialLeaseRedemptionRequest{Lease: *lease, Transport: definition.Transport.Endpoint, CredentialFields: fields}, binding
-}
-
-var _ ActionCredentialLeaseRedeemer = (*SQLiteStore)(nil)
+var _ ActionCredentialLeaseRedeemer = (*sqlite.SQLiteStore)(nil)

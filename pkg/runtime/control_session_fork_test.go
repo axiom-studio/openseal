@@ -4,15 +4,17 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 	store := newTestKernelStore(t)
 	parent := openTestConversationSession(t, store, "r1")
-	if _, err := testAppend(store, parent.ID, "r1", testUserEntry("p1", "a"), testUserEntry("p2", "b")); err != nil {
+	if _, err := testAppend(store, parent.ID, "r1", storetest.UserSessionEntry("p1", "a"), storetest.UserSessionEntry("p2", "b")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testAppend(store, parent.ID, "r1", testAssistantEntry("a1", "t1", "c1"), testToolEntry("e1", "t1", "c1", ToolEntryPending)); err != nil {
+	if _, err := testAppend(store, parent.ID, "r1", storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", ToolEntryPending)); err != nil {
 		t.Fatal(err)
 	}
 	path, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, parent.ID)
@@ -45,7 +47,6 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 
 	// The child session made from the ref renders the parent up to, not
 	// including, the forking assistant entry, then its seed.
-	putTestSessionRun(t, store, "child", "", AgentRunStatusQueued, 0)
 	child := &AgentRun{
 		ID: "child", Scope: testSessionScope, Goal: "Compare the two vendors", Source: RunSourceFork,
 		Checkpoint: map[string]interface{}{"forkChild": map[string]interface{}{"sourceRunId": "r1"}},
@@ -58,14 +59,14 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := createSQLiteRunSessionInOwnTx(t.Context(), store, txReq)
+	created, err := forkTestSession(t, store, "r1", txReq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Session.ForkEntryID != "p2" || created.Session.ForkSequence != 2 {
-		t.Fatalf("child session = %+v", created.Session)
+	if created.ForkEntryID != "p2" || created.ForkSequence != 2 {
+		t.Fatalf("child session = %+v", created)
 	}
-	childPath, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, created.Session.ID)
+	childPath, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

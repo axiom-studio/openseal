@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -17,7 +19,7 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
-	seedActionCall(t, store, &ActionCall{
+	storetest.SeedActionCall(t, store, &ActionCall{
 		ID: "prepared-comment", Scope: scope, RunID: run.ID, TurnID: "step-0", DeploymentID: "release-agent",
 		SkillID: "browser", SkillVersion: "2.0.0", Action: "fill", Status: ActionCallStatusSucceeded,
 		Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
@@ -280,13 +282,13 @@ func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 	return catalog, scope
 }
 
-func claimedActionRun(t *testing.T, store *SQLiteStore, scope Scope, now time.Time, worker string) *AgentRun {
+func claimedActionRun(t *testing.T, store *sqlite.SQLiteStore, scope Scope, now time.Time, worker string) *AgentRun {
 	t.Helper()
 	return claimedOwnedActionRun(t, store, scope, now, worker, ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"})
 }
 
 // claimedOwnedActionRun claims a run of release-agent under owner.
-func claimedOwnedActionRun(t *testing.T, store *SQLiteStore, scope Scope, now time.Time, worker string, owner ObjectiveOwner) *AgentRun {
+func claimedOwnedActionRun(t *testing.T, store *sqlite.SQLiteStore, scope Scope, now time.Time, worker string, owner ObjectiveOwner) *AgentRun {
 	t.Helper()
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }

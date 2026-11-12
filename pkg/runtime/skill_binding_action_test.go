@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -496,7 +497,7 @@ func slackConversationSkillDefinition() *skill.Definition {
 	}
 }
 
-func createClaimedSkillActionRun(t *testing.T, ctx context.Context, store *SQLiteStore, scope Scope, deploymentID, workerID string) *AgentRun {
+func createClaimedSkillActionRun(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore, scope Scope, deploymentID, workerID string) *AgentRun {
 	t.Helper()
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, AssignedAgentID: deploymentID,
@@ -515,7 +516,7 @@ func createClaimedSkillActionRun(t *testing.T, ctx context.Context, store *SQLit
 // approveParkedSkillAction parks f's Run on proposal's approval at step end,
 // approves it, and leases the queued Run to worker as the loop's next claim
 // does.
-func approveParkedSkillAction(t *testing.T, ctx context.Context, store *SQLiteStore, f *loopProposalFixture, proposal *ActionProposalResult, worker string) *loopProposalFixture {
+func approveParkedSkillAction(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore, f *loopProposalFixture, proposal *ActionProposalResult, worker string) *loopProposalFixture {
 	t.Helper()
 	f.assertUntouched()
 	f.parkOnApproval(proposal.Approval.ID)
@@ -526,7 +527,7 @@ func approveParkedSkillAction(t *testing.T, ctx context.Context, store *SQLiteSt
 	return newLoopProposalFixture(t, store, f.run, worker, time.Now().UTC())
 }
 
-func approveSkillAction(t *testing.T, ctx context.Context, store *SQLiteStore, scope Scope, proposal *ActionProposalResult) {
+func approveSkillAction(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore, scope Scope, proposal *ActionProposalResult) {
 	t.Helper()
 	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
 		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,

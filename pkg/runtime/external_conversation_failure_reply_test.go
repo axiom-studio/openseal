@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func externalConversationFailureReplyFixture(t *testing.T, provider string, status AgentRunStatus) (*SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint, *ExternalConversationInboxItem) {
+func externalConversationFailureReplyFixture(t *testing.T, provider string, status AgentRunStatus) (*sqlite.SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint, *ExternalConversationInboxItem) {
 	t.Helper()
 	ctx := context.Background()
 	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, provider, []capability.ConversationDeliveryOperation{

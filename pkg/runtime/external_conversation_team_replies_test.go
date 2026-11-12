@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -14,7 +15,7 @@ import (
 // routed to two members, each with its own member Run.
 type teamChannelFixture struct {
 	t            *testing.T
-	store        *SQLiteStore
+	store        *sqlite.SQLiteStore
 	catalog      *skill.Catalog
 	endpoint     *ExternalConversationEndpoint
 	conversation *Conversation
@@ -201,7 +202,7 @@ func TestExternalTeamChannelRejectsUnverifiedMemberRun(t *testing.T) {
 
 // routingOverride serves a routing Run whose output a test changed.
 type routingOverride struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	routing *AgentRun
 }
 

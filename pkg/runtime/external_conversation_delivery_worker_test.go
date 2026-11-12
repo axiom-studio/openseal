@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -281,7 +282,7 @@ func externalConversationDeliveryFixture(
 	t *testing.T,
 	ctx context.Context,
 	provider string,
-) (*SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint) {
+) (*sqlite.SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint) {
 	return externalConversationDeliveryFixtureWithOperations(t, ctx, provider, []skill.ConversationDeliveryOperation{skill.ConversationDeliveryMessageSend})
 }
 
@@ -290,7 +291,7 @@ func externalConversationDeliveryFixtureWithOperations(
 	ctx context.Context,
 	provider string,
 	operations []skill.ConversationDeliveryOperation,
-) (*SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint) {
+) (*sqlite.SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint) {
 	t.Helper()
 	store := newTestKernelStore(t)
 	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, provider, operations)

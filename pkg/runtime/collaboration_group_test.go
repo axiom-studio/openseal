@@ -4,6 +4,8 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) {
@@ -13,7 +15,7 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 		open func(*testing.T) (CollaborationKernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (CollaborationKernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "grouped-collaboration.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "grouped-collaboration.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

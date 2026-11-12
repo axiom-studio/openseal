@@ -2,39 +2,25 @@ package runtime
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
-)
 
-type spaceConversationStore interface {
-	SpaceStore
-	ConversationStore
-}
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
+)
 
 func TestSQLiteSpaceStore(t *testing.T) {
 	t.Parallel()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "spaces.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "spaces.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	exerciseSpaceStore(t, store)
-}
-
-// legacyDefaultSpaceOwner and legacyDefaultSpaceID describe the one space
-// per scope that the model before per-owner default spaces kept. Only tests
-// of the migrations from that model use them.
-const legacyDefaultSpaceOwner = "system"
-
-func legacyDefaultSpaceID(scope Scope) string {
-	digest := md5.Sum([]byte(scope.Kind + ":" + scope.ID))
-	return "default-" + hex.EncodeToString(digest[:])
 }
 
 func TestSpaceValidation(t *testing.T) {
@@ -71,7 +57,7 @@ func TestSpaceValidation(t *testing.T) {
 
 // exerciseSpaceStore is the store contract shared by the SQLite and
 // PostgreSQL implementations.
-func exerciseSpaceStore(t *testing.T, store spaceConversationStore) {
+func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	t.Helper()
 	ctx := context.Background()
 	clock := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
@@ -312,7 +298,7 @@ func assertSpaceConversations(t *testing.T, conversations *ConversationService, 
 func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "backfill.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,52 +337,20 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
-	assertSpacesBackfilled(t, reopened, scope, agentOnly, conversation.ID)
+	storetest.AssertSpacesBackfilled(t, reopened, scope, agentOnly, conversation.ID)
 }
 
 // assertSpacesBackfilled checks what migration 67 leaves in a database from
 // before spaces: one space named Default per scope, owned by no person.
-func assertSpacesBackfilled(t *testing.T, store spaceConversationStore, scope, agentOnly Scope, conversationID string) {
-	t.Helper()
-	ctx := context.Background()
-	legacyID := legacyDefaultSpaceID(scope)
-	listed, err := store.ListSpaces(ctx, scope)
-	if err != nil || len(listed) != 1 || listed[0].ID != legacyID || !listed[0].IsDefault || listed[0].OwnerID != legacyDefaultSpaceOwner ||
-		listed[0].Name != "Default" || listed[0].Look != DefaultSpaceLook || listed[0].Position != 0 {
-		t.Fatalf("backfilled spaces = %+v, err = %v", listed, err)
-	}
-	members, err := store.ListSpaceMembers(ctx, scope, legacyID)
-	if err != nil || len(members) != 3 {
-		t.Fatalf("backfilled members = %+v, err = %v", members, err)
-	}
-	want := []SpaceMember{{Type: SpaceMemberAgent, ID: "helper"}, {Type: SpaceMemberAgent, ID: "writer"}, {Type: SpaceMemberTeam, ID: "crew"}}
-	for index, member := range members {
-		if member.Type != want[index].Type || member.ID != want[index].ID || member.Position != index {
-			t.Fatalf("member %d = %+v", index, member)
-		}
-	}
-	conversation, err := store.GetConversation(ctx, scope, conversationID)
-	if err != nil || conversation == nil || conversation.SpaceID != legacyID {
-		t.Fatalf("backfilled conversation = %+v, err = %v", conversation, err)
-	}
-	listedConversations, err := store.ListConversations(ctx, ConversationFilter{Scope: scope, SpaceID: legacyID})
-	if err != nil || len(listedConversations) != 1 {
-		t.Fatalf("space filter after backfill = %d, err = %v", len(listedConversations), err)
-	}
-	if solo, err := store.ListSpaceMembers(ctx, agentOnly, legacyDefaultSpaceID(agentOnly)); err != nil || len(solo) != 1 || solo[0].ID != "solo" {
-		t.Fatalf("agent-only scope = %+v, err = %v", solo, err)
-	}
-}
-
 func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "default.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,7 +367,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newID := legacyDefaultSpaceID(scope)
+	newID := storetest.LegacyDefaultSpaceID(scope)
 	oldID := "personal-" + strings.TrimPrefix(newID, "default-")
 	// Rewind to the Personal schema: one space per scope, owned by no person.
 	// The space keeps a name someone gave it.
@@ -423,7 +377,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 		`ALTER TABLE spaces RENAME COLUMN owner_id TO created_by`,
 		`ALTER TABLE spaces RENAME COLUMN is_default TO is_personal`,
 		`CREATE UNIQUE INDEX idx_spaces_personal ON spaces(scope_kind, scope_id) WHERE is_personal = 1`,
-		`UPDATE spaces SET id = '` + oldID + `', name = 'Shared', created_by = '` + legacyDefaultSpaceOwner + `'`,
+		`UPDATE spaces SET id = '` + oldID + `', name = 'Shared', created_by = '` + storetest.LegacyDefaultSpaceOwner + `'`,
 		`UPDATE space_members SET space_id = '` + oldID + `'`,
 		`UPDATE conversations SET space_id = '` + oldID + `', payload = json_set(payload, '$.spaceId', '` + oldID + `')`,
 	} {
@@ -434,14 +388,14 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
 	listed, err := reopened.ListSpaces(ctx, scope)
 	if err != nil || len(listed) != 1 || listed[0].ID != newID || !listed[0].IsDefault || listed[0].Name != "Shared" ||
-		listed[0].Access != SpaceAccessOwner || listed[0].OwnerID != legacyDefaultSpaceOwner {
+		listed[0].Access != SpaceAccessOwner || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
 	members, err := reopened.ListSpaceMembers(ctx, scope, newID)

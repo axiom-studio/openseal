@@ -7,6 +7,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -64,7 +65,7 @@ func resolveControlAuthorityForTest(t *testing.T, in ControlAuthorityInput) Cont
 
 // claimedForegroundChatRun schedules and claims the foreground conversation
 // Run for one user message in an Agent's chat.
-func claimedForegroundChatRun(t *testing.T, store *SQLiteStore) *AgentRun {
+func claimedForegroundChatRun(t *testing.T, store *sqlite.SQLiteStore) *AgentRun {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "control-authority"}
 	conversations := NewConversationService(store)
@@ -90,7 +91,7 @@ func claimedForegroundChatRun(t *testing.T, store *SQLiteStore) *AgentRun {
 	return claimed
 }
 
-func chatAuthorityInput(store *SQLiteStore, run *AgentRun) ControlAuthorityInput {
+func chatAuthorityInput(store *sqlite.SQLiteStore, run *AgentRun) ControlAuthorityInput {
 	return ControlAuthorityInput{
 		Run: run, DeploymentID: "agent", ConversationTasks: store, Runs: store, Conversations: store,
 	}

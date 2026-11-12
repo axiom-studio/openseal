@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 type gatewayVerificationStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	routeLookups, received int
 }
 
