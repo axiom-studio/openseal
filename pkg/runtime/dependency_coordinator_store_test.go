@@ -7,9 +7,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-func createDependencySource(t *testing.T, store *SQLiteStore, scope Scope, id string) *AgentRun {
+func createDependencySource(t *testing.T, store *sqlite.SQLiteStore, scope Scope, id string) *AgentRun {
 	t.Helper()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := &AgentRun{

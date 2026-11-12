@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -25,7 +26,7 @@ func terminalCloseStores() []struct {
 		store func(*testing.T) terminalCloseTestStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) terminalCloseTestStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "terminal-close.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "terminal-close.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

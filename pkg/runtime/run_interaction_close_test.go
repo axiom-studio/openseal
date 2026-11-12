@@ -4,11 +4,13 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // interactionCallsStore adds recorded interaction calls to a store's listing.
 type interactionCallsStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	calls []*ActionCall
 }
 

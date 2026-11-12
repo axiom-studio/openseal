@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -232,7 +233,7 @@ func numericRevision(value interface{}) (int64, bool) {
 func objectiveActionStores() []objectiveActionStoreCase {
 	return []objectiveActionStoreCase{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objectives.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objectives.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

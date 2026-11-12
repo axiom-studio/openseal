@@ -8,6 +8,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/mcp"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -17,7 +18,7 @@ import (
 // for: researcher (changeable), platform (fixed policy) and old (retired).
 type skillTargetFixture struct {
 	ctx        context.Context
-	store      *SQLiteStore
+	store      *sqlite.SQLiteStore
 	scope      Scope
 	skillScope skill.ScopeReference
 	agents     *kernelagent.Registry

@@ -11,12 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestSQLiteOwnerDefaultSpaces(t *testing.T) {
 	t.Parallel()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "owner-default.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "owner-default.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +239,7 @@ type ownerDefaultSpaceRow struct {
 func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "owner-default-migration.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +294,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +331,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	}
 
 	// The migration runs on every open.
-	again, err := NewSQLiteStore(path)
+	again, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +424,7 @@ func assertSQLiteOwnerDefaults(t *testing.T, db *sql.DB, wantRows int, wantDefau
 // A space that changes hands leaves each owner with the oldest space they own
 // as their default: the legacy scope-wide default becomes its real owner's.
 func TestSetSpaceOwnerGivesEachOwnerTheirOldestSpaceAsDefault(t *testing.T) {
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "owner-change.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "owner-change.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

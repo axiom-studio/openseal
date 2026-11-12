@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestSkillReferenceUpgradeStoreRollsBackEveryResourceOnConflict(t *testing.T) {
 	tests := map[string]func(*testing.T) SkillReferenceUpgradeStore{
 		"sqlite": func(t *testing.T) SkillReferenceUpgradeStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "upgrade.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "upgrade.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

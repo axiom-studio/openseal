@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -26,7 +27,7 @@ func testSessionLeasePtr() *AgentRunLeaseGuard {
 	return &lease
 }
 
-func putTestSessionRun(t *testing.T, store *SQLiteStore, runID, sessionID string, status AgentRunStatus, interventions int) *AgentRun {
+func putTestSessionRun(t *testing.T, store *sqlite.SQLiteStore, runID, sessionID string, status AgentRunStatus, interventions int) *AgentRun {
 	t.Helper()
 	expires := testSessionNow.Add(time.Minute)
 	run := &AgentRun{
@@ -44,7 +45,7 @@ func putTestSessionRun(t *testing.T, store *SQLiteStore, runID, sessionID string
 // can rebind or relabel a Run mid-scenario. A new Run is created; an existing
 // one is rewritten through the store's update outside any lease, which moves
 // its revision on by one (returned in the written Run).
-func putTestRun(t testing.TB, store *SQLiteStore, run *AgentRun) *AgentRun {
+func putTestRun(t testing.TB, store *sqlite.SQLiteStore, run *AgentRun) *AgentRun {
 	t.Helper()
 	ctx := context.Background()
 	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
@@ -70,7 +71,7 @@ func putTestRun(t testing.TB, store *SQLiteStore, run *AgentRun) *AgentRun {
 	return next
 }
 
-func testStoredSessionRun(t *testing.T, store *SQLiteStore, runID string) *AgentRun {
+func testStoredSessionRun(t *testing.T, store *sqlite.SQLiteStore, runID string) *AgentRun {
 	t.Helper()
 	run, err := store.GetAgentRun(context.Background(), testSessionScope, runID)
 	if err != nil {
@@ -79,7 +80,7 @@ func testStoredSessionRun(t *testing.T, store *SQLiteStore, runID string) *Agent
 	return run
 }
 
-func openTestConversationSession(t *testing.T, store *SQLiteStore, runID string) *AgentSession {
+func openTestConversationSession(t *testing.T, store *sqlite.SQLiteStore, runID string) *AgentSession {
 	t.Helper()
 	sessionID := ConversationAgentSessionID(testSessionScope, ConversationRunLane("c1", "", "agent-a"))
 	putTestSessionRun(t, store, runID, sessionID, AgentRunStatusRunning, 0)
@@ -92,7 +93,7 @@ func openTestConversationSession(t *testing.T, store *SQLiteStore, runID string)
 	return opened.Session
 }
 
-func testAppend(store *SQLiteStore, sessionID, runID string, entries ...*SessionEntry) (*AppendAgentSessionEntriesResult, error) {
+func testAppend(store *sqlite.SQLiteStore, sessionID, runID string, entries ...*SessionEntry) (*AppendAgentSessionEntriesResult, error) {
 	return store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: sessionID, RunID: runID, Lease: testSessionLeasePtr(), Entries: entries, Now: testSessionNow,
 	})
@@ -104,7 +105,7 @@ func testAppend(store *SQLiteStore, sessionID, runID string, entries ...*Session
 // session.ParentSessionID. The new Run is the one putTestSessionRun writes,
 // with the source as its parent. Only same-Agent children fork a session,
 // so both Runs are recorded as assigned to session.AgentID.
-func forkTestSession(t *testing.T, store *SQLiteStore, sourceRunID string, session CreateRunAgentSessionTxRequest) (*AgentSession, error) {
+func forkTestSession(t *testing.T, store *sqlite.SQLiteStore, sourceRunID string, session CreateRunAgentSessionTxRequest) (*AgentSession, error) {
 	t.Helper()
 	source := testStoredSessionRun(t, store, sourceRunID)
 	expires := testSessionNow.Add(time.Minute)

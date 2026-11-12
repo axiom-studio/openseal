@@ -14,6 +14,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -125,7 +126,7 @@ func (bindingTestChatWorkspaces) PrepareChatWorkspace(_ context.Context, run *Ag
 
 // claimedBindingRun stores run as claimed by worker w1, so the resolver may
 // create its session.
-func claimedBindingRun(t *testing.T, store *SQLiteStore, run *AgentRun) *AgentRun {
+func claimedBindingRun(t *testing.T, store *sqlite.SQLiteStore, run *AgentRun) *AgentRun {
 	t.Helper()
 	expires := time.Now().Add(time.Hour)
 	run.Status, run.LeaseOwner, run.LeaseExpiresAt, run.Revision = AgentRunStatusRunning, "w1", &expires, 1

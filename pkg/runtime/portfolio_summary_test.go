@@ -4,6 +4,8 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestPortfolioSummarizesRunsByRequestedOwner(t *testing.T) {
@@ -12,7 +14,7 @@ func TestPortfolioSummarizesRunsByRequestedOwner(t *testing.T) {
 		store func(*testing.T) KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "summary.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "summary.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

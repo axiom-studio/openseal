@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -35,7 +36,7 @@ func nestedActionStores(t *testing.T) []struct {
 		open func(*testing.T) KernelStore
 	}{
 		{name: "sqlite", open: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "nested.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "nested.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -114,7 +115,7 @@ func testEntryView(entry *SessionEntry) SessionEntryView {
 
 type compactionFixture struct {
 	*storetest.SessionFixture
-	store     *SQLiteStore
+	store     *sqlite.SQLiteStore
 	runID     string
 	sessionID string
 	host      *fakeSummaryHost

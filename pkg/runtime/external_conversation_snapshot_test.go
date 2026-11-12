@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -82,7 +83,7 @@ func postSnapshotCanonicalReply(t *testing.T, store ConversationStore, endpoint 
 func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing.T) {
 	ctx := t.Context()
 	_, memoryCatalog, original, item := externalConversationFailureReplyFixture(t, "slack", AgentRunStatusCompleted)
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "snapshot-upgrade.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "snapshot-upgrade.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

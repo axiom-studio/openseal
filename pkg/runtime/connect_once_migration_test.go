@@ -5,12 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestSQLiteConnectOnceMigration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "connect-once.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +29,7 @@ func TestSQLiteConnectOnceMigration(t *testing.T) {
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if store, err = NewSQLiteStore(path); err != nil {
+		if store, err = sqlite.NewSQLiteStore(path); err != nil {
 			t.Fatal(err)
 		}
 	})

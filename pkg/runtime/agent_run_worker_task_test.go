@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -63,7 +64,7 @@ func answerStep(text string) StepOutput {
 // binding does for the parts these tests need: the lane session (seeded with
 // the trigger message), the control authority and the claim tool executor,
 // whose control executor admits tasks through tasks.
-func workerTaskResolver(t *testing.T, store *SQLiteStore, tasks ConversationTaskKernelStore, producer StepProducer) TurnRunnerResolverFunc {
+func workerTaskResolver(t *testing.T, store *sqlite.SQLiteStore, tasks ConversationTaskKernelStore, producer StepProducer) TurnRunnerResolverFunc {
 	t.Helper()
 	activity := NewRunActivityService(store, store)
 	control := &ControlExecutor{
@@ -95,7 +96,7 @@ func workerTaskResolver(t *testing.T, store *SQLiteStore, tasks ConversationTask
 
 // openWorkerTaskSession opens the chat Run's lane session and appends the
 // trigger message once (the conversation catch-up's part).
-func openWorkerTaskSession(ctx context.Context, store *SQLiteStore, run *AgentRun) (*AgentSession, error) {
+func openWorkerTaskSession(ctx context.Context, store *sqlite.SQLiteStore, run *AgentRun) (*AgentSession, error) {
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
 	thread, _ := run.Context["threadRootMessageId"].(string)
@@ -127,12 +128,12 @@ func openWorkerTaskSession(ctx context.Context, store *SQLiteStore, run *AgentRu
 	return store.GetAgentSession(ctx, run.Scope, session.ID)
 }
 
-func workerTaskPool(t *testing.T, store *SQLiteStore, scope Scope, producer StepProducer) *AgentRunWorkerPool {
+func workerTaskPool(t *testing.T, store *sqlite.SQLiteStore, scope Scope, producer StepProducer) *AgentRunWorkerPool {
 	t.Helper()
 	return workerTaskPoolWith(t, store, scope, workerTaskResolver(t, store, store, producer))
 }
 
-func workerTaskPoolWith(t *testing.T, store *SQLiteStore, scope Scope, resolver TurnRunnerResolver) *AgentRunWorkerPool {
+func workerTaskPoolWith(t *testing.T, store *sqlite.SQLiteStore, scope Scope, resolver TurnRunnerResolver) *AgentRunWorkerPool {
 	t.Helper()
 	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
 		Scope: scope, Kind: RunKindConversation, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute,
@@ -145,7 +146,7 @@ func workerTaskPoolWith(t *testing.T, store *SQLiteStore, scope Scope, resolver 
 
 // admissionLostTaskStore loses the source lease at the task admission
 // commit: the worker died after its step was applied, before the settle.
-type admissionLostTaskStore struct{ *SQLiteStore }
+type admissionLostTaskStore struct{ *sqlite.SQLiteStore }
 
 func (s *admissionLostTaskStore) CreateConversationTask(context.Context, ConversationTaskCreateRecord) (*ConversationTaskResult, error) {
 	return nil, ErrLeaseLost
@@ -156,7 +157,7 @@ func (s *admissionLostTaskStore) CreateConversationTask(context.Context, Convers
 // applied, and stops before admission: the Run is running, leased by
 // "worker", its last step completed and applied, and the tool entry
 // pending. Callers admit the task themselves (taskStartRequest).
-func settledWorkerTaskFixture(t *testing.T, store *SQLiteStore) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
+func settledWorkerTaskFixture(t *testing.T, store *sqlite.SQLiteStore) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "worker-task"}
 	conversations := NewConversationService(store)
@@ -259,7 +260,7 @@ func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
 
 // expireRunLease moves the Run's lease into the past so another worker can
 // claim it (the first worker is gone).
-func expireRunLease(t *testing.T, store *SQLiteStore, run *AgentRun) {
+func expireRunLease(t *testing.T, store *sqlite.SQLiteStore, run *AgentRun) {
 	t.Helper()
 	current := getStoredRun(t, store, run.Scope, run.ID)
 	past := time.Now().UTC().Add(-time.Second)

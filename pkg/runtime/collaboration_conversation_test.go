@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 type countingConversationStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	conversationReads int
 }
 

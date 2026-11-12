@@ -7,16 +7,18 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "natural-channels.db")
-	primary, err := NewSQLiteStore(path)
+	primary, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replica, err := NewSQLiteStore(path)
+	replica, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +118,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		t.Fatal(err)
 	}
 
-	restarted, err := NewSQLiteStore(path)
+	restarted, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

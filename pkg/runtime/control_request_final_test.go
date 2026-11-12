@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 // newRequestFinalFixture claims run (a queued decision or review Run in store)
 // and gives it a session whose one finished step made call. The executor runs
 // the real decision and review handlers.
-func newRequestFinalFixture(t *testing.T, store *SQLiteStore, run *AgentRun, call LoopToolCall) *controlFixture {
+func newRequestFinalFixture(t *testing.T, store *sqlite.SQLiteStore, run *AgentRun, call LoopToolCall) *controlFixture {
 	t.Helper()
 	ctx := context.Background()
 	// After the reconciler created the Run (claims ignore Runs from the future).
@@ -97,7 +98,7 @@ func (f *controlFixture) completeWithFinal(final *FinalAnswer) *AgentRun {
 	return completed
 }
 
-func onlyRunWithSource(t *testing.T, store *SQLiteStore, scope Scope, parentID string, source RunSource) *AgentRun {
+func onlyRunWithSource(t *testing.T, store *sqlite.SQLiteStore, scope Scope, parentID string, source RunSource) *AgentRun {
 	t.Helper()
 	runs, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: parentID, Limit: 20})
 	if err != nil {

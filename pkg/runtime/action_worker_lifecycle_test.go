@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -232,7 +233,7 @@ func forActionLifecycleBackends(t *testing.T, test func(*testing.T, KernelStore,
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, actionLifecycleBackend) {
 			path := filepath.Join(t.TempDir(), "action-lifecycle.db")
-			store, err := NewSQLiteStore(path)
+			store, err := sqlite.NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -241,7 +242,7 @@ func forActionLifecycleBackends(t *testing.T, test func(*testing.T, KernelStore,
 				if err := store.Close(); err != nil {
 					t.Fatal(err)
 				}
-				reopened, err := NewSQLiteStore(path)
+				reopened, err := sqlite.NewSQLiteStore(path)
 				if err != nil {
 					t.Fatal(err)
 				}

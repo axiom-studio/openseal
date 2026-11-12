@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -31,7 +32,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "contract.db")
-		current, err := NewSQLiteStore(path)
+		current, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -40,7 +41,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 			if err := current.Close(); err != nil {
 				t.Fatal(err)
 			}
-			current, err = NewSQLiteStore(path)
+			current, err = sqlite.NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}

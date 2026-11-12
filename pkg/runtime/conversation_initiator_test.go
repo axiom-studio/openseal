@@ -4,6 +4,8 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
@@ -11,11 +13,11 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
 			var store ConversationStore = newTestKernelStore(t)
-			var disk *SQLiteStore
+			var disk *sqlite.SQLiteStore
 			path := filepath.Join(t.TempDir(), "initiator.db")
 			if backend == "sqlite" {
 				var err error
-				disk, err = NewSQLiteStore(path)
+				disk, err = sqlite.NewSQLiteStore(path)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -49,7 +51,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 				if err := disk.Close(); err != nil {
 					t.Fatal(err)
 				}
-				disk, err = NewSQLiteStore(path)
+				disk, err = sqlite.NewSQLiteStore(path)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
@@ -13,7 +15,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 		store KernelStore
 		close func()
 	}{}
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "activity.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "activity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

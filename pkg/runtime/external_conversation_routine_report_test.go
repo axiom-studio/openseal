@@ -9,11 +9,12 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 type routineReportFixture struct {
-	store        *SQLiteStore
+	store        *sqlite.SQLiteStore
 	endpoint     *ExternalConversationEndpoint
 	conversation *Conversation
 	source       *ChannelMessage

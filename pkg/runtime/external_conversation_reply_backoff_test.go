@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -160,7 +161,7 @@ func TestExternalConversationReplyProgressDurableStores(t *testing.T) {
 		open func(*testing.T) replyProgressTestStore
 	}{
 		{name: "sqlite", open: func(t *testing.T) replyProgressTestStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

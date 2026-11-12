@@ -6,12 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // agentBuilderApprovalCoordinator wires the builder fixture to a kernel store
 // with a claimed Finn Run, so proposals take the real coordinator path.
-func agentBuilderApprovalCoordinator(t *testing.T, policy ActionPolicyEvaluator, now time.Time) (*agentBuilderFixture, *SQLiteStore, *AgentRun, *ActionCoordinator) {
+func agentBuilderApprovalCoordinator(t *testing.T, policy ActionPolicyEvaluator, now time.Time) (*agentBuilderFixture, *sqlite.SQLiteStore, *AgentRun, *ActionCoordinator) {
 	t.Helper()
 	ctx := context.Background()
 	fixture := newAgentBuilderFixture(t, true)

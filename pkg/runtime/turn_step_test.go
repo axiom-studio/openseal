@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -23,7 +24,7 @@ type turnStepBackend struct {
 func turnStepBackends() []turnStepBackend {
 	return []turnStepBackend{
 		{name: "sqlite", open: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "turn-steps.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "turn-steps.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

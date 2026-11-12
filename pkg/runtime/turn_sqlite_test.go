@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestSQLiteMigratesAgentTurnLeases(t *testing.T) {
@@ -27,7 +29,7 @@ func TestSQLiteMigratesAgentTurnLeases(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +58,7 @@ func TestSQLiteMigratesAgentTurnLeases(t *testing.T) {
 
 func TestSQLiteAgentTurnsEnforceOneActiveAndSurviveRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "turns.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +127,7 @@ func TestSQLiteAgentTurnsEnforceOneActiveAndSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

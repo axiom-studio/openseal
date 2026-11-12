@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/appproject"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestMessageHeaderExactFormat(t *testing.T) {
@@ -73,7 +74,7 @@ func TestMessageHeaderExactFormat(t *testing.T) {
 // attachmentFixture stores artifacts whose content is served by ref.
 type attachmentFixture struct {
 	t       *testing.T
-	store   *SQLiteStore
+	store   *sqlite.SQLiteStore
 	content *conversationAppContent
 	scope   Scope
 }

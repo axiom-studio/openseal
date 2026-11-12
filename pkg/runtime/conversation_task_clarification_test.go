@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type conversationTaskClarificationStore interface {
@@ -29,7 +31,7 @@ type conversationTaskClarificationFixture struct {
 func forConversationTaskClarificationStores(t *testing.T, test func(*testing.T, conversationTaskClarificationStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "task-clarification.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "task-clarification.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

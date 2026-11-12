@@ -7,6 +7,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -14,7 +15,7 @@ import (
 func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "teams.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

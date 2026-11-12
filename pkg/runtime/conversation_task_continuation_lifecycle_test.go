@@ -10,9 +10,11 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-func continuationLifecycleFixture(t *testing.T, store *SQLiteStore, id string) (*AgentRun, *Conversation, *ChannelMessage) {
+func continuationLifecycleFixture(t *testing.T, store *sqlite.SQLiteStore, id string) (*AgentRun, *Conversation, *ChannelMessage) {
 	t.Helper()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: id}
@@ -34,7 +36,7 @@ func continuationLifecycleFixture(t *testing.T, store *SQLiteStore, id string) (
 // backdateContinuationLifecycleRun makes the Run look created at createdAt.
 // No store method changes a Run's creation time, so it rewrites the row on
 // db, the test's own connection to the store's file.
-func backdateContinuationLifecycleRun(t *testing.T, store *SQLiteStore, db *sql.DB, run *AgentRun, createdAt time.Time) *AgentRun {
+func backdateContinuationLifecycleRun(t *testing.T, store *sqlite.SQLiteStore, db *sql.DB, run *AgentRun, createdAt time.Time) *AgentRun {
 	t.Helper()
 	execSQL(t, db, `UPDATE agent_runs SET created_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, createdAt, run.Scope.Kind, run.Scope.ID, run.ID)
 	rewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.CreatedAt = createdAt })
@@ -132,7 +134,7 @@ func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool)
 	})
 }
 
-func assertConversationRunStillForeground(t *testing.T, store *SQLiteStore, original *AgentRun, conversation *Conversation, trigger *ChannelMessage, status AgentRunStatus) *AgentRun {
+func assertConversationRunStillForeground(t *testing.T, store *sqlite.SQLiteStore, original *AgentRun, conversation *Conversation, trigger *ChannelMessage, status AgentRunStatus) *AgentRun {
 	t.Helper()
 	current, err := store.GetAgentRun(t.Context(), original.Scope, original.ID)
 	if err != nil || current == nil || current.Status != status || current.Kind != RunKindConversation || current.ConcurrencyKey != original.ConcurrencyKey || current.Context[ConversationTaskContextKey] != nil {
@@ -157,7 +159,7 @@ func assertConversationRunStillForeground(t *testing.T, store *SQLiteStore, orig
 }
 
 type promotionTurnPublisher struct {
-	store *SQLiteStore
+	store *sqlite.SQLiteStore
 	calls int
 }
 

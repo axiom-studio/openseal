@@ -6,10 +6,12 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type countingAgentRunClaimStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	claims atomic.Int64
 }
 

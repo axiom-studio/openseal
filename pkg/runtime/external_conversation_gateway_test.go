@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -16,7 +17,7 @@ import (
 func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +143,7 @@ func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T
 func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "synthetic-conversation.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +221,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

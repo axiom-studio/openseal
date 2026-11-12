@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func claimedForkTaskFixture(t *testing.T) (*SQLiteStore, *AgentRun, *ConversationTaskResult) {
+func claimedForkTaskFixture(t *testing.T) (*sqlite.SQLiteStore, *AgentRun, *ConversationTaskResult) {
 	t.Helper()
 	store := newTestKernelStore(t)
 	foreground, turn, _, _ := settledWorkerTaskFixture(t, store)

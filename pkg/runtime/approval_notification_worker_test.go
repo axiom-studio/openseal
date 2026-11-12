@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -379,7 +380,7 @@ func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T
 func registerApprovalNotificationCallback(
 	t *testing.T,
 	ctx context.Context,
-	store *SQLiteStore,
+	store *sqlite.SQLiteStore,
 	catalog *skill.Catalog,
 	endpoint *ExternalConversationEndpoint,
 ) *CallbackRegistration {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/mcp"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -40,7 +41,7 @@ var linearLogo = strings.Repeat("ab", 32)
 
 // connectAppFixture is an Agent whose run sees a Linear connection only once
 // connected is set, as the host supplies connected apps per run.
-func connectAppFixture(t *testing.T) (context.Context, *SQLiteStore, *skill.Catalog, *SkillBindingActionDispatcher, Scope, *atomic.Bool) {
+func connectAppFixture(t *testing.T) (context.Context, *sqlite.SQLiteStore, *skill.Catalog, *SkillBindingActionDispatcher, Scope, *atomic.Bool) {
 	t.Helper()
 	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
 	if err := catalog.Register(ctx, mcp.SkillDefinition()); err != nil {

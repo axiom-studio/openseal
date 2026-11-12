@@ -8,9 +8,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-func createSQLiteDependencySource(t *testing.T, store *SQLiteStore, scope Scope, id string) {
+func createSQLiteDependencySource(t *testing.T, store *sqlite.SQLiteStore, scope Scope, id string) {
 	t.Helper()
 	now := time.Date(2026, 7, 10, 14, 0, 0, 0, time.UTC)
 	err := store.CreateAgentRun(context.Background(), &AgentRun{
@@ -28,7 +30,7 @@ func TestSQLiteDependencyFanInSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "dependencies.db")
 	scope := Scope{Kind: "tenant", ID: "restart"}
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +62,7 @@ func TestSQLiteDependencyFanInSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restarted, err := NewSQLiteStore(path)
+	restarted, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +100,7 @@ func TestSQLiteDependencyFanInSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verified, err := NewSQLiteStore(path)
+	verified, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,12 +119,12 @@ func TestSQLiteDependencyConcurrentStoresEmitOneWake(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "concurrent-dependencies.db")
 	scope := Scope{Kind: "tenant", ID: "sqlite-concurrent"}
-	primary, err := NewSQLiteStore(path)
+	primary, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer primary.Close()
-	replica, err := NewSQLiteStore(path)
+	replica, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

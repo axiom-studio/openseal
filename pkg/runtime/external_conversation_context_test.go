@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -40,7 +41,7 @@ func (h *recordingContextHost) ReadExternalConversationContext(_ context.Context
 	return h.result, h.err
 }
 
-func receiveContextTestEvent(t *testing.T, store *SQLiteStore, endpoint *ExternalConversationEndpoint, id, messageID, threadID string, now time.Time) *ExternalConversationInboxItem {
+func receiveContextTestEvent(t *testing.T, store *sqlite.SQLiteStore, endpoint *ExternalConversationEndpoint, id, messageID, threadID string, now time.Time) *ExternalConversationInboxItem {
 	t.Helper()
 	item := &ExternalConversationInboxItem{
 		ID: id, Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
@@ -70,7 +71,7 @@ func contextTestHistory(event NormalizedExternalConversationEvent) *ExternalConv
 	}}
 }
 
-func newContextTestWorker(t *testing.T, store *SQLiteStore, resolver ExternalConversationAdapterResolver, host ExternalConversationContextHost, crash bool) (*ExternalConversationInboxWorker, *crashAfterExternalConversationDispatch) {
+func newContextTestWorker(t *testing.T, store *sqlite.SQLiteStore, resolver ExternalConversationAdapterResolver, host ExternalConversationContextHost, crash bool) (*ExternalConversationInboxWorker, *crashAfterExternalConversationDispatch) {
 	t.Helper()
 	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
 	if err != nil {

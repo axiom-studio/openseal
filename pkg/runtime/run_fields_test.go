@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type runFieldsStore interface {
@@ -17,7 +19,7 @@ type runFieldsStore interface {
 
 func runFieldsBackends(t *testing.T, test func(t *testing.T, store runFieldsStore)) {
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "runtime.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "runtime.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

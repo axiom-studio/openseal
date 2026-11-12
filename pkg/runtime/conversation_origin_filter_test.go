@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func conversationOriginFilterStores() map[string]func(*testing.T) ConversationStore {
 	return map[string]func(*testing.T) ConversationStore{
 		"sqlite": func(t *testing.T) ConversationStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "origin-filter.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "origin-filter.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 const explanationWorker = "explain-worker"
@@ -30,7 +32,7 @@ func (f *explanationFinal) Deliver(context.Context, FinalDelivery) (FinalDeliver
 func explanationStores(t *testing.T, test func(*testing.T, KernelStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "run-loop-explanation.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "run-loop-explanation.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func surfaceInteractionStores(t *testing.T) []struct {
@@ -19,7 +21,7 @@ func surfaceInteractionStores(t *testing.T) []struct {
 		store func(*testing.T) KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "surface-interactions.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "surface-interactions.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

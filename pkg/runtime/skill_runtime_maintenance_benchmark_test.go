@@ -7,13 +7,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func BenchmarkSkillRuntimeMaintenanceMetadataTerminalHistory(b *testing.B) {
 	for _, size := range []int{100, 10000} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
 			path := b.TempDir() + "/maintenance-metadata.db"
-			store, err := NewSQLiteStore(path)
+			store, err := sqlite.NewSQLiteStore(path)
 			if err != nil {
 				b.Fatal(err)
 			}

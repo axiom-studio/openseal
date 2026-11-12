@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type countingFinalReplyStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	pages int
 }
 

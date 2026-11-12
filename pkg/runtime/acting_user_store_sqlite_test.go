@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -14,7 +15,7 @@ import (
 // SQLite store.
 func TestAgentRunActingUserIsImmutable(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "acting-user.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "acting-user.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

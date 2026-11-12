@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -166,7 +167,7 @@ func TestAgentBuilderDraftsAreSelectedByTheStore(t *testing.T) {
 func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "drafts.db")
-		store, err := NewSQLiteStore(path)
+		store, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -177,7 +178,7 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
-		reopened, err := NewSQLiteStore(path)
+		reopened, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}

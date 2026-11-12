@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type budgetPlanningProducer struct {
@@ -37,7 +39,7 @@ func (deterministicBudgetProducer) Produce(context.Context, StepInput) (StepOutp
 
 type stepBudgetFixture struct {
 	t        *testing.T
-	store    *SQLiteStore
+	store    *sqlite.SQLiteStore
 	activity *RunActivityService
 	turns    *AgentTurnService
 	run      *AgentRun

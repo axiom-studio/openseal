@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
@@ -13,7 +15,7 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 		open func(*testing.T) (atomicForkStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (atomicForkStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "coordinator.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "coordinator.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -21,7 +22,7 @@ type conversationTaskToolTestStore interface {
 func forConversationTaskToolStores(t *testing.T, test func(*testing.T, conversationTaskToolTestStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-task-tool.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-task-tool.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

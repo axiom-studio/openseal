@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type atomicForkStore interface {
@@ -19,7 +21,7 @@ func TestDependencyFanOutAtomicallyCreatesTargetRuns(t *testing.T) {
 		open func(*testing.T) (atomicForkStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (atomicForkStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "fork.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "fork.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

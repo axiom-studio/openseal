@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -118,7 +119,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 	}
 }
 func TestPendingSetupProjectionIsTenantScoped(t *testing.T) {
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "pending.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "pending.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +239,7 @@ func TestOriginApprovalConversationMembersMayDecide(t *testing.T) {
 // a store, for an approval a test sets directly instead of proposing it from
 // a leased Run.
 type reviewApprovalStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	approval *ApprovalCheckpoint
 	call     *ActionCall
 }
@@ -270,7 +271,7 @@ func (s *reviewApprovalStore) GetActionCall(ctx context.Context, scope Scope, id
 
 // markReviewCardDelivered delivers the review card with correlation id, as
 // the delivery worker does once the provider accepts it.
-func markReviewCardDelivered(t *testing.T, store *SQLiteStore, scope Scope, correlationID, providerMessageID string) {
+func markReviewCardDelivered(t *testing.T, store *sqlite.SQLiteStore, scope Scope, correlationID, providerMessageID string) {
 	t.Helper()
 	now := time.Now().UTC()
 	leased, err := store.ClaimExternalConversationDelivery(t.Context(), scope, "delivery-worker", now, time.Minute)
@@ -287,7 +288,7 @@ func markReviewCardDelivered(t *testing.T, store *SQLiteStore, scope Scope, corr
 }
 
 // saveReviewTestRun saves run as the next revision of the stored Run.
-func saveReviewTestRun(t *testing.T, store *SQLiteStore, run *AgentRun) {
+func saveReviewTestRun(t *testing.T, store *sqlite.SQLiteStore, run *AgentRun) {
 	t.Helper()
 	expected := run.Revision
 	run.Revision++

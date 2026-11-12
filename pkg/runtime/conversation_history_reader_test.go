@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
@@ -100,7 +102,7 @@ func TestConversationHistoryStores(t *testing.T) {
 			}
 			switch name {
 			case "sqlite":
-				s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "history.db"))
+				s, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "history.db"))
 				if err != nil {
 					t.Fatal(err)
 				}

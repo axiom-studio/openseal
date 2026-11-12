@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -304,11 +305,11 @@ func TestActionCoordinatorPassesConversationApprovalModeToPolicy(t *testing.T) {
 
 var approvalModeActor = ActivityActor{Type: "user", ID: "user-7"}
 
-func approvalModeConversation(t *testing.T, store *SQLiteStore) *Conversation {
+func approvalModeConversation(t *testing.T, store *sqlite.SQLiteStore) *Conversation {
 	return approvalModeConversationWithKey(t, store, "chat")
 }
 
-func approvalModeConversationWithKey(t *testing.T, store *SQLiteStore, key string) *Conversation {
+func approvalModeConversationWithKey(t *testing.T, store *sqlite.SQLiteStore, key string) *Conversation {
 	t.Helper()
 	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "one"})
 	conversation, _, err := NewConversationService(store).CreateConversation(context.Background(), CreateConversationRequest{
@@ -365,7 +366,7 @@ func approvalModeCatalog(t *testing.T) *skill.Catalog {
 
 var approvalModeRunCounter int
 
-func proposeForApprovalMode(t *testing.T, store *SQLiteStore, coordinator *ActionCoordinator, conversation *Conversation, action string) *ApprovalCheckpoint {
+func proposeForApprovalMode(t *testing.T, store *sqlite.SQLiteStore, coordinator *ActionCoordinator, conversation *Conversation, action string) *ApprovalCheckpoint {
 	t.Helper()
 	approvalModeRunCounter++
 	return proposeForApprovalModeInConversation(t, store, coordinator, conversation.ID, action, fmt.Sprintf("run-%s-%d", action, approvalModeRunCounter))
@@ -374,7 +375,7 @@ func proposeForApprovalMode(t *testing.T, store *SQLiteStore, coordinator *Actio
 // proposeForApprovalModeInConversation proposes action as a loop step of a
 // new Run of the conversation and parks the Run on its approval, as the loop
 // does at step end.
-func proposeForApprovalModeInConversation(t *testing.T, store *SQLiteStore, coordinator *ActionCoordinator, conversationID, action, key string) *ApprovalCheckpoint {
+func proposeForApprovalModeInConversation(t *testing.T, store *sqlite.SQLiteStore, coordinator *ActionCoordinator, conversationID, action, key string) *ApprovalCheckpoint {
 	t.Helper()
 	result, f, err := proposeLoopForApprovalMode(t, store, coordinator, conversationID, action, key, map[string]interface{}{})
 	if err != nil {
@@ -388,7 +389,7 @@ func proposeForApprovalModeInConversation(t *testing.T, store *SQLiteStore, coor
 	return result.Approval
 }
 
-func proposeResultForApprovalMode(t *testing.T, store *SQLiteStore, coordinator *ActionCoordinator, conversationID, action, key string) *ActionProposalResult {
+func proposeResultForApprovalMode(t *testing.T, store *sqlite.SQLiteStore, coordinator *ActionCoordinator, conversationID, action, key string) *ActionProposalResult {
 	t.Helper()
 	result, err := proposeWithArgumentsForApprovalMode(t, store, coordinator, conversationID, action, key, map[string]interface{}{})
 	if err != nil {
@@ -397,7 +398,7 @@ func proposeResultForApprovalMode(t *testing.T, store *SQLiteStore, coordinator 
 	return result
 }
 
-func proposeWithArgumentsForApprovalMode(t *testing.T, store *SQLiteStore, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, error) {
+func proposeWithArgumentsForApprovalMode(t *testing.T, store *sqlite.SQLiteStore, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, error) {
 	t.Helper()
 	result, _, err := proposeLoopForApprovalMode(t, store, coordinator, conversationID, action, key, arguments)
 	return result, err
@@ -405,14 +406,14 @@ func proposeWithArgumentsForApprovalMode(t *testing.T, store *SQLiteStore, coord
 
 // proposeLoopForApprovalMode proposes action as tool call key of a loop step
 // of a new Run acting for conversationID.
-func proposeLoopForApprovalMode(t *testing.T, store *SQLiteStore, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
+func proposeLoopForApprovalMode(t *testing.T, store *sqlite.SQLiteStore, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
 	t.Helper()
 	return proposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{"conversationId": conversationID}, action, key, arguments)
 }
 
 // proposeLoopForApprovalModeWithContext is proposeLoopForApprovalMode for a
 // new Run with this Context.
-func proposeLoopForApprovalModeWithContext(t *testing.T, store *SQLiteStore, coordinator *ActionCoordinator, runContext map[string]interface{}, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
+func proposeLoopForApprovalModeWithContext(t *testing.T, store *sqlite.SQLiteStore, coordinator *ActionCoordinator, runContext map[string]interface{}, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
 	t.Helper()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
@@ -437,7 +438,7 @@ func proposeLoopForApprovalModeWithContext(t *testing.T, store *SQLiteStore, coo
 func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "approval-mode.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +457,7 @@ func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testin
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = NewSQLiteStore(path)
+	store, err = sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,9 +523,9 @@ func TestApprovalModeChangeAppearsInConversationChangeFeed(t *testing.T) {
 	}
 }
 
-func mustSQLiteApprovalModeStore(t *testing.T) *SQLiteStore {
+func mustSQLiteApprovalModeStore(t *testing.T) *sqlite.SQLiteStore {
 	t.Helper()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "changes.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "changes.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +563,7 @@ func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
 	}
 }
 
-func setFixtureApprovalMode(t *testing.T, store *SQLiteStore, conversation *Conversation, mode ConversationApprovalMode) {
+func setFixtureApprovalMode(t *testing.T, store *sqlite.SQLiteStore, conversation *Conversation, mode ConversationApprovalMode) {
 	t.Helper()
 	current, err := store.GetConversation(t.Context(), conversation.Scope, conversation.ID)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -17,7 +18,7 @@ func setupRequestFixture() *SkillSetupRequest {
 }
 func TestSkillSetupStoresScopeCASAndTerminalState(t *testing.T) {
 	ctx := context.Background()
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "setup.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "setup.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestSkillSetupStoresScopeCASAndTerminalState(t *testing.T) {
 }
 func TestSkillSetupSurvivesSQLiteReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "setup.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func TestSkillSetupSurvivesSQLiteReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.Close()
-	store, err = NewSQLiteStore(path)
+	store, err = sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

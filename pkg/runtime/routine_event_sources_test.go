@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -44,7 +45,7 @@ func (c routineGoogleSourcesForTest) ListRoutineEventSources(context.Context, Sc
 }
 
 type eventRoutineFixture struct {
-	store      *SQLiteStore
+	store      *sqlite.SQLiteStore
 	run        *AgentRun
 	catalog    *skill.Catalog
 	bound      *skill.BoundAction

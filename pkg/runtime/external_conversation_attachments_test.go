@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -41,7 +42,7 @@ func (h *externalFileHost) ReadExternalConversationAttachment(_ context.Context,
 	h.origin = req.Endpoint.Address
 	return &ExternalConversationAttachmentContent{ID: req.Attachment.ID, Name: req.Attachment.Name, MediaType: "text/plain", Data: []byte("real contents"), Status: "supplied"}, nil
 }
-func fileConversationFixture(t *testing.T) (*SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint) {
+func fileConversationFixture(t *testing.T) (*sqlite.SQLiteStore, *skill.Catalog, *ExternalConversationEndpoint) {
 	t.Helper()
 	store, original, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
 	bound, err := original.ResolveConversationAdapterBinding(t.Context(), skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID)

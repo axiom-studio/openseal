@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestRoutineEventDispatcherOneActiveRun(t *testing.T) {
@@ -608,7 +610,7 @@ func TestPauseRoutineLeavesCloseOutToDispatcher(t *testing.T) {
 
 // passCountingStore counts dispatcher passes on the leader.
 type passCountingStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	passes atomic.Int64
 }
 

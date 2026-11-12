@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -22,7 +23,7 @@ import (
 // these records never leave together, such as a succeeded call under a
 // pending approval. Each list matches only the filter fields the audit sets.
 type runbookAuditRecords struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	turns      []*AgentTurn
 	actions    actionCallRecords
 	approvals  []*ApprovalCheckpoint

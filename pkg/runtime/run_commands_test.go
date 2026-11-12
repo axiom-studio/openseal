@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
@@ -14,7 +16,7 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 		store func(*testing.T) RunCommandStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) RunCommandStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "commands.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "commands.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -132,7 +134,7 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 		store func(*testing.T) RunCommandStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) RunCommandStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cascade.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "cascade.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -368,7 +370,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 		Scope: Scope{Kind: "tenant", ID: "restart"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 		AssignedAgentID: "agent", Goal: "Survive restart", Source: RunSourceManual, IdempotencyKey: "stable-request",
 	}
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +382,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

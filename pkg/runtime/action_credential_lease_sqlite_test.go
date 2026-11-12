@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -19,11 +20,11 @@ import (
 func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "credential-redemption.db")
-	primary, err := NewSQLiteStore(path)
+	primary, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replica, err := NewSQLiteStore(path)
+	replica, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,12 +39,12 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 		}
 	}
 
-	stores := []*SQLiteStore{primary, replica}
+	stores := []*sqlite.SQLiteStore{primary, replica}
 	results := make(chan error, len(stores))
 	var wait sync.WaitGroup
 	for _, store := range stores {
 		wait.Add(1)
-		go func(store *SQLiteStore) {
+		go func(store *sqlite.SQLiteStore) {
 			defer wait.Done()
 			results <- store.RedeemActionCredentialLease(ctx, request)
 		}(store)
@@ -86,7 +87,7 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 	if err := primary.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := NewSQLiteStore(path)
+	restarted, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,9 +100,9 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing.T) {
 	for _, test := range []struct {
 		name  string
-		drift func(*testing.T, context.Context, *SQLiteStore, *sql.DB, *skill.Binding, ActionCredentialLeaseRedemptionRequest)
+		drift func(*testing.T, context.Context, *sqlite.SQLiteStore, *sql.DB, *skill.Binding, ActionCredentialLeaseRedemptionRequest)
 	}{
-		{"action lease owner", func(t *testing.T, ctx context.Context, _ *SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"action lease owner", func(t *testing.T, ctx context.Context, _ *sqlite.SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
 			var payload string
 			if err := db.QueryRowContext(ctx, `SELECT payload FROM action_calls WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.ActionCallID).Scan(&payload); err != nil {
 				t.Fatal(err)
@@ -116,7 +117,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 				t.Fatal(err)
 			}
 		}},
-		{"assigned agent", func(t *testing.T, ctx context.Context, _ *SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"assigned agent", func(t *testing.T, ctx context.Context, _ *sqlite.SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
 			var payload string
 			if err := db.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.RunID).Scan(&payload); err != nil {
 				t.Fatal(err)
@@ -131,7 +132,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 				t.Fatal(err)
 			}
 		}},
-		{"binding revision", func(t *testing.T, ctx context.Context, store *SQLiteStore, _ *sql.DB, binding *skill.Binding, _ ActionCredentialLeaseRedemptionRequest) {
+		{"binding revision", func(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore, _ *sql.DB, binding *skill.Binding, _ ActionCredentialLeaseRedemptionRequest) {
 			catalog := skill.NewCatalogWithStore(store)
 			if _, err := catalog.DisableBinding(ctx, skill.DisableBindingRequest{
 				Scope: binding.Scope, DeploymentID: binding.DeploymentID, BindingID: binding.ID, ExpectedRevision: binding.Revision,
@@ -144,7 +145,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "authority.db")
-			store, err := NewSQLiteStore(path)
+			store, err := sqlite.NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -166,4 +167,4 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 	}
 }
 
-var _ ActionCredentialLeaseRedeemer = (*SQLiteStore)(nil)
+var _ ActionCredentialLeaseRedeemer = (*sqlite.SQLiteStore)(nil)

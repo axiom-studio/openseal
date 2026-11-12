@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestSQLiteSpaceAccess(t *testing.T) {
 	t.Parallel()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "access.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "access.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +308,7 @@ func exerciseSpaceAccessState(t *testing.T, spaces *SpaceService, scope, other S
 func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "legacy.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +345,7 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		reopened, err := NewSQLiteStore(path)
+		reopened, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}

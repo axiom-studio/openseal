@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -164,7 +165,7 @@ func TestSQLiteCredentialRedemptionOfHostBindings(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "host-redemption.db")
-			store, err := NewSQLiteStore(path)
+			store, err := sqlite.NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}

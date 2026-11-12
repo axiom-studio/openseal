@@ -5,12 +5,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // steeringRun stores run r1 (bound to a conversation session) with the given
 // interventions and cursor, and returns the stored Run and session.
-func steeringRun(t *testing.T, store *SQLiteStore, consumed int, interventions ...AgentRunIntervention) (*AgentRun, *AgentSession) {
+func steeringRun(t *testing.T, store *sqlite.SQLiteStore, consumed int, interventions ...AgentRunIntervention) (*AgentRun, *AgentSession) {
 	t.Helper()
 	session := openTestConversationSession(t, store, "r1")
 	run := getStoredRun(t, store, testSessionScope, "r1")
@@ -20,7 +21,7 @@ func steeringRun(t *testing.T, store *SQLiteStore, consumed int, interventions .
 	return testStoredSessionRun(t, store, "r1"), session
 }
 
-func addSteeringIntervention(t *testing.T, store *SQLiteStore, intervention AgentRunIntervention) *AgentRun {
+func addSteeringIntervention(t *testing.T, store *sqlite.SQLiteStore, intervention AgentRunIntervention) *AgentRun {
 	t.Helper()
 	run := getStoredRun(t, store, testSessionScope, "r1")
 	run.PendingInterventions = append(run.PendingInterventions, intervention)
@@ -34,7 +35,7 @@ func steeringInput(run *AgentRun, session *AgentSession) StepInput {
 	return StepInput{Run: run, Step: steeringStep(), Session: session, WorkerID: "w1", Mode: StepModeNormal}
 }
 
-func steeringEntries(t *testing.T, store *SQLiteStore, sessionID string) []*SessionEntry {
+func steeringEntries(t *testing.T, store *sqlite.SQLiteStore, sessionID string) []*SessionEntry {
 	t.Helper()
 	entries, err := store.ListAgentSessionEntries(context.Background(), SessionEntryFilter{Scope: testSessionScope, SessionID: sessionID})
 	if err != nil {

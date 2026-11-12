@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -24,7 +25,7 @@ type startTaskTestStore interface {
 func forStartTaskStores(t *testing.T, test func(*testing.T, startTaskTestStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "start-task.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "start-task.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

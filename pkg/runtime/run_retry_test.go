@@ -5,6 +5,8 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) {
@@ -12,7 +14,7 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 		t.Run(backend, func(t *testing.T) {
 			var store RunCommandStore = newTestKernelStore(t)
 			if backend == "sqlite" {
-				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "retry.db"))
+				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "retry.db"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -90,7 +92,7 @@ func TestRetryConversationRunRejectsAnAlreadyExplainedProposalFailure(t *testing
 		t.Run(backend, func(t *testing.T) {
 			var store RunCommandStore = newTestKernelStore(t)
 			if backend == "sqlite" {
-				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "explained-retry.db"))
+				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "explained-retry.db"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -124,7 +126,7 @@ func TestRetryClearsFailureExplanation(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var store RunCommandStore = newTestKernelStore(t)
 			if backend == "sqlite" {
-				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "retry-failure.db"))
+				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "retry-failure.db"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -153,7 +155,7 @@ func TestRetryClearsFailureExplanation(t *testing.T) {
 }
 
 type retryGuardStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	actions  []*ActionCall
 	children []*AgentRun
 	pending  []*AgentTurn

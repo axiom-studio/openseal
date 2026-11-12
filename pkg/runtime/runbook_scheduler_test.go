@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(t *testing.T) {
@@ -15,7 +16,7 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "bounded-schedule.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "bounded-schedule.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

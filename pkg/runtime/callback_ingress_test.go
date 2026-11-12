@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -229,7 +230,7 @@ func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T)
 func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "callbacks.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +259,7 @@ func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 	}
 }
 
-func newCallbackCatalog(t *testing.T, ctx context.Context, store *SQLiteStore) *skillCatalogAdapter {
+func newCallbackCatalog(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore) *skillCatalogAdapter {
 	t.Helper()
 	catalog := newSkillCatalogAdapter(store)
 	registerCallbackFixture(t, ctx, catalog.Catalog)
@@ -298,7 +299,7 @@ func newCallbackCatalog(t *testing.T, ctx context.Context, store *SQLiteStore) *
 // the callback resolver/store relationship explicit.
 type skillCatalogAdapter struct{ *skill.Catalog }
 
-func newSkillCatalogAdapter(store *SQLiteStore) *skillCatalogAdapter {
+func newSkillCatalogAdapter(store *sqlite.SQLiteStore) *skillCatalogAdapter {
 	return &skillCatalogAdapter{Catalog: skill.NewCatalogWithStore(store)}
 }
 

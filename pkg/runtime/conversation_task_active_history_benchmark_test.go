@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -23,7 +24,7 @@ import (
 func BenchmarkConversationTaskSQLiteActiveHistory(b *testing.B) {
 	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) (conversationTaskSQLTestStore, conversationTaskBenchmarkExplainPlans) {
 		path := filepath.Join(b.TempDir(), "tasks.db")
-		store, err := NewSQLiteStore(path)
+		store, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			b.Fatal(err)
 		}

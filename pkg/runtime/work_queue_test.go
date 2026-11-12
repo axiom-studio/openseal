@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // queueHarness binds a status to a memory work queue, like the Engine does,
@@ -38,7 +40,7 @@ func (h *queueHarness) onDelivery(deliver func(WorkSignal)) { h.deliver.Store(&d
 // deadlineActionStore reports ActionCall deadlines with the PostgreSQL
 // store's semantics over the SQLite store, and counts every read.
 type deadlineActionStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	claims        atomic.Int64
 	claimsDone    atomic.Int64
 	claimed       atomic.Int64
@@ -233,7 +235,7 @@ func TestQueueDrivenActionPoolPollsWhileQueueIsUnhealthy(t *testing.T) {
 
 // deadlineAgentRunStore counts every read an AgentRunWorkerPool makes.
 type deadlineAgentRunStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	claims        atomic.Int64
 	lists         atomic.Int64
 	deadlineReads atomic.Int64
@@ -455,7 +457,7 @@ func TestTerminalRunSweepProgressDoesNotRepeatCompletedSweeps(t *testing.T) {
 }
 
 type signalConversationStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	conversationLists atomic.Int64
 }
 

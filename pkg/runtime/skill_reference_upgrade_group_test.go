@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -20,7 +21,7 @@ type groupUpgradeStore interface {
 func TestSkillReferenceUpgradeMovesEveryBindingAtTheVersionTogether(t *testing.T) {
 	for name, open := range map[string]func(*testing.T) groupUpgradeStore{
 		"sqlite": func(t *testing.T) groupUpgradeStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "group-upgrade.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "group-upgrade.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

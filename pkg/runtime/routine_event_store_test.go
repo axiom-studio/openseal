@@ -5,13 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestSQLiteRoutineEventStore(t *testing.T) {
 	storetest.RunRoutineEventContract(t, func(t *testing.T) (KernelStore, storetest.RoutineEventPayloadProbe) {
 		path := filepath.Join(t.TempDir(), "routine-events.db")
-		store, err := NewSQLiteStore(path)
+		store, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -32,7 +33,7 @@ func TestSQLiteRoutineEventStore(t *testing.T) {
 // event Task written before them is filled in.
 func TestSQLiteRoutineEventsMigrationFillsIndexColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +47,7 @@ func TestSQLiteRoutineEventsMigrationFillsIndexColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = store.Close()
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

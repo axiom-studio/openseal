@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "external-conversation.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	restarted, err := NewSQLiteStore(path)
+	restarted, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) 
 
 func TestSQLiteExternalConversationDeliveryRebindsAfterEndpointUpgrade(t *testing.T) {
 	ctx := context.Background()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "delivery-rebind.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "delivery-rebind.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +225,7 @@ func TestSQLiteExternalConversationDeliveryRebindsAfterEndpointUpgrade(t *testin
 func TestSQLiteExternalConversationClaimsPreserveOrderingPartitions(t *testing.T) {
 	ctx := context.Background()
 	_, endpoint := activeExternalConversationTestEndpoint(t, ctx)
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "ordering.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "ordering.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

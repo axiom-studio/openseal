@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestSQLiteSpaceStore(t *testing.T) {
 	t.Parallel()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "spaces.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "spaces.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +298,7 @@ func assertSpaceConversations(t *testing.T, conversations *ConversationService, 
 func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "backfill.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +337,7 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +350,7 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "default.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +388,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

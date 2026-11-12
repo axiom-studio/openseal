@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -20,7 +21,7 @@ type handoffCommandTestStore interface {
 func forHandoffCommandStores(t *testing.T, test func(*testing.T, handoffCommandTestStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "handoff.db"))
+		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "handoff.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -744,4 +745,4 @@ func TestRunCommandsHandoffUnavailableReceiptReaderFailsClosed(t *testing.T) {
 
 // Keep the fixture's composed backend contract checked without widening the
 // production RunCommandStore interface for a test-only handoff dependency.
-var _ handoffCommandTestStore = (*SQLiteStore)(nil)
+var _ handoffCommandTestStore = (*sqlite.SQLiteStore)(nil)

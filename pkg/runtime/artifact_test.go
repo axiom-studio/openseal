@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
@@ -20,7 +22,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 		open func(*testing.T) (ArtifactStore, func())
 	}{
 		{name: "sqlite", open: func(t *testing.T) (ArtifactStore, func()) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -165,7 +167,7 @@ func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T)
 
 func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +179,7 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +199,7 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 // then by version, newest first.
 func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	ctx := context.Background()
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

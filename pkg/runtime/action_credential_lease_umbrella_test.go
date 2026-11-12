@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -115,7 +116,7 @@ func leaseUmbrellaRequest(t *testing.T, ctx context.Context, store KernelStore, 
 func TestSQLiteActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "lease-umbrella.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

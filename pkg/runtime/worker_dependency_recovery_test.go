@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
 
@@ -118,7 +119,7 @@ func TestAgentRunWorkerDependencyRetirementLeavesIndependentTargetsUntouched(t *
 }
 
 type dependencyRepairReadCountingStore struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	runReads atomic.Int64
 	runLists atomic.Int64
 }

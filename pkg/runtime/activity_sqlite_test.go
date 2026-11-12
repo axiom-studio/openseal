@@ -9,11 +9,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestSQLiteActivityIsOrderedAndDurable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "activity.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +52,7 @@ func TestSQLiteActivityIsOrderedAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +117,7 @@ func TestSQLiteMigratesAgentRunRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +143,7 @@ func TestSQLiteMigratesAgentRunRevision(t *testing.T) {
 
 func TestSQLiteRunTransitionIsAtomicAndDurable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transition.db")
-	store, err := NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +180,7 @@ func TestSQLiteRunTransitionIsAtomicAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

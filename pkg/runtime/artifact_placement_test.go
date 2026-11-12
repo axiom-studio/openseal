@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type placementRuns map[string]*AgentRun
@@ -125,7 +126,7 @@ func TestArtifactPlacementFailsOnConversationLookupErrors(t *testing.T) {
 
 func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 	ctx := context.Background()
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +214,7 @@ func TestArtifactRejectsInvalidPlacementIdentifiers(t *testing.T) {
 }
 
 func TestKernelStoresProvideArtifactPlacementLookups(t *testing.T) {
-	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

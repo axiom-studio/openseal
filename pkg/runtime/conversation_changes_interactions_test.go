@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -30,7 +31,7 @@ func interactionChangeStores() []struct {
 		store func(*testing.T) KernelStore
 	}{
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "interaction-changes.db"))
+			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "interaction-changes.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -255,7 +256,7 @@ func TestConversationRunLineageValueInheritsThreadPlacement(t *testing.T) {
 }
 
 type teamRosterPortfolio struct {
-	*SQLiteStore
+	*sqlite.SQLiteStore
 	team *kernelteam.Deployment
 }
 
