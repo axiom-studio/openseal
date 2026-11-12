@@ -9,8 +9,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// Test-only access to skill binding internals for the external skill binding
-// tests. It moves with the skill binding code.
+// Test-only access to skill binding internals for the external tests
+// (package skillbinding_test), which use skillbindingtest's fixtures and so
+// cannot be in-package tests.
 
 type InteractionRequestRefusal = interactionRequestRefusal
 

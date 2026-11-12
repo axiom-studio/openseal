@@ -130,7 +130,7 @@ func credentialRequestResult(r *models.CredentialRequest) (map[string]interface{
 	return map[string]interface{}{"credentialRequest": value}, nil
 }
 
-// pendingCredentialRequestFromAction returns the request a succeeded
+// PendingCredentialRequestFromAction returns the request a succeeded
 // request_credential call created when it is still waiting for the user.
 func PendingCredentialRequestFromAction(ctx context.Context, store interface{}, call *models.ActionCall) *models.CredentialRequest {
 	if call == nil || call.Status != models.ActionCallStatusSucceeded || call.SkillID != models.SkillManagementSkillID || call.Action != agentrun.SkillActionRequestCredential {
@@ -185,6 +185,8 @@ func (e *interactionRequestRefusal) Error() string { return e.message }
 
 func refuseInteraction(message string) error { return &interactionRequestRefusal{message: message} }
 
+// IsInteractionRequestAction reports whether name asks the user for setup, a
+// credential or a connection.
 func IsInteractionRequestAction(name string) bool {
 	return name == agentrun.SkillActionRequestSetup || name == agentrun.SkillActionRequestCredential || name == agentrun.SkillActionRequestConnection
 }
@@ -208,6 +210,8 @@ func interactionRequestRefusalResult(err error) map[string]interface{} {
 	}}
 }
 
+// InteractionRequestRefused reports whether call succeeded with a refusal
+// instead of showing the user a card.
 func InteractionRequestRefused(call *models.ActionCall) bool {
 	if call == nil || call.Status != models.ActionCallStatusSucceeded {
 		return false

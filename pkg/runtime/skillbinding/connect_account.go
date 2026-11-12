@@ -17,22 +17,22 @@ import (
 // each person's own account when no person asked for its run.
 const CredentialErrorPersonUnavailable = "person_unavailable"
 
-// connectAccountRequiredPrefix starts the error of a call parked on a
+// ConnectAccountRequiredPrefix starts the error of a call parked on a
 // connect_account card.
 const ConnectAccountRequiredPrefix = "connect_account_required: "
 
-// connectAccountRequestPrefix is the ID prefix of a connect_account card; the
+// ConnectAccountRequestPrefix is the ID prefix of a connect_account card; the
 // rest is the parked action call's ID.
 const ConnectAccountRequestPrefix = "connect-account:"
 
-// personUnavailableError fails an action whose per_person account has no
+// PersonUnavailableError fails an action whose per_person account has no
 // person to act for. It is returned to the model like any failure, with no
 // card.
 type PersonUnavailableError struct{ message string }
 
 func (e *PersonUnavailableError) Error() string { return e.message }
 
-// actionCredentialRequirements are the bound action's credential
+// ActionCredentialRequirements are the bound action's credential
 // requirements by slot.
 func ActionCredentialRequirements(bound *skill.BoundAction) map[string]skill.CredentialRequirement {
 	if bound == nil || len(bound.Action.Credentials) == 0 {
@@ -45,6 +45,8 @@ func ActionCredentialRequirements(bound *skill.BoundAction) map[string]skill.Cre
 	return requirements
 }
 
+// CallUsesPersonCredential reports whether call uses a person's own
+// credential.
 func CallUsesPersonCredential(call *models.ActionCall) bool {
 	for _, reference := range call.CredentialRefs {
 		if skill.IsPersonCredentialReference(reference) {
@@ -54,6 +56,8 @@ func CallUsesPersonCredential(call *models.ActionCall) bool {
 	return false
 }
 
+// NewPersonUnavailableError explains that bound needs a person's own
+// account and no person asked for the Run.
 func NewPersonUnavailableError(bound *skill.BoundAction, umbrella models.ObjectiveOwner) error {
 	return &PersonUnavailableError{message: boundSkillName(bound) + " uses each person's own account, and no person asked for this run. Ask someone who manages " + umbrellaLabel(umbrella) + " to share an account with it."}
 }
@@ -76,6 +80,8 @@ func umbrellaLabel(umbrella models.ObjectiveOwner) string {
 	return "this Agent"
 }
 
+// ConnectAccountSlots are the accounts a connect-account card asks for: one
+// per name, in name order, with bound's requirement for that credential.
 func ConnectAccountSlots(bound *skill.BoundAction, names []string) []models.ConnectAccountSlot {
 	sort.Strings(names)
 	requirements := ActionCredentialRequirements(bound)
@@ -106,7 +112,7 @@ func ConnectAccountProvider(r *models.SkillSetupRequest) string {
 	return r.SkillName
 }
 
-// createConnectAccountRequest saves (or replays) the connect_account card for
+// CreateConnectAccountRequest saves (or replays) the connect_account card for
 // a parked call. The card belongs to the run's proven conversation; without
 // one the call fails as person_unavailable.
 func CreateConnectAccountRequest(ctx context.Context, store models.KernelStore, run *models.AgentRun, call *models.ActionCall, bound *skill.BoundAction, umbrella models.ObjectiveOwner, slots []models.ConnectAccountSlot, mode string) (*models.SkillSetupRequest, error) {
@@ -165,7 +171,7 @@ func capitalizeFirst(value string) string {
 	return string(unicode.ToUpper(first)) + value[size:]
 }
 
-// isParkedConnectAccountCall reports whether call failed before dispatch only
+// IsParkedConnectAccountCall reports whether call failed before dispatch only
 // because its card asks someone to connect an account.
 func IsParkedConnectAccountCall(call *models.ActionCall) bool {
 	if call == nil || call.Status != models.ActionCallStatusFailed || call.FailurePhase != models.ActionFailureBeforeDispatch || call.SkillID == models.SkillManagementSkillID {
@@ -177,7 +183,7 @@ func IsParkedConnectAccountCall(call *models.ActionCall) bool {
 	return kind == models.SkillSetupKindConnectAccount && id == ConnectAccountRequestPrefix+call.ID
 }
 
-// pendingConnectAccountRequestFromAction returns the pending card a parked
+// PendingConnectAccountRequestFromAction returns the pending card a parked
 // call waits for. A card settled before this commit does not park the run.
 func PendingConnectAccountRequestFromAction(ctx context.Context, store models.SkillSetupRequestStore, call *models.ActionCall) *models.SkillSetupRequest {
 	if store == nil || !IsParkedConnectAccountCall(call) {
@@ -210,7 +216,7 @@ func ConnectAccountResolutionInstruction(r *models.SkillSetupRequest) string {
 	}
 }
 
-// connectAccountWaitSummary describes a run parked on its card.
+// ConnectAccountWaitSummary describes a run parked on its card.
 func ConnectAccountWaitSummary(r *models.SkillSetupRequest) string {
 	who := "the person asking"
 	if r.Mode == models.SkillSetupModeShared {

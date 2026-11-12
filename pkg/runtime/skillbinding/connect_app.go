@@ -498,7 +498,7 @@ func listedToolNames(tools []string) []interface{} {
 	return listed
 }
 
-// pendingConnectAppRequestFromAction returns the request a succeeded
+// PendingConnectAppRequestFromAction returns the request a succeeded
 // request_connection call created for its own Run when it still waits for
 // the user.
 func PendingConnectAppRequestFromAction(ctx context.Context, store models.SkillSetupRequestStore, call *models.ActionCall) *models.SkillSetupRequest {

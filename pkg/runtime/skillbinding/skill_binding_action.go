@@ -261,6 +261,7 @@ func skillManagementAction(name, description string, properties map[string]inter
 	}
 }
 
+// SkillBindingUpsertArguments are the arguments of upsert_binding.
 type SkillBindingUpsertArguments struct {
 	BindingID                   string                                   `json:"bindingId"`
 	ExpectedRevision            int64                                    `json:"expectedRevision"`
@@ -652,7 +653,7 @@ func resolveSkillBindingDisable(ctx context.Context, catalog *skill.Catalog, sco
 	return args, current, nil
 }
 
-// validateSkillBindingArguments checks a proposed upsert against the exact
+// ValidateSkillBindingArguments checks a proposed upsert against the exact
 // definition. credentials are the saved binding's; a model cannot supply any.
 func ValidateSkillBindingArguments(definition *skill.Definition, args SkillBindingUpsertArguments, credentials map[string]skill.CredentialReference) error {
 	// The canonical Catalog performs the same recursive validation at write
@@ -744,6 +745,8 @@ func validateSkillActionNonSecretConfig(value interface{}, path string) error {
 	return nil
 }
 
+// ExactSkillDefinition returns one Skill definition version; a sourced
+// definition must be named with its sourceIdentity.
 func ExactSkillDefinition(ctx context.Context, catalog *skill.Catalog, id, version, sourceIdentity string) (*skill.Definition, error) {
 	if sourceIdentity != "" {
 		return catalog.GetDefinitionVariant(ctx, id, version, sourceIdentity)
@@ -758,7 +761,7 @@ func ExactSkillDefinition(ctx context.Context, catalog *skill.Catalog, id, versi
 	return definition, nil
 }
 
-// skillBindingCandidate is the binding a model-proposed upsert writes. A
+// SkillBindingCandidate is the binding a model-proposed upsert writes. A
 // model never adds, changes or removes credentials: the candidate keeps the
 // current binding's, and only a person's card or route attaches them.
 func SkillBindingCandidate(scope skill.ScopeReference, deploymentID string, args SkillBindingUpsertArguments, current *skill.Binding) *skill.Binding {
@@ -804,7 +807,7 @@ func (t *skillTargetAgent) preview() map[string]interface{} {
 	return map[string]interface{}{"id": t.ID, "displayName": t.DisplayName}
 }
 
-// isTargetedSkillBindingAction reports whether bound is an openseal.skills
+// IsTargetedSkillBindingAction reports whether bound is an openseal.skills
 // upsert_binding or disable_binding whose arguments name another Agent with
 // targetAgentId. It changes that Agent, so like create_agent and update_agent
 // it is always reviewed and approved only by a person in the app, in every
@@ -887,7 +890,7 @@ func skillActionTarget(ctx context.Context, catalog *skill.Catalog, agents *kern
 	return &skillTargetAgent{ID: deployment.ID, DisplayName: definition.DisplayName}, nil
 }
 
-// withoutUnusableTargetAgent hides targetAgentId from the model-visible
+// WithoutUnusableTargetAgent hides targetAgentId from the model-visible
 // actions of an Agent that cannot use it. Only a builder may name another
 // Agent (skillActionTarget), so every other Agent is offered the actions
 // without the argument and without the sentence that describes it; a model
@@ -974,6 +977,8 @@ func decodeSkillBindingArguments(arguments map[string]interface{}, target interf
 	return nil
 }
 
+// SecretSafeBindingPreview describes binding for a person or model without
+// credential values.
 func SecretSafeBindingPreview(binding *skill.Binding) interface{} {
 	if binding == nil {
 		return nil
@@ -1021,6 +1026,8 @@ func (d *SkillBindingActionDispatcher) replayedDisable(ctx context.Context, scop
 	return skillBindingActionResult(SkillActionDisableBinding, current, true), nil
 }
 
+// SameManagedSkillBinding reports whether two bindings agree on every field
+// a model-proposed upsert can set.
 func SameManagedSkillBinding(left, right *skill.Binding) bool {
 	return left.SkillID == right.SkillID && left.SkillVersion == right.SkillVersion && left.SourceIdentity == right.SourceIdentity &&
 		reflect.DeepEqual(left.AllowedActions, right.AllowedActions) && left.EnablePrompt == right.EnablePrompt &&

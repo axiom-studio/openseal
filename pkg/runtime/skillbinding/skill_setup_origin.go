@@ -123,8 +123,10 @@ func independentTaskStartedByStep(ctx context.Context, store models.KernelStore,
 	return true, nil
 }
 
-// The immutable task ledger, never copied conversation context, establishes
-// setup access for an independent task whose foreground source has completed.
+// ConversationTaskSetupOrigin returns the conversation task run works for, or
+// nil when it works for none. The immutable task ledger, never copied
+// conversation context, establishes setup access for an independent task
+// whose foreground source has completed.
 func ConversationTaskSetupOrigin(ctx context.Context, store models.ConversationTaskProofStore, run *models.AgentRun) (*models.ConversationTask, error) {
 	if run == nil {
 		return nil, models.ErrInvalidSkillSetup
@@ -163,6 +165,8 @@ func ConversationTaskSetupOrigin(ctx context.Context, store models.ConversationT
 	return task, nil
 }
 
+// TaskSetupActionMatches reports whether call is the request_setup call of
+// run for deploymentID.
 func TaskSetupActionMatches(call *models.ActionCall, run *models.AgentRun, deploymentID string) bool {
 	return call != nil && run != nil && call.Scope == run.Scope && call.RunID == run.ID &&
 		call.DeploymentID == deploymentID && call.SkillID == models.SkillManagementSkillID && call.Action == agentrun.SkillActionRequestSetup

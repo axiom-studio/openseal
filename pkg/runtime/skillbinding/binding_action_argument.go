@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+// Keys of the embed session a Run carries in its context.
 const (
 	SessionContextIDKey             = "id"
 	SessionContextVerifiedClaimsKey = "verifiedClaims"
@@ -99,6 +100,8 @@ func trustedRunSessionContext(run *models.AgentRun) (map[string]interface{}, err
 	return session, nil
 }
 
+// BindingResolvedArgumentProvenance records which arguments of the bound
+// action its binding resolves, and from where.
 func BindingResolvedArgumentProvenance(bound *skill.BoundAction) map[string]models.ResolvedActionArgument {
 	if bound == nil || bound.Binding == nil {
 		return nil
@@ -134,6 +137,8 @@ func (EmbedSessionActionAuthorityValidator) ValidateActionProposal(_ context.Con
 	return map[string]interface{}{"embedSessionAuthority": "granted"}, nil
 }
 
+// ConstrainEmbedSessionActions limits the actions offered to a Run that acts
+// for an embed session to those that session may use.
 func ConstrainEmbedSessionActions(run *models.AgentRun, actions []skill.ModelAction) []skill.ModelAction {
 	if run == nil {
 		return actions

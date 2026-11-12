@@ -331,6 +331,7 @@ func skillSetupActionsGranted(binding *skill.Binding, actions []string) bool {
 	return true
 }
 
+// SkillSetupRequestResult is the action output for a saved setup request.
 func SkillSetupRequestResult(r *models.SkillSetupRequest) (map[string]interface{}, error) {
 	data, err := json.Marshal(r)
 	if err != nil {
