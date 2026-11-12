@@ -128,7 +128,7 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			specs := ControlToolSpecs(tc.authority)
+			specs := builtinControlSpecs(tc.authority)
 			var spec *ControlToolSpec
 			for i := range specs {
 				if specs[i].Name == ControlToolFinalAnswer {
@@ -162,7 +162,7 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 				}
 			}
 			// Constant per claim (prompt cache).
-			again := ControlToolSpecs(tc.authority)
+			again := builtinControlSpecs(tc.authority)
 			if !reflect.DeepEqual(specs, again) {
 				t.Fatal("specs differ between two listings")
 			}
@@ -170,7 +170,7 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 	}
 	// Decision and review Runs never get turn_final_answer.
 	for _, mode := range []FinalAnswerMode{FinalModeDecision, FinalModeReview} {
-		for _, spec := range ControlToolSpecs(ControlAuthority{FinalMode: mode}) {
+		for _, spec := range builtinControlSpecs(ControlAuthority{FinalMode: mode}) {
 			if spec.Name == ControlToolFinalAnswer {
 				t.Fatalf("%s offers turn_final_answer", mode)
 			}
@@ -620,13 +620,13 @@ func TestFinalOutputPublisherValidatesExtensionFields(t *testing.T) {
 		t.Fatalf("publication without fields = %#v, %v", publication, err)
 	}
 	// The tool offered to the model gains the host properties, never required.
-	tools := WithFinalOutputProperties(ControlModelStepTools(ControlAuthority{}), f.run, publisher)
+	tools := WithFinalOutputProperties(builtinControlModelStepTools(ControlAuthority{}), f.run, publisher)
 	properties, required := schemaProperties(t, tools[0].InputSchema)
 	if tools[0].Name != string(ControlToolFinalAnswer) || properties["generatedFiles"] == nil ||
 		properties["answer"].(map[string]interface{})["type"] != "string" || !reflect.DeepEqual(required, []string{"answer"}) {
 		t.Fatalf("tool = %#v", tools[0])
 	}
-	if base := ControlModelStepTools(ControlAuthority{}); base[0].InputSchema["properties"].(map[string]interface{})["generatedFiles"] != nil {
+	if base := builtinControlModelStepTools(ControlAuthority{}); base[0].InputSchema["properties"].(map[string]interface{})["generatedFiles"] != nil {
 		t.Fatal("WithFinalOutputProperties changed the base tool")
 	}
 	// Extension fields without a publisher are dropped as unknown.

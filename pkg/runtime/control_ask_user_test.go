@@ -251,7 +251,8 @@ func TestAskUserPostsQuestionAndParks(t *testing.T) {
 			t.Fatalf("question = %#v %v", question, err)
 		}
 		parked := call.park(t, result.Park)
-		if !isConversationQuestionWait(parked) || clarificationQuestionKey(parked) != key {
+		if parked.Status != AgentRunStatusWaitingForEvent || parked.WakeCondition == nil || parked.WakeCondition.Type != "user_message" ||
+			parked.WakeCondition.Reference != call.entry.ID || parkedQuestionKey(parked) != key {
 			t.Fatalf("parked run is not a question wait: %#v", parked)
 		}
 		// The reconciler replays the same message, never a second one.
@@ -340,7 +341,7 @@ type conflictingQuestionStore struct {
 }
 
 func (s conflictingQuestionStore) CommitChannelMessage(ctx context.Context, record ChannelMessageCommitRecord) (*ChannelMessageCommitResult, error) {
-	if strings.HasPrefix(record.Message.IdempotencyKey, conversationClarificationKeyPrefix) {
+	if strings.HasPrefix(record.Message.IdempotencyKey, "conversation-clarification:") {
 		return nil, ErrRevisionConflict
 	}
 	return s.ConversationStore.CommitChannelMessage(ctx, record)
@@ -378,9 +379,9 @@ func TestAskUserAnswerFromOtherActorIgnored(t *testing.T) {
 	question := f.question(t)
 	foreign := f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "someone-else"},
 		Intent: MessageIntentAnswer, Content: "Use the admin page.", ResolvesMessageID: question.ID, IdempotencyKey: "foreign-answer"})
-	// An explicit reply to the question is a clarification attempt (handled),
-	// but a foreign actor's answer wakes nothing.
-	if result, _, err := f.scheduler.resumeConversationAnswer(t.Context(), f.conversation, foreign); err != nil || result != nil {
+	// An explicit reply to the question is a clarification attempt, but a
+	// foreign actor's answer wakes nothing and starts nothing.
+	if result, _, err := f.scheduler.ScheduleMessage(t.Context(), f.run.Scope, f.conversation.ID, foreign.ID); err != nil || result != nil {
 		t.Fatalf("foreign answer accepted: %#v %v", result, err)
 	}
 	current := f.current(t)

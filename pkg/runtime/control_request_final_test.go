@@ -90,7 +90,7 @@ func (f *controlFixture) completeWithFinal(final *FinalAnswer) *AgentRun {
 	f.t.Helper()
 	completed, _, err := NewRunActivityService(f.store, f.store).TransitionRun(f.ctx, f.run.Scope, f.run.ID, RunTransitionRequest{
 		ExpectedRevision: f.run.Revision, Status: AgentRunStatusCompleted, Output: final.Output,
-		Summary: finalCompletedSummary, LeaseOwner: controlTestWorker,
+		Summary: "Run completed with its final answer", LeaseOwner: controlTestWorker,
 	})
 	if err != nil {
 		f.t.Fatalf("complete run: %v", err)
@@ -286,7 +286,7 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 		completionReviewCall("review", `{"decision":"approve","message":"The evidence meets the criteria."}`))
 	authority := ControlAuthority{AgentID: "reviewer-agent", FinalMode: FinalModeReview}
 	// The decision tool is not offered in a review Run.
-	if specs := ControlToolSpecs(authority); len(specs) != 1 || specs[0].Name != ControlToolCompletionReview {
+	if specs := builtinControlSpecs(authority); len(specs) != 1 || specs[0].Name != ControlToolCompletionReview {
 		t.Fatalf("review specs = %#v", specs)
 	}
 	result, err := f.exec.Settle(f.ctx, f.context("review", authority))
@@ -333,7 +333,7 @@ func TestDecisionBudgetIsTwelveSteps(t *testing.T) {
 }
 
 func TestRequestFinalToolSchemas(t *testing.T) {
-	decision := ControlToolSpecs(ControlAuthority{FinalMode: FinalModeDecision})
+	decision := builtinControlSpecs(ControlAuthority{FinalMode: FinalModeDecision})
 	if len(decision) != 1 || decision[0].Name != ControlToolRequestDecision || decision[0].Phase != ControlPhaseSettle {
 		t.Fatalf("decision specs = %#v", decision)
 	}
@@ -345,7 +345,7 @@ func TestRequestFinalToolSchemas(t *testing.T) {
 	if !reflect.DeepEqual(enum, []string{"accept", "reject", "request_clarification"}) {
 		t.Fatalf("decision enum = %#v", enum)
 	}
-	review := ControlToolSpecs(ControlAuthority{FinalMode: FinalModeReview})
+	review := builtinControlSpecs(ControlAuthority{FinalMode: FinalModeReview})
 	properties, _ = schemaProperties(t, review[0].InputSchema)
 	if enum := properties["decision"].(map[string]interface{})["enum"]; !reflect.DeepEqual(enum, []string{"approve", "reject"}) {
 		t.Fatalf("review enum = %#v", enum)

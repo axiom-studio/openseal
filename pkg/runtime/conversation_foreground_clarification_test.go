@@ -83,12 +83,21 @@ func (f *foregroundClarificationFixture) ask(t *testing.T, question, wakeType st
 	}
 }
 
+// parkedQuestionKey is the idempotency key of the question run is parked on,
+// "" when it is not parked.
+func parkedQuestionKey(run *AgentRun) string {
+	if run == nil || run.WakeCondition == nil {
+		return ""
+	}
+	return conversationClarificationKey(run.ID, run.WakeCondition.Reference)
+}
+
 func (f *foregroundClarificationFixture) question(t *testing.T) *ChannelMessage {
 	t.Helper()
 	if _, err := f.scheduler.ReconcileScope(t.Context(), f.run.Scope); err != nil {
 		t.Fatal(err)
 	}
-	question, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), f.run.Scope, f.conversation.ID, clarificationQuestionKey(f.run))
+	question, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), f.run.Scope, f.conversation.ID, parkedQuestionKey(f.run))
 	if err != nil || question == nil || question.Intent != MessageIntentQuestion || !question.RequiresResponse || question.ReplyToMessageID != f.trigger.ID ||
 		question.Content != f.asked || len(question.References) != 1 || question.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: f.run.ID}) {
 		t.Fatalf("foreground question = %#v %v", question, err)
@@ -260,7 +269,7 @@ func TestForegroundConversationQuestionsRequireUserMessageWait(t *testing.T) {
 		if _, err := f.scheduler.ReconcileScope(t.Context(), f.run.Scope); err != nil {
 			t.Fatal(err)
 		}
-		question, err := store.FindChannelMessageByIdempotencyKey(t.Context(), f.run.Scope, f.conversation.ID, clarificationQuestionKey(f.run))
+		question, err := store.FindChannelMessageByIdempotencyKey(t.Context(), f.run.Scope, f.conversation.ID, parkedQuestionKey(f.run))
 		if err != nil || question != nil {
 			t.Fatalf("provider wait was projected as a human question: %#v %v", question, err)
 		}

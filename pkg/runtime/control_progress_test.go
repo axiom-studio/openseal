@@ -21,7 +21,7 @@ func progressFixture(t *testing.T, calls ...LoopToolCall) *controlFixture {
 
 func progressSpec(t *testing.T, authority ControlAuthority) ControlToolSpec {
 	t.Helper()
-	for _, spec := range ControlToolSpecs(authority) {
+	for _, spec := range builtinControlSpecs(authority) {
 		if spec.Name == ControlToolReportProgress {
 			return spec
 		}

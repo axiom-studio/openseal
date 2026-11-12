@@ -525,11 +525,12 @@ func TestDelegateNewMessageRefusesWithoutRequest(t *testing.T) {
 }
 
 func TestDelegateBoundedSourceFundsMinimumChild(t *testing.T) {
+	const childMinimumTurns = 8 // the Turns every child is funded with at least
 	f := newDelegateFixture(t, newTestKernelStore(t), func(req *CreateAgentRunRequest) {
 		req.Budget = &BudgetPolicy{MaxTurns: 64}
 	})
 	_, request := f.delegate()
-	if request.BudgetAllocation == nil || request.BudgetAllocation.MaxTurns != controlMinimumChildTurns {
+	if request.BudgetAllocation == nil || request.BudgetAllocation.MaxTurns != childMinimumTurns {
 		t.Fatalf("budget = %#v", request.BudgetAllocation)
 	}
 }
