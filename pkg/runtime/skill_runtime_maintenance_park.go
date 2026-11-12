@@ -5,11 +5,13 @@ import (
 	"errors"
 	"maps"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
-func (p *AgentRunWorkerPool) parkSkillRuntimeMaintenance(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, cause error) bool {
-	var held *SkillRuntimeMaintenanceError
+func (p *AgentRunWorkerPool) parkSkillRuntimeMaintenance(ctx context.Context, workerID string, run *models.AgentRun, turn *models.AgentTurn, cause error) bool {
+	var held *models.SkillRuntimeMaintenanceError
 	if !errors.As(cause, &held) {
 		return false
 	}
@@ -22,11 +24,11 @@ func (p *AgentRunWorkerPool) parkSkillRuntimeMaintenance(ctx context.Context, wo
 	if turn != nil {
 		turnID = turn.ID
 	}
-	_, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusWaitingForDependency, LeaseOwner: workerID, Checkpoint: checkpoint,
-		WakeCondition: &WakeCondition{Type: skillRuntimeMaintenanceWakeType, Reference: held.Maintenance.SkillID},
+	_, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusWaitingForDependency, LeaseOwner: workerID, Checkpoint: checkpoint,
+		WakeCondition: &models.WakeCondition{Type: models.SkillRuntimeMaintenanceWakeType, Reference: held.Maintenance.SkillID},
 		Summary:       "Waiting for the Skill runtime upgrade to finish", EventType: "run.skill_runtime_waiting",
-		Actor: ActivityActor{Type: "worker", ID: workerID}, TurnID: turnID, CausationID: turnID,
+		Actor: models.ActivityActor{Type: "worker", ID: workerID}, TurnID: turnID, CausationID: turnID,
 	})
 	if err != nil {
 		p.logger.Warnw("failed to park Run for Skill runtime maintenance", "runId", run.ID, "error", err)

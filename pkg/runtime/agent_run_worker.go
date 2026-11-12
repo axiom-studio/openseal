@@ -11,32 +11,34 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
-type TurnRunnerResolverFunc func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error)
+type TurnRunnerResolverFunc func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error)
 
-func (f TurnRunnerResolverFunc) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+func (f TurnRunnerResolverFunc) ResolveTurnRunner(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 	return f(ctx, run)
 }
 
-type ActionProposalObserverFunc func(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error
+type ActionProposalObserverFunc func(context.Context, *models.AgentRun, *models.AgentTurn, *models.ActionProposalResult) error
 
-func (f ActionProposalObserverFunc) ObserveActionProposal(ctx context.Context, run *AgentRun, turn *AgentTurn, proposal *ActionProposalResult) error {
+func (f ActionProposalObserverFunc) ObserveActionProposal(ctx context.Context, run *models.AgentRun, turn *models.AgentTurn, proposal *models.ActionProposalResult) error {
 	return f(ctx, run, turn, proposal)
 }
 
 type AgentRunWorkerConfig struct {
-	Scope                             Scope
-	Kind                              RunKind
+	Scope                             models.Scope
+	Kind                              models.RunKind
 	AssignedAgentID                   string
 	WorkerIDPrefix                    string
 	Concurrency                       int
@@ -55,7 +57,7 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 	if err := c.Scope.Validate(); err != nil {
 		return err
 	}
-	if c.Kind != "" && !validRunKind(c.Kind) {
+	if c.Kind != "" && !models.IsValidRunKind(c.Kind) {
 		return fmt.Errorf("unsupported run kind %q", c.Kind)
 	}
 	if c.Concurrency <= 0 {
@@ -64,7 +66,7 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 	if c.MaxActiveForAgent <= 0 {
 		c.MaxActiveForAgent = c.Concurrency
 	}
-	if err := validateConversationTaskForegroundReserve(c.ConversationTaskForegroundReserve, c.MaxActiveForAgent); err != nil {
+	if err := models.ValidateConversationTaskForegroundReserve(c.ConversationTaskForegroundReserve, c.MaxActiveForAgent); err != nil {
 		return err
 	}
 	if c.MaxActiveForOwner < 0 || c.MaxActiveForObjective < 0 || c.MaxActiveForConcurrencyKey < 0 {
@@ -93,21 +95,21 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 type AgentRunWorkerPool struct {
 	config               AgentRunWorkerConfig
 	scheduler            *agentrun.AgentRunScheduler
-	portfolio            PortfolioStore
+	portfolio            models.PortfolioStore
 	loop                 *runloop.RunLoop
 	wakeService          *agentrun.AgentRunWakeService
-	activity             *RunActivityService
+	activity             *activity.RunActivityService
 	actions              *action.ActionCoordinator
 	runFinalizer         agentrun.RunTerminalFinalizer
 	runCommands          *agentrun.RunCommandService
 	lastFinalizationScan time.Time
 	dependencyCursor     string
 	forks                *agentrun.RunForkCoordinator
-	dependencies         *DependencyCoordinator // pages waiting fork groups; nil unless the store indexes them
+	dependencies         *portfolio.DependencyCoordinator // pages waiting fork groups; nil unless the store indexes them
 	collaboration        *collaboration.CollaborationService
 	conversationTasks    *conversationrun.ConversationTaskService
 	requestInbox         *collaboration.AgentRequestInboxReconciler
-	reportingStore       ConversationStore
+	reportingStore       models.ConversationStore
 	resolver             conversation.TurnRunnerResolver
 	logger               *zap.SugaredLogger
 	wake                 chan struct{}
@@ -121,7 +123,7 @@ type AgentRunWorkerPool struct {
 	signals              atomic.Pointer[workqueue.WorkSignalStatus]
 	// deadlines lets a queue-driven pool schedule its next due Run or lease
 	// expiry instead of polling. Stores without it always poll.
-	deadlines AgentRunDeadlineStore
+	deadlines models.AgentRunDeadlineStore
 	usage     workqueue.PoolActivity
 	now       func() time.Time
 }
@@ -153,13 +155,13 @@ func (p *AgentRunWorkerPool) IdleFor(now time.Time) time.Duration {
 	return p.usage.IdleFor(now)
 }
 
-func NewAgentRunWorkerPool(store KernelStore, resolver conversation.TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
+func NewAgentRunWorkerPool(store models.KernelStore, resolver conversation.TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
 	return newAgentRunWorkerPool(store, resolver, logger, config, runloop.RunLoopMaxStepsPerClaim, opts...)
 }
 
 // newAgentRunWorkerPool is NewAgentRunWorkerPool with the number of steps
 // one claim may run before it yields.
-func newAgentRunWorkerPool(store KernelStore, resolver conversation.TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, maxStepsPerClaim int, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
+func newAgentRunWorkerPool(store models.KernelStore, resolver conversation.TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, maxStepsPerClaim int, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
 	if store == nil || resolver == nil {
 		return nil, errors.New("kernel store and turn runner resolver are required")
 	}
@@ -179,29 +181,29 @@ func newAgentRunWorkerPool(store KernelStore, resolver conversation.TurnRunnerRe
 	}
 	pool := &AgentRunWorkerPool{
 		config: config, scheduler: agentrun.NewAgentRunScheduler(store, opts...), portfolio: store, loop: loop,
-		wakeService: agentrun.NewAgentRunWakeService(store, store, opts...), activity: NewRunActivityService(store, store, opts...),
+		wakeService: agentrun.NewAgentRunWakeService(store, store, opts...), activity: activity.NewRunActivityService(store, store, opts...),
 		runCommands: agentrun.NewRunCommandService(store, opts...), now: clock,
 		resolver: resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: workqueue.NewWorkerPollSignal(),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
 	}
-	pool.deadlines, _ = store.(AgentRunDeadlineStore)
+	pool.deadlines, _ = store.(models.AgentRunDeadlineStore)
 	pool.usage.Touch()
-	if forkStore, ok := store.(RunForkStore); ok {
+	if forkStore, ok := store.(models.RunForkStore); ok {
 		pool.forks = agentrun.NewRunForkCoordinator(forkStore, opts...)
-		if _, indexed := forkStore.(RunDependencyReconciliationStore); indexed {
-			pool.dependencies = NewDependencyCoordinator(forkStore, opts...)
+		if _, indexed := forkStore.(models.RunDependencyReconciliationStore); indexed {
+			pool.dependencies = portfolio.NewDependencyCoordinator(forkStore, opts...)
 		}
 	}
-	if collaborationStore, ok := store.(CollaborationKernelStore); ok {
+	if collaborationStore, ok := store.(models.CollaborationKernelStore); ok {
 		pool.collaboration = collaboration.NewCollaborationService(collaborationStore, opts...)
 	}
-	if taskStore, ok := store.(ConversationTaskKernelStore); ok {
+	if taskStore, ok := store.(models.ConversationTaskKernelStore); ok {
 		pool.conversationTasks = conversationrun.NewConversationTaskService(taskStore, opts...)
 	}
-	if inboxStore, ok := store.(AgentRequestInboxStore); ok {
+	if inboxStore, ok := store.(models.AgentRequestInboxStore); ok {
 		pool.requestInbox, _ = collaboration.NewAgentRequestInboxReconciler(inboxStore, opts...)
 	}
-	if reportingStore, ok := store.(ConversationStore); ok {
+	if reportingStore, ok := store.(models.ConversationStore); ok {
 		pool.reportingStore = reportingStore
 	}
 	return pool, nil
@@ -243,7 +245,7 @@ func (p *AgentRunWorkerPool) requestClaim() {
 	}
 }
 
-func (p *AgentRunWorkerPool) WakeScope(scope Scope) {
+func (p *AgentRunWorkerPool) WakeScope(scope models.Scope) {
 	if scope == p.config.Scope {
 		p.Wake()
 	}
@@ -276,7 +278,7 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			p.logger.Errorw("failed to claim agent run", "workerId", workerID, "error", err)
 			if signals := p.signals.Load(); signals.Healthy() {
 				// No poll follows a failed claim while queue-driven.
-				signals.ScheduleIn(WorkFamilyRunDue, p.config.Scope, workqueue.WorkerPollDelay(p.config.PollInterval, 1, workerID))
+				signals.ScheduleIn(models.WorkFamilyRunDue, p.config.Scope, workqueue.WorkerPollDelay(p.config.PollInterval, 1, workerID))
 			}
 		}
 		if run != nil {
@@ -292,26 +294,26 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 	}
 }
 
-func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, run *AgentRun) {
+func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, run *models.AgentRun) {
 	if run == nil {
 		return
 	}
-	if run.Status == AgentRunStatusPaused && runAttemptBudgetAtLimit(run) {
-		_, _ = p.activity.AppendActivity(ctx, &ActivityEvent{
-			Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
+	if run.Status == models.AgentRunStatusPaused && models.RunAttemptBudgetAtLimit(run) {
+		_, _ = p.activity.AppendActivity(ctx, &models.ActivityEvent{
+			Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: models.TeamIDForRun(run),
 			EventType: "budget.exhausted", Summary: "Run paused before exceeding its autonomous attempt budget",
-			Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
+			Actor: models.ActivityActor{Type: "worker", ID: workerID}, Visibility: models.ActivityVisibilityScope,
 			Payload: map[string]interface{}{"dimension": "attempts", "used": run.BudgetUsage.Attempts, "limit": run.Budget.MaxAttempts},
 		})
 		return
 	}
-	if run.Status != AgentRunStatusRunning {
+	if run.Status != models.AgentRunStatusRunning {
 		return
 	}
-	_, _ = p.activity.AppendActivity(ctx, &ActivityEvent{
-		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
+	_, _ = p.activity.AppendActivity(ctx, &models.ActivityEvent{
+		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: models.TeamIDForRun(run),
 		EventType: "run.claimed", Summary: "Run claimed by autonomous worker",
-		Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
+		Actor: models.ActivityActor{Type: "worker", ID: workerID}, Visibility: models.ActivityVisibilityScope,
 	})
 	// Resolution can itself involve slow hosted setup. Keep the existing claim
 	// alive across that work so another worker cannot resolve or invoke a second
@@ -319,7 +321,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	resolutionCtx, cancelResolution := context.WithCancel(ctx)
 	resolutionHeartbeatDone := make(chan error, 1)
 	go p.heartbeatRunLease(resolutionCtx, cancelResolution, workerID, run, resolutionHeartbeatDone)
-	binding, err := p.resolver.ResolveTurnRunner(resolutionCtx, cloneAgentRun(run))
+	binding, err := p.resolver.ResolveTurnRunner(resolutionCtx, models.CloneAgentRun(run))
 	cancelResolution()
 	if heartbeatErr := <-resolutionHeartbeatDone; heartbeatErr != nil {
 		p.logger.Warnw("agent Run lease was lost during runner resolution", "runId", run.ID, "error", heartbeatErr)
@@ -331,7 +333,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	if latest, refreshErr := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID); refreshErr != nil {
 		p.logger.Warnw("failed to refresh agent Run after runner resolution", "runId", run.ID, "error", refreshErr)
 		return
-	} else if latest == nil || latest.Status != AgentRunStatusRunning || latest.LeaseOwner != workerID {
+	} else if latest == nil || latest.Status != models.AgentRunStatusRunning || latest.LeaseOwner != workerID {
 		return
 	} else {
 		run = latest
@@ -346,9 +348,9 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		if err == nil {
 			err = errors.New("turn runner resolver returned no step producer")
 		}
-		failed, _, transitionErr := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-			ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, Error: err.Error(), LeaseOwner: workerID,
-			Summary: "Agent run failed during runner resolution", Actor: ActivityActor{Type: "worker", ID: workerID},
+		failed, _, transitionErr := p.activity.TransitionRun(ctx, run.Scope, run.ID, activity.RunTransitionRequest{
+			ExpectedRevision: run.Revision, Status: models.AgentRunStatusFailed, Error: err.Error(), LeaseOwner: workerID,
+			Summary: "Agent run failed during runner resolution", Actor: models.ActivityActor{Type: "worker", ID: workerID},
 		})
 		if transitionErr != nil {
 			p.logger.Errorw("failed to persist runner resolution failure", "runId", run.ID, "error", transitionErr)
@@ -371,7 +373,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		p.logger.Warnw("agent run claim ended with an error", "runId", run.ID, "exit", exit.Reason, "steps", exit.Steps, "error", exit.Err)
 	}
 	switch {
-	case exit.Run != nil && isTerminalAgentRunStatus(exit.Run.Status):
+	case exit.Run != nil && models.IsTerminalAgentRunStatus(exit.Run.Status):
 		p.finishTerminalRun(ctx, exit.Run)
 		p.Wake()
 	case exit.Reason == runloop.RunLoopExitYielded || exit.Reason == runloop.RunLoopExitRequeued || exit.Reason == runloop.RunLoopExitParked:
@@ -382,7 +384,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 // finishTerminalRun runs the worker's terminal follow-ups: resource cleanup,
 // the reporting fast path and the parent fork group or AgentRequest the Run
 // answers.
-func (p *AgentRunWorkerPool) finishTerminalRun(ctx context.Context, run *AgentRun) {
+func (p *AgentRunWorkerPool) finishTerminalRun(ctx context.Context, run *models.AgentRun) {
 	p.finalizeTerminalRun(ctx, run)
 	p.projectTerminalReporting(ctx, run)
 	p.resolveForkChild(ctx, run)
@@ -391,8 +393,8 @@ func (p *AgentRunWorkerPool) finishTerminalRun(ctx context.Context, run *AgentRu
 
 // workerPlanToolEntries is the pool's RunLoopConfig.PlanToolEntries: the
 // dispatcher's planners over the binding's claim executor.
-func workerPlanToolEntries(store PortfolioStore) runloop.StepToolEntryPlanner {
-	return func(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
+func workerPlanToolEntries(store models.PortfolioStore) runloop.StepToolEntryPlanner {
+	return func(binding *agentrun.TurnRunnerBinding, session *models.AgentSession, step *models.AgentTurn, assistant *models.SessionEntry, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
 		if assistant != nil {
 			return runloop.PlanToolEntries(binding, assistant)
 		}
@@ -404,7 +406,7 @@ func workerPlanToolEntries(store PortfolioStore) runloop.StepToolEntryPlanner {
 			return nil, err
 		}
 		if run == nil {
-			return nil, ErrRunNotFound
+			return nil, models.ErrRunNotFound
 		}
 		return runloop.PlanToolCallEntries(binding, run, step, session.ID, calls)
 	}
@@ -425,19 +427,19 @@ func workerPlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text 
 	return control.PlainTextFinal(ctx, cc, text)
 }
 
-func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run *AgentRun) {
-	if run == nil || !isTerminalAgentRunStatus(run.Status) {
+func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run *models.AgentRun) {
+	if run == nil || !models.IsTerminalAgentRunStatus(run.Status) {
 		return
 	}
 	if p.requestInbox != nil {
 		applied, err := p.requestInbox.ResolveDecisionRun(ctx, run)
-		if err != nil && !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrInvalidAgentRequestState) {
+		if err != nil && !errors.Is(err, models.ErrRevisionConflict) && !errors.Is(err, models.ErrInvalidAgentRequestState) {
 			p.logger.Warnw("failed to resolve AgentRequest inbox decision", "runId", run.ID, "error", err)
 		} else if applied {
 			p.Wake()
 		}
 		applied, err = p.requestInbox.ResolveCompletionReviewRun(ctx, run)
-		if err != nil && !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrInvalidAgentRequestState) {
+		if err != nil && !errors.Is(err, models.ErrRevisionConflict) && !errors.Is(err, models.ErrInvalidAgentRequestState) {
 			p.logger.Warnw("failed to resolve AgentRequest completion review", "runId", run.ID, "error", err)
 		} else if applied {
 			p.Wake()
@@ -447,24 +449,24 @@ func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run 
 		return
 	}
 	_, err := p.collaboration.ResolveTerminalAgentRequestChild(ctx, run)
-	if err != nil && !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrInvalidAgentRequestState) {
+	if err != nil && !errors.Is(err, models.ErrRevisionConflict) && !errors.Is(err, models.ErrInvalidAgentRequestState) {
 		p.logger.Warnw("failed to resolve collaboration request from terminal child", "runId", run.ID, "error", err)
 	}
 }
 
-func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *AgentRun) {
+func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *models.AgentRun) {
 	if p.forks == nil || run == nil || run.ParentRunID == "" || run.Checkpoint["forkChild"] == nil {
 		return
 	}
-	result, err := p.forks.CompleteChild(ctx, run, ActivityActor{Type: "worker", ID: p.poolID})
-	if err != nil && !errors.Is(err, ErrDependencyConflict) {
+	result, err := p.forks.CompleteChild(ctx, run, models.ActivityActor{Type: "worker", ID: p.poolID})
+	if err != nil && !errors.Is(err, models.ErrDependencyConflict) {
 		p.logger.Warnw("failed to resolve terminal fork child", "runId", run.ID, "error", err)
 	} else if result != nil && !result.Replayed && result.Evaluation.Wake {
 		p.Wake()
 	}
 }
 
-func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {
+func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *models.AgentRun) {
 	// Canonical stores already captured an immutable reporting intent with the
 	// terminal commit. This fast path improves latency; the durable reporting
 	// worker retries and acknowledges it independently using the same message
@@ -474,26 +476,26 @@ func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *
 	}
 }
 
-func (p *AgentRunWorkerPool) finalizeTerminalRun(ctx context.Context, run *AgentRun) {
-	if run == nil || !isTerminalAgentRunStatus(run.Status) {
+func (p *AgentRunWorkerPool) finalizeTerminalRun(ctx context.Context, run *models.AgentRun) {
+	if run == nil || !models.IsTerminalAgentRunStatus(run.Status) {
 		return
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if p.runCommands != nil {
-		if err := p.runCommands.CascadeTerminalRun(cleanupCtx, cloneAgentRun(run)); err != nil {
+		if err := p.runCommands.CascadeTerminalRun(cleanupCtx, models.CloneAgentRun(run)); err != nil {
 			p.logger.Warnw("failed to cascade terminal Run cancellation", "runId", run.ID, "status", run.Status, "error", err)
 		}
 	}
 	if p.runFinalizer == nil {
 		return
 	}
-	if err := p.runFinalizer.FinalizeRun(cleanupCtx, cloneAgentRun(run)); err != nil {
+	if err := p.runFinalizer.FinalizeRun(cleanupCtx, models.CloneAgentRun(run)); err != nil {
 		p.logger.Warnw("failed to finalize terminal Run resources", "runId", run.ID, "status", run.Status, "error", err)
 	}
 }
 
-func (p *AgentRunWorkerPool) heartbeatRunLease(ctx context.Context, cancel context.CancelFunc, workerID string, run *AgentRun, done chan<- error) {
+func (p *AgentRunWorkerPool) heartbeatRunLease(ctx context.Context, cancel context.CancelFunc, workerID string, run *models.AgentRun, done chan<- error) {
 	interval := p.config.LeaseDuration / 3
 	if interval <= 0 {
 		interval = time.Second
@@ -569,7 +571,7 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 				observedWake = nil
 				if healthy {
 					// A retired pool would miss its local retry; keep it queued.
-					signals.ScheduleIn(WorkFamilyRunDue, p.config.Scope, delay)
+					signals.ScheduleIn(models.WorkFamilyRunDue, p.config.Scope, delay)
 				}
 			}
 			wait = workqueue.PollWait(delay)
@@ -600,7 +602,7 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 			} else {
 				maintenanceFailures = 0
 			}
-			signals.Schedule(WorkFamilyRunDue, p.config.Scope, next)
+			signals.Schedule(models.WorkFamilyRunDue, p.config.Scope, next)
 			wait = workqueue.WaitForever()
 		}
 		if !workqueue.WaitIdle(ctx, observedWake, healthChanged, wait) {
@@ -628,10 +630,10 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 	// so a large historical backlog cannot hold this pool's scheduler loop for
 	// minutes while it probes already-finalized Runs.
 	const pageSize = 10
-	newest, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: p.config.Scope, Kind: p.config.Kind, Statuses: []AgentRunStatus{
-			AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled,
-		}, Order: AgentRunOrderCreatedDesc, Limit: pageSize,
+	newest, err := p.portfolio.ListAgentRuns(ctx, models.AgentRunFilter{
+		Scope: p.config.Scope, Kind: p.config.Kind, Statuses: []models.AgentRunStatus{
+			models.AgentRunStatusCompleted, models.AgentRunStatusFailed, models.AgentRunStatusCanceled,
+		}, Order: models.AgentRunOrderCreatedDesc, Limit: pageSize,
 	})
 	if err != nil {
 		p.logger.Warnw("failed to list terminal Runs for resource finalization", "error", err)
@@ -660,10 +662,10 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		terminalRunSweeps.advance(key, pageSize)
 		return next
 	}
-	historical, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: p.config.Scope, Kind: p.config.Kind, Statuses: []AgentRunStatus{
-			AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled,
-		}, Order: AgentRunOrderCreatedDesc, Limit: pageSize, Offset: offset,
+	historical, err := p.portfolio.ListAgentRuns(ctx, models.AgentRunFilter{
+		Scope: p.config.Scope, Kind: p.config.Kind, Statuses: []models.AgentRunStatus{
+			models.AgentRunStatusCompleted, models.AgentRunStatusFailed, models.AgentRunStatusCanceled,
+		}, Order: models.AgentRunOrderCreatedDesc, Limit: pageSize, Offset: offset,
 	})
 	if err != nil {
 		p.logger.Warnw("failed to list historical terminal Runs for resource finalization", "error", err)
@@ -746,7 +748,7 @@ func (t *terminalRunSweepProgress) put(key string, entry terminalRunSweep) {
 // reconcileAgentRequestInbox returns when a throttled conversation projection
 // is next due, and whether the pass failed and must be retried.
 func (p *AgentRunWorkerPool) reconcileAgentRequestInbox(ctx context.Context) (*time.Time, bool) {
-	if p.requestInbox == nil || p.config.Kind != "" && p.config.Kind != RunKindAgentWork {
+	if p.requestInbox == nil || p.config.Kind != "" && p.config.Kind != models.RunKindAgentWork {
 		return nil, false
 	}
 	result, err := p.requestInbox.ReconcileWorker(ctx, p.config.Scope, p.config.AssignedAgentID)
@@ -779,11 +781,11 @@ func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) (*time.T
 			if !candidate.Ready {
 				continue
 			}
-			result, err := p.forks.ReconcileRunDependencyGroup(ctx, ReconcileRunDependencyGroupRequest{
+			result, err := p.forks.ReconcileRunDependencyGroup(ctx, portfolio.ReconcileRunDependencyGroupRequest{
 				Scope: candidate.Scope, GroupID: candidate.GroupID, ExpectedGroupRevision: candidate.GroupRevision,
-				ExpectedSourceRevision: candidate.SourceRevision, Actor: ActivityActor{Type: "worker", ID: p.poolID}, Visibility: ActivityVisibilityScope,
+				ExpectedSourceRevision: candidate.SourceRevision, Actor: models.ActivityActor{Type: "worker", ID: p.poolID}, Visibility: models.ActivityVisibilityScope,
 			})
-			if err != nil && !errors.Is(err, ErrRevisionConflict) {
+			if err != nil && !errors.Is(err, models.ErrRevisionConflict) {
 				p.logger.Warnw("failed to reconcile waiting dependency group", "groupId", candidate.GroupID, "error", err)
 				failed = true
 			} else if result != nil && !result.Replayed && result.Evaluation.Wake {
@@ -799,8 +801,8 @@ func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) (*time.T
 	}
 	// Custom stores without the optional indexed contract retain their existing
 	// terminal-child recovery behavior.
-	runs, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: p.config.Scope, Statuses: []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled}, Limit: 100,
+	runs, err := p.portfolio.ListAgentRuns(ctx, models.AgentRunFilter{
+		Scope: p.config.Scope, Statuses: []models.AgentRunStatus{models.AgentRunStatusCompleted, models.AgentRunStatusFailed, models.AgentRunStatusCanceled}, Limit: 100,
 	})
 	if err != nil {
 		p.logger.Warnw("failed to list terminal fork children", "error", err)
@@ -812,7 +814,7 @@ func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) (*time.T
 	return nil, false
 }
 
-func (p *AgentRunWorkerPool) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+func (p *AgentRunWorkerPool) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
 	if p != nil {
 		p.forks.SetAcceptedRunExecutionPreparer(preparer)
 		p.collaboration.SetAcceptedRunExecutionPreparer(preparer)

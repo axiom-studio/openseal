@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
@@ -42,13 +43,13 @@ type LoopBindingConfig struct {
 	SkillHosts SkillHostCapabilityResolver
 	// ConversationTasks is optional canonical storage for hosted task context.
 	// A model or copied Run context cannot supply task admission authority.
-	ConversationTasks ConversationTaskKernelStore
+	ConversationTasks models.ConversationTaskKernelStore
 	// Store is the kernel store: the session log the Run writes to, the path
 	// its model steps render and the governed calls they read. Required.
-	Store KernelStore
+	Store models.KernelStore
 	// Conversations resolves a conversation Run's origin (ask_user, approval
 	// mode). Optional: without it those flags stay off.
-	Conversations ConversationStore
+	Conversations models.ConversationStore
 	// Tools builds the claim's LoopToolExecutor. Required.
 	Tools *runloop.StepToolDispatcher
 	// ChatWorkspaces resolves the claim's chat Workspace, whose host tools
@@ -98,14 +99,14 @@ func (f SkillHostCapabilityResolverFunc) ResolveSkillHostCapabilities(ctx contex
 // here, so the advertised tools stay stable for the claim. Final is nil: the
 // loop completes the Run with the final output. The conversation runner adds
 // its own Final and hooks on top for chat replies.
-func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCatalog, run *AgentRun, config LoopBindingConfig) (*agentrun.TurnRunnerBinding, error) {
+func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCatalog, run *models.AgentRun, config LoopBindingConfig) (*agentrun.TurnRunnerBinding, error) {
 	if catalog == nil {
 		return nil, errors.New("canonical Agent turn catalog is unavailable")
 	}
 	if config.Store == nil || config.Tools == nil {
 		return nil, errors.New("loop binding requires a kernel store and a tool dispatcher")
 	}
-	if run == nil || (run.Kind != RunKindAgentWork && run.Kind != RunKindConversation) || strings.TrimSpace(run.AssignedAgentID) == "" {
+	if run == nil || (run.Kind != models.RunKindAgentWork && run.Kind != models.RunKindConversation) || strings.TrimSpace(run.AssignedAgentID) == "" {
 		return nil, errors.New("Agent work requires an assigned Agent")
 	}
 	scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
@@ -117,7 +118,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 		return nil, errors.New("assigned Agent deployment is not active")
 	}
 	definitionID, definitionVersion := deployment.DefinitionID, deployment.ActiveVersion
-	accepted, err := AcceptedRunExecutionForRun(run)
+	accepted, err := models.AcceptedRunExecutionForRun(run)
 	if err != nil {
 		return nil, err
 	}
@@ -127,12 +128,12 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 	definition, err := catalog.GetAgentDefinition(ctx, definitionID, definitionVersion)
 	if err != nil || definition == nil {
 		if accepted != nil || strings.TrimSpace(run.Entrypoint) != "" {
-			return nil, fmt.Errorf("%w: immutable Agent definition is unavailable", ErrAcceptedRunExecution)
+			return nil, fmt.Errorf("%w: immutable Agent definition is unavailable", models.ErrAcceptedRunExecution)
 		}
 		return nil, fmt.Errorf("resolve active Agent definition: %w", err)
 	}
 	if accepted != nil && (definition.ID != accepted.DefinitionID || definition.Version != accepted.DefinitionVersion || definition.Runbook == nil || definition.Runbook.ID != accepted.RunbookID || definition.Runbook.Version != accepted.RunbookVersion) {
-		return nil, ErrAcceptedRunExecution
+		return nil, models.ErrAcceptedRunExecution
 	}
 	r := &loopBindingResolution{config: config, catalog: catalog, run: run, scope: scope, deployment: deployment, definition: definition}
 	if trial, ok, trialErr := agentbuilder.AgentTrialContextForRun(run); trialErr != nil {
@@ -179,10 +180,10 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 	// Agent-owned run delegated to another Agent (a request, a completion
 	// review) activates that Agent without any connection: it never lends
 	// its own.
-	actorCtx := skill.WithRunActor(ctx, RunSkillActor(run))
+	actorCtx := skill.WithRunActor(ctx, models.RunSkillActor(run))
 	memberCtx := actorCtx
-	teamRun := run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != ""
-	delegatedRun := run.Owner.Type == OwnerTypeAgent && run.Owner.ID != run.AssignedAgentID
+	teamRun := run.Owner.Type == models.OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != ""
+	delegatedRun := run.Owner.Type == models.OwnerTypeAgent && run.Owner.ID != run.AssignedAgentID
 	if teamRun || delegatedRun {
 		memberCtx = skill.WithoutConnections(actorCtx)
 	}
@@ -279,22 +280,22 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 	}
 	delegationMode, _ := run.Context[agentrun.DelegationModeContextKey].(string)
 	if strings.TrimSpace(run.Entrypoint) != "" && delegationMode != string(runbook.DelegateReason) {
-		if definition.Runbook == nil || (accepted == nil && legacyAcceptedRunExecution(run, deployment, definition) == nil) {
-			return nil, ErrAcceptedRunExecution
+		if definition.Runbook == nil || (accepted == nil && models.LegacyAcceptedRunExecution(run, deployment, definition) == nil) {
+			return nil, models.ErrAcceptedRunExecution
 		}
 		if err := validatePinnedRunbookPlan(definition.Runbook, run); err != nil {
-			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, err)
+			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", models.ErrAcceptedRunExecution, deployment.ID, err)
 		}
 		producer, resolveErr := routine.NewRunbookStepProducer(definition.Runbook, strings.TrimSpace(run.Entrypoint), catalog, models.WithClock(config.Now))
 		if resolveErr != nil {
-			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, resolveErr)
+			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", models.ErrAcceptedRunExecution, deployment.ID, resolveErr)
 		}
 		base.Producer = producer
 		base.InputContextRefs = append(base.InputContextRefs, "runbook:"+definition.Runbook.ID+"@"+definition.Runbook.Version)
 		return r.deterministic(ctx, base)
 	}
 	var prompt agentrun.PromptContribution
-	if run.Source == RunSourceRequest || run.Source == RunSourceHandoff || run.Source == RunSourceEscalation {
+	if run.Source == models.RunSourceRequest || run.Source == models.RunSourceHandoff || run.Source == models.RunSourceEscalation {
 		if _, ok := run.Context["collaboration"]; ok {
 			prompt.AgentInstructions = append(prompt.AgentInstructions, collaboration.AcceptedAgentRequestExecutionSystemInstruction)
 		}
@@ -303,7 +304,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 		prompt.AgentInstructions = append(prompt.AgentInstructions, "Delegated execution instructions: "+strings.TrimSpace(delegated))
 	}
 	for _, action := range actions {
-		if action.SkillID == RunbookManagementSkillID && action.Action == runtimeaction.RunbookActionCreateTask {
+		if action.SkillID == models.RunbookManagementSkillID && action.Action == runtimeaction.RunbookActionCreateTask {
 			prompt.AgentInstructions = append(prompt.AgentInstructions, routine.RoutineTimezoneInstruction, routine.RoutineDeliveryInstruction)
 			if instruction := routine.BindingToolGrantInstruction(actions); instruction != "" {
 				prompt.AgentInstructions = append(prompt.AgentInstructions, instruction)
@@ -318,7 +319,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 type loopBindingResolution struct {
 	config     LoopBindingConfig
 	catalog    conversationrun.AgentTurnCatalog
-	run        *AgentRun
+	run        *models.AgentRun
 	scope      skill.ScopeReference
 	deployment *kernelagent.AgentDeployment
 	definition *kernelagent.AgentDefinition
@@ -341,7 +342,7 @@ func (r *loopBindingResolution) identity(actionDeploymentID string) *agentrun.Tu
 	return &agentrun.TurnRunnerBinding{
 		DeploymentID: r.deployment.ID, ActionDeploymentID: actionDeploymentID,
 		DefinitionID: r.definition.ID, DefinitionVersion: r.definition.Version,
-		BudgetReservation: BudgetUsage{Turns: 1},
+		BudgetReservation: models.BudgetUsage{Turns: 1},
 		ModelCredential:   deploymentModelCredential(r.deployment),
 	}
 }
@@ -350,7 +351,7 @@ func (r *loopBindingResolution) identity(actionDeploymentID string) *agentrun.Tu
 // Workspace (when workspace is true), control authority, the model step
 // producer over the catalog preparer, its compactor, the run-start preparer,
 // the tool executor and the progress acknowledgement renderer.
-func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.TurnRunnerBinding, prompts []HostedSkillPrompt, prompt agentrun.PromptContribution, workspaceTools bool) (*agentrun.TurnRunnerBinding, error) {
+func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.TurnRunnerBinding, prompts []models.HostedSkillPrompt, prompt agentrun.PromptContribution, workspaceTools bool) (*agentrun.TurnRunnerBinding, error) {
 	if r.config.Host == nil {
 		return nil, modelstep.ErrTurnHostUnavailable
 	}
@@ -394,7 +395,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		preparerConfig.RoutineScript = script.Section().Text
 	}
 	if r.config.Media.ImageInput != nil {
-		preparerConfig.ImageInput = r.config.Media.ImageInput(ctx, agentrun.StepInput{Run: r.run, Session: session, Binding: binding}, ModelStepRequest{
+		preparerConfig.ImageInput = r.config.Media.ImageInput(ctx, agentrun.StepInput{Run: r.run, Session: session, Binding: binding}, models.ModelStepRequest{
 			Scope: r.run.Scope, RunID: r.run.ID, AgentID: r.deployment.ID,
 			DefinitionID: binding.DefinitionID, DefinitionVersion: binding.DefinitionVersion,
 			ModelCredential: preparerConfig.ModelCredential, Model: binding.Model,
@@ -410,7 +411,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 	binding.Producer = producer
 	binding.Compactor = &modelstep.LoopCompactor{
 		Host: r.config.Host, Sessions: r.config.Store, Requests: preparer,
-		Budget: modelstep.NewRunActivityCompactionBudget(r.config.Store, NewRunActivityService(r.config.Store, r.config.Store, models.WithClock(r.config.Now)), r.config.Now),
+		Budget: modelstep.NewRunActivityCompactionBudget(r.config.Store, activity.NewRunActivityService(r.config.Store, r.config.Store, models.WithClock(r.config.Now)), r.config.Now),
 		Now:    r.config.Now,
 	}
 	binding.Preparers = []agentrun.StepPreparer{runloop.NewRunStartPreparer(r.config.Store, r.config.Store)}
@@ -445,7 +446,7 @@ func (r *loopBindingResolution) deterministic(ctx context.Context, binding *agen
 // resolution outside a claim (a progress acknowledgement's synthetic Run)
 // writes nothing: no session is created and no Workspace prepared.
 func (r *loopBindingResolution) claimed() bool {
-	return r.run.Status == AgentRunStatusRunning && strings.TrimSpace(r.run.LeaseOwner) != ""
+	return r.run.Status == models.AgentRunStatusRunning && strings.TrimSpace(r.run.LeaseOwner) != ""
 }
 
 // session is the session the Run writes to. A Run bound to one (its
@@ -453,15 +454,15 @@ func (r *loopBindingResolution) claimed() bool {
 // it. Any other Run gets its parentless run session at its first claim (A3):
 // a model Run's is seeded with its brief (and an event routine occurrence's
 // with its events), a deterministic Run's stays empty.
-func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*AgentSession, error) {
+func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*models.AgentSession, error) {
 	run := r.run
 	if run.SessionID != "" {
-		return conversationRunSession(ctx, r.config.Store, run)
+		return models.ConversationRunSession(ctx, r.config.Store, run)
 	}
 	if !r.claimed() {
 		return nil, nil
 	}
-	var initial []*SessionEntry
+	var initial []*models.SessionEntry
 	if seeded {
 		entries, err := routine.SessionSeedEntries(ctx, r.config.Store, r.config.RoutineEventFiles, r.config.Logger, run)
 		if err != nil {
@@ -469,13 +470,13 @@ func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*Agen
 		}
 		initial = entries
 	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	threadRootID, _ := run.Context["threadRootMessageId"].(string)
 	now := r.now()
-	opened, err := r.config.Store.CreateRunAgentSession(ctx, CreateRunAgentSessionRequest{
+	opened, err := r.config.Store.CreateRunAgentSession(ctx, models.CreateRunAgentSessionRequest{
 		Scope: run.Scope, OwnerRunID: run.ID, AgentID: r.deployment.ID,
 		ConversationID: strings.TrimSpace(conversationID), ThreadRootID: strings.TrimSpace(threadRootID),
-		Lease:          AgentRunLeaseGuard{WorkerID: run.LeaseOwner, Now: now},
+		Lease:          models.AgentRunLeaseGuard{WorkerID: run.LeaseOwner, Now: now},
 		InitialEntries: initial, Now: now,
 	})
 	if err != nil {
@@ -551,7 +552,7 @@ func restrictActivatedSkillsToRun(activation *skill.ActivationSnapshot, context 
 func withoutRunbookActivationStart(actions []capability.ModelAction) []capability.ModelAction {
 	filtered := make([]capability.ModelAction, 0, len(actions))
 	for _, action := range actions {
-		if action.SkillID == RunbookManagementSkillID && action.Action == routine.RunbookActionStart {
+		if action.SkillID == models.RunbookManagementSkillID && action.Action == routine.RunbookActionStart {
 			continue
 		}
 		filtered = append(filtered, action)
@@ -559,7 +560,7 @@ func withoutRunbookActivationStart(actions []capability.ModelAction) []capabilit
 	return filtered
 }
 
-func validatePinnedRunbookPlan(definition *runbook.Definition, run *AgentRun) error {
+func validatePinnedRunbookPlan(definition *runbook.Definition, run *models.AgentRun) error {
 	if definition == nil || run == nil || len(run.Plan) == 0 {
 		return nil
 	}
@@ -606,8 +607,8 @@ func projectCallableRunbookOperations(definition *runbook.Definition) []agentrun
 	return operations
 }
 
-func delegatedFromCurrentRunbook(run *AgentRun, definition *runbook.Definition) bool {
-	if run == nil || definition == nil || run.Source != RunSourceRequest {
+func delegatedFromCurrentRunbook(run *models.AgentRun, definition *runbook.Definition) bool {
+	if run == nil || definition == nil || run.Source != models.RunSourceRequest {
 		return false
 	}
 	triggerInput, ok := run.Context["triggerInput"].(map[string]interface{})
@@ -678,8 +679,8 @@ func deploymentModelCredential(deployment *kernelagent.AgentDeployment) *capabil
 // model actions. After the deliberate kernel and chat-default preferences
 // below, a model action name exposed twice is a hard error: the model names an
 // action, so a duplicate could only be routed to one binding by guesswork.
-func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkillPrompt, []capability.ModelAction, []agentrun.PreparedSkillRuntime, []string, error) {
-	prompts := make([]HostedSkillPrompt, 0, len(activation.Skills))
+func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]models.HostedSkillPrompt, []capability.ModelAction, []agentrun.PreparedSkillRuntime, []string, error) {
+	prompts := make([]models.HostedSkillPrompt, 0, len(activation.Skills))
 	actions := make([]capability.ModelAction, 0)
 	prepared := make([]agentrun.PreparedSkillRuntime, 0)
 	refs := []string{"skill-snapshot:" + activation.SnapshotID}
@@ -723,7 +724,7 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 		promptKey := activated.SkillID + "@" + activated.SkillVersion
 		if activated.Prompt != nil && strings.TrimSpace(activated.Prompt.Instructions) != "" && !promptSeen[promptKey] {
 			promptSeen[promptKey] = true
-			prompt := HostedSkillPrompt{
+			prompt := models.HostedSkillPrompt{
 				SkillID: activated.SkillID, Version: activated.SkillVersion, BindingID: activated.BindingID, BindingRevision: activated.BindingRevision,
 				Name: activated.Name, Description: activated.Description, Instructions: activated.Prompt.Instructions,
 			}
@@ -763,7 +764,7 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 
 // skillPromptReference is the appliedSkillRefs handle of a Skill prompt:
 // skill:<id>@<version>, plus #binding:<id>@<revision> for a bound prompt.
-func skillPromptReference(prompt HostedSkillPrompt) string {
+func skillPromptReference(prompt models.HostedSkillPrompt) string {
 	reference := "skill:" + strings.TrimSpace(prompt.SkillID) + "@" + strings.TrimSpace(prompt.Version)
 	if strings.TrimSpace(prompt.BindingID) != "" && prompt.BindingRevision > 0 {
 		reference += fmt.Sprintf("#binding:%s@%d", strings.TrimSpace(prompt.BindingID), prompt.BindingRevision)
@@ -776,15 +777,15 @@ func skillPromptReference(prompt HostedSkillPrompt) string {
 // embedding host. Other Skills have no canonical identity ("").
 func kernelManagementBindingID(skillID, version string) string {
 	switch strings.TrimSpace(skillID) {
-	case AgentManagementSkillID:
+	case models.AgentManagementSkillID:
 		return "bundled:agents"
-	case ObjectiveManagementSkillID:
+	case models.ObjectiveManagementSkillID:
 		return "bundled:objectives"
-	case RunbookManagementSkillID:
+	case models.RunbookManagementSkillID:
 		return "bundled:runbooks"
-	case RunManagementSkillID:
+	case models.RunManagementSkillID:
 		return "bundled:runs"
-	case SkillManagementSkillID:
+	case models.SkillManagementSkillID:
 		return "bundled:skills@" + strings.TrimSpace(version)
 	default:
 		return ""
@@ -796,7 +797,7 @@ func kernelManagementBindingID(skillID, version string) string {
 // Agent instructions, the drafted model, and no actions, workspace tools or
 // control tools beyond the final answer.
 func (r *loopBindingResolution) agentTrial(ctx context.Context, trial *agentbuilder.AgentTrialContext) (*agentrun.TurnRunnerBinding, error) {
-	if r.run.Kind != RunKindAgentWork || r.run.ParentRunID == "" || r.run.ParentRunID != trial.ParentRunID {
+	if r.run.Kind != models.RunKindAgentWork || r.run.ParentRunID == "" || r.run.ParentRunID != trial.ParentRunID {
 		return nil, errors.New("agent trial context does not belong to this Run")
 	}
 	profile := trial.Profile

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -20,7 +21,7 @@ import (
 // shortcut: Team-owned conversation Runs and ordinary Agent work never share a
 // claim stream.
 type DynamicAgentRunWorkerConfig struct {
-	Kind                              RunKind
+	Kind                              models.RunKind
 	AssignedAgentID                   string
 	Concurrency                       int
 	MaxActiveForAgent                 int
@@ -37,8 +38,8 @@ type DynamicAgentRunWorkerConfig struct {
 }
 
 func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
-	c.Kind = normalizeRunKind(c.Kind)
-	if !validRunKind(c.Kind) {
+	c.Kind = models.NormalizeRunKind(c.Kind)
+	if !models.IsValidRunKind(c.Kind) {
 		return fmt.Errorf("unsupported run kind %q", c.Kind)
 	}
 	if c.Concurrency <= 0 {
@@ -50,7 +51,7 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 	if c.MaxActiveForAgent <= 0 {
 		c.MaxActiveForAgent = c.Concurrency
 	}
-	if err := validateConversationTaskForegroundReserve(c.ConversationTaskForegroundReserve, c.MaxActiveForAgent); err != nil {
+	if err := models.ValidateConversationTaskForegroundReserve(c.ConversationTaskForegroundReserve, c.MaxActiveForAgent); err != nil {
 		return err
 	}
 	if c.MaxActiveForOwner < 0 || c.MaxActiveForObjective < 0 || c.MaxActiveForConcurrencyKey < 0 {
@@ -80,7 +81,7 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 // AgentRunWorkerSupervisor runs an isolated, kind-aware Run pool per scope
 // with Run work. See workqueue.ScopePools for when a scope has a pool.
 type AgentRunWorkerSupervisor struct {
-	store    KernelStore
+	store    models.KernelStore
 	resolver conversation.TurnRunnerResolver
 	config   DynamicAgentRunWorkerConfig
 	logger   *zap.SugaredLogger
@@ -90,7 +91,7 @@ type AgentRunWorkerSupervisor struct {
 	actions           *action.ActionCoordinator
 	runFinalizer      agentrun.RunTerminalFinalizer
 	limiter           *workqueue.WorkerLimiter
-	executionPreparer AcceptedRunExecutionPreparer
+	executionPreparer models.AcceptedRunExecutionPreparer
 }
 
 func (s *AgentRunWorkerSupervisor) SetRunTerminalFinalizer(finalizer agentrun.RunTerminalFinalizer) {
@@ -117,7 +118,7 @@ func (s *AgentRunWorkerSupervisor) SetWorkerLimiter(limiter *workqueue.WorkerLim
 }
 
 func NewAgentRunWorkerSupervisor(
-	store KernelStore,
+	store models.KernelStore,
 	resolver conversation.TurnRunnerResolver,
 	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
@@ -133,11 +134,11 @@ func NewAgentRunWorkerSupervisor(
 		logger = zap.NewNop().Sugar()
 	}
 	supervisor := &AgentRunWorkerSupervisor{store: store, resolver: resolver, config: config, logger: logger}
-	supervisor.pools = workqueue.NewScopePools("run:"+string(config.Kind), source, config.ReconcileInterval, workqueue.PoolRetireAfter, WorkFamilyRunDue, logger, supervisor.newPool)
+	supervisor.pools = workqueue.NewScopePools("run:"+string(config.Kind), source, config.ReconcileInterval, workqueue.PoolRetireAfter, models.WorkFamilyRunDue, logger, supervisor.newPool)
 	return supervisor, nil
 }
 
-func (s *AgentRunWorkerSupervisor) newPool(scope Scope) (*AgentRunWorkerPool, error) {
+func (s *AgentRunWorkerSupervisor) newPool(scope models.Scope) (*AgentRunWorkerPool, error) {
 	pool, err := NewAgentRunWorkerPool(s.store, s.resolver, s.logger, AgentRunWorkerConfig{
 		Scope: scope, Kind: s.config.Kind, AssignedAgentID: s.config.AssignedAgentID,
 		Concurrency: s.config.Concurrency, MaxActiveForAgent: s.config.MaxActiveForAgent,
@@ -167,7 +168,7 @@ func (s *AgentRunWorkerSupervisor) Stop() { s.pools.Stop() }
 
 func (s *AgentRunWorkerSupervisor) Wake() { s.pools.Wake() }
 
-func (s *AgentRunWorkerSupervisor) WakeScope(scope Scope) { s.pools.WakeScope(scope) }
+func (s *AgentRunWorkerSupervisor) WakeScope(scope models.Scope) { s.pools.WakeScope(scope) }
 
 // RefreshScopes lists worker scopes now while polling.
 func (s *AgentRunWorkerSupervisor) RefreshScopes() { s.pools.Request() }
@@ -179,7 +180,7 @@ func (s *AgentRunWorkerSupervisor) SetWorkSignals(status *workqueue.WorkSignalSt
 
 func (s *AgentRunWorkerSupervisor) ScopeCount() int { return s.pools.Count() }
 
-func (s *AgentRunWorkerSupervisor) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+func (s *AgentRunWorkerSupervisor) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
 	s.mu.Lock()
 	s.executionPreparer = preparer
 	s.mu.Unlock()
