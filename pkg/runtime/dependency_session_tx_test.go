@@ -57,24 +57,7 @@ func openDependencySessionPostgres(t *testing.T) dependencySessionStore {
 		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 		_ = store.Close()
 	})
-	return dependencySessionPostgres{store}
-}
-
-// dependencySessionPostgres adds the conformance fixture's fork hook to the
-// Postgres store (that hook lives in the integration-tagged test file).
-type dependencySessionPostgres struct{ *PostgresStore }
-
-func (s dependencySessionPostgres) conformanceCreateRunAgentSessionTx(ctx context.Context, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	result, err := s.createRunAgentSessionTx(ctx, tx, req)
-	if err != nil {
-		return nil, err
-	}
-	return result, tx.Commit()
+	return store
 }
 
 // forkTxFixture is a leased conversation Run whose last step called a

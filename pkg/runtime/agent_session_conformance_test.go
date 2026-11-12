@@ -27,10 +27,11 @@ type agentSessionConformanceStore interface {
 	PortfolioStore
 	RunActivityStore
 	AgentRunScheduleStore
-	// conformanceCreateRunAgentSessionTx runs the backend's in-transaction
-	// createRunAgentSessionTx helper in a transaction of its own (forks).
-	conformanceCreateRunAgentSessionTx(ctx context.Context, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error)
 }
+
+// createRunSessionInOwnTx runs a backend's in-transaction
+// createRunAgentSessionTx helper in a transaction of its own (forks).
+type createRunSessionInOwnTx func(ctx context.Context, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error)
 
 const conformanceWorker = "session-worker"
 
@@ -38,21 +39,25 @@ type sessionConformance struct {
 	t     *testing.T
 	ctx   context.Context
 	store agentSessionConformanceStore
-	scope Scope
-	now   time.Time
+	// createRunSession is set only by the conformance suite, for fork.
+	createRunSession createRunSessionInOwnTx
+	scope            Scope
+	now              time.Time
 }
 
-func runAgentSessionStoreConformance(t *testing.T, open func(t *testing.T) agentSessionConformanceStore) {
+func runAgentSessionStoreConformance(t *testing.T, open func(t *testing.T) (agentSessionConformanceStore, createRunSessionInOwnTx)) {
 	t.Helper()
 	for _, sub := range agentSessionConformanceSubtests {
 		sub := sub
 		t.Run(sub.name, func(t *testing.T) {
+			store, createRunSession := open(t)
 			f := &sessionConformance{
-				t:     t,
-				ctx:   context.Background(),
-				store: open(t),
-				scope: Scope{Kind: "tenant", ID: "session-" + uuid.NewString()[:8]},
-				now:   time.Now().UTC().Truncate(time.Millisecond),
+				t:                t,
+				ctx:              context.Background(),
+				store:            store,
+				createRunSession: createRunSession,
+				scope:            Scope{Kind: "tenant", ID: "session-" + uuid.NewString()[:8]},
+				now:              time.Now().UTC().Truncate(time.Millisecond),
 			}
 			sub.run(f)
 		})
@@ -327,7 +332,7 @@ func (f *sessionConformance) event(runID, summary string) *ActivityEvent {
 
 // fork runs the backend's in-transaction run-session create.
 func (f *sessionConformance) fork(ownerRunID, parentSessionID string, forkSequence int64, initial ...*SessionEntry) (*OpenAgentSessionResult, error) {
-	return f.store.conformanceCreateRunAgentSessionTx(f.ctx, CreateRunAgentSessionTxRequest{
+	return f.createRunSession(f.ctx, CreateRunAgentSessionTxRequest{
 		Scope: f.scope, OwnerRunID: ownerRunID, AgentID: "agent-a", ParentSessionID: parentSessionID,
 		ForkSequence: forkSequence, InitialEntries: initial, Now: f.now,
 	})

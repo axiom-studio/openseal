@@ -12,12 +12,17 @@ import (
 // TestSQLiteAgentSessionStore runs the session store conformance suite
 // (agent_session_conformance_test.go) against the SQLite backend.
 func TestSQLiteAgentSessionStore(t *testing.T) {
-	runAgentSessionStoreConformance(t, func(t *testing.T) agentSessionConformanceStore {
-		return openTestSQLiteSessionStore(t)
+	runAgentSessionStoreConformance(t, func(t *testing.T) (agentSessionConformanceStore, createRunSessionInOwnTx) {
+		store := openTestSQLiteSessionStore(t)
+		return store, func(ctx context.Context, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
+			return createSQLiteRunSessionInOwnTx(ctx, store, req)
+		}
 	})
 }
 
-func (s *SQLiteStore) conformanceCreateRunAgentSessionTx(ctx context.Context, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
+// createSQLiteRunSessionInOwnTx runs the store's in-transaction
+// createRunAgentSessionTx helper in a write transaction of its own.
+func createSQLiteRunSessionInOwnTx(ctx context.Context, s *SQLiteStore, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
 	var result *OpenAgentSessionResult
 	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
 		var err error

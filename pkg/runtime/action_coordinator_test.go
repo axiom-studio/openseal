@@ -106,7 +106,7 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 		return ActionPolicyDecision{Disposition: decision, Reason: "test"}, nil
 	}))
 	coordinator.now = func() time.Time { return now.Add(time.Second) }
-	coordinator.newID = func() string { return "id-" + decision.String() }
+	coordinator.newID = func() string { return "id-" + string(decision) }
 	base := ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy"}
 	invalid := loopProposeRequest(base, "invalid")
 	invalid.Arguments = map[string]interface{}{"environment": 42}
@@ -244,8 +244,6 @@ func externalOperationPolicyCatalog(t *testing.T) (*skill.Catalog, Scope) {
 	}
 	return catalog, scope
 }
-
-func (d ActionDisposition) String() string { return string(d) }
 
 func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 	t.Helper()

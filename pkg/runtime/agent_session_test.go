@@ -153,7 +153,7 @@ func TestApplyToolEntryTransition(t *testing.T) {
 	if _, err := applyToolEntryTransition(running, ToolEntryTransitionRequest{RunID: "r2", From: ToolEntryRunning, To: ToolEntryCompleted, Result: done.Result}); !errors.Is(err, ErrToolEntryNotOwned) {
 		t.Fatalf("foreign run: %v", err)
 	}
-	if _, err := applyToolEntryTransition(running, done.withRevision(1)); !errors.Is(err, ErrToolEntryStateConflict) {
+	if _, err := applyToolEntryTransition(running, transitionAtRevision(done, 1)); !errors.Is(err, ErrToolEntryStateConflict) {
 		t.Fatalf("stale revision: %v", err)
 	}
 	other := done
@@ -163,7 +163,8 @@ func TestApplyToolEntryTransition(t *testing.T) {
 	}
 }
 
-func (r ToolEntryTransitionRequest) withRevision(rev int64) ToolEntryTransitionRequest {
+// transitionAtRevision is r expecting the entry at revision rev.
+func transitionAtRevision(r ToolEntryTransitionRequest, rev int64) ToolEntryTransitionRequest {
 	r.ExpectedRevision = rev
 	return r
 }

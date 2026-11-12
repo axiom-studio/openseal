@@ -45,12 +45,17 @@ func newAgentSessionPostgresStores(t *testing.T, n int) []*PostgresStore {
 // TestPostgresAgentSessionStore runs the session store conformance suite
 // (agent_session_conformance_test.go) against the Postgres backend.
 func TestPostgresAgentSessionStore(t *testing.T) {
-	runAgentSessionStoreConformance(t, func(t *testing.T) agentSessionConformanceStore {
-		return newAgentSessionPostgresStores(t, 1)[0]
+	runAgentSessionStoreConformance(t, func(t *testing.T) (agentSessionConformanceStore, createRunSessionInOwnTx) {
+		store := newAgentSessionPostgresStores(t, 1)[0]
+		return store, func(ctx context.Context, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
+			return createPostgresRunSessionInOwnTx(ctx, store, req)
+		}
 	})
 }
 
-func (s *PostgresStore) conformanceCreateRunAgentSessionTx(ctx context.Context, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
+// createPostgresRunSessionInOwnTx runs the store's in-transaction
+// createRunAgentSessionTx helper in a transaction of its own.
+func createPostgresRunSessionInOwnTx(ctx context.Context, s *PostgresStore, req CreateRunAgentSessionTxRequest) (*OpenAgentSessionResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err

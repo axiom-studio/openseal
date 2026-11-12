@@ -194,7 +194,7 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := store.conformanceCreateRunAgentSessionTx(t.Context(), txReq)
+	created, err := createSQLiteRunSessionInOwnTx(t.Context(), store, txReq)
 	if err != nil {
 		t.Fatal(err)
 	}

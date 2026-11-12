@@ -311,13 +311,13 @@ func TestCreateRunSessionBindsRunAndForks(t *testing.T) {
 
 	// Same-Agent fork in the child-creating transaction, before p3.
 	putTestSessionRun(t, store, "child", "", AgentRunStatusQueued, 0)
-	_, err = store.conformanceCreateRunAgentSessionTx(context.Background(), CreateRunAgentSessionTxRequest{
+	_, err = createSQLiteRunSessionInOwnTx(context.Background(), store, CreateRunAgentSessionTxRequest{
 		Scope: testSessionScope, OwnerRunID: "child", AgentID: "agent-a", ParentSessionID: parent.ID, ForkSequence: 5,
 	})
 	if !errors.Is(err, ErrInvalidAgentSession) {
 		t.Fatalf("fork past the leaf = %v, want ErrInvalidAgentSession", err)
 	}
-	fork, err := store.conformanceCreateRunAgentSessionTx(context.Background(), CreateRunAgentSessionTxRequest{
+	fork, err := createSQLiteRunSessionInOwnTx(context.Background(), store, CreateRunAgentSessionTxRequest{
 		Scope: testSessionScope, OwnerRunID: "child", AgentID: "agent-a", ParentSessionID: parent.ID, ForkSequence: 2, Now: testSessionNow,
 	})
 	if err != nil {
@@ -349,7 +349,7 @@ func TestForkDepthLimit(t *testing.T) {
 	for depth := 1; depth <= MaxAgentSessionDepth+1; depth++ {
 		runID := "d" + string(rune('0'+depth))
 		putTestSessionRun(t, store, runID, "", AgentRunStatusQueued, 0)
-		result, err := store.conformanceCreateRunAgentSessionTx(context.Background(), CreateRunAgentSessionTxRequest{
+		result, err := createSQLiteRunSessionInOwnTx(context.Background(), store, CreateRunAgentSessionTxRequest{
 			Scope: testSessionScope, OwnerRunID: runID, AgentID: "agent-a", ParentSessionID: parent.ID,
 		})
 		if depth > MaxAgentSessionDepth {
