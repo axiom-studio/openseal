@@ -532,13 +532,14 @@ func TestForkInsufficientBudgetIsToolError(t *testing.T) {
 }
 
 func TestForkBoundedRunFundsMinimumChildren(t *testing.T) {
+	const childMinimumTurns = 8 // the Turns every child is funded with at least
 	forkStores(t, func(t *testing.T, store forkTestStore) {
 		c := newForkCall(t, store, &BudgetPolicy{MaxTurns: 40}, twoBranchFork)
 		if result := c.settle(); result.Kind != ControlParked {
 			t.Fatalf("result = %#v", result)
 		}
 		for _, id := range c.meta().ChildRunIDs {
-			if child := c.getRun(id); child.Budget == nil || child.Budget.MaxTurns != controlMinimumChildTurns {
+			if child := c.getRun(id); child.Budget == nil || child.Budget.MaxTurns != childMinimumTurns {
 				t.Fatalf("child budget = %#v", child.Budget)
 			}
 		}

@@ -33,7 +33,22 @@ type toolExecFixture struct {
 	binding  *TurnRunnerBinding
 }
 
-func newToolExecFixture(t *testing.T, authority ControlAuthority) *toolExecFixture {
+// fakeLoopControls fakes every control tool of the run loop, except the
+// tools in real, which keep the handler given there.
+func fakeLoopControls(real ...controlTool) (controlRegistry, map[ControlToolName]*fakeControlHandler) {
+	registry := newControlRegistry(real...)
+	fakes := map[ControlToolName]*fakeControlHandler{}
+	for name := range loopControlRegistry() {
+		if _, ok := registry[name]; !ok {
+			fakes[name] = &fakeControlHandler{}
+			registry[name] = fakes[name]
+		}
+	}
+	return registry, fakes
+}
+
+// newToolExecFixture fakes the control tools, except the tools in real.
+func newToolExecFixture(t *testing.T, authority ControlAuthority, real ...controlTool) *toolExecFixture {
 	t.Helper()
 	ctx := context.Background()
 	store := newTestKernelStore(t)
@@ -58,9 +73,10 @@ func newToolExecFixture(t *testing.T, authority ControlAuthority) *toolExecFixtu
 	}
 	f := &toolExecFixture{t: t, ctx: ctx, store: store, scope: scope, now: now, run: run, host: newScriptedHost()}
 	f.run = f.currentRun()
-	registry, handlers := fakeControlRegistry()
+	registry, handlers := fakeLoopControls(real...)
 	f.handlers = handlers
-	f.control = &ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
+	f.control = &ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }}
+	f.control.useTools(registry)
 	dispatcher, err := NewStepToolDispatcher(StepToolDispatcherConfig{
 		Sessions: store, Turns: store, Actions: store, Control: f.control,
 		Host: NewHostToolDispatcher(f.host, nil, nil), Now: func() time.Time { return now },
@@ -327,7 +343,7 @@ func TestSecondSettleCallRefused(t *testing.T) {
 		t.Fatalf("outcome = %#v", out)
 	}
 	ask := f.entry(step.entries[1])
-	if ask.State != ToolEntryError || resultValue(t, ask)["error"] != controlOneSettleCallCode {
+	if ask.State != ToolEntryError || resultValue(t, ask)["error"] != "control_one_settle_call" {
 		t.Fatalf("second settle call = %s %v", ask.State, ask.Tool.Result)
 	}
 	if wait := f.entry(step.entries[0]); wait.State != ToolEntryPending || f.handlers[ControlToolWait].calls != 0 {
@@ -413,10 +429,20 @@ func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc C
 	h.settles++
 	key := "fork-" + cc.Entry.ID
 	h.groups[key]++
-	entry, err := x.transitionControlEntry(ctx, cc, ToolEntryAwaitingChild, &ToolEntryWait{GroupID: key}, nil, &ControlEntryMeta{ForkID: key, GroupID: key})
+	meta, err := json.Marshal(&ControlEntryMeta{Kind: ControlToolFork, ForkID: key, GroupID: key})
 	if err != nil {
 		return ControlResult{}, err
 	}
+	now := x.Now()
+	moved, err := x.Sessions.TransitionToolEntry(ctx, ToolEntryTransitionRequest{
+		Scope: cc.Run.Scope, EntryID: cc.Entry.ID, RunID: cc.Run.ID, Lease: AgentRunLeaseGuard{WorkerID: cc.WorkerID, Now: now},
+		From: cc.Entry.State, ExpectedRevision: cc.Entry.Revision, To: ToolEntryAwaitingChild,
+		Wait: &ToolEntryWait{GroupID: key}, Kernel: &ToolEntryKernelPatch{Control: meta}, Now: now,
+	})
+	if err != nil {
+		return ControlResult{}, err
+	}
+	entry := moved.Entry
 	return ControlResult{Kind: ControlParked, Entry: entry, Park: &LoopPark{
 		Status: AgentRunStatusWaitingForDependency, Wake: &WakeCondition{Type: "run_dependencies", Reference: key},
 		Summary: "Waiting for the branches", Committed: true,
@@ -429,17 +455,8 @@ func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc C
 // ControlExecutor.Resume, whose resumers own that row of SPEC §3.7 (CTL-5b,
 // CTL-6b).
 func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
-	f := newToolExecFixture(t, ControlAuthority{ForkAllowed: true})
 	fork := &committedForkHandler{groups: map[string]int{}}
-	registry := controlRegistry{}
-	for _, name := range controlToolOrder {
-		if name == ControlToolFork {
-			registry.register(name, fork)
-		} else {
-			registry.register(name, &fakeControlHandler{})
-		}
-	}
-	f.control.handlers = registry
+	f := newToolExecFixture(t, ControlAuthority{ForkAllowed: true}, newControlTool(ControlToolFork, fork))
 	// Step 1 asked for a fork; the step finished and was applied, then the
 	// worker died before the settle phase created the group.
 	step := f.step("step-1", AgentTurnStatusCompleted, toolCall("call-fork", "control_fork", `{"goal":"split"}`))
@@ -670,7 +687,7 @@ func TestResumeUncheckedStepRefusesSecondSettleCall(t *testing.T) {
 		t.Fatalf("outcome = %#v", out)
 	}
 	ask := f.entry(step.entries[1])
-	if ask.State != ToolEntryError || resultValue(t, ask)["error"] != controlOneSettleCallCode {
+	if ask.State != ToolEntryError || resultValue(t, ask)["error"] != "control_one_settle_call" {
 		t.Fatalf("second settle call = %s %v", ask.State, ask.Tool.Result)
 	}
 	if wait := f.entry(step.entries[0]); wait.State != ToolEntryCompleted || f.handlers[ControlToolWait].calls != 1 || f.handlers[ControlToolAskUser].calls != 0 {

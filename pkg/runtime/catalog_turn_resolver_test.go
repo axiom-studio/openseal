@@ -142,11 +142,16 @@ func claimedBindingRun(t *testing.T, store *sqlite.Store, run *AgentRun) *AgentR
 // prepareBindingStep is the model request of the binding's first step.
 func prepareBindingStep(t *testing.T, binding *TurnRunnerBinding, run *AgentRun) ModelStepRequest {
 	t.Helper()
-	producer, ok := binding.Producer.(*ModelStepProducer)
-	if !ok {
+	if _, ok := binding.Producer.(*ModelStepProducer); !ok {
 		t.Fatalf("binding producer = %T, want the model step producer", binding.Producer)
 	}
-	req, err := producer.preparer.PrepareModelStep(t.Context(), StepInput{
+	// The compactor builds its summary requests with the producer's own
+	// preparer, so it prepares the step the producer would.
+	compactor, ok := binding.Compactor.(*LoopCompactor)
+	if !ok {
+		t.Fatalf("binding compactor = %T, want the loop compactor", binding.Compactor)
+	}
+	req, err := compactor.Requests.PrepareModelStep(t.Context(), StepInput{
 		Run: run, Step: &AgentTurn{ID: "step-1", RunID: run.ID, Sequence: 1}, Session: binding.Session, Binding: binding, Mode: StepModeNormal,
 	})
 	if err != nil {
@@ -415,6 +420,10 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	}
 }
 
+// progressAcknowledgementInstruction is the system instruction of every
+// progress acknowledgement step.
+const progressAcknowledgementInstruction = "Produce only a brief progress acknowledgement in the Agent's configured personality. Use only the verified facts in the user message. Write at most two short sentences and 100 characters. Do not claim completion, expose hidden reasoning, propose actions, call tools, or add unrelated explanation."
+
 func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "11"}
 	catalog := &resolverCatalog{
@@ -446,7 +455,7 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 	}
 	if ack := stepHost.requests[0]; ack.Tools != nil || ack.SessionID != "" || ack.Purpose != ModelStepPurposeAcknowledgement || len(ack.System.SkillPrompts) != 0 ||
 		!slices.Contains(ack.System.AgentInstructions, "Work carefully.") ||
-		!slices.Contains(ack.System.AgentInstructions, runProgressAcknowledgementSystemInstruction) {
+		!slices.Contains(ack.System.AgentInstructions, progressAcknowledgementInstruction) {
 		t.Fatalf("progress acknowledgement request = %#v", ack)
 	}
 	req := prepareBindingStep(t, binding, run)
@@ -937,5 +946,93 @@ func TestLoopRunSessionSeed(t *testing.T) {
 	}
 	if entries[0].ID == entries[1].ID {
 		t.Fatal("brief and event entries share an id")
+	}
+}
+
+func TestResolveLoopBindingAgentTrial(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "trial"}
+	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{ID: "finn", Scope: skillScope, DefinitionID: "finn-definition", ActiveVersion: "7", RolloutStatus: kernelagent.RolloutActive},
+		definition: &kernelagent.AgentDefinition{ID: "finn-definition", Version: "7", Purpose: "Build Agents", SystemPrompt: "You are Finn, the builder."},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skillScope, DeploymentID: "finn"},
+	}
+	store := newTestKernelStore(t)
+	parent := &AgentRun{
+		ID: "parent", Scope: scope, Kind: RunKindConversation, RootRunID: "parent", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
+		AssignedAgentID: "finn", Goal: "Build an Agent", Status: AgentRunStatusRunning, Revision: 1, CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateAgentRun(t.Context(), cloneAgentRun(parent)); err != nil {
+		t.Fatal(err)
+	}
+	// The trial context is stored on the child as the JSON object of an
+	// AgentTrialContext.
+	encoded, err := json.Marshal(AgentTrialContext{
+		Profile: agentProfileArguments{
+			DisplayName: "Inbox Triage", Purpose: "Sort the support inbox.", SystemPrompt: "Sort mail by urgency.",
+			Personality: "Friendly", OperatingPrinciples: []string{"Flag anything legal."},
+		},
+		ParentRunID: parent.ID, ActionCallID: "trial-call",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trial map[string]interface{}
+	if err := json.Unmarshal(encoded, &trial); err != nil {
+		t.Fatal(err)
+	}
+	child := claimedBindingRun(t, store, &AgentRun{
+		ID: "child", Scope: scope, Kind: RunKindAgentWork, ParentRunID: parent.ID, RootRunID: parent.ID,
+		Owner: parent.Owner, AssignedAgentID: "finn", Goal: "Hello there", Source: RunSourceHandoff,
+		Context: map[string]interface{}{AgentTrialContextKey: trial, AgentTrialModelContextKey: "gpt-6-luna"},
+	})
+	config := loopBindingTestConfig(t, store, &progressAckStepHost{})
+	config.ChatWorkspaces = bindingTestChatWorkspaces{}
+	binding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(child), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.activationDeployments) != 0 {
+		t.Fatalf("trial activated Skills: %v", catalog.activationDeployments)
+	}
+	if binding.DeploymentID != "finn" || binding.DefinitionID != "finn-definition" || binding.DefinitionVersion != "7" ||
+		binding.Model != "gpt-6-luna" || len(binding.ModelActions) != 0 || len(binding.RunbookOperations) != 0 ||
+		binding.Final != nil || binding.FinalOutput != nil {
+		t.Fatalf("binding = %#v", binding)
+	}
+	authority := binding.Authority
+	if authority.finalMode() != FinalModeDefault || authority.CanAskUser || authority.ForkAllowed || authority.CanReportProgress ||
+		authority.CanWait || authority.CanReact || authority.TaskStart != nil || len(authority.DelegateTargets) != 0 {
+		t.Fatalf("authority = %#v", authority)
+	}
+	req := prepareBindingStep(t, binding, child)
+	if tools := bindingToolNames(req); !slices.Equal(tools, []string{string(ControlToolFinalAnswer)}) {
+		t.Fatalf("tools = %v", tools)
+	}
+	if req.DefinitionID != "finn-definition" || req.DefinitionVersion != "7" || req.Model != "gpt-6-luna" {
+		t.Fatalf("request identity = %s@%s model %q", req.DefinitionID, req.DefinitionVersion, req.Model)
+	}
+	instructions := strings.Join(req.System.AgentInstructions, "\n")
+	for _, want := range []string{"Sort mail by urgency.", "Purpose: Sort the support inbox.", "Personality: Friendly", "Flag anything legal."} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("instructions lack %q: %q", want, instructions)
+		}
+	}
+	if strings.Contains(instructions, "You are Finn") || strings.Contains(instructions, "Build Agents") {
+		t.Fatalf("instructions carry the builder's persona: %q", instructions)
+	}
+	entries, err := store.ListAgentSessionEntries(t.Context(), SessionEntryFilter{Scope: scope, SessionID: binding.Session.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].User == nil || len(entries[0].User.Content) != 1 || entries[0].User.Content[0].Text != "Hello there" {
+		t.Fatalf("seed = %#v", entries)
+	}
+
+	// A trial context on a Run that is not its child is refused.
+	stray := cloneAgentRun(child)
+	stray.ParentRunID = "someone-else"
+	if _, err := ResolveLoopBinding(t.Context(), catalog, stray, config); err == nil {
+		t.Fatal("stray trial context accepted")
 	}
 }

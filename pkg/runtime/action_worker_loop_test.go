@@ -31,6 +31,21 @@ type loopActionSpec struct {
 // owner workerID, as ActionCoordinator.Propose does for a governed loop tool
 // call: the Run is unchanged except for the action reservation of a budgeted
 // Run.
+// loopActionCredentialRefs are the binding's references for the credentials
+// the bound action requires, as a proposal records them; nil when none.
+func loopActionCredentialRefs(bound *skill.BoundAction) map[string]skill.CredentialReference {
+	refs := make(map[string]skill.CredentialReference)
+	for _, requirement := range bound.Action.Credentials {
+		if reference, ok := bound.Binding.Credentials[requirement.Name]; ok {
+			refs[requirement.Name] = reference
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return refs
+}
+
 func proposeLoopAction(t *testing.T, store KernelStore, catalog ActionExecutionCatalog, run *AgentRun, workerID string, now time.Time, spec loopActionSpec) *ActionProposalResult {
 	t.Helper()
 	ctx := context.Background()
@@ -47,7 +62,7 @@ func proposeLoopAction(t *testing.T, store KernelStore, catalog ActionExecutionC
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
 		SkillID: spec.skillID, SkillVersion: spec.version, Action: spec.action, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 		Status: ActionCallStatusReady, Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: bound.Action.Review,
-		Arguments: maps.Clone(spec.arguments), CredentialRefs: boundCredentialReferences(bound), IdempotencyKey: "tool-call:step-1:" + spec.id,
+		Arguments: maps.Clone(spec.arguments), CredentialRefs: loopActionCredentialRefs(bound), IdempotencyKey: "tool-call:step-1:" + spec.id,
 		MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if spec.externalOperation != nil {

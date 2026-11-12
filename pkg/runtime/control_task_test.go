@@ -507,7 +507,7 @@ func TestOldTaskWithoutToolEntryStillValidates(t *testing.T) {
 func TestStartTaskSpecAndArguments(t *testing.T) {
 	authority := ControlAuthority{TaskStart: &HostedConversationTaskContext{ConversationID: "c", CanStart: true}}
 	var spec *ControlToolSpec
-	for _, s := range ControlToolSpecs(authority) {
+	for _, s := range builtinControlSpecs(authority) {
 		if s.Name == ControlToolStartTask {
 			s := s
 			spec = &s
@@ -522,7 +522,7 @@ func TestStartTaskSpecAndArguments(t *testing.T) {
 	}
 	voice := authority
 	voice.VoiceCallStarted = true
-	for _, s := range ControlToolSpecs(voice) {
+	for _, s := range builtinControlSpecs(voice) {
 		if s.Name == ControlToolStartTask {
 			t.Fatal("start_task offered in a voice call")
 		}

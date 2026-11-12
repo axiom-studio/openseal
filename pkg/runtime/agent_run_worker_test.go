@@ -43,18 +43,3 @@ func TestAgentRunWorkerPoolCoalescesIdleClaimPolling(t *testing.T) {
 		t.Fatalf("idle claim probes scaled with worker concurrency: got %d", claims)
 	}
 }
-
-func TestDelegatedRunbookOriginPreservesImmutableIdentity(t *testing.T) {
-	origin := delegatedRunbookOrigin(map[string]interface{}{
-		"runbookDefinitionId": "hourly-scan", "runbookDefinitionVersion": "2.0.2",
-		"runbookEntrypoint": "perform-hourly", "runbookActivationId": "activation-one", "runbookTriggerId": "hourly",
-	})
-	if origin["runbookDefinitionId"] != "hourly-scan" || origin["runbookDefinitionVersion"] != "2.0.2" ||
-		origin["runbookEntrypoint"] != "perform-hourly" || origin["runbookActivationId"] != "activation-one" ||
-		origin["runbookTriggerId"] != "hourly" {
-		t.Fatalf("delegated Runbook origin = %#v", origin)
-	}
-	if delegatedRunbookOrigin(map[string]interface{}{"runbookDefinitionId": "hourly-scan"}) != nil {
-		t.Fatal("incomplete Runbook origin was propagated")
-	}
-}

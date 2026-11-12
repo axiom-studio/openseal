@@ -431,7 +431,7 @@ func TestRunOperationResumeWhileChildRunsReparks(t *testing.T) {
 func TestRunOperationsListedInCapabilitiesNoteInOrder(t *testing.T) {
 	second := HostedRunbookOperation{Entrypoint: "report", Name: "Weekly report", Description: "Summarize the week"}
 	authority := ControlAuthority{Operations: []HostedRunbookOperation{operationTestEngage, second}}
-	specs := ControlToolSpecs(authority)
+	specs := builtinControlSpecs(authority)
 	var spec *ControlToolSpec
 	for i := range specs {
 		if specs[i].Name == ControlToolRunOperation {
@@ -450,7 +450,7 @@ func TestRunOperationsListedInCapabilitiesNoteInOrder(t *testing.T) {
 	if _, enum := entrypoint["enum"]; enum || strings.Contains(spec.Description, "engage-now") {
 		t.Fatalf("run_operation lists its operations: %v %s", entrypoint, spec.Description)
 	}
-	for _, s := range ControlToolSpecs(ControlAuthority{}) {
+	for _, s := range builtinControlSpecs(ControlAuthority{}) {
 		if s.Name == ControlToolRunOperation {
 			t.Fatal("run_operation offered with no operations")
 		}

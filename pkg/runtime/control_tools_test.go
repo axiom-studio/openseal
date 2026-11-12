@@ -51,6 +51,23 @@ func fakeControlRegistry() (controlRegistry, map[ControlToolName]*fakeControlHan
 	return registry, handlers
 }
 
+// builtinControlSpecs are the specs of the built-in control tools offered
+// under a. The runbook tools are never offered, so they are the specs every
+// loop step gets.
+func builtinControlSpecs(a ControlAuthority) []ControlToolSpec {
+	return newControlRegistry(builtinControlTools()...).specs(a)
+}
+
+// builtinControlModelStepTools are builtinControlSpecs as model step tools.
+func builtinControlModelStepTools(a ControlAuthority) []ModelStepTool {
+	specs := builtinControlSpecs(a)
+	tools := make([]ModelStepTool, 0, len(specs))
+	for _, spec := range specs {
+		tools = append(tools, spec.ModelStepTool())
+	}
+	return tools
+}
+
 func specNames(specs []ControlToolSpec) []string {
 	names := make([]string, 0, len(specs))
 	for _, spec := range specs {

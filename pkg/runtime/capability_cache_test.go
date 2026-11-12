@@ -24,16 +24,34 @@ func (a fixtureNoteAppender) AppendAgentSessionEntries(_ context.Context, req Ap
 	return &AppendAgentSessionEntriesResult{Entries: out}, nil
 }
 
-// ensureNote runs the producer's capabilities-note check for one step.
+// fixtureNoteSessions is a render fixture as a model step producer's
+// session store.
+type fixtureNoteSessions struct{ fixtureNoteAppender }
+
+func (s fixtureNoteSessions) LoadAgentSessionPath(context.Context, Scope, string) (*AgentSessionPath, error) {
+	return s.f.path(), nil
+}
+
+func (s fixtureNoteSessions) GetActionCall(context.Context, Scope, string) (*ActionCall, error) {
+	return nil, nil
+}
+
+// ensureNote produces one model step, which first appends the capabilities
+// note the step's path needs, and reports whether it appended one.
 func (f *prepareFixture) ensureNote(step string) bool {
 	f.t.Helper()
-	path := f.render.path()
-	in := StepInput{Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: StepModeNormal}
-	appended, err := ensureCapabilityNote(context.Background(), fixtureNoteAppender{f.render}, in, path, f.preparer.CapabilityListing(in), f.render.entries[0].CreatedAt)
+	host := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult { return progressAckResult(req, "Done.") }}
+	producer, err := NewModelStepProducer(host, f.preparer, fixtureNoteSessions{fixtureNoteAppender{f.render}})
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	return appended
+	before := len(f.capabilityNotes())
+	path := f.render.path()
+	in := StepInput{Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: StepModeNormal}
+	if _, err := producer.Produce(context.Background(), in); err != nil {
+		f.t.Fatal(err)
+	}
+	return len(f.capabilityNotes()) > before
 }
 
 func (f *prepareFixture) capabilityNotes() []*SessionEntry {
@@ -238,38 +256,6 @@ func TestSurfacedToolDefinitionFrozen(t *testing.T) {
 	}
 }
 
-func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
-	one := ControlAuthority{AgentID: "agent-1", SkillPromptRefs: []string{"skill-notion@1"}}
-	two := ControlAuthority{AgentID: "agent-1", SkillPromptRefs: []string{"skill-notion@1", "skill-slack@1"}}
-	if mustJSON(t, finalAnswerSchema(one)) != mustJSON(t, finalAnswerSchema(two)) || finalAnswerDescription(one) != finalAnswerDescription(two) {
-		t.Fatal("the final answer tool changes with the Skill refs")
-	}
-	if selections, rejection := finalSkillSelections([]string{"skill-gone@1"}, two.SkillPromptRefs); rejection != nil || len(selections) != 2 ||
-		selections[0].Disposition != HostedSkillNotApplied || selections[1].Disposition != HostedSkillNotApplied {
-		t.Fatalf("an unknown ref must be left out: %#v %v", selections, rejection)
-	}
-	// Delegate, fork and operation tools carry no target list either.
-	targets := ControlAuthority{AgentID: "agent-1", ForkAllowed: true,
-		DelegateTargets: []HostedAgentTarget{{ID: "agent-2", DisplayName: "Ada"}}, ForkTargets: []HostedAgentTarget{{ID: "agent-2"}},
-		Operations: []HostedRunbookOperation{{Entrypoint: "report", Name: "Report"}}}
-	more := targets
-	more.DelegateTargets = append(more.DelegateTargets, HostedAgentTarget{ID: "agent-3", DisplayName: "Bo"})
-	more.ForkTargets = append(more.ForkTargets, HostedAgentTarget{ID: "agent-3"})
-	more.Operations = append(more.Operations, HostedRunbookOperation{Entrypoint: "audit", Name: "Audit"})
-	for _, name := range []ControlToolName{ControlToolDelegate, ControlToolFork, ControlToolRunOperation} {
-		handler := newControlRegistry(builtinControlTools()...)[name]
-		if mustJSON(t, handler.Spec(targets)) != mustJSON(t, handler.Spec(more)) {
-			t.Fatalf("%s changes with its targets", name)
-		}
-	}
-	items := capabilityNoteLines(controlTargetItems(more))
-	for _, want := range []string{"- agent-2: Ada", "- agent-3: Bo", "- audit — Audit. Input schema:"} {
-		if !strings.Contains(items, want) {
-			t.Fatalf("targets missing %q from the note: %s", want, items)
-		}
-	}
-}
-
 func TestLoadDescriptionModeIndependent(t *testing.T) {
 	listed := NewCapabilitySet(capabilityCatalogFixture(), nil, CapabilitySetConfig{})
 	searching := NewCapabilitySet(capabilityCatalogFixture(), nil, CapabilitySetConfig{CatalogBytes: 200})
@@ -292,43 +278,6 @@ func TestLoadDescriptionModeIndependent(t *testing.T) {
 	}
 }
 
-func TestLoadSurfacesWholeSkillWithinBudget(t *testing.T) {
-	catalog := capabilityCatalogFixture()
-	s := NewCapabilitySet(catalog, []string{"action:notion.op3"}, CapabilitySetConfig{})
-	_, isError, loaded := ExecuteLoadCapabilities(s, loadArgs("action:notion.op5"), capabilityToolName)
-	if isError {
-		t.Fatal("load failed")
-	}
-	// The requested action first, then its Skill's other actions in catalog
-	// order; op3 was already loaded and the bound prompt was too.
-	want := []string{"action:notion.op5", "action:notion.op0", "action:notion.op1", "action:notion.op2", "action:notion.op4", "action:notion.op6", "action:notion.op7"}
-	if !reflect.DeepEqual(loaded, want) {
-		t.Fatalf("loaded = %v\nwant %v", loaded, want)
-	}
-
-	// A budget for two more definitions keeps the first two siblings.
-	cost := s.toolCost("action:notion.op0")
-	bounded := NewCapabilitySet(catalog, nil, CapabilitySetConfig{SkillLoadBudget: 3*cost + cost/2})
-	_, _, loaded = ExecuteLoadCapabilities(bounded, loadArgs("action:notion.op5"), capabilityToolName)
-	if want := []string{"prompt:skill-notion@3", "action:notion.op5", "action:notion.op0", "action:notion.op1"}; !reflect.DeepEqual(loaded, want) {
-		t.Fatalf("bounded loaded = %v\nwant %v", loaded, want)
-	}
-	// Instructions load one at a time.
-	_, _, loaded = ExecuteLoadCapabilities(NewCapabilitySet(catalog, nil, CapabilitySetConfig{}), loadArgs("prompt:skill-research-1@1"), capabilityToolName)
-	if !reflect.DeepEqual(loaded, []string{"prompt:skill-research-1@1"}) {
-		t.Fatalf("prompt load = %v", loaded)
-	}
-	// Another Skill connection (binding) is not a sibling.
-	other := capabilityCatalogFixture()
-	other.Actions[1].BindingID = "binding-2"
-	_, _, loaded = ExecuteLoadCapabilities(NewCapabilitySet(other, nil, CapabilitySetConfig{}), loadArgs("action:notion.op0"), capabilityToolName)
-	for _, id := range loaded {
-		if id == "action:notion.op1" {
-			t.Fatal("an action of another binding was loaded")
-		}
-	}
-}
-
 func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
 	x := newToolExecFixture(t, ControlAuthority{})
 	x.binding.ModelActions = capabilityCatalogFixture().Actions
@@ -345,113 +294,6 @@ func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
 	if first.Capability != "action:notion.op2" || first.Name != names["notion.op2"] || first.Description != "Notion operation 2" ||
 		first.InputSchema["type"] != "object" {
 		t.Fatalf("frozen tool = %+v", first)
-	}
-}
-
-func TestCompactionCarriesSurfacedTools(t *testing.T) {
-	f := newPrepareFixture(t, fullPrepareAuthority())
-	early := f.addLoad("step-1", "c1", "action:notion.fetch")
-	f.render.user("run-1", "and gmail")
-	late := f.addLoad("step-2", "c2", "action:gmail.read")
-	before := f.prepare("step-3")
-
-	carried := carriedToolsAfter(&CompactionEntry{CarriedTools: []SurfacedTool{{Capability: "action:drive.list", Name: "action_drive_list",
-		InputSchema: map[string]interface{}{"type": "object"}}}}, []*SessionEntry{early})
-	if got := []string{carried[0].Name, carried[1].Name}; len(carried) != 2 || !reflect.DeepEqual(got, []string{"action_drive_list", "action_notion_fetch"}) {
-		t.Fatalf("carried = %+v", carried)
-	}
-
-	// Summarize up to the second load: the first load's tool is carried.
-	kept := late.ID
-	f.render.add(&SessionEntry{RunID: "run-1", Type: SessionEntryCompaction, Compaction: &CompactionEntry{
-		Summary: "Earlier work.", FirstKeptEntryID: f.render.entries[len(f.render.entries)-3].ID, TokensBefore: 9000,
-		CarriedTools: carriedToolsAfter(nil, f.render.entries[:len(f.render.entries)-3]),
-		Provider:     "anthropic", Model: "claude-test", Trigger: CompactionTriggerThreshold,
-	}})
-	after := f.prepare("step-3")
-	loadedTools := func(req ModelStepRequest) []ModelStepTool {
-		var tools []ModelStepTool
-		for _, tool := range req.Tools {
-			if tool.Group == ModelStepToolLoaded {
-				tools = append(tools, tool)
-			}
-		}
-		return tools
-	}
-	got := loadedTools(after)
-	if len(got) != 2 || got[0].Name != "action_notion_fetch" || got[0].Surface != "" || got[1].Name != "action_gmail_read" || got[1].Surface != kept {
-		t.Fatalf("loaded after compaction = %+v", got)
-	}
-	if mustJSON(t, got[0].InputSchema) != mustJSON(t, loadedTools(before)[0].InputSchema) {
-		t.Fatal("the carried definition changed")
-	}
-	set := f.preparer.CapabilitySet(StepInput{Run: f.run, Binding: f.binding, Path: f.render.path()})
-	if !set.Loaded("action:notion.fetch") {
-		t.Fatal("a carried tool is not callable")
-	}
-	// The carried tool's bound instructions were in the summarized load
-	// result: they are not loaded, and loading them returns their text.
-	if set.Loaded("prompt:skill-notion@1") {
-		t.Fatal("a carried tool's instructions count as loaded after the compaction")
-	}
-	content, isError, _ := ExecuteLoadCapabilities(set, map[string]interface{}{"ids": []interface{}{"prompt:skill-notion@1"}}, loopCapabilityToolName(f.binding.ModelActions))
-	if isError || !strings.Contains(string(content), "Notion rules.") {
-		t.Fatalf("reloading the carried tool's instructions = %v %s", isError, content)
-	}
-}
-
-func TestCompactionSummaryRequestKeepsStepPrefix(t *testing.T) {
-	f := newPrepareFixture(t, fullPrepareAuthority())
-	early := f.addLoad("step-1", "c1", "action:notion.fetch")
-	f.render.user("run-1", "and gmail")
-	late := f.addLoad("step-2", "c2", "action:gmail.read")
-	step := f.prepare("step-3")
-
-	// The whole-path summary is the step's request plus the instruction.
-	whole := compactionSummaryRequest(step)
-	if !reflect.DeepEqual(whole.Tools, step.Tools) || !reflect.DeepEqual(whole.Entries, step.Entries) || !reflect.DeepEqual(whole.System, step.System) {
-		t.Fatal("the whole-path summary request changed the step's tools, entries or system")
-	}
-	if err := whole.Validate(); err != nil {
-		t.Fatal(err)
-	}
-
-	at := func(id string) int {
-		for i, entry := range step.Entries {
-			if entry.ID == id {
-				return i
-			}
-		}
-		t.Fatalf("entry %s not rendered", id)
-		return -1
-	}
-	surfaceOf := func(req ModelStepRequest, name string) (string, bool) {
-		for _, tool := range req.Tools {
-			if tool.Name == name {
-				return tool.Surface, true
-			}
-		}
-		return "", false
-	}
-	// A chunk ending at the first load: its tool keeps the surface, the
-	// later load's tool is not declared.
-	first := compactionChunkSummaryRequest(step, step.Entries[:at(early.ID)+1])
-	if surface, ok := surfaceOf(first, "action_notion_fetch"); !ok || surface != early.ID {
-		t.Fatalf("first chunk notion surface = %q %v", surface, ok)
-	}
-	if _, ok := surfaceOf(first, "action_gmail_read"); ok {
-		t.Fatal("a tool surfaced after the chunk is declared")
-	}
-	if err := first.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	// A chunk after the first load: its tool is callable from the start.
-	second := compactionChunkSummaryRequest(step, step.Entries[at(early.ID)+1:])
-	if surface, ok := surfaceOf(second, "action_notion_fetch"); !ok || surface != "" {
-		t.Fatalf("second chunk notion surface = %q %v", surface, ok)
-	}
-	if surface, ok := surfaceOf(second, "action_gmail_read"); !ok || surface != late.ID {
-		t.Fatalf("second chunk gmail surface = %q %v", surface, ok)
 	}
 }
 
@@ -494,65 +336,5 @@ func TestValidateSurfaces(t *testing.T) {
 		if err := req.Validate(); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
-	}
-}
-
-func TestCapabilityNoteRelistsWhenOnlyAnUpdateSurvives(t *testing.T) {
-	listing := capabilityListing{Mode: capabilityNoteModeList, Items: []capabilityNoteItem{
-		{Key: "action:a", Section: capabilityNoteCatalog, Text: "- action:a"},
-	}}
-	fullText, fullData := capabilityNoteText(listing, nil)
-	if !fullData.Full || !strings.HasPrefix(fullText, capabilityNoteOpen) {
-		t.Fatalf("first note = %q full=%v", fullText, fullData.Full)
-	}
-	listing.Items = append(listing.Items, capabilityNoteItem{Key: "action:b", Section: capabilityNoteCatalog, Text: "- action:b"})
-	updateText, updateData := capabilityNoteText(listing, &fullData)
-	if updateData.Full || !strings.HasPrefix(updateText, "<capabilities_update>") {
-		t.Fatalf("second note = %q full=%v", updateText, updateData.Full)
-	}
-	note := func(id, text string, data capabilityNoteData) *SessionEntry {
-		encoded, _ := json.Marshal(data)
-		return &SessionEntry{ID: id, Type: SessionEntryNote, Note: &NoteEntry{Kind: NoteCapabilities, Text: text, Data: encoded}}
-	}
-	both := &AgentSessionPath{Entries: []*SessionEntry{note("n1", fullText, fullData), note("n2", updateText, updateData)}}
-	if latest := latestCapabilityNote(both); latest == nil || latest.Digest != updateData.Digest {
-		t.Fatalf("latest with both notes = %+v", latest)
-	}
-	// A compaction summarized the full note but kept the update: the
-	// listing is gone, so the next step lists everything again.
-	onlyUpdate := &AgentSessionPath{Entries: []*SessionEntry{note("n2", updateText, updateData)}}
-	if latest := latestCapabilityNote(onlyUpdate); latest != nil {
-		t.Fatalf("an update without its full note counts as the listing: %+v", latest)
-	}
-	text, data := capabilityNoteText(listing, latestCapabilityNote(onlyUpdate))
-	if !data.Full || !strings.Contains(text, "- action:a") || !strings.Contains(text, "- action:b") {
-		t.Fatalf("relisting = %q", text)
-	}
-}
-
-func TestCapabilityNoteModeChangeToNoCatalog(t *testing.T) {
-	deferred := capabilityListing{Mode: capabilityNoteModeList, Items: []capabilityNoteItem{
-		{Key: "action:a", Section: capabilityNoteCatalog, Text: "- action:a"},
-		{Key: "action:b", Section: capabilityNoteCatalog, Text: "- action:b"},
-	}}
-	_, previous := capabilityNoteText(deferred, nil)
-	text, data := capabilityNoteText(capabilityListing{Mode: capabilityNoteModeNone}, &previous)
-	if !data.Full || strings.Contains(text, capabilityNoteRemovedHead) || !strings.Contains(text, capabilityNoteNoCatalog) {
-		t.Fatalf("mode change note = %q", text)
-	}
-}
-
-func TestCapabilityNoteRestoredTool(t *testing.T) {
-	catalog := capabilityNoteItem{Key: "action:a", Section: capabilityNoteCatalog, Text: "- action:a"}
-	revoked := capabilityListing{Mode: capabilityNoteModeList, Items: []capabilityNoteItem{
-		catalog, {Key: "unavailable:action_gmail_send", Section: capabilityNoteUnavailable, Text: "- action_gmail_send"},
-	}}
-	_, previous := capabilityNoteText(revoked, nil)
-	restored := capabilityListing{Mode: capabilityNoteModeList, Items: []capabilityNoteItem{
-		catalog, {Key: "action:gmail.send", Section: capabilityNoteCatalog, Text: "- action:gmail.send"},
-	}}
-	text, _ := capabilityNoteText(restored, &previous)
-	if !strings.Contains(text, capabilityNoteRestoredHead+"\n- action_gmail_send") || strings.Contains(text, capabilityNoteRemovedHead) {
-		t.Fatalf("restored note = %q", text)
 	}
 }

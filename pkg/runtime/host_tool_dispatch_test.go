@@ -231,20 +231,37 @@ func TestHostToolRunCommandSetsCommandRefAndSortedVMTools(t *testing.T) {
 	}
 }
 
+// proposeNested asks the fixture's coordinator for a nested call of call's
+// step as runID, the way the VM does, and returns its error. The coordinator
+// has no stores, so a call the step's authority allows fails as not
+// configured, after the authority checks.
+func (f *hostToolDispatchFixture) proposeNested(call HostToolCall, runID, capability string) error {
+	_, err := f.actions.ProposeNested(context.Background(), NestedActionRequest{
+		Scope: call.Step.Scope, Origin: ActionOriginVM, RunID: runID, TurnID: call.Step.ID,
+		Capability: capability, IdempotencyKey: "probe",
+	})
+	return err
+}
+
 func TestHostToolRunCommandOpensNestedAuthorityForStepAndClosesIt(t *testing.T) {
 	f := newHostToolDispatchFixture()
 	call := hostToolCallFixture(t, workspace.OperationRunCommand, map[string]interface{}{"command": "seal call alpha.lookup"})
-	var during *nestedActionAuthority
+	var offered, notOffered, otherRun error
 	f.host.replies = append(f.host.replies, func(ctx context.Context, request HostToolRequest) (HostToolResult, error) {
-		during = f.actions.nested.lookup(call.Step.Scope, call.Step.ID)
+		offered = f.proposeNested(call, "run_1", "alpha.lookup")
+		notOffered = f.proposeNested(call, "run_1", "nobody.else")
+		otherRun = f.proposeNested(call, "run_2", "alpha.lookup")
 		return hostReplyJSON(map[string]interface{}{"exitStatus": 0}, false)(ctx, request)
 	})
 	runHostTool(t, f, call)
-	if during == nil || during.runID != "run_1" || during.workerID != "worker_1" || during.binding != call.Binding {
-		t.Fatalf("nested authority during the call = %#v", during)
+	// During the call the step's authority is open for run_1 with the call's
+	// binding: it offers alpha.lookup and nothing else.
+	if offered == nil || errors.Is(offered, ErrNestedTurnNotActive) || errors.Is(offered, ErrNestedActionNotAuthorized) ||
+		!errors.Is(notOffered, ErrNestedActionNotAuthorized) || !errors.Is(otherRun, ErrNestedTurnNotActive) {
+		t.Fatalf("nested authority during the call: offered=%v notOffered=%v otherRun=%v", offered, notOffered, otherRun)
 	}
-	if after := f.actions.nested.lookup(call.Step.Scope, call.Step.ID); after != nil {
-		t.Fatalf("nested authority still open: %#v", after)
+	if after := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(after, ErrNestedTurnNotActive) {
+		t.Fatalf("nested authority still open: %v", after)
 	}
 }
 
@@ -253,8 +270,8 @@ func TestHostToolRunCommandWithoutActionsOpensNoBridge(t *testing.T) {
 	call := hostToolCallFixture(t, workspace.OperationRunCommand, map[string]interface{}{"command": "ls"})
 	call.Binding.ModelActions = nil
 	f.host.replies = append(f.host.replies, func(ctx context.Context, request HostToolRequest) (HostToolResult, error) {
-		if f.actions.nested.lookup(call.Step.Scope, call.Step.ID) != nil {
-			t.Error("nested authority opened without VM tools")
+		if err := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(err, ErrNestedTurnNotActive) {
+			t.Errorf("nested authority opened without VM tools: %v", err)
 		}
 		return hostReplyJSON(map[string]interface{}{"exitStatus": 0}, false)(ctx, request)
 	})
@@ -268,8 +285,8 @@ func TestHostToolNonCommandNeverOpensNestedAuthority(t *testing.T) {
 	f := newHostToolDispatchFixture()
 	call := hostToolCallFixture(t, workspace.OperationWriteFile, map[string]interface{}{"path": "a.txt", "content": "x"})
 	f.host.replies = append(f.host.replies, func(ctx context.Context, request HostToolRequest) (HostToolResult, error) {
-		if f.actions.nested.lookup(call.Step.Scope, call.Step.ID) != nil {
-			t.Error("nested authority opened for a non-command tool")
+		if err := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(err, ErrNestedTurnNotActive) {
+			t.Errorf("nested authority opened for a non-command tool: %v", err)
 		}
 		return hostReplyJSON(map[string]interface{}{"path": "a.txt"}, false)(ctx, request)
 	})

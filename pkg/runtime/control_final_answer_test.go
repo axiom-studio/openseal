@@ -128,7 +128,7 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			specs := ControlToolSpecs(tc.authority)
+			specs := builtinControlSpecs(tc.authority)
 			var spec *ControlToolSpec
 			for i := range specs {
 				if specs[i].Name == ControlToolFinalAnswer {
@@ -162,7 +162,7 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 				}
 			}
 			// Constant per claim (prompt cache).
-			again := ControlToolSpecs(tc.authority)
+			again := builtinControlSpecs(tc.authority)
 			if !reflect.DeepEqual(specs, again) {
 				t.Fatal("specs differ between two listings")
 			}
@@ -170,7 +170,7 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 	}
 	// Decision and review Runs never get turn_final_answer.
 	for _, mode := range []FinalAnswerMode{FinalModeDecision, FinalModeReview} {
-		for _, spec := range ControlToolSpecs(ControlAuthority{FinalMode: mode}) {
+		for _, spec := range builtinControlSpecs(ControlAuthority{FinalMode: mode}) {
 			if spec.Name == ControlToolFinalAnswer {
 				t.Fatalf("%s offers turn_final_answer", mode)
 			}
@@ -620,13 +620,13 @@ func TestFinalOutputPublisherValidatesExtensionFields(t *testing.T) {
 		t.Fatalf("publication without fields = %#v, %v", publication, err)
 	}
 	// The tool offered to the model gains the host properties, never required.
-	tools := WithFinalOutputProperties(ControlModelStepTools(ControlAuthority{}), f.run, publisher)
+	tools := WithFinalOutputProperties(builtinControlModelStepTools(ControlAuthority{}), f.run, publisher)
 	properties, required := schemaProperties(t, tools[0].InputSchema)
 	if tools[0].Name != string(ControlToolFinalAnswer) || properties["generatedFiles"] == nil ||
 		properties["answer"].(map[string]interface{})["type"] != "string" || !reflect.DeepEqual(required, []string{"answer"}) {
 		t.Fatalf("tool = %#v", tools[0])
 	}
-	if base := ControlModelStepTools(ControlAuthority{}); base[0].InputSchema["properties"].(map[string]interface{})["generatedFiles"] != nil {
+	if base := builtinControlModelStepTools(ControlAuthority{}); base[0].InputSchema["properties"].(map[string]interface{})["generatedFiles"] != nil {
 		t.Fatal("WithFinalOutputProperties changed the base tool")
 	}
 	// Extension fields without a publisher are dropped as unknown.
@@ -791,4 +791,36 @@ func TestRoutineOccurrenceSilentRefusedAfterChildWrite(t *testing.T) {
 	}
 	f.addActionCallFor(child.ID, "child-sent", ActionCallStatusSucceeded, skill.SideEffectExternal)
 	requireRejected(t, f, f.settleFinal("quiet", ControlAuthority{RoutineOccurrence: true}), "quiet", finalSilentAfterChangeCode)
+}
+
+func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
+	one := ControlAuthority{AgentID: "agent-1", SkillPromptRefs: []string{"skill-notion@1"}}
+	two := ControlAuthority{AgentID: "agent-1", SkillPromptRefs: []string{"skill-notion@1", "skill-slack@1"}}
+	if mustJSON(t, finalAnswerSchema(one)) != mustJSON(t, finalAnswerSchema(two)) || finalAnswerDescription(one) != finalAnswerDescription(two) {
+		t.Fatal("the final answer tool changes with the Skill refs")
+	}
+	if selections, rejection := finalSkillSelections([]string{"skill-gone@1"}, two.SkillPromptRefs); rejection != nil || len(selections) != 2 ||
+		selections[0].Disposition != HostedSkillNotApplied || selections[1].Disposition != HostedSkillNotApplied {
+		t.Fatalf("an unknown ref must be left out: %#v %v", selections, rejection)
+	}
+	// Delegate, fork and operation tools carry no target list either.
+	targets := ControlAuthority{AgentID: "agent-1", ForkAllowed: true,
+		DelegateTargets: []HostedAgentTarget{{ID: "agent-2", DisplayName: "Ada"}}, ForkTargets: []HostedAgentTarget{{ID: "agent-2"}},
+		Operations: []HostedRunbookOperation{{Entrypoint: "report", Name: "Report"}}}
+	more := targets
+	more.DelegateTargets = append(more.DelegateTargets, HostedAgentTarget{ID: "agent-3", DisplayName: "Bo"})
+	more.ForkTargets = append(more.ForkTargets, HostedAgentTarget{ID: "agent-3"})
+	more.Operations = append(more.Operations, HostedRunbookOperation{Entrypoint: "audit", Name: "Audit"})
+	for _, name := range []ControlToolName{ControlToolDelegate, ControlToolFork, ControlToolRunOperation} {
+		handler := newControlRegistry(builtinControlTools()...)[name]
+		if mustJSON(t, handler.Spec(targets)) != mustJSON(t, handler.Spec(more)) {
+			t.Fatalf("%s changes with its targets", name)
+		}
+	}
+	items := capabilityNoteLines(controlTargetItems(more))
+	for _, want := range []string{"- agent-2: Ada", "- agent-3: Bo", "- audit — Audit. Input schema:"} {
+		if !strings.Contains(items, want) {
+			t.Fatalf("targets missing %q from the note: %s", want, items)
+		}
+	}
 }
