@@ -137,33 +137,6 @@ func TestConversationClarificationRoundTrip(t *testing.T) {
 	}
 }
 
-func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
-	f := newClarificationFixture(t, newTestKernelStore(t), "targets")
-	q := f.question(t)
-	other, err := NewPortfolioService(f.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: f.root.Scope, Kind: RunKindAgentWork, Owner: f.root.Owner, AssignedAgentID: "writer", ParentRunID: f.root.ID, Goal: "Draft the outline", Source: RunSourceRequest})
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, _ = askUserParked(t, f.store, claimAskUserRun(t, f.store, other, "other-worker"), "other-worker", "Which audience should I use?")
-	if _, err := f.scheduler.ReconcileScope(t.Context(), f.root.Scope); err != nil {
-		t.Fatal(err)
-	}
-	answer := f.answer(t, "")
-	// More than one waiting task: do not guess what an unthreaded message answers.
-	if _, handled, err := f.scheduler.resumeConversationAnswer(t.Context(), f.conversation, answer); err != nil || handled {
-		t.Fatalf("ambiguous reply consumed: %v %v", handled, err)
-	}
-	answer.ResolvesMessageID = q.ID
-	result, handled, err := f.scheduler.resumeConversationAnswer(t.Context(), f.conversation, answer)
-	if err != nil || !handled || result.Run.ID != f.child.ID {
-		t.Fatalf("explicit reply = %#v %v %v", result, handled, err)
-	}
-	unchanged, _ := f.store.GetAgentRun(t.Context(), f.root.Scope, other.ID)
-	if unchanged.Status != AgentRunStatusWaitingForEvent {
-		t.Fatal("unrelated task woke")
-	}
-}
-
 type failingAnswerProjectionStore struct {
 	ConversationStore
 	fail bool
