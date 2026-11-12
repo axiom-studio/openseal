@@ -8,10 +8,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-type RowQuerier interface {
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-}
-
 const unfinishedSkillActionSQL = "'ready','waiting_for_approval','running','compensating'"
 const UnfinishedSkillRunSQL = "'queued','planning','running','paused','sleeping','waiting_for_dependency','waiting_for_agent','waiting_for_approval','waiting_for_event'"
 

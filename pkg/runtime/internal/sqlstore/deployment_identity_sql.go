@@ -1,7 +1,6 @@
 package sqlstore
 
 import (
-	"context"
 	"database/sql"
 )
 
@@ -16,9 +15,4 @@ func DeploymentIdentityCollisions(rows *sql.Rows) ([]string, error) {
 		collisions = append(collisions, kind+"/"+scopeID+"/"+id)
 	}
 	return collisions, rows.Err()
-}
-
-type ExecRowQuerier interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }

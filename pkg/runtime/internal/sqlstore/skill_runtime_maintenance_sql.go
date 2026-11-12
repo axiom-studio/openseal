@@ -51,14 +51,6 @@ func MaintenanceBindingsMatch(ctx context.Context, q RowQuerier, g *models.Skill
 	return matched, err
 }
 
-var _ RowQuerier = (*sql.Conn)(nil)
-
-type MaintenanceDB interface {
-	RowQuerier
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-}
-
 func ReadSkillRuntimeMaintenance(ctx context.Context, q RowQuerier, table string, scope models.Scope, skillID string, postgres, lock bool) (*models.SkillRuntimeMaintenance, error) {
 	query := "SELECT payload FROM " + table + " WHERE scope_kind=? AND scope_id=? AND skill_id=?"
 	if postgres {

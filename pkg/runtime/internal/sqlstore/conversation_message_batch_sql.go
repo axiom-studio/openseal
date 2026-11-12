@@ -2,16 +2,11 @@ package sqlstore
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/models"
 )
-
-type Querier interface {
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-}
 
 func GetChannelMessageBatch(ctx context.Context, reader Querier, table string, scope models.Scope, conversationID string, ids []string, postgres bool) ([]*models.ChannelMessage, error) {
 	if err := models.ValidateChannelMessageBatch(scope, ids); err != nil {

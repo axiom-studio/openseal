@@ -1,17 +1,12 @@
 package sqlstore
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 
 	"github.com/axiom-studio/openseal/pkg/models"
 )
-
-type RowScanner interface {
-	Scan(...interface{}) error
-}
 
 func ScanExternalConversationEndpoint(scanner RowScanner) (*models.ExternalConversationEndpoint, error) {
 	var payload string
@@ -95,8 +90,4 @@ func ScanExternalConversationDelivery(scanner RowScanner) (*models.ExternalConve
 		return nil, err
 	}
 	return &value, value.Validate()
-}
-
-type Execer interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 }
