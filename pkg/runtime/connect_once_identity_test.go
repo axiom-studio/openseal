@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -45,7 +46,7 @@ func TestDelegatedAgentRunWorksWithoutAnyConnection(t *testing.T) {
 		t.Fatalf("delegated run actions = %v, want only member:notes", got)
 	}
 
-	validator, err := NewTeamSkillActionValidator(catalog)
+	validator, err := skillbinding.NewTeamSkillActionValidator(catalog)
 	if err != nil {
 		t.Fatal(err)
 	}

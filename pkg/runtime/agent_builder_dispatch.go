@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -176,7 +177,7 @@ func (d *AgentBuilderActionDispatcher) listAgents(ctx context.Context, scope Sco
 		agents = append(agents, map[string]interface{}{
 			"id": deployment.ID, "displayName": name, "purpose": definition.Purpose,
 			"rolloutStatus": deployment.RolloutStatus, "spaceIds": spaceIDs,
-			"manageable": deployment.ID != builderID && !agentDefinitionPolicyFixed(definition),
+			"manageable": deployment.ID != builderID && !skillbinding.AgentDefinitionPolicyFixed(definition),
 		})
 	}
 	return agentBuilderJSONMap(map[string]interface{}{"resourceType": "agent_list", "agents": agents})
@@ -306,7 +307,7 @@ func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input ag
 	}
 	deployment, err := d.agents.GetDeployment(ctx, reference, args.AgentID)
 	if err != nil {
-		return nil, agentBuilderTargetError(args.AgentID, err)
+		return nil, skillbinding.AgentBuilderTargetError(args.AgentID, err)
 	}
 	// Removals an earlier attempt already made are done; the rest must
 	// still be enabled bindings of the target.
@@ -391,7 +392,7 @@ func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input ag
 		if err != nil {
 			return nil, err
 		}
-		bindings = append(bindings, secretSafeBindingPreview(binding))
+		bindings = append(bindings, skillbinding.SecretSafeBindingPreview(binding))
 	}
 	for _, bindingID := range removals {
 		if err := d.disableAgentSkill(ctx, skillScope, deployment.ID, bindingID, actor); err != nil {
@@ -405,7 +406,7 @@ func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input ag
 			return nil, err
 		}
 		if binding != nil {
-			removedBindings = append(removedBindings, secretSafeBindingPreview(binding))
+			removedBindings = append(removedBindings, skillbinding.SecretSafeBindingPreview(binding))
 		}
 	}
 	if model != nil {

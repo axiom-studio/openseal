@@ -12,6 +12,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -94,7 +95,7 @@ func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context
 				}
 				deployment, err := v.agents.GetDeployment(ctx, agentBuilderScope(input.Run.Scope), strings.TrimSpace(agentID))
 				if err != nil {
-					return nil, true, agentBuilderTargetError(agentID, err)
+					return nil, true, skillbinding.AgentBuilderTargetError(agentID, err)
 				}
 				arguments["expectedDeploymentRevision"] = deployment.Revision
 			}
@@ -297,7 +298,7 @@ func resolveAgentUpdate(
 	}
 	deployment, err := agents.GetDeployment(ctx, agentBuilderScope(scope), args.AgentID)
 	if err != nil {
-		return nil, agentBuilderTargetError(args.AgentID, err)
+		return nil, skillbinding.AgentBuilderTargetError(args.AgentID, err)
 	}
 	if deployment.RolloutStatus == kernelagent.RolloutRetired {
 		return nil, fmt.Errorf("agent %q is retired and cannot be changed", args.AgentID)
@@ -309,8 +310,8 @@ func resolveAgentUpdate(
 	if err != nil {
 		return nil, err
 	}
-	if agentDefinitionPolicyFixed(definition) {
-		return nil, fmt.Errorf("agent %q cannot be changed in chat: %w", args.AgentID, ErrAgentBehaviorFixed)
+	if skillbinding.AgentDefinitionPolicyFixed(definition) {
+		return nil, fmt.Errorf("agent %q cannot be changed in chat: %w", args.AgentID, skillbinding.ErrAgentBehaviorFixed)
 	}
 	candidate := cloneAgentDefinitionForAction(definition)
 	applyAgentBehaviorArguments(candidate, agentBehaviorActionArguments{
@@ -551,7 +552,7 @@ func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants
 		if catalog == nil {
 			return nil, errors.New("skill catalog is not configured")
 		}
-		definition, err := exactSkillDefinition(ctx, catalog, grant.SkillID, grant.SkillVersion, grant.SourceIdentity)
+		definition, err := skillbinding.ExactSkillDefinition(ctx, catalog, grant.SkillID, grant.SkillVersion, grant.SourceIdentity)
 		if err != nil {
 			return nil, err
 		}
@@ -561,7 +562,7 @@ func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants
 		// The declared ceiling is never trusted: it is the riskiest allowed
 		// action of the exact catalog definition.
 		grant.MaximumRisk = catalogGrantRisk(definition, grant.AllowedActions)
-		if err := validateSkillBindingArguments(definition, skillBindingUpsertArguments{
+		if err := skillbinding.ValidateSkillBindingArguments(definition, skillbinding.SkillBindingUpsertArguments{
 			SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, SourceIdentity: grant.SourceIdentity,
 			AllowedActions: grant.AllowedActions, EnablePrompt: grant.EnablePrompt,
 			MaximumRisk: grant.MaximumRisk, Config: grant.Config,
@@ -594,7 +595,7 @@ func resolveAgentConnections(ctx context.Context, catalog *skill.Catalog, reques
 		if catalog == nil {
 			return nil, errors.New("skill catalog is not configured")
 		}
-		definition, err := exactSkillDefinition(ctx, catalog, request.SkillID, request.SkillVersion, request.SourceIdentity)
+		definition, err := skillbinding.ExactSkillDefinition(ctx, catalog, request.SkillID, request.SkillVersion, request.SourceIdentity)
 		if err != nil {
 			return nil, err
 		}
@@ -629,7 +630,7 @@ func resolveAgentRemovedBindings(ctx context.Context, catalog *skill.Catalog, sc
 			return nil, err
 		}
 		name := binding.SkillID
-		if definition, definitionErr := exactSkillDefinition(ctx, catalog, binding.SkillID, binding.SkillVersion, binding.SourceIdentity); definitionErr == nil && definition != nil && definition.Name != "" {
+		if definition, definitionErr := skillbinding.ExactSkillDefinition(ctx, catalog, binding.SkillID, binding.SkillVersion, binding.SourceIdentity); definitionErr == nil && definition != nil && definition.Name != "" {
 			name = definition.Name
 		}
 		result = append(result, resolvedAgentRemovedBinding{binding: binding, name: name})

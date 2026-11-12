@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -54,16 +55,16 @@ func targetedSkillCoordinator(t *testing.T, policy ActionPolicyEvaluator) (*skil
 func targetedSkillRequest(f *skillTargetFixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) ProposeActionRequest {
 	return loopProposeRequest(ProposeActionRequest{
 		Scope: f.scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: action,
+		SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: action,
 		Arguments: arguments, Summary: "Give Researcher the Reddit reader",
 	}, toolCallID)
 }
 
 func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
-	disable := map[string]interface{}{"bindingId": "reddit", "expectedRevision": 1, SkillActionTargetAgentArgument: "researcher"}
+	disable := map[string]interface{}{"bindingId": "reddit", "expectedRevision": 1, skillbinding.SkillActionTargetAgentArgument: "researcher"}
 	for _, mode := range []ConversationApprovalMode{ConversationApprovalAuto, ConversationApprovalSkip, ConversationApprovalManual} {
 		for action, arguments := range map[string]map[string]interface{}{
-			SkillActionUpsertBinding: readerUpsertArguments("researcher"), SkillActionDisableBinding: disable,
+			skillbinding.SkillActionUpsertBinding: readerUpsertArguments("researcher"), skillbinding.SkillActionDisableBinding: disable,
 		} {
 			f, run, coordinator := targetedSkillCoordinator(t, modePolicy(mode))
 			result, err := coordinator.Propose(f.ctx, targetedSkillRequest(f, run, action, arguments, action))
@@ -91,7 +92,7 @@ func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
 
 	// The builder's own Skills keep the chat's approval mode.
 	f, run, coordinator := targetedSkillCoordinator(t, modePolicy(ConversationApprovalAuto))
-	own, err := coordinator.Propose(f.ctx, targetedSkillRequest(f, run, SkillActionUpsertBinding, readerUpsertArguments(""), "own"))
+	own, err := coordinator.Propose(f.ctx, targetedSkillRequest(f, run, skillbinding.SkillActionUpsertBinding, readerUpsertArguments(""), "own"))
 	if err != nil || own.Approval != nil {
 		t.Fatalf("untargeted upsert in auto mode = %#v, %v", own, err)
 	}
@@ -102,7 +103,7 @@ func TestTargetedSkillBindingChangeCannotBeAllowedByPolicy(t *testing.T) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "host allows everything"}, nil
 	})
 	f, run, coordinator := targetedSkillCoordinator(t, allow)
-	_, err := coordinator.Propose(f.ctx, targetedSkillRequest(f, run, SkillActionUpsertBinding, readerUpsertArguments("researcher"), "allowed"))
+	_, err := coordinator.Propose(f.ctx, targetedSkillRequest(f, run, skillbinding.SkillActionUpsertBinding, readerUpsertArguments("researcher"), "allowed"))
 	if err == nil || !strings.Contains(err.Error(), "always requires explicit review") {
 		t.Fatalf("an allowed targeted upsert was not refused: %v", err)
 	}
@@ -136,7 +137,7 @@ func targetedSkillCard(operation string) map[string]interface{} {
 
 func TestTargetedSkillBindingApprovalOnlyThroughHostRoute(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
-		for _, operation := range []string{SkillActionUpsertBinding, SkillActionDisableBinding} {
+		for _, operation := range []string{skillbinding.SkillActionUpsertBinding, skillbinding.SkillActionDisableBinding} {
 			card := targetedSkillCard(operation)
 			for resolver, authorizer := range map[string]ApprovalAuthorizer{
 				"eligible": EligibleApprovalAuthorizer{}, "allow all": allowAllApprovals, "nil": nil,
@@ -187,7 +188,7 @@ func TestTargetedSkillBindingApprovalOnlyThroughHostRoute(t *testing.T) {
 		}
 
 		// The chat's own skill change keeps every ordinary path.
-		own := map[string]interface{}{"skillId": SkillManagementSkillID, "action": SkillActionUpsertBinding, "resourceType": "skill_binding", "operation": SkillActionUpsertBinding}
+		own := map[string]interface{}{"skillId": SkillManagementSkillID, "action": skillbinding.SkillActionUpsertBinding, "resourceType": "skill_binding", "operation": skillbinding.SkillActionUpsertBinding}
 		f, approval := cardApproval(t, store, "own-mode", own, ApprovalTimeoutExpire)
 		if result, err := NewApprovalCoordinator(f.store, f.store, nil).ResolveByApprovalMode(f.ctx, f.scope, approval.ID, approval.Revision, ConversationApprovalAuto, "sweep"); err != nil || result.Approval.Status != ApprovalStatusApproved {
 			t.Fatalf("approval-mode approve of an own skills card = %#v, %v", result, err)

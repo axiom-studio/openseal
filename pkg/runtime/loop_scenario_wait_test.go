@@ -18,6 +18,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -51,13 +52,13 @@ func waitCardSkills(f *loopFixture) {
 			Idempotency: skill.IdempotencySupported,
 		}},
 	}
-	for _, definition := range []*skill.Definition{SkillManagementSkill(), mail} {
+	for _, definition := range []*skill.Definition{skillbinding.SkillManagementSkill(), mail} {
 		if err := f.catalog.Register(f.ctx, definition); err != nil {
 			f.t.Fatal(err)
 		}
 	}
 	bindings := []*skill.Binding{
-		{ID: "skills-binding", Scope: skillScope, DeploymentID: loopFixtureAgent, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
+		{ID: "skills-binding", Scope: skillScope, DeploymentID: loopFixtureAgent, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
 			AllowedActions: []string{agentrun.SkillActionRequestCredential, agentrun.SkillActionRequestConnection}, MaximumRisk: skill.RiskLevelExternal, Revision: 1},
 		{ID: "mail-binding", Scope: skillScope, DeploymentID: loopFixtureAgent, SkillID: "mail", SkillVersion: "1.0.0",
 			AllowedActions: []string{"send_mail"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1,
@@ -189,7 +190,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			})...)
 			conversation, run := f.startChat("Pay the invoice")
 			steerToRest(f, run.ID, 4)
-			entry := waitParked(f, run.ID, waitTool(t, stepView{req: convFirstStep(f, run.ID)}, agentrun.SkillActionRequestCredential), CredentialRequestWakeType)
+			entry := waitParked(f, run.ID, waitTool(t, stepView{req: convFirstStep(f, run.ID)}, agentrun.SkillActionRequestCredential), skillbinding.CredentialRequestWakeType)
 			requestID := f.mustRun(run.ID).WakeCondition.Reference
 			if entry.Tool.Wait == nil || entry.Tool.Wait.EventWaitID != requestID {
 				t.Fatalf("entry wait = %#v, want event %s", entry.Tool.Wait, requestID)
@@ -208,7 +209,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			if err := credentials.SaveCredentialRequest(f.ctx, request, request.Revision-1); err != nil {
 				t.Fatal(err)
 			}
-			waitSettleCard(f, run.ID, CredentialRequestWakeType, requestID, entry.ActionCallID, CredentialRequestResolutionInstruction(request))
+			waitSettleCard(f, run.ID, skillbinding.CredentialRequestWakeType, requestID, entry.ActionCallID, skillbinding.CredentialRequestResolutionInstruction(request))
 			done := convDrive(f, run.ID)
 			_, result := waitCompleted(f, done.ID, entry.Tool.Name, 0)
 			if !strings.Contains(result, "The user saved or updated their card in the vault.") {
@@ -237,14 +238,14 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 				if err := setups.SaveSkillSetupRequest(f.ctx, request, 0); err != nil {
 					return nil, err
 				}
-				return skillSetupResult(request)
+				return skillbinding.SkillSetupRequestResult(request)
 			})
 			f.model.add(waitCardRules(t, agentrun.SkillActionRequestConnection, func(v stepView) ModelStepResult {
 				return act("Linear needs connecting.", call(waitTool(t, v, agentrun.SkillActionRequestConnection), map[string]any{"app": "linear", "reason": "Connect Linear to list your issues"}))
 			})...)
 			conversation, run := f.startChat("List my Linear issues")
 			steerToRest(f, run.ID, 4)
-			entry := waitParked(f, run.ID, waitTool(t, stepView{req: convFirstStep(f, run.ID)}, agentrun.SkillActionRequestConnection), ConnectAppWakeType)
+			entry := waitParked(f, run.ID, waitTool(t, stepView{req: convFirstStep(f, run.ID)}, agentrun.SkillActionRequestConnection), skillbinding.ConnectAppWakeType)
 			requestID := f.mustRun(run.ID).WakeCondition.Reference
 
 			request, err := setups.GetSkillSetupRequest(f.ctx, f.scope, requestID)
@@ -256,7 +257,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			if err := setups.SaveSkillSetupRequest(f.ctx, request, request.Revision-1); err != nil {
 				t.Fatal(err)
 			}
-			waitSettleCard(f, run.ID, ConnectAppWakeType, requestID, entry.ActionCallID, ConnectAppResolutionInstruction(request, []string{"linear_list_issues"}))
+			waitSettleCard(f, run.ID, skillbinding.ConnectAppWakeType, requestID, entry.ActionCallID, skillbinding.ConnectAppResolutionInstruction(request, []string{"linear_list_issues"}))
 			done := convDrive(f, run.ID)
 			if _, result := waitCompleted(f, done.ID, entry.Tool.Name, 0); !strings.Contains(result, "The user connected Linear. Its tools are now available: linear_list_issues.") {
 				t.Fatalf("connect app outcome = %q", result)
@@ -304,7 +305,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			tool := waitTool(t, stepView{req: convFirstStep(f, run.ID)}, "send_mail")
 			entry := waitParked(f, run.ID, tool, ConnectAccountWakeType)
 			requestID := f.mustRun(run.ID).WakeCondition.Reference
-			if requestID != connectAccountRequestPrefix+entry.ActionCallID || f.dispatch.count("send_mail") != 0 {
+			if requestID != skillbinding.ConnectAccountRequestPrefix+entry.ActionCallID || f.dispatch.count("send_mail") != 0 {
 				t.Fatalf("connect account card %s for call %s, dispatches %d", requestID, entry.ActionCallID, f.dispatch.count("send_mail"))
 			}
 
@@ -321,7 +322,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			if err := setups.SaveSkillSetupRequest(f.ctx, card, card.Revision-1); err != nil {
 				t.Fatal(err)
 			}
-			waitSettleCard(f, run.ID, ConnectAccountWakeType, requestID, entry.ActionCallID, ConnectAccountResolutionInstruction(card))
+			waitSettleCard(f, run.ID, ConnectAccountWakeType, requestID, entry.ActionCallID, skillbinding.ConnectAccountResolutionInstruction(card))
 			done := convDrive(f, run.ID)
 			// The parked call failed before dispatch; its settled entry keeps
 			// that failure and carries the card's outcome, and the retry is a

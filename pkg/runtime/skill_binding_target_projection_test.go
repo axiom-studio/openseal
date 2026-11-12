@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
 func TestSkillBindingTargetSetupRequestIsOwnedByTheTarget(t *testing.T) {
 	f := newSkillTargetFixture(t)
 	run := f.chatRun(t, "finn")
 	result, err := f.dispatch(t, run, "setup", agentrun.SkillActionRequestSetup, map[string]interface{}{
-		"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Read communities", SkillActionTargetAgentArgument: "researcher",
+		"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Read communities", skillbinding.SkillActionTargetAgentArgument: "researcher",
 	})
 	if err != nil || result["setupRequest"] == nil {
 		t.Fatalf("targeted setup = %#v, %v", result, err)
@@ -37,7 +38,7 @@ func TestSkillBindingTargetSetupRequestIsOwnedByTheTarget(t *testing.T) {
 	if err != nil || len(projected) != 1 || projected[0].ID != request.ID {
 		t.Fatalf("builder chat projection = %#v, %v", projected, err)
 	}
-	listed, err := f.dispatch(t, run, "list", SkillActionListSetupRequests, map[string]interface{}{})
+	listed, err := f.dispatch(t, run, "list", skillbinding.SkillActionListSetupRequests, map[string]interface{}{})
 	if err != nil || len(listed["requests"].([]interface{})) != 1 {
 		t.Fatalf("builder list_setup_requests = %#v, %v", listed, err)
 	}

@@ -13,6 +13,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -526,7 +527,7 @@ func resolveAgentBehaviorAction(
 		return args, nil, nil, nil, err
 	}
 	if !definition.Amendments.AgentMayPropose {
-		return args, nil, nil, nil, ErrAgentBehaviorFixed
+		return args, nil, nil, nil, skillbinding.ErrAgentBehaviorFixed
 	}
 	candidate := cloneAgentDefinitionForAction(definition)
 	applyAgentBehaviorArguments(candidate, args)
@@ -576,7 +577,7 @@ func resolveAgentChannelAction(
 		return args, nil, nil, nil, nil, nil, err
 	}
 	if !definition.Amendments.AgentMayPropose {
-		return args, nil, nil, nil, nil, nil, ErrAgentBehaviorFixed
+		return args, nil, nil, nil, nil, nil, skillbinding.ErrAgentBehaviorFixed
 	}
 	endpoint, err := endpoints.Get(ctx, run.Scope, args.EndpointID)
 	if err != nil {

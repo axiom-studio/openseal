@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -46,12 +47,12 @@ func TestAcceptedRunExecutionRetainsFutureRunbookActionBeforeFirstCallAcrossStor
 		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
 			t.Fatalf("future Runbook action was not retained: %v %v", busy, err)
 		}
-		service := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
-		plan, err := service.Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0", ToSourceIdentity: "native::reader"})
+		service := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
+		plan, err := service.Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0", ToSourceIdentity: "native::reader"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := service.Apply(t.Context(), ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "controller"}, Reason: "Adopt new executable"}); !errors.Is(err, ErrSkillReferenceUpgradeBusy) {
+		if _, err := service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "controller"}, Reason: "Adopt new executable"}); !errors.Is(err, ErrSkillReferenceUpgradeBusy) {
 			t.Fatalf("upgrade invalidated future exact Runbook step: %v", err)
 		}
 		if _, err := store.(SkillRuntimeMaintenanceStore).AcquireSkillRuntimeMaintenance(t.Context(), runSkillDependencyMaintenanceRequest(scope)); !errors.Is(err, ErrSkillReferenceUpgradeBusy) {

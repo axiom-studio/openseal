@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -100,7 +101,7 @@ func (i *AgentInstaller) ExportSharedAgent(ctx context.Context, scope Scope, dep
 	if err != nil {
 		return nil, err
 	}
-	if deployment.ID == AgentBuilderDeploymentID || agentDefinitionPolicyFixed(definition) {
+	if deployment.ID == AgentBuilderDeploymentID || skillbinding.AgentDefinitionPolicyFixed(definition) {
 		return nil, ErrSharedAgentNotShareable
 	}
 	if definition.Provenance.Source == SharedAgentProvenanceSource {
@@ -284,7 +285,7 @@ func (i *AgentInstaller) PlanSharedAgentInstall(ctx context.Context, request Sha
 				plan.Slots = append(plan.Slots, sharedAgentPlannedSlot(shared, slot, bindingID))
 			}
 		}
-		candidate := skillBindingCandidate(reference, plan.DeploymentID, sharedSkillBindingArguments(bindingID, shared.grant.grant), nil)
+		candidate := skillbinding.SkillBindingCandidate(reference, plan.DeploymentID, sharedSkillBindingArguments(bindingID, shared.grant.grant), nil)
 		candidate.Credentials = maps.Clone(shared.grant.credentials)
 		plan.Bindings = append(plan.Bindings, candidate)
 	}
@@ -913,7 +914,7 @@ func (i *AgentInstaller) resolveSharedSkill(ctx context.Context, value SharedAge
 		// A skill that needs an account here can't be a plain grant.
 		return resolved, nil
 	}
-	if err := validateSkillBindingArguments(definition, sharedSkillBindingArguments("", grant), credentials); err != nil {
+	if err := skillbinding.ValidateSkillBindingArguments(definition, sharedSkillBindingArguments("", grant), credentials); err != nil {
 		return resolved, nil
 	}
 	resolved.available = true
@@ -951,7 +952,7 @@ func sharedAgentPlanCredentials(resolved *sharedAgentResolvedInstall, bindings [
 				credentials[slot] = skill.CredentialReference{Kind: requirement.Kind, ID: strings.TrimSpace(reference.ID)}
 			}
 		}
-		if err := validateSkillBindingArguments(grant.definition, sharedSkillBindingArguments("", grant.grant), credentials); err != nil {
+		if err := skillbinding.ValidateSkillBindingArguments(grant.definition, sharedSkillBindingArguments("", grant.grant), credentials); err != nil {
 			return nil, fmt.Errorf("Skill %s: %w", grant.grant.SkillID, err)
 		}
 		grant.credentials = credentials
@@ -1057,8 +1058,8 @@ func sharedAgentPlannedSlot(shared sharedSkill, slot, bindingID string) SharedAg
 	return planned
 }
 
-func sharedSkillBindingArguments(bindingID string, grant AgentSkillGrant) skillBindingUpsertArguments {
-	return skillBindingUpsertArguments{
+func sharedSkillBindingArguments(bindingID string, grant AgentSkillGrant) skillbinding.SkillBindingUpsertArguments {
+	return skillbinding.SkillBindingUpsertArguments{
 		BindingID: bindingID, SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, SourceIdentity: grant.SourceIdentity,
 		AllowedActions: grant.AllowedActions, EnablePrompt: grant.EnablePrompt, MaximumRisk: grant.MaximumRisk,
 	}

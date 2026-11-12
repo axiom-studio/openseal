@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -123,7 +124,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 			t.Fatal("binding upgrade fixture requires durable Skill catalog storage")
 		}
 		catalog = skill.NewCatalogWithStore(durable)
-		if err := catalog.Register(t.Context(), SkillManagementSkill()); err != nil {
+		if err := catalog.Register(t.Context(), skillbinding.SkillManagementSkill()); err != nil {
 			t.Fatal(err)
 		}
 		for _, version := range []string{"1.0.0", "2.0.0"} {
@@ -145,12 +146,12 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	}
 	if err := catalog.Bind(t.Context(), &skill.Binding{
 		ID: "setup-actions", Revision: 1, Scope: skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID},
-		DeploymentID: run.AssignedAgentID, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
-		AllowedActions: []string{agentrun.SkillActionRequestSetup, SkillActionListSetupRequests}, MaximumRisk: skill.RiskLevelRead,
+		DeploymentID: run.AssignedAgentID, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
+		AllowedActions: []string{agentrun.SkillActionRequestSetup, skillbinding.SkillActionListSetupRequests}, MaximumRisk: skill.RiskLevelRead,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	validator, err := NewSkillBindingActionValidator(catalog, teamRosterReader(store))
+	validator, err := skillbinding.NewSkillBindingActionValidator(catalog, teamRosterReader(store))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +169,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	}
 	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(t.Context(), ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: step.ID, WorkerID: "setup-worker", DeploymentID: run.AssignedAgentID,
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup,
+		SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup,
 		Arguments: arguments,
 		Summary:   "Ask for Reddit setup",
 		Origin:    ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: "loop:" + step.ID + ":call-setup", CausationID: step.ID,
@@ -197,7 +198,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 		}
 		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{candidate}}, nil
 	})
-	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,8 +450,8 @@ func TestSkillSetupTaskBindingUpgradeRebaseResumesSameWorkAfterRestart(t *testin
 		if !ok {
 			t.Fatal("binding upgrade fixture requires canonical reference upgrade storage")
 		}
-		service := NewSkillReferenceUpgradeService(upgradeStore, f.catalog)
-		plan, err := service.Plan(t.Context(), PlanSkillReferenceUpgradeRequest{
+		service := skillbinding.NewSkillReferenceUpgradeService(upgradeStore, f.catalog)
+		plan, err := service.Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{
 			Scope: original.Scope, DeploymentID: original.DeploymentID, BindingID: original.BindingID,
 			ToVersion: original.SkillVersion, ToSourceIdentity: original.SourceIdentity,
 		})
@@ -458,7 +459,7 @@ func TestSkillSetupTaskBindingUpgradeRebaseResumesSameWorkAfterRestart(t *testin
 			t.Fatal(err)
 		}
 		actor := ActivityActor{Type: "user", ID: f.task.Task.AuthenticatedActor.ID}
-		if _, err := service.Apply(t.Context(), ApplySkillReferenceUpgradeRequest{
+		if _, err := service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{
 			Plan: plan, Actor: actor, Reason: "Upgrade the saved account to the reviewed installed version",
 			Approval: &SkillReferenceUpgradeApproval{Principal: actor, Reason: "Approve the reviewed account upgrade"},
 		}); err != nil {
@@ -469,7 +470,7 @@ func TestSkillSetupTaskBindingUpgradeRebaseResumesSameWorkAfterRestart(t *testin
 		if err != nil || upgraded == nil || len(upgraded.Lifecycle) == 0 || upgraded.Lifecycle[len(upgraded.Lifecycle)-1].SkillUpgrade == nil {
 			t.Fatalf("canonical upgrade did not persist lifecycle proof: %#v %v", upgraded, err)
 		}
-		rebased, err := RebaseSkillSetupRequestAfterBindingUpgrade(original, original.Revision, upgraded)
+		rebased, err := skillbinding.RebaseSkillSetupRequestAfterBindingUpgrade(original, original.Revision, upgraded)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -614,11 +615,11 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 		if err != nil {
 			t.Fatal(err)
 		}
-		dispatcher, err := NewSkillBindingActionDispatcher(store, f.catalog, nil)
+		dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, f.catalog, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		listed, err := f.dispatch(t, dispatcher, run, SkillActionListSetupRequests, "list-setup", map[string]interface{}{})
+		listed, err := f.dispatch(t, dispatcher, run, skillbinding.SkillActionListSetupRequests, "list-setup", map[string]interface{}{})
 		if err != nil || listed == nil {
 			t.Fatalf("proven task cannot list its setup: %#v %v", listed, err)
 		}
@@ -631,7 +632,7 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 		if err := store.CreateAgentRun(t.Context(), forged); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.dispatch(t, dispatcher, forged, SkillActionListSetupRequests, "list-copied", map[string]interface{}{}); err == nil {
+		if _, err := f.dispatch(t, dispatcher, forged, skillbinding.SkillActionListSetupRequests, "list-copied", map[string]interface{}{}); err == nil {
 			t.Fatal("copied conversation context granted task setup access")
 		}
 		// A refused interaction request is a result, not a dispatch error.
@@ -646,9 +647,9 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 }
 
 // dispatch runs one SkillManagement action of run as a call of that run.
-func (f *skillSetupTaskWaitFixture) dispatch(t *testing.T, dispatcher *SkillBindingActionDispatcher, run *AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
+func (f *skillSetupTaskWaitFixture) dispatch(t *testing.T, dispatcher *skillbinding.SkillBindingActionDispatcher, run *AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
 	t.Helper()
-	bound, err := f.catalog.Resolve(t.Context(), skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, run.AssignedAgentID, SkillManagementSkillID, SkillManagementSkillVersion, action)
+	bound, err := f.catalog.Resolve(t.Context(), skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, run.AssignedAgentID, SkillManagementSkillID, skillbinding.SkillManagementSkillVersion, action)
 	if err != nil {
 		t.Fatal(err)
 	}

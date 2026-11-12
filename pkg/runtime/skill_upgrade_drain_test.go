@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -19,9 +20,9 @@ func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *te
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		catalog, proposal, plan := skillUpgradeDrainFixture(t, store)
-		service := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
+		service := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
 		apply := func() error {
-			_, err := service.Apply(t.Context(), ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "upgrader"}, Reason: "Adopt compatible Skill version"})
+			_, err := service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "upgrader"}, Reason: "Adopt compatible Skill version"})
 			return err
 		}
 		if err := apply(); !errors.Is(err, ErrSkillReferenceUpgradeBusy) {
@@ -41,7 +42,7 @@ func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *te
 		if fixture.reopen != nil {
 			store = fixture.reopen().(KernelStore)
 			catalog = skill.NewCatalogWithStore(store.(skill.CatalogStore))
-			service = NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
+			service = skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
 			if err := apply(); !errors.Is(err, ErrSkillReferenceUpgradeBusy) {
 				t.Fatalf("restart lost live receipt fence: %v", err)
 			}
@@ -97,7 +98,7 @@ func skillUpgradeDrainFixture(t *testing.T, store KernelStore) (*skill.Catalog, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog).Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0"})
+	plan, err := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog).Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0"})
 	if err != nil || plan.ApprovalRequired {
 		t.Fatalf("compatible plan: %#v %v", plan, err)
 	}

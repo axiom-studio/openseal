@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -647,7 +648,7 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 	}
 	call := result.Call
 	if dispatches != 0 || call.Status != ActionCallStatusFailed || call.FailurePhase != ActionFailureBeforeDispatch ||
-		!strings.HasPrefix(call.Error, "connect_account_required: ") || call.ExternalOperationDigest != "" || !isParkedConnectAccountCall(call) {
+		!strings.HasPrefix(call.Error, "connect_account_required: ") || call.ExternalOperationDigest != "" || !skillbinding.IsParkedConnectAccountCall(call) {
 		t.Fatalf("parked call = %#v", call)
 	}
 	card, err := store.GetSkillSetupRequest(t.Context(), scope, "connect-account:"+call.ID)

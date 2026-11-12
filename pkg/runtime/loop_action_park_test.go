@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
 // fakeGovernedCards serves card requests by id, without the store's
@@ -85,7 +86,7 @@ func connectAppCardCall(id string) *ActionCall {
 
 func connectAccountCardCall(id string) *ActionCall {
 	call := governedCardCall(id, "send", ActionCallStatusFailed,
-		map[string]interface{}{"setupRequest": map[string]interface{}{"kind": SkillSetupKindConnectAccount, "id": connectAccountRequestPrefix + id}})
+		map[string]interface{}{"setupRequest": map[string]interface{}{"kind": SkillSetupKindConnectAccount, "id": skillbinding.ConnectAccountRequestPrefix + id}})
 	call.SkillID, call.FailurePhase, call.Error = "mail", ActionFailureBeforeDispatch, "a sign-in is needed"
 	return call
 }
@@ -111,8 +112,8 @@ func (f *fakeGovernedCards) addConnectApp(call *ActionCall, status string) {
 }
 
 func (f *fakeGovernedCards) addConnectAccount(call *ActionCall, status string) {
-	f.setups[connectAccountRequestPrefix+call.ID] = &SkillSetupRequest{
-		ID: connectAccountRequestPrefix + call.ID, Scope: governedCardScope, RunID: call.RunID, ActionCallID: call.ID,
+	f.setups[skillbinding.ConnectAccountRequestPrefix+call.ID] = &SkillSetupRequest{
+		ID: skillbinding.ConnectAccountRequestPrefix + call.ID, Scope: governedCardScope, RunID: call.RunID, ActionCallID: call.ID,
 		Kind: SkillSetupKindConnectAccount, SkillName: "Gmail", Mode: skillSetupModePerPerson, Status: status, Revision: 1,
 	}
 }
@@ -169,7 +170,7 @@ func TestCardWaitCredentialRequest(t *testing.T) {
 	call := credentialCardCall("call-1")
 	cards.addCredential(call, CredentialRequestStatusPending)
 	p := cardParker(cards)
-	requireCardWait(t, p, governedCardRun(), call, CredentialRequestWakeType, "credential-call-1", "Waiting for the user to save a requested credential")
+	requireCardWait(t, p, governedCardRun(), call, skillbinding.CredentialRequestWakeType, "credential-call-1", "Waiting for the user to save a requested credential")
 
 	cards.credentials["credential-call-1"].Status = CredentialRequestStatusResolved
 	requireCardWait(t, p, governedCardRun(), call, "", "", "")
@@ -180,7 +181,7 @@ func TestCardWaitConnectApp(t *testing.T) {
 	call := connectAppCardCall("call-1")
 	cards.addConnectApp(call, "pending")
 	p := cardParker(cards)
-	requireCardWait(t, p, governedCardRun(), call, ConnectAppWakeType, "setup-call-1", "Waiting for the user to connect Linear")
+	requireCardWait(t, p, governedCardRun(), call, skillbinding.ConnectAppWakeType, "setup-call-1", "Waiting for the user to connect Linear")
 
 	cards.setups["setup-call-1"].Status = "dismissed"
 	requireCardWait(t, p, governedCardRun(), call, "", "", "")
@@ -191,9 +192,9 @@ func TestCardWaitConnectAccount(t *testing.T) {
 	call := connectAccountCardCall("call-1")
 	cards.addConnectAccount(call, "pending")
 	p := cardParker(cards)
-	requireCardWait(t, p, governedCardRun(), call, ConnectAccountWakeType, connectAccountRequestPrefix+"call-1", "Waiting for the person asking to connect Gmail")
+	requireCardWait(t, p, governedCardRun(), call, ConnectAccountWakeType, skillbinding.ConnectAccountRequestPrefix+"call-1", "Waiting for the person asking to connect Gmail")
 
-	cards.setups[connectAccountRequestPrefix+"call-1"].Status = "resolved"
+	cards.setups[skillbinding.ConnectAccountRequestPrefix+"call-1"].Status = "resolved"
 	requireCardWait(t, p, governedCardRun(), call, "", "", "")
 }
 
@@ -218,7 +219,7 @@ func TestPlanParkApprovalBeforeCardFirstInOrder(t *testing.T) {
 	p := cardParker(newFakeGovernedCards())
 	run := governedCardRun()
 	card := func(id string) GovernedToolOutcome {
-		return governedCardOutcome("tool-"+id, &ActionCall{ID: id}, &WakeCondition{Type: CredentialRequestWakeType, Reference: "credential-" + id}, "card "+id)
+		return governedCardOutcome("tool-"+id, &ActionCall{ID: id}, &WakeCondition{Type: skillbinding.CredentialRequestWakeType, Reference: "credential-" + id}, "card "+id)
 	}
 	approval := func(id string) GovernedToolOutcome {
 		return governedApprovalOutcome("tool-"+id, &ActionCall{ID: id}, &ApprovalCheckpoint{ID: "approval-" + id, Summary: "send " + id})
@@ -296,7 +297,7 @@ func TestPlanParkSupersedesHeldApprovalsOnNewMessage(t *testing.T) {
 		cardCall := &ActionCall{ID: "card"}
 		outcomes := []GovernedToolOutcome{
 			governedApprovalOutcome("tool-first", firstCall, first),
-			governedCardOutcome("tool-card", cardCall, &WakeCondition{Type: ConnectAppWakeType, Reference: "setup-card"}, "Waiting for the user to connect Linear"),
+			governedCardOutcome("tool-card", cardCall, &WakeCondition{Type: skillbinding.ConnectAppWakeType, Reference: "setup-card"}, "Waiting for the user to connect Linear"),
 			governedApprovalOutcome("tool-second", secondCall, second),
 		}
 		plan, err := p.PlanPark(f.ctx, run, outcomes)
@@ -414,15 +415,15 @@ func TestReplanParkNilWhenCardSettled(t *testing.T) {
 		wake   string
 	}
 	cards := []card{
-		{name: "credential request", call: credentialCardCall("call-1"), add: (*fakeGovernedCards).addCredential, wake: CredentialRequestWakeType,
+		{name: "credential request", call: credentialCardCall("call-1"), add: (*fakeGovernedCards).addCredential, wake: skillbinding.CredentialRequestWakeType,
 			settle: func(f *fakeGovernedCards, c *ActionCall, _ *AgentRun) {
 				f.credentials["credential-"+c.ID].Status = CredentialRequestStatusResolved
 			}},
-		{name: "connect app", call: connectAppCardCall("call-1"), add: (*fakeGovernedCards).addConnectApp, wake: ConnectAppWakeType,
+		{name: "connect app", call: connectAppCardCall("call-1"), add: (*fakeGovernedCards).addConnectApp, wake: skillbinding.ConnectAppWakeType,
 			settle: func(f *fakeGovernedCards, c *ActionCall, _ *AgentRun) { f.setups["setup-"+c.ID].Status = "resolved" }},
 		{name: "connect account", call: connectAccountCardCall("call-1"), add: (*fakeGovernedCards).addConnectAccount, wake: ConnectAccountWakeType,
 			settle: func(f *fakeGovernedCards, c *ActionCall, _ *AgentRun) {
-				f.setups[connectAccountRequestPrefix+c.ID].Status = "dismissed"
+				f.setups[skillbinding.ConnectAccountRequestPrefix+c.ID].Status = "dismissed"
 			}},
 		{name: "human intervention", call: humanCardCall("call-1"), wake: governedHumanInterventionWakeType,
 			add: func(*fakeGovernedCards, *ActionCall, string) {},
@@ -491,7 +492,7 @@ func TestSettledTextFromInterventionElseRecord(t *testing.T) {
 		t.Fatalf("pending request = %q; want none", got)
 	}
 	fake.credentials["credential-"+credential.ID].Status = CredentialRequestStatusDismissed
-	if got, want := p.settledText(ctx, run, credential, nil), CredentialRequestResolutionInstruction(fake.credentials["credential-"+credential.ID]); got != want {
+	if got, want := p.settledText(ctx, run, credential, nil), skillbinding.CredentialRequestResolutionInstruction(fake.credentials["credential-"+credential.ID]); got != want {
 		t.Fatalf("credential record = %q; want %q", got, want)
 	}
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
 
@@ -249,7 +250,7 @@ func pendingSkillSetupID(run *AgentRun, views []governedToolView, interventions 
 	for index := len(views) - 1; index >= 0; index-- {
 		view := views[index]
 		if view.SkillID != SkillManagementSkillID || view.Status != string(ActionCallStatusSucceeded) ||
-			view.Action != agentrun.SkillActionRequestSetup && view.Action != SkillActionListSetupRequests {
+			view.Action != agentrun.SkillActionRequestSetup && view.Action != skillbinding.SkillActionListSetupRequests {
 			continue
 		}
 		return pendingSetupIn(run, view, interventions)
@@ -281,7 +282,7 @@ func pendingSetupIn(run *AgentRun, view governedToolView, interventions []AgentR
 	switch view.Action {
 	case agentrun.SkillActionRequestSetup:
 		return pending(view.Result["setupRequest"])
-	case SkillActionListSetupRequests:
+	case skillbinding.SkillActionListSetupRequests:
 		values, _ := view.Result["requests"].([]interface{})
 		for _, value := range values {
 			if id := pending(value); id != "" {

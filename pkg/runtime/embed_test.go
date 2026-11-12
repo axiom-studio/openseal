@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -84,8 +85,8 @@ func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := context[sessionContextVerifiedClaimsKey].(map[string]interface{})
-	if context[sessionContextIDKey] != opened.Session.ID || claims["userId"] != "customer-42" {
+	claims := context[skillbinding.SessionContextVerifiedClaimsKey].(map[string]interface{})
+	if context[skillbinding.SessionContextIDKey] != opened.Session.ID || claims["userId"] != "customer-42" {
 		t.Fatalf("session context = %#v", context)
 	}
 	authority := context["authority"].(map[string]interface{})
@@ -93,7 +94,7 @@ func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testin
 	allows := func(action string) bool {
 		run := &AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{"authority": authority}}}
 		bound := &skill.BoundAction{Binding: &skill.Binding{ID: "crm"}, Action: skill.Action{Name: action, Risk: skill.RiskLevelRead}}
-		_, err := EmbedSessionActionAuthorityValidator{}.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: run, Bound: bound})
+		_, err := skillbinding.EmbedSessionActionAuthorityValidator{}.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: run, Bound: bound})
 		return err == nil
 	}
 	if !allows("lookup") || allows("delete") {

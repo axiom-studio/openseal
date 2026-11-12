@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"go.uber.org/zap"
@@ -203,11 +204,11 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 		if activateErr != nil {
 			return nil, fmt.Errorf("apply Team Runbook Skill authority: %w", activateErr)
 		}
-		authorityCatalog, ok := catalog.(TeamSkillAuthorityCatalog)
+		authorityCatalog, ok := catalog.(skillbinding.TeamSkillAuthorityCatalog)
 		if !ok {
 			return nil, errors.New("Team Skill authority resolution is unavailable")
 		}
-		teamActivation, activateErr = AuthorizeTeamSkillActivation(ctx, authorityCatalog, run, teamActivation)
+		teamActivation, activateErr = skillbinding.AuthorizeTeamSkillActivation(ctx, authorityCatalog, run, teamActivation)
 		if activateErr != nil {
 			return nil, fmt.Errorf("authorize bound Skills for Team %s: %w", run.Owner.ID, activateErr)
 		}
@@ -250,7 +251,7 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 		}
 		actions = filtered
 	}
-	actions = withoutUnusableTargetAgent(activation, actions)
+	actions = skillbinding.WithoutUnusableTargetAgent(activation, actions)
 	base := r.identity(actionDeploymentID)
 	base.ModelActions, base.PreparedRuntimes, base.InputContextRefs = actions, prepared, contextRefs
 	base.RunbookOperations = runbookOperations

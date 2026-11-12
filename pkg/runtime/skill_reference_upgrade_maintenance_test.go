@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -41,12 +42,12 @@ func TestSkillReferenceUpgradeMaintenanceRequiresOwnedExactTargetAcrossStores(t 
 		if err != nil {
 			t.Fatal(err)
 		}
-		service := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
-		plan, err := service.Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0", ToSourceIdentity: publisher})
+		service := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
+		plan, err := service.Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0", ToSourceIdentity: publisher})
 		if err != nil || plan.ApprovalRequired {
 			t.Fatalf("compatible old binding plan: %#v %v", plan, err)
 		}
-		request := ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "controller"}, Reason: "Advance verified compatible binding"}
+		request := skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "controller"}, Reason: "Advance verified compatible binding"}
 		if _, err := service.Apply(t.Context(), request); !errors.Is(err, ErrSkillRuntimeMaintenance) {
 			t.Fatalf("ordinary caller crossed maintenance gate: %v", err)
 		}
@@ -55,7 +56,7 @@ func TestSkillReferenceUpgradeMaintenanceRequiresOwnedExactTargetAcrossStores(t 
 		if _, err := service.Apply(WithSkillRuntimeMaintenance(t.Context(), &stale), request); !errors.Is(err, ErrSkillRuntimeMaintenance) {
 			t.Fatalf("stale owner crossed maintenance gate: %v", err)
 		}
-		third, err := service.Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.2.0", ToSourceIdentity: publisher})
+		third, err := service.Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.2.0", ToSourceIdentity: publisher})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -126,12 +127,12 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	if err != nil || work == nil || work.ID != task.WorkRun.ID {
 		t.Fatalf("claim Team task: %#v %v", work, err)
 	}
-	origin, err := conversationTaskSetupOrigin(ctx, store, work)
+	origin, err := skillbinding.ConversationTaskSetupOrigin(ctx, store, work)
 	if err != nil || origin == nil || origin.TargetAgentID != "task-agent" {
 		t.Fatalf("Team member task setup origin = %#v, %v", origin, err)
 	}
 	team.Roster = nil
-	if _, err := conversationTaskSetupOrigin(ctx, store, work); !errors.Is(err, ErrInvalidSkillSetup) {
+	if _, err := skillbinding.ConversationTaskSetupOrigin(ctx, store, work); !errors.Is(err, ErrInvalidSkillSetup) {
 		t.Fatalf("removed member's task setup origin err = %v", err)
 	}
 }

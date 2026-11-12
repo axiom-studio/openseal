@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestBindingActionArgumentResolverOverridesModelWithTrustedSessionValues(t *testing.T) {
-	resolver := BindingActionArgumentResolver{}
+	resolver := skillbinding.BindingActionArgumentResolver{}
 	bound := &skill.BoundAction{
 		Action: skill.Action{Name: "lookup"},
 		Binding: &skill.Binding{ArgumentBindings: map[string]map[string]skill.BindingArgumentValue{
@@ -21,8 +22,8 @@ func TestBindingActionArgumentResolverOverridesModelWithTrustedSessionValues(t *
 		}},
 	}
 	run := &AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{
-		sessionContextIDKey:             "session-123",
-		sessionContextVerifiedClaimsKey: map[string]interface{}{"userId": "customer-42"},
+		skillbinding.SessionContextIDKey:             "session-123",
+		skillbinding.SessionContextVerifiedClaimsKey: map[string]interface{}{"userId": "customer-42"},
 	}}}
 	arguments, handled, err := resolver.ResolveActionProposalArguments(context.Background(), agentrun.ActionProposalValidationInput{
 		Run: run, Bound: bound, Arguments: map[string]interface{}{"query": "open orders", "userId": "model-forged"},
@@ -36,14 +37,14 @@ func TestBindingActionArgumentResolverOverridesModelWithTrustedSessionValues(t *
 }
 
 func TestBindingActionArgumentResolverRejectsMissingVerifiedClaim(t *testing.T) {
-	resolver := BindingActionArgumentResolver{}
+	resolver := skillbinding.BindingActionArgumentResolver{}
 	bound := &skill.BoundAction{Action: skill.Action{Name: "lookup"}, Binding: &skill.Binding{
 		ArgumentBindings: map[string]map[string]skill.BindingArgumentValue{"lookup": {
 			"userId": {Source: skill.BindingArgumentVerifiedClaim, Claim: "userId"},
 		}},
 	}}
 	_, _, err := resolver.ResolveActionProposalArguments(context.Background(), agentrun.ActionProposalValidationInput{
-		Run:   &AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{sessionContextIDKey: "session-123"}}},
+		Run:   &AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{skillbinding.SessionContextIDKey: "session-123"}}},
 		Bound: bound,
 	})
 	if err == nil {

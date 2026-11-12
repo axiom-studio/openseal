@@ -9,6 +9,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -151,7 +152,7 @@ func (i *AgentInstaller) finishCreatedAgent(ctx context.Context, scope Scope, sp
 		if err != nil {
 			return nil, nil, err
 		}
-		bindings = append(bindings, secretSafeBindingPreview(binding))
+		bindings = append(bindings, skillbinding.SecretSafeBindingPreview(binding))
 	}
 	conversation, err := i.provision.EnsureAgentControlConversation(ctx, deployment)
 	if err != nil {
@@ -294,7 +295,7 @@ func (i *AgentInstaller) placeAgentInSpace(ctx context.Context, scope Scope, spa
 func (i *AgentInstaller) grantAgentSkill(ctx context.Context, scope Scope, deploymentID string, grant AgentSkillGrant, credentials map[string]skill.CredentialReference, actor skill.BindingActor, reason string) (*skill.Binding, error) {
 	reference := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	bindingID := agentBuilderBindingID(deploymentID, grant.SkillID)
-	args := skillBindingUpsertArguments{
+	args := skillbinding.SkillBindingUpsertArguments{
 		BindingID: bindingID, SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, SourceIdentity: grant.SourceIdentity,
 		AllowedActions: grant.AllowedActions, EnablePrompt: grant.EnablePrompt, MaximumRisk: grant.MaximumRisk, Config: grant.Config,
 	}
@@ -302,11 +303,11 @@ func (i *AgentInstaller) grantAgentSkill(ctx context.Context, scope Scope, deplo
 	if err != nil && !errors.Is(err, skill.ErrBindingNotFound) {
 		return nil, err
 	}
-	candidate := skillBindingCandidate(reference, deploymentID, args, current)
+	candidate := skillbinding.SkillBindingCandidate(reference, deploymentID, args, current)
 	if credentials != nil {
 		candidate.Credentials = maps.Clone(credentials)
 	}
-	if current != nil && !current.Disabled && sameManagedSkillBinding(current, candidate) {
+	if current != nil && !current.Disabled && skillbinding.SameManagedSkillBinding(current, candidate) {
 		return current, nil
 	}
 	var expected int64
@@ -318,7 +319,7 @@ func (i *AgentInstaller) grantAgentSkill(ctx context.Context, scope Scope, deplo
 	})
 	if errors.Is(err, skill.ErrBindingRevisionConflict) {
 		latest, getErr := i.catalog.GetBinding(ctx, reference, deploymentID, bindingID)
-		if getErr == nil && latest != nil && !latest.Disabled && sameManagedSkillBinding(latest, candidate) {
+		if getErr == nil && latest != nil && !latest.Disabled && skillbinding.SameManagedSkillBinding(latest, candidate) {
 			return latest, nil
 		}
 	}

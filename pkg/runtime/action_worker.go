@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/google/uuid"
@@ -333,7 +334,7 @@ func (w *ActionWorker) executeClaimed(ctx context.Context, call *ActionCall, wor
 			credentials, executionErr = w.credentials.ResolveCredentials(executionCtx, CredentialResolutionRequest{
 				Scope: call.Scope, DeploymentID: call.DeploymentID, SkillID: call.SkillID, SkillVersion: call.SkillVersion,
 				Action: call.Action, ActionCallID: call.ID, RunID: call.RunID, References: maps.Clone(call.CredentialRefs),
-				Umbrella: umbrella, ActingUser: sourceRun.ActingUser, Requirements: actionCredentialRequirements(bound),
+				Umbrella: umbrella, ActingUser: sourceRun.ActingUser, Requirements: skillbinding.ActionCredentialRequirements(bound),
 			})
 			if executionErr == nil {
 				for name := range call.CredentialRefs {
@@ -597,7 +598,7 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			updatedCall.FailurePhase = ActionFailureBeforeDispatch
 			updatedCall.Error = parked.Error()
 			updatedCall.ErrorCode, updatedCall.ErrorDetails = "", nil
-			projection, projectionErr := skillSetupResult(parked.request)
+			projection, projectionErr := skillbinding.SkillSetupRequestResult(parked.request)
 			if projectionErr != nil {
 				return ActionExecutionRecord{}, projectionErr
 			}
@@ -605,7 +606,7 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			updatedCall.Output = projection
 			updatedCall.ExternalOperationDigest = ""
 			eventType = "action.connection_requested"
-			summary = connectAccountWaitSummary(parked.request)
+			summary = skillbinding.ConnectAccountWaitSummary(parked.request)
 		} else if executionErr == nil {
 			updatedCall.Status = ActionCallStatusSucceeded
 			updatedCall.Output = sanitizeActionOutput(output, credentials)
@@ -615,9 +616,9 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			updatedCall.Status = ActionCallStatusFailed
 			updatedCall.Error = sanitizeActionError(executionErr, credentials)
 			updatedCall.ErrorCode, updatedCall.ErrorDetails = "", nil
-			var unavailable *personUnavailableError
+			var unavailable *skillbinding.PersonUnavailableError
 			if errors.As(executionErr, &unavailable) {
-				updatedCall.ErrorCode = CredentialErrorPersonUnavailable
+				updatedCall.ErrorCode = skillbinding.CredentialErrorPersonUnavailable
 			}
 			if errors.Is(executionErr, errActionInterrupted) {
 				updatedCall.ErrorCode = ActionErrorCodeInterrupted
@@ -656,10 +657,10 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			updatedRun.HumanInterventions = append(updatedRun.HumanInterventions, *request)
 			eventType = "action.human_intervention_required"
 			summary = request.Summary
-		} else if request := pendingCredentialRequestFromAction(ctx, w.store, updatedCall); request != nil {
+		} else if request := skillbinding.PendingCredentialRequestFromAction(ctx, w.store, updatedCall); request != nil {
 			eventType = "action.credential_requested"
 			summary = "Waiting for the user to save a requested credential"
-		} else if request := pendingConnectAppRequestFromAction(ctx, w.store, updatedCall); request != nil {
+		} else if request := skillbinding.PendingConnectAppRequestFromAction(ctx, w.store, updatedCall); request != nil {
 			eventType = "action.connection_requested"
 			summary = "Waiting for the user to connect " + request.SkillName
 		}

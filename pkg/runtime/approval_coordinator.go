@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/google/uuid"
 )
 
@@ -60,7 +61,7 @@ func isTargetedSkillBindingApproval(approval *ApprovalCheckpoint) bool {
 	}
 	resourceType, _ := approval.ProposedAction["resourceType"].(string)
 	operation, _ := approval.ProposedAction["operation"].(string)
-	return resourceType == "skill_binding" && (operation == SkillActionUpsertBinding || operation == SkillActionDisableBinding) &&
+	return resourceType == "skill_binding" && (operation == skillbinding.SkillActionUpsertBinding || operation == skillbinding.SkillActionDisableBinding) &&
 		approval.ProposedAction["targetAgent"] != nil
 }
 

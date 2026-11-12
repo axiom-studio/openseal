@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -121,7 +122,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 		return CredentialAvailability{}, nil
 	}))
 	result := executePersonAction(t, worker, scope, proposal)
-	if dispatched || result.Call.Status != ActionCallStatusFailed || result.Call.ErrorCode != CredentialErrorPersonUnavailable ||
+	if dispatched || result.Call.Status != ActionCallStatusFailed || result.Call.ErrorCode != skillbinding.CredentialErrorPersonUnavailable ||
 		!strings.Contains(result.Call.Error, "uses each person's own account, and no person asked for this run") {
 		t.Fatalf("call = %#v dispatched=%v", result.Call, dispatched)
 	}
@@ -179,7 +180,7 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 		card.Reason != "The Google account shared with this Agent is no longer available." {
 		t.Fatalf("shared card = %#v, %v", card, err)
 	}
-	if summary := connectAccountWaitSummary(card); summary != "Waiting for someone who manages this Agent to connect Google" {
+	if summary := skillbinding.ConnectAccountWaitSummary(card); summary != "Waiting for someone who manages this Agent to connect Google" {
 		t.Fatalf("summary = %q", summary)
 	}
 }
@@ -198,7 +199,7 @@ func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapNoPerson}}, nil
 	}))
 	result := executePersonAction(t, worker, scope, proposal)
-	if result.Call.ErrorCode != CredentialErrorPersonUnavailable || isParkedConnectAccountCall(result.Call) {
+	if result.Call.ErrorCode != skillbinding.CredentialErrorPersonUnavailable || skillbinding.IsParkedConnectAccountCall(result.Call) {
 		t.Fatalf("call = %#v", result.Call)
 	}
 	requests, _ := store.ListSkillSetupRequests(context.Background(), scope, "release-agent", "conversation-1")
@@ -221,10 +222,10 @@ func TestPersonActionApprovalOnlyByActingUser(t *testing.T) {
 }
 
 func TestConnectAppKeyMatchesHostKey(t *testing.T) {
-	if key := ConnectAppKey(ConnectAppTarget{CatalogSlug: "linear"}); key != "linear" {
+	if key := skillbinding.ConnectAppKey(ConnectAppTarget{CatalogSlug: "linear"}); key != "linear" {
 		t.Fatalf("catalog key = %q", key)
 	}
-	key := ConnectAppKey(ConnectAppTarget{Address: "https://mcp.example.com/sse"})
+	key := skillbinding.ConnectAppKey(ConnectAppTarget{Address: "https://mcp.example.com/sse"})
 	if !strings.HasPrefix(key, "custom:") || len(key) != len("custom:")+24 {
 		t.Fatalf("custom key = %q", key)
 	}
@@ -235,7 +236,7 @@ func TestConnectAppKeyMatchesHostKey(t *testing.T) {
 func TestTaskSetupActionMatchesPreviousBundledVersion(t *testing.T) {
 	run := &AgentRun{Scope: Scope{Kind: "tenant", ID: "one"}, ID: "run"}
 	call := &ActionCall{Scope: run.Scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: "1.6.0", Action: agentrun.SkillActionRequestSetup}
-	if !taskSetupActionMatches(call, run, "agent") {
+	if !skillbinding.TaskSetupActionMatches(call, run, "agent") {
 		t.Fatal("a 1.6.0 request_setup receipt no longer verifies")
 	}
 }

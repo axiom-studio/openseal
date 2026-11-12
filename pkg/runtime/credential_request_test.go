@@ -11,6 +11,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -62,21 +63,21 @@ func TestCredentialRequestStoresScopeCASAndTerminalState(t *testing.T) {
 	}
 }
 
-func credentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *SkillBindingActionDispatcher, Scope) {
+func credentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *skillbinding.SkillBindingActionDispatcher, Scope) {
 	t.Helper()
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "a"}
 	catalog := skillActionCatalog(t, ctx, scope, "agent")
 	if err := catalog.Bind(ctx, &skill.Binding{ID: "interaction-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent",
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, AllowedActions: []string{agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestCredential}, MaximumRisk: skill.RiskLevelRead}); err != nil {
+		SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, AllowedActions: []string{agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestCredential}, MaximumRisk: skill.RiskLevelRead}); err != nil {
 		t.Fatal(err)
 	}
 	// The bundled live browser is never in the installable catalog.
 	provider := skill.DiscoveryProviderFunc(func(context.Context, skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
 		return &skill.DiscoveryPage{}, nil
 	})
-	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	dispatcher, err := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,9 +101,9 @@ func proposeInteractionCall(t *testing.T, ctx context.Context, store *sqlite.Sto
 		t.Fatal(err)
 	}
 	f := newLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
-	validator, _ := NewSkillBindingActionValidator(catalog, store)
+	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, store)
 	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(ctx, f.request(ProposeActionRequest{
-		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: action, Arguments: arguments, Summary: "Ask the user"}, "interaction"))
+		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: action, Arguments: arguments, Summary: "Ask the user"}, "interaction"))
 	if err != nil || proposal.Approval != nil || proposal.Call.Status != ActionCallStatusReady {
 		t.Fatalf("proposal: %#v %v", proposal, err)
 	}
@@ -220,9 +221,9 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	}
 	f := newLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
 	run := f.run
-	validator, _ := NewSkillBindingActionValidator(catalog, store)
+	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, store)
 	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(ctx, f.request(ProposeActionRequest{
-		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: agentrun.SkillActionRequestCredential,
+		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestCredential,
 		Arguments: map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}, "request-credential"))
 	if err != nil {
 		t.Fatal(err)

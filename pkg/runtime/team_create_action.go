@@ -14,6 +14,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -219,7 +220,7 @@ func resolveTeamCreate(
 		seen[memberID] = true
 		deployment, err := agents.GetDeployment(ctx, agentBuilderScope(scope), memberID)
 		if err != nil {
-			return nil, agentBuilderTargetError(memberID, err)
+			return nil, skillbinding.AgentBuilderTargetError(memberID, err)
 		}
 		if deployment.RolloutStatus == kernelagent.RolloutRetired {
 			return nil, fmt.Errorf("agent %q is retired and cannot join a Team", memberID)

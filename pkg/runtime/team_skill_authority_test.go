@@ -7,6 +7,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -54,7 +55,7 @@ func TestTeamSkillAuthorityGivesEveryMemberEveryTeamBinding(t *testing.T) {
 	// The member Agent's own allowlist does not narrow Team bindings.
 	catalog.agentDefinition.Authority.AllowedSkillIDs = []string{"something-else"}
 	catalog.agent.Restrictions.AllowedSkillIDs = []string{"something-else"}
-	projected, err := AuthorizeTeamSkillActivation(t.Context(), catalog, run, snapshot)
+	projected, err := skillbinding.AuthorizeTeamSkillActivation(t.Context(), catalog, run, snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,14 +68,14 @@ func TestTeamSkillAuthorityGivesEveryMemberEveryTeamBinding(t *testing.T) {
 	// The Team Skill allowlist and the member Agent's risk ceiling still apply.
 	catalog.deployment.Restrictions.AllowedSkillIDs = []string{"forum"}
 	catalog.agentDefinition.Authority.MaximumRisk = capability.RiskLevelRead
-	projected, err = AuthorizeTeamSkillActivation(t.Context(), catalog, run, snapshot)
+	projected, err = skillbinding.AuthorizeTeamSkillActivation(t.Context(), catalog, run, snapshot)
 	if err != nil || len(projected.Skills) != 1 || len(projected.Skills[0].Actions) != 1 || projected.Skills[0].Actions[0].Action != "search" {
 		t.Fatalf("restricted projection = %#v, %v", projected, err)
 	}
 
 	foreign := *run
 	foreign.AssignedAgentID = "outsider"
-	if _, err := AuthorizeTeamSkillActivation(t.Context(), catalog, &foreign, snapshot); err == nil {
+	if _, err := skillbinding.AuthorizeTeamSkillActivation(t.Context(), catalog, &foreign, snapshot); err == nil {
 		t.Fatal("expected non-member Team Skill projection to fail closed")
 	}
 }
@@ -82,7 +83,7 @@ func TestTeamSkillAuthorityGivesEveryMemberEveryTeamBinding(t *testing.T) {
 func TestTeamSkillActionValidatorKeepsMemberConnectionsOutOfTeamRuns(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "one"}
 	catalog := teamSkillAuthorityFixture(scope)
-	validator, err := NewTeamSkillActionValidator(catalog)
+	validator, err := skillbinding.NewTeamSkillActionValidator(catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,7 @@ func TestTeamSkillActionDispatcherStopsRevokedRosterAuthority(t *testing.T) {
 		Action:  capability.Action{Name: "search", Risk: capability.RiskLevelRead},
 	}
 	dispatched := 0
-	dispatcher, err := NewTeamSkillActionDispatcher(catalog, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	dispatcher, err := skillbinding.NewTeamSkillActionDispatcher(catalog, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched++
 		return map[string]interface{}{"ok": true}, nil
 	}))

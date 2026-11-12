@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -13,7 +14,9 @@ import (
 // the account its card asks for.
 type connectAccountParked struct{ request *SkillSetupRequest }
 
-func (e *connectAccountParked) Error() string { return connectAccountRequiredPrefix + e.request.Reason }
+func (e *connectAccountParked) Error() string {
+	return skillbinding.ConnectAccountRequiredPrefix + e.request.Reason
+}
 
 // credentialAvailabilityBox lets a host install its checker after workers
 // exist.
@@ -49,8 +52,8 @@ func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *Age
 		}
 		return ObjectiveOwner{}, err
 	}
-	if callUsesPersonCredential(call) && run.ActingUser == "" {
-		return umbrella, personUnavailable(bound, umbrella)
+	if skillbinding.CallUsesPersonCredential(call) && run.ActingUser == "" {
+		return umbrella, skillbinding.NewPersonUnavailableError(bound, umbrella)
 	}
 	checker := w.credentialAvailabilityChecker()
 	if checker == nil {
@@ -58,7 +61,7 @@ func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *Age
 	}
 	availability, err := checker.CheckCredentialAvailability(ctx, CredentialAvailabilityRequest{
 		Scope: call.Scope, Umbrella: umbrella, ActingUser: run.ActingUser, DeploymentID: call.DeploymentID, BindingID: call.BindingID,
-		References: maps.Clone(call.CredentialRefs), Requirements: actionCredentialRequirements(bound),
+		References: maps.Clone(call.CredentialRefs), Requirements: skillbinding.ActionCredentialRequirements(bound),
 	})
 	if err != nil {
 		return umbrella, err
@@ -67,7 +70,7 @@ func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *Age
 	for slot, gap := range availability.Gaps {
 		switch gap {
 		case CredentialGapNoPerson:
-			return umbrella, personUnavailable(bound, umbrella)
+			return umbrella, skillbinding.NewPersonUnavailableError(bound, umbrella)
 		case CredentialGapPersonSignIn:
 			person = append(person, slot)
 		case CredentialGapSharedSignIn:
@@ -85,7 +88,7 @@ func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *Age
 	default:
 		return umbrella, nil
 	}
-	request, err := createConnectAccountRequest(ctx, w.store, run, call, bound, umbrella, connectAccountSlots(bound, slots), mode)
+	request, err := skillbinding.CreateConnectAccountRequest(ctx, w.store, run, call, bound, umbrella, skillbinding.ConnectAccountSlots(bound, slots), mode)
 	if err != nil {
 		return umbrella, err
 	}

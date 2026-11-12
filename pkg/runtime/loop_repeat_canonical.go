@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -86,7 +87,7 @@ func repeatGovernedCardOperation(operation string) bool {
 	if !strings.HasPrefix(operation, prefix) {
 		return false
 	}
-	return isInteractionRequestAction(strings.TrimPrefix(operation, prefix))
+	return skillbinding.IsInteractionRequestAction(strings.TrimPrefix(operation, prefix))
 }
 
 // repeatEffectOf classifies one call. toolKind/sideEffect/repeatable come from

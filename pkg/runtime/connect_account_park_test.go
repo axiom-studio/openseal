@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -40,7 +41,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	result := executePersonAction(t, worker, scope, proposal)
 	call := result.Call
 	if dispatches != 0 || call.Status != ActionCallStatusFailed || call.FailurePhase != ActionFailureBeforeDispatch ||
-		!strings.HasPrefix(call.Error, "connect_account_required: ") || call.ExternalOperationDigest != "" || !isParkedConnectAccountCall(call) {
+		!strings.HasPrefix(call.Error, "connect_account_required: ") || call.ExternalOperationDigest != "" || !skillbinding.IsParkedConnectAccountCall(call) {
 		t.Fatalf("parked call = %#v", call)
 	}
 	if len(checks) != 1 || checks[0].ActingUser != connectAccountTestUser || checks[0].Umbrella != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}) ||
@@ -67,7 +68,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	}
 	parker := newGovernedParker(store, nil, nil)
 	wake, summary, err := parker.governedCardWait(context.Background(), stored, call)
-	if err != nil || wake == nil || wake.Type != ConnectAccountWakeType || wake.Reference != card.ID || summary != connectAccountWaitSummary(card) {
+	if err != nil || wake == nil || wake.Type != ConnectAccountWakeType || wake.Reference != card.ID || summary != skillbinding.ConnectAccountWaitSummary(card) {
 		t.Fatalf("card wait = %#v %q %v", wake, summary, err)
 	}
 

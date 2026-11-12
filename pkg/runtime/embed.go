@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/google/uuid"
 )
 
@@ -230,9 +231,9 @@ func (s *EmbedSessionService) ResolveConversationSessionContext(ctx context.Cont
 		grants = append(grants, map[string]interface{}{"bindingId": grant.BindingID, "action": grant.Action})
 	}
 	return map[string]interface{}{
-		sessionContextIDKey:             session.ID,
-		sessionContextVerifiedClaimsKey: maps.Clone(session.VerifiedClaims),
-		"authority":                     map[string]interface{}{"actionGrants": grants, "maximumActionRisk": string(installation.Permissions.MaximumActionRisk)},
+		skillbinding.SessionContextIDKey:             session.ID,
+		skillbinding.SessionContextVerifiedClaimsKey: maps.Clone(session.VerifiedClaims),
+		"authority": map[string]interface{}{"actionGrants": grants, "maximumActionRisk": string(installation.Permissions.MaximumActionRisk)},
 	}, nil
 }
 

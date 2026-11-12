@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -564,7 +565,7 @@ func TestAgentBuilderUpdateAgentRefusals(t *testing.T) {
 		want      string
 	}{
 		"builder": {map[string]interface{}{"agentId": "finn", "expectedDeploymentRevision": revision("finn"), "purpose": "Other", "rationale": "x"}, "another Agent"},
-		"fixed":   {map[string]interface{}{"agentId": "platform", "expectedDeploymentRevision": revision("platform"), "purpose": "Other", "rationale": "x"}, ErrAgentBehaviorFixed.Error()},
+		"fixed":   {map[string]interface{}{"agentId": "platform", "expectedDeploymentRevision": revision("platform"), "purpose": "Other", "rationale": "x"}, skillbinding.ErrAgentBehaviorFixed.Error()},
 		"retired": {map[string]interface{}{"agentId": "old-agent", "expectedDeploymentRevision": revision("old-agent"), "purpose": "Other", "rationale": "x"}, "retired"},
 		"bundled": {map[string]interface{}{"agentId": "researcher", "expectedDeploymentRevision": revision("researcher"), "removeSkillBindingIds": []interface{}{"bundled:agents"}, "rationale": "x"}, "built in"},
 		"stale":   {map[string]interface{}{"agentId": "researcher", "expectedDeploymentRevision": revision("researcher") + 5, "purpose": "Other", "rationale": "x"}, "changed while the card waited"},
@@ -726,7 +727,7 @@ func TestAgentBuilderCreatedAgentKeepsGrantRiskInTeams(t *testing.T) {
 	team := teamBuilderDefinition("team-x", teamCreateArguments{DisplayName: "Crew"}, members, "call-team", agentBuilderApprover.ID)
 	// The Team Skill authority of the member in a Team deployment of that
 	// definition with no restrictions of its own.
-	validator, err := NewTeamSkillActionValidator(builderTeamAuthorityCatalog{
+	validator, err := skillbinding.NewTeamSkillActionValidator(builderTeamAuthorityCatalog{
 		deployment: &kernelteam.Deployment{
 			ID: "team-x", Scope: f.reference(), DefinitionID: team.ID, ActiveVersion: team.Version, Status: kernelteam.DeploymentActive,
 			Roster: []kernelteam.RosterAssignment{{ID: "member", AgentDeploymentID: deployment.ID}},

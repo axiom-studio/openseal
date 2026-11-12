@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -142,7 +143,7 @@ type ActionCoordinator struct {
 }
 
 func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators []ActionProposalValidator, opts ...models.ServiceOption) *ActionCoordinator {
-	portable := []ActionProposalValidator{KernelResolvedActionArgumentResolver{}, BindingActionArgumentResolver{}, EmbedSessionActionAuthorityValidator{}, RequiredActionEvidenceValidator{}, ObservationRefActionProposalValidator{}}
+	portable := []ActionProposalValidator{KernelResolvedActionArgumentResolver{}, skillbinding.BindingActionArgumentResolver{}, skillbinding.EmbedSessionActionAuthorityValidator{}, RequiredActionEvidenceValidator{}, ObservationRefActionProposalValidator{}}
 	portable = append(portable, validators...)
 	coordinator := &ActionCoordinator{
 		portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: models.ClockFrom(opts), newID: uuid.NewString,
@@ -334,7 +335,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	// unreviewed, and its checkpoint never auto-approves on timeout.
 	// A builder's skill change aimed at another Agent is reviewed the same
 	// way: it changes that Agent, so the asking person approves it.
-	targeted := isTargetedSkillBindingAction(bound, arguments)
+	targeted := skillbinding.IsTargetedSkillBindingAction(bound, arguments)
 	if bound.Action.AlwaysReview() || isAgentBuilderApprovalAction(bound) || targeted {
 		if decision.Disposition == ActionDispositionAllow {
 			return nil, fmt.Errorf("action policy allowed %s.%s, which always requires explicit review", req.SkillID, req.Action)
@@ -385,7 +386,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action, Origin: req.Origin, OriginRef: strings.TrimSpace(req.OriginRef), Execution: req.Execution,
 		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: review,
 		Arguments:         persistedActionArguments(arguments, bound.Action.InputSchema),
-		ResolvedArguments: bindingResolvedArgumentProvenance(bound),
+		ResolvedArguments: skillbinding.BindingResolvedArgumentProvenance(bound),
 		PreparedRuntime:   clonePreparedRuntime(req.PreparedRuntime),
 		CredentialRefs:    boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		ExternalOperationDigest: externalOperationDigest,
@@ -563,7 +564,7 @@ func (c *ActionCoordinator) newApprovalCheckpoint(ctx context.Context, req Propo
 		// as a draft would, is decided only in the app, and lapses rather
 		// than approves when nobody answers.
 		ttl, timeout, destinations = agentBuilderApprovalTTL, ApprovalTimeoutExpire, nil
-	} else if isTargetedSkillBindingAction(bound, arguments) {
+	} else if skillbinding.IsTargetedSkillBindingAction(bound, arguments) {
 		// A skill change aimed at another Agent is decided only in the app
 		// and lapses rather than approves when nobody answers.
 		timeout, destinations = ApprovalTimeoutExpire, nil
@@ -651,7 +652,7 @@ func (c *ActionCoordinator) suppressDuplicateExternalOperation(ctx context.Conte
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision, SkillID: req.SkillID, SkillVersion: req.SkillVersion,
 		Action: req.Action, Origin: req.Origin, Execution: req.Execution, Status: ActionCallStatusSucceeded, Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect,
 		Arguments: persistedActionArguments(arguments, bound.Action.InputSchema), PreparedRuntime: clonePreparedRuntime(req.PreparedRuntime),
-		ResolvedArguments: bindingResolvedArgumentProvenance(bound),
+		ResolvedArguments: skillbinding.BindingResolvedArgumentProvenance(bound),
 		EvidenceRefs:      append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		ExternalOperationDigest: digest, DuplicateOfActionCallID: prior.ID,
 		Output:      map[string]interface{}{"duplicateSuppressed": true, "priorActionCallId": prior.ID, "priorRunId": prior.RunID},

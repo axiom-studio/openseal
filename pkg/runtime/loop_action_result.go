@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -114,7 +115,7 @@ func renderGovernedResult(call *ActionCall, approval *ApprovalCheckpoint, settle
 				"evidenceRef": ref, "status": string(ToolResultInterrupted), "error": governedInterruptedError,
 			})
 		}
-		if isParkedConnectAccountCall(call) {
+		if skillbinding.IsParkedConnectAccountCall(call) {
 			value := map[string]interface{}{"evidenceRef": ref, "status": string(ToolResultFailed), "error": governedConnectAccountError}
 			if settled != "" {
 				value["outcome"] = settled

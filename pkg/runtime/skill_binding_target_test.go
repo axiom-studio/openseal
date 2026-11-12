@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/mcp"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -24,8 +25,8 @@ type skillTargetFixture struct {
 	skillScope skill.ScopeReference
 	agents     *kernelagent.Registry
 	catalog    *skill.Catalog
-	validator  *SkillBindingActionValidator
-	dispatcher *SkillBindingActionDispatcher
+	validator  *skillbinding.SkillBindingActionValidator
+	dispatcher *skillbinding.SkillBindingActionDispatcher
 	discovered []skill.DiscoveryRequest
 }
 
@@ -69,15 +70,15 @@ func newSkillTargetFixture(t *testing.T) *skillTargetFixture {
 		}
 	}
 	f.catalog = skill.NewCatalog()
-	for _, definition := range []*skill.Definition{SkillManagementSkill(), AgentManagementSkill(), redditSkillDefinition(), mcp.SkillDefinition()} {
+	for _, definition := range []*skill.Definition{skillbinding.SkillManagementSkill(), AgentManagementSkill(), redditSkillDefinition(), mcp.SkillDefinition()} {
 		if err := f.catalog.Register(f.ctx, definition); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, member := range []string{"finn", "writer"} {
 		if err := f.catalog.Bind(f.ctx, &skill.Binding{
-			ID: "skills", Revision: 1, Scope: f.skillScope, DeploymentID: member, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
-			AllowedActions: []string{SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding, agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestConnection, SkillActionListSetupRequests},
+			ID: "skills", Revision: 1, Scope: f.skillScope, DeploymentID: member, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
+			AllowedActions: []string{skillbinding.SkillActionDiscoverBinding, skillbinding.SkillActionUpsertBinding, skillbinding.SkillActionDisableBinding, agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestConnection, skillbinding.SkillActionListSetupRequests},
 			MaximumRisk:    skill.RiskLevelWrite,
 		}); err != nil {
 			t.Fatal(err)
@@ -110,11 +111,11 @@ func newSkillTargetFixture(t *testing.T) *skillTargetFixture {
 		}}}, nil
 	})
 	var err error
-	if f.validator, err = NewSkillBindingActionValidator(f.catalog, f.store); err != nil {
+	if f.validator, err = skillbinding.NewSkillBindingActionValidator(f.catalog, f.store); err != nil {
 		t.Fatal(err)
 	}
 	f.validator.UseAgentRegistry(f.agents)
-	if f.dispatcher, err = NewSkillBindingActionDispatcher(f.store, f.catalog, nil, provider); err != nil {
+	if f.dispatcher, err = skillbinding.NewSkillBindingActionDispatcher(f.store, f.catalog, nil, provider); err != nil {
 		t.Fatal(err)
 	}
 	f.dispatcher.UseAgentRegistry(f.agents)
@@ -137,7 +138,7 @@ func (f *skillTargetFixture) chatRun(t *testing.T, member string) *AgentRun {
 
 func (f *skillTargetFixture) bound(t *testing.T, member, action string) *skill.BoundAction {
 	t.Helper()
-	bound, err := f.catalog.Resolve(f.ctx, f.skillScope, member, SkillManagementSkillID, SkillManagementSkillVersion, action)
+	bound, err := f.catalog.Resolve(f.ctx, f.skillScope, member, SkillManagementSkillID, skillbinding.SkillManagementSkillVersion, action)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func readerUpsertArguments(target string) map[string]interface{} {
 		"allowedActions": []interface{}{"read"}, "enablePrompt": false, "maximumRisk": "read",
 	}
 	if target != "" {
-		arguments[SkillActionTargetAgentArgument] = target
+		arguments[skillbinding.SkillActionTargetAgentArgument] = target
 	}
 	return arguments
 }
@@ -167,20 +168,20 @@ func TestSkillBindingTargetFromNonBuilderIsRefused(t *testing.T) {
 	f := newSkillTargetFixture(t)
 	run := f.chatRun(t, "writer")
 	if _, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
-		Run: run, Bound: f.bound(t, "writer", SkillActionUpsertBinding), Arguments: readerUpsertArguments("researcher"),
+		Run: run, Bound: f.bound(t, "writer", skillbinding.SkillActionUpsertBinding), Arguments: readerUpsertArguments("researcher"),
 	}); err == nil || !strings.Contains(err.Error(), "only an Agent that builds Agents") {
 		t.Fatalf("non-builder upsert for another Agent = %v", err)
 	}
 	if _, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
-		Run: run, Bound: f.bound(t, "writer", SkillActionDiscoverBinding), Arguments: map[string]interface{}{"query": "reddit", SkillActionTargetAgentArgument: "researcher"},
+		Run: run, Bound: f.bound(t, "writer", skillbinding.SkillActionDiscoverBinding), Arguments: map[string]interface{}{"query": "reddit", skillbinding.SkillActionTargetAgentArgument: "researcher"},
 	}); err == nil {
 		t.Fatal("non-builder discovery for another Agent was accepted")
 	}
-	if _, err := f.dispatch(t, run, "upsert", SkillActionUpsertBinding, readerUpsertArguments("researcher")); err == nil {
+	if _, err := f.dispatch(t, run, "upsert", skillbinding.SkillActionUpsertBinding, readerUpsertArguments("researcher")); err == nil {
 		t.Fatal("non-builder dispatch bound a Skill to another Agent")
 	}
 	result, err := f.dispatch(t, run, "setup", agentrun.SkillActionRequestSetup, map[string]interface{}{
-		"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Read communities", SkillActionTargetAgentArgument: "researcher",
+		"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Read communities", skillbinding.SkillActionTargetAgentArgument: "researcher",
 	})
 	if err != nil || result["refused"] == nil {
 		t.Fatalf("non-builder setup for another Agent = %#v, %v", result, err)
@@ -207,7 +208,7 @@ func TestSkillBindingTargetFromBuilderBindsTheTarget(t *testing.T) {
 		}
 	}
 	preview, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
-		Run: run, Bound: f.bound(t, "finn", SkillActionUpsertBinding), Arguments: readerUpsertArguments("researcher"),
+		Run: run, Bound: f.bound(t, "finn", skillbinding.SkillActionUpsertBinding), Arguments: readerUpsertArguments("researcher"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -218,14 +219,14 @@ func TestSkillBindingTargetFromBuilderBindsTheTarget(t *testing.T) {
 		t.Fatalf("targeted preview = %#v", preview)
 	}
 	own, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
-		Run: run, Bound: f.bound(t, "finn", SkillActionUpsertBinding), Arguments: readerUpsertArguments(""),
+		Run: run, Bound: f.bound(t, "finn", skillbinding.SkillActionUpsertBinding), Arguments: readerUpsertArguments(""),
 	})
 	if err != nil || own["targetAgent"] != nil || own["deploymentId"] != "finn" {
 		t.Fatalf("untargeted preview = %#v, %v", own, err)
 	}
 
-	result, err := f.dispatch(t, run, "upsert", SkillActionUpsertBinding, readerUpsertArguments("researcher"))
-	if err != nil || result["operation"] != SkillActionUpsertBinding {
+	result, err := f.dispatch(t, run, "upsert", skillbinding.SkillActionUpsertBinding, readerUpsertArguments("researcher"))
+	if err != nil || result["operation"] != skillbinding.SkillActionUpsertBinding {
 		t.Fatalf("targeted upsert = %#v, %v", result, err)
 	}
 	binding, err := f.catalog.GetBinding(f.ctx, f.skillScope, "researcher", "reddit")
@@ -235,17 +236,17 @@ func TestSkillBindingTargetFromBuilderBindsTheTarget(t *testing.T) {
 	if own, _ := f.catalog.GetBinding(f.ctx, f.skillScope, "finn", "reddit"); own == nil || own.Revision != 1 {
 		t.Fatalf("builder's own binding changed: %#v", own)
 	}
-	replayed, err := f.dispatch(t, run, "upsert", SkillActionUpsertBinding, readerUpsertArguments("researcher"))
+	replayed, err := f.dispatch(t, run, "upsert", skillbinding.SkillActionUpsertBinding, readerUpsertArguments("researcher"))
 	if err != nil || replayed["replayed"] != true {
 		t.Fatalf("replayed targeted upsert = %#v, %v", replayed, err)
 	}
 
-	disable := map[string]interface{}{"bindingId": "reddit", "expectedRevision": binding.Revision, SkillActionTargetAgentArgument: "researcher"}
-	disablePreview, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{Run: run, Bound: f.bound(t, "finn", SkillActionDisableBinding), Arguments: disable})
+	disable := map[string]interface{}{"bindingId": "reddit", "expectedRevision": binding.Revision, skillbinding.SkillActionTargetAgentArgument: "researcher"}
+	disablePreview, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{Run: run, Bound: f.bound(t, "finn", skillbinding.SkillActionDisableBinding), Arguments: disable})
 	if err != nil || disablePreview["targetAgent"] == nil || disablePreview["deploymentId"] != "researcher" {
 		t.Fatalf("targeted disable preview = %#v, %v", disablePreview, err)
 	}
-	if _, err := f.dispatch(t, run, "disable", SkillActionDisableBinding, disable); err != nil {
+	if _, err := f.dispatch(t, run, "disable", skillbinding.SkillActionDisableBinding, disable); err != nil {
 		t.Fatal(err)
 	}
 	if disabled, _ := f.catalog.GetBinding(f.ctx, f.skillScope, "researcher", "reddit"); disabled == nil || !disabled.Disabled {
@@ -257,11 +258,11 @@ func TestSkillBindingTargetDiscoverReportsTargetReadiness(t *testing.T) {
 	f := newSkillTargetFixture(t)
 	run := f.chatRun(t, "finn")
 	if _, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
-		Run: run, Bound: f.bound(t, "finn", SkillActionDiscoverBinding), Arguments: map[string]interface{}{"query": "reddit", SkillActionTargetAgentArgument: "researcher"},
+		Run: run, Bound: f.bound(t, "finn", skillbinding.SkillActionDiscoverBinding), Arguments: map[string]interface{}{"query": "reddit", skillbinding.SkillActionTargetAgentArgument: "researcher"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.dispatch(t, run, "discover", SkillActionDiscoverBinding, map[string]interface{}{"query": "reddit", SkillActionTargetAgentArgument: "researcher"})
+	result, err := f.dispatch(t, run, "discover", skillbinding.SkillActionDiscoverBinding, map[string]interface{}{"query": "reddit", skillbinding.SkillActionTargetAgentArgument: "researcher"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,12 +271,12 @@ func TestSkillBindingTargetDiscoverReportsTargetReadiness(t *testing.T) {
 		items[0].(map[string]interface{})["readiness"] != string(skill.DiscoveryReadinessBindable) {
 		t.Fatalf("targeted discovery = %#v, requests %#v", result, f.discovered)
 	}
-	own, err := f.dispatch(t, run, "discover-own", SkillActionDiscoverBinding, map[string]interface{}{"query": "reddit"})
+	own, err := f.dispatch(t, run, "discover-own", skillbinding.SkillActionDiscoverBinding, map[string]interface{}{"query": "reddit"})
 	if err != nil || f.discovered[1].DeploymentID != "finn" ||
 		own["items"].([]interface{})[0].(map[string]interface{})["readiness"] != string(skill.DiscoveryReadinessUnavailable) {
 		t.Fatalf("own discovery = %#v, %v", own, err)
 	}
-	if _, err := f.dispatch(t, run, "discover-old", SkillActionDiscoverBinding, map[string]interface{}{"query": "reddit", SkillActionTargetAgentArgument: "old"}); err == nil {
+	if _, err := f.dispatch(t, run, "discover-old", skillbinding.SkillActionDiscoverBinding, map[string]interface{}{"query": "reddit", skillbinding.SkillActionTargetAgentArgument: "old"}); err == nil {
 		t.Fatal("discovery for a retired Agent was accepted")
 	}
 }
@@ -289,11 +290,11 @@ func TestSkillBindingTargetConnectionRequestIsOwnedByTheTarget(t *testing.T) {
 		}
 		return nil, nil
 	})
-	apps := &AppCatalogRef{}
-	apps.Set(fakeAppCatalog{entries: []AppCatalogEntry{{Slug: "linear", Name: "Linear", Official: true, SignIn: AppSignInOAuth}}})
+	apps := &skillbinding.AppCatalogRef{}
+	apps.Set(fakeAppCatalog{entries: []skillbinding.AppCatalogEntry{{Slug: "linear", Name: "Linear", Official: true, SignIn: AppSignInOAuth}}})
 	f.dispatcher.UseAppCatalog(apps)
 	run := f.chatRun(t, "finn")
-	result, err := f.dispatch(t, run, "connect", agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", SkillActionTargetAgentArgument: "researcher"})
+	result, err := f.dispatch(t, run, "connect", agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", skillbinding.SkillActionTargetAgentArgument: "researcher"})
 	if err != nil || result["setupRequest"] == nil {
 		t.Fatalf("targeted connection = %#v, %v", result, err)
 	}
@@ -306,59 +307,59 @@ func TestSkillBindingTargetConnectionRequestIsOwnedByTheTarget(t *testing.T) {
 		t.Fatalf("target connections read as %#v", actors)
 	}
 	writer := f.chatRun(t, "writer")
-	refused, err := f.dispatch(t, writer, "connect-writer", agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", SkillActionTargetAgentArgument: "researcher"})
+	refused, err := f.dispatch(t, writer, "connect-writer", agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", skillbinding.SkillActionTargetAgentArgument: "researcher"})
 	if err != nil || refused["refused"] == nil {
 		t.Fatalf("non-builder connection for another Agent = %#v, %v", refused, err)
 	}
 }
 
 func TestTargetAgentHiddenFromNonBuilders(t *testing.T) {
-	definition := SkillManagementSkill()
+	definition := skillbinding.SkillManagementSkill()
 	var actions []capability.ModelAction
-	for _, name := range []string{agentrun.SkillActionRequestConnection, SkillActionFindApps, SkillActionUpsertBinding} {
+	for _, name := range []string{agentrun.SkillActionRequestConnection, skillbinding.SkillActionFindApps, skillbinding.SkillActionUpsertBinding} {
 		action := definition.Actions[name]
 		actions = append(actions, capability.ModelAction{SkillID: SkillManagementSkillID, Action: name, Description: action.Description, InputSchema: action.InputSchema})
 	}
-	hidden := withoutUnusableTargetAgent(&skill.ActivationSnapshot{}, actions)
+	hidden := skillbinding.WithoutUnusableTargetAgent(&skill.ActivationSnapshot{}, actions)
 	for _, action := range hidden {
-		if properties, _ := action.InputSchema["properties"].(map[string]interface{}); properties[SkillActionTargetAgentArgument] != nil {
+		if properties, _ := action.InputSchema["properties"].(map[string]interface{}); properties[skillbinding.SkillActionTargetAgentArgument] != nil {
 			t.Fatalf("%s still offers targetAgentId", action.Action)
 		}
 		if action.Action == agentrun.SkillActionRequestConnection && strings.Contains(action.Description, "With targetAgentId") {
 			t.Fatalf("%s still describes targetAgentId", action.Action)
 		}
 	}
-	if properties := actions[0].InputSchema["properties"].(map[string]interface{}); properties[SkillActionTargetAgentArgument] == nil {
+	if properties := actions[0].InputSchema["properties"].(map[string]interface{}); properties[skillbinding.SkillActionTargetAgentArgument] == nil {
 		t.Fatal("hiding targetAgentId mutated the shared definition")
 	}
 	builder := &skill.ActivationSnapshot{Skills: []skill.ActivatedSkill{{
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
 		Actions: []capability.ModelAction{{Action: AgentActionCreateAgent}},
 	}}}
-	for _, action := range withoutUnusableTargetAgent(builder, actions) {
-		if action.Action == SkillActionFindApps {
+	for _, action := range skillbinding.WithoutUnusableTargetAgent(builder, actions) {
+		if action.Action == skillbinding.SkillActionFindApps {
 			continue
 		}
-		if properties, _ := action.InputSchema["properties"].(map[string]interface{}); properties[SkillActionTargetAgentArgument] == nil {
+		if properties, _ := action.InputSchema["properties"].(map[string]interface{}); properties[skillbinding.SkillActionTargetAgentArgument] == nil {
 			t.Fatalf("builder lost targetAgentId on %s", action.Action)
 		}
 	}
 }
 
 func TestSkillManagementSkillVersionIs170(t *testing.T) {
-	if SkillManagementSkillVersion != "1.7.0" {
-		t.Fatalf("openseal.skills = %s, want 1.7.0", SkillManagementSkillVersion)
+	if skillbinding.SkillManagementSkillVersion != "1.7.0" {
+		t.Fatalf("openseal.skills = %s, want 1.7.0", skillbinding.SkillManagementSkillVersion)
 	}
-	definition := SkillManagementSkill()
-	for _, name := range []string{SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding, agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestConnection} {
+	definition := skillbinding.SkillManagementSkill()
+	for _, name := range []string{skillbinding.SkillActionDiscoverBinding, skillbinding.SkillActionUpsertBinding, skillbinding.SkillActionDisableBinding, agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestConnection} {
 		properties := definition.Actions[name].InputSchema["properties"].(map[string]interface{})
-		if properties[SkillActionTargetAgentArgument] == nil {
+		if properties[skillbinding.SkillActionTargetAgentArgument] == nil {
 			t.Fatalf("%s has no targetAgentId", name)
 		}
 	}
-	for _, name := range []string{agentrun.SkillActionRequestCredential, SkillActionListSetupRequests, SkillActionFindApps} {
+	for _, name := range []string{agentrun.SkillActionRequestCredential, skillbinding.SkillActionListSetupRequests, skillbinding.SkillActionFindApps} {
 		properties, _ := definition.Actions[name].InputSchema["properties"].(map[string]interface{})
-		if properties[SkillActionTargetAgentArgument] != nil {
+		if properties[skillbinding.SkillActionTargetAgentArgument] != nil {
 			t.Fatalf("%s accepts targetAgentId", name)
 		}
 	}

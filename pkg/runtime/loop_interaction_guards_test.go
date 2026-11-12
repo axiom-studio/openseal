@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -213,7 +214,7 @@ func TestBackgroundTaskParksOnPendingSetup(t *testing.T) {
 	// list_setup_requests reports the same pending form.
 	g := newGuardFixture(t)
 	setupTaskRun(g)
-	g.add("list", SkillManagementSkillID, SkillActionListSetupRequests, ActionCallStatusSucceeded, map[string]interface{}{
+	g.add("list", SkillManagementSkillID, skillbinding.SkillActionListSetupRequests, ActionCallStatusSucceeded, map[string]interface{}{
 		"requests": []interface{}{
 			map[string]interface{}{"id": "other-run", "status": "pending", "runId": "run-else", "actionCallId": "x"},
 			map[string]interface{}{"id": "done", "status": "resolved", "runId": g.run.ID, "actionCallId": "y"},

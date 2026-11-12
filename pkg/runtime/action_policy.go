@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -47,7 +48,7 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	}
 	// A builder's skill change aimed at another Agent changes that Agent, so
 	// it is reviewed in every approval mode, like create_agent and update_agent.
-	if isTargetedSkillBindingAction(input.Bound, input.Arguments) {
+	if skillbinding.IsTargetedSkillBindingAction(input.Bound, input.Arguments) {
 		decision, err := p.requireApproval("a skill change for another agent is always approved by a person")
 		decision.ApprovalTimeout = ApprovalTimeoutExpire
 		return decision, err

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -29,7 +30,7 @@ func (s interactionCallsStore) ListActionCalls(ctx context.Context, filter Actio
 }
 
 func interactionCall(scope Scope, runID, id, action, key, requestID string) *ActionCall {
-	return &ActionCall{ID: id, Scope: scope, RunID: runID, DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
+	return &ActionCall{ID: id, Scope: scope, RunID: runID, DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
 		Action: action, Status: ActionCallStatusSucceeded, Output: map[string]interface{}{key: map[string]interface{}{"id": requestID}}}
 }
 
@@ -48,7 +49,7 @@ func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 		t.Fatalf("credential action: %#v", executed.Call)
 	}
 	// The loop parks the Run on the card at step end.
-	f.park(AgentRunStatusWaitingForEvent, &WakeCondition{Type: CredentialRequestWakeType, Reference: requestID})
+	f.park(AgentRunStatusWaitingForEvent, &WakeCondition{Type: skillbinding.CredentialRequestWakeType, Reference: requestID})
 	parked := f.current()
 	// A pending Skill setup request of the same Run is closed too.
 	setup := &SkillSetupRequest{ID: "setup-1", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID,

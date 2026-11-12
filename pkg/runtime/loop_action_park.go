@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
 // governedParker decides where a Run with open governed tool entries waits:
@@ -67,23 +68,23 @@ func (p *governedParker) governedCardWait(ctx context.Context, run *AgentRun, ca
 		if request := pendingHumanInterventionForCall(run, call); request != nil {
 			return &WakeCondition{Type: governedHumanInterventionWakeType, Reference: request.ID}, request.Summary, nil
 		}
-		if interactionRequestRefused(call) {
+		if skillbinding.InteractionRequestRefused(call) {
 			return nil, "", nil
 		}
 		if p.credentials != nil {
-			if request := pendingCredentialRequestFromAction(ctx, p.credentials, call); request != nil {
-				return &WakeCondition{Type: CredentialRequestWakeType, Reference: request.ID}, "Waiting for the user to save a requested credential", nil
+			if request := skillbinding.PendingCredentialRequestFromAction(ctx, p.credentials, call); request != nil {
+				return &WakeCondition{Type: skillbinding.CredentialRequestWakeType, Reference: request.ID}, "Waiting for the user to save a requested credential", nil
 			}
 		}
-		if request := pendingConnectAppRequestFromAction(ctx, p.setups, call); request != nil {
-			return &WakeCondition{Type: ConnectAppWakeType, Reference: request.ID}, "Waiting for the user to connect " + request.SkillName, nil
+		if request := skillbinding.PendingConnectAppRequestFromAction(ctx, p.setups, call); request != nil {
+			return &WakeCondition{Type: skillbinding.ConnectAppWakeType, Reference: request.ID}, "Waiting for the user to connect " + request.SkillName, nil
 		}
 		if isAgentTrialCall(call) {
 			return p.agentTrialWait(ctx, call)
 		}
 	case ActionCallStatusFailed:
-		if request := pendingConnectAccountRequestFromAction(ctx, p.setups, call); request != nil {
-			return &WakeCondition{Type: ConnectAccountWakeType, Reference: request.ID}, connectAccountWaitSummary(request), nil
+		if request := skillbinding.PendingConnectAccountRequestFromAction(ctx, p.setups, call); request != nil {
+			return &WakeCondition{Type: ConnectAccountWakeType, Reference: request.ID}, skillbinding.ConnectAccountWaitSummary(request), nil
 		}
 	}
 	return nil, "", nil
@@ -385,7 +386,7 @@ func (p *governedParker) settledText(ctx context.Context, run *AgentRun, call *A
 			}
 			return ""
 		}
-		if interactionRequestRefused(call) || call.SkillID != SkillManagementSkillID {
+		if skillbinding.InteractionRequestRefused(call) || call.SkillID != SkillManagementSkillID {
 			return ""
 		}
 		switch call.Action {
@@ -398,7 +399,7 @@ func (p *governedParker) settledText(ctx context.Context, run *AgentRun, call *A
 			if err != nil || request == nil || request.RunID != call.RunID || request.Status == CredentialRequestStatusPending {
 				return ""
 			}
-			return CredentialRequestResolutionInstruction(request)
+			return skillbinding.CredentialRequestResolutionInstruction(request)
 		case agentrun.SkillActionRequestConnection:
 			id := agentrun.InteractionRequestID(call, "setupRequest")
 			if id == "" || p.setups == nil {
@@ -408,17 +409,17 @@ func (p *governedParker) settledText(ctx context.Context, run *AgentRun, call *A
 			if err != nil || request == nil || request.Kind != SkillSetupKindConnectApp || request.RunID != call.RunID || request.Status == "pending" {
 				return ""
 			}
-			return ConnectAppResolutionInstruction(request, nil)
+			return skillbinding.ConnectAppResolutionInstruction(request, nil)
 		}
 	case ActionCallStatusFailed:
-		if !isParkedConnectAccountCall(call) || p.setups == nil {
+		if !skillbinding.IsParkedConnectAccountCall(call) || p.setups == nil {
 			return ""
 		}
-		request, err := p.setups.GetSkillSetupRequest(ctx, call.Scope, connectAccountRequestPrefix+call.ID)
+		request, err := p.setups.GetSkillSetupRequest(ctx, call.Scope, skillbinding.ConnectAccountRequestPrefix+call.ID)
 		if err != nil || request == nil || request.Kind != SkillSetupKindConnectAccount || request.RunID != call.RunID || request.Status == "pending" {
 			return ""
 		}
-		return ConnectAccountResolutionInstruction(request)
+		return skillbinding.ConnectAccountResolutionInstruction(request)
 	}
 	return ""
 }

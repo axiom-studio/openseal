@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
 const ConversationTaskSkillSetupWakeType = "skill_setup"
@@ -22,7 +23,7 @@ type conversationTaskSetupStore interface {
 }
 
 func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupStore, run *AgentRun, requestID string, requireCompletedAction bool) (*ConversationTask, *SkillSetupRequest, error) {
-	task, err := conversationTaskSetupOrigin(ctx, store, run)
+	task, err := skillbinding.ConversationTaskSetupOrigin(ctx, store, run)
 	if err != nil || task == nil {
 		return task, nil, err
 	}
@@ -39,7 +40,7 @@ func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupSt
 	if err != nil {
 		return task, nil, err
 	}
-	if !taskSetupActionMatches(call, run, task.TargetAgentID) {
+	if !skillbinding.TaskSetupActionMatches(call, run, task.TargetAgentID) {
 		return task, nil, ErrInvalidSkillSetup
 	}
 	if call.Status != ActionCallStatusSucceeded {

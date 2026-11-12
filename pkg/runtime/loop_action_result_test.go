@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -90,7 +91,7 @@ func TestRenderGovernedResultTable(t *testing.T) {
 		{name: "failed connect-once parked settled", call: func() *ActionCall {
 			c := governedResultCall(ActionCallStatusFailed)
 			c.SkillID, c.FailurePhase, c.Error = "mail", ActionFailureBeforeDispatch, "needs sign-in"
-			c.Output = map[string]interface{}{"setupRequest": map[string]interface{}{"kind": SkillSetupKindConnectAccount, "id": connectAccountRequestPrefix + "call-1"}}
+			c.Output = map[string]interface{}{"setupRequest": map[string]interface{}{"kind": SkillSetupKindConnectAccount, "id": skillbinding.ConnectAccountRequestPrefix + "call-1"}}
 			return c
 		}, settled: "The person you act for connected Google. Retry the step that needed it.", state: ToolEntryError, status: ToolResultFailed,
 			json: `{"error":"An account sign-in was needed.","evidenceRef":"action-call:call-1","outcome":"The person you act for connected Google. Retry the step that needed it.","status":"failed"}`},

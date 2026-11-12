@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
 // The Run-start preparer (SPEC §2.4 Preparers, first in the list). It turns
@@ -171,7 +172,7 @@ func runStartSetupPendingNote(run *AgentRun, sessionID string, step *AgentTurn, 
 	for index := len(views) - 1; index >= 0; index-- {
 		view := views[index]
 		if view.SkillID != SkillManagementSkillID || view.Status != string(ActionCallStatusSucceeded) ||
-			view.Action != agentrun.SkillActionRequestSetup && view.Action != SkillActionListSetupRequests {
+			view.Action != agentrun.SkillActionRequestSetup && view.Action != skillbinding.SkillActionListSetupRequests {
 			continue
 		}
 		id := pendingSetupIn(run, view, run.PendingInterventions)

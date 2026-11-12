@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
 const (
@@ -732,7 +733,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	if pinnedRunbook {
 		return binding, nil
 	}
-	binding.ModelActions = constrainEmbedSessionActions(run, binding.ModelActions)
+	binding.ModelActions = skillbinding.ConstrainEmbedSessionActions(run, binding.ModelActions)
 	if err := r.bindConversationLoop(ctx, run, binding, ConversationLoopStores{Sessions: r.sessions, Actions: r.actions, Activity: r.activity}); err != nil {
 		return nil, err
 	}

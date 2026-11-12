@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -74,13 +75,13 @@ func TestRunSkillDependencyPinsQueuedInvocationBeforeFirstActionAcrossStores(t *
 				t.Fatalf("dependency expanded foreign scope/version/deployment: %#v %v %v", unrelated, busy, err)
 			}
 		}
-		plan, err := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog).Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0", ToSourceIdentity: "native::reader"})
+		plan, err := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog).Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0", ToSourceIdentity: "native::reader"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		service := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
+		service := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
 		apply := func() error {
-			_, err := service.Apply(t.Context(), ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "controller"}, Reason: "Adopt verified runtime"})
+			_, err := service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "controller"}, Reason: "Adopt verified runtime"})
 			return err
 		}
 		if err := apply(); !errors.Is(err, ErrSkillReferenceUpgradeBusy) {
@@ -93,7 +94,7 @@ func TestRunSkillDependencyPinsQueuedInvocationBeforeFirstActionAcrossStores(t *
 			store = fixture.reopen().(KernelStore)
 			usage = store.(SkillRuntimeUsageStore)
 			catalog = skill.NewCatalogWithStore(store.(skill.CatalogStore))
-			service = NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
+			service = skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
 			assertBusy()
 		}
 		// Future deterministic execution still sees its original exact version.
@@ -216,8 +217,8 @@ func TestRunSkillDependencySerializesNewInvocationAndBindingUpgradeAcrossStores(
 			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 				store := fixture.store.(KernelStore)
 				catalog, scope, _ := runSkillDependencyFixture(t, store)
-				service := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
-				plan, err := service.Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0", ToSourceIdentity: "native::reader"})
+				service := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
+				plan, err := service.Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0", ToSourceIdentity: "native::reader"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -227,7 +228,7 @@ func TestRunSkillDependencySerializesNewInvocationAndBindingUpgradeAcrossStores(
 					run, runErr = NewPortfolioService(store).CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
 				}
 				upgrade := func() {
-					_, upgradeErr = service.Apply(t.Context(), ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "controller"}, Reason: "Adopt new runtime"})
+					_, upgradeErr = service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "controller"}, Reason: "Adopt new runtime"})
 				}
 				switch ordering {
 				case "run_first":

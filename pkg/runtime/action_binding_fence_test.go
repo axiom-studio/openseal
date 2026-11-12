@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -393,7 +394,7 @@ func actionBindingFenceUpgrade(fixture *actionBindingFenceFixture) *SkillReferen
 	next.Revision++
 	next.UpdatedAt = fixture.now.Add(time.Minute)
 	plan := &SkillReferenceUpgradePlan{
-		APIVersion: SkillReferenceUpgradeAPIVersion, Scope: fixture.proposal.Call.Scope,
+		APIVersion: skillbinding.SkillReferenceUpgradeAPIVersion, Scope: fixture.proposal.Call.Scope,
 		DeploymentID: next.DeploymentID, BindingID: next.ID, ExpectedBindingRevision: fixture.binding.Revision,
 		From:   SkillReferenceIdentity{ID: fixture.binding.SkillID, Version: fixture.binding.SkillVersion, SourceIdentity: fixture.binding.SourceIdentity},
 		To:     SkillReferenceIdentity{ID: next.SkillID, Version: next.SkillVersion, SourceIdentity: next.SourceIdentity},
@@ -402,7 +403,7 @@ func actionBindingFenceUpgrade(fixture *actionBindingFenceFixture) *SkillReferen
 	return &SkillReferenceUpgradeMutation{
 		Plan: plan, Binding: next,
 		Receipt: &SkillReferenceUpgradeReceipt{
-			APIVersion: SkillReferenceUpgradeAPIVersion, PlanDigest: plan.Digest, Scope: plan.Scope,
+			APIVersion: skillbinding.SkillReferenceUpgradeAPIVersion, PlanDigest: plan.Digest, Scope: plan.Scope,
 			DeploymentID: next.DeploymentID, BindingID: next.ID, BindingRevision: next.Revision,
 			From: plan.From, To: plan.To, AppliedAt: next.UpdatedAt,
 		},
