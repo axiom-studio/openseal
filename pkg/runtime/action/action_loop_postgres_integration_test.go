@@ -1,6 +1,6 @@
 //go:build integration
 
-package runtime
+package action_test
 
 import (
 	"context"

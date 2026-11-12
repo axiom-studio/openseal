@@ -1,6 +1,6 @@
 //go:build integration
 
-package runtime
+package conversation_test
 
 import (
 	"context"

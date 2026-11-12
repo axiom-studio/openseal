@@ -1,4 +1,4 @@
-package runtime
+package conversation_test
 
 import (
 	"encoding/json"
