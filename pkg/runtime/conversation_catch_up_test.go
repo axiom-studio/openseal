@@ -46,7 +46,7 @@ func forCatchUpStores(t *testing.T, owner ObjectiveOwner, test func(*testing.T, 
 		test(t, &catchUpFixture{
 			t: t, store: sessions, service: service, conversation: conversation, agentID: "agent",
 			now:     time.Now().UTC().Truncate(time.Millisecond),
-			catchUp: &conversationCatchUp{conversations: service, runs: store},
+			catchUp: newConversationCatchUp(service, store, nil),
 		})
 	})
 }

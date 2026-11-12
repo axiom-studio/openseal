@@ -52,7 +52,9 @@ func runContextSectionNames(t *testing.T, note *SessionEntry) map[string]bool {
 	if note == nil {
 		return map[string]bool{}
 	}
-	var data runContextNoteData
+	var data struct {
+		Sections map[string]json.RawMessage `json:"sections"`
+	}
 	if err := json.Unmarshal(note.Note.Data, &data); err != nil {
 		t.Fatalf("note data: %v", err)
 	}
