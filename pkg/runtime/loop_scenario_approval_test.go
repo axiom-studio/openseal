@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
 
 const (
@@ -183,7 +184,7 @@ func TestLoopApprovalParksAtStepEnd(t *testing.T) {
 			f := newApprovalScenario(t, open(t))
 			conversation, run := f.startChat(approvalScenarioTrigger)
 			exit, parked := f.runClaim(run.ID)
-			if exit.Reason != RunLoopExitParked || exit.Err != nil {
+			if exit.Reason != runloop.RunLoopExitParked || exit.Err != nil {
 				t.Fatalf("exit = %s, %v", exit.Reason, exit.Err)
 			}
 			assertParkedOnApproval(t, f, parked)

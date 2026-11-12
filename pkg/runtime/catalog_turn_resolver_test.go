@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -115,7 +116,7 @@ func (c *resolverCatalog) GetActionCall(context.Context, Scope, string) (*Action
 // store's sessions, steps and calls and a tool dispatcher over them.
 func loopBindingTestConfig(t testing.TB, store KernelStore, host agentrun.StepHost) LoopBindingConfig {
 	t.Helper()
-	tools, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store})
+	tools, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store})
 	if err != nil {
 		t.Fatal(err)
 	}

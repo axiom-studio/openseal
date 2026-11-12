@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
 
 // poolFixturePool is a worker pool over the loop fixture's store whose
@@ -25,7 +26,7 @@ import (
 func poolFixturePool(t *testing.T, f *loopFixture, maxSteps int) *AgentRunWorkerPool {
 	t.Helper()
 	if maxSteps <= 0 {
-		maxSteps = RunLoopMaxStepsPerClaim
+		maxSteps = runloop.RunLoopMaxStepsPerClaim
 	}
 	pool, err := newAgentRunWorkerPool(f.store, TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return f.binding(run), nil

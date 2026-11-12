@@ -24,6 +24,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
 
 // portVisualArtifactID is the stable artifact ID of the visual on the answer
@@ -183,8 +184,8 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 			failed := f.driveToRest(run.ID, hostRetries+2)
 			f.mustStatus(failed, AgentRunStatusFailed)
 			portRequireTypedFailure(t, failed)
-			if failed.FailureExplanation.Code != StepFailureHostUnavailable || failed.FailureExplanation.Explained {
-				t.Fatalf("failure = %#v, want an unexplained %s", failed.FailureExplanation, StepFailureHostUnavailable)
+			if failed.FailureExplanation.Code != runloop.StepFailureHostUnavailable || failed.FailureExplanation.Explained {
+				t.Fatalf("failure = %#v, want an unexplained %s", failed.FailureExplanation, runloop.StepFailureHostUnavailable)
 			}
 			if got := len(f.model.calls("")); got != hostRetries+1 {
 				t.Fatalf("model calls = %d, want %d (3 requeues, then the failure)", got, hostRetries+1)
@@ -234,7 +235,7 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 			f.dispatch.on("lookup", bigLookup)
 			conversation, run := f.startChat("check issues 1 to 5")
 			exit, failed := f.runClaimWith(f.ctx, run.ID, f.withLoopCompactor)
-			if exit.Reason != RunLoopExitFailed || exit.Err != nil {
+			if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil {
 				t.Fatalf("exit = %s (%v), want failed", exit.Reason, exit.Err)
 			}
 			f.mustStatus(failed, AgentRunStatusFailed)

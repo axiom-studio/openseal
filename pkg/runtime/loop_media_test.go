@@ -30,6 +30,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
 
 // mediaContent serves artifact bytes by content ref; set swaps them.
@@ -156,7 +157,7 @@ func (f *mediaFixture) drive(runID string, maxClaims int) *AgentRun {
 	f.t.Helper()
 	for i := 0; i < maxClaims; i++ {
 		exit, run := f.runClaimWith(f.ctx, runID, f.bind)
-		if exit.Err != nil && exit.Reason != RunLoopExitRequeued {
+		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
 			f.t.Fatalf("claim %d exited %s: %v", i+1, exit.Reason, exit.Err)
 		}
 		if run.Status != AgentRunStatusQueued {

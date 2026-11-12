@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
@@ -98,7 +99,7 @@ type chatLoopFixture struct {
 	conversation *Conversation
 	runner       *conversationrun.ConversationRunTurnRunner
 	actions      *chatLoopActions
-	loop         *RunLoop
+	loop         *runloop.RunLoop
 	team         bool
 	now          time.Time
 	// agents is the runner's AgentTurns resolver: the bare Agent binding of
@@ -133,7 +134,7 @@ func newChatLoopFixture(t *testing.T, base conversationtest.ThreadStartStore, op
 	if err != nil {
 		t.Fatal(err)
 	}
-	loop, err := NewRunLoop(store, nil, nil, RunLoopConfig{
+	loop, err := runloop.NewRunLoop(store, nil, nil, runloop.RunLoopConfig{
 		PlanToolEntries: func(*agentrun.TurnRunnerBinding, *AgentSession, *AgentTurn, *SessionEntry, []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 			return nil, fmt.Errorf("chat loop tests make no tool calls")
 		},
@@ -300,7 +301,7 @@ func (f *chatLoopFixture) bindAgent(run *AgentRun, agentID string, producer agen
 	f.agents[run.ID] = &agentrun.TurnRunnerBinding{
 		DeploymentID: agentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model", ModelActions: actions,
-		Producer: producer, Preparers: []agentrun.StepPreparer{NewRunStartPreparer(f.store, f.store)},
+		Producer: producer, Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(f.store, f.store)},
 		// What ResolveControlAuthority grants the speaking Agent of a chat.
 		Authority: agentrun.ControlAuthority{AgentID: agentID, CanAskUser: true, CanReact: true},
 	}
@@ -311,13 +312,13 @@ func (f *chatLoopFixture) bindAgent(run *AgentRun, agentID string, producer agen
 	return binding
 }
 
-func (f *chatLoopFixture) drive(run *AgentRun, binding *agentrun.TurnRunnerBinding) RunLoopExit {
+func (f *chatLoopFixture) drive(run *AgentRun, binding *agentrun.TurnRunnerBinding) runloop.RunLoopExit {
 	f.t.Helper()
 	current, err := f.store.GetAgentRun(f.ctx, run.Scope, run.ID)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	exit := f.loop.Drive(f.ctx, RunLoopClaim{Run: current, WorkerID: chatLoopWorker, Binding: binding})
+	exit := f.loop.Drive(f.ctx, runloop.RunLoopClaim{Run: current, WorkerID: chatLoopWorker, Binding: binding})
 	if exit.Err != nil {
 		f.t.Fatalf("drive %s: %v (exit %s)", run.ID, exit.Err, exit.Reason)
 	}

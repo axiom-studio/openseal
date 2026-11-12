@@ -27,6 +27,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -556,7 +557,7 @@ func convMemberAgentBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerB
 	if err != nil {
 		f.t.Fatalf("resolve member authority: %v", err)
 	}
-	preparer := NewCatalogModelStepPreparer(CatalogModelStepPreparerConfig{
+	preparer := runloop.NewCatalogModelStepPreparer(runloop.CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 	})
 	host := fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}
@@ -570,8 +571,8 @@ func convMemberAgentBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerB
 		ModelProvider: string(kitModelProvider), Model: kitModelName,
 		ModelActions: append([]capability.ModelAction(nil), f.offered...),
 		Producer:     producer, Session: session, Host: host, Authority: control,
-		Preparers: []agentrun.StepPreparer{NewRunStartPreparer(sessions, f.store)},
-		Tools:     f.dispatcher.ForClaim(LoopToolClaim{}),
+		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(sessions, f.store)},
+		Tools:     f.dispatcher.ForClaim(runloop.LoopToolClaim{}),
 	}
 	return binding
 }
@@ -591,8 +592,8 @@ func convDriveNextMember(f *loopFixture) *AgentRun {
 		if binding.Session != nil && claimed.SessionID != binding.Session.ID {
 			claimed = f.mustRun(claimed.ID)
 		}
-		exit := f.loop.Drive(f.ctx, RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
-		if exit.Err != nil && exit.Reason != RunLoopExitRequeued {
+		exit := f.loop.Drive(f.ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
+		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
 			f.t.Fatalf("member %s exited %s: %v", claimed.ID, exit.Reason, exit.Err)
 		}
 		run := f.mustRun(claimed.ID)
@@ -622,7 +623,7 @@ func convRoute(f *loopFixture, conversationID string, trigger *ChannelMessage) *
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if exit := f.loop.Drive(f.ctx, RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding}); exit.Reason != RunLoopExitFinal {
+	if exit := f.loop.Drive(f.ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding}); exit.Reason != runloop.RunLoopExitFinal {
 		f.t.Fatalf("routing exit = %#v", exit)
 	}
 	return f.mustRun(routing.ID)

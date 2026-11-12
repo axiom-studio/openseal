@@ -23,6 +23,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -49,7 +50,7 @@ type LoopBindingConfig struct {
 	// mode). Optional: without it those flags stay off.
 	Conversations ConversationStore
 	// Tools builds the claim's LoopToolExecutor. Required.
-	Tools *StepToolDispatcher
+	Tools *runloop.StepToolDispatcher
 	// ChatWorkspaces resolves the claim's chat Workspace, whose host tools
 	// the Run is offered. nil: no Run is offered host tools.
 	ChatWorkspaces modelstep.ChatWorkspaces
@@ -362,7 +363,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		chat = r.workspace(ctx)
 	}
 	hostTools := modelstep.HostToolSpecs(chat)
-	script, err := PrepareRoutineScript(r.run, hostTools)
+	script, err := runloop.PrepareRoutineScript(r.run, hostTools)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +384,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 	binding.Session = session
 	binding.Prompt = prompt
 	instructions := hostedAgentInstructions(r.definition)
-	preparerConfig := CatalogModelStepPreparerConfig{
+	preparerConfig := runloop.CatalogModelStepPreparerConfig{
 		AgentInstructions: instructions, SkillPrompts: prompts, HostTools: hostTools,
 		ModelCredential: deploymentModelCredential(r.deployment),
 		Capabilities:    r.config.Capabilities,
@@ -399,7 +400,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 			ModelCredential: preparerConfig.ModelCredential, Model: binding.Model,
 		})
 	}
-	preparer := NewCatalogModelStepPreparer(preparerConfig)
+	preparer := runloop.NewCatalogModelStepPreparer(preparerConfig)
 	producer, err := modelstep.NewModelStepProducer(r.config.Host, preparer, r.config.Store)
 	if err != nil {
 		return nil, err
@@ -412,8 +413,8 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		Budget: modelstep.NewRunActivityCompactionBudget(r.config.Store, NewRunActivityService(r.config.Store, r.config.Store, models.WithClock(r.config.Now)), r.config.Now),
 		Now:    r.config.Now,
 	}
-	binding.Preparers = []agentrun.StepPreparer{NewRunStartPreparer(r.config.Store, r.config.Store)}
-	binding.Tools = r.config.Tools.ForClaim(LoopToolClaim{
+	binding.Preparers = []agentrun.StepPreparer{runloop.NewRunStartPreparer(r.config.Store, r.config.Store)}
+	binding.Tools = r.config.Tools.ForClaim(runloop.LoopToolClaim{
 		Workspace: chat, SkillPrompts: prompts, CapabilityConfig: r.config.Capabilities, CommandPins: script.CommandPins(),
 	})
 	binding.ProgressAcknowledgementRenderer = externalconversation.NewProgressAcknowledgementRenderer(r.config.Host,
@@ -436,7 +437,7 @@ func (r *loopBindingResolution) deterministic(ctx context.Context, binding *agen
 	}
 	binding.Host = r.config.Host
 	binding.Session = session
-	binding.Tools = r.config.Tools.ForClaim(LoopToolClaim{CapabilityConfig: r.config.Capabilities})
+	binding.Tools = r.config.Tools.ForClaim(runloop.LoopToolClaim{CapabilityConfig: r.config.Capabilities})
 	return binding, nil
 }
 

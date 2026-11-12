@@ -21,6 +21,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
 
 // steerClaim claims runID and drives one claim with the fixture's binding,
@@ -32,7 +33,7 @@ func steerClaim(f *loopFixture, runID string) (LoopExit, *AgentRun) {
 	if binding.Session != nil && claimed.SessionID != binding.Session.ID {
 		claimed = f.mustRun(runID)
 	}
-	exit := f.loop.Drive(f.ctx, RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
+	exit := f.loop.Drive(f.ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
 	return exit, f.mustRun(runID)
 }
 
@@ -41,7 +42,7 @@ func steerToRest(f *loopFixture, runID string, maxClaims int) *AgentRun {
 	f.t.Helper()
 	for i := 0; i < maxClaims; i++ {
 		exit, run := steerClaim(f, runID)
-		if exit.Err != nil && exit.Reason != RunLoopExitRequeued {
+		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
 			var events []string
 			for _, event := range f.events(runID) {
 				events = append(events, event.EventType)

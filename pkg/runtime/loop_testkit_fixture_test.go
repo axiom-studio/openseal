@@ -32,6 +32,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -290,7 +291,7 @@ type loopFixture struct {
 	actions  *action.ActionCoordinator
 	approve  *action.ApprovalCoordinator
 	executor *action.ActionWorker
-	loop     *RunLoop
+	loop     *runloop.RunLoop
 	convs    *runtimeconversation.ConversationService
 	workerID string // "loop-worker-1"; crash() switches to "loop-worker-2"
 
@@ -299,7 +300,7 @@ type loopFixture struct {
 	scheduler  *conversationrun.ConversationRunScheduler
 	runner     *conversationrun.ConversationRunTurnRunner
 	control    *control.ControlExecutor
-	dispatcher *StepToolDispatcher
+	dispatcher *runloop.StepToolDispatcher
 	offered    []capability.ModelAction
 	// chats is the raw store's conversation side. Conversation services
 	// write through it, not through the crash store: a crash stands for a
@@ -434,7 +435,7 @@ func (f *loopFixture) build() {
 	f.actions = action.NewActionCoordinator(f.store, f.store, f.catalog, policy, nil, clock)
 	f.approve = action.NewApprovalCoordinator(f.store, f.store, action.ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }), clock)
 	f.executor = action.NewActionWorker(f.store, f.catalog, f.config.credentials, action.ActionDispatcherFunc(f.dispatch.Dispatch), clock)
-	governed, err := NewGovernedToolExecutor(GovernedToolExecutorConfig{
+	governed, err := runloop.NewGovernedToolExecutor(runloop.GovernedToolExecutorConfig{
 		Actions: f.actions, Approvals: f.approve, Worker: f.executor, Store: f.store, Now: f.clock.Now,
 	})
 	if err != nil {
@@ -448,14 +449,14 @@ func (f *loopFixture) build() {
 	if tasks, ok := f.store.(ConversationTaskKernelStore); ok {
 		f.control.Tasks = conversationrun.NewConversationTaskService(tasks)
 	}
-	f.dispatcher, err = NewStepToolDispatcher(StepToolDispatcherConfig{
+	f.dispatcher, err = runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{
 		Sessions: f.store.(AgentSessionStore), Turns: f.store, Actions: f.store, Coordinator: f.actions,
 		Governed: governed, Control: f.control, Host: modelstep.NewHostToolDispatcher(f.tools, f.actions, nil), Now: f.clock.Now,
 	})
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	f.loop, err = NewRunLoop(f.store, f.actions, nil, RunLoopConfig{
+	f.loop, err = runloop.NewRunLoop(f.store, f.actions, nil, runloop.RunLoopConfig{
 		StepLeaseDuration: loopFixtureLease, MaxStepsPerClaim: f.config.maxSteps, Now: f.clock.Now,
 		PlanToolEntries: f.planToolEntries, PlainTextFinal: f.control.PlainTextFinal,
 	})
@@ -467,7 +468,7 @@ func (f *loopFixture) build() {
 // planToolEntries is the loop's planner seam over the dispatcher's planners.
 func (f *loopFixture) planToolEntries(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 	if assistant != nil {
-		return PlanToolEntries(binding, assistant)
+		return runloop.PlanToolEntries(binding, assistant)
 	}
 	if session == nil || step == nil {
 		return nil, errors.New("deterministic tool entries need a session and a step")
@@ -476,7 +477,7 @@ func (f *loopFixture) planToolEntries(binding *agentrun.TurnRunnerBinding, sessi
 	if err != nil {
 		return nil, err
 	}
-	return PlanToolCallEntries(binding, run, step, session.ID, calls)
+	return runloop.PlanToolCallEntries(binding, run, step, session.ID, calls)
 }
 
 // ---------------------------------------------------------------------------
@@ -605,7 +606,7 @@ func (f *loopFixture) runClaim(runID string) (LoopExit, *AgentRun) {
 }
 
 // LoopExit is the loop's exit of one claim (RunLoopExit).
-type LoopExit = RunLoopExit
+type LoopExit = runloop.RunLoopExit
 
 func (f *loopFixture) runClaimContext(ctx context.Context, runID string) (LoopExit, *AgentRun) {
 	f.t.Helper()
@@ -614,7 +615,7 @@ func (f *loopFixture) runClaimContext(ctx context.Context, runID string) (LoopEx
 	if binding.Session != nil && claimed.SessionID != binding.Session.ID {
 		claimed = f.mustRun(runID)
 	}
-	exit := f.loop.Drive(ctx, RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
+	exit := f.loop.Drive(ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
 	return exit, f.mustRun(runID)
 }
 
@@ -625,7 +626,7 @@ func (f *loopFixture) driveToRest(runID string, maxClaims int) *AgentRun {
 	f.t.Helper()
 	for i := 0; i < maxClaims; i++ {
 		exit, run := f.runClaim(runID)
-		if exit.Err != nil && exit.Reason != RunLoopExitRequeued {
+		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
 			f.t.Fatalf("claim %d of %s exited %s: %v", i+1, runID, exit.Reason, exit.Err)
 		}
 		if run.Status != AgentRunStatusQueued {
@@ -707,7 +708,7 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*agentrun.
 	if err != nil {
 		f.t.Fatalf("resolve control authority: %v", err)
 	}
-	preparer := NewCatalogModelStepPreparer(CatalogModelStepPreparerConfig{
+	preparer := runloop.NewCatalogModelStepPreparer(runloop.CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 		HostTools:         modelstep.HostToolSpecs(authority),
 		Capabilities:      loopFixtureCapabilities,
@@ -728,8 +729,8 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*agentrun.
 			Budget: modelstep.NewRunActivityCompactionBudget(f.store, NewRunActivityService(f.store, f.store), f.clock.Now),
 			Now:    f.clock.Now,
 		},
-		Preparers: []agentrun.StepPreparer{NewRunStartPreparer(sessions, f.store)},
-		Tools:     f.dispatcher.ForClaim(LoopToolClaim{Workspace: authority, CapabilityConfig: loopFixtureCapabilities}),
+		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(sessions, f.store)},
+		Tools:     f.dispatcher.ForClaim(runloop.LoopToolClaim{Workspace: authority, CapabilityConfig: loopFixtureCapabilities}),
 	}
 	return binding, nil
 }

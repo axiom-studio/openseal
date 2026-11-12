@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
@@ -321,7 +322,7 @@ func TestRunbookKernelToolsAreNeverOffered(t *testing.T) {
 		ForkAllowed: true, CanWait: true, CanAskUser: true, CanReact: true, CanReportProgress: true,
 		DelegateTargets: []agentrun.HostedAgentTarget{{ID: "a"}}, Operations: []agentrun.HostedRunbookOperation{{Entrypoint: "x"}},
 	}
-	for _, spec := range ControlToolSpecs(everything) {
+	for _, spec := range runloop.ControlToolSpecs(everything) {
 		if spec.Name == ControlToolRunbookFork || spec.Name == ControlToolRunbookDelegate {
 			t.Fatalf("kernel-only tool %s offered to a model", spec.Name)
 		}
@@ -363,8 +364,8 @@ type runbookLoopFixture struct {
 	store    *sqlite.Store
 	scope    Scope
 	control  *control.ControlExecutor
-	tools    *StepToolDispatcher
-	loop     *RunLoop
+	tools    *runloop.StepToolDispatcher
+	loop     *runloop.RunLoop
 	producer *routine.RunbookStepProducer
 }
 
@@ -374,15 +375,15 @@ func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runboo
 	f := &runbookLoopFixture{t: t, ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "runbook-loop"}}
 	collaboration := collaboration.NewCollaborationService(store)
 	f.control = &control.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration}
-	tools, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: f.control})
+	tools, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: f.control})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.tools = tools
 	f.producer = newTestRunbookProducer(t, definition, "manual", store)
-	loop, err := NewRunLoop(store, nil, nil, RunLoopConfig{
+	loop, err := runloop.NewRunLoop(store, nil, nil, runloop.RunLoopConfig{
 		PlanToolEntries: func(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, _ *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
-			return PlanToolCallEntries(binding, &AgentRun{ID: step.RunID, Scope: step.Scope}, step, session.ID, calls)
+			return runloop.PlanToolCallEntries(binding, &AgentRun{ID: step.RunID, Scope: step.Scope}, step, session.ID, calls)
 		},
 		PlainTextFinal: f.control.PlainTextFinal,
 	})
@@ -414,7 +415,7 @@ func (f *runbookLoopFixture) create(req CreateAgentRunRequest) *AgentRun {
 
 // drive claims the next queued Run of the scope (it must be one of wantIDs)
 // and drives one claim on its run session.
-func (f *runbookLoopFixture) drive(wantIDs ...string) (string, RunLoopExit) {
+func (f *runbookLoopFixture) drive(wantIDs ...string) (string, runloop.RunLoopExit) {
 	f.t.Helper()
 	now := time.Now().UTC()
 	claimed, err := f.store.ClaimNextAgentRun(f.ctx, AgentRunClaim{Scope: f.scope, WorkerID: runbookLoopWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
@@ -440,8 +441,8 @@ func (f *runbookLoopFixture) drive(wantIDs ...string) (string, RunLoopExit) {
 		session = opened.Session
 	}
 	claimed = f.run(claimed.ID)
-	binding := &agentrun.TurnRunnerBinding{Producer: f.producer, Session: session, Tools: f.tools.ForClaim(LoopToolClaim{})}
-	return claimed.ID, f.loop.Drive(f.ctx, RunLoopClaim{Run: claimed, WorkerID: runbookLoopWorker, Binding: binding})
+	binding := &agentrun.TurnRunnerBinding{Producer: f.producer, Session: session, Tools: f.tools.ForClaim(runloop.LoopToolClaim{})}
+	return claimed.ID, f.loop.Drive(f.ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: runbookLoopWorker, Binding: binding})
 }
 
 func (f *runbookLoopFixture) run(id string) *AgentRun {

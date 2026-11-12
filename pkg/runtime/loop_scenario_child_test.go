@@ -32,6 +32,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -188,7 +189,7 @@ func (c *childFixture) claimNext() *AgentRun {
 }
 
 // drive claims runID (it must be the next queued Run) and drives one claim.
-func (c *childFixture) drive(runID string) (RunLoopExit, *AgentRun) {
+func (c *childFixture) drive(runID string) (runloop.RunLoopExit, *AgentRun) {
 	c.t.Helper()
 	claimed := c.claimNext()
 	if claimed == nil || claimed.ID != runID {
@@ -203,14 +204,14 @@ func (c *childFixture) drive(runID string) (RunLoopExit, *AgentRun) {
 	return c.driveClaimed(claimed)
 }
 
-func (c *childFixture) driveClaimed(claimed *AgentRun) (RunLoopExit, *AgentRun) {
+func (c *childFixture) driveClaimed(claimed *AgentRun) (runloop.RunLoopExit, *AgentRun) {
 	c.t.Helper()
 	c.claims[claimed.ID]++
 	binding := c.bindingFor(claimed)
 	// The resolver may create the run session at first claim.
 	claimed = c.mustRun(claimed.ID)
-	exit := c.loop.Drive(c.ctx, RunLoopClaim{Run: claimed, WorkerID: c.workerID, Binding: binding})
-	if exit.Err != nil && exit.Reason != RunLoopExitRequeued {
+	exit := c.loop.Drive(c.ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: c.workerID, Binding: binding})
+	if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
 		after := c.mustRun(claimed.ID)
 		c.t.Logf("after: status %s lease %q output %v", after.Status, after.LeaseOwner, after.Output)
 		c.t.Fatalf("claim of %s exited %s: %v\nlog: %v", claimed.ID, exit.Reason, exit.Err, c.entryTypesOf(claimed.ID))
@@ -326,7 +327,7 @@ func (c *childFixture) bindingFor(run *AgentRun) *agentrun.TurnRunnerBinding {
 		c.authority(run, &control)
 	}
 	host := fakeStepHost{scriptedModel: c.model, fakeHostTools: c.tools}
-	preparer := NewCatalogModelStepPreparer(CatalogModelStepPreparerConfig{
+	preparer := runloop.NewCatalogModelStepPreparer(runloop.CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 	})
 	producer, err := modelstep.NewModelStepProducer(host, preparer, c.store)
@@ -338,8 +339,8 @@ func (c *childFixture) bindingFor(run *AgentRun) *agentrun.TurnRunnerBinding {
 		DefinitionID: loopFixtureDefinition, DefinitionVersion: "1",
 		ModelProvider: string(kitModelProvider), Model: kitModelName,
 		Producer: producer, Host: host, Authority: control,
-		Preparers: []agentrun.StepPreparer{NewRunStartPreparer(c.store.(AgentSessionStore), c.store)},
-		Tools:     c.dispatcher.ForClaim(LoopToolClaim{}),
+		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(c.store.(AgentSessionStore), c.store)},
+		Tools:     c.dispatcher.ForClaim(runloop.LoopToolClaim{}),
 	}
 	_, decision := run.Context[agentrun.AgentRequestInboxContextKey]
 	_, review := run.Context[agentrun.AgentRequestCompletionReviewContextKey]
@@ -404,7 +405,7 @@ func (c *childFixture) runbookBinding(run *AgentRun) *agentrun.TurnRunnerBinding
 		DeploymentID: run.AssignedAgentID, ActionDeploymentID: loopFixtureAgent,
 		DefinitionID: loopFixtureDefinition, DefinitionVersion: "1",
 		Producer: producer, Authority: control, Session: c.runSession(run, false),
-		Tools: c.dispatcher.ForClaim(LoopToolClaim{}),
+		Tools: c.dispatcher.ForClaim(runloop.LoopToolClaim{}),
 	}
 }
 
@@ -579,7 +580,7 @@ func TestLoopForkCreatesChildSessionAndResumesWithItsFinalText(t *testing.T) {
 		parent := c.startRun(RunKindAgentWork, "Count the stock")
 
 		// The fork parks the parent and releases its claim.
-		if exit, _ := c.drive(parent.ID); exit.Reason != RunLoopExitParked {
+		if exit, _ := c.drive(parent.ID); exit.Reason != runloop.RunLoopExitParked {
 			t.Fatalf("parent exit = %s", exit.Reason)
 		}
 		waiting := c.mustRun(parent.ID)
@@ -1245,7 +1246,7 @@ func TestLoopRunbookStartParksForChild(t *testing.T) {
 	eachStore(t, "child_runbook_start", func(t *testing.T, store KernelStore) {
 		c := newRunbookChildFixture(t, store)
 		parent := c.startRun(RunKindAgentWork, "Engage acme")
-		if exit, _ := c.drive(parent.ID); exit.Reason != RunLoopExitParked {
+		if exit, _ := c.drive(parent.ID); exit.Reason != runloop.RunLoopExitParked {
 			t.Fatalf("parent exit = %s", exit.Reason)
 		}
 		c.mustStatus(parent, AgentRunStatusWaitingForDependency)

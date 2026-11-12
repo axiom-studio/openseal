@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -76,7 +77,7 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTas
 		Portfolio: store, Sessions: store, Activity: activity, Conversations: conversation.NewConversationService(store),
 		Reporting: store, Tasks: conversationrun.NewConversationTaskService(tasks),
 	}
-	dispatcher, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: control})
+	dispatcher, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: control})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTas
 		return &agentrun.TurnRunnerBinding{
 			DeploymentID: run.AssignedAgentID, DefinitionID: run.AssignedAgentID, DefinitionVersion: "1",
 			ModelProvider: "fake", Model: "deterministic", Producer: producer, Session: session, Authority: authority,
-			Tools: dispatcher.ForClaim(LoopToolClaim{}),
+			Tools: dispatcher.ForClaim(runloop.LoopToolClaim{}),
 		}, nil
 	}
 }

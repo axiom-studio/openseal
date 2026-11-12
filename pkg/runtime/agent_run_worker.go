@@ -16,6 +16,7 @@ import (
 	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -93,7 +94,7 @@ type AgentRunWorkerPool struct {
 	config               AgentRunWorkerConfig
 	scheduler            *agentrun.AgentRunScheduler
 	portfolio            PortfolioStore
-	loop                 *RunLoop
+	loop                 *runloop.RunLoop
 	wakeService          *agentrun.AgentRunWakeService
 	activity             *RunActivityService
 	actions              *action.ActionCoordinator
@@ -153,7 +154,7 @@ func (p *AgentRunWorkerPool) IdleFor(now time.Time) time.Duration {
 }
 
 func NewAgentRunWorkerPool(store KernelStore, resolver conversation.TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
-	return newAgentRunWorkerPool(store, resolver, logger, config, RunLoopMaxStepsPerClaim, opts...)
+	return newAgentRunWorkerPool(store, resolver, logger, config, runloop.RunLoopMaxStepsPerClaim, opts...)
 }
 
 // newAgentRunWorkerPool is NewAgentRunWorkerPool with the number of steps
@@ -169,7 +170,7 @@ func newAgentRunWorkerPool(store KernelStore, resolver conversation.TurnRunnerRe
 		logger = zap.NewNop().Sugar()
 	}
 	clock := models.ClockFrom(opts)
-	loop, err := NewRunLoop(store, nil, logger, RunLoopConfig{
+	loop, err := runloop.NewRunLoop(store, nil, logger, runloop.RunLoopConfig{
 		StepLeaseDuration: config.TurnLeaseDuration, MaxStepsPerClaim: maxStepsPerClaim, Now: clock,
 		PlanToolEntries: workerPlanToolEntries(store), PlainTextFinal: workerPlainTextFinal,
 	})
@@ -360,11 +361,11 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	claimCtx, cancelClaim := context.WithCancel(ctx)
 	heartbeatDone := make(chan error, 1)
 	go p.heartbeatRunLease(claimCtx, cancelClaim, workerID, run, heartbeatDone)
-	exit := p.loop.Drive(claimCtx, RunLoopClaim{Run: run, WorkerID: workerID, Binding: binding})
+	exit := p.loop.Drive(claimCtx, runloop.RunLoopClaim{Run: run, WorkerID: workerID, Binding: binding})
 	cancelClaim()
-	if heartbeatErr := <-heartbeatDone; heartbeatErr != nil && exit.Reason != RunLoopExitLeaseLost {
+	if heartbeatErr := <-heartbeatDone; heartbeatErr != nil && exit.Reason != runloop.RunLoopExitLeaseLost {
 		p.logger.Warnw("agent Run lease was lost during its claim", "runId", run.ID, "exit", exit.Reason, "error", heartbeatErr)
-		exit.Reason = RunLoopExitLeaseLost
+		exit.Reason = runloop.RunLoopExitLeaseLost
 	}
 	if exit.Err != nil {
 		p.logger.Warnw("agent run claim ended with an error", "runId", run.ID, "exit", exit.Reason, "steps", exit.Steps, "error", exit.Err)
@@ -373,7 +374,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	case exit.Run != nil && isTerminalAgentRunStatus(exit.Run.Status):
 		p.finishTerminalRun(ctx, exit.Run)
 		p.Wake()
-	case exit.Reason == RunLoopExitYielded || exit.Reason == RunLoopExitRequeued || exit.Reason == RunLoopExitParked:
+	case exit.Reason == runloop.RunLoopExitYielded || exit.Reason == runloop.RunLoopExitRequeued || exit.Reason == runloop.RunLoopExitParked:
 		p.Wake()
 	}
 }
@@ -390,10 +391,10 @@ func (p *AgentRunWorkerPool) finishTerminalRun(ctx context.Context, run *AgentRu
 
 // workerPlanToolEntries is the pool's RunLoopConfig.PlanToolEntries: the
 // dispatcher's planners over the binding's claim executor.
-func workerPlanToolEntries(store PortfolioStore) StepToolEntryPlanner {
+func workerPlanToolEntries(store PortfolioStore) runloop.StepToolEntryPlanner {
 	return func(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 		if assistant != nil {
-			return PlanToolEntries(binding, assistant)
+			return runloop.PlanToolEntries(binding, assistant)
 		}
 		if session == nil || step == nil {
 			return nil, errors.New("deterministic tool entries need a session and a step")
@@ -405,7 +406,7 @@ func workerPlanToolEntries(store PortfolioStore) StepToolEntryPlanner {
 		if run == nil {
 			return nil, ErrRunNotFound
 		}
-		return PlanToolCallEntries(binding, run, step, session.ID, calls)
+		return runloop.PlanToolCallEntries(binding, run, step, session.ID, calls)
 	}
 }
 
@@ -414,7 +415,7 @@ func workerPlanToolEntries(store PortfolioStore) StepToolEntryPlanner {
 func workerPlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (runtimecontrol.ControlResult, error) {
 	var control *runtimecontrol.ControlExecutor
 	if cc.Binding != nil {
-		if tools, ok := cc.Binding.Tools.(*ClaimToolExecutor); ok {
+		if tools, ok := cc.Binding.Tools.(*runloop.ClaimToolExecutor); ok {
 			control = tools.ControlExecutor()
 		}
 	}

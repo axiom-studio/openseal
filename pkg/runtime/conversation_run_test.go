@@ -15,6 +15,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -281,7 +282,7 @@ func (r *chatRunResolver) ResolveTurnRunner(_ context.Context, run *AgentRun) (*
 		DeploymentID: run.AssignedAgentID, DefinitionID: "agent-definition", DefinitionVersion: "7",
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model",
 		ModelActions: append([]capability.ModelAction(nil), r.actions...),
-		Producer:     r.producer, Preparers: []agentrun.StepPreparer{NewRunStartPreparer(r.store, r.store)},
+		Producer:     r.producer, Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(r.store, r.store)},
 		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
 	}, nil
 }
@@ -323,7 +324,7 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 			t.Fatalf("preparers = %d, prompt sections = %d", len(binding.Preparers), len(binding.Prompt.Sections))
 		}
 		exit := f.drive(run, binding)
-		if exit.Reason != RunLoopExitFinal {
+		if exit.Reason != runloop.RunLoopExitFinal {
 			t.Fatalf("exit = %#v", exit)
 		}
 		done := f.run(run.ID)
@@ -383,7 +384,7 @@ func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 		if binding.DefinitionID != "openseal.conversation-router" || binding.Producer == nil || binding.Session != nil || binding.Final != nil || len(binding.Preparers) != 0 {
 			t.Fatalf("routing binding = %#v", binding)
 		}
-		if exit := f.drive(claimed, binding); exit.Reason != RunLoopExitFinal {
+		if exit := f.drive(claimed, binding); exit.Reason != runloop.RunLoopExitFinal {
 			t.Fatalf("exit = %#v", exit)
 		}
 		done := f.run(claimed.ID)
@@ -418,7 +419,7 @@ func TestConversationRunOutsideParticipationEndsWithoutAgentBinding(t *testing.T
 		if binding.Model != "participation-disabled" || binding.Producer == nil || len(resolver.resolved) != 0 || binding.Session != nil {
 			t.Fatalf("binding = %#v, resolved = %d", binding, len(resolver.resolved))
 		}
-		if exit := f.drive(run, binding); exit.Reason != RunLoopExitFinal {
+		if exit := f.drive(run, binding); exit.Reason != runloop.RunLoopExitFinal {
 			t.Fatalf("exit = %#v", exit)
 		}
 		done := f.run(run.ID)

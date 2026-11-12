@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -67,7 +68,7 @@ func repeatNotes(f *loopFixture, runID string) []*SessionEntry {
 func repeatNoteAfter(f *loopFixture, runID, entryID string) *SessionEntry {
 	f.t.Helper()
 	for _, note := range repeatNotes(f, runID) {
-		if note.SourceKey == RepeatNoteSourceKey(entryID) {
+		if note.SourceKey == runloop.RepeatNoteSourceKey(entryID) {
 			return note
 		}
 	}
@@ -505,7 +506,7 @@ func TestLoopRepeatsAreCountedAcrossClaimsAndParks(t *testing.T) {
 		))
 		run := f.startRun(RunKindAgentWork, "Check 6815")
 		exit, after := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitYielded || after.Status != AgentRunStatusQueued {
+		if exit.Reason != runloop.RunLoopExitYielded || after.Status != AgentRunStatusQueued {
 			t.Fatalf("first claim exited %s with %s, want a yield", exit.Reason, after.Status)
 		}
 		if got := len(repeatToolEntries(f, run.ID, "lookup")); got != 2 {
@@ -624,7 +625,7 @@ func TestLoopVMNestedCallsAreNotCountedAsRepeats(t *testing.T) {
 func TestLoopRepeatResultDigestIgnoresTheActionReference(t *testing.T) {
 	result := func(id, status string) *ToolResult {
 		return &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{
-			{Type: ContentPartJSON, Value: json.RawMessage(`{"evidenceRef":"` + GovernedEvidenceRef(id) + `","output":{"status":"` + status + `"}}`)},
+			{Type: ContentPartJSON, Value: json.RawMessage(`{"evidenceRef":"` + runloop.GovernedEvidenceRef(id) + `","output":{"status":"` + status + `"}}`)},
 			{Type: ContentPartImage, MediaType: "image/png", SHA256: "abc", ActionCallID: id},
 		}}
 	}

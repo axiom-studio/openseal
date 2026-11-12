@@ -21,6 +21,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
 
 // ---------------------------------------------------------------------------
@@ -28,7 +29,7 @@ import (
 
 // runClaimWith claims the Run, lets mutate adjust the resolved binding (a
 // compactor, a deterministic producer) and drives one claim.
-func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate func(*agentrun.TurnRunnerBinding)) (RunLoopExit, *AgentRun) {
+func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate func(*agentrun.TurnRunnerBinding)) (runloop.RunLoopExit, *AgentRun) {
 	f.t.Helper()
 	claimed := f.claim(runID)
 	binding := f.binding(claimed)
@@ -38,7 +39,7 @@ func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate fun
 	if mutate != nil {
 		mutate(binding)
 	}
-	exit := f.loop.Drive(ctx, RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
+	exit := f.loop.Drive(ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
 	return exit, f.mustRun(runID)
 }
 
@@ -154,7 +155,7 @@ func TestRunLoopMultiStepToFinal(t *testing.T) {
 		))
 		conversation, run := f.startChat("check issues 1 and 2")
 		exit, done := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitFinal || exit.Err != nil || exit.Steps != 3 {
+		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil || exit.Steps != 3 {
 			t.Fatalf("exit = %s steps %d err %v, want final after 3 steps", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(done, AgentRunStatusCompleted)
@@ -286,15 +287,15 @@ func TestRunLoopPreviewResetOnToolStep(t *testing.T) {
 func TestRunLoopFairnessYieldAfter50Steps(t *testing.T) {
 	eachStore(t, "rl_yield_steps", func(t *testing.T, store KernelStore) {
 		f := newLoopFixture(t, store, withRules(
-			lookupRule("lookup", 0, stepAtMost(RunLoopMaxStepsPerClaim), nil),
-			&modelRule{name: "answer", when: func(v stepView) bool { return v.Step() == RunLoopMaxStepsPerClaim+1 },
+			lookupRule("lookup", 0, stepAtMost(runloop.RunLoopMaxStepsPerClaim), nil),
+			&modelRule{name: "answer", when: func(v stepView) bool { return v.Step() == runloop.RunLoopMaxStepsPerClaim+1 },
 				reply: func(stepView) ModelStepResult {
 					return finalAnswer(map[string]any{"answer": "All 50 issues are open."})
 				}},
 		))
 		run := f.startRun(RunKindAgentWork, "Check the 50 issues")
 		exit, yielded := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitYielded || exit.Err != nil || exit.Steps != RunLoopMaxStepsPerClaim {
+		if exit.Reason != runloop.RunLoopExitYielded || exit.Err != nil || exit.Steps != runloop.RunLoopMaxStepsPerClaim {
 			t.Fatalf("first claim = %s after %d steps (%v), want yielded after 50", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(yielded, AgentRunStatusQueued)
@@ -306,7 +307,7 @@ func TestRunLoopFairnessYieldAfter50Steps(t *testing.T) {
 			t.Fatalf("after the yield: %d steps, running %v", len(steps), f.runningStep(run.ID))
 		}
 		exit, done := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitFinal || exit.Steps != 1 {
+		if exit.Reason != runloop.RunLoopExitFinal || exit.Steps != 1 {
 			t.Fatalf("second claim = %s after %d steps (%v)", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(done, AgentRunStatusCompleted)
@@ -336,7 +337,7 @@ func TestRunLoopFairnessYieldAfterClaimDuration(t *testing.T) {
 		))
 		run := f.startRun(RunKindAgentWork, "Keep checking issues")
 		exit, yielded := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitYielded || exit.Err != nil {
+		if exit.Reason != runloop.RunLoopExitYielded || exit.Err != nil {
 			t.Fatalf("claim = %s (%v), want yielded", exit.Reason, exit.Err)
 		}
 		// 9 steps are 450s; the 10th crosses 480s and the claim yields after it.
@@ -386,7 +387,7 @@ func TestRunLoopParkConflictReplansAndTransitionsOnce(t *testing.T) {
 		))
 		run := f.startRun(RunKindAgentWork, "Close issue 8")
 		exit, parked := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitParked || exit.Err != nil {
+		if exit.Reason != runloop.RunLoopExitParked || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want parked", exit.Reason, exit.Err)
 		}
 		f.mustStatus(parked, AgentRunStatusWaitingForApproval)
@@ -413,7 +414,7 @@ func TestRunLoopParkConflictReplansAndTransitionsOnce(t *testing.T) {
 // parks or settles: the moment a message can land between the approval
 // request and the park.
 type afterInlineTools struct {
-	*ClaimToolExecutor
+	*runloop.ClaimToolExecutor
 	after func()
 }
 
@@ -440,7 +441,7 @@ func TestRunLoopParkReplanSupersededByMessage(t *testing.T) {
 		conversation, run := f.startChat("close issue 8")
 		posted := false
 		exit, done := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) {
-			b.Tools = afterInlineTools{ClaimToolExecutor: b.Tools.(*ClaimToolExecutor), after: func() {
+			b.Tools = afterInlineTools{ClaimToolExecutor: b.Tools.(*runloop.ClaimToolExecutor), after: func() {
 				if !posted {
 					posted = true
 					f.clock.Advance(time.Second) // the message is newer than the approval request
@@ -448,7 +449,7 @@ func TestRunLoopParkReplanSupersededByMessage(t *testing.T) {
 				}
 			}}
 		})
-		if exit.Reason != RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
+		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
 			t.Fatalf("exit = %s after %d steps (%v), want final after 2", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(done, AgentRunStatusCompleted)
@@ -486,7 +487,7 @@ func TestRunLoopFinalToolRejectedThreeTimesFails(t *testing.T) {
 		}}))
 		run := f.startRun(RunKindAgentWork, "Answer badly")
 		exit, failed := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitFailed || exit.Err != nil || exit.Steps != 3 {
+		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil || exit.Steps != 3 {
 			t.Fatalf("exit = %s after %d steps (%v), want failed after 3", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(failed, AgentRunStatusFailed)
@@ -514,7 +515,7 @@ func TestRunLoopPlainFinalRejectedThenFails(t *testing.T) {
 		}}))
 		conversation, run := f.startChat("hello?")
 		exit, failed := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitFailed || exit.Err != nil || exit.Steps != 3 {
+		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil || exit.Steps != 3 {
 			t.Fatalf("exit = %s after %d steps (%v), want failed after 3", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(failed, AgentRunStatusFailed)
@@ -545,13 +546,13 @@ func TestRunLoopHostUnavailableRetriesThenFails(t *testing.T) {
 		// The step host is retried after 2s, 5s and 15s.
 		for i, delay := range []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second} {
 			exit, requeued := f.runClaim(run.ID)
-			if exit.Reason != RunLoopExitRequeued {
+			if exit.Reason != runloop.RunLoopExitRequeued {
 				t.Fatalf("claim %d = %s (%v), want requeued", i+1, exit.Reason, exit.Err)
 			}
 			f.mustStatus(requeued, AgentRunStatusQueued)
 			steps := f.sortedSteps(run.ID)
 			last := steps[len(steps)-1]
-			if last.Status != AgentTurnStatusFailed || last.FailureCode != StepFailureHostUnavailable || last.CompletedAt == nil {
+			if last.Status != AgentTurnStatusFailed || last.FailureCode != runloop.StepFailureHostUnavailable || last.CompletedAt == nil {
 				t.Fatalf("step %d = %s %q", last.Sequence, last.Status, last.FailureCode)
 			}
 			if !requeued.AvailableAt.Equal(last.CompletedAt.Add(delay)) {
@@ -562,11 +563,11 @@ func TestRunLoopHostUnavailableRetriesThenFails(t *testing.T) {
 			f.build()
 		}
 		exit, failed := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitFailed || exit.Err != nil {
+		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil {
 			t.Fatalf("fourth claim = %s (%v), want failed", exit.Reason, exit.Err)
 		}
 		f.mustStatus(failed, AgentRunStatusFailed)
-		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != StepFailureHostUnavailable || failed.FailureExplanation.Explained {
+		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != runloop.StepFailureHostUnavailable || failed.FailureExplanation.Explained {
 			t.Fatalf("failure = %#v", failed.FailureExplanation)
 		}
 		if steps := f.sortedSteps(run.ID); len(steps) != 4 {
@@ -606,7 +607,7 @@ func TestRunLoopContextExceededCompactsOnce(t *testing.T) {
 		f.dispatch.on("lookup", bigLookup)
 		run := f.startRun(RunKindAgentWork, "Check issues 1 to 5")
 		exit, done := f.runClaimWith(f.ctx, run.ID, f.withLoopCompactor)
-		if exit.Reason != RunLoopExitFinal || exit.Err != nil {
+		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want final", exit.Reason, exit.Err)
 		}
 		f.mustStatus(done, AgentRunStatusCompleted)
@@ -641,7 +642,7 @@ func TestRunLoopContextExceededTwiceFails(t *testing.T) {
 		f.dispatch.on("lookup", bigLookup)
 		run := f.startRun(RunKindAgentWork, "Check issues 1 to 5")
 		exit, failed := f.runClaimWith(f.ctx, run.ID, f.withLoopCompactor)
-		if exit.Reason != RunLoopExitFailed || exit.Err != nil {
+		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want failed", exit.Reason, exit.Err)
 		}
 		f.mustStatus(failed, AgentRunStatusFailed)
@@ -657,8 +658,8 @@ func TestRunLoopContextExceededTwiceFails(t *testing.T) {
 				len(f.model.calls(ModelStepPurposeSummary)), len(f.model.calls(ModelStepPurposeExplanation)))
 		}
 		rows := f.sortedSteps(run.ID)
-		if last := rows[len(rows)-1]; last.Status != AgentTurnStatusFailed || last.FailureCode != StepFailureContextExceeded {
-			t.Fatalf("last step = %s %q, want failed %s", last.Status, last.FailureCode, StepFailureContextExceeded)
+		if last := rows[len(rows)-1]; last.Status != AgentTurnStatusFailed || last.FailureCode != runloop.StepFailureContextExceeded {
+			t.Fatalf("last step = %s %q, want failed %s", last.Status, last.FailureCode, runloop.StepFailureContextExceeded)
 		}
 	})
 }
@@ -691,7 +692,7 @@ func TestRunLoopFailureExplanationStep(t *testing.T) {
 		conversation, run := f.startChat("summarize the backlog")
 		runID = run.ID
 		exit, failed := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
+		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
 			t.Fatalf("exit = %s after %d steps (%v), want final after the explanation", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(failed, AgentRunStatusFailed)
@@ -719,7 +720,7 @@ func TestRunLoopUnexplainableFailureEndsDirectly(t *testing.T) {
 			err: &modelstep.TurnHostFailure{Code: "provider_unavailable", Message: "The model provider is unavailable."}}))
 		_, run := f.startChat("hello")
 		exit, failed := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitFailed || exit.Err != nil || exit.Steps != 1 {
+		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil || exit.Steps != 1 {
 			t.Fatalf("exit = %s after %d steps (%v), want failed after 1", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(failed, AgentRunStatusFailed)
@@ -741,7 +742,7 @@ func TestRunLoopCreditErrorFromFailureExplanation(t *testing.T) {
 			err: &modelstep.TurnHostFailure{Code: RunCreditErrorWorkspaceCreditsExhausted, Message: "The workspace has no credits left."}}))
 		_, run := f.startChat("hello")
 		exit, failed := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitFailed || exit.Err != nil {
+		if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want failed", exit.Reason, exit.Err)
 		}
 		f.mustStatus(failed, AgentRunStatusFailed)
@@ -789,7 +790,7 @@ func TestRunLoopBudgetExhaustionPausesAfterStep(t *testing.T) {
 			return map[string]interface{}{"id": in.Arguments["id"], "status": "open"}, nil
 		})
 		exit, paused := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitPaused || exit.Err != nil || exit.Steps != 2 {
+		if exit.Reason != runloop.RunLoopExitPaused || exit.Err != nil || exit.Steps != 2 {
 			t.Fatalf("exit = %s after %d steps (%v), want paused after 2", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(paused, AgentRunStatusPaused)
@@ -811,7 +812,7 @@ func TestRunLoopBudgetAdmissionRefusesModelStep(t *testing.T) {
 		f := newLoopFixture(t, store, withRules(lookupRule("lookup", 0, nil, nil)))
 		run := f.startBoundedRun("Check issues", BudgetPolicy{MaxInputTokens: 10})
 		exit, paused := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitPaused || exit.Err != nil {
+		if exit.Reason != runloop.RunLoopExitPaused || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want paused", exit.Reason, exit.Err)
 		}
 		f.mustStatus(paused, AgentRunStatusPaused)
@@ -820,7 +821,7 @@ func TestRunLoopBudgetAdmissionRefusesModelStep(t *testing.T) {
 			t.Fatalf("steps = %d, want 1", len(steps))
 		}
 		step := steps[0]
-		if step.Status != AgentTurnStatusCanceled || step.FailureCode != StepFailureBudgetExhausted || step.BudgetAdmission == nil || step.BudgetAdmission.TurnID != step.ID {
+		if step.Status != AgentTurnStatusCanceled || step.FailureCode != runloop.StepFailureBudgetExhausted || step.BudgetAdmission == nil || step.BudgetAdmission.TurnID != step.ID {
 			t.Fatalf("step = %s %q admission %#v", step.Status, step.FailureCode, step.BudgetAdmission)
 		}
 		if got := len(f.model.calls("")); got != 0 {
@@ -844,12 +845,12 @@ func TestRunLoopDurationBudgetCancelsStep(t *testing.T) {
 			}}))
 		run := f.startBoundedRun("Check issue 1", BudgetPolicy{MaxDurationMS: 200})
 		exit, paused := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitPaused || exit.Err != nil {
+		if exit.Reason != runloop.RunLoopExitPaused || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want paused", exit.Reason, exit.Err)
 		}
 		f.mustStatus(paused, AgentRunStatusPaused)
 		steps := f.sortedSteps(run.ID)
-		if len(steps) != 1 || steps[0].Status != AgentTurnStatusCanceled || steps[0].FailureCode != StepFailureDurationBudget {
+		if len(steps) != 1 || steps[0].Status != AgentTurnStatusCanceled || steps[0].FailureCode != runloop.StepFailureDurationBudget {
 			t.Fatalf("steps = %#v", steps)
 		}
 		if got := strings.Join(f.entryTypes(run.ID), ","); got != "user" {
@@ -881,7 +882,7 @@ func TestRunLoopCanceledRunDiscardsOutput(t *testing.T) {
 			}}))
 		run := f.startRun(RunKindAgentWork, "Check issue 1")
 		exit, canceled := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitEnded {
+		if exit.Reason != runloop.RunLoopExitEnded {
 			t.Fatalf("exit = %s (%v), want ended", exit.Reason, exit.Err)
 		}
 		f.mustStatus(canceled, AgentRunStatusCanceled)
@@ -925,7 +926,7 @@ func TestRunLoopLeaseLostWritesNothing(t *testing.T) {
 			}}))
 		run := f.startRun(RunKindAgentWork, "Check issue 1")
 		exit, after := f.runClaim(run.ID)
-		if exit.Reason != RunLoopExitLeaseLost {
+		if exit.Reason != runloop.RunLoopExitLeaseLost {
 			t.Fatalf("exit = %s (%v), want lease_lost", exit.Reason, exit.Err)
 		}
 		if after.Status != AgentRunStatusRunning || after.LeaseOwner != loopFixtureWorker2 || after.Revision != revisionAtSteal {
@@ -1009,7 +1010,7 @@ func TestRunLoopDeterministicProducerKernelState(t *testing.T) {
 		producer := f.scriptedRunbook(false)
 		run := f.startRun(RunKindAgentWork, "Run the issue runbook")
 		exit, done := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) { b.Producer = producer })
-		if exit.Reason != RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
+		if exit.Reason != runloop.RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
 			t.Fatalf("exit = %s after %d steps (%v), want final after 2", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(done, AgentRunStatusCompleted)
@@ -1044,7 +1045,7 @@ func TestRunLoopDeterministicParkUsesLoopTransition(t *testing.T) {
 		producer := f.scriptedRunbook(true)
 		run := f.startRun(RunKindAgentWork, "Wait for the requester")
 		exit, parked := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) { b.Producer = producer })
-		if exit.Reason != RunLoopExitParked || exit.Err != nil {
+		if exit.Reason != runloop.RunLoopExitParked || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want parked", exit.Reason, exit.Err)
 		}
 		f.mustStatus(parked, AgentRunStatusWaitingForEvent)
