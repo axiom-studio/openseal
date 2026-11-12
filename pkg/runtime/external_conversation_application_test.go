@@ -90,7 +90,8 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+			store, db := newTestSQLiteStore(t)
+			catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
 			gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
 			endpoint.InstallationID = "T123"
 			endpoint.ApplicationID = ""
@@ -103,7 +104,7 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 				tc.mutate(endpoint, host.result)
 			}
 			// Reinsert to allow a foreign-scope fixture without weakening normal update checks.
-			execStoreSQL(t, store, `DELETE FROM external_conversation_endpoints`)
+			execSQL(t, db, `DELETE FROM external_conversation_endpoints`)
 			if err := store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
 				t.Fatal(err)
 			}
