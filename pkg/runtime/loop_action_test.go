@@ -49,6 +49,12 @@ type governedFixture struct {
 	observed    int
 }
 
+// ObserveActionProposal counts the proposals the executor reports.
+func (f *governedFixture) ObserveActionProposal(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error {
+	f.observed++
+	return nil
+}
+
 func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "governed-" + uuid.NewString()[:8]}
@@ -98,10 +104,7 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 		}), models.WithClock(now))
 	f.executor, err = NewGovernedToolExecutor(GovernedToolExecutorConfig{
 		Actions: coordinator, Approvals: f.approvals, Worker: f.worker, Store: store, Now: now,
-		Observer: ActionProposalObserverFunc(func(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error {
-			f.observed++
-			return nil
-		}),
+		Observer: f,
 	})
 	if err != nil {
 		t.Fatal(err)
