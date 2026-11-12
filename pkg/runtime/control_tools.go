@@ -327,20 +327,20 @@ type ControlResume struct {
 	Result   ControlResult
 }
 
-// controlHandler implements one control tool. spec is called only when the
-// authority offers the tool; decode is the strict argument decoder (use
-// decodeControlInto); run is the inline or settle execution, by the tool's
-// phase.
+// controlHandler implements one control tool. Spec is called only when the
+// authority offers the tool; Decode is the strict argument decoder (use
+// models.DecodeControlInto); Run is the inline or settle execution, by the
+// tool's phase.
 type controlHandler interface {
-	spec(a ControlAuthority) ControlToolSpec
-	decode(raw json.RawMessage) (interface{}, error)
-	run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error)
+	Spec(a ControlAuthority) ControlToolSpec
+	Decode(raw json.RawMessage) (interface{}, error)
+	Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error)
 }
 
 // controlResumer is implemented by parking tools (awaiting_child /
 // awaiting_event entries).
 type controlResumer interface {
-	resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error)
+	Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error)
 }
 
 type controlRegistry map[ControlToolName]controlHandler
@@ -407,7 +407,7 @@ func (r controlRegistry) specs(a ControlAuthority) []ControlToolSpec {
 		if !ok || !controlToolOffered(name, a) {
 			continue
 		}
-		spec := h.spec(a)
+		spec := h.Spec(a)
 		spec.Name = name
 		spec.Phase = controlToolRules[name].Phase
 		specs = append(specs, spec)
@@ -535,12 +535,12 @@ func (x *ControlExecutor) dispatch(ctx context.Context, cc ControlContext, phase
 	if cc.Entry.Tool.ArgumentsError != "" {
 		return x.refuse(ctx, cc, controlArgumentsInvalid(cc.Entry.Tool.ArgumentsError))
 	}
-	args, err := h.decode(cc.Entry.Tool.Arguments)
+	args, err := h.Decode(cc.Entry.Tool.Arguments)
 	if err != nil {
 		return x.refuse(ctx, cc, controlArgumentsInvalid(err.Error()))
 	}
 	cc.Arguments = args
-	result, err := h.run(ctx, x, cc)
+	result, err := h.Run(ctx, x, cc)
 	if err != nil {
 		return ControlResult{}, err
 	}
@@ -571,12 +571,12 @@ func (x *ControlExecutor) Resume(ctx context.Context, cc ControlContext) (Contro
 	if !ok {
 		return ControlResume{}, fmt.Errorf("control tool %s does not park", name)
 	}
-	args, err := h.decode(cc.Entry.Tool.Arguments)
+	args, err := h.Decode(cc.Entry.Tool.Arguments)
 	if err != nil {
 		return ControlResume{}, fmt.Errorf("decode arguments of parked control entry %s: %w", cc.Entry.ID, err)
 	}
 	cc.Arguments = args
-	resumed, err := resumer.resume(ctx, x, cc)
+	resumed, err := resumer.Resume(ctx, x, cc)
 	if err != nil {
 		return ControlResume{}, err
 	}

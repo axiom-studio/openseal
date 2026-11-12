@@ -15,7 +15,7 @@ import (
 
 type startTaskHandler struct{}
 
-func (startTaskHandler) spec(ControlAuthority) ControlToolSpec {
+func (startTaskHandler) Spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Start one durable background task for substantial requested work and reply with a brief acknowledgment. " +
 			"Call it alone; it ends your reply to this message.",
@@ -35,7 +35,7 @@ func (startTaskHandler) spec(ControlAuthority) ControlToolSpec {
 	}
 }
 
-func (startTaskHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (startTaskHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	args, err := parseStartTaskArgs(raw)
 	if err != nil {
 		return nil, err
@@ -52,7 +52,7 @@ func startTaskNewMessage() *ToolResult {
 		"A new message arrived before the task started; read it and decide again.", nil)
 }
 
-func (startTaskHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*startTaskArgs)
 	// Rule 1 (§7.2): the only tool call of its assistant entry. The loop
 	// refuses mixed entries before the inline phase; this keeps a resumed

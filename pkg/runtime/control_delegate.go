@@ -70,10 +70,10 @@ type delegateHandler struct{}
 
 type delegateReplyHandler struct{}
 
-// spec carries no Agent list: the eligible Agents are in the capabilities
+// Spec carries no Agent list: the eligible Agents are in the capabilities
 // note (capability_note.go), so a new Agent never changes the tool, and the
 // handler resolves agentId against the claim's targets.
-func (delegateHandler) spec(a ControlAuthority) ControlToolSpec {
+func (delegateHandler) Spec(a ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Ask another Agent to do a piece of work and wait for its answer. " +
 			"The Agent sees only the goal and context you give it. The Agents you can ask are listed in the capabilities note.",
@@ -92,7 +92,7 @@ func (delegateHandler) spec(a ControlAuthority) ControlToolSpec {
 	}
 }
 
-func (delegateHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (delegateHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	value, err := models.DecodeControlInto[delegateArgs](raw)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func (delegateHandler) decode(raw json.RawMessage) (interface{}, error) {
 	return args, nil
 }
 
-func (delegateHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (delegateHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*delegateArgs)
 	spec := DelegationSpec{
 		StepID: "delegate-" + cc.Entry.ID, AgentID: args.AgentID, Goal: args.Goal,
@@ -135,7 +135,7 @@ func (delegateHandler) run(ctx context.Context, x *ControlExecutor, cc ControlCo
 	return x.Delegate(ctx, cc, spec)
 }
 
-func (delegateHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+func (delegateHandler) Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
 	return x.resumeDelegation(ctx, cc)
 }
 
@@ -429,7 +429,7 @@ func (x *ControlExecutor) replayDelegation(ctx context.Context, cc ControlContex
 // ---------------------------------------------------------------------------
 // agent_delegate_reply
 
-func (delegateReplyHandler) spec(ControlAuthority) ControlToolSpec {
+func (delegateReplyHandler) Spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Answer the clarification question an Agent asked about work you delegated with agent_delegate, " +
 			"and wait for that Agent again.",
@@ -443,7 +443,7 @@ func (delegateReplyHandler) spec(ControlAuthority) ControlToolSpec {
 	}
 }
 
-func (delegateReplyHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (delegateReplyHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	value, err := models.DecodeControlInto[delegateReplyArgs](raw)
 	if err != nil {
 		return nil, err
@@ -463,7 +463,7 @@ func (delegateReplyHandler) decode(raw json.RawMessage) (interface{}, error) {
 	return args, nil
 }
 
-func (delegateReplyHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (delegateReplyHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	if x.Collaboration == nil {
 		return ControlResult{}, errors.New("delegation needs the collaboration service")
 	}
@@ -517,7 +517,7 @@ func (x *ControlExecutor) answerClarification(ctx context.Context, cc ControlCon
 	return ControlResult{Kind: ControlParked, Run: answered.Source, Entry: cc.Entry, Park: park}, nil
 }
 
-func (delegateReplyHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+func (delegateReplyHandler) Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
 	return x.resumeDelegation(ctx, cc)
 }
 

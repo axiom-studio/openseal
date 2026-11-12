@@ -175,7 +175,7 @@ func (p *ModelStepProducer) ensureCapabilityNote(ctx context.Context, in StepInp
 		return fmt.Errorf("load session path: %w", err)
 	}
 	in.Path = path
-	_, err = ensureCapabilityNote(ctx, p.sessions, in, path, source.capabilityListing(in), p.now())
+	_, err = ensureCapabilityNote(ctx, p.sessions, in, path, source.CapabilityListing(in), p.now())
 	return err
 }
 

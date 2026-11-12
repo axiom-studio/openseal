@@ -201,8 +201,8 @@ func (p *AgentRunWorkerPool) SetWorkSignals(status *WorkSignalStatus) {
 	p.signals.Store(status)
 }
 
-// idleFor reports how long the pool has neither run nor been woken.
-func (p *AgentRunWorkerPool) idleFor(now time.Time) time.Duration {
+// IdleFor reports how long the pool has neither run nor been woken.
+func (p *AgentRunWorkerPool) IdleFor(now time.Time) time.Duration {
 	return p.usage.idleFor(now)
 }
 

@@ -48,7 +48,7 @@ func requestFinalSchema(decisions []string, messageDescription string) map[strin
 
 type requestDecisionHandler struct{}
 
-func (requestDecisionHandler) spec(ControlAuthority) ControlToolSpec {
+func (requestDecisionHandler) Spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Record your decision on the incoming request and finish this run. Call it alone.",
 		InputSchema: requestFinalSchema(
@@ -58,11 +58,11 @@ func (requestDecisionHandler) spec(ControlAuthority) ControlToolSpec {
 	}
 }
 
-func (requestDecisionHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (requestDecisionHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[requestFinalArgs](raw)
 }
 
-func (requestDecisionHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (requestDecisionHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args, ok := cc.Arguments.(*requestFinalArgs)
 	if !ok || args == nil {
 		return ControlResult{}, errors.New("agent_request_decision arguments were not decoded")
@@ -74,18 +74,18 @@ func (requestDecisionHandler) run(ctx context.Context, x *ControlExecutor, cc Co
 
 type completionReviewHandler struct{}
 
-func (completionReviewHandler) spec(ControlAuthority) ControlToolSpec {
+func (completionReviewHandler) Spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Record your review of the delegated work and finish this run. Call it alone.",
 		InputSchema: requestFinalSchema([]string{"approve", "reject"}, "A concise evidence-based reason."),
 	}
 }
 
-func (completionReviewHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (completionReviewHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[requestFinalArgs](raw)
 }
 
-func (completionReviewHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (completionReviewHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args, ok := cc.Arguments.(*requestFinalArgs)
 	if !ok || args == nil {
 		return ControlResult{}, errors.New("agent_request_review arguments were not decoded")

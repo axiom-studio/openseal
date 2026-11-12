@@ -34,7 +34,7 @@ type reportProgressArgs struct {
 
 type reportProgressHandler struct{}
 
-func (reportProgressHandler) spec(a ControlAuthority) ControlToolSpec {
+func (reportProgressHandler) Spec(a ControlAuthority) ControlToolSpec {
 	if a.TaskWork {
 		return ControlToolSpec{
 			Description: "Record a concise internal activity-trail note and continue the existing task. Do not send a new public acknowledgment or routine progress commentary.",
@@ -62,11 +62,11 @@ func (reportProgressHandler) spec(a ControlAuthority) ControlToolSpec {
 	}
 }
 
-func (reportProgressHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (reportProgressHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[reportProgressArgs](raw)
 }
 
-func (reportProgressHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args, _ := cc.Arguments.(*reportProgressArgs)
 	if args == nil {
 		return ControlResult{}, errors.New("turn_report_progress: arguments were not decoded")

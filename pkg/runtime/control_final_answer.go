@@ -291,15 +291,15 @@ func WithFinalOutputProperties(tools []ModelStepTool, run *AgentRun, publisher F
 
 type finalAnswerHandler struct{}
 
-func (finalAnswerHandler) spec(a ControlAuthority) ControlToolSpec {
+func (finalAnswerHandler) Spec(a ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{Description: finalAnswerDescription(a), InputSchema: finalAnswerSchema(a)}
 }
 
-func (finalAnswerHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (finalAnswerHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return decodeFinalAnswerCall(raw)
 }
 
-func (finalAnswerHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (finalAnswerHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	call, ok := cc.Arguments.(*finalAnswerCall)
 	if !ok || call == nil {
 		return ControlResult{}, errors.New("turn_final_answer arguments were not decoded")
@@ -893,7 +893,7 @@ func (r controlRegistry) finalToolRequiredFields(tool ControlToolName, a Control
 	if !ok {
 		return "its required fields"
 	}
-	required, _ := h.spec(a).InputSchema["required"].([]string)
+	required, _ := h.Spec(a).InputSchema["required"].([]string)
 	if len(required) == 0 {
 		return "its required fields"
 	}

@@ -773,7 +773,7 @@ func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	if _, _, _, err := runbookKernelCall(cc, pending); err == nil {
 		t.Fatal("a kernel call without its tool entry settled")
 	}
-	result, err := (runbookForkHandler{}).run(f.ctx, f.control, cc)
+	result, err := (runbookForkHandler{}).Run(f.ctx, f.control, cc)
 	if err == nil || result.Entry != nil {
 		t.Fatalf("an entry-less fork call was not refused: %#v", result)
 	}

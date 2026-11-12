@@ -409,7 +409,7 @@ type committedForkHandler struct {
 	settles int
 }
 
-func (h *committedForkHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	h.settles++
 	key := "fork-" + cc.Entry.ID
 	h.groups[key]++

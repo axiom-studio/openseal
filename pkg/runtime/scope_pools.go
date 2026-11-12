@@ -15,7 +15,7 @@ type scopePool interface {
 	Stop()
 	Wake()
 	SetWorkSignals(*WorkSignalStatus)
-	idleFor(time.Time) time.Duration
+	IdleFor(time.Time) time.Duration
 }
 
 // scopePools keeps one pool per scope that has work.
@@ -253,7 +253,7 @@ func (s *scopePools[P]) retireIdle(now time.Time) {
 	s.mu.Lock()
 	retired := make([]P, 0)
 	for scope, pool := range s.pools {
-		if pool.idleFor(now) >= s.retire {
+		if pool.IdleFor(now) >= s.retire {
 			retired = append(retired, pool)
 			delete(s.pools, scope)
 		}

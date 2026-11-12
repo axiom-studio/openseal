@@ -29,7 +29,7 @@ func (f *prepareFixture) ensureNote(step string) bool {
 	f.t.Helper()
 	path := f.render.path()
 	in := StepInput{Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: StepModeNormal}
-	appended, err := ensureCapabilityNote(context.Background(), fixtureNoteAppender{f.render}, in, path, f.preparer.capabilityListing(in), f.render.entries[0].CreatedAt)
+	appended, err := ensureCapabilityNote(context.Background(), fixtureNoteAppender{f.render}, in, path, f.preparer.CapabilityListing(in), f.render.entries[0].CreatedAt)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
 	more.Operations = append(more.Operations, HostedRunbookOperation{Entrypoint: "audit", Name: "Audit"})
 	for _, name := range []ControlToolName{ControlToolDelegate, ControlToolFork, ControlToolRunOperation} {
 		handler := newControlRegistry(builtinControlTools()...)[name]
-		if mustJSON(t, handler.spec(targets)) != mustJSON(t, handler.spec(more)) {
+		if mustJSON(t, handler.Spec(targets)) != mustJSON(t, handler.Spec(more)) {
 			t.Fatalf("%s changes with its targets", name)
 		}
 	}

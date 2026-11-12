@@ -150,8 +150,8 @@ func (p *ActionWorkerPool) queueDriven() bool {
 	return p.deadlines != nil && p.signals.Load().Healthy()
 }
 
-// idleFor reports how long the pool has neither claimed nor been woken.
-func (p *ActionWorkerPool) idleFor(now time.Time) time.Duration {
+// IdleFor reports how long the pool has neither claimed nor been woken.
+func (p *ActionWorkerPool) IdleFor(now time.Time) time.Duration {
 	return p.activity.idleFor(now)
 }
 

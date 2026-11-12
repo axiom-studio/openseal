@@ -92,7 +92,7 @@ type capabilityNoteData struct {
 // capabilityListingSource builds the listing of a step. The catalog preparer
 // implements it; a preparer without a catalog does not.
 type capabilityListingSource interface {
-	capabilityListing(in StepInput) capabilityListing
+	CapabilityListing(in StepInput) capabilityListing
 }
 
 func capabilityItemDigest(text string) string {
@@ -299,12 +299,12 @@ func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in 
 // ---------------------------------------------------------------------------
 // The catalog preparer's listing
 
-// capabilityListing is the step's listing: the catalog (every ID, or the
+// CapabilityListing is the step's listing: the catalog (every ID, or the
 // directory past the catalog budget), the Agents and
 // operations the control tools accept, surfaced tools that are no longer in
 // the catalog, the guidance that depends on the catalog, and the
 // conversation's approval mode.
-func (p *catalogModelStepPreparer) capabilityListing(in StepInput) capabilityListing {
+func (p *catalogModelStepPreparer) CapabilityListing(in StepInput) capabilityListing {
 	listing := capabilityListing{Mode: capabilityNoteModeNone}
 	binding := in.Binding
 	if binding == nil {

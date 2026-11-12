@@ -28,11 +28,11 @@ func TestAskUserOptionsDecodeLimits(t *testing.T) {
 		"allowMultiple without options": `{"question":"Which?","allowMultiple":true}`,
 		"allowOther without options":    `{"question":"Which?","allowOther":true}`,
 	} {
-		if _, err := (askUserHandler{}).decode(json.RawMessage(raw)); err == nil {
+		if _, err := (askUserHandler{}).Decode(json.RawMessage(raw)); err == nil {
 			t.Errorf("%s: decode accepted it", name)
 		}
 	}
-	value, err := (askUserHandler{}).decode(json.RawMessage(`{"question":"Which?","options":[{"label":" A ","description":" first "},{"label":"` +
+	value, err := (askUserHandler{}).Decode(json.RawMessage(`{"question":"Which?","options":[{"label":" A ","description":" first "},{"label":"` +
 		strings.Repeat("b", 80) + `"}],"allowMultiple":true,"allowOther":true}`))
 	if err != nil {
 		t.Fatal(err)
@@ -44,11 +44,11 @@ func TestAskUserOptionsDecodeLimits(t *testing.T) {
 	if got := args.ChannelQuestion(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("question = %#v", got)
 	}
-	if plain, err := (askUserHandler{}).decode(json.RawMessage(`{"question":"Which?","options":[]}`)); err != nil ||
+	if plain, err := (askUserHandler{}).Decode(json.RawMessage(`{"question":"Which?","options":[]}`)); err != nil ||
 		plain.(*askUserArgs).ChannelQuestion() != nil {
 		t.Fatalf("empty options = %#v %v", plain, err)
 	}
-	spec := (askUserHandler{}).spec(ControlAuthority{})
+	spec := (askUserHandler{}).Spec(ControlAuthority{})
 	properties := spec.InputSchema["properties"].(map[string]interface{})
 	for _, key := range []string{"options", "allowMultiple", "allowOther"} {
 		if properties[key] == nil {

@@ -533,11 +533,11 @@ func TestStartTaskSpecAndArguments(t *testing.T) {
 		"long ack":      `{"goal":"g","acknowledgment":"` + strings.Repeat("a", 601) + `"}`,
 		"two values":    `{"goal":"g","acknowledgment":"a"}{}`,
 	} {
-		if _, err := (startTaskHandler{}).decode(json.RawMessage(raw)); err == nil {
+		if _, err := (startTaskHandler{}).Decode(json.RawMessage(raw)); err == nil {
 			t.Errorf("%s: decoded", name)
 		}
 	}
-	value, err := (startTaskHandler{}).decode(json.RawMessage(`{"goal":" g ","acknowledgment":" a "}`))
+	value, err := (startTaskHandler{}).Decode(json.RawMessage(`{"goal":" g ","acknowledgment":" a "}`))
 	if err != nil || value.(*startTaskArgs).Goal != "g" || value.(*startTaskArgs).Acknowledgment != "a" {
 		t.Fatalf("decode = %#v, %v", value, err)
 	}

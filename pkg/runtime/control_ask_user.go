@@ -23,7 +23,7 @@ const (
 
 type askUserHandler struct{}
 
-func (askUserHandler) spec(ControlAuthority) ControlToolSpec {
+func (askUserHandler) Spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Ask the person who asked one concrete question and wait for their answer. " +
 			"Ask only when you cannot continue well without it. Offer options when the answer is a choice. " +
@@ -53,7 +53,7 @@ func (askUserHandler) spec(ControlAuthority) ControlToolSpec {
 	}
 }
 
-func (askUserHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (askUserHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	args, err := parseAskUserArgs(raw)
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *AgentRun) (*Co
 	return conversation, trigger, nil
 }
 
-func (askUserHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (askUserHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*askUserArgs)
 	conversation, trigger, err := x.askUserOrigin(ctx, cc.Run)
 	if err != nil {
@@ -219,11 +219,11 @@ func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *AgentRun
 	return nil
 }
 
-// resume: the answer is the ConversationAnswer intervention whose receipt
+// Resume: the answer is the ConversationAnswer intervention whose receipt
 // names this entry's step and question message. Until it arrives the Run
 // re-parks; the question is re-posted idempotently first, which also covers a
 // crash between the entry transition and the post.
-func (askUserHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
 	if cc.Entry.State != ToolEntryAwaitingEvent {
 		return ControlResume{}, fmt.Errorf("%w: ask_user resume of %s in state %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
 	}

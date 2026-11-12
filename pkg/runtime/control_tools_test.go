@@ -26,15 +26,15 @@ type fakeControlHandler struct {
 	seen  []interface{}
 }
 
-func (h *fakeControlHandler) spec(a ControlAuthority) ControlToolSpec {
+func (h *fakeControlHandler) Spec(a ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{Description: "fake", InputSchema: map[string]interface{}{"type": "object"}}
 }
 
-func (h *fakeControlHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (h *fakeControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[fakeControlArgs](raw)
 }
 
-func (h *fakeControlHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (h *fakeControlHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	h.calls++
 	h.seen = append(h.seen, cc.Arguments)
 	return x.complete(ctx, cc, controlJSONResult(ToolResultSucceeded, map[string]interface{}{"status": "done"}), &ControlEntryMeta{ForkID: "fork-" + cc.Entry.ID})

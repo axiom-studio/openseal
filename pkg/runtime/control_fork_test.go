@@ -619,8 +619,8 @@ func TestForkResumeWhileGroupWaitsReparks(t *testing.T) {
 }
 
 func TestForkSpecSameWithAndWithoutTargets(t *testing.T) {
-	self := forkHandler{}.spec(ControlAuthority{ForkAllowed: true})
-	targets := forkHandler{}.spec(ControlAuthority{ForkAllowed: true, ForkTargets: []HostedAgentTarget{{ID: "agent-b"}}})
+	self := forkHandler{}.Spec(ControlAuthority{ForkAllowed: true})
+	targets := forkHandler{}.Spec(ControlAuthority{ForkAllowed: true, ForkTargets: []HostedAgentTarget{{ID: "agent-b"}}})
 	if !reflect.DeepEqual(self, targets) {
 		t.Fatal("fork targets changed the fork tool")
 	}

@@ -39,9 +39,9 @@ type operationArgs struct {
 
 type operationHandler struct{}
 
-// spec carries no operation list: the operations and their input schemas are
+// Spec carries no operation list: the operations and their input schemas are
 // in the capabilities note, and the handler authorizes the entrypoint.
-func (operationHandler) spec(a ControlAuthority) ControlToolSpec {
+func (operationHandler) Spec(a ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Start one of your callable operations as a separate Run; its result comes back to you as this tool's result. The operations and their input schemas are listed in the capabilities note.",
 		InputSchema: map[string]interface{}{
@@ -77,7 +77,7 @@ func operationDescriptionLine(op HostedRunbookOperation) string {
 	return line + ". Input schema: " + string(schema)
 }
 
-func (operationHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (operationHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	value, err := models.DecodeControlInto[operationArgs](raw)
 	if err != nil {
 		return nil, err
@@ -93,7 +93,7 @@ func (operationHandler) decode(raw json.RawMessage) (interface{}, error) {
 	return args, nil
 }
 
-func (operationHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*operationArgs)
 	run := cc.Run
 	op, ok := authorizedOperation(cc.Authority.Operations, args.Entrypoint)
@@ -265,9 +265,9 @@ func controlRejectRecursiveRunbook(ctx context.Context, portfolio PortfolioStore
 	return nil
 }
 
-// resume: a group still waiting re-parks; otherwise the child's saved output
+// Resume: a group still waiting re-parks; otherwise the child's saved output
 // becomes the entry's result.
-func (operationHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
 	if !x.Forks.configured() || x.Portfolio == nil {
 		return ControlResume{}, errors.New("control executor has no fork coordinator")
 	}

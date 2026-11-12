@@ -405,11 +405,11 @@ func TestAskUserWithoutConversationIsRefused(t *testing.T) {
 
 func TestAskUserArgumentsAreValidated(t *testing.T) {
 	for _, raw := range []string{`{"question":"   "}`, `{"question":"x","extra":1}`, `{"question":"` + strings.Repeat("a", 4097) + `"}`} {
-		if _, err := (askUserHandler{}).decode(json.RawMessage(raw)); err == nil {
+		if _, err := (askUserHandler{}).Decode(json.RawMessage(raw)); err == nil {
 			t.Fatalf("decode accepted %s", raw[:min(len(raw), 40)])
 		}
 	}
-	value, err := (askUserHandler{}).decode(json.RawMessage(`{"question":"  Which one?  "}`))
+	value, err := (askUserHandler{}).Decode(json.RawMessage(`{"question":"  Which one?  "}`))
 	if err != nil || value.(*askUserArgs).Question != "Which one?" {
 		t.Fatalf("decode = %#v %v", value, err)
 	}

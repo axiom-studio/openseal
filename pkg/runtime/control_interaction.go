@@ -25,7 +25,7 @@ type reactControlArgs struct {
 
 type reactControlHandler struct{}
 
-func (reactControlHandler) spec(ControlAuthority) ControlToolSpec {
+func (reactControlHandler) Spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: ConversationReactInstruction,
 		InputSchema: map[string]interface{}{
@@ -38,11 +38,11 @@ func (reactControlHandler) spec(ControlAuthority) ControlToolSpec {
 	}
 }
 
-func (reactControlHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (reactControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[reactControlArgs](raw)
 }
 
-func (reactControlHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*reactControlArgs)
 	reaction := TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji}
 	if !validOpaqueIdentifier(reaction.MessageID, 256) || ValidateReactionEmoji(reaction.Emoji) != nil {
@@ -139,7 +139,7 @@ type waitControlArgs struct {
 
 type waitControlHandler struct{}
 
-func (waitControlHandler) spec(ControlAuthority) ControlToolSpec {
+func (waitControlHandler) Spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: waitControlDescription,
 		InputSchema: map[string]interface{}{
@@ -154,7 +154,7 @@ func (waitControlHandler) spec(ControlAuthority) ControlToolSpec {
 	}
 }
 
-func (waitControlHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (waitControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	value, err := models.DecodeControlInto[waitControlArgs](raw)
 	if err != nil {
 		return nil, err
@@ -165,7 +165,7 @@ func (waitControlHandler) decode(raw json.RawMessage) (interface{}, error) {
 	return value, nil
 }
 
-func (waitControlHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (waitControlHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*waitControlArgs)
 	wakeAt := x.now().Add(time.Duration(args.Seconds) * time.Second)
 	entry, err := x.transitionControlEntry(ctx, cc, ToolEntryAwaitingEvent,
@@ -176,7 +176,7 @@ func (waitControlHandler) run(ctx context.Context, x *ControlExecutor, cc Contro
 	return ControlResult{Kind: ControlParked, Entry: entry, Park: waitPark(entry.ID, wakeAt)}, nil
 }
 
-func (waitControlHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+func (waitControlHandler) Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
 	args := cc.Arguments.(*waitControlArgs)
 	meta, err := DecodeControlEntryMeta(cc.Entry)
 	if err != nil {

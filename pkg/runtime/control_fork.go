@@ -61,7 +61,7 @@ type ForkSpec struct {
 
 type forkHandler struct{}
 
-func (forkHandler) spec(a ControlAuthority) ControlToolSpec {
+func (forkHandler) Spec(a ControlAuthority) ControlToolSpec {
 	branch := map[string]interface{}{
 		"goal": map[string]interface{}{
 			"type": "string", "minLength": 1, "maxLength": maximumForkGoalBytes,
@@ -97,7 +97,7 @@ func (forkHandler) spec(a ControlAuthority) ControlToolSpec {
 	}
 }
 
-func (forkHandler) decode(raw json.RawMessage) (interface{}, error) {
+func (forkHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	value, err := models.DecodeControlInto[forkArgs](raw)
 	if err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func (forkHandler) decode(raw json.RawMessage) (interface{}, error) {
 	return args, nil
 }
 
-func (forkHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (forkHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*forkArgs)
 	branches := make([]RunForkBranch, len(args.Branches))
 	for i, arg := range args.Branches {
@@ -357,9 +357,9 @@ func (x *ControlExecutor) forkParked(ctx context.Context, cc ControlContext, cre
 	}, nil
 }
 
-// resume turns the resolved dependency group into the entry's result: every
+// Resume turns the resolved dependency group into the entry's result: every
 // branch's final answer, or its failure. A group still waiting re-parks.
-func (forkHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+func (forkHandler) Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
 	return x.resumeFork(ctx, cc)
 }
 
