@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,9 +15,10 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-// routineEventHarness is one in-memory store with a matcher, a dispatcher and a
-// test clock, plus helpers to create event routines through the activation
-// service (so index refresh is exercised on every create).
+// routineEventHarness is one store (in memory unless the test reads raw
+// rows) with a matcher, a dispatcher and a test clock, plus helpers to
+// create event routines through the activation service (so index refresh is
+// exercised on every create).
 type routineEventHarness struct {
 	t            *testing.T
 	ctx          context.Context
@@ -33,8 +35,22 @@ type routineEventHarness struct {
 
 func newRoutineEventHarness(t *testing.T) *routineEventHarness {
 	t.Helper()
+	return newRoutineEventHarnessOn(t, newTestKernelStore(t))
+}
+
+// newRoutineEventRowsHarness is newRoutineEventHarness on a store file, with
+// the test's own connection to it for reading the routine_events rows the
+// store keeps to itself (listRoutineEventRows).
+func newRoutineEventRowsHarness(t *testing.T) (*routineEventHarness, *sql.DB) {
+	t.Helper()
+	store, db := newTestSQLiteStore(t)
+	return newRoutineEventHarnessOn(t, store), db
+}
+
+func newRoutineEventHarnessOn(t *testing.T, store *SQLiteStore) *routineEventHarness {
+	t.Helper()
 	h := &routineEventHarness{
-		t: t, ctx: t.Context(), store: newTestKernelStore(t), scope: Scope{Kind: "tenant", ID: "event-routines"},
+		t: t, ctx: t.Context(), store: store, scope: Scope{Kind: "tenant", ID: "event-routines"},
 		owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}, now: time.Now().UTC(),
 	}
 	h.matcher = NewRoutineEventMatcher(h.store)
@@ -454,7 +470,7 @@ func (s *routineEventStoreOnly) GetRunbookActivation(ctx context.Context, scope 
 }
 
 func TestRoutineEventOverflowStoresNoPayload(t *testing.T) {
-	h := newRoutineEventHarness(t)
+	h, db := newRoutineEventRowsHarness(t)
 	activation := h.routine("busy", nil)
 	h.offer(activation, RoutineEventMaxPendingPerRoutine)
 	h.serial++
@@ -464,7 +480,7 @@ func TestRoutineEventOverflowStoresNoPayload(t *testing.T) {
 		t.Fatalf("overflow offer=%#v err=%v", offer, err)
 	}
 	var record *storedRoutineEvent
-	for _, stored := range listStoredRoutineEvents(t, h.store, h.scope) {
+	for _, stored := range listRoutineEventRows(t, db, h.scope) {
 		if stored.ActivationID == activation.ID && stored.EventID == overflowID {
 			record = &stored
 		}

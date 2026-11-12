@@ -1,16 +1,101 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
+
+// runbookAuditRecords is the audit's store: Runs and activations come from a
+// real store, and the turns, action calls, approvals, artifacts, Agent
+// requests and approval deliveries are records a test states for them. The
+// audit only reads, so a test can give it states the workflows that write
+// these records never leave together, such as a succeeded call under a
+// pending approval. Each list matches only the filter fields the audit sets.
+type runbookAuditRecords struct {
+	*SQLiteStore
+	turns      []*AgentTurn
+	actions    actionCallRecords
+	approvals  []*ApprovalCheckpoint
+	artifacts  []*Artifact
+	requests   []*AgentRequest
+	endpoints  []*ExternalConversationEndpoint
+	deliveries []*ExternalConversationDelivery
+}
+
+func (s *runbookAuditRecords) ListAgentTurns(_ context.Context, filter AgentTurnFilter) ([]*AgentTurn, error) {
+	matched := make([]*AgentTurn, 0)
+	for _, turn := range s.turns {
+		if turn.Scope == filter.Scope && turn.RunID == filter.RunID && turn.Sequence > filter.AfterSequence {
+			matched = append(matched, models.CloneAgentTurn(turn))
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Sequence < matched[j].Sequence })
+	return recordPage(matched, 0, filter.Limit), nil
+}
+
+func (s *runbookAuditRecords) ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error) {
+	return s.actions.ListActionCalls(ctx, filter)
+}
+
+func (s *runbookAuditRecords) ListApprovals(_ context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error) {
+	matched := make([]*ApprovalCheckpoint, 0)
+	for _, approval := range s.approvals {
+		if approval.Scope == filter.Scope && approval.RunID == filter.RunID {
+			matched = append(matched, models.CloneApprovalCheckpoint(approval))
+		}
+	}
+	return recordPage(matched, filter.Offset, filter.Limit), nil
+}
+
+func (s *runbookAuditRecords) ListArtifacts(_ context.Context, filter ArtifactFilter) ([]*Artifact, error) {
+	matched := make([]*Artifact, 0)
+	for _, artifact := range s.artifacts {
+		if artifact.Scope == filter.Scope && artifact.Provenance.RunID == filter.ProducerRunID {
+			matched = append(matched, models.CloneArtifact(artifact))
+		}
+	}
+	return recordPage(matched, filter.Offset, filter.Limit), nil
+}
+
+func (s *runbookAuditRecords) ListAgentRequests(_ context.Context, filter AgentRequestFilter) ([]*AgentRequest, error) {
+	matched := make([]*AgentRequest, 0)
+	for _, request := range s.requests {
+		if request.Scope == filter.Scope && request.SourceRunID == filter.SourceRunID {
+			matched = append(matched, models.CloneAgentRequest(request))
+		}
+	}
+	return recordPage(matched, filter.Offset, filter.Limit), nil
+}
+
+func (s *runbookAuditRecords) ListExternalConversationDeliveries(_ context.Context, filter ExternalConversationDeliveryFilter) ([]*ExternalConversationDelivery, error) {
+	matched := make([]*ExternalConversationDelivery, 0)
+	for _, delivery := range s.deliveries {
+		if delivery.Scope == filter.Scope && delivery.Correlation != nil &&
+			delivery.Correlation.Kind == filter.CorrelationKind && delivery.Correlation.ID == filter.CorrelationID {
+			matched = append(matched, models.CloneExternalConversationDelivery(delivery))
+		}
+	}
+	return recordPage(matched, filter.Offset, filter.Limit), nil
+}
+
+func (s *runbookAuditRecords) GetExternalConversationEndpoint(_ context.Context, scope Scope, id string) (*ExternalConversationEndpoint, error) {
+	for _, endpoint := range s.endpoints {
+		if endpoint.Scope == scope && endpoint.ID == id {
+			return models.CloneExternalConversationEndpoint(endpoint), nil
+		}
+	}
+	return nil, ErrExternalConversationEndpointNotFound
+}
 
 func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testing.T) {
 	ctx := t.Context()
@@ -44,7 +129,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	}, "user", "operator", "audit"); err != nil {
 		t.Fatal(err)
 	}
-	store := newTestKernelStore(t)
+	store := &runbookAuditRecords{SQLiteStore: newTestKernelStore(t)}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Research", Goal: "Find evidence", Status: ObjectiveStatusActive,
 	})
@@ -85,27 +170,27 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	persistedRun.Checkpoint = checkpoint
 	persistedRun.Status = AgentRunStatusRunning
 	persistedRun.UpdatedAt = now.Add(2 * time.Minute)
-	putStoredRun(t, store, persistedRun)
-	putStoredTurn(t, store, &AgentTurn{ID: "turn-browse", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusCompleted, OutputSummary: "Requested browser", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now})
-	putStoredTurn(t, store, &AgentTurn{ID: "turn-review", Scope: scope, RunID: run.ID, Sequence: 2, Status: AgentTurnStatusCompleted, OutputSummary: "Delegated review", Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute), StartedAt: now.Add(2 * time.Minute)})
-	putStoredAction(t, store, &ActionCall{
+	putTestRun(t, store.SQLiteStore, persistedRun)
+	store.turns = append(store.turns, &AgentTurn{ID: "turn-browse", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusCompleted, OutputSummary: "Requested browser", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now})
+	store.turns = append(store.turns, &AgentTurn{ID: "turn-review", Scope: scope, RunID: run.ID, Sequence: 2, Status: AgentTurnStatusCompleted, OutputSummary: "Delegated review", Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute), StartedAt: now.Add(2 * time.Minute)})
+	store.actions.put(&ActionCall{
 		ID: "action-browse", Scope: scope, RunID: run.ID, TurnID: "turn-browse", DeploymentID: owner.ID,
 		SkillID: "browser", SkillVersion: "1", Action: "browse", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead,
 		Arguments: map[string]interface{}{"url": "https://example.test/article", "password": "never-project-this"}, Output: map[string]interface{}{"title": "Useful article", "token": "nor-this"}, ApprovalID: "approval-browse",
 		Attempt: 1, MaxAttempts: 2, Revision: 2, CreatedAt: now, UpdatedAt: now.Add(time.Minute),
 	})
-	putStoredApproval(t, store, &ApprovalCheckpoint{
+	store.approvals = append(store.approvals, &ApprovalCheckpoint{
 		ID: "approval-browse", Scope: scope, RunID: run.ID, ActionCallID: "action-browse", Status: ApprovalStatusPending,
 		Risk: skill.RiskLevelRead, Summary: "Approve browsing", ProposedAction: map[string]interface{}{"comment": "A concise reviewed reply", "password": "also-never-project-this"},
 		EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	})
 	adapter := ExternalConversationAdapterReference{SkillID: "slack", SkillVersion: "1", BindingID: "slack-binding", BindingRevision: 1, AdapterID: "slack"}
-	putStoredExternalEndpoint(t, store, &ExternalConversationEndpoint{
+	store.endpoints = append(store.endpoints, &ExternalConversationEndpoint{
 		ID: "slack-approvals", IngressRoute: "slack-callback", Scope: scope, Owner: owner, DeploymentID: owner.ID,
 		Name: "Reddit approvals", Adapter: adapter, Provider: "slack", Mode: capability.ConversationEndpointChannel,
 		Address: "#team-reddit-agent-approvals", Status: ExternalConversationEndpointActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	})
-	putStoredExternalDelivery(t, store, &ExternalConversationDelivery{
+	store.deliveries = append(store.deliveries, &ExternalConversationDelivery{
 		ID: "approval-delivery", Scope: scope, EndpointID: "slack-approvals", EndpointRevision: 1, Adapter: adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "approval-conversation", ChannelMessageID: "approval-message",
 		OrderingKey: "approval-conversation", IdempotencyKey: "approval-delivery:approval-browse:slack-approvals",
@@ -113,15 +198,17 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 		Status:      ExternalConversationDeliveryDelivered, Attempt: 1, MaximumAttempts: 5, AvailableAt: now,
 		ProviderMessageID: "slack-message-1", Revision: 2, CreatedAt: now, UpdatedAt: now.Add(time.Minute), DeliveredAt: now.Add(time.Minute),
 	})
-	putStoredArtifact(t, store, &Artifact{
+	store.artifacts = append(store.artifacts, &Artifact{
 		ID: "evidence", Version: 1, Scope: scope, Name: "Evidence", ContentRef: "opaque-secret-storage-ref", Digest: strings.Repeat("a", 64), SizeBytes: 12,
 		Classification: ArtifactClassificationInternal, Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: owner.ID}, RunID: run.ID, TurnID: "turn-browse", ActionID: "action-browse"}, CreatedAt: now,
 	})
-	putStoredRun(t, store, &AgentRun{
+	if err := store.CreateAgentRun(ctx, &AgentRun{
 		ID: childID, Scope: scope, ObjectiveID: objective.ID, ParentRunID: run.ID, RootRunID: run.ID, Owner: owner, AssignedAgentID: "reviewer",
 		Goal: "Review findings", Source: RunSourceRequest, Status: AgentRunStatusRunning, AvailableAt: now.Add(2 * time.Minute), QueueEnteredAt: now.Add(2 * time.Minute), Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute),
-	})
-	putStoredAgentRequest(t, store, &AgentRequest{
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.requests = append(store.requests, &AgentRequest{
 		ID: requestID, Scope: scope, Kind: AgentRequestKindRequest, Status: AgentRequestStatusAccepted,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: owner.ID}, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer"},
 		SourceRunID: run.ID, ChildRunID: childID, Goal: "Review findings", AcceptancePolicy: AgentRequestAcceptanceRecipientReview,
@@ -174,7 +261,7 @@ func TestRunExecutionAuditProjectsConversationalRunAsOneGraph(t *testing.T) {
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "conversation-audit"}
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	store := newTestKernelStore(t)
+	store := &runbookAuditRecords{SQLiteStore: newTestKernelStore(t)}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"},
 		AssignedAgentID: "assistant", Goal: "Respond to an Agent channel message", Source: RunSourceRequest,
@@ -183,11 +270,11 @@ func TestRunExecutionAuditProjectsConversationalRunAsOneGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	putStoredTurn(t, store, &AgentTurn{
+	store.turns = append(store.turns, &AgentTurn{
 		ID: "turn-one", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusFailed,
 		Error: "capability binding unavailable", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
 	})
-	putStoredAction(t, store, &ActionCall{
+	store.actions.put(&ActionCall{
 		ID: "action-one", Scope: scope, RunID: run.ID, TurnID: "turn-one", DeploymentID: "assistant",
 		BindingID: "bundled:agents", BindingRevision: 1, SkillID: AgentManagementSkillID,
 		SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,

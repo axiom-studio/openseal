@@ -146,7 +146,7 @@ func TestRoutineEventTenantRunCap(t *testing.T) {
 // TestRoutineEventBurstRespectsCaps sends 1 000 events to 20 routines of one
 // tenant (520 to one of them, so it overflows) while Runs finish over time.
 func TestRoutineEventBurstRespectsCaps(t *testing.T) {
-	h := newRoutineEventHarness(t)
+	h, db := newRoutineEventRowsHarness(t)
 	const maxPerHour = 3
 	routines := make([]*RunbookActivation, 0, 20)
 	for i := 0; i < 20; i++ {
@@ -209,7 +209,7 @@ func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 		}
 	}
 	overflow := 0
-	for _, record := range listStoredRoutineEvents(t, h.store, h.scope) {
+	for _, record := range listRoutineEventRows(t, db, h.scope) {
 		if record.State == RoutineEventDropped && record.DroppedReason == RoutineEventDroppedOverflow {
 			overflow++
 			if record.KeepsData {

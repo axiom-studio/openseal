@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// SQLite store test: it moves to store/sqlite in U2.9. It runs the session
+// conformance suite (agent_session_conformance_test.go, for storetest) and
+// the testSession* helpers of agent_session_test.go and
+// agent_session_store_test.go.
+
 // TestSQLiteAgentSessionStore runs the session store conformance suite
 // (agent_session_conformance_test.go) against the SQLite backend.
 func TestSQLiteAgentSessionStore(t *testing.T) {

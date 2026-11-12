@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -212,6 +213,7 @@ type controlFixture struct {
 	t        *testing.T
 	ctx      context.Context
 	store    *SQLiteStore
+	records  *controlRecords
 	run      *AgentRun
 	session  *AgentSession
 	step     *AgentTurn
@@ -302,8 +304,45 @@ func newControlFixture(t *testing.T, calls []LoopToolCall) *controlFixture {
 	}
 	registry, handlers := fakeControlRegistry()
 	f.handlers = handlers
-	f.exec = &ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
+	f.records = &controlRecords{SQLiteStore: store}
+	f.exec = &ControlExecutor{Portfolio: f.records, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
 	return f
+}
+
+// controlRecords is the executor's portfolio: the fixture's store, plus the
+// action calls and conversation tasks a test states for its Runs. The control
+// tools only list a Run's action calls and find a task by its work Run, so a
+// test gives those records here instead of driving them through the action
+// and task workflows. The store itself holds no action calls or tasks.
+type controlRecords struct {
+	*SQLiteStore
+	actions actionCallRecords
+	tasks   []*ConversationTask
+}
+
+// putAction stores call as given, replacing the call with the same ID.
+func (f *controlFixture) putAction(call *ActionCall) { f.records.actions.put(call) }
+
+// action returns a copy of a call the test stored.
+func (f *controlFixture) action(id string) *ActionCall { return f.records.actions.get(f.t, id) }
+
+// putConversationTask stores task as given, as the task of its work Run.
+func (f *controlFixture) putConversationTask(task *ConversationTask) {
+	f.records.tasks = append(f.records.tasks, models.CloneConversationTask(task))
+}
+
+func (s *controlRecords) ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error) {
+	return s.actions.ListActionCalls(ctx, filter)
+}
+
+// FindConversationTaskByWorkRunID finds a stored task by its work Run.
+func (s *controlRecords) FindConversationTaskByWorkRunID(_ context.Context, scope Scope, runID string) (*ConversationTask, error) {
+	for _, task := range s.tasks {
+		if task.Scope == scope && task.WorkRunID == runID {
+			return models.CloneConversationTask(task), nil
+		}
+	}
+	return nil, nil
 }
 
 func (f *controlFixture) context(callID string, authority ControlAuthority) ControlContext {

@@ -65,12 +65,9 @@ func TestExternalClaimNeedsReceipt(t *testing.T) {
 	f.governedEntry("send", "mail", "send", map[string]interface{}{"status": "queued"})
 	requireRejected(t, f, f.settleFinal("claim", ControlAuthority{}), "claim", finalUnevidencedClaimCode)
 	// The same call with an external operation receipt evidences the claim.
-	receipt, err := f.store.GetActionCall(t.Context(), f.run.Scope, "action-send")
-	if err != nil {
-		t.Fatal(err)
-	}
+	receipt := f.action("action-send")
 	receipt.ExternalOperationDigest = "sha256:" + strings.Repeat("a", 64)
-	putStoredAction(t, f.store, receipt)
+	f.putAction(receipt)
 	requireFinal(t, f.settleFinal("claim2", ControlAuthority{}))
 	// Without any governed call the claim is refused.
 	g := newFinalFixture(t, finalCall("final", `{"answer":"I posted the comment."}`))

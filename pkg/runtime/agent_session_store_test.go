@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Session store specifics (store-3): the Run binding fence, the watermark
@@ -27,27 +29,44 @@ func putTestSessionRun(t *testing.T, store *SQLiteStore, runID, sessionID string
 	t.Helper()
 	expires := testSessionNow.Add(time.Minute)
 	run := &AgentRun{
-		ID: runID, Scope: testSessionScope, Status: status, Revision: 1, SessionID: sessionID,
+		ID: runID, Scope: testSessionScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, Goal: "session test",
+		Status: status, Revision: 1, SessionID: sessionID,
 		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: testSessionNow, UpdatedAt: testSessionNow,
 	}
 	for i := 0; i < interventions; i++ {
 		run.PendingInterventions = append(run.PendingInterventions, AgentRunIntervention{ID: "iv" + string(rune('a'+i)), Instruction: "steer"})
 	}
-	// The Run is written as is, without the scheduler's rules, so a test can
-	// rebind or relabel one mid-scenario.
+	return putTestRun(t, store, run)
+}
+
+// putTestRun writes run as given, without the scheduler's rules, so a test
+// can rebind or relabel a Run mid-scenario. A new Run is created; an existing
+// one is rewritten through the store's update outside any lease, which moves
+// its revision on by one (returned in the written Run).
+func putTestRun(t testing.TB, store *SQLiteStore, run *AgentRun) *AgentRun {
+	t.Helper()
 	ctx := context.Background()
-	conn, err := store.db.Conn(ctx)
+	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `DELETE FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`, testSessionScope.Kind, testSessionScope.ID, runID); err != nil {
-		t.Fatal(err)
+	if current == nil {
+		if err := store.CreateAgentRun(ctx, run); err != nil {
+			t.Fatalf("create run %s: %v", run.ID, err)
+		}
+		return run
 	}
-	if err := insertSQLiteAgentRunConn(ctx, conn, run); err != nil {
-		t.Fatal(err)
+	next := cloneAgentRun(run)
+	next.Revision = current.Revision + 1
+	event := &ActivityEvent{
+		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.status_changed", Severity: ActivitySeverityInfo,
+		AgentID: run.AssignedAgentID, RunID: run.ID, Actor: ActivityActor{Type: "system", ID: "test"},
+		Summary: "Test rewrote the Run", Visibility: ActivityVisibilityScope, CreatedAt: run.UpdatedAt,
 	}
-	return run
+	if _, err := store.UpdateAgentRunWithEvent(ctx, next, current.Revision, event, nil); err != nil {
+		t.Fatalf("rewrite run %s: %v", run.ID, err)
+	}
+	return next
 }
 
 func testStoredSessionRun(t *testing.T, store *SQLiteStore, runID string) *AgentRun {
@@ -79,7 +98,7 @@ func testAppend(store *SQLiteStore, sessionID, runID string, entries ...*Session
 }
 
 func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
-	store := newTestKernelStore(t)
+	store, db := newTestSQLiteStore(t)
 	putTestSessionRun(t, store, "r1", "other-session", AgentRunStatusRunning, 0)
 	req := OpenConversationAgentSessionRequest{Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r1", Lease: testSessionLease()}
 	if _, err := store.OpenConversationAgentSession(context.Background(), req); !errors.Is(err, ErrSessionMoved) {
@@ -90,7 +109,7 @@ func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
 	if _, err := store.OpenConversationAgentSession(context.Background(), bad); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("open with a foreign lease = %v, want ErrLeaseLost", err)
 	}
-	if countStoreRows(t, store, "agent_sessions") != 0 {
+	if countRows(t, db, "agent_sessions") != 0 {
 		t.Fatalf("a failed open stored a session")
 	}
 

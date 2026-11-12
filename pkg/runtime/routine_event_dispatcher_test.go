@@ -209,7 +209,7 @@ func TestRoutineEventMaximumOccurrencesRetires(t *testing.T) {
 }
 
 func TestRoutineEventPausedDrops(t *testing.T) {
-	h := newRoutineEventHarness(t)
+	h, db := newRoutineEventRowsHarness(t)
 	activation := h.routine("pause-me", nil)
 	h.offer(activation, 3)
 	h.setStatus(activation, RunbookActivationPaused)
@@ -223,7 +223,7 @@ func TestRoutineEventPausedDrops(t *testing.T) {
 	if count, _ := h.store.CountPendingRoutineEvents(h.ctx, h.scope, activation.ID); count != 0 {
 		t.Fatalf("pending = %d", count)
 	}
-	for _, record := range listStoredRoutineEvents(t, h.store, h.scope) {
+	for _, record := range listRoutineEventRows(t, db, h.scope) {
 		if record.ActivationID == activation.ID && (record.State != RoutineEventDropped || record.DroppedReason != RoutineEventDroppedPaused || record.KeepsData) {
 			t.Fatalf("record %s = %#v", record.EventID, record)
 		}
