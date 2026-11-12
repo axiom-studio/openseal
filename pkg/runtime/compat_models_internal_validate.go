@@ -191,6 +191,10 @@ func validConversationTaskAdmissionRoot(root *AgentRun, task *ConversationTask) 
 	return models.IsValidConversationTaskAdmissionRoot(root, task)
 }
 
+func validConversationTaskAdmissionSource(source *AgentRun, conversation *Conversation, message *ChannelMessage, task *ConversationTask) bool {
+	return models.IsValidConversationTaskAdmissionSource(source, conversation, message, task)
+}
+
 func validConversationTaskAdmissionSourceWithRound(source *AgentRun, conversation *Conversation, message *ChannelMessage, task *ConversationTask, round *ParticipationRound) bool {
 	return models.IsValidConversationTaskAdmissionSourceWithRound(source, conversation, message, task, round)
 }

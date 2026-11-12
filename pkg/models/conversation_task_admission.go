@@ -209,6 +209,10 @@ func IsValidConversationTaskAdmissionRoot(root *AgentRun, task *ConversationTask
 	return ConversationTaskMatchesWorkRun(task, root) && (task.Mode == ConversationTaskModeContinuation || root.ObjectiveID == "")
 }
 
+func IsValidConversationTaskAdmissionSource(source *AgentRun, conversation *Conversation, message *ChannelMessage, task *ConversationTask) bool {
+	return IsValidConversationTaskAdmissionSourceWithRound(source, conversation, message, task, nil)
+}
+
 func IsValidConversationTaskAdmissionSourceWithRound(source *AgentRun, conversation *Conversation, message *ChannelMessage, task *ConversationTask, round *ParticipationRound) bool {
 	if source == nil || conversation == nil || message == nil || source.Scope != task.Scope || source.ID != task.SourceRunID ||
 		source.Kind != RunKindConversation || source.Source != RunSourceChat || source.ParentRunID != "" || source.RootRunID != source.ID ||

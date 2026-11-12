@@ -8,10 +8,6 @@ import (
 	"github.com/lib/pq"
 )
 
-func validConversationTaskAdmissionSource(source *AgentRun, conversation *Conversation, message *ChannelMessage, task *ConversationTask) bool {
-	return validConversationTaskAdmissionSourceWithRound(source, conversation, message, task, nil)
-}
-
 // VerifyConversationTaskWorkRun binds a loaded Task to its canonical work,
 // original actor/message/thread and any later governed Team assignment. The
 // structural matcher alone never grants execution or viewer authority.
