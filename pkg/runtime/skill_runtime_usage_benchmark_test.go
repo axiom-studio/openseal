@@ -11,20 +11,22 @@ import (
 func BenchmarkSkillRuntimeUsageTerminalHistory(b *testing.B) {
 	for _, size := range []int{100, 10000} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
-			store, err := NewSQLiteStore(b.TempDir() + "/history.db")
+			path := b.TempDir() + "/history.db"
+			store, err := NewSQLiteStore(path)
 			if err != nil {
 				b.Fatal(err)
 			}
+			sqlDB := openTestSQLiteDB(b, path)
 			defer store.Close()
 			scope := Scope{Kind: "tenant", ID: "benchmark"}
 			run, err := NewPortfolioService(store).CreateAgentRun(context.Background(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Historical finished task", Source: RunSourceManual})
 			if err != nil {
 				b.Fatal(err)
 			}
-			if _, err = store.db.Exec(`UPDATE agent_runs SET status='completed' WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, run.ID); err != nil {
+			if _, err = sqlDB.Exec(`UPDATE agent_runs SET status='completed' WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, run.ID); err != nil {
 				b.Fatal(err)
 			}
-			tx, err := store.db.Begin()
+			tx, err := sqlDB.Begin()
 			if err != nil {
 				b.Fatal(err)
 			}

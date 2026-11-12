@@ -12,10 +12,12 @@ import (
 func BenchmarkSkillRuntimeMaintenanceMetadataTerminalHistory(b *testing.B) {
 	for _, size := range []int{100, 10000} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
-			store, err := NewSQLiteStore(b.TempDir() + "/maintenance-metadata.db")
+			path := b.TempDir() + "/maintenance-metadata.db"
+			store, err := NewSQLiteStore(path)
 			if err != nil {
 				b.Fatal(err)
 			}
+			sqlDB := openTestSQLiteDB(b, path)
 			defer store.Close()
 			ctx := context.Background()
 			scope := Scope{Kind: "tenant", ID: "maintenance-benchmark"}
@@ -23,10 +25,10 @@ func BenchmarkSkillRuntimeMaintenanceMetadataTerminalHistory(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			if _, err := store.db.Exec(`UPDATE agent_runs SET status='completed' WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, run.ID); err != nil {
+			if _, err := sqlDB.Exec(`UPDATE agent_runs SET status='completed' WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, run.ID); err != nil {
 				b.Fatal(err)
 			}
-			tx, err := store.db.Begin()
+			tx, err := sqlDB.Begin()
 			if err != nil {
 				b.Fatal(err)
 			}

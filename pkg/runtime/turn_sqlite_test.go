@@ -31,8 +31,9 @@ func TestSQLiteMigratesAgentTurnLeases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
-	rows, err := store.db.Query(`PRAGMA table_info(agent_turns)`)
+	rows, err := sqlDB.Query(`PRAGMA table_info(agent_turns)`)
 	if err != nil {
 		t.Fatal(err)
 	}

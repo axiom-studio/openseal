@@ -219,10 +219,12 @@ func (r *countedChannelMessageSQLReader) QueryContext(ctx context.Context, query
 }
 
 func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "exact-batch.db"))
+	path := filepath.Join(t.TempDir(), "exact-batch.db")
+	store, err := NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	conversation := channelMessageBatchConversation(t, store, scope, "channel")
@@ -231,7 +233,7 @@ func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T
 	channelMessageBatchCommit(t, store, &otherConversation, &ChannelMessage{ID: "shared"})
 	otherTenant := channelMessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "two"}, "channel")
 	channelMessageBatchCommit(t, store, &otherTenant, &ChannelMessage{ID: "shared"})
-	reader := &countedChannelMessageSQLReader{db: store.db}
+	reader := &countedChannelMessageSQLReader{db: sqlDB}
 	selected, err := getChannelMessageBatchSQL(t.Context(), reader, "channel_messages", scope, conversation.ID, []string{"shared", "missing", "shared"}, false)
 	if err != nil || reader.queries != 1 || len(selected) != 1 || selected[0].Scope != scope || selected[0].ConversationID != conversation.ID {
 		t.Fatalf("exact scoped batch query = %#v, %v; reads=%d", selected, err, reader.queries)

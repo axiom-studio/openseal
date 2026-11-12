@@ -67,6 +67,7 @@ func seedSQLiteChangeSets(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
 	ctx := context.Background()
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -91,23 +92,23 @@ func seedSQLiteChangeSets(t *testing.T, path string) string {
 			WHERE COALESCE(json_extract(payload, '$.kind'), 'agent_work') = 'workforce_authoring'`,
 	}
 	for _, statement := range statements {
-		if _, err := store.db.Exec(statement); err != nil {
+		if _, err := sqlDB.Exec(statement); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for index, row := range cutoverLineageRows {
-		if _, err := store.db.Exec(`INSERT INTO workforce_change_sets (scope_kind, scope_id, id, parent_id, status, revision, idempotency_key, request_digest, candidate_digest, created_at, updated_at, payload)
+		if _, err := sqlDB.Exec(`INSERT INTO workforce_change_sets (scope_kind, scope_id, id, parent_id, status, revision, idempotency_key, request_digest, candidate_digest, created_at, updated_at, payload)
 			VALUES (?,?,?,?,?,1,?,'digest','digest',?,?,?)`, builderCutoverScope.Kind, builderCutoverScope.ID, row.id, row.parentID, row.status,
 			"key-"+row.id, now.Add(time.Duration(index)*time.Second), now, row.payload(t, builderCutoverScope)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := store.db.Exec(`UPDATE agent_runs SET status = 'running', lease_owner = 'authoring-worker',
+	if _, err := sqlDB.Exec(`UPDATE agent_runs SET status = 'running', lease_owner = 'authoring-worker',
 		payload = json_set(payload, '$.kind', 'workforce_authoring', '$.status', 'running', '$.leaseOwner', 'authoring-worker') WHERE id = ?`, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"agent_deployments", "team_deployments"} {
-		if _, err := store.db.Exec(`INSERT INTO `+table+` (scope_kind, scope_id, id, definition_id, active_version, revision, updated_at, payload)
+		if _, err := sqlDB.Exec(`INSERT INTO `+table+` (scope_kind, scope_id, id, definition_id, active_version, revision, updated_at, payload)
 			VALUES (?,?,?,'definition-1','1',1,?,?)`, builderCutoverScope.Kind, builderCutoverScope.ID, "paused-"+table, now,
 			`{"id":"paused-`+table+`","rolloutStatus":"paused","status":"paused","activation":{"changeSetId":"cs-applied"}}`); err != nil {
 			t.Fatal(err)
@@ -141,16 +142,17 @@ func TestAgentBuilderMigrationSQLiteKeepsLeafDraftsAndRetiresChangeSets(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
 	ctx := context.Background()
 
-	if names := sqliteObjectNames(t, store.db, "table", "workforce_change_sets"); len(names) != 0 {
+	if names := sqliteObjectNames(t, sqlDB, "table", "workforce_change_sets"); len(names) != 0 {
 		t.Fatalf("change-set table survived: %v", names)
 	}
-	if names := sqliteObjectNames(t, store.db, "index", "idx_workforce_change_sets"); len(names) != 0 {
+	if names := sqliteObjectNames(t, sqlDB, "index", "idx_workforce_change_sets"); len(names) != 0 {
 		t.Fatalf("change-set indexes survived: %v", names)
 	}
-	if names := sqliteObjectNames(t, store.db, "index", "idx_agent_runs_global_recovery"); len(names) != 0 {
+	if names := sqliteObjectNames(t, sqlDB, "index", "idx_agent_runs_global_recovery"); len(names) != 0 {
 		t.Fatalf("authoring recovery index survived: %v", names)
 	}
 	drafts, err := store.ListAgentBuilderCutoverDrafts(ctx)
@@ -164,12 +166,12 @@ func TestAgentBuilderMigrationSQLiteKeepsLeafDraftsAndRetiresChangeSets(t *testi
 		t.Fatalf("authoring run = %#v, %v; want canceled without lease", run, err)
 	}
 	var status, leaseOwner string
-	if err := store.db.QueryRow(`SELECT status, lease_owner FROM agent_runs WHERE id = ?`, runID).Scan(&status, &leaseOwner); err != nil || status != "canceled" || leaseOwner != "" {
+	if err := sqlDB.QueryRow(`SELECT status, lease_owner FROM agent_runs WHERE id = ?`, runID).Scan(&status, &leaseOwner); err != nil || status != "canceled" || leaseOwner != "" {
 		t.Fatalf("authoring run columns = %q %q, %v", status, leaseOwner, err)
 	}
 	for _, table := range []string{"agent_deployments", "team_deployments"} {
 		var activation sql.NullString
-		if err := store.db.QueryRow(`SELECT json_type(payload, '$.activation') FROM `+table+` WHERE id = ?`, "paused-"+table).Scan(&activation); err != nil || activation.Valid {
+		if err := sqlDB.QueryRow(`SELECT json_type(payload, '$.activation') FROM `+table+` WHERE id = ?`, "paused-"+table).Scan(&activation); err != nil || activation.Valid {
 			t.Fatalf("%s activation = %v, %v; want removed", table, activation, err)
 		}
 	}
@@ -209,13 +211,15 @@ func TestAgentBuilderMigrationSQLiteKeepsLeafDraftsAndRetiresChangeSets(t *testi
 }
 
 func TestAgentBuilderMigrationSQLiteFreshStoreHasNoChangeSets(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "fresh.db"))
+	path := filepath.Join(t.TempDir(), "fresh.db")
+	store, err := NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
 	for _, prefix := range []string{"workforce_change_sets", agentBuilderCutoverTable} {
-		if names := sqliteObjectNames(t, store.db, "table", prefix); len(names) != 0 {
+		if names := sqliteObjectNames(t, sqlDB, "table", prefix); len(names) != 0 {
 			t.Fatalf("fresh store has %v", names)
 		}
 	}

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 
 type channelActionFixture struct {
 	store       *SQLiteStore
+	db          *sql.DB
 	agents      *kernelagent.Registry
 	endpoints   *ExternalConversationEndpointService
 	resolver    *switchableConversationAdapterResolver
@@ -31,11 +33,13 @@ type channelActionFixture struct {
 func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	t.Helper()
 	ctx := context.Background()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "channels.db"))
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
+	db := openTestSQLiteDB(t, path)
 	_, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	resolver := &switchableConversationAdapterResolver{ExternalConversationAdapterResolver: catalog}
 	endpoints := NewExternalConversationEndpointService(store, resolver)
@@ -95,7 +99,7 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &channelActionFixture{store: store, agents: agents, endpoints: endpoints, resolver: resolver, catalog: catalog, scope: scope, endpoint: endpoint, run: run,
+	return &channelActionFixture{store: store, db: db, agents: agents, endpoints: endpoints, resolver: resolver, catalog: catalog, scope: scope, endpoint: endpoint, run: run,
 		coordinator: NewActionCoordinator(store, store, catalog, policy, validator), dispatcher: dispatcher}
 }
 
@@ -216,7 +220,7 @@ func TestAgentChannelRechecksEndpointAndAdapterAfterApproval(t *testing.T) {
 				}
 				// Simulate a corrupted association without relying on a public
 				// endpoint revision change to catch the ownership violation.
-				if _, err := f.store.db.ExecContext(ctx, `UPDATE external_conversation_endpoints SET owner_id=?, payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, foreign.Owner.ID, string(payload), f.scope.Kind, f.scope.ID, foreign.ID); err != nil {
+				if _, err := f.db.ExecContext(ctx, `UPDATE external_conversation_endpoints SET owner_id=?, payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, foreign.Owner.ID, string(payload), f.scope.Kind, f.scope.ID, foreign.ID); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -243,7 +247,7 @@ func TestAgentChannelActivationRollsBackWhenEndpointWriteFails(t *testing.T) {
 	}
 	call := f.approve(t, proposal)
 	ctx := context.Background()
-	if _, err := f.store.db.ExecContext(ctx, `CREATE TRIGGER reject_endpoint_update BEFORE UPDATE ON external_conversation_endpoints BEGIN SELECT RAISE(ABORT, 'endpoint write rejected'); END`); err != nil {
+	if _, err := f.db.ExecContext(ctx, `CREATE TRIGGER reject_endpoint_update BEFORE UPDATE ON external_conversation_endpoints BEGIN SELECT RAISE(ABORT, 'endpoint write rejected'); END`); err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
@@ -256,7 +260,7 @@ func TestAgentChannelActivationRollsBackWhenEndpointWriteFails(t *testing.T) {
 			t.Fatal("failed transaction changed endpoint")
 		}
 	}
-	if _, err := f.store.db.ExecContext(ctx, `DROP TRIGGER reject_endpoint_update`); err != nil {
+	if _, err := f.db.ExecContext(ctx, `DROP TRIGGER reject_endpoint_update`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err != nil {
@@ -335,7 +339,7 @@ func TestAgentChannelActivationEndpointCASRollsBackWholeTransaction(t *testing.T
 	ctx := context.Background()
 	// Move the endpoint revision after preflight, inside the activation
 	// transaction, to exercise its final CAS rather than only early validation.
-	if _, err := f.store.db.ExecContext(ctx, `CREATE TRIGGER change_endpoint_before_activation BEFORE INSERT ON agent_definitions BEGIN UPDATE external_conversation_endpoints SET revision=revision+1; END`); err != nil {
+	if _, err := f.db.ExecContext(ctx, `CREATE TRIGGER change_endpoint_before_activation BEFORE INSERT ON agent_definitions BEGIN UPDATE external_conversation_endpoints SET revision=revision+1; END`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); !errors.Is(err, ErrExternalConversationConflict) {

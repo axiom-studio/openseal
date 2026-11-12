@@ -19,14 +19,16 @@ type routineEventPayloadProbe func(t *testing.T, scope Scope, activationID, even
 
 func TestSQLiteRoutineEventStore(t *testing.T) {
 	runRoutineEventStoreContract(t, func(t *testing.T) (KernelStore, routineEventPayloadProbe) {
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "routine-events.db"))
+		path := filepath.Join(t.TempDir(), "routine-events.db")
+		store, err := NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
+		sqlDB := openTestSQLiteDB(t, path)
 		t.Cleanup(func() { _ = store.Close() })
 		return store, func(t *testing.T, scope Scope, activationID, eventID string) bool {
 			var hasPayload bool
-			if err := store.db.QueryRow(`SELECT payload IS NOT NULL FROM routine_events WHERE scope_kind = ? AND scope_id = ? AND activation_id = ? AND event_id = ?`,
+			if err := sqlDB.QueryRow(`SELECT payload IS NOT NULL FROM routine_events WHERE scope_kind = ? AND scope_id = ? AND activation_id = ? AND event_id = ?`,
 				scope.Kind, scope.ID, activationID, eventID).Scan(&hasPayload); err != nil {
 				t.Fatalf("read event %s: %v", eventID, err)
 			}
@@ -43,12 +45,13 @@ func TestSQLiteRoutineEventsMigrationFillsIndexColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	scope := Scope{Kind: "tenant", ID: "migrate"}
 	activation := routineEventTestActivation(scope, "activation-old", time.Now().UTC())
 	if err := store.CreateRunbookActivation(t.Context(), activation); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`UPDATE runbook_activations SET event_kind = NULL, event_source_ref = NULL`); err != nil {
+	if _, err := sqlDB.Exec(`UPDATE runbook_activations SET event_kind = NULL, event_source_ref = NULL`); err != nil {
 		t.Fatal(err)
 	}
 	_ = store.Close()

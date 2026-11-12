@@ -316,6 +316,7 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "legacy"}
 	agentOnly := Scope{Kind: "tenant", ID: "agents-only"}
@@ -343,7 +344,7 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 		{`DELETE FROM space_members`, nil},
 		{`DELETE FROM spaces`, nil},
 	} {
-		if _, err := store.db.Exec(statement.query, statement.args...); err != nil {
+		if _, err := sqlDB.Exec(statement.query, statement.args...); err != nil {
 			t.Fatalf("%s: %v", statement.query, err)
 		}
 	}
@@ -399,6 +400,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "renamed"}
 	seeded := seedTestSpace(t, store, scope)
@@ -425,7 +427,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 		`UPDATE space_members SET space_id = '` + oldID + `'`,
 		`UPDATE conversations SET space_id = '` + oldID + `', payload = json_set(payload, '$.spaceId', '` + oldID + `')`,
 	} {
-		if _, err := store.db.Exec(statement); err != nil {
+		if _, err := sqlDB.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}

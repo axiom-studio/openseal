@@ -12,6 +12,7 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	t.Cleanup(func() { store.Close() })
 	now := runStoreContractEpoch
 	first, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "upgrade-pending"}, now)
@@ -26,7 +27,7 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 		t.Fatalf("legacy delivered fixture: %d %v", count, err)
 	}
 	// Exact old table shape, including its active lease and released snapshot.
-	_, err = store.db.Exec(`DROP TRIGGER agent_runs_terminal_reporting_insert; DROP TRIGGER agent_runs_terminal_reporting_update;
+	_, err = sqlDB.Exec(`DROP TRIGGER agent_runs_terminal_reporting_insert; DROP TRIGGER agent_runs_terminal_reporting_update;
 		DROP INDEX idx_run_terminal_reports_pending_due; DROP INDEX idx_run_terminal_reports_scoped_due;
 		ALTER TABLE run_terminal_reports RENAME TO reporting_v59_fixture;
 		CREATE TABLE run_terminal_reports(scope_kind TEXT NOT NULL,scope_id TEXT NOT NULL,run_id TEXT NOT NULL,

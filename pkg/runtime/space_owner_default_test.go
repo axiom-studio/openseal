@@ -240,6 +240,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	scope := Scope{Kind: "tenant", ID: "legacy"}
 	other := Scope{Kind: "tenant", ID: "legacy-other"}
 	base := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
@@ -271,7 +272,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		`DROP INDEX idx_spaces_owner_default`,
 		`CREATE UNIQUE INDEX idx_spaces_default ON spaces(scope_kind, scope_id) WHERE is_default = 1`,
 	} {
-		if _, err := store.db.Exec(statement); err != nil {
+		if _, err := sqlDB.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}
@@ -280,12 +281,12 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		if row.owner == legacyDefaultSpaceOwner {
 			access = SpaceAccessEveryone
 		}
-		if _, err := store.db.Exec(`INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, ?, 'tidepool', ?, ?, ?, ?, ?, ?)`,
+		if _, err := sqlDB.Exec(`INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, ?, 'tidepool', ?, ?, ?, ?, ?, ?)`,
 			row.id, row.scope.Kind, row.scope.ID, "Space "+row.id, position, row.isDefault, access, row.owner, row.createdAt, row.createdAt); err != nil {
 			t.Fatalf("insert %s: %v", row.id, err)
 		}
 	}
-	legacySnapshot := sqliteSpacesSnapshot(t, store.db)
+	legacySnapshot := sqliteSpacesSnapshot(t, sqlDB)
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -298,8 +299,8 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		"legacy-other/ana-other-default", "legacy/" + legacyDefaultSpaceID(scope), "legacy/ana-oldest", "legacy/ben-a", "legacy/solo-older",
 	}
 	slices.Sort(wantDefaults)
-	assertSQLiteOwnerDefaults(t, reopened.db, len(rows), wantDefaults)
-	migrated := sqliteSpacesSnapshot(t, reopened.db)
+	assertSQLiteOwnerDefaults(t, sqlDB, len(rows), wantDefaults)
+	migrated := sqliteSpacesSnapshot(t, sqlDB)
 	// Only is_default changed, and only on the three spaces that were marked.
 	if changed := snapshotDifferences(legacySnapshot, migrated); !slices.Equal(changed, []string{"legacy/ana-oldest", "legacy/ben-a", "legacy/solo-older"}) {
 		t.Fatalf("rows changed by the migration = %v", changed)
@@ -309,7 +310,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		t.Fatalf("legacy Default space = %q, was %q", migrated[legacyKey], legacySnapshot[legacyKey])
 	}
 	var indexes string
-	if err := reopened.db.QueryRow(`SELECT COALESCE(group_concat(name, ','), '') FROM (SELECT name FROM sqlite_master
+	if err := sqlDB.QueryRow(`SELECT COALESCE(group_concat(name, ','), '') FROM (SELECT name FROM sqlite_master
 		WHERE type = 'index' AND name IN ('idx_spaces_default', 'idx_spaces_owner_default') ORDER BY name)`).Scan(&indexes); err != nil || indexes != "idx_spaces_owner_default" {
 		t.Fatalf("default space indexes = %q, err = %v", indexes, err)
 	}
@@ -332,10 +333,10 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = again.Close() })
-	if changed := snapshotDifferences(migrated, sqliteSpacesSnapshot(t, again.db)); len(changed) != 0 {
+	if changed := snapshotDifferences(migrated, sqliteSpacesSnapshot(t, sqlDB)); len(changed) != 0 {
 		t.Fatalf("rows changed by opening again = %v", changed)
 	}
-	assertSQLiteOwnerDefaults(t, again.db, len(rows), wantDefaults)
+	assertSQLiteOwnerDefaults(t, sqlDB, len(rows), wantDefaults)
 	// The migrated database follows the store contract: a new owner's first
 	// space is their default space, and an owner who has one gets no second.
 	spaces := NewSpaceService(again)

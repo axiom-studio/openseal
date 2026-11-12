@@ -309,6 +309,7 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "legacy"}
 	spaces := NewSpaceService(store)
@@ -319,10 +320,10 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	if _, err := spaces.SetSpaceAccess(ctx, scope, work.ID, SpaceAccessEveryone); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`UPDATE spaces SET is_default = 0, position = 1 WHERE id = ?`, work.ID); err != nil {
+	if _, err := sqlDB.Exec(`UPDATE spaces SET is_default = 0, position = 1 WHERE id = ?`, work.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, 'Default', 'tidepool', 0, 1, 'everyone', ?, ?, ?)`,
+	if _, err := sqlDB.Exec(`INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, 'Default', 'tidepool', 0, 1, 'everyone', ?, ?, ?)`,
 		legacyDefaultSpaceID(scope), scope.Kind, scope.ID, legacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour), work.CreatedAt.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +334,7 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 		`ALTER TABLE spaces RENAME COLUMN owner_id TO created_by`,
 		`DROP TABLE space_people`,
 	} {
-		if _, err := store.db.Exec(statement); err != nil {
+		if _, err := sqlDB.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}

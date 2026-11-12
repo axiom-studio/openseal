@@ -112,17 +112,19 @@ func leaseUmbrellaRequest(t *testing.T, ctx context.Context, store KernelStore, 
 
 func TestSQLiteActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *testing.T) {
 	ctx := context.Background()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "lease-umbrella.db"))
+	path := filepath.Join(t.TempDir(), "lease-umbrella.db")
+	store, err := NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
 	insert := func(t *testing.T, ctx context.Context, call *ActionCall) {
 		payload, err := json.Marshal(call)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.db.ExecContext(ctx, `INSERT INTO action_calls
+		if _, err := sqlDB.ExecContext(ctx, `INSERT INTO action_calls
 			(id,scope_kind,scope_id,run_id,status,available_at,lease_owner,lease_expires_at,revision,created_at,payload)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.Status, call.AvailableAt,
 			call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload)); err != nil {

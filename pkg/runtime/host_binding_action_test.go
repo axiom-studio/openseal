@@ -162,14 +162,16 @@ func TestSQLiteCredentialRedemptionOfHostBindings(t *testing.T) {
 		{name: "collides with a stored row", keepRow: true, host: func(b *skill.Binding) *skill.Binding { return b }, wantError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "host-redemption.db"))
+			path := filepath.Join(t.TempDir(), "host-redemption.db")
+			store, err := NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
+			sqlDB := openTestSQLiteDB(t, path)
 			defer store.Close()
 			request, binding := createSQLiteActionCredentialLeaseFixture(t, ctx, store, "nonce-host-binding-0001")
 			if !test.keepRow {
-				if _, err := store.db.ExecContext(ctx, `DELETE FROM skill_bindings WHERE id = ?`, binding.ID); err != nil {
+				if _, err := sqlDB.ExecContext(ctx, `DELETE FROM skill_bindings WHERE id = ?`, binding.ID); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -179,7 +181,7 @@ func TestSQLiteCredentialRedemptionOfHostBindings(t *testing.T) {
 				t.Fatalf("redeem error = %v, want error %v", err, test.wantError)
 			}
 			var consumed int
-			if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions`).Scan(&consumed); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if err := sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions`).Scan(&consumed); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				t.Fatal(err)
 			}
 			if (consumed == 1) == test.wantError {

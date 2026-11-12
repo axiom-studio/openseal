@@ -429,6 +429,7 @@ func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB := openTestSQLiteDB(t, path)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
@@ -437,7 +438,7 @@ func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`UPDATE conversations SET payload = json_remove(payload, '$.approvalMode')`); err != nil {
+	if _, err := sqlDB.Exec(`UPDATE conversations SET payload = json_remove(payload, '$.approvalMode')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -449,7 +450,7 @@ func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testin
 	}
 	defer store.Close()
 	var stored string
-	if err := store.db.QueryRow(`SELECT json_extract(payload, '$.approvalMode') FROM conversations`).Scan(&stored); err != nil || stored != "auto" {
+	if err := sqlDB.QueryRow(`SELECT json_extract(payload, '$.approvalMode') FROM conversations`).Scan(&stored); err != nil || stored != "auto" {
 		t.Fatalf("backfilled approval mode = %q, %v", stored, err)
 	}
 	result, err := NewConversationApprovalModeService(store).SetApprovalMode(ctx, SetConversationApprovalModeRequest{
