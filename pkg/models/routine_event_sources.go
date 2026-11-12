@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// RoutineEventNamedChannels lists the channels or chats a Slack or Telegram
+// routineEventNamedChannels lists the channels or chats a Slack or Telegram
 // trigger names in its equals/one_of place conditions, the ones
 // pinRoutineEventChannels checked at create time.
-func RoutineEventNamedChannels(trigger *RoutineEventTrigger) []string {
+func routineEventNamedChannels(trigger *RoutineEventTrigger) []string {
 	if trigger == nil {
 		return nil
 	}

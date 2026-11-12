@@ -27,7 +27,7 @@ type AgentRunClaim struct {
 	// The three task-run maps below are computed by conversation task
 	// admission while a claim is evaluated; callers leave them empty. They
 	// are never encoded.
-	ConversationTaskRuns        map[string]bool `json:"-"`
+	conversationTaskRuns        map[string]bool `json:"-"`
 	ActiveConversationTaskRuns  map[string]bool `json:"-"`
 	InvalidConversationTaskRuns map[string]bool `json:"-"`
 }
@@ -208,7 +208,7 @@ func EvaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 			decision.Blocks = append(decision.Blocks, block)
 			continue
 		}
-		if claim.ConversationTaskRuns[run.ID] && activeTasksByAgent[run.AssignedAgentID] >= agentLimit-claim.ConversationTaskForegroundReserve {
+		if claim.conversationTaskRuns[run.ID] && activeTasksByAgent[run.AssignedAgentID] >= agentLimit-claim.ConversationTaskForegroundReserve {
 			block := base
 			block.Reason, block.Active, block.Limit = AgentRunAdmissionReasonTaskCapacity, activeTasksByAgent[run.AssignedAgentID], agentLimit-claim.ConversationTaskForegroundReserve
 			decision.Blocks = append(decision.Blocks, block)
@@ -264,7 +264,7 @@ func EvaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 			decision.Blocks = append(decision.Blocks, block)
 			continue
 		}
-		if selected == nil || AgentRunSchedulesBefore(run, selected, claim.Now, claim.AgingInterval) {
+		if selected == nil || agentRunSchedulesBefore(run, selected, claim.Now, claim.AgingInterval) {
 			selected = run
 		}
 	}
@@ -394,7 +394,7 @@ func agentRunEffectivePriority(run *AgentRun, now time.Time, agingInterval time.
 	return int64(run.Priority) + int64(age/agingInterval)
 }
 
-func AgentRunSchedulesBefore(left, right *AgentRun, now time.Time, agingInterval time.Duration) bool {
+func agentRunSchedulesBefore(left, right *AgentRun, now time.Time, agingInterval time.Duration) bool {
 	leftScore := agentRunEffectivePriority(left, now, agingInterval)
 	rightScore := agentRunEffectivePriority(right, now, agingInterval)
 	if leftScore != rightScore {

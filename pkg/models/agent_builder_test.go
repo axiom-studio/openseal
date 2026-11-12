@@ -27,7 +27,7 @@ func TestAgentBuilderParametersValidate(t *testing.T) {
 	if err := message.Validate(); err != nil {
 		t.Fatalf("valid parameters refused: %v", err)
 	}
-	principles := make([]string, MaximumAgentBuilderOperatingPrinciples+1)
+	principles := make([]string, maximumAgentBuilderOperatingPrinciples+1)
 	for index := range principles {
 		principles[index] = "principle " + string(rune('a'+index))
 	}
@@ -38,11 +38,11 @@ func TestAgentBuilderParametersValidate(t *testing.T) {
 	}{
 		{name: "missing kind", parameters: AgentBuilderParameters{Name: "X"}},
 		{name: "unknown kind", parameters: AgentBuilderParameters{Kind: "workflow", Name: "X"}},
-		{name: "long name", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: strings.Repeat("n", MaximumAgentBuilderNameBytes+1)}},
+		{name: "long name", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: strings.Repeat("n", maximumAgentBuilderNameBytes+1)}},
 		{name: "multi-line name", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: "Press\nDesk"}},
-		{name: "long model", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Model: strings.Repeat("m", MaximumAgentBuilderModelBytes+1)}},
-		{name: "long purpose", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{Purpose: strings.Repeat("p", MaximumAgentBuilderPurposeBytes+1)}}},
-		{name: "long behaviour", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{SystemPrompt: strings.Repeat("s", MaximumAgentBuilderSystemPromptBytes+1)}}},
+		{name: "long model", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Model: strings.Repeat("m", maximumAgentBuilderModelBytes+1)}},
+		{name: "long purpose", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{Purpose: strings.Repeat("p", maximumAgentBuilderPurposeBytes+1)}}},
+		{name: "long behaviour", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{SystemPrompt: strings.Repeat("s", maximumAgentBuilderSystemPromptBytes+1)}}},
 		{name: "too many principles", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{OperatingPrinciples: principles}}},
 		{name: "duplicate principle", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{OperatingPrinciples: []string{"a", "a"}}}},
 		{name: "empty principle", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{OperatingPrinciples: []string{" "}}}},
@@ -82,7 +82,7 @@ func TestAgentBuilderCutoverStartRequestFitsParameters(t *testing.T) {
 		t.Fatalf("request = %#v", request)
 	}
 	parameters := request.Parameters
-	if len(parameters.Name) > MaximumAgentBuilderNameBytes || !strings.HasPrefix(parameters.Name, "éé") || parameters.Model != "model with newline" {
+	if len(parameters.Name) > maximumAgentBuilderNameBytes || !strings.HasPrefix(parameters.Name, "éé") || parameters.Model != "model with newline" {
 		t.Fatalf("name %q (%d bytes) model %q", parameters.Name, len(parameters.Name), parameters.Model)
 	}
 	if parameters.Draft == nil || parameters.Draft.Purpose != "" || parameters.Draft.SystemPrompt != "Behave." ||

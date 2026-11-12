@@ -102,17 +102,17 @@ func (d AgentBuilderCutoverDraft) StartRequest(model, spaceID string) StartAgent
 		lines = append(lines, line)
 	}
 	parameters := AgentBuilderParameters{Kind: AgentBuilderKindAgent}
-	parameters.Model = fitAgentBuilderParameter("model", strings.TrimSpace(model), MaximumAgentBuilderModelBytes, true)
+	parameters.Model = fitAgentBuilderParameter("model", strings.TrimSpace(model), maximumAgentBuilderModelBytes, true)
 	if agent := d.Agent; agent != nil {
-		parameters.Name = fitAgentBuilderParameter("name", agent.DisplayName, MaximumAgentBuilderNameBytes, true)
+		parameters.Name = fitAgentBuilderParameter("name", agent.DisplayName, maximumAgentBuilderNameBytes, true)
 		draft := &AgentBuilderDraftProfile{
-			Purpose:      fitAgentBuilderParameter("draft purpose", agent.Purpose, MaximumAgentBuilderPurposeBytes, true),
-			SystemPrompt: fitAgentBuilderParameter("draft behaviour", agent.SystemPrompt, MaximumAgentBuilderSystemPromptBytes, false),
+			Purpose:      fitAgentBuilderParameter("draft purpose", agent.Purpose, maximumAgentBuilderPurposeBytes, true),
+			SystemPrompt: fitAgentBuilderParameter("draft behaviour", agent.SystemPrompt, maximumAgentBuilderSystemPromptBytes, false),
 			Personality:  fitAgentBuilderParameter("draft personality", agent.Personality, maximumAgentBuilderPersonalityBytes, false),
 		}
 		seen := map[string]struct{}{}
 		for _, principle := range agent.OperatingPrinciples {
-			if len(draft.OperatingPrinciples) == MaximumAgentBuilderOperatingPrinciples {
+			if len(draft.OperatingPrinciples) == maximumAgentBuilderOperatingPrinciples {
 				break
 			}
 			fitted := fitAgentBuilderParameter("draft operating principle", principle, maximumAgentBuilderOperatingPrincipleBytes, false)

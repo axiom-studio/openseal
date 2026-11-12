@@ -103,7 +103,7 @@ func SkillRuntimeMaintenanceFromContext(ctx context.Context) (*SkillRuntimeMaint
 	if !ok {
 		return nil, false
 	}
-	return CloneSkillRuntimeMaintenance(&gate), true
+	return cloneSkillRuntimeMaintenance(&gate), true
 }
 
 func ValidateSkillRuntimeMaintenanceContext(ctx context.Context, gate *SkillRuntimeMaintenance, now time.Time) error {
@@ -184,7 +184,7 @@ func NextSkillRuntimeMaintenance(current *SkillRuntimeMaintenance, r SkillRuntim
 			return nil, false, ErrSkillRuntimeMaintenanceConflict
 		}
 		if !current.Active {
-			return CloneSkillRuntimeMaintenance(current), false, nil
+			return cloneSkillRuntimeMaintenance(current), false, nil
 		}
 		if current.Owner != r.Owner && current.LeaseExpiresAt.After(r.Now) {
 			return nil, false, ErrSkillRuntimeMaintenanceConflict
@@ -225,7 +225,7 @@ func CompleteMaintenanceRecord(g *SkillRuntimeMaintenance, r SkillRuntimeMainten
 	return &copy
 }
 
-func CloneSkillRuntimeMaintenance(g *SkillRuntimeMaintenance) *SkillRuntimeMaintenance {
+func cloneSkillRuntimeMaintenance(g *SkillRuntimeMaintenance) *SkillRuntimeMaintenance {
 	if g == nil {
 		return nil
 	}

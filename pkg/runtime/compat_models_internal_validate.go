@@ -19,10 +19,6 @@ func validActingUser(value string) bool {
 	return models.IsValidActingUser(value)
 }
 
-func validActionCallStatus(status ActionCallStatus) bool {
-	return models.IsValidActionCallStatus(status)
-}
-
 func validLeaseIdentifier(value string, maximum int) bool {
 	return models.IsValidLeaseIdentifier(value, maximum)
 }
@@ -49,10 +45,6 @@ func validateContentParts(parts []ContentPart, limits contentPartLimits) (images
 
 func validateToolArguments(field string, args json.RawMessage) error {
 	return models.ValidateToolArguments(field, args)
-}
-
-func validateToolResultForState(state ToolEntryState, result *ToolResult, kind error) error {
-	return models.ValidateToolResultForState(state, result, kind)
 }
 
 func validateAppendAgentSessionEntries(req AppendAgentSessionEntriesRequest) error {
@@ -177,10 +169,6 @@ func validateConversationRun(run *AgentRun) error {
 
 func validateChannelMessageViewFilter(filter ChannelMessageFilter) error {
 	return models.ValidateChannelMessageViewFilter(filter)
-}
-
-func validateConversationRunSession(run *AgentRun) error {
-	return models.ValidateConversationRunSession(run)
 }
 
 func validateConversationTaskSource(current *AgentRun, task *ConversationTask, revision int64, worker string) error {

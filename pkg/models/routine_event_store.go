@@ -171,7 +171,7 @@ func RoutineEventSubscriptionOf(activation *RunbookActivation) (RoutineEventSubs
 		copied := *timing
 		subscription.Calendar = &copied
 	}
-	subscription.Channels = RoutineEventNamedChannels(activation.Task.Event)
+	subscription.Channels = routineEventNamedChannels(activation.Task.Event)
 	return subscription, true
 }
 

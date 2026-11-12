@@ -165,10 +165,6 @@ func cloneRunDependencyGroup(in *RunDependencyGroup) *RunDependencyGroup {
 	return models.CloneRunDependencyGroup(in)
 }
 
-func cloneRunDependency(in *RunDependency) *RunDependency {
-	return models.CloneRunDependency(in)
-}
-
 func cloneDependencySlice(values []*RunDependency) []*RunDependency {
 	return models.CloneRunDependencies(values)
 }
@@ -231,10 +227,6 @@ func cloneRunbookActivation(value *RunbookActivation) *RunbookActivation {
 
 func cloneScheduledAgentTask(t *ScheduledAgentTask) *ScheduledAgentTask {
 	return models.CloneScheduledAgentTask(t)
-}
-
-func cloneSkillRuntimeMaintenance(g *SkillRuntimeMaintenance) *SkillRuntimeMaintenance {
-	return models.CloneSkillRuntimeMaintenance(g)
 }
 
 func cloneSkillSetupRequest(r *SkillSetupRequest) *SkillSetupRequest {

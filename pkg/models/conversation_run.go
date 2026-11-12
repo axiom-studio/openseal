@@ -66,7 +66,7 @@ func ValidateConversationRun(run *AgentRun) error {
 		run.ConcurrencyKey != ConversationRunLane(conversationID, root, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
 		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
 	}
-	return ValidateConversationRunSession(run)
+	return validateConversationRunSession(run)
 }
 
 // External provider messages never inherit the agent’s other private work.

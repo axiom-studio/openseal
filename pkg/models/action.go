@@ -150,7 +150,7 @@ func (c *ActionCall) Validate() error {
 	if (strings.TrimSpace(c.BindingID) == "") != (c.BindingRevision == 0) || c.BindingRevision < 0 {
 		return errors.New("action binding id and revision must be provided together")
 	}
-	if !IsValidActionCallStatus(c.Status) || c.Revision < 1 || c.MaxAttempts < 1 || c.Attempt < 0 {
+	if !validActionCallStatus(c.Status) || c.Revision < 1 || c.MaxAttempts < 1 || c.Attempt < 0 {
 		return errors.New("action call lifecycle metadata is invalid")
 	}
 	switch c.Origin {
@@ -543,7 +543,7 @@ type ActionStore interface {
 	PersistActionExecution(ctx context.Context, execution ActionExecutionRecord) (*ActionExecutionResult, error)
 }
 
-func IsValidActionCallStatus(status ActionCallStatus) bool {
+func validActionCallStatus(status ActionCallStatus) bool {
 	switch status {
 	case ActionCallStatusReady, ActionCallStatusWaitingApproval, ActionCallStatusDenied,
 		ActionCallStatusRunning, ActionCallStatusSucceeded, ActionCallStatusFailed,

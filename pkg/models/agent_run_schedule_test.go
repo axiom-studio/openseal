@@ -9,19 +9,19 @@ func TestAgentRunSchedulingUsesAgingDeadlineAndFIFO(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	oldLow := &AgentRun{ID: "old", Priority: 1, QueueEnteredAt: now.Add(-10 * time.Minute)}
 	newHigh := &AgentRun{ID: "new", Priority: 5, QueueEnteredAt: now.Add(-time.Minute)}
-	if !AgentRunSchedulesBefore(oldLow, newHigh, now, time.Minute) {
+	if !agentRunSchedulesBefore(oldLow, newHigh, now, time.Minute) {
 		t.Fatal("wait aging did not prevent starvation")
 	}
 	early := now.Add(time.Hour)
 	late := now.Add(2 * time.Hour)
 	left := &AgentRun{ID: "left", Priority: 5, QueueEnteredAt: now, Deadline: &early}
 	right := &AgentRun{ID: "right", Priority: 5, QueueEnteredAt: now, Deadline: &late}
-	if !AgentRunSchedulesBefore(left, right, now, time.Minute) {
+	if !agentRunSchedulesBefore(left, right, now, time.Minute) {
 		t.Fatal("earlier deadline did not break an equal-score tie")
 	}
 	left.Deadline, right.Deadline = nil, nil
 	left.QueueEnteredAt = now.Add(-time.Second)
-	if !AgentRunSchedulesBefore(left, right, now, time.Minute) {
+	if !agentRunSchedulesBefore(left, right, now, time.Minute) {
 		t.Fatal("FIFO did not break an equal-score tie")
 	}
 }

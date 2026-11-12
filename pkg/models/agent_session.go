@@ -621,7 +621,7 @@ func (e *SessionEntry) Validate() error {
 		if e.User == nil {
 			return InvalidSessionEntryf("user entry %s has no user payload", e.ID)
 		}
-		err = e.User.Validate()
+		err = e.User.validate()
 	case SessionEntryAssistant:
 		if e.Assistant == nil {
 			return InvalidSessionEntryf("assistant entry %s has no assistant payload", e.ID)
@@ -644,7 +644,7 @@ func (e *SessionEntry) Validate() error {
 		if e.Note == nil {
 			return InvalidSessionEntryf("note entry %s has no note payload", e.ID)
 		}
-		err = e.Note.Validate()
+		err = e.Note.validate()
 	case SessionEntryModelChange:
 		if e.ModelChange == nil {
 			return InvalidSessionEntryf("model_change entry %s has no model_change payload", e.ID)
@@ -735,7 +735,7 @@ func ValidateContentParts(parts []ContentPart, limits ContentPartLimits) (images
 	return images, nil
 }
 
-func (u *UserEntry) Validate() error {
+func (u *UserEntry) validate() error {
 	switch u.Origin {
 	case UserEntryChannelMessage:
 		if strings.TrimSpace(u.MessageID) == "" {
@@ -857,17 +857,17 @@ func (e *SessionEntry) validateTool() error {
 		return InvalidSessionEntryf("tool entry %s: result is set exactly in terminal states", e.ID)
 	}
 	if t.Result != nil {
-		if err := ValidateToolResultForState(e.State, t.Result, ErrInvalidSessionEntry); err != nil {
+		if err := validateToolResultForState(e.State, t.Result, ErrInvalidSessionEntry); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// ValidateToolResultForState applies the result rules of a terminal state:
+// validateToolResultForState applies the result rules of a terminal state:
 // completed ⇔ succeeded, interrupted ⇔ interrupted|canceled, error = any
 // other status; IsError == (Status != succeeded); content caps.
-func ValidateToolResultForState(state ToolEntryState, result *ToolResult, kind error) error {
+func validateToolResultForState(state ToolEntryState, result *ToolResult, kind error) error {
 	if !result.Status.Valid() {
 		return fmt.Errorf("%w: unknown result status %q", kind, result.Status)
 	}
@@ -915,7 +915,7 @@ func (c *CompactionEntry) validate(entryID string) error {
 	return nil
 }
 
-func (n *NoteEntry) Validate() error {
+func (n *NoteEntry) validate() error {
 	if !n.Kind.Valid() {
 		return InvalidSessionEntryf("unknown note kind %q", n.Kind)
 	}
@@ -1468,7 +1468,7 @@ func ValidateToolEntryTransitionRequest(req ToolEntryTransitionRequest) error {
 		return fmt.Errorf("%w: result is required exactly for terminal states", ErrInvalidToolEntryTransition)
 	}
 	if req.Result != nil {
-		if err := ValidateToolResultForState(req.To, req.Result, ErrInvalidToolEntryTransition); err != nil {
+		if err := validateToolResultForState(req.To, req.Result, ErrInvalidToolEntryTransition); err != nil {
 			return err
 		}
 	}
@@ -1769,11 +1769,11 @@ func BuildAgentSessionPath(chain []*AgentSession, segments [][]*SessionEntry, co
 // ---------------------------------------------------------------------------
 // Compaction cut (SPEC §4.6)
 
-// CompactionOpenToolBound is the highest allowed cut index over render-order
+// compactionOpenToolBound is the highest allowed cut index over render-order
 // path entries: the index of the earliest assistant entry (of any Run) that
 // has an open tool entry on the path, or len(entries) when none is open. An
 // open tool entry whose assistant is not on the path bounds the cut at itself.
-func CompactionOpenToolBound(entries []*SessionEntry) int {
+func compactionOpenToolBound(entries []*SessionEntry) int {
 	bound := len(entries)
 	assistants := make(map[string]int)
 	for i, entry := range entries {
@@ -1814,12 +1814,12 @@ func IsValidCompactionCut(e *SessionEntry) bool {
 // a summary of entries[:cut] (FirstKeptEntryID = entries[cut].ID; cut ==
 // len(entries) keeps nothing). entries[cut] passes IsValidCompactionCut, and the
 // cut is at or before the earliest assistant entry with an open tool entry
-// (CompactionOpenToolBound), so no in-flight call is summarized away.
+// (compactionOpenToolBound), so no in-flight call is summarized away.
 func IsValidCompactionCutAt(entries []*SessionEntry, cut int) bool {
 	if cut < 0 || cut > len(entries) {
 		return false
 	}
-	if cut > CompactionOpenToolBound(entries) {
+	if cut > compactionOpenToolBound(entries) {
 		return false
 	}
 	if cut == len(entries) {

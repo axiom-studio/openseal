@@ -465,12 +465,12 @@ const (
 	AgentBuilderKindAgent = "agent"
 	AgentBuilderKindTeam  = "team"
 
-	MaximumAgentBuilderNameBytes               = 80
-	MaximumAgentBuilderModelBytes              = 200
-	MaximumAgentBuilderPurposeBytes            = 2000
-	MaximumAgentBuilderSystemPromptBytes       = 16384
+	maximumAgentBuilderNameBytes               = 80
+	maximumAgentBuilderModelBytes              = 200
+	maximumAgentBuilderPurposeBytes            = 2000
+	maximumAgentBuilderSystemPromptBytes       = 16384
 	maximumAgentBuilderPersonalityBytes        = 16384
-	MaximumAgentBuilderOperatingPrinciples     = 16
+	maximumAgentBuilderOperatingPrinciples     = 16
 	maximumAgentBuilderOperatingPrincipleBytes = 2048
 )
 
@@ -507,24 +507,24 @@ func (p *AgentBuilderParameters) Validate() error {
 	if p.Kind != AgentBuilderKindAgent && p.Kind != AgentBuilderKindTeam {
 		return fmt.Errorf("%w: builder parameters kind must be %q or %q", ErrInvalidConversation, AgentBuilderKindAgent, AgentBuilderKindTeam)
 	}
-	if err := agentBuilderLine("name", p.Name, MaximumAgentBuilderNameBytes); err != nil {
+	if err := agentBuilderLine("name", p.Name, maximumAgentBuilderNameBytes); err != nil {
 		return err
 	}
-	if err := agentBuilderLine("model", p.Model, MaximumAgentBuilderModelBytes); err != nil {
+	if err := agentBuilderLine("model", p.Model, maximumAgentBuilderModelBytes); err != nil {
 		return err
 	}
 	if d := p.Draft; d != nil {
-		if err := agentBuilderLine("draft purpose", d.Purpose, MaximumAgentBuilderPurposeBytes); err != nil {
+		if err := agentBuilderLine("draft purpose", d.Purpose, maximumAgentBuilderPurposeBytes); err != nil {
 			return err
 		}
-		if err := agentBuilderText("draft behaviour", d.SystemPrompt, MaximumAgentBuilderSystemPromptBytes); err != nil {
+		if err := agentBuilderText("draft behaviour", d.SystemPrompt, maximumAgentBuilderSystemPromptBytes); err != nil {
 			return err
 		}
 		if err := agentBuilderText("draft personality", d.Personality, maximumAgentBuilderPersonalityBytes); err != nil {
 			return err
 		}
-		if len(d.OperatingPrinciples) > MaximumAgentBuilderOperatingPrinciples {
-			return fmt.Errorf("%w: a draft has at most %d operating principles", ErrInvalidConversation, MaximumAgentBuilderOperatingPrinciples)
+		if len(d.OperatingPrinciples) > maximumAgentBuilderOperatingPrinciples {
+			return fmt.Errorf("%w: a draft has at most %d operating principles", ErrInvalidConversation, maximumAgentBuilderOperatingPrinciples)
 		}
 		seen := make(map[string]struct{}, len(d.OperatingPrinciples))
 		for _, principle := range d.OperatingPrinciples {

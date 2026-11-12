@@ -44,7 +44,7 @@ func TestValidateConversationRunRejectsForeignSession(t *testing.T) {
 	continuation := valid()
 	continuation.SessionID = RunAgentSessionID(scope, "run")
 	continuation.Context[ConversationTaskContextKey] = "task-1"
-	if err := ValidateConversationRunSession(continuation); err != nil {
+	if err := validateConversationRunSession(continuation); err != nil {
 		t.Fatalf("task continuation: %v", err)
 	}
 }
@@ -69,7 +69,7 @@ func TestChildSessionSeedBoundsBriefAndKind(t *testing.T) {
 	if len(body) != MaximumChildBriefBytes-1 || !utf8.ValidString(text) {
 		t.Fatalf("brief kept %d bytes (valid %v)", len(body), utf8.ValidString(text))
 	}
-	if err := seed.User.Validate(); err != nil {
+	if err := seed.User.validate(); err != nil {
 		t.Fatalf("seed entry invalid: %v", err)
 	}
 }

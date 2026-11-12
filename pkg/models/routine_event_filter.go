@@ -248,14 +248,14 @@ func (t *RoutineEventTrigger) Matches(e *RoutineEvent) bool {
 		} else {
 			values = e.Fields[condition.Field]
 		}
-		if !condition.Holds(values) {
+		if !condition.holds(values) {
 			return false
 		}
 	}
 	return true
 }
 
-func (c *RoutineEventCondition) Holds(values []string) bool {
+func (c *RoutineEventCondition) holds(values []string) bool {
 	found := false
 	for _, value := range values {
 		if c.satisfiedBy(value) {

@@ -128,7 +128,7 @@ func TestRunDependencyValidationRejectsUnsafeResultAndDuplicateEdges(t *testing.
 		t.Fatalf("unsafe dependency error = %v", err)
 	}
 	edge := dependencyEdge(group, "same", RunDependencyStateSatisfied, true)
-	if _, err := EvaluateRunDependencies(group, []*RunDependency{edge, CloneRunDependency(edge)}); !errors.Is(err, ErrInvalidRunDependency) {
+	if _, err := EvaluateRunDependencies(group, []*RunDependency{edge, cloneRunDependency(edge)}); !errors.Is(err, ErrInvalidRunDependency) {
 		t.Fatalf("duplicate dependency error = %v", err)
 	}
 }

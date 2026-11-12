@@ -141,7 +141,7 @@ type ConversationTaskPromotionFork struct {
 // note append's placeholder lease; the fence is the transaction itself.
 const conversationTaskPromotionNoteWorker = "conversation-task-promotion"
 
-func ConversationTaskPromotedText(messageID, taskID string) string {
+func conversationTaskPromotedText(messageID, taskID string) string {
 	return "Your work on message " + messageID + " continues in background task " + taskID +
 		"; its result will be posted in this chat when it finishes."
 }
@@ -187,7 +187,7 @@ func buildConversationTaskPromotionFork(task *ConversationTask, run *AgentRun, c
 	}
 	key := TaskPromotedSourceKey(run.ID)
 	note := &SessionEntry{ID: SessionEntryID(chat.ID, key), Scope: run.Scope, SessionID: chat.ID, RunID: run.ID, Type: SessionEntryNote, SourceKey: key,
-		Note: &NoteEntry{Kind: NoteTaskPromoted, Text: ConversationTaskPromotedText(task.SourceMessageID, task.ID), Data: data}}
+		Note: &NoteEntry{Kind: NoteTaskPromoted, Text: conversationTaskPromotedText(task.SourceMessageID, task.ID), Data: data}}
 	fork.Note = &AppendAgentSessionEntriesRequest{Scope: run.Scope, SessionID: chat.ID, RunID: run.ID,
 		Lease: &AgentRunLeaseGuard{WorkerID: conversationTaskPromotionNoteWorker, Now: now}, Entries: []*SessionEntry{note}, Now: now}
 	if err := ValidateAppendAgentSessionEntries(*fork.Note); err != nil {

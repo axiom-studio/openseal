@@ -20,18 +20,18 @@ func ConversationSessionID(scope Scope, lane string) string {
 	return ConversationAgentSessionID(scope, lane)
 }
 
-// ConversationLaneSessionID is the session id a chat Run in this lane writes
+// conversationLaneSessionID is the session id a chat Run in this lane writes
 // to, or "" when the Run has no acting Agent (a Team's routing Run).
-func ConversationLaneSessionID(scope Scope, conversationID, threadRoot, agentID string) string {
+func conversationLaneSessionID(scope Scope, conversationID, threadRoot, agentID string) string {
 	if strings.TrimSpace(agentID) == "" {
 		return ""
 	}
 	return ConversationSessionID(scope, ConversationRunLane(conversationID, threadRoot, agentID))
 }
 
-// ConversationLaneSession is the in-memory shape of a lane session before its
+// conversationLaneSession is the in-memory shape of a lane session before its
 // row exists. The store creates the row lazily at the Run's first step.
-func ConversationLaneSession(scope Scope, conversationID, threadRoot, agentID string) *AgentSession {
+func conversationLaneSession(scope Scope, conversationID, threadRoot, agentID string) *AgentSession {
 	lane := ConversationRunLane(conversationID, threadRoot, agentID)
 	id := ConversationSessionID(scope, lane)
 	return &AgentSession{
@@ -70,12 +70,12 @@ func ConversationRunSession(ctx context.Context, sessions AgentSessionStore, run
 	}
 	conversationID, _ := run.Context[ConversationRunConversationIDContextKey].(string)
 	root, _ := run.Context["threadRootMessageId"].(string)
-	lane := ConversationLaneSessionID(run.Scope, conversationID, root, run.AssignedAgentID)
+	lane := conversationLaneSessionID(run.Scope, conversationID, root, run.AssignedAgentID)
 	session, err := sessions.GetAgentSession(ctx, run.Scope, run.SessionID)
 	switch {
 	case err == nil:
 	case errors.Is(err, ErrAgentSessionNotFound) && conversationID != "" && run.SessionID == lane:
-		return ConversationLaneSession(run.Scope, conversationID, root, run.AssignedAgentID), nil
+		return conversationLaneSession(run.Scope, conversationID, root, run.AssignedAgentID), nil
 	case errors.Is(err, ErrAgentSessionNotFound):
 		return nil, fmt.Errorf("%w: run session %s does not exist", ErrInvalidAgentRun, run.SessionID)
 	default:
@@ -93,10 +93,10 @@ func ConversationRunSession(ctx context.Context, sessions AgentSessionStore, run
 	return session, nil
 }
 
-// ValidateConversationRunSession is the session rule of ValidateConversationRun
+// validateConversationRunSession is the session rule of ValidateConversationRun
 // (section 05 §1.2): a conversation Run that is not a task continuation writes
 // only to its own lane session.
-func ValidateConversationRunSession(run *AgentRun) error {
+func validateConversationRunSession(run *AgentRun) error {
 	if run.SessionID == "" {
 		return nil
 	}

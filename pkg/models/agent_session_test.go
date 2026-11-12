@@ -484,7 +484,7 @@ func TestCompactionCutRespectsOpenToolEntries(t *testing.T) {
 	if IsValidCompactionCutAt(entries, -1) || IsValidCompactionCutAt(entries, len(entries)+1) {
 		t.Error("out of range cuts are invalid")
 	}
-	if bound := CompactionOpenToolBound(entries); bound != 6 {
+	if bound := compactionOpenToolBound(entries); bound != 6 {
 		t.Errorf("bound = %d, want 6", bound)
 	}
 

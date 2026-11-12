@@ -419,7 +419,7 @@ func ApplyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 	clonedEdges := make([]*RunDependency, len(edges))
 	var current *RunDependency
 	for index, edge := range edges {
-		clonedEdges[index] = CloneRunDependency(edge)
+		clonedEdges[index] = cloneRunDependency(edge)
 		if edge != nil && edge.ID == record.DependencyID {
 			current = clonedEdges[index]
 		}
@@ -429,7 +429,7 @@ func ApplyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 	}
 	if group.Status == RunDependencyGroupCanceled && IsTerminalAgentRunStatus(source.Status) {
 		evaluation, err := EvaluateRunDependencies(group, clonedEdges)
-		return &RunDependencyResult{Group: CloneRunDependencyGroup(group), Dependency: CloneRunDependency(current), Dependencies: clonedEdges,
+		return &RunDependencyResult{Group: CloneRunDependencyGroup(group), Dependency: cloneRunDependency(current), Dependencies: clonedEdges,
 			Source: CloneAgentRun(source), Evaluation: evaluation, Replayed: true}, err
 	}
 	if current.State == RunDependencyStateSatisfied || current.State == RunDependencyStateFailed || current.State == RunDependencyStateCanceled {
@@ -440,13 +440,13 @@ func ApplyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 		if group.Status == RunDependencyGroupWaiting && IsTerminalAgentRunStatus(source.Status) {
 			result, err := retireDependencyGroup(group, clonedEdges, source, record.Actor, record.Visibility, record.OccurredAt)
 			if result != nil {
-				result.Dependency = CloneRunDependency(current)
+				result.Dependency = cloneRunDependency(current)
 			}
 			return result, err
 		}
 		evaluation, err := EvaluateRunDependencies(group, clonedEdges)
 		return &RunDependencyResult{
-			Group: CloneRunDependencyGroup(group), Dependency: CloneRunDependency(current), Dependencies: clonedEdges,
+			Group: CloneRunDependencyGroup(group), Dependency: cloneRunDependency(current), Dependencies: clonedEdges,
 			Source: CloneAgentRun(source), Evaluation: evaluation, Replayed: true,
 		}, err
 	}
@@ -458,7 +458,7 @@ func ApplyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 		if result != nil {
 			for _, edge := range result.Dependencies {
 				if edge.ID == current.ID {
-					result.Dependency = CloneRunDependency(edge)
+					result.Dependency = cloneRunDependency(edge)
 					break
 				}
 			}
@@ -534,7 +534,7 @@ func ApplyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 		evaluation.Wake = false
 	}
 	return &RunDependencyResult{
-		Group: updatedGroup, Dependency: CloneRunDependency(current), Dependencies: clonedEdges,
+		Group: updatedGroup, Dependency: cloneRunDependency(current), Dependencies: clonedEdges,
 		Source: updatedSource, Evaluation: evaluation, Events: events,
 	}, nil
 }
@@ -613,7 +613,7 @@ func CloneRunDependencyGroup(in *RunDependencyGroup) *RunDependencyGroup {
 	return &out
 }
 
-func CloneRunDependency(in *RunDependency) *RunDependency {
+func cloneRunDependency(in *RunDependency) *RunDependency {
 	if in == nil {
 		return nil
 	}

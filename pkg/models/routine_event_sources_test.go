@@ -13,10 +13,10 @@ func TestRoutineEventNamedChannels(t *testing.T) {
 		{Field: "channel", Op: RoutineFilterContains, Value: "C4"},
 		{Field: "text", Op: RoutineFilterEquals, Value: "C5"},
 	}}
-	if got := RoutineEventNamedChannels(trigger); !reflect.DeepEqual(got, []string{"C1", "C2"}) {
+	if got := routineEventNamedChannels(trigger); !reflect.DeepEqual(got, []string{"C1", "C2"}) {
 		t.Fatalf("channels=%v", got)
 	}
-	if got := RoutineEventNamedChannels(&RoutineEventTrigger{Kind: RoutineEventGitHub, Filter: trigger.Filter}); got != nil {
+	if got := routineEventNamedChannels(&RoutineEventTrigger{Kind: RoutineEventGitHub, Filter: trigger.Filter}); got != nil {
 		t.Fatalf("github channels=%v", got)
 	}
 }

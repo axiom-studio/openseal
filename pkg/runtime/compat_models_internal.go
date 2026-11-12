@@ -19,44 +19,39 @@ import (
 )
 
 const (
-	maxSessionEntryListLimit               = models.MaxSessionEntryListLimit
-	capabilityInvocationContextKey         = models.CapabilityInvocationContextKey
-	capabilityActionPrefix                 = models.CapabilityActionPrefix
-	maximumAppAddress                      = models.MaximumAppAddress
-	minimumAskUserOptions                  = models.MinimumAskUserOptions
-	maximumAskUserOptions                  = models.MaximumAskUserOptions
-	maximumAskUserOptionLabelBytes         = models.MaximumAskUserOptionLabelBytes
-	maximumAskUserOptionDescriptionBytes   = models.MaximumAskUserOptionDescriptionBytes
-	maximumAgentBuilderNameBytes           = models.MaximumAgentBuilderNameBytes
-	maximumAgentBuilderModelBytes          = models.MaximumAgentBuilderModelBytes
-	maximumAgentBuilderPurposeBytes        = models.MaximumAgentBuilderPurposeBytes
-	maximumAgentBuilderSystemPromptBytes   = models.MaximumAgentBuilderSystemPromptBytes
-	maximumAgentBuilderOperatingPrinciples = models.MaximumAgentBuilderOperatingPrinciples
-	defaultConversationChangeLimit         = models.DefaultConversationChangeLimit
-	maximumConversationChangeLimit         = models.MaximumConversationChangeLimit
-	conversationRunContextConversationID   = models.ConversationRunConversationIDContextKey
-	conversationRunContextTriggerID        = models.ConversationRunTriggerIDContextKey
-	conversationRunSchedulerParticipant    = models.ConversationRunSchedulerParticipant
-	maximumChildBriefBytes                 = models.MaximumChildBriefBytes
-	routingReasonContextKey                = models.RoutingReasonContextKey
-	routineCallbackSourcePrefix            = models.RoutineCallbackSourcePrefix
-	routineGoogleSourcePrefix              = models.RoutineGoogleSourcePrefix
-	routineEventSubscriptionPageLimit      = models.RoutineEventSubscriptionPageLimit
-	maximumRoutineGrants                   = models.MaximumRoutineGrants
-	maximumRoutineGrantLabel               = models.MaximumRoutineGrantLabel
-	maximumRoutineGrantToolArguments       = models.MaximumRoutineGrantToolArguments
-	maximumRoutineGrantDestinations        = models.MaximumRoutineGrantDestinations
-	maximumRoutineGrantDestinationBytes    = models.MaximumRoutineGrantDestinationBytes
-	maximumRoutineScriptCommand            = models.MaximumRoutineScriptCommand
-	runReportingContextMilestones          = models.RunReportingMilestonesContextKey
-	runReportingContextRootRunID           = models.RunReportingRootRunIDContextKey
-	skillRuntimeMaintenanceWakeType        = models.SkillRuntimeMaintenanceWakeType
-	skillSetupModePerPerson                = models.SkillSetupModePerPerson
-	skillSetupModeShared                   = models.SkillSetupModeShared
-	spokenResponseStyleInstruction         = models.SpokenResponseStyleInstruction
-	spokenResponseAuthorityInstruction     = models.SpokenResponseAuthorityInstruction
-	voiceCallGreetingBehaviorInstruction   = models.VoiceCallGreetingBehaviorInstruction
-	maximumSurfaceInteractionLimit         = models.MaximumSurfaceInteractionLimit
+	maxSessionEntryListLimit             = models.MaxSessionEntryListLimit
+	capabilityInvocationContextKey       = models.CapabilityInvocationContextKey
+	capabilityActionPrefix               = models.CapabilityActionPrefix
+	maximumAppAddress                    = models.MaximumAppAddress
+	minimumAskUserOptions                = models.MinimumAskUserOptions
+	maximumAskUserOptions                = models.MaximumAskUserOptions
+	maximumAskUserOptionLabelBytes       = models.MaximumAskUserOptionLabelBytes
+	maximumAskUserOptionDescriptionBytes = models.MaximumAskUserOptionDescriptionBytes
+	defaultConversationChangeLimit       = models.DefaultConversationChangeLimit
+	maximumConversationChangeLimit       = models.MaximumConversationChangeLimit
+	conversationRunContextConversationID = models.ConversationRunConversationIDContextKey
+	conversationRunContextTriggerID      = models.ConversationRunTriggerIDContextKey
+	conversationRunSchedulerParticipant  = models.ConversationRunSchedulerParticipant
+	maximumChildBriefBytes               = models.MaximumChildBriefBytes
+	routingReasonContextKey              = models.RoutingReasonContextKey
+	routineCallbackSourcePrefix          = models.RoutineCallbackSourcePrefix
+	routineGoogleSourcePrefix            = models.RoutineGoogleSourcePrefix
+	routineEventSubscriptionPageLimit    = models.RoutineEventSubscriptionPageLimit
+	maximumRoutineGrants                 = models.MaximumRoutineGrants
+	maximumRoutineGrantLabel             = models.MaximumRoutineGrantLabel
+	maximumRoutineGrantToolArguments     = models.MaximumRoutineGrantToolArguments
+	maximumRoutineGrantDestinations      = models.MaximumRoutineGrantDestinations
+	maximumRoutineGrantDestinationBytes  = models.MaximumRoutineGrantDestinationBytes
+	maximumRoutineScriptCommand          = models.MaximumRoutineScriptCommand
+	runReportingContextMilestones        = models.RunReportingMilestonesContextKey
+	runReportingContextRootRunID         = models.RunReportingRootRunIDContextKey
+	skillRuntimeMaintenanceWakeType      = models.SkillRuntimeMaintenanceWakeType
+	skillSetupModePerPerson              = models.SkillSetupModePerPerson
+	skillSetupModeShared                 = models.SkillSetupModeShared
+	spokenResponseStyleInstruction       = models.SpokenResponseStyleInstruction
+	spokenResponseAuthorityInstruction   = models.SpokenResponseAuthorityInstruction
+	voiceCallGreetingBehaviorInstruction = models.VoiceCallGreetingBehaviorInstruction
+	maximumSurfaceInteractionLimit       = models.MaximumSurfaceInteractionLimit
 )
 
 type (
@@ -122,10 +117,6 @@ func runAttemptBudgetAtLimit(run *AgentRun) bool {
 	return models.RunAttemptBudgetAtLimit(run)
 }
 
-func agentRunSchedulesBefore(left, right *AgentRun, now time.Time, agingInterval time.Duration) bool {
-	return models.AgentRunSchedulesBefore(left, right, now, agingInterval)
-}
-
 func invalidEntry(format string, args ...interface{}) error {
 	return models.InvalidSessionEntryf(format, args...)
 }
@@ -156,10 +147,6 @@ func sessionEntryMatchesFilter(e *SessionEntry, filter SessionEntryFilter) bool 
 
 func buildAgentSessionPath(chain []*AgentSession, segments [][]*SessionEntry, compaction *SessionEntry) (*AgentSessionPath, error) {
 	return models.BuildAgentSessionPath(chain, segments, compaction)
-}
-
-func compactionOpenToolBound(entries []*SessionEntry) int {
-	return models.CompactionOpenToolBound(entries)
 }
 
 func initialEntriesAppend(req CreateRunAgentSessionTxRequest, sessionID string) AppendAgentSessionEntriesRequest {
@@ -290,14 +277,6 @@ func conversationSessionID(scope Scope, lane string) string {
 	return models.ConversationSessionID(scope, lane)
 }
 
-func conversationLaneSessionID(scope Scope, conversationID, threadRoot, agentID string) string {
-	return models.ConversationLaneSessionID(scope, conversationID, threadRoot, agentID)
-}
-
-func conversationLaneSession(scope Scope, conversationID, threadRoot, agentID string) *AgentSession {
-	return models.ConversationLaneSession(scope, conversationID, threadRoot, agentID)
-}
-
 func newRunSession(scope Scope, runID, agentID string) *AgentSession {
 	return models.NewRunSession(scope, runID, agentID)
 }
@@ -368,10 +347,6 @@ func conversationTaskFinalResponseKeys(run *AgentRun) []string {
 
 func conversationTaskFinishedBeforePromotion(step *AgentTurn) bool {
 	return models.ConversationTaskFinishedBeforePromotion(step)
-}
-
-func conversationTaskPromotedText(messageID, taskID string) string {
-	return models.ConversationTaskPromotedText(messageID, taskID)
 }
 
 func buildConversationTaskContinuation(req ConversationTaskPromotionRequest, run *AgentRun, conversation *Conversation, message *ChannelMessage, chat *AgentSession) (*ConversationTask, *AgentRun, *ActivityEvent, *models.ConversationTaskPromotionFork, error) {
@@ -500,10 +475,6 @@ func matchesRunFilter(run *AgentRun, filter AgentRunFilter) bool {
 
 func routineEventPlaceField(kind RoutineEventKind) string {
 	return models.RoutineEventPlaceField(kind)
-}
-
-func routineEventNamedChannels(trigger *RoutineEventTrigger) []string {
-	return models.RoutineEventNamedChannels(trigger)
 }
 
 func routineEventIndexOf(activation *RunbookActivation) (RoutineEventKind, string) {

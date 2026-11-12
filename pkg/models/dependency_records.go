@@ -210,7 +210,7 @@ func runeBool(value bool) rune {
 func CloneRunDependencies(values []*RunDependency) []*RunDependency {
 	result := make([]*RunDependency, len(values))
 	for index, edge := range values {
-		result[index] = CloneRunDependency(edge)
+		result[index] = cloneRunDependency(edge)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result

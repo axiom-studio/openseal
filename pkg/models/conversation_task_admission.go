@@ -25,7 +25,7 @@ type ConversationTaskAdmissionLookup struct {
 }
 
 func PrepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim, runs []*AgentRun, lookup ConversationTaskAdmissionLookup) error {
-	claim.ConversationTaskRuns = nil
+	claim.conversationTaskRuns = nil
 	claim.InvalidConversationTaskRuns = nil
 	if claim.ConversationTaskForegroundReserve == 0 {
 		claim.ActiveConversationTaskRuns = nil
@@ -34,7 +34,7 @@ func PrepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim,
 	if claim.ActiveConversationTaskRuns == nil {
 		claim.ActiveConversationTaskRuns = make(map[string]bool)
 	}
-	claim.ConversationTaskRuns = make(map[string]bool)
+	claim.conversationTaskRuns = make(map[string]bool)
 	claim.InvalidConversationTaskRuns = make(map[string]bool)
 	tasks := make(map[string]*ConversationTask)
 	checked := make(map[string]bool)
@@ -128,7 +128,7 @@ func PrepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim,
 			}
 		}
 		if valid {
-			claim.ConversationTaskRuns[candidate.ID] = true
+			claim.conversationTaskRuns[candidate.ID] = true
 		} else {
 			claim.InvalidConversationTaskRuns[candidate.ID] = true
 		}

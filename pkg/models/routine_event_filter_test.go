@@ -205,7 +205,7 @@ func TestRoutineEventFilterMatches(t *testing.T) {
 		{RoutineEventCondition{Op: RoutineFilterEquals, Value: "x", Not: true}, []string{"y", "X"}, false},
 	}
 	for index, tc := range ops {
-		if got := tc.condition.Holds(tc.values); got != tc.want {
+		if got := tc.condition.holds(tc.values); got != tc.want {
 			t.Errorf("op case %d (%s %v): holds = %v, want %v", index, tc.condition.Op, tc.values, got, tc.want)
 		}
 	}
