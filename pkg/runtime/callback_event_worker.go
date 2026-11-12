@@ -20,8 +20,8 @@ type CallbackEventWorkerConfig struct {
 
 func (c CallbackEventWorkerConfig) normalize() (CallbackEventWorkerConfig, error) {
 	c.WorkerID = strings.TrimSpace(c.WorkerID)
-	if !validOpaqueIdentifier(c.WorkerID, 256) {
-		return CallbackEventWorkerConfig{}, fmt.Errorf("%w: callback worker id is invalid", ErrInvalidCallbackRegistration)
+	if !models.IsValidOpaqueIdentifier(c.WorkerID, 256) {
+		return CallbackEventWorkerConfig{}, fmt.Errorf("%w: callback worker id is invalid", models.ErrInvalidCallbackRegistration)
 	}
 	if c.LeaseDuration == 0 {
 		c.LeaseDuration = time.Minute
@@ -36,7 +36,7 @@ func (c CallbackEventWorkerConfig) normalize() (CallbackEventWorkerConfig, error
 		c.MaxAttempts = 10
 	}
 	if c.LeaseDuration <= 0 || c.BaseRetry <= 0 || c.MaximumRetry < c.BaseRetry || c.MaxAttempts < 1 || c.MaxAttempts > 1000 {
-		return CallbackEventWorkerConfig{}, fmt.Errorf("%w: callback worker policy is invalid", ErrInvalidCallbackRegistration)
+		return CallbackEventWorkerConfig{}, fmt.Errorf("%w: callback worker policy is invalid", models.ErrInvalidCallbackRegistration)
 	}
 	return c, nil
 }
@@ -46,8 +46,8 @@ func (c CallbackEventWorkerConfig) normalize() (CallbackEventWorkerConfig, error
 // expired work is recovered after a process or pod restart.
 type CallbackEventWorker struct {
 	store interface {
-		CallbackRegistrationStore
-		CallbackEventStore
+		models.CallbackRegistrationStore
+		models.CallbackEventStore
 	}
 	service *CallbackIngressService
 	config  CallbackEventWorkerConfig
@@ -55,8 +55,8 @@ type CallbackEventWorker struct {
 }
 
 func NewCallbackEventWorker(store interface {
-	CallbackRegistrationStore
-	CallbackEventStore
+	models.CallbackRegistrationStore
+	models.CallbackEventStore
 }, service *CallbackIngressService, config CallbackEventWorkerConfig, opts ...models.ServiceOption) (*CallbackEventWorker, error) {
 	if store == nil || service == nil {
 		return nil, errors.New("callback event store and ingress service are required")
@@ -68,7 +68,7 @@ func NewCallbackEventWorker(store interface {
 	return &CallbackEventWorker{store: store, service: service, config: normalized, now: models.ClockFrom(opts)}, nil
 }
 
-func (w *CallbackEventWorker) ProcessOne(ctx context.Context, scope Scope) (*CallbackEventReceipt, error) {
+func (w *CallbackEventWorker) ProcessOne(ctx context.Context, scope models.Scope) (*models.CallbackEventReceipt, error) {
 	if w == nil || w.store == nil || w.service == nil {
 		return nil, errors.New("callback event worker is not configured")
 	}
@@ -78,8 +78,8 @@ func (w *CallbackEventWorker) ProcessOne(ctx context.Context, scope Scope) (*Cal
 		return receipt, err
 	}
 	registration, err := w.store.GetCallbackRegistration(ctx, receipt.Scope, receipt.RegistrationID)
-	if err == nil && (registration == nil || registration.Status != CallbackRegistrationActive || registration.Revision != receipt.RegistrationRevision) {
-		err = fmt.Errorf("%w: callback registration is unavailable or changed", ErrCallbackRegistrationConflict)
+	if err == nil && (registration == nil || registration.Status != models.CallbackRegistrationActive || registration.Revision != receipt.RegistrationRevision) {
+		err = fmt.Errorf("%w: callback registration is unavailable or changed", models.ErrCallbackRegistrationConflict)
 	}
 	if err == nil {
 		err = w.service.dispatch(ctx, registration, receipt.Event, receipt.CreatedAt)
@@ -90,15 +90,15 @@ func (w *CallbackEventWorker) ProcessOne(ctx context.Context, scope Scope) (*Cal
 	receipt.UpdatedAt = finishedAt
 	receipt.LeaseOwner, receipt.LeaseExpiresAt = "", time.Time{}
 	if err == nil {
-		receipt.Status = CallbackEventApplied
+		receipt.Status = models.CallbackEventApplied
 		receipt.LastError = ""
 		receipt.AppliedAt = &finishedAt
 	} else {
 		receipt.LastError = boundedCallbackError(err)
-		if receipt.Attempts >= w.config.MaxAttempts || errors.Is(err, ErrInvalidCallbackRegistration) {
-			receipt.Status = CallbackEventFailed
+		if receipt.Attempts >= w.config.MaxAttempts || errors.Is(err, models.ErrInvalidCallbackRegistration) {
+			receipt.Status = models.CallbackEventFailed
 		} else {
-			receipt.Status = CallbackEventPending
+			receipt.Status = models.CallbackEventPending
 			receipt.AvailableAt = finishedAt.Add(callbackRetryDelay(w.config.BaseRetry, w.config.MaximumRetry, receipt.Attempts))
 		}
 	}
