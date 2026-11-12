@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -30,7 +31,7 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := openTestSQLiteDB(t, path)
+	db := kerneltest.OpenSQLiteDB(t, path)
 	request, _ := storetest.ActionCredentialLeaseFixture(t, ctx, primary, "nonce-sqlite-concurrent-0001")
 	cutoff := time.Now().UTC().Add(-time.Minute)
 	for index := 0; index < 130; index++ {
@@ -152,7 +153,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 				t.Fatal(err)
 			}
 			defer store.Close()
-			db := openTestSQLiteDB(t, path)
+			db := kerneltest.OpenSQLiteDB(t, path)
 			request, binding := storetest.ActionCredentialLeaseFixture(t, ctx, store, "nonce-sqlite-drift-"+uuid.NewString())
 			test.drift(t, ctx, store, db, binding, request)
 			if err := store.RedeemActionCredentialLease(ctx, request); !errors.Is(err, models.ErrActionCredentialLeaseMismatch) {

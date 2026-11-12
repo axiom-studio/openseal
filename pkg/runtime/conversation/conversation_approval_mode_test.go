@@ -320,7 +320,7 @@ func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := conversationtest.OpenSQLiteDB(t, path)
+	sqlDB := kerneltest.OpenSQLiteDB(t, path)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{

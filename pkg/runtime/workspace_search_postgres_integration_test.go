@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -96,7 +97,7 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A store opened on the schema runs the upgrade.
-	openPostgresStoreOn(t, pgSchema)
+	kerneltest.OpenPostgresOn(t, pgSchema)
 	var indexCount int
 	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname=$1 AND indexname IN ('conversations_search_idx','channel_messages_search_idx','artifacts_search_idx','agent_runs_search_idx')`, pgSchema.Name).Scan(&indexCount); err != nil {
 		t.Fatal(err)

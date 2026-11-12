@@ -345,7 +345,7 @@ func newFileStoreWithDB(t testing.TB) (*sqlite.Store, *sql.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	return store, conversationtest.OpenSQLiteDB(t, path)
+	return store, kerneltest.OpenSQLiteDB(t, path)
 }
 
 // StoredEvent is one row of routine_events. KeepsData reports whether

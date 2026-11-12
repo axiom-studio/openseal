@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -79,7 +80,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 	if err := replica.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted := openPostgresStoreOn(t, pgSchema)
+	restarted := kerneltest.OpenPostgresOn(t, pgSchema)
 	if err := restarted.RedeemActionCredentialLease(ctx, request); !errors.Is(err, models.ErrActionCredentialLeaseReplay) {
 		t.Fatalf("restart replay error = %v, want %v", err, models.ErrActionCredentialLeaseReplay)
 	}
@@ -115,7 +116,7 @@ func newActionCredentialLeasePostgresStores(t *testing.T) (context.Context, *pos
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_credential_lease_")
-	return ctx, openPostgresStoreOn(t, pgSchema), openPostgresStoreOn(t, pgSchema), pgSchema
+	return ctx, kerneltest.OpenPostgresOn(t, pgSchema), kerneltest.OpenPostgresOn(t, pgSchema), pgSchema
 }
 
 func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *postgres.Store, pgSchema storetest.PostgresSchema, nonce string) (models.ActionCredentialLeaseRedemptionRequest, *skill.Binding) {

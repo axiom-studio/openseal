@@ -1,6 +1,6 @@
 // The in-package agent builder tests' own copies of the Team roster
-// portfolio, the Slack conversation catalog, the switchable adapter resolver
-// and the Postgres test store opener that runtime's tests use.
+// portfolio, the Slack conversation catalog and the switchable adapter
+// resolver that runtime's tests use.
 
 package agentbuilder
 
@@ -8,16 +8,13 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
-	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -87,26 +84,4 @@ func slackConversationCatalog(t *testing.T, ctx context.Context) (*sqlite.Store,
 		SkillID: definition.ID, SkillVersion: definition.Version,
 		BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
 	}
-}
-
-// openPostgresTestStoreOn opens another store on schema s, closed when the
-// test ends.
-func openPostgresTestStoreOn(t testing.TB, s storetest.PostgresSchema, options ...postgres.Option) *postgres.Store {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	store, err := postgres.New(ctx, s.DSN, append([]postgres.Option{postgres.WithSchema(s.Name)}, options...)...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store
-}
-
-// openPostgresTestStore opens a Postgres store on a fresh schema (see
-// storetest.NewPostgresSchema) and returns it with the schema.
-func openPostgresTestStore(t testing.TB, prefix string, options ...postgres.Option) (*postgres.Store, storetest.PostgresSchema) {
-	t.Helper()
-	schema := storetest.NewPostgresSchema(t, prefix)
-	return openPostgresTestStoreOn(t, schema, options...), schema
 }

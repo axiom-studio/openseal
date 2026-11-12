@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -21,7 +22,7 @@ func BenchmarkSkillRuntimeMaintenanceMetadataTerminalHistory(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			sqlDB := openTestSQLiteDB(b, path)
+			sqlDB := kerneltest.OpenSQLiteDB(b, path)
 			defer store.Close()
 			ctx := context.Background()
 			scope := models.Scope{Kind: "tenant", ID: "maintenance-benchmark"}

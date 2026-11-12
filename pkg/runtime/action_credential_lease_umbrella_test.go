@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -122,7 +123,7 @@ func TestSQLiteActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := openTestSQLiteDB(t, path)
+	sqlDB := kerneltest.OpenSQLiteDB(t, path)
 	defer store.Close()
 	insert := func(t *testing.T, ctx context.Context, call *models.ActionCall) {
 		payload, err := json.Marshal(call)

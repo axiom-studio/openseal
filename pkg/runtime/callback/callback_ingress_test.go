@@ -206,7 +206,7 @@ func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 
 func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T) {
 	ctx := context.Background()
-	store, db := newCallbackTestSQLiteStore(t)
+	store, db := kerneltest.NewSQLiteFileStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0

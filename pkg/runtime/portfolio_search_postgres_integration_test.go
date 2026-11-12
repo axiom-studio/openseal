@@ -3,13 +3,15 @@
 package runtime
 
 import (
-	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestPostgresRunSearchIsLiteralAndPrecedesPagination(t *testing.T) {
-	store, _ := openTestPostgresStore(t, "openseal_run_search_")
+	store, _ := kerneltest.OpenPostgres(t, "openseal_run_search_")
 	service := portfolio.NewPortfolioService(store)
 	scope := models.Scope{Kind: "local", ID: "default"}
 	var expected []*models.AgentRun

@@ -2,25 +2,12 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
-
-// openTestSQLiteDB opens the test's own connection to the SQLite file at
-// path, closed when the test ends.
-func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
-}
 
 // getStoredRun reads a Run that the test knows exists.
 func getStoredRun(t testing.TB, store *sqlite.Store, scope models.Scope, id string) *models.AgentRun {
@@ -30,21 +17,6 @@ func getStoredRun(t testing.TB, store *sqlite.Store, scope models.Scope, id stri
 		t.Fatalf("get run %s: %v", id, err)
 	}
 	return run
-}
-
-// newTestSQLiteStore opens a SQLite store on a fresh file and the test's own
-// connection to that file, both closed when the test ends. Use it instead of
-// kerneltest.NewStore when the test reads or writes rows no store method
-// offers.
-func newTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.New(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store, openTestSQLiteDB(t, path)
 }
 
 // openTestSQLiteSessionStore opens a SQLite store on a fresh file, closed

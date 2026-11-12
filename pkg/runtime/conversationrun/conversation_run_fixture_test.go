@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -22,8 +21,8 @@ import (
 // The helpers in this file are for the in-package conversation run tests,
 // which cannot import conversationruntest (it imports conversationrun) or
 // use the test helpers of runtime. They copy conversationruntest's run
-// scheduler and message post, and runtime's coordinator, SQLite store
-// opener, visual content store and continuation fixture, and a trimmed chat
+// scheduler and message post, and runtime's coordinator, visual content
+// store and continuation fixture, and a trimmed chat
 // loop fixture of the run loop tests. Change the copies together.
 
 // newTestScheduler is a run scheduler over store with the default config.
@@ -74,19 +73,6 @@ func postTestMessage(
 		t.Fatal(err)
 	}
 	return result.Message
-}
-
-// newFileSQLiteStore opens a SQLite store on a fresh file and the test's own
-// connection to that file, both closed when the test ends.
-func newFileSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.New(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store, conversationtest.OpenSQLiteDB(t, path)
 }
 
 // storedRun reads a Run that the test knows exists.

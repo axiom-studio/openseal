@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
@@ -18,7 +19,7 @@ import (
 func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_budget_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_budget_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))

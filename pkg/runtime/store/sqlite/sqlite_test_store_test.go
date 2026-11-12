@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-// The store's tests open stores and connections of their own. Runtime's
-// scenario tests have the same openers in its kernel_store_test.go.
+// The store's tests open stores and connections of their own. kerneltest
+// has the same openers for other packages' tests; it imports this package,
+// so these tests cannot use it.
 
 // newTestKernelStore returns an empty in-memory kernel store that is closed
-// when the test ends. It is kerneltest.NewStore, which imports this package
-// and so cannot be used by its in-package tests.
+// when the test ends.
 func newTestKernelStore(t testing.TB) *Store {
 	t.Helper()
 	store, err := NewInMemory()

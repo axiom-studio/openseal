@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -66,7 +67,7 @@ func ForEachBackend(t *testing.T, test func(*testing.T, models.KernelStore, Back
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = store.Close() })
-			return store, Backend{DB: openTestSQLiteDB(t, path), Table: func(name string) string { return name }, Reopen: func(t *testing.T) models.KernelStore {
+			return store, Backend{DB: kerneltest.OpenSQLiteDB(t, path), Table: func(name string) string { return name }, Reopen: func(t *testing.T) models.KernelStore {
 				if err := store.Close(); err != nil {
 					t.Fatal(err)
 				}
@@ -94,7 +95,7 @@ func ForEachBackend(t *testing.T, test func(*testing.T, models.KernelStore, Back
 				_ = store.Close()
 			})
 			return store, Backend{Postgres: true, DB: pgSchema.DB, Table: pgSchema.Table, Reopen: func(t *testing.T) models.KernelStore {
-				return openPostgresStoreOn(t, pgSchema)
+				return kerneltest.OpenPostgresOn(t, pgSchema)
 			}}
 		}},
 	} {

@@ -108,7 +108,7 @@ func TestSQLiteCredentialRedemptionOfHostBindings(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sqlDB := openTestSQLiteDB(t, path)
+			sqlDB := kerneltest.OpenSQLiteDB(t, path)
 			defer store.Close()
 			request, binding := storetest.ActionCredentialLeaseFixture(t, ctx, store, "nonce-host-binding-0001")
 			if !test.keepRow {

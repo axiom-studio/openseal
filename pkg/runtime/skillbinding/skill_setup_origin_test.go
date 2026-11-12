@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -22,30 +22,11 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// newOriginTestStore opens a SQLite store on a fresh file and the test's own
-// connection to that file, both closed when the test ends. It is a copy of
-// runtime's newTestSQLiteStore; change both.
-func newOriginTestStore(t *testing.T) (*sqlite.Store, *sql.DB) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.New(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return store, db
-}
-
 // skillSetupTaskFixture also returns the test's own connection to the
 // store's file, for the rows the tests tamper with.
 func skillSetupTaskFixture(t *testing.T) (*skillbinding.SkillBindingActionDispatcher, *sqlite.Store, *sql.DB, *models.ConversationTaskResult) {
 	t.Helper()
-	store, db := newOriginTestStore(t)
+	store, db := kerneltest.NewSQLiteFileStore(t)
 	start := skillSetupTaskStart(t, store)
 	result, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), start)
 	if err != nil {

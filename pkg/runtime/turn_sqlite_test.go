@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -36,7 +37,7 @@ func TestSQLiteMigratesAgentTurnLeases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := openTestSQLiteDB(t, path)
+	sqlDB := kerneltest.OpenSQLiteDB(t, path)
 	defer store.Close()
 	rows, err := sqlDB.Query(`PRAGMA table_info(agent_turns)`)
 	if err != nil {

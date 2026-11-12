@@ -146,7 +146,7 @@ func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := conversationtest.OpenSQLiteDB(t, path)
+	sqlDB := kerneltest.OpenSQLiteDB(t, path)
 	defer store.Close()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	conversation := conversationtest.MessageBatchConversation(t, store, scope, "channel")

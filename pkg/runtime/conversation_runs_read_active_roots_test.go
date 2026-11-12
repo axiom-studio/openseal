@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
-	store, db := newTestSQLiteStore(t)
+	store, db := kerneltest.NewSQLiteFileStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "active-root"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
 	at := time.Now()

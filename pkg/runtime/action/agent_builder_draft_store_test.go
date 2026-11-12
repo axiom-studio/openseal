@@ -2,7 +2,6 @@ package action_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -180,7 +180,7 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 			t.Fatal(err)
 		}
 		seed := seedAgentBuilderDrafts(t, store)
-		if _, err := openTestSQLiteDB(t, path).Exec(`DROP INDEX idx_conversations_builder_draft; ALTER TABLE conversations DROP COLUMN builder_draft_requester`); err != nil {
+		if _, err := kerneltest.OpenSQLiteDB(t, path).Exec(`DROP INDEX idx_conversations_builder_draft; ALTER TABLE conversations DROP COLUMN builder_draft_requester`); err != nil {
 			t.Fatal(err)
 		}
 		if err := store.Close(); err != nil {
@@ -229,7 +229,7 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 	})
 }
 
-// seedTestSpaceFor, seedTestSpace and openTestSQLiteDB are copies of
+// seedTestSpaceFor and seedTestSpace are copies of
 // runtime's test helpers, which the action tests cannot see. Change the
 // copies together.
 
@@ -258,16 +258,4 @@ func seedTestSpaceFor(t testing.TB, store models.SpaceStore, scope models.Scope,
 func seedTestSpace(t testing.TB, store models.SpaceStore, scope models.Scope) *models.Space {
 	t.Helper()
 	return seedTestSpaceFor(t, store, scope, "")
-}
-
-// openTestSQLiteDB opens the test's own connection to the SQLite file at
-// path, closed when the test ends.
-func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
 }

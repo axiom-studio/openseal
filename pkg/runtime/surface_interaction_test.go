@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -31,7 +32,7 @@ func surfaceInteractionStores(t *testing.T) []struct {
 			return store
 		}},
 		{name: "postgres", store: func(t *testing.T) models.KernelStore {
-			store, _ := openTestPostgresStore(t, "openseal_surface_interactions_")
+			store, _ := kerneltest.OpenPostgres(t, "openseal_surface_interactions_")
 			return store
 		}},
 	}

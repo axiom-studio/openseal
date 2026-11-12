@@ -9,13 +9,14 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func promotedContinuationAuthorityFixture(t *testing.T, id string) (*sqlite.Store, *models.ConversationTaskResult, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
-	store, db := newFileSQLiteStore(t)
+	store, db := kerneltest.NewSQLiteFileStore(t)
 	run, conversation, message := continuationFixture(t, store, id)
 	now := time.Now().UTC()
 	run = backdateContinuationRun(t, store, db, run, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))
@@ -41,7 +42,7 @@ func finishContinuationAuthorityRun(t *testing.T, store *sqlite.Store, run *mode
 }
 
 func TestConversationTaskContinuationUsesTaskReserveAndLeavesForegroundSlot(t *testing.T) {
-	store, db := newFileSQLiteStore(t)
+	store, db := kerneltest.NewSQLiteFileStore(t)
 	base, _, _ := continuationFixture(t, store, "continuation-reserve")
 	now := time.Now().UTC()
 	base = backdateContinuationRun(t, store, db, base, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -47,7 +48,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 				t.Fatal(err)
 			}
 			return current
-		}, db: openTestSQLiteDB(t, path), table: func(name string) string { return name }})
+		}, db: kerneltest.OpenSQLiteDB(t, path), table: func(name string) string { return name }})
 	})
 	t.Run("postgres", func(t *testing.T) {
 		pgSchema := storetest.NewPostgresSchema(t, "run_store_contract_")

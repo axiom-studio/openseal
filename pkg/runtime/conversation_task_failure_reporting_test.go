@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
@@ -266,7 +267,7 @@ func TestConversationTaskContinuationFailureUsesSanitizedReply(t *testing.T) {
 // together.
 func promotedContinuationFixture(t *testing.T, id string) (*sqlite.Store, *models.ConversationTaskResult, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
-	store, db := newTestSQLiteStore(t)
+	store, db := kerneltest.NewSQLiteFileStore(t)
 	run, conversation, message := continuationRunFixture(t, store, id)
 	now := time.Now().UTC()
 	run = backdateContinuationRun(t, store, db, run, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))

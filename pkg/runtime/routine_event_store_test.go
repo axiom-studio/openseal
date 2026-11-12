@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -17,7 +18,7 @@ func TestSQLiteRoutineEventStore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		sqlDB := openTestSQLiteDB(t, path)
+		sqlDB := kerneltest.OpenSQLiteDB(t, path)
 		t.Cleanup(func() { _ = store.Close() })
 		return store, func(t *testing.T, scope models.Scope, activationID, eventID string) bool {
 			var hasPayload bool
@@ -38,7 +39,7 @@ func TestSQLiteRoutineEventsMigrationFillsIndexColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := openTestSQLiteDB(t, path)
+	sqlDB := kerneltest.OpenSQLiteDB(t, path)
 	scope := models.Scope{Kind: "tenant", ID: "migrate"}
 	activation := storetest.RoutineEventActivation(scope, "activation-old", time.Now().UTC())
 	if err := store.CreateRunbookActivation(t.Context(), activation); err != nil {

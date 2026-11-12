@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -22,7 +23,7 @@ import (
 func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_grouped_collaboration_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_grouped_collaboration_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
@@ -117,7 +118,7 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_team_bids_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_team_bids_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))

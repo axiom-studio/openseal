@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -83,7 +84,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	if err != nil || moved.SpaceID != newID {
 		t.Fatalf("conversation = %+v, err = %v", moved, err)
 	}
-	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
+	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 }

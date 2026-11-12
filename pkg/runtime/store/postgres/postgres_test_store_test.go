@@ -8,9 +8,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-// The store's tests open stores on schemas they own. Runtime's scenario
-// tests have the same two openers in its postgres_test_schema_test.go;
-// each package opens its own store type on storetest.PostgresSchema.
+// The store's tests open stores on schemas they own. kerneltest has the same
+// two openers for other packages' tests; it imports this package, so these
+// tests cannot use it.
 
 // openPostgresStoreOn opens another store on schema s, closed when the
 // test ends.

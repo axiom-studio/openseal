@@ -12,13 +12,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_natural_channels_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_natural_channels_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
@@ -26,7 +27,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, err = %v", version, err)
 	}
 

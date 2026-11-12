@@ -117,7 +117,7 @@ func TestConversationHistoryStores(t *testing.T) {
 				if dsn == "" {
 					t.Skip("requires isolated PostgreSQL")
 				}
-				s, _ := openTestPostgresStore(t, "chat_history_")
+				s, _ := kerneltest.OpenPostgres(t, "chat_history_")
 				store = s
 			}
 			testConversationHistory(t, store)

@@ -1,17 +1,13 @@
 package actiontest
 
 import (
-	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
-	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // StoreBackend is one kernel store backend a test runs on.
@@ -34,43 +30,9 @@ func Stores(t *testing.T) []StoreBackend {
 	}
 	if dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN"); dsn != "" {
 		stores = append(stores, StoreBackend{Name: "postgres", Open: func(t *testing.T) models.KernelStore {
-			store, _ := openTestPostgresStore(t, "openseal_nested_")
+			store, _ := kerneltest.OpenPostgres(t, "openseal_nested_")
 			return store
 		}})
 	}
 	return stores
-}
-
-// openPostgresStoreOn opens another store on schema s, closed when the
-// test ends.
-func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...postgres.Option) *postgres.Store {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	store, err := postgres.New(ctx, s.DSN, append([]postgres.Option{postgres.WithSchema(s.Name)}, options...)...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store
-}
-
-// openTestPostgresStore opens a Postgres store on a fresh schema (see
-// storetest.NewPostgresSchema) and returns it with the schema.
-func openTestPostgresStore(t testing.TB, prefix string, options ...postgres.Option) (*postgres.Store, storetest.PostgresSchema) {
-	t.Helper()
-	schema := storetest.NewPostgresSchema(t, prefix)
-	return openPostgresStoreOn(t, schema, options...), schema
-}
-
-// openTestSQLiteDB opens the test's own connection to the SQLite file at
-// path, closed when the test ends.
-func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
 }

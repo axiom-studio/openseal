@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
@@ -18,7 +19,7 @@ import (
 func TestPostgresDependencyFanInIsConcurrentRecoverableAndIsolated(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_dependencies_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_dependencies_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
@@ -26,7 +27,7 @@ func TestPostgresDependencyFanInIsConcurrentRecoverableAndIsolated(t *testing.T)
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, err = %v", version, err)
 	}
 
@@ -166,7 +167,7 @@ func TestPostgresDependencyFanInIsConcurrentRecoverableAndIsolated(t *testing.T)
 func TestPostgresDependencyFanInPreservesIndependentMultiObjectiveProgress(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_dependency_load_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_dependency_load_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))

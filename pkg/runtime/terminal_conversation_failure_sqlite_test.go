@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -16,7 +17,7 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := openTestSQLiteDB(t, path)
+	sqlDB := kerneltest.OpenSQLiteDB(t, path)
 	t.Cleanup(func() { store.Close() })
 	now := runStoreContractEpoch
 	first, _, _ := externalconversationtest.TerminalReportingRun(t, store, models.Scope{Kind: "tenant", ID: "upgrade-pending"}, now)

@@ -16,8 +16,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -47,7 +47,7 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	db := conversationtest.OpenSQLiteDB(t, path)
+	db := kerneltest.OpenSQLiteDB(t, path)
 	_, catalog, scope, adapter := slackConversationCatalog(t, ctx)
 	resolver := &switchableAdapterResolver{ExternalConversationAdapterResolver: catalog}
 	endpoints := externalconversation.NewExternalConversationEndpointService(store, resolver)

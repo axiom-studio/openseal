@@ -11,13 +11,14 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_artifacts_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_artifacts_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
@@ -74,7 +75,7 @@ func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
 	if crossScope, err := replica.GetArtifact(ctx, models.Scope{Kind: "tenant", ID: "other"}, artifact.ID, 0); err != nil || crossScope != nil {
 		t.Fatalf("cross-scope artifact = %#v, %v", crossScope, err)
 	}
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 }

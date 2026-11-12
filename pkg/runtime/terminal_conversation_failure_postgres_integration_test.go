@@ -11,13 +11,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func terminalFailureMigrationPostgres(t *testing.T) (*postgres.Store, storetest.PostgresSchema) {
 	t.Helper()
-	return openTestPostgresStore(t, "failure_reporting_")
+	return kerneltest.OpenPostgres(t, "failure_reporting_")
 }
 
 func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrigger(t *testing.T) {
@@ -41,8 +42,8 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 	// All old readers/writers are stopped before upgrade, as required by the
 	// explicit schema59 deployment barrier. A process reopen exercises the
 	// canonical migration ledger instead of hidden ad-hoc DDL.
-	upgraded := openPostgresStoreOn(t, schema)
-	if version, err := upgraded.PostgresSchemaVersion(t.Context()); err != nil || version != postgresSchemaHead(t) {
+	upgraded := kerneltest.OpenPostgresOn(t, schema)
+	if version, err := upgraded.PostgresSchemaVersion(t.Context()); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("ledger migration absent: %d %v", version, err)
 	}
 	intent, err := upgraded.GetRunTerminalReport(t.Context(), run.Scope, run.ID, run.Status)
@@ -76,7 +77,7 @@ func TestTerminalFailurePostgres59RollbackRejectsMultipleAttemptReceipts(t *test
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err == nil || !strings.Contains(err.Error(), "multiple attempt receipts") {
 		t.Fatalf("rollback silently discarded an immutable attempt: %v", err)
 	}
-	if version, err := store.PostgresSchemaVersion(t.Context()); err != nil || version != postgresSchemaHead(t) {
+	if version, err := store.PostgresSchemaVersion(t.Context()); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("rejected rollback changed ledger: %d %v", version, err)
 	}
 	latest, err := store.GetRunTerminalReport(t.Context(), second.Scope, second.ID, second.Status)
@@ -93,7 +94,7 @@ func TestTerminalFailurePostgres59RollbackRequiresNewFailureDelivery(t *testing.
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err == nil || !strings.Contains(err.Error(), "before new conversation failure replies are delivered") {
 		t.Fatalf("rollback abandoned an unsupported pending failure reply: %v", err)
 	}
-	if version, err := store.PostgresSchemaVersion(t.Context()); err != nil || version != postgresSchemaHead(t) {
+	if version, err := store.PostgresSchemaVersion(t.Context()); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("rejected rollback changed ledger: %d %v", version, err)
 	}
 	if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {

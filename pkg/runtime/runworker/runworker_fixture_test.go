@@ -2,7 +2,7 @@ package runworker
 
 // Copies of runtime's base test fixtures for the run worker tests, so they
 // can move with the run worker code. The originals are in pkg/runtime: the
-// stored Run reader and SQLite file opener of kernel_store_test.go, the
+// stored Run reader of kernel_store_test.go, the
 // method fixture of accepted_run_execution_test.go, the action call records
 // of action_call_records_test.go, the store matrices of
 // conversation_task_sql_test.go, run_store_contract_test.go and
@@ -24,7 +24,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun/agentruntest"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -40,19 +39,6 @@ func workerStoredRun(t testing.TB, store *sqlite.Store, scope models.Scope, id s
 		t.Fatalf("get run %s: %v", id, err)
 	}
 	return run
-}
-
-// newWorkerSQLiteStore opens a SQLite store on a fresh file and the test's
-// own connection to that file, both closed when the test ends.
-func newWorkerSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.New(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store, conversationtest.OpenSQLiteDB(t, path)
 }
 
 // workerAcceptedMethodFixture is an agent whose runbook waits an hour, then

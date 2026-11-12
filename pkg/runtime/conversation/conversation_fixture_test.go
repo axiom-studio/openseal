@@ -2,51 +2,21 @@ package conversation
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // The helpers in this file are for the in-package conversation tests,
 // which cannot import conversationtest (it imports conversation). They
-// copy runtime's and conversationtest's SQLite openers, space seed and
+// copy runtime's and conversationtest's space seed and
 // thread start post, and the final-answer action calls and run context
 // section reader of runtime's conversation run tests. Change the copies
 // together.
-
-// openTestSQLiteDB opens the test's own connection to the SQLite file at
-// path, closed when the test ends.
-func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
-}
-
-// newTestSQLiteStore opens a SQLite store on a fresh file and the test's own
-// connection to that file, both closed when the test ends. Use it instead of
-// kerneltest.NewStore when the test reads or writes rows no store method
-// offers.
-func newTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.New(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store, openTestSQLiteDB(t, path)
-}
 
 // seedTestSpace gives the empty owner a default space in the scope, so a
 // conversation created with no space and no person behind it has one to go to.

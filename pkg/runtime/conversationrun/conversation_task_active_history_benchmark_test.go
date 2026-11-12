@@ -13,7 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -32,7 +32,7 @@ func BenchmarkConversationTaskSQLiteActiveHistory(b *testing.B) {
 			b.Fatal(err)
 		}
 		b.Cleanup(func() { _ = store.Close() })
-		db := conversationtest.OpenSQLiteDB(b, path)
+		db := kerneltest.OpenSQLiteDB(b, path)
 		return store, func(b *testing.B, filter models.ConversationTaskFilter, _ int) {
 			conversationTaskBenchmarkExplain(b, db, filter)
 			conversationActiveRunsBenchmarkExplain(b, db, filter)

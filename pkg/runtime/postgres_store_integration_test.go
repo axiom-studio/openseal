@@ -17,6 +17,7 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -26,7 +27,7 @@ import (
 func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_test_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_test_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	var retiredTable sql.NullString
@@ -467,7 +468,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	if err != nil || persistedExecution.Call.Status != models.ActionCallStatusSucceeded || persistedExecution.Run.Status != models.AgentRunStatusQueued {
 		t.Fatalf("persisted execution = %#v, %v", persistedExecution, err)
 	}
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 	if err := primary.RollbackPostgresMigrations(ctx, 4); err != nil {
@@ -485,8 +486,8 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("recent tables after rollback = %d, %v", recentTables, err)
 	}
 	// A store opened on the rolled-back schema migrates it forward again.
-	openPostgresStoreOn(t, pgSchema)
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
+	kerneltest.OpenPostgresOn(t, pgSchema)
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("reapplied schema version = %d, %v", version, err)
 	}
 }
@@ -494,7 +495,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_collab_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_collab_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))
@@ -558,7 +559,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil || len(activity) != 5 || activity[0].EventType != "collaboration.completed" {
 		t.Fatalf("team activity = %#v, %v", activity, err)
 	}
-	if version, err := replica.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
+	if version, err := replica.PostgresSchemaVersion(ctx); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 }
@@ -566,7 +567,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_commands_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_commands_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))

@@ -4,9 +4,11 @@ package runtime
 
 import (
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func TestPostgresApplicationRouteMatching(t *testing.T) {
-	store, _ := openTestPostgresStore(t, "app_route_")
+	store, _ := kerneltest.OpenPostgres(t, "app_route_")
 	checkApplicationRouteMatching(t, store)
 }

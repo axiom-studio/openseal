@@ -24,9 +24,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
-	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -158,21 +157,6 @@ func executeLoopPersonAction(t *testing.T, worker *action.ActionWorker, scope mo
 	return result
 }
 
-// openLoopPostgresStore opens a Postgres store on a fresh schema (see
-// storetest.NewPostgresSchema) and returns it with the schema.
-func openLoopPostgresStore(t testing.TB, prefix string, options ...postgres.Option) (*postgres.Store, storetest.PostgresSchema) {
-	t.Helper()
-	schema := storetest.NewPostgresSchema(t, prefix)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	store, err := postgres.New(ctx, schema.DSN, append([]postgres.Option{postgres.WithSchema(schema.Name)}, options...)...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store, schema
-}
-
 type loopStoreCase struct {
 	name string
 	open func(*testing.T) models.KernelStore
@@ -195,7 +179,7 @@ func loopStoreMatrix(t *testing.T, prefix string) []loopStoreCase {
 	}
 	if dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN"); dsn != "" {
 		cases = append(cases, loopStoreCase{name: "postgres", open: func(t *testing.T) models.KernelStore {
-			store, _ := openLoopPostgresStore(t, prefix+"_")
+			store, _ := kerneltest.OpenPostgres(t, prefix+"_")
 			return store
 		}})
 	}

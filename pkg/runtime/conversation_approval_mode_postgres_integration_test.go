@@ -11,13 +11,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	store, pgSchema := openTestPostgresStore(t, "openseal_approval_mode_")
+	store, pgSchema := kerneltest.OpenPostgres(t, "openseal_approval_mode_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	scope := models.Scope{Kind: "tenant", ID: "one"}
@@ -46,7 +47,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
+	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != kerneltest.PostgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT payload->>'approvalMode' FROM `+pgSchema.Table("conversations")).Scan(&raw); err != nil || raw != "auto" {

@@ -170,7 +170,7 @@ func newFileStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	return store, conversationtest.OpenSQLiteDB(t, path)
+	return store, kerneltest.OpenSQLiteDB(t, path)
 }
 
 // runStore is what the run store contracts use: the same public commands
@@ -210,7 +210,7 @@ func forEachRunStore(t *testing.T, test func(*testing.T, runStoreFixture)) {
 				t.Fatal(err)
 			}
 			return current
-		}, db: conversationtest.OpenSQLiteDB(t, path), table: func(name string) string { return name }})
+		}, db: kerneltest.OpenSQLiteDB(t, path), table: func(name string) string { return name }})
 	})
 	t.Run("postgres", func(t *testing.T) {
 		pgSchema := storetest.NewPostgresSchema(t, "run_store_contract_")

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
@@ -16,7 +17,7 @@ import (
 func TestPostgresObjectiveExecutionPolicySerializesReplicaClaims(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	primary, pgSchema := openTestPostgresStore(t, "openseal_objective_policy_")
+	primary, pgSchema := kerneltest.OpenPostgres(t, "openseal_objective_policy_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
 	replica, err := postgres.New(ctx, dsn, postgres.WithSchema(schema))

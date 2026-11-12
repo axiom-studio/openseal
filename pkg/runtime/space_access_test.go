@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -314,7 +315,7 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := openTestSQLiteDB(t, path)
+	sqlDB := kerneltest.OpenSQLiteDB(t, path)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "legacy"}
 	spaces := portfolio.NewSpaceService(store)

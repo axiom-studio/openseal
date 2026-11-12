@@ -148,7 +148,7 @@ func forkTestSession(t *testing.T, store *sqlite.Store, sourceRunID string, sess
 }
 
 func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
-	store, db := newTestSQLiteStore(t)
+	store, db := kerneltest.NewSQLiteFileStore(t)
 	putTestSessionRun(t, store, "r1", "other-session", models.AgentRunStatusRunning, 0)
 	req := models.OpenConversationAgentSessionRequest{Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r1", Lease: testSessionLease()}
 	if _, err := store.OpenConversationAgentSession(context.Background(), req); !errors.Is(err, models.ErrSessionMoved) {

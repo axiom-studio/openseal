@@ -14,18 +14,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-// OpenSQLiteDB opens the test's own connection to the SQLite file at path,
-// closed when the test ends.
-func OpenSQLiteDB(t testing.TB, path string) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
-}
-
 // SeedSpace gives the empty owner a default space in the scope, so a
 // conversation created with no space and no person behind it has one to go
 // to. An owner who already has a default space keeps it, so a fixture that

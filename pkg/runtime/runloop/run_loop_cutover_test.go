@@ -15,6 +15,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
@@ -47,7 +48,7 @@ func cutoverStores() []struct {
 			name string
 			open func(*testing.T) cutoverTestStore
 		}{name: "postgres", open: func(t *testing.T) cutoverTestStore {
-			store, _ := openLoopPostgresStore(t, "openseal_cutover_")
+			store, _ := kerneltest.OpenPostgres(t, "openseal_cutover_")
 			return store
 		}})
 	}

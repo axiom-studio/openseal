@@ -4,16 +4,18 @@ package runtime
 
 import (
 	"context"
-	"github.com/axiom-studio/openseal/pkg/models"
-	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
+	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestPostgresObjectiveLifecycleCommitsActivityAtomically(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	store, _ := openTestPostgresStore(t, "openseal_objective_activity_")
+	store, _ := kerneltest.OpenPostgres(t, "openseal_objective_activity_")
 	portfolio := runtimeportfolio.NewPortfolioService(store)
 	scope := models.Scope{Kind: "tenant", ID: "audit"}
 	objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -16,7 +17,7 @@ func TestSQLiteConnectOnceMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	db := openTestSQLiteDB(t, path)
+	db := kerneltest.OpenSQLiteDB(t, path)
 	h := storetest.ConnectOnceMigrationHarness{
 		SQLite: true,
 		DB:     func() *sql.DB { return db },

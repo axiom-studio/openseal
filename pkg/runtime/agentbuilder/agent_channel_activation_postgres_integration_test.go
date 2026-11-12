@@ -13,13 +13,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	store, pgSchema := openPostgresTestStore(t, "openseal_channel_atomic_")
+	store, pgSchema := kerneltest.OpenPostgres(t, "openseal_channel_atomic_")
 	_, catalog, scope, adapter := slackConversationCatalog(t, ctx)
 	endpoints := externalconversation.NewExternalConversationEndpointService(store, catalog)
 	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{

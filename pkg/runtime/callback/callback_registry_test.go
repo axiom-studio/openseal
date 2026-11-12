@@ -2,16 +2,13 @@ package callback
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -139,26 +136,4 @@ func registerCallbackFixture(t *testing.T, ctx context.Context, catalog *skill.C
 		t.Fatal(err)
 	}
 	return definition, binding
-}
-
-// The store helper below copies runtime's newTestSQLiteStore, so the
-// callback tests do not depend on runtime's test helpers and can live with
-// the callback code.
-
-// newCallbackTestSQLiteStore opens a SQLite store on a fresh file and the
-// test's own connection to that file, both closed when the test ends.
-func newCallbackTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.New(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return store, db
 }

@@ -1,9 +1,7 @@
 package collaboration_test
 
 import (
-	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -12,10 +10,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration/collaborationtest"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -60,7 +56,7 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 }
 
 func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *testing.T) {
-	kernel, db := newInboxSQLiteStore(t)
+	kernel, db := kerneltest.NewSQLiteFileStore(t)
 	store := &collaborationtest.TeamStore{Store: kernel}
 	source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := runtimecollaboration.NewAgentRequestInboxReconciler(store)
@@ -384,17 +380,4 @@ func TestAgentRequestInboxUsesDeterministicTeamMemberAndAcceptancePolicy(t *test
 			}
 		})
 	}
-}
-
-// newInboxSQLiteStore opens a SQLite store on a fresh file and the test's
-// own connection to that file, both closed when the test ends.
-func newInboxSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := sqlite.New(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store, conversationtest.OpenSQLiteDB(t, path)
 }

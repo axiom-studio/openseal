@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -246,7 +247,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB := openTestSQLiteDB(t, path)
+	sqlDB := kerneltest.OpenSQLiteDB(t, path)
 	scope := models.Scope{Kind: "tenant", ID: "legacy"}
 	other := models.Scope{Kind: "tenant", ID: "legacy-other"}
 	base := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)

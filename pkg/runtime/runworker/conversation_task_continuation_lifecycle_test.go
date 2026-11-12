@@ -53,7 +53,7 @@ func backdateContinuationLifecycleRun(t *testing.T, store *sqlite.Store, db *sql
 }
 
 func TestConversationTaskContinuationReconcilesQueuedRunFromCreationTime(t *testing.T) {
-	store, db := newWorkerSQLiteStore(t)
+	store, db := kerneltest.NewSQLiteFileStore(t)
 	run, conversation, _ := continuationLifecycleFixture(t, store, "queued-continuation")
 	now := time.Now().UTC()
 	run = backdateContinuationLifecycleRun(t, store, db, run, now.Add(-models.ConversationTaskForegroundTimeout))
@@ -182,7 +182,7 @@ func (p *promotionTurnPublisher) PublishTurnOutput(ctx context.Context, run *mod
 }
 
 func TestAgentRunWorkerContinuationAbsorbsNativeTaskProposal(t *testing.T) {
-	store, db := newWorkerSQLiteStore(t)
+	store, db := kerneltest.NewSQLiteFileStore(t)
 	run, conversation, _ := continuationLifecycleFixture(t, store, "native-continuation")
 	run = backdateContinuationLifecycleRun(t, store, db, run, time.Now().Add(-models.ConversationTaskForegroundTimeout-time.Second))
 	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: run.Scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
@@ -256,7 +256,7 @@ func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *
 func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 	for _, status := range []models.AgentRunStatus{models.AgentRunStatusQueued, models.AgentRunStatusRunning} {
 		t.Run(string(status), func(t *testing.T) {
-			store, db := newWorkerSQLiteStore(t)
+			store, db := kerneltest.NewSQLiteFileStore(t)
 			run, conversation, trigger := continuationLifecycleFixture(t, store, "reconcile-foreground")
 			run = backdateContinuationLifecycleRun(t, store, db, run, time.Now().Add(-time.Minute))
 			if status == models.AgentRunStatusRunning {
