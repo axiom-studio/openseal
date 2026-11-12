@@ -28,8 +28,8 @@ const (
 // claims, leases and fairness are always decided by the store.
 type WorkSignal struct {
 	Kind    WorkSignalKind
-	Family  WorkFamily
-	Scope   Scope
+	Family  models.WorkFamily
+	Scope   models.Scope
 	Rebuild bool
 }
 
@@ -81,18 +81,18 @@ func (s *WorkSignalStatus) queueBound() bool {
 
 // schedule asks the queue for a pass of family in scope at due. A nil due
 // schedules nothing: the scope has no time-based work.
-func (s *WorkSignalStatus) schedule(family WorkFamily, scope Scope, due *time.Time) {
+func (s *WorkSignalStatus) schedule(family models.WorkFamily, scope models.Scope, due *time.Time) {
 	if s == nil || due == nil {
 		return
 	}
 	s.mu.Lock()
 	publisher := s.publisher
 	s.mu.Unlock()
-	publisher.schedule(WorkItem{Family: family, Scope: scope, DueAt: due.UTC()})
+	publisher.schedule(models.WorkItem{Family: family, Scope: scope, DueAt: due.UTC()})
 }
 
 // scheduleIn schedules a pass after delay, for spacing and backoff.
-func (s *WorkSignalStatus) scheduleIn(family WorkFamily, scope Scope, delay time.Duration) {
+func (s *WorkSignalStatus) scheduleIn(family models.WorkFamily, scope models.Scope, delay time.Duration) {
 	if s == nil {
 		return
 	}
@@ -209,9 +209,9 @@ func earliestDeadline(values ...*time.Time) *time.Time {
 // runs more often than the fixed tick it replaces.
 type scopeWakeQueue struct {
 	mu       sync.Mutex
-	dirty    map[Scope]struct{}
-	lastRun  map[Scope]time.Time
-	failures map[Scope]int
+	dirty    map[models.Scope]struct{}
+	lastRun  map[models.Scope]time.Time
+	failures map[models.Scope]int
 	signal   chan struct{}
 }
 
@@ -219,12 +219,12 @@ type scopeWakeQueue struct {
 func (q *scopeWakeQueue) signals() <-chan struct{} { return q.signal }
 
 func newScopeWakeQueue() *scopeWakeQueue {
-	return &scopeWakeQueue{dirty: make(map[Scope]struct{}), lastRun: make(map[Scope]time.Time), failures: make(map[Scope]int), signal: make(chan struct{}, 1)}
+	return &scopeWakeQueue{dirty: make(map[models.Scope]struct{}), lastRun: make(map[models.Scope]time.Time), failures: make(map[models.Scope]int), signal: make(chan struct{}, 1)}
 }
 
 // outcome returns when a failed scope should be retried, with exponential
 // backoff from base, or nil once the scope succeeds.
-func (q *scopeWakeQueue) outcome(scope Scope, err error, base time.Duration, now time.Time) *time.Time {
+func (q *scopeWakeQueue) outcome(scope models.Scope, err error, base time.Duration, now time.Time) *time.Time {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if err == nil {
@@ -235,7 +235,7 @@ func (q *scopeWakeQueue) outcome(scope Scope, err error, base time.Duration, now
 	return new(now.Add(workerPollDelay(base, q.failures[scope]-1, scope.Kind+":"+scope.ID)))
 }
 
-func (q *scopeWakeQueue) wakeScope(scope Scope) {
+func (q *scopeWakeQueue) wakeScope(scope models.Scope) {
 	if scope.Validate() != nil {
 		return
 	}
@@ -249,7 +249,7 @@ func (q *scopeWakeQueue) wakeScope(scope Scope) {
 }
 
 // ran records a full pass over scopes.
-func (q *scopeWakeQueue) ran(scopes []Scope, now time.Time) {
+func (q *scopeWakeQueue) ran(scopes []models.Scope, now time.Time) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, scope := range scopes {
@@ -259,14 +259,14 @@ func (q *scopeWakeQueue) ran(scopes []Scope, now time.Time) {
 
 // take drains signalled scopes. A scope that ran within spacing is returned
 // in deferred with the time its next pass may start.
-func (q *scopeWakeQueue) take(now time.Time, spacing time.Duration) (ready []Scope, deferred map[Scope]time.Time) {
+func (q *scopeWakeQueue) take(now time.Time, spacing time.Duration) (ready []models.Scope, deferred map[models.Scope]time.Time) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	ready = make([]Scope, 0, len(q.dirty))
+	ready = make([]models.Scope, 0, len(q.dirty))
 	for scope := range q.dirty {
 		if last, ran := q.lastRun[scope]; ran && spacing > 0 && now.Sub(last) < spacing {
 			if deferred == nil {
-				deferred = make(map[Scope]time.Time)
+				deferred = make(map[models.Scope]time.Time)
 			}
 			deferred[scope] = last.Add(spacing)
 			continue
@@ -299,15 +299,15 @@ func (q *scopeWakeQueue) take(now time.Time, spacing time.Duration) (ready []Sco
 type knownWorkerScopes struct {
 	source         WorkerScopeSource
 	refresh        time.Duration
-	known          map[Scope]struct{}
-	unknownChecked map[Scope]time.Time
+	known          map[models.Scope]struct{}
+	unknownChecked map[models.Scope]time.Time
 }
 
 func newKnownWorkerScopes(source WorkerScopeSource, refresh time.Duration) *knownWorkerScopes {
-	return &knownWorkerScopes{source: source, refresh: refresh, known: make(map[Scope]struct{}), unknownChecked: make(map[Scope]time.Time)}
+	return &knownWorkerScopes{source: source, refresh: refresh, known: make(map[models.Scope]struct{}), unknownChecked: make(map[models.Scope]time.Time)}
 }
 
-func (k *knownWorkerScopes) list(ctx context.Context) ([]Scope, error) {
+func (k *knownWorkerScopes) list(ctx context.Context) ([]models.Scope, error) {
 	scopes, err := k.source.ListWorkerScopes(ctx)
 	if err != nil {
 		return nil, err
@@ -320,9 +320,9 @@ func (k *knownWorkerScopes) list(ctx context.Context) ([]Scope, error) {
 	return scopes, nil
 }
 
-func (k *knownWorkerScopes) filter(ctx context.Context, now time.Time, scopes []Scope) ([]Scope, error) {
+func (k *knownWorkerScopes) filter(ctx context.Context, now time.Time, scopes []models.Scope) ([]models.Scope, error) {
 	refreshed := false
-	result := make([]Scope, 0, len(scopes))
+	result := make([]models.Scope, 0, len(scopes))
 	for _, scope := range scopes {
 		if _, ok := k.known[scope]; !ok && !refreshed {
 			if checked, seen := k.unknownChecked[scope]; !seen || now.Sub(checked) >= k.refresh {
@@ -341,9 +341,9 @@ func (k *knownWorkerScopes) filter(ctx context.Context, now time.Time, scopes []
 	return result, nil
 }
 
-func normalizedConversationRunScopes(scopes []Scope) []Scope {
-	seen := make(map[Scope]struct{}, len(scopes))
-	result := make([]Scope, 0, len(scopes))
+func normalizedConversationRunScopes(scopes []models.Scope) []models.Scope {
+	seen := make(map[models.Scope]struct{}, len(scopes))
+	result := make([]models.Scope, 0, len(scopes))
 	for _, scope := range scopes {
 		if scope.Validate() != nil {
 			continue

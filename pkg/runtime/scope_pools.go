@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"go.uber.org/zap"
 )
 
@@ -35,14 +36,14 @@ type scopePools[P scopePool] struct {
 	gate      *workScopeGate
 	interval  time.Duration
 	retire    time.Duration
-	dueFamily WorkFamily
+	dueFamily models.WorkFamily
 	logger    *zap.SugaredLogger
-	create    func(Scope) (P, error)
+	create    func(models.Scope) (P, error)
 
 	mu       sync.RWMutex
-	pools    map[Scope]P
+	pools    map[models.Scope]P
 	signals  *WorkSignalStatus
-	pending  map[Scope]struct{}
+	pending  map[models.Scope]struct{}
 	requests chan struct{}
 	cancel   context.CancelFunc
 	ctx      context.Context
@@ -51,10 +52,10 @@ type scopePools[P scopePool] struct {
 
 // retire is how long a queue-driven pool stays idle before it stops;
 // supervisors pass poolRetireAfter.
-func newScopePools[P scopePool](name string, source WorkerScopeSource, interval, retire time.Duration, dueFamily WorkFamily, logger *zap.SugaredLogger, create func(Scope) (P, error)) *scopePools[P] {
+func newScopePools[P scopePool](name string, source WorkerScopeSource, interval, retire time.Duration, dueFamily models.WorkFamily, logger *zap.SugaredLogger, create func(models.Scope) (P, error)) *scopePools[P] {
 	return &scopePools[P]{
 		name: name, source: source, gate: newWorkScopeGate(source, interval), interval: interval, retire: retire, dueFamily: dueFamily,
-		logger: logger, create: create, pools: make(map[Scope]P), pending: make(map[Scope]struct{}), requests: make(chan struct{}, 1),
+		logger: logger, create: create, pools: make(map[models.Scope]P), pending: make(map[models.Scope]struct{}), requests: make(chan struct{}, 1),
 	}
 }
 
@@ -106,7 +107,7 @@ func (s *scopePools[P]) wake() { s.each(func(pool P) { pool.Wake() }) }
 // wakeScope wakes the scope's pool, or asks for one while the queue is
 // healthy. The read lock orders the wake before any retirement check, so a
 // woken pool is never retired by a concurrent pass.
-func (s *scopePools[P]) wakeScope(scope Scope) {
+func (s *scopePools[P]) wakeScope(scope models.Scope) {
 	s.mu.RLock()
 	pool, ok := s.pools[scope]
 	signals := s.signals
@@ -196,7 +197,7 @@ func (s *scopePools[P]) run(ctx context.Context) {
 // admit starts pools for scopes the queue delivered work for.
 func (s *scopePools[P]) admit(ctx context.Context, signals *WorkSignalStatus) {
 	s.mu.Lock()
-	scopes := make([]Scope, 0, len(s.pending))
+	scopes := make([]models.Scope, 0, len(s.pending))
 	for scope := range s.pending {
 		if _, running := s.pools[scope]; !running {
 			scopes = append(scopes, scope)
@@ -211,7 +212,7 @@ func (s *scopePools[P]) admit(ctx context.Context, signals *WorkSignalStatus) {
 	if err != nil && ctx.Err() == nil {
 		s.logger.Warnw("worker scope admission failed", "workers", s.name, "error", err)
 		// The scopes' work is durable; ask the queue to deliver it again.
-		admitted := make(map[Scope]struct{}, len(allowed))
+		admitted := make(map[models.Scope]struct{}, len(allowed))
 		for _, scope := range allowed {
 			admitted[scope] = struct{}{}
 		}
@@ -228,7 +229,7 @@ func (s *scopePools[P]) admit(ctx context.Context, signals *WorkSignalStatus) {
 
 // startPool starts a scope pool. Queue admissions log quietly: scopes come
 // and go with their work.
-func (s *scopePools[P]) startPool(ctx context.Context, scope Scope, quiet bool) {
+func (s *scopePools[P]) startPool(ctx context.Context, scope models.Scope, quiet bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, running := s.pools[scope]; running || ctx.Err() != nil {
@@ -275,7 +276,7 @@ func (s *scopePools[P]) reconcile(ctx context.Context) {
 		}
 		return
 	}
-	desired := make(map[Scope]struct{}, len(scopes))
+	desired := make(map[models.Scope]struct{}, len(scopes))
 	for _, scope := range scopes {
 		if err := scope.Validate(); err != nil {
 			s.logger.Warnw("ignoring invalid worker scope", "workers", s.name, "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
@@ -283,7 +284,7 @@ func (s *scopePools[P]) reconcile(ctx context.Context) {
 		}
 		desired[scope] = struct{}{}
 	}
-	ordered := make([]Scope, 0, len(desired))
+	ordered := make([]models.Scope, 0, len(desired))
 	for scope := range desired {
 		ordered = append(ordered, scope)
 	}

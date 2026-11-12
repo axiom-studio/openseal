@@ -23,7 +23,7 @@ import (
 // serially. It reports WorkSignalConnected once it is consuming, with Rebuild
 // set when the queue's schedule was lost and must be rebuilt from the store.
 type WorkQueue interface {
-	PublishWork(ctx context.Context, items []WorkItem) error
+	PublishWork(ctx context.Context, items []models.WorkItem) error
 	ConsumeWork(ctx context.Context, handle func(WorkSignal)) error
 }
 
@@ -31,7 +31,7 @@ type WorkQueue interface {
 // listing every scope. Queue-driven supervisors use it to admit a scope the
 // first time it has work.
 type WorkScopeChecker interface {
-	WorkerScopeActive(ctx context.Context, scope Scope) (bool, error)
+	WorkerScopeActive(ctx context.Context, scope models.Scope) (bool, error)
 }
 
 // workPublisher coalesces scheduled items in process and publishes them in
@@ -40,7 +40,7 @@ type workPublisher struct {
 	queue  WorkQueue
 	logger *zap.SugaredLogger
 	mu     sync.Mutex
-	items  map[workItemKey]time.Time
+	items  map[models.WorkItemKey]time.Time
 	ready  chan struct{}
 }
 
@@ -48,14 +48,14 @@ func newWorkPublisher(queue WorkQueue, logger *zap.SugaredLogger) *workPublisher
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	return &workPublisher{queue: queue, logger: logger, items: make(map[workItemKey]time.Time), ready: make(chan struct{}, 1)}
+	return &workPublisher{queue: queue, logger: logger, items: make(map[models.WorkItemKey]time.Time), ready: make(chan struct{}, 1)}
 }
 
-func (p *workPublisher) schedule(item WorkItem) {
+func (p *workPublisher) schedule(item models.WorkItem) {
 	if p == nil || item.Family == "" || item.Scope.Validate() != nil {
 		return
 	}
-	key := workItemKey{Family: item.Family, Scope: item.Scope}
+	key := models.WorkItemKey{Family: item.Family, Scope: item.Scope}
 	p.mu.Lock()
 	if current, ok := p.items[key]; !ok || item.DueAt.Before(current) {
 		p.items[key] = item.DueAt
@@ -67,12 +67,12 @@ func (p *workPublisher) schedule(item WorkItem) {
 	}
 }
 
-func (p *workPublisher) take() []WorkItem {
+func (p *workPublisher) take() []models.WorkItem {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	items := make([]WorkItem, 0, len(p.items))
+	items := make([]models.WorkItem, 0, len(p.items))
 	for key, due := range p.items {
-		items = append(items, WorkItem{Family: key.Family, Scope: key.Scope, DueAt: due})
+		items = append(items, models.WorkItem{Family: key.Family, Scope: key.Scope, DueAt: due})
 	}
 	clear(p.items)
 	return items
@@ -120,22 +120,22 @@ func (p *workPublisher) run(ctx context.Context) {
 type MemoryWorkQueue struct {
 	mu      sync.Mutex
 	due     workDueHeap
-	index   map[workItemKey]*workDueEntry
+	index   map[models.WorkItemKey]*workDueEntry
 	changed chan struct{}
 	now     func() time.Time
 }
 
 func NewMemoryWorkQueue(opts ...models.ServiceOption) *MemoryWorkQueue {
-	return &MemoryWorkQueue{index: make(map[workItemKey]*workDueEntry), changed: make(chan struct{}, 1), now: models.ClockFrom(opts)}
+	return &MemoryWorkQueue{index: make(map[models.WorkItemKey]*workDueEntry), changed: make(chan struct{}, 1), now: models.ClockFrom(opts)}
 }
 
-func (q *MemoryWorkQueue) PublishWork(_ context.Context, items []WorkItem) error {
+func (q *MemoryWorkQueue) PublishWork(_ context.Context, items []models.WorkItem) error {
 	q.mu.Lock()
 	for _, item := range items {
 		if item.Family == "" || item.Scope.Validate() != nil {
 			continue
 		}
-		key := workItemKey{Family: item.Family, Scope: item.Scope}
+		key := models.WorkItemKey{Family: item.Family, Scope: item.Scope}
 		if entry, ok := q.index[key]; ok {
 			if item.DueAt.Before(entry.due) {
 				entry.due = item.DueAt
@@ -167,7 +167,7 @@ func (q *MemoryWorkQueue) ConsumeWork(ctx context.Context, handle func(WorkSigna
 		var wait <-chan time.Time
 		var timer *time.Timer
 		q.mu.Lock()
-		var ready []workItemKey
+		var ready []models.WorkItemKey
 		for q.due.Len() > 0 && !q.due[0].due.After(now) {
 			entry := heap.Pop(&q.due).(*workDueEntry)
 			delete(q.index, entry.key)
@@ -200,7 +200,7 @@ func (q *MemoryWorkQueue) ConsumeWork(ctx context.Context, handle func(WorkSigna
 }
 
 type workDueEntry struct {
-	key   workItemKey
+	key   models.WorkItemKey
 	due   time.Time
 	index int
 }
@@ -233,7 +233,7 @@ type workScopeGate struct {
 	checker WorkScopeChecker
 	known   *knownWorkerScopes
 	mu      sync.Mutex
-	cache   map[Scope]workScopeAnswer
+	cache   map[models.Scope]workScopeAnswer
 	now     func() time.Time
 }
 
@@ -249,7 +249,7 @@ const (
 )
 
 func newWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *workScopeGate {
-	gate := &workScopeGate{source: source, cache: make(map[Scope]workScopeAnswer), now: time.Now}
+	gate := &workScopeGate{source: source, cache: make(map[models.Scope]workScopeAnswer), now: time.Now}
 	gate.checker, _ = source.(WorkScopeChecker)
 	if gate.checker == nil {
 		gate.known = newKnownWorkerScopes(source, refresh)
@@ -260,13 +260,13 @@ func newWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *workScop
 // filter keeps the scopes that may run workers. Lookup failures drop the
 // scope for this pass; its work stays durable and is retried when the
 // scope is next scheduled.
-func (g *workScopeGate) filter(ctx context.Context, scopes []Scope) ([]Scope, error) {
+func (g *workScopeGate) filter(ctx context.Context, scopes []models.Scope) ([]models.Scope, error) {
 	if g.checker == nil {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		return g.known.filter(ctx, g.now(), scopes)
 	}
-	result := make([]Scope, 0, len(scopes))
+	result := make([]models.Scope, 0, len(scopes))
 	var errs []error
 	for _, scope := range scopes {
 		active, err := g.active(ctx, scope)
@@ -281,7 +281,7 @@ func (g *workScopeGate) filter(ctx context.Context, scopes []Scope) ([]Scope, er
 	return result, errors.Join(errs...)
 }
 
-func (g *workScopeGate) active(ctx context.Context, scope Scope) (bool, error) {
+func (g *workScopeGate) active(ctx context.Context, scope models.Scope) (bool, error) {
 	now := g.now()
 	g.mu.Lock()
 	answer, ok := g.cache[scope]
