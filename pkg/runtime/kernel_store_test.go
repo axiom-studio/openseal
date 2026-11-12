@@ -56,3 +56,15 @@ func newTestSQLiteStore(t testing.TB) (*SQLiteStore, *sql.DB) {
 	t.Cleanup(func() { store.Close() })
 	return store, openTestSQLiteDB(t, path)
 }
+
+// openTestSQLiteSessionStore opens a SQLite store on a fresh file, closed
+// when the test ends.
+func openTestSQLiteSessionStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}

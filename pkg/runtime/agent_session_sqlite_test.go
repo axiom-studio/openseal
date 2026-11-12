@@ -13,9 +13,25 @@ import (
 )
 
 // SQLite store test: it moves to store/sqlite in U2.9. It runs the session
-// conformance suite (storetest.RunAgentSessionContract) and
-// the testSession* helpers of agent_session_test.go and
-// agent_session_store_test.go.
+// conformance suite (storetest.RunAgentSessionContract) and checks the
+// store's own session writes.
+
+// sqliteSessionScope and sqliteSessionNow are the scope and clock of the
+// sessions these tests write.
+var (
+	sqliteSessionScope = models.Scope{Kind: "org", ID: "o1"}
+	sqliteSessionNow   = time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+)
+
+// sqliteSessionLease is worker w1's lease guard at sqliteSessionNow.
+func sqliteSessionLease() models.AgentRunLeaseGuard {
+	return models.AgentRunLeaseGuard{WorkerID: "w1", Now: sqliteSessionNow}
+}
+
+func sqliteSessionLeasePtr() *models.AgentRunLeaseGuard {
+	lease := sqliteSessionLease()
+	return &lease
+}
 
 // TestSQLiteAgentSessionStore runs the session store conformance suite
 // (storetest.RunAgentSessionContract) against the SQLite backend.
@@ -38,16 +54,6 @@ func createSQLiteRunSessionInOwnTx(ctx context.Context, s *SQLiteStore, req mode
 		return err
 	})
 	return result, err
-}
-
-func openTestSQLiteSessionStore(t *testing.T) *SQLiteStore {
-	t.Helper()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "sessions.db"))
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store
 }
 
 func TestSQLiteAgentSessionLogMigrationReplays(t *testing.T) {
@@ -80,13 +86,13 @@ func TestSQLiteAgentSessionLogMigrationReplays(t *testing.T) {
 func putTestSQLiteSessionRun(t *testing.T, store *SQLiteStore, runID, sessionID string, status models.AgentRunStatus) {
 	t.Helper()
 	ctx := context.Background()
-	expires := testSessionNow.Add(time.Minute)
+	expires := sqliteSessionNow.Add(time.Minute)
 	run := &models.AgentRun{
-		ID: runID, Scope: testSessionScope, Status: status, Revision: 1, SessionID: sessionID,
-		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: testSessionNow, UpdatedAt: testSessionNow,
+		ID: runID, Scope: sqliteSessionScope, Status: status, Revision: 1, SessionID: sessionID,
+		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: sqliteSessionNow, UpdatedAt: sqliteSessionNow,
 	}
 	err := store.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
-		current, err := getSQLiteAgentRun(ctx, conn, testSessionScope, runID)
+		current, err := getSQLiteAgentRun(ctx, conn, sqliteSessionScope, runID)
 		if err != nil {
 			return insertSQLiteAgentRunConn(ctx, conn, run)
 		}
@@ -101,16 +107,16 @@ func putTestSQLiteSessionRun(t *testing.T, store *SQLiteStore, runID, sessionID 
 func TestSQLiteInTxHelpersSkipFence(t *testing.T) {
 	ctx := context.Background()
 	store := openTestSQLiteSessionStore(t)
-	sessionID := models.ConversationAgentSessionID(testSessionScope, models.ConversationRunLane("c1", "", "agent-a"))
+	sessionID := models.ConversationAgentSessionID(sqliteSessionScope, models.ConversationRunLane("c1", "", "agent-a"))
 	putTestSQLiteSessionRun(t, store, "r1", sessionID, models.AgentRunStatusRunning)
 	opened, err := store.OpenConversationAgentSession(ctx, models.OpenConversationAgentSessionRequest{
-		Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r1", Lease: testSessionLease(), Now: testSessionNow,
+		Scope: sqliteSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r1", Lease: sqliteSessionLease(), Now: sqliteSessionNow,
 	})
 	if err != nil || !opened.Created {
 		t.Fatalf("open = %+v, %v", opened, err)
 	}
 	if _, err := store.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
-		Scope: testSessionScope, SessionID: sessionID, RunID: "r1", Lease: testSessionLeasePtr(), Now: testSessionNow,
+		Scope: sqliteSessionScope, SessionID: sessionID, RunID: "r1", Lease: sqliteSessionLeasePtr(), Now: sqliteSessionNow,
 		Entries: []*models.SessionEntry{storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", models.ToolEntryPending)},
 	}); err != nil {
 		t.Fatal(err)
@@ -122,10 +128,10 @@ func TestSQLiteInTxHelpersSkipFence(t *testing.T) {
 	var appendErr, transitionErr error
 	err = store.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
 		_, appendErr = store.appendAgentSessionEntriesTx(ctx, conn, models.AppendAgentSessionEntriesRequest{
-			Scope: testSessionScope, SessionID: sessionID, RunID: "r1", Entries: []*models.SessionEntry{note},
+			Scope: sqliteSessionScope, SessionID: sessionID, RunID: "r1", Entries: []*models.SessionEntry{note},
 		})
 		_, transitionErr = store.transitionToolEntryTx(ctx, conn, models.ToolEntryTransitionRequest{
-			Scope: testSessionScope, EntryID: "e1", RunID: "r1", Lease: models.AgentRunLeaseGuard{WorkerID: "w-other"},
+			Scope: sqliteSessionScope, EntryID: "e1", RunID: "r1", Lease: models.AgentRunLeaseGuard{WorkerID: "w-other"},
 			From: models.ToolEntryPending, To: models.ToolEntryAwaitingChild, Wait: &models.ToolEntryWait{ChildRunIDs: []string{"child"}},
 		})
 		return nil
@@ -133,13 +139,13 @@ func TestSQLiteInTxHelpersSkipFence(t *testing.T) {
 	if err != nil || appendErr != nil || transitionErr != nil {
 		t.Fatalf("in-tx helpers: tx %v, append %v, transition %v", err, appendErr, transitionErr)
 	}
-	byStep, err := store.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: testSessionScope, StepID: "t1", Descending: true})
+	byStep, err := store.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: sqliteSessionScope, StepID: "t1", Descending: true})
 	if err != nil || len(byStep) != 2 || byStep[0].ID != "e1" || byStep[0].State != models.ToolEntryAwaitingChild {
 		t.Fatalf("list by step = %v, %v", byStep, err)
 	}
 	// The public append still checks the binding.
 	if _, err := store.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
-		Scope: testSessionScope, SessionID: sessionID, RunID: "r1", Lease: testSessionLeasePtr(), Now: testSessionNow,
+		Scope: sqliteSessionScope, SessionID: sessionID, RunID: "r1", Lease: sqliteSessionLeasePtr(), Now: sqliteSessionNow,
 		Entries: []*models.SessionEntry{{ID: "n2", Type: models.SessionEntryNote, Note: &models.NoteEntry{Kind: models.NoteTaskPromoted, Text: "x", Data: json.RawMessage(`{}`)}}},
 	}); err != models.ErrSessionMoved {
 		t.Fatalf("append after rebind = %v, want ErrSessionMoved", err)
@@ -151,25 +157,25 @@ func TestSQLiteInTxHelpersSkipFence(t *testing.T) {
 func TestSQLiteListByRunOrdersByTimeAcrossSessions(t *testing.T) {
 	ctx := context.Background()
 	store := openTestSQLiteSessionStore(t)
-	sessionID := models.RunAgentSessionID(testSessionScope, "r1")
+	sessionID := models.RunAgentSessionID(sqliteSessionScope, "r1")
 	putTestSQLiteSessionRun(t, store, "r1", sessionID, models.AgentRunStatusRunning)
 	if _, err := store.CreateRunAgentSession(ctx, models.CreateRunAgentSessionRequest{
-		Scope: testSessionScope, OwnerRunID: "r1", AgentID: "agent-a", Lease: testSessionLease(), Now: testSessionNow,
+		Scope: sqliteSessionScope, OwnerRunID: "r1", AgentID: "agent-a", Lease: sqliteSessionLease(), Now: sqliteSessionNow,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	times := []time.Time{testSessionNow.Add(500 * time.Millisecond), testSessionNow.Add(time.Second), testSessionNow.Add(1500 * time.Millisecond)}
+	times := []time.Time{sqliteSessionNow.Add(500 * time.Millisecond), sqliteSessionNow.Add(time.Second), sqliteSessionNow.Add(1500 * time.Millisecond)}
 	for i, at := range times {
 		id := "n" + string(rune('a'+i))
-		lease := models.AgentRunLeaseGuard{WorkerID: "w1", Now: testSessionNow}
+		lease := models.AgentRunLeaseGuard{WorkerID: "w1", Now: sqliteSessionNow}
 		if _, err := store.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
-			Scope: testSessionScope, SessionID: sessionID, RunID: "r1", Lease: &lease, Now: at,
+			Scope: sqliteSessionScope, SessionID: sessionID, RunID: "r1", Lease: &lease, Now: at,
 			Entries: []*models.SessionEntry{{ID: id, Type: models.SessionEntryNote, Note: &models.NoteEntry{Kind: models.NoteTaskPromoted, Text: id, Data: json.RawMessage(`{}`)}}},
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	listed, err := store.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: testSessionScope, RunID: "r1"})
+	listed, err := store.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: sqliteSessionScope, RunID: "r1"})
 	if err != nil || len(listed) != 3 {
 		t.Fatalf("list = %v, %v", listed, err)
 	}
