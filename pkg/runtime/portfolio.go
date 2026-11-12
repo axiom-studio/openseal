@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -17,9 +16,6 @@ var (
 	ErrInvalidObjectiveTransition = errors.New("invalid objective transition")
 	ErrInvalidRunCommand          = errors.New("invalid run command")
 )
-
-// RunCreditErrorWorkspaceCreditsExhausted is the only RunCreditError code.
-const RunCreditErrorWorkspaceCreditsExhausted = "workspace_credits_exhausted"
 
 type CreateObjectiveRequest struct {
 	Scope           Scope
@@ -190,39 +186,6 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, obj
 		return nil, err
 	}
 	return current, nil
-}
-
-func objectiveActivityEvent(objective *models.Objective, actor models.ActivityActor, visibility models.ActivityVisibility, eventType, summary string, occurredAt time.Time, payload map[string]interface{}) *models.ActivityEvent {
-	if strings.TrimSpace(actor.Type) == "" {
-		actor = models.ActivityActor{Type: "system", ID: "openseal"}
-	}
-	if visibility == "" {
-		visibility = models.ActivityVisibilityScope
-	}
-	event := &models.ActivityEvent{
-		ID: uuid.NewString(), Scope: objective.Scope, ObjectiveID: objective.ID, EventType: eventType,
-		Severity: models.ActivitySeverityInfo, Actor: actor, Summary: summary, Payload: payload,
-		Visibility: visibility, CreatedAt: occurredAt,
-	}
-	event.AgentID = ownedItemEventAgentID(objective.Owner, actor)
-	if objective.Owner.Type == models.OwnerTypeTeam {
-		event.TeamID = objective.Owner.ID
-	}
-	return event
-}
-
-// ownedItemEventAgentID is the Agent an owned item's activity belongs to: the
-// owning Agent, or the Team member that acted on a Team-owned item.
-func ownedItemEventAgentID(owner models.ObjectiveOwner, actor models.ActivityActor) string {
-	switch owner.Type {
-	case models.OwnerTypeAgent:
-		return owner.ID
-	case models.OwnerTypeTeam:
-		if actor.Type == "agent" {
-			return actor.ID
-		}
-	}
-	return ""
 }
 
 func (s *PortfolioService) GetObjective(ctx context.Context, scope Scope, objectiveID string) (*Objective, error) {
@@ -439,15 +402,6 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 	if req.ProgressSummary != nil {
 		objective.ProgressSummary = *req.ProgressSummary
 	}
-}
-
-func canTransitionObjective(from, to models.ObjectiveStatus) bool {
-	allowed := map[models.ObjectiveStatus]map[models.ObjectiveStatus]bool{
-		models.ObjectiveStatusDraft:  {models.ObjectiveStatusActive: true, models.ObjectiveStatusRetired: true},
-		models.ObjectiveStatusActive: {models.ObjectiveStatusPaused: true, models.ObjectiveStatusSatisfied: true, models.ObjectiveStatusFailed: true, models.ObjectiveStatusRetired: true},
-		models.ObjectiveStatusPaused: {models.ObjectiveStatusActive: true, models.ObjectiveStatusFailed: true, models.ObjectiveStatusRetired: true},
-	}
-	return allowed[from][to]
 }
 
 func objectiveCreationFingerprint(req CreateObjectiveRequest) (string, error) {

@@ -11,11 +11,7 @@ import (
 )
 
 const (
-	RunManagementSkillID      = "openseal.runs"
 	RunManagementSkillVersion = "1.0.0"
-	RunActionPause            = "pause"
-	RunActionResume           = "resume"
-	RunActionCancel           = "cancel"
 	RunManagementEndpoint     = "kernel://runs"
 	runResourceType           = "agent_run"
 )

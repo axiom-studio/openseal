@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // agent_request_decision and agent_request_review (section 04 §11.7): the
@@ -57,7 +59,7 @@ func (requestDecisionHandler) spec(ControlAuthority) ControlToolSpec {
 }
 
 func (requestDecisionHandler) decode(raw json.RawMessage) (interface{}, error) {
-	return decodeControlInto[requestFinalArgs](raw)
+	return models.DecodeControlInto[requestFinalArgs](raw)
 }
 
 func (requestDecisionHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
@@ -80,7 +82,7 @@ func (completionReviewHandler) spec(ControlAuthority) ControlToolSpec {
 }
 
 func (completionReviewHandler) decode(raw json.RawMessage) (interface{}, error) {
-	return decodeControlInto[requestFinalArgs](raw)
+	return models.DecodeControlInto[requestFinalArgs](raw)
 }
 
 func (completionReviewHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {

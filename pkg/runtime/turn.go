@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -30,10 +29,6 @@ type TurnAction struct {
 	// Turn is persisted.
 	PreparedRuntime *skill.PreparedRuntime `json:"preparedRuntime,omitempty"`
 }
-
-// maximumStepNarrationBytes bounds a step's narration (OutputSummary and the
-// turn.narration event summary) on a rune boundary.
-const maximumStepNarrationBytes = 2000
 
 // ActivityEventTurnNarration is the public activity event carrying a step's
 // narration. It is written in the same transaction as the step's
@@ -253,31 +248,6 @@ func (s *AgentTurnService) RecordStepModel(ctx context.Context, scope Scope, tur
 		return nil, err
 	}
 	return turn, nil
-}
-
-// boundStepNarration trims the narration and cuts it to
-// maximumStepNarrationBytes on a rune boundary.
-func boundStepNarration(text string) string {
-	text = strings.TrimSpace(text)
-	if len(text) <= maximumStepNarrationBytes {
-		return text
-	}
-	cut := maximumStepNarrationBytes
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
-	return strings.TrimSpace(text[:cut])
-}
-
-func normalizeModelIdentity(provider, model string) (string, string, error) {
-	provider, model = strings.TrimSpace(provider), strings.TrimSpace(model)
-	if (provider == "") != (model == "") {
-		return "", "", errors.New("agent turn model provider and model must be reported together")
-	}
-	if len(provider) > 256 || len(model) > 256 || strings.ContainsAny(provider, "\r\n\x00") || strings.ContainsAny(model, "\r\n\x00") {
-		return "", "", errors.New("agent turn model identity cannot exceed 256 characters or contain control delimiters")
-	}
-	return provider, model, nil
 }
 
 func (s *AgentTurnService) RenewTurn(ctx context.Context, scope Scope, turnID, workerID string, leaseDuration time.Duration) (*AgentTurn, error) {

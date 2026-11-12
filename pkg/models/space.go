@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -280,3 +281,24 @@ var (
 	// scope: they have not created a space there yet.
 	ErrNoDefaultSpace = errors.New("this owner has no default space")
 )
+
+// A Space groups a scope's agents, teams and conversations under a name and a
+// look. Nothing creates a space but CreateSpace. The first space an owner
+// creates in a scope is that owner's default space: it cannot be deleted and
+// receives the conversations of the other spaces the owner deletes.
+var (
+	// ErrTeamAgentOutsideSpace refuses a Team roster Agent that is not in
+	// every space the Team is in.
+	ErrTeamAgentOutsideSpace = errors.New("a team's agents must be in its space")
+)
+
+func CheckAgentsInSpace(space *Space, members []*SpaceMember, agentIDs []string) error {
+	for _, agentID := range agentIDs {
+		if !slices.ContainsFunc(members, func(member *SpaceMember) bool {
+			return member.Type == SpaceMemberAgent && member.ID == agentID
+		}) {
+			return fmt.Errorf("%w: agent %q is not in space %q", ErrTeamAgentOutsideSpace, agentID, space.Name)
+		}
+	}
+	return nil
+}

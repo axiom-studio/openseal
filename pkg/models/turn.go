@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -225,4 +226,33 @@ func CloneAgentTurn(in *AgentTurn) *AgentTurn {
 	data, _ := json.Marshal(in)
 	_ = json.Unmarshal(data, &out)
 	return &out
+}
+
+// maximumStepNarrationBytes bounds a step's narration (OutputSummary and the
+// turn.narration event summary) on a rune boundary.
+const maximumStepNarrationBytes = 2000
+
+// boundStepNarration trims the narration and cuts it to
+// maximumStepNarrationBytes on a rune boundary.
+func BoundStepNarration(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= maximumStepNarrationBytes {
+		return text
+	}
+	cut := maximumStepNarrationBytes
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return strings.TrimSpace(text[:cut])
+}
+
+func NormalizeModelIdentity(provider, model string) (string, string, error) {
+	provider, model = strings.TrimSpace(provider), strings.TrimSpace(model)
+	if (provider == "") != (model == "") {
+		return "", "", errors.New("agent turn model provider and model must be reported together")
+	}
+	if len(provider) > 256 || len(model) > 256 || strings.ContainsAny(provider, "\r\n\x00") || strings.ContainsAny(model, "\r\n\x00") {
+		return "", "", errors.New("agent turn model identity cannot exceed 256 characters or contain control delimiters")
+	}
+	return provider, model, nil
 }

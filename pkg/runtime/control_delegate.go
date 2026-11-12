@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -92,7 +93,7 @@ func (delegateHandler) spec(a ControlAuthority) ControlToolSpec {
 }
 
 func (delegateHandler) decode(raw json.RawMessage) (interface{}, error) {
-	value, err := decodeControlInto[delegateArgs](raw)
+	value, err := models.DecodeControlInto[delegateArgs](raw)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +444,7 @@ func (delegateReplyHandler) spec(ControlAuthority) ControlToolSpec {
 }
 
 func (delegateReplyHandler) decode(raw json.RawMessage) (interface{}, error) {
-	value, err := decodeControlInto[delegateReplyArgs](raw)
+	value, err := models.DecodeControlInto[delegateReplyArgs](raw)
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 	"hash"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/agent"
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -395,4 +396,275 @@ type CreateActionCredentialLeaseRequest = models.CreateActionCredentialLeaseRequ
 // NewActionCredentialLease forwards to models.NewActionCredentialLease.
 func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*models.ActionCredentialLease, error) {
 	return models.NewActionCredentialLease(request)
+}
+
+type ActionCredentialLeaseSignature = models.ActionCredentialLeaseSignature
+
+type SignedActionCredentialLease = models.SignedActionCredentialLease
+
+type ActivityProjection = models.ActivityProjection
+
+const AgentManagementSkillID = models.AgentManagementSkillID
+
+const AgentManagementSkillVersion = models.AgentManagementSkillVersion
+
+const AgentActionAmendBehavior = models.AgentActionAmendBehavior
+
+const AgentActionListChannels = models.AgentActionListChannels
+
+const AgentActionConfigureChannel = models.AgentActionConfigureChannel
+
+const AgentActionListAgents = models.AgentActionListAgents
+
+const AgentActionCreateAgent = models.AgentActionCreateAgent
+
+const AgentActionUpdateAgent = models.AgentActionUpdateAgent
+
+const AgentActionTryAgent = models.AgentActionTryAgent
+
+const AgentManagementEndpoint = models.AgentManagementEndpoint
+
+// AgentManagementSkill forwards to models.AgentManagementSkill.
+func AgentManagementSkill() *skill.Definition {
+	return models.AgentManagementSkill()
+}
+
+// IsSupportedAgentManagementSkillVersion forwards to models.IsSupportedAgentManagementSkillVersion.
+func IsSupportedAgentManagementSkillVersion(version string) bool {
+	return models.IsSupportedAgentManagementSkillVersion(version)
+}
+
+type AgentSkillGrant = models.AgentSkillGrant
+
+type AgentConnectionRequest = models.AgentConnectionRequest
+
+// ValidateAgentProfileImage forwards to models.ValidateAgentProfileImage.
+func ValidateAgentProfileImage(ctx context.Context, store interface {
+	GetArtifact(context.Context, models.Scope, string, int64) (*models.Artifact, error)
+}, content ArtifactContentStore, scope models.Scope, reference *agent.ProfileImage) error {
+	return models.ValidateAgentProfileImage(ctx, store, content, scope, reference)
+}
+
+var ErrToolOutputNoChat = models.ErrToolOutputNoChat
+
+type ToolOutputKeeper = models.ToolOutputKeeper
+
+// BoundToolResult forwards to models.BoundToolResult.
+func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation ToolInvocation, result models.ToolResult) (models.ToolResult, error) {
+	return models.BoundToolResult(ctx, keeper, invocation, result)
+}
+
+type ArtifactContentStore = models.ArtifactContentStore
+
+type ArtifactContentWrite = models.ArtifactContentWrite
+
+type ArtifactStoredContent = models.ArtifactStoredContent
+
+// AgentOnChatRoster forwards to models.AgentOnChatRoster.
+func AgentOnChatRoster(ctx context.Context, teams models.TeamRosterReader, scope models.Scope, owner models.ObjectiveOwner, agentID string) (bool, error) {
+	return models.AgentOnChatRoster(ctx, teams, scope, owner, agentID)
+}
+
+type RunDependencySpec = models.RunDependencySpec
+
+type CreateRunDependencyGroupRequest = models.CreateRunDependencyGroupRequest
+
+const HostToolAPIVersion = models.HostToolAPIVersion
+
+const MaxHostToolCommandRefBytes = models.MaxHostToolCommandRefBytes
+
+// HostToolCommandRef forwards to models.HostToolCommandRef.
+func HostToolCommandRef(toolEntryID string) string {
+	return models.HostToolCommandRef(toolEntryID)
+}
+
+type HostToolExecutor = models.HostToolExecutor
+
+type HostToolRequest = models.HostToolRequest
+
+type HostVMTool = models.HostVMTool
+
+type HostToolResult = models.HostToolResult
+
+const HostToolFailureInvalidRequest = models.HostToolFailureInvalidRequest
+
+const HostToolFailureAccessDenied = models.HostToolFailureAccessDenied
+
+const HostToolFailureRequestTooLarge = models.HostToolFailureRequestTooLarge
+
+const HostToolFailureChatFilesUnavailable = models.HostToolFailureChatFilesUnavailable
+
+const HostToolFailureSandboxesUnavailable = models.HostToolFailureSandboxesUnavailable
+
+const HostToolFailureUnsupportedOperation = models.HostToolFailureUnsupportedOperation
+
+const HostToolFailureUnavailable = models.HostToolFailureUnavailable
+
+const HostToolFailureFailed = models.HostToolFailureFailed
+
+type HostToolFailure = models.HostToolFailure
+
+var ErrHostToolUnsupported = models.ErrHostToolUnsupported
+
+type TurnTaskProposal = models.TurnTaskProposal
+
+type ConversationTaskSnapshot = models.ConversationTaskSnapshot
+
+type HostedConversationTaskContext = models.HostedConversationTaskContext
+
+const ModelStepAPIVersion = models.ModelStepAPIVersion
+
+type ModelStepPurpose = models.ModelStepPurpose
+
+const ModelStepPurposeStep = models.ModelStepPurposeStep
+
+const ModelStepPurposeSummary = models.ModelStepPurposeSummary
+
+const ModelStepPurposeExplanation = models.ModelStepPurposeExplanation
+
+const ModelStepPurposeAcknowledgement = models.ModelStepPurposeAcknowledgement
+
+var ErrInvalidModelStepRequest = models.ErrInvalidModelStepRequest
+
+type ModelStepRequest = models.ModelStepRequest
+
+type ModelStepSystem = models.ModelStepSystem
+
+type ModelStepSystemSection = models.ModelStepSystemSection
+
+type ModelStepStream = models.ModelStepStream
+
+type SessionEntryView = models.SessionEntryView
+
+const EntryAuthorPerson = models.EntryAuthorPerson
+
+const EntryAuthorAgent = models.EntryAuthorAgent
+
+type EntryAuthor = models.EntryAuthor
+
+type UserEntryView = models.UserEntryView
+
+type ToolEntryView = models.ToolEntryView
+
+type ToolResultView = models.ToolResultView
+
+type CompactionEntryView = models.CompactionEntryView
+
+type NoteEntryView = models.NoteEntryView
+
+type ModelStepResult = models.ModelStepResult
+
+type ModelStepModelInfo = models.ModelStepModelInfo
+
+type ModelStepRenderInfo = models.ModelStepRenderInfo
+
+const ObjectiveManagementSkillID = models.ObjectiveManagementSkillID
+
+const RunCreditErrorWorkspaceCreditsExhausted = models.RunCreditErrorWorkspaceCreditsExhausted
+
+type RoutineOwnerAddressResolver = models.RoutineOwnerAddressResolver
+
+const RunManagementSkillID = models.RunManagementSkillID
+
+const RunActionPause = models.RunActionPause
+
+const RunActionResume = models.RunActionResume
+
+const RunActionCancel = models.RunActionCancel
+
+var ErrRunUmbrellaUnavailable = models.ErrRunUmbrellaUnavailable
+
+// RunUmbrella forwards to models.RunUmbrella.
+func RunUmbrella(ctx context.Context, roster models.TeamRosterReader, run *models.AgentRun) (models.ObjectiveOwner, error) {
+	return models.RunUmbrella(ctx, roster, run)
+}
+
+// ConversationUmbrella forwards to models.ConversationUmbrella.
+func ConversationUmbrella(conversation *models.Conversation) models.ObjectiveOwner {
+	return models.ConversationUmbrella(conversation)
+}
+
+// TaskUmbrella forwards to models.TaskUmbrella.
+func TaskUmbrella(task *models.ConversationTask) (models.ObjectiveOwner, string) {
+	return models.TaskUmbrella(task)
+}
+
+// OwnerOfSkillUmbrella forwards to models.OwnerOfSkillUmbrella.
+func OwnerOfSkillUmbrella(umbrella skill.Umbrella) models.ObjectiveOwner {
+	return models.OwnerOfSkillUmbrella(umbrella)
+}
+
+// InteractionRunResumable forwards to models.InteractionRunResumable.
+func InteractionRunResumable(ctx context.Context, roster models.TeamRosterReader, run *models.AgentRun, owner models.ObjectiveOwner, agentID string) (bool, error) {
+	return models.InteractionRunResumable(ctx, roster, run, owner, agentID)
+}
+
+const RunbookManagementSkillID = models.RunbookManagementSkillID
+
+const SkillManagementSkillID = models.SkillManagementSkillID
+
+var ErrTeamAgentOutsideSpace = models.ErrTeamAgentOutsideSpace
+
+type HostedSkillPrompt = models.HostedSkillPrompt
+
+const TeamManagementSkillID = models.TeamManagementSkillID
+
+type ToolInvocation = models.ToolInvocation
+
+type TurnAnswerPreview = models.TurnAnswerPreview
+
+type TurnAnswerPreviewObserver = models.TurnAnswerPreviewObserver
+
+// WithTurnAnswerPreview forwards to models.WithTurnAnswerPreview.
+func WithTurnAnswerPreview(ctx context.Context, observer TurnAnswerPreviewObserver) context.Context {
+	return models.WithTurnAnswerPreview(ctx, observer)
+}
+
+// HasTurnAnswerPreview forwards to models.HasTurnAnswerPreview.
+func HasTurnAnswerPreview(ctx context.Context) bool {
+	return models.HasTurnAnswerPreview(ctx)
+}
+
+// ReportTurnAnswerPreview forwards to models.ReportTurnAnswerPreview.
+func ReportTurnAnswerPreview(ctx context.Context, preview TurnAnswerPreview) error {
+	return models.ReportTurnAnswerPreview(ctx, preview)
+}
+
+type TurnProgressObserver = models.TurnProgressObserver
+
+// WithTurnProgress forwards to models.WithTurnProgress.
+func WithTurnProgress(ctx context.Context, observer TurnProgressObserver) context.Context {
+	return models.WithTurnProgress(ctx, observer)
+}
+
+// HasTurnProgress forwards to models.HasTurnProgress.
+func HasTurnProgress(ctx context.Context) bool {
+	return models.HasTurnProgress(ctx)
+}
+
+// ReportTurnProgress forwards to models.ReportTurnProgress.
+func ReportTurnProgress(ctx context.Context, summary string) error {
+	return models.ReportTurnProgress(ctx, summary)
+}
+
+const MaxTurnProgressOriginRefBytes = models.MaxTurnProgressOriginRefBytes
+
+// WithTurnProgressOrigin forwards to models.WithTurnProgressOrigin.
+func WithTurnProgressOrigin(ctx context.Context, ref string) context.Context {
+	return models.WithTurnProgressOrigin(ctx, ref)
+}
+
+// TurnProgressOrigin forwards to models.TurnProgressOrigin.
+func TurnProgressOrigin(ctx context.Context) string {
+	return models.TurnProgressOrigin(ctx)
+}
+
+// IsTurnCommentary forwards to models.IsTurnCommentary.
+func IsTurnCommentary(ctx context.Context) bool {
+	return models.IsTurnCommentary(ctx)
+}
+
+// ReportTurnCommentary forwards to models.ReportTurnCommentary.
+func ReportTurnCommentary(ctx context.Context, summary string) error {
+	return models.ReportTurnCommentary(ctx, summary)
 }

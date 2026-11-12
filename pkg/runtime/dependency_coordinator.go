@@ -5,34 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"reflect"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
-
-type RunDependencySpec struct {
-	ID          string
-	TargetRunID string
-	RequestID   string
-	Kind        models.RunDependencyKind
-	Required    *bool
-}
-
-type CreateRunDependencyGroupRequest struct {
-	ID                     string
-	Scope                  models.Scope
-	SourceRunID            string
-	ExpectedSourceRevision int64
-	Policy                 models.RunDependencyPolicy
-	Dependencies           []RunDependencySpec
-	IdempotencyKey         string
-	Actor                  models.ActivityActor
-	Visibility             models.ActivityVisibility
-}
 
 type ResolveRunDependencyRequest struct {
 	Scope                      Scope
@@ -216,45 +194,6 @@ func (c *DependencyCoordinator) ListRunDependencies(ctx context.Context, scope S
 		return nil, errors.New("run dependency store is not configured")
 	}
 	return c.store.ListRunDependencies(ctx, scope, strings.TrimSpace(groupID))
-}
-
-func canEnterDependencyWait(run *models.AgentRun) bool {
-	if run == nil || run.WakeCondition != nil {
-		return false
-	}
-	switch run.Status {
-	case models.AgentRunStatusQueued, models.AgentRunStatusPlanning, models.AgentRunStatusRunning:
-		return true
-	default:
-		return false
-	}
-}
-
-func sameDependencyGroupRequest(group *models.RunDependencyGroup, edges []*models.RunDependency, req CreateRunDependencyGroupRequest) bool {
-	if group == nil || group.Scope != req.Scope || group.SourceRunID != strings.TrimSpace(req.SourceRunID) ||
-		group.Policy != req.Policy || group.IdempotencyKey != strings.TrimSpace(req.IdempotencyKey) || len(edges) != len(req.Dependencies) {
-		return false
-	}
-	type intent struct {
-		target, request string
-		kind            models.RunDependencyKind
-		required        bool
-	}
-	existing := make([]intent, 0, len(edges))
-	for _, edge := range edges {
-		existing = append(existing, intent{target: edge.TargetRunID, request: edge.RequestID, kind: edge.Kind, required: edge.Required})
-	}
-	wanted := make([]intent, 0, len(req.Dependencies))
-	for _, spec := range req.Dependencies {
-		required := true
-		if spec.Required != nil {
-			required = *spec.Required
-		}
-		wanted = append(wanted, intent{target: strings.TrimSpace(spec.TargetRunID), request: strings.TrimSpace(spec.RequestID), kind: spec.Kind, required: required})
-	}
-	sort.Slice(existing, func(i, j int) bool { return fmt.Sprint(existing[i]) < fmt.Sprint(existing[j]) })
-	sort.Slice(wanted, func(i, j int) bool { return fmt.Sprint(wanted[i]) < fmt.Sprint(wanted[j]) })
-	return reflect.DeepEqual(existing, wanted)
 }
 
 func dependencyGroupEvent(run *AgentRun, group *RunDependencyGroup, edges []*RunDependency, actor ActivityActor, visibility ActivityVisibility, now time.Time) *ActivityEvent {

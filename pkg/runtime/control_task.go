@@ -4,11 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"strings"
-	"unicode/utf8"
-
-	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // conversation_start_task (section 04 §7, A4): a settle-phase control tool
@@ -17,17 +12,6 @@ import (
 // session just before this step's assistant entry), completes this tool entry
 // with the started result and completes the source Run with the
 // acknowledgment as its reply. There is no park: the Run ends here.
-
-const (
-	maximumStartTaskGoalBytes           = 16000
-	maximumStartTaskAcknowledgmentBytes = 600
-	startTaskKeyPrefix                  = "task-"
-)
-
-type startTaskArgs struct {
-	Goal           string `json:"goal"`
-	Acknowledgment string `json:"acknowledgment"`
-}
 
 type startTaskHandler struct{}
 
@@ -58,43 +42,6 @@ func (startTaskHandler) decode(raw json.RawMessage) (interface{}, error) {
 	}
 	return args, nil
 }
-
-// parseStartTaskArgs strictly decodes and checks the arguments of a
-// conversation_start_task call: a trimmed goal and acknowledgment within
-// their limits.
-func parseStartTaskArgs(raw json.RawMessage) (*startTaskArgs, error) {
-	args := &startTaskArgs{}
-	if err := decodeControlArguments(raw, args); err != nil {
-		return nil, err
-	}
-	args.Goal = strings.TrimSpace(args.Goal)
-	args.Acknowledgment = strings.TrimSpace(args.Acknowledgment)
-	if args.Goal == "" || len(args.Goal) > maximumStartTaskGoalBytes || !utf8.ValidString(args.Goal) {
-		return nil, fmt.Errorf("goal must be valid, non-empty text of at most %d bytes", maximumStartTaskGoalBytes)
-	}
-	if args.Acknowledgment == "" || len(args.Acknowledgment) > maximumStartTaskAcknowledgmentBytes || !utf8.ValidString(args.Acknowledgment) {
-		return nil, fmt.Errorf("acknowledgment must be valid, non-empty text of at most %d bytes", maximumStartTaskAcknowledgmentBytes)
-	}
-	return args, nil
-}
-
-// startTaskArguments decodes the arguments of a conversation_start_task
-// entry exactly as the handler does (nil when it is not one or they are
-// invalid). Admission and provenance proofs compare against these.
-func startTaskArguments(entry *models.SessionEntry) *startTaskArgs {
-	if entry == nil || entry.Type != models.SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(models.ControlToolStartTask) ||
-		entry.Tool.ArgumentsError != "" {
-		return nil
-	}
-	args, err := parseStartTaskArgs(entry.Tool.Arguments)
-	if err != nil {
-		return nil
-	}
-	return args
-}
-
-// startTaskKey is the idempotency key of the task an entry starts (§3.4).
-func startTaskKey(entryID string) string { return startTaskKeyPrefix + entryID }
 
 func startTaskRejected(message string) *ToolResult {
 	return controlErrorResult(ToolResultRefused, "task_rejected", message, nil)

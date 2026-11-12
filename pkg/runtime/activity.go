@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -294,14 +293,6 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	return run, persisted, nil
 }
 
-func cloneBudgetUsage(usage *models.BudgetUsage) *models.BudgetUsage {
-	if usage == nil {
-		return nil
-	}
-	cloned := *usage
-	return &cloned
-}
-
 func (s *RunActivityService) AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error) {
 	if s == nil || s.activity == nil {
 		return nil, errors.New("run activity service is not configured")
@@ -339,34 +330,4 @@ func (s *RunActivityService) ListActivity(ctx context.Context, filter ActivityFi
 	}
 	filter.Descending = false
 	return s.activity.ListActivity(ctx, filter)
-}
-
-func canTransitionAgentRun(from, to models.AgentRunStatus) bool {
-	allowed := map[models.AgentRunStatus]map[models.AgentRunStatus]bool{
-		models.AgentRunStatusQueued:               {models.AgentRunStatusPlanning: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusCanceled: true},
-		models.AgentRunStatusPlanning:             {models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusWaitingForAgent: true, models.AgentRunStatusWaitingForApproval: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
-		models.AgentRunStatusRunning:              {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusSleeping: true, models.AgentRunStatusWaitingForDependency: true, models.AgentRunStatusWaitingForAgent: true, models.AgentRunStatusWaitingForApproval: true, models.AgentRunStatusWaitingForEvent: true, models.AgentRunStatusCompleted: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
-		models.AgentRunStatusPaused:               {models.AgentRunStatusQueued: true, models.AgentRunStatusSleeping: true, models.AgentRunStatusWaitingForDependency: true, models.AgentRunStatusWaitingForAgent: true, models.AgentRunStatusWaitingForApproval: true, models.AgentRunStatusWaitingForEvent: true, models.AgentRunStatusCanceled: true},
-		models.AgentRunStatusSleeping:             {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusCanceled: true},
-		models.AgentRunStatusWaitingForDependency: {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
-		models.AgentRunStatusWaitingForAgent:      {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
-		models.AgentRunStatusWaitingForApproval:   {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
-		models.AgentRunStatusWaitingForEvent:      {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
-	}
-	return allowed[from][to]
-}
-
-func isWaitingRunStatus(status models.AgentRunStatus) bool {
-	return status == models.AgentRunStatusSleeping || status == models.AgentRunStatusWaitingForDependency ||
-		status == models.AgentRunStatusWaitingForAgent || status == models.AgentRunStatusWaitingForApproval ||
-		status == models.AgentRunStatusWaitingForEvent
-}
-
-// terminalCreditError reads the kernel-classified cause of a failed Run, never
-// provider text, so only a Workspace credit refusal yields a credit error.
-func terminalCreditError(status models.AgentRunStatus, failure *models.RunFailureExplanation) *models.RunCreditError {
-	if status != models.AgentRunStatusFailed || failure == nil || failure.Code != RunCreditErrorWorkspaceCreditsExhausted {
-		return nil
-	}
-	return &models.RunCreditError{Code: RunCreditErrorWorkspaceCreditsExhausted}
 }

@@ -11,7 +11,6 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -243,13 +242,13 @@ func resolveAgentCreate(
 	if err := decodeAgentBuilderArguments(arguments, &args); err != nil {
 		return nil, err
 	}
-	args.agentProfileArguments = args.agentProfileArguments.normalized()
+	args.AgentProfileArguments = args.AgentProfileArguments.Normalized()
 	args.SpaceID = strings.TrimSpace(args.SpaceID)
 	args.Rationale = strings.TrimSpace(args.Rationale)
 	if args.Rationale == "" {
 		return nil, errors.New("create_agent requires a rationale")
 	}
-	if err := validateAgentProfileText(args.agentProfileArguments); err != nil {
+	if err := validateAgentProfileText(args.AgentProfileArguments); err != nil {
 		return nil, err
 	}
 	if err := ensureAgentNameAvailable(ctx, agents, teams, scope, args.DisplayName, ""); err != nil {
@@ -374,9 +373,9 @@ func resolveAgentTry(ctx context.Context, host AgentBuilderHost, scope Scope, ar
 	if err := decodeAgentBuilderArguments(arguments, &args); err != nil {
 		return args, err
 	}
-	args.agentProfileArguments = args.agentProfileArguments.normalized()
+	args.AgentProfileArguments = args.AgentProfileArguments.Normalized()
 	args.Message = strings.TrimSpace(args.Message)
-	if err := validateAgentProfileText(args.agentProfileArguments); err != nil {
+	if err := validateAgentProfileText(args.AgentProfileArguments); err != nil {
 		return args, err
 	}
 	if args.Message == "" || utf8.RuneCountInString(args.Message) > maxAgentTrialMessageRunes {
@@ -673,10 +672,6 @@ func agentBuilderTargetError(agentID string, err error) error {
 	return err
 }
 
-func agentBuilderScope(scope models.Scope) capability.ScopeReference {
-	return capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
-}
-
 func agentProfileFromDefinition(definition *kernelagent.AgentDefinition) agentProfileArguments {
 	return agentProfileArguments{
 		DisplayName: definition.DisplayName, Purpose: definition.Purpose, SystemPrompt: definition.SystemPrompt,
@@ -742,7 +737,7 @@ func agentCreatePreview(bound *skill.BoundAction, resolved *resolvedAgentCreate)
 		})
 	}
 	preview := agentBuilderPreviewHead(bound)
-	preview["agent"] = agentProfilePreview(resolved.args.agentProfileArguments, "")
+	preview["agent"] = agentProfilePreview(resolved.args.AgentProfileArguments, "")
 	preview["model"] = map[string]interface{}{"id": resolved.args.Model}
 	preview["space"] = map[string]interface{}{"id": resolved.space.ID, "name": resolved.space.Name}
 	preview["skills"] = agentSkillGrantsPreview(resolved.skills)

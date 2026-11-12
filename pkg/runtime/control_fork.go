@@ -8,6 +8,8 @@ import (
 	"maps"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // control_fork (section 04 §6): a settle-phase control tool that runs two to
@@ -96,7 +98,7 @@ func (forkHandler) spec(a ControlAuthority) ControlToolSpec {
 }
 
 func (forkHandler) decode(raw json.RawMessage) (interface{}, error) {
-	value, err := decodeControlInto[forkArgs](raw)
+	value, err := models.DecodeControlInto[forkArgs](raw)
 	if err != nil {
 		return nil, err
 	}

@@ -31,7 +31,7 @@ func (h *fakeControlHandler) spec(a ControlAuthority) ControlToolSpec {
 }
 
 func (h *fakeControlHandler) decode(raw json.RawMessage) (interface{}, error) {
-	return decodeControlInto[fakeControlArgs](raw)
+	return models.DecodeControlInto[fakeControlArgs](raw)
 }
 
 func (h *fakeControlHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
@@ -404,10 +404,10 @@ func TestControlArgumentsRejectUnknownFields(t *testing.T) {
 	}
 	// One value only: a trailing value is refused (stored entries always hold
 	// one object, so this is checked on the decoder).
-	if _, err := decodeControlInto[fakeControlArgs](json.RawMessage(`{"goal":"x"} {"goal":"y"}`)); err == nil {
+	if _, err := models.DecodeControlInto[fakeControlArgs](json.RawMessage(`{"goal":"x"} {"goal":"y"}`)); err == nil {
 		t.Fatal("trailing value accepted")
 	}
-	if args, err := decodeControlInto[fakeControlArgs](nil); err != nil || args.(*fakeControlArgs).Goal != "" {
+	if args, err := models.DecodeControlInto[fakeControlArgs](nil); err != nil || args.(*fakeControlArgs).Goal != "" {
 		t.Fatalf("empty arguments = %#v, %v", args, err)
 	}
 	meta, err := DecodeControlEntryMeta(f.stored("ok"))

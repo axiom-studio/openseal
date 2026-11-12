@@ -1,26 +1,24 @@
-package runtime
+package models
 
 import (
 	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // TurnTaskProposal asks the kernel to admit independent work from a foreground
 // conversation. The model describes intent only; the kernel owns actor,
 // conversation, target deployment, and execution identity.
 type TurnTaskProposal struct {
-	TaskKey        string               `json:"taskKey"`
-	Goal           string               `json:"goal"`
-	Acknowledgment string               `json:"acknowledgment"`
-	Budget         *models.BudgetPolicy `json:"budget,omitempty"`
+	TaskKey        string        `json:"taskKey"`
+	Goal           string        `json:"goal"`
+	Acknowledgment string        `json:"acknowledgment"`
+	Budget         *BudgetPolicy `json:"budget,omitempty"`
 }
 
 func (p *TurnTaskProposal) Validate() error {
-	if p == nil || !models.IsValidOpaqueIdentifier(p.TaskKey, 128) ||
+	if p == nil || !IsValidOpaqueIdentifier(p.TaskKey, 128) ||
 		strings.TrimSpace(p.Goal) == "" || len(p.Goal) > 16384 ||
 		strings.TrimSpace(p.Acknowledgment) == "" || len(p.Acknowledgment) > 600 {
 		return errors.New("task proposal requires a bounded task key, goal, and acknowledgment")
@@ -36,21 +34,21 @@ func cloneTurnTaskProposal(proposal *TurnTaskProposal) *TurnTaskProposal {
 		return nil
 	}
 	copy := *proposal
-	copy.Budget = models.CloneBudgetPolicy(proposal.Budget)
+	copy.Budget = CloneBudgetPolicy(proposal.Budget)
 	return &copy
 }
 
 // ConversationTaskSnapshot is the small model-visible projection of one
 // durable task, without source authority or credentials.
 type ConversationTaskSnapshot struct {
-	TaskID            string                      `json:"taskId"`
-	Mode              models.ConversationTaskMode `json:"mode,omitempty"`
-	WorkRunID         string                      `json:"workRunId"`
-	Goal              string                      `json:"goal"`
-	Status            models.AgentRunStatus       `json:"status"`
-	Revision          int64                       `json:"revision"`
-	AvailableControls []string                    `json:"availableControls,omitempty"`
-	CreatedAt         time.Time                   `json:"createdAt"`
+	TaskID            string               `json:"taskId"`
+	Mode              ConversationTaskMode `json:"mode,omitempty"`
+	WorkRunID         string               `json:"workRunId"`
+	Goal              string               `json:"goal"`
+	Status            AgentRunStatus       `json:"status"`
+	Revision          int64                `json:"revision"`
+	AvailableControls []string             `json:"availableControls,omitempty"`
+	CreatedAt         time.Time            `json:"createdAt"`
 }
 
 // HostedConversationTaskContext is supplied by the trusted host after resolving
@@ -67,13 +65,13 @@ func (value *HostedConversationTaskContext) Validate() error {
 	if value == nil {
 		return nil
 	}
-	if !models.IsValidOpaqueIdentifier(value.ConversationID, 128) || value.ThreadRootID != "" && !models.IsValidOpaqueIdentifier(value.ThreadRootID, 128) || len(value.Tasks) > 10 {
+	if !IsValidOpaqueIdentifier(value.ConversationID, 128) || value.ThreadRootID != "" && !IsValidOpaqueIdentifier(value.ThreadRootID, 128) || len(value.Tasks) > 10 {
 		return errors.New("hosted conversation task context requires an exact conversation and at most ten task snapshots")
 	}
 	seen := make(map[string]bool, len(value.Tasks))
 	for _, snapshot := range value.Tasks {
-		if !models.IsValidOpaqueIdentifier(snapshot.TaskID, 128) || !models.IsValidOpaqueIdentifier(snapshot.WorkRunID, 128) ||
-			(snapshot.Mode != models.ConversationTaskModeIndependent && snapshot.Mode != models.ConversationTaskModeContinuation) ||
+		if !IsValidOpaqueIdentifier(snapshot.TaskID, 128) || !IsValidOpaqueIdentifier(snapshot.WorkRunID, 128) ||
+			(snapshot.Mode != ConversationTaskModeIndependent && snapshot.Mode != ConversationTaskModeContinuation) ||
 			strings.TrimSpace(snapshot.Goal) == "" || !utf8.ValidString(snapshot.Goal) || utf8.RuneCountInString(snapshot.Goal) > 512 ||
 			!validConversationTaskSnapshotStatus(snapshot.Status) || snapshot.Revision < 1 || snapshot.CreatedAt.IsZero() || seen[snapshot.TaskID] {
 			return errors.New("hosted conversation task snapshot is invalid or exceeds its bounded goal summary")
@@ -102,11 +100,11 @@ func cloneHostedConversationTaskContext(value *HostedConversationTaskContext) *H
 	return &copy
 }
 
-func validateTaskProposalOutput(proposal *TurnTaskProposal, status models.AgentRunStatus, wake *models.WakeCondition, summary string, output map[string]interface{}, runError string) error {
+func validateTaskProposalOutput(proposal *TurnTaskProposal, status AgentRunStatus, wake *WakeCondition, summary string, output map[string]interface{}, runError string) error {
 	if err := proposal.Validate(); err != nil {
 		return err
 	}
-	if status != models.AgentRunStatusRunning || wake != nil {
+	if status != AgentRunStatusRunning || wake != nil {
 		return errors.New("a proposed task must leave the foreground Run running until durable admission")
 	}
 	if strings.TrimSpace(summary) != "" || len(output) != 0 || strings.TrimSpace(runError) != "" {
@@ -117,15 +115,15 @@ func validateTaskProposalOutput(proposal *TurnTaskProposal, status models.AgentR
 
 // validateHostedTaskAuthority is the old hosted Turn's name for
 // validateConversationTaskStartAuthority; it goes with the hosted Turn path.
-func validateHostedTaskAuthority(run *models.AgentRun, taskContext *HostedConversationTaskContext) error {
-	return validateConversationTaskStartAuthority(run, taskContext)
+func validateHostedTaskAuthority(run *AgentRun, taskContext *HostedConversationTaskContext) error {
+	return ValidateConversationTaskStartAuthority(run, taskContext)
 }
 
-func validConversationTaskSnapshotStatus(status models.AgentRunStatus) bool {
+func validConversationTaskSnapshotStatus(status AgentRunStatus) bool {
 	switch status {
-	case models.AgentRunStatusQueued, models.AgentRunStatusPlanning, models.AgentRunStatusRunning, models.AgentRunStatusPaused, models.AgentRunStatusSleeping,
-		models.AgentRunStatusWaitingForDependency, models.AgentRunStatusWaitingForAgent, models.AgentRunStatusWaitingForApproval, models.AgentRunStatusWaitingForEvent,
-		models.AgentRunStatusCompleted, models.AgentRunStatusFailed, models.AgentRunStatusCanceled:
+	case AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning, AgentRunStatusPaused, AgentRunStatusSleeping,
+		AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent, AgentRunStatusWaitingForApproval, AgentRunStatusWaitingForEvent,
+		AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled:
 		return true
 	default:
 		return false

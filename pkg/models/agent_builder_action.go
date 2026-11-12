@@ -1,4 +1,4 @@
-package runtime
+package models
 
 import (
 	"fmt"
@@ -13,15 +13,15 @@ import (
 // Bounds of a drafted Agent profile. They are the limits the change-set
 // drafts enforced, now in the action schema and validateAgentProfileText.
 const (
-	maxAgentDisplayNameRunes      = 80
+	MaxAgentDisplayNameRunes      = 80
 	maxAgentPurposeRunes          = 2000
 	maxAgentProfileTextRunes      = 16384
 	maxAgentOperatingPrinciples   = 16
 	maxAgentOperatingPrincipleLen = 2048
 	maxAgentModelIDLength         = 128
-	maxAgentBuilderSkillGrants    = 16
-	maxAgentBuilderConnections    = 8
-	maxAgentTrialMessageRunes     = 4096
+	MaxAgentBuilderSkillGrants    = 16
+	MaxAgentBuilderConnections    = 8
+	MaxAgentTrialMessageRunes     = 4096
 	maxAgentListQueryRunes        = 200
 )
 
@@ -46,7 +46,7 @@ type AgentConnectionRequest struct {
 	SourceIdentity string `json:"sourceIdentity,omitempty"`
 }
 
-type agentProfileArguments struct {
+type AgentProfileArguments struct {
 	DisplayName         string   `json:"displayName"`
 	Purpose             string   `json:"purpose"`
 	SystemPrompt        string   `json:"systemPrompt"`
@@ -55,15 +55,15 @@ type agentProfileArguments struct {
 	Model               string   `json:"model,omitempty"`
 }
 
-type agentCreateArguments struct {
-	agentProfileArguments
+type AgentCreateArguments struct {
+	AgentProfileArguments
 	SpaceID     string                   `json:"spaceId"`
 	Skills      []AgentSkillGrant        `json:"skills,omitempty"`
 	Connections []AgentConnectionRequest `json:"connections,omitempty"`
 	Rationale   string                   `json:"rationale"`
 }
 
-type agentUpdateArguments struct {
+type AgentUpdateArguments struct {
 	AgentID                    string            `json:"agentId"`
 	ExpectedDeploymentRevision int64             `json:"expectedDeploymentRevision"`
 	DisplayName                *string           `json:"displayName,omitempty"`
@@ -77,12 +77,12 @@ type agentUpdateArguments struct {
 	Rationale                  string            `json:"rationale"`
 }
 
-type agentTryArguments struct {
-	agentProfileArguments
+type AgentTryArguments struct {
+	AgentProfileArguments
 	Message string `json:"message"`
 }
 
-type agentListArguments struct {
+type AgentListArguments struct {
 	Query string `json:"query,omitempty"`
 }
 
@@ -90,7 +90,7 @@ type agentListArguments struct {
 // update_agent and try_agent.
 func agentProfileProperties() map[string]interface{} {
 	return map[string]interface{}{
-		"displayName":  map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maxAgentDisplayNameRunes},
+		"displayName":  map[string]interface{}{"type": "string", "minLength": 1, "maxLength": MaxAgentDisplayNameRunes},
 		"purpose":      map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maxAgentPurposeRunes},
 		"systemPrompt": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maxAgentProfileTextRunes},
 		"personality":  map[string]interface{}{"type": "string", "maxLength": maxAgentProfileTextRunes},
@@ -137,7 +137,7 @@ func agentProfileOutputSchema(operation string) map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
-			"resourceType": map[string]interface{}{"type": "string", "const": agentProfileResourceType},
+			"resourceType": map[string]interface{}{"type": "string", "const": AgentProfileResourceType},
 			"operation":    map[string]interface{}{"type": "string", "const": operation},
 			"deploymentId": map[string]interface{}{"type": "string"},
 			"displayName":  map[string]interface{}{"type": "string"},
@@ -172,8 +172,8 @@ func agentListAgentsAction() skill.Action {
 func agentCreateAgentAction() skill.Action {
 	properties := agentProfileProperties()
 	properties["spaceId"] = map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128, skill.SchemaExtensionKernelResolved: true}
-	properties["skills"] = map[string]interface{}{"type": "array", "maxItems": maxAgentBuilderSkillGrants, "items": agentSkillGrantSchema()}
-	properties["connections"] = map[string]interface{}{"type": "array", "maxItems": maxAgentBuilderConnections, "items": agentConnectionRequestSchema()}
+	properties["skills"] = map[string]interface{}{"type": "array", "maxItems": MaxAgentBuilderSkillGrants, "items": agentSkillGrantSchema()}
+	properties["connections"] = map[string]interface{}{"type": "array", "maxItems": MaxAgentBuilderConnections, "items": agentConnectionRequestSchema()}
 	properties["rationale"] = map[string]interface{}{"type": "string", "minLength": 1}
 	return skill.Action{
 		Name:        AgentActionCreateAgent,
@@ -192,9 +192,9 @@ func agentUpdateAgentAction() skill.Action {
 	properties := agentProfileProperties()
 	properties["agentId"] = map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128}
 	properties["expectedDeploymentRevision"] = map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true}
-	properties["addSkills"] = map[string]interface{}{"type": "array", "maxItems": maxAgentBuilderSkillGrants, "items": agentSkillGrantSchema()}
+	properties["addSkills"] = map[string]interface{}{"type": "array", "maxItems": MaxAgentBuilderSkillGrants, "items": agentSkillGrantSchema()}
 	properties["removeSkillBindingIds"] = map[string]interface{}{
-		"type": "array", "maxItems": maxAgentBuilderSkillGrants, "uniqueItems": true,
+		"type": "array", "maxItems": MaxAgentBuilderSkillGrants, "uniqueItems": true,
 		"items": map[string]interface{}{"type": "string", "minLength": 1},
 	}
 	properties["rationale"] = map[string]interface{}{"type": "string", "minLength": 1}
@@ -218,7 +218,7 @@ func agentUpdateAgentAction() skill.Action {
 
 func agentTryAgentAction() skill.Action {
 	properties := agentProfileProperties()
-	properties["message"] = map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maxAgentTrialMessageRunes}
+	properties["message"] = map[string]interface{}{"type": "string", "minLength": 1, "maxLength": MaxAgentTrialMessageRunes}
 	return skill.Action{
 		Name:        AgentActionTryAgent,
 		Description: "Send one test message to a drafted profile and read its reply. Nothing is created and the test Agent has no tools.",
@@ -242,34 +242,34 @@ func agentTryAgentAction() skill.Action {
 
 // normalizedAgentName is the key the name check compares: case-folded, with
 // runs of whitespace collapsed to one space.
-func normalizedAgentName(name string) string {
+func NormalizedAgentName(name string) string {
 	return strings.ToLower(strings.Join(strings.Fields(name), " "))
 }
 
 // normalized returns the profile with trimmed text and deduplicated
 // principles, the form a definition stores.
-func (p agentProfileArguments) normalized() agentProfileArguments {
+func (p AgentProfileArguments) Normalized() AgentProfileArguments {
 	p.DisplayName = strings.TrimSpace(p.DisplayName)
 	p.Purpose = strings.TrimSpace(p.Purpose)
 	p.SystemPrompt = strings.TrimSpace(p.SystemPrompt)
 	p.Personality = strings.TrimSpace(p.Personality)
-	p.OperatingPrinciples = normalizedActionStrings(p.OperatingPrinciples)
+	p.OperatingPrinciples = TrimmedUniqueStrings(p.OperatingPrinciples)
 	p.Model = strings.TrimSpace(p.Model)
 	return p
 }
 
 // validateAgentProfileText enforces the profile bounds and refuses secrets in
 // any profile text. profile must already be normalized.
-func validateAgentProfileText(profile agentProfileArguments) error {
-	return validateAgentProfileFields(profile, nil)
+func ValidateAgentProfileText(profile AgentProfileArguments) error {
+	return ValidateAgentProfileFields(profile, nil)
 }
 
 // validateAgentProfileFields checks the named profile fields, or every field
 // when fields is nil.
-func validateAgentProfileFields(profile agentProfileArguments, fields map[string]bool) error {
+func ValidateAgentProfileFields(profile AgentProfileArguments, fields map[string]bool) error {
 	checked := func(name string) bool { return fields == nil || fields[name] }
 	if checked("displayName") {
-		if err := validateAgentDisplayName(profile.DisplayName); err != nil {
+		if err := ValidateAgentDisplayName(profile.DisplayName); err != nil {
 			return err
 		}
 	}
@@ -325,9 +325,9 @@ func validateAgentProfileFields(profile agentProfileArguments, fields map[string
 	return nil
 }
 
-func validateAgentDisplayName(name string) error {
-	if name == "" || utf8.RuneCountInString(name) > maxAgentDisplayNameRunes || strings.IndexFunc(name, unicode.IsControl) >= 0 {
-		return fmt.Errorf("agent name must contain 1 to %d characters without control characters", maxAgentDisplayNameRunes)
+func ValidateAgentDisplayName(name string) error {
+	if name == "" || utf8.RuneCountInString(name) > MaxAgentDisplayNameRunes || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return fmt.Errorf("agent name must contain 1 to %d characters without control characters", MaxAgentDisplayNameRunes)
 	}
 	return nil
 }

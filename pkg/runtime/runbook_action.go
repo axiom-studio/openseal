@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	RunbookManagementSkillID      = "openseal.runbooks"
 	RunbookManagementSkillVersion = "1.9.0"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"

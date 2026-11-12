@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -677,13 +678,13 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 
 // countingRunReader counts store reads made while resolving a Run's mode.
 type countingRunReader struct {
-	agentRunReader
+	models.AgentRunReader
 	reads int
 }
 
 func (r *countingRunReader) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {
 	r.reads++
-	return r.agentRunReader.GetAgentRun(ctx, scope, runID)
+	return r.AgentRunReader.GetAgentRun(ctx, scope, runID)
 }
 
 // Children carry their source's routineEventBatchId, never one their caller
@@ -712,7 +713,7 @@ func TestRoutineEventBatchInheritedWithoutRootRead(t *testing.T) {
 		if got := routineEventBatchOf(child); got != test.wantBatch {
 			t.Fatalf("%s child batch = %q, want %q", test.source.ID, got, test.wantBatch)
 		}
-		reader := &countingRunReader{agentRunReader: store}
+		reader := &countingRunReader{AgentRunReader: store}
 		id, mode, err := RunConversationApprovalMode(ctx, reader, store, child)
 		if err != nil || id != conversation.ID || mode != test.wantMode {
 			t.Fatalf("%s child mode = %q %q %v, want %q", test.source.ID, id, mode, err, test.wantMode)

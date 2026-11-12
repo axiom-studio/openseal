@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 // StartAgentBuilderRequest opens a builder conversation and posts the request
@@ -170,4 +171,8 @@ func fitAgentBuilderParameter(field, value string, limit int, oneLine bool) stri
 		return ""
 	}
 	return value
+}
+
+func ScopeReference(scope Scope) capability.ScopeReference {
+	return capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 }

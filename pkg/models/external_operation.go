@@ -30,3 +30,7 @@ func ExternalOperationClaimDigest(call *ActionCall) string {
 	}
 	return call.ExternalOperationDigest
 }
+
+func ExternalOperationReceiptComplete(status ActionCallStatus) bool {
+	return status == ActionCallStatusSucceeded || status == ActionCallStatusCompensated
+}

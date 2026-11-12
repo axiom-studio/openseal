@@ -1,9 +1,5 @@
 package runtime
 
-import (
-	"strings"
-)
-
 func externalMessageSource(endpoint *ExternalConversationEndpoint, event NormalizedExternalConversationEvent) *ExternalMessageSource {
 	source := &ExternalMessageSource{Provider: endpoint.Provider, WorkspaceID: endpoint.InstallationID,
 		ChannelID: event.ExternalConversationID, ThreadID: event.ExternalThreadID, MessageID: event.ExternalMessageID,
@@ -29,12 +25,4 @@ func externalMessageSource(endpoint *ExternalConversationEndpoint, event Normali
 		}
 	}
 	return source
-}
-
-func sourceLabel(value string, max int) string {
-	value = strings.TrimSpace(value)
-	if len(value) > max || strings.ContainsAny(value, "\r\n\x00") {
-		return ""
-	}
-	return value
 }

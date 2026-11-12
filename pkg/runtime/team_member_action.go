@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	TeamManagementSkillID      = "openseal.teams"
 	TeamManagementSkillVersion = "2.2.0"
 	TeamActionUpdateMember     = "update_member"
 	TeamActionUpdateProfile    = "update_profile"

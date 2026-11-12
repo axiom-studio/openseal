@@ -226,9 +226,9 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input Ac
 	if err := decodeAgentBuilderArguments(input.Arguments, &args); err != nil {
 		return nil, err
 	}
-	args.agentProfileArguments = args.agentProfileArguments.normalized()
+	args.AgentProfileArguments = args.AgentProfileArguments.Normalized()
 	args.SpaceID = strings.TrimSpace(args.SpaceID)
-	if err := validateAgentProfileText(args.agentProfileArguments); err != nil {
+	if err := validateAgentProfileText(args.AgentProfileArguments); err != nil {
 		return nil, err
 	}
 	grants, err := resolveAgentSkillGrants(ctx, d.catalog, args.Skills)
@@ -240,7 +240,7 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input Ac
 		Scope:        scope,
 		DefinitionID: agentBuilderResourceID("agent-definition", scope, call.ID),
 		DeploymentID: agentBuilderResourceID("agent-deployment", scope, call.ID),
-		Profile:      args.agentProfileArguments,
+		Profile:      args.AgentProfileArguments,
 		SpaceID:      args.SpaceID,
 		Grants:       grants,
 		MaximumRisk:  agentGrantsMaximumRisk("", grants),

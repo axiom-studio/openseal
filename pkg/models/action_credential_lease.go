@@ -427,3 +427,14 @@ func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*Acti
 	}
 	return lease, nil
 }
+
+type ActionCredentialLeaseSignature struct {
+	Algorithm string `json:"algorithm"`
+	KeyID     string `json:"keyId"`
+	Value     []byte `json:"value"`
+}
+
+type SignedActionCredentialLease struct {
+	Lease     ActionCredentialLease          `json:"lease"`
+	Signature ActionCredentialLeaseSignature `json:"signature"`
+}

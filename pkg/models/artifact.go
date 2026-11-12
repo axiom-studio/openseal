@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -416,4 +418,94 @@ func (f ArtifactFiles) Keeps(working bool) bool {
 // version over makes the file a result again.
 type ArtifactWorkingFileStore interface {
 	MarkArtifactFiles(ctx context.Context, scope Scope, working, results []string) error
+}
+
+// ArtifactContentStore is implemented by a host that owns bytes. Raw content
+// and storage credentials must never be persisted in Artifact or Activity
+// state. SizeBytes may be -1 when the incoming stream size is unknown.
+type ArtifactContentStore interface {
+	Put(context.Context, ArtifactContentWrite) (ArtifactStoredContent, error)
+	Open(context.Context, Scope, string) (io.ReadCloser, error)
+}
+
+type ArtifactContentWrite struct {
+	Scope     Scope
+	MediaType string
+	Reader    io.Reader
+	SizeBytes int64
+	Digest    string
+	// Owner is the Artifact's owner, such as the Agent whose conversation
+	// produced it. A host may use it to place bytes; it is never part of the
+	// content reference contract.
+	Owner *ObjectiveOwner
+	// Space is the id of the Space the bytes belong to when the content is
+	// the Space's own, such as its icon, rather than an Agent's or a Team's.
+	// Like Owner it only tells a host where to place the bytes (an object
+	// store keeps each Space's content in its own folder); it is never part
+	// of the content reference contract, and a host that keeps all bytes in
+	// one place may ignore it.
+	Space string
+}
+
+type ArtifactStoredContent struct {
+	ContentRef string `json:"contentRef"`
+	Digest     string `json:"digest"`
+	SizeBytes  int64  `json:"sizeBytes"`
+}
+
+func NormalizeArtifact(artifact *Artifact) {
+	artifact.ID = strings.TrimSpace(artifact.ID)
+	artifact.Name = strings.TrimSpace(artifact.Name)
+	artifact.Type = strings.TrimSpace(artifact.Type)
+	artifact.MediaType = strings.ToLower(strings.TrimSpace(artifact.MediaType))
+	artifact.ContentRef = strings.TrimSpace(artifact.ContentRef)
+	artifact.Digest = strings.ToLower(strings.TrimSpace(artifact.Digest))
+	artifact.Provenance.Producer.Type = strings.TrimSpace(artifact.Provenance.Producer.Type)
+	artifact.Provenance.Producer.ID = strings.TrimSpace(artifact.Provenance.Producer.ID)
+	if artifact.Provenance.Owner != nil {
+		owner := *artifact.Provenance.Owner
+		owner.ID = strings.TrimSpace(owner.ID)
+		artifact.Provenance.Owner = &owner
+	}
+	artifact.Provenance.RunID = strings.TrimSpace(artifact.Provenance.RunID)
+	artifact.Provenance.ObjectiveID = strings.TrimSpace(artifact.Provenance.ObjectiveID)
+	artifact.Provenance.TurnID = strings.TrimSpace(artifact.Provenance.TurnID)
+	artifact.Provenance.ActionID = strings.TrimSpace(artifact.Provenance.ActionID)
+	artifact.Provenance.RequestID = strings.TrimSpace(artifact.Provenance.RequestID)
+	artifact.Provenance.ConversationID = strings.TrimSpace(artifact.Provenance.ConversationID)
+	artifact.Provenance.SpaceID = strings.TrimSpace(artifact.Provenance.SpaceID)
+	for index := range artifact.Evidence {
+		artifact.Evidence[index].TargetRef = strings.TrimSpace(artifact.Evidence[index].TargetRef)
+		artifact.Evidence[index].Summary = strings.TrimSpace(artifact.Evidence[index].Summary)
+	}
+	sort.SliceStable(artifact.Evidence, func(i, j int) bool {
+		left, right := artifact.Evidence[i], artifact.Evidence[j]
+		if left.TargetKind != right.TargetKind {
+			return left.TargetKind < right.TargetKind
+		}
+		if left.TargetRef != right.TargetRef {
+			return left.TargetRef < right.TargetRef
+		}
+		return left.Relation < right.Relation
+	})
+}
+
+func RunContextConversationID(run *AgentRun) string {
+	id, _ := run.Context[ConversationRunConversationIDContextKey].(string)
+	id = strings.TrimSpace(id)
+	if !IsValidOpaqueIdentifier(id, 128) {
+		return ""
+	}
+	return id
+}
+
+// savedArtifact is a file a tool saved, with the chat path it was saved from
+// when the tool reported one, so an answer can hand it over by either.
+//
+// Shown is set for a file the Agent showed in the chat itself (save_app,
+// present): it goes out with the answer whether or not the answer names it.
+type SavedArtifact struct {
+	Ref   ConversationReference
+	Path  string
+	Shown bool
 }

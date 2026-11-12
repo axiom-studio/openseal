@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	ObjectiveManagementSkillID      = "openseal.objectives"
 	ObjectiveManagementSkillVersion = "1.2.0"
 	ObjectiveActionCreate           = "create"
 	ObjectiveActionUpdate           = "update"

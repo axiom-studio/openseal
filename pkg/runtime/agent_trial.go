@@ -69,7 +69,7 @@ func ensureAgentTrialRun(ctx context.Context, store PortfolioStore, parent *Agen
 	if existing != nil {
 		return checkedAgentTrialChild(existing, parent.ID, callID)
 	}
-	profile := args.agentProfileArguments
+	profile := args.AgentProfileArguments
 	profile.Model = ""
 	trial, err := agentTrialContextMap(AgentTrialContext{Profile: profile, ParentRunID: parent.ID, ActionCallID: callID})
 	if err != nil {

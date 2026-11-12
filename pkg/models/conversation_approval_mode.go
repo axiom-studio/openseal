@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // ConversationApprovalMode is the per-conversation review boundary the kernel
@@ -77,4 +78,32 @@ type ConversationApprovalModeKernelStore interface {
 	ConversationApprovalModeStore
 	PortfolioStore
 	ActionStore
+}
+
+type AgentRunReader interface {
+	GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error)
+}
+
+// inheritRoutineEventBatch gives a child Run its source's routineEventBatchId,
+// and drops any value the child's caller-supplied context tried to set, so
+// only a real occurrence and the Runs under it carry the key.
+func InheritRoutineEventBatch(source *AgentRun, context map[string]interface{}) map[string]interface{} {
+	batch := ""
+	if source != nil {
+		batch = RoutineEventBatchID(source)
+	}
+	if batch == "" {
+		delete(context, RoutineEventBatchContextKey)
+		return context
+	}
+	if context == nil {
+		context = map[string]interface{}{}
+	}
+	context[RoutineEventBatchContextKey] = batch
+	return context
+}
+
+func RoutineEventBatchID(run *AgentRun) string {
+	batch, _ := run.Context[RoutineEventBatchContextKey].(string)
+	return strings.TrimSpace(batch)
 }

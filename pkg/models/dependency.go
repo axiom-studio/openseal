@@ -622,3 +622,62 @@ func cloneRunDependency(in *RunDependency) *RunDependency {
 	out.Artifacts = CloneArtifactReferences(in.Artifacts)
 	return &out
 }
+
+type RunDependencySpec struct {
+	ID          string
+	TargetRunID string
+	RequestID   string
+	Kind        RunDependencyKind
+	Required    *bool
+}
+
+type CreateRunDependencyGroupRequest struct {
+	ID                     string
+	Scope                  Scope
+	SourceRunID            string
+	ExpectedSourceRevision int64
+	Policy                 RunDependencyPolicy
+	Dependencies           []RunDependencySpec
+	IdempotencyKey         string
+	Actor                  ActivityActor
+	Visibility             ActivityVisibility
+}
+
+func CanEnterDependencyWait(run *AgentRun) bool {
+	if run == nil || run.WakeCondition != nil {
+		return false
+	}
+	switch run.Status {
+	case AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+func SameDependencyGroupRequest(group *RunDependencyGroup, edges []*RunDependency, req CreateRunDependencyGroupRequest) bool {
+	if group == nil || group.Scope != req.Scope || group.SourceRunID != strings.TrimSpace(req.SourceRunID) ||
+		group.Policy != req.Policy || group.IdempotencyKey != strings.TrimSpace(req.IdempotencyKey) || len(edges) != len(req.Dependencies) {
+		return false
+	}
+	type intent struct {
+		target, request string
+		kind            RunDependencyKind
+		required        bool
+	}
+	existing := make([]intent, 0, len(edges))
+	for _, edge := range edges {
+		existing = append(existing, intent{target: edge.TargetRunID, request: edge.RequestID, kind: edge.Kind, required: edge.Required})
+	}
+	wanted := make([]intent, 0, len(req.Dependencies))
+	for _, spec := range req.Dependencies {
+		required := true
+		if spec.Required != nil {
+			required = *spec.Required
+		}
+		wanted = append(wanted, intent{target: strings.TrimSpace(spec.TargetRunID), request: strings.TrimSpace(spec.RequestID), kind: spec.Kind, required: required})
+	}
+	sort.Slice(existing, func(i, j int) bool { return fmt.Sprint(existing[i]) < fmt.Sprint(existing[j]) })
+	sort.Slice(wanted, func(i, j int) bool { return fmt.Sprint(wanted[i]) < fmt.Sprint(wanted[j]) })
+	return reflect.DeepEqual(existing, wanted)
+}

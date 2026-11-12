@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -773,4 +775,49 @@ func PageObjectives(values []*Objective, offset, limit int) []*Objective {
 		values = values[:limit]
 	}
 	return values
+}
+
+// RunCreditErrorWorkspaceCreditsExhausted is the only RunCreditError code.
+const RunCreditErrorWorkspaceCreditsExhausted = "workspace_credits_exhausted"
+
+func ObjectiveActivityEvent(objective *Objective, actor ActivityActor, visibility ActivityVisibility, eventType, summary string, occurredAt time.Time, payload map[string]interface{}) *ActivityEvent {
+	if strings.TrimSpace(actor.Type) == "" {
+		actor = ActivityActor{Type: "system", ID: "openseal"}
+	}
+	if visibility == "" {
+		visibility = ActivityVisibilityScope
+	}
+	event := &ActivityEvent{
+		ID: uuid.NewString(), Scope: objective.Scope, ObjectiveID: objective.ID, EventType: eventType,
+		Severity: ActivitySeverityInfo, Actor: actor, Summary: summary, Payload: payload,
+		Visibility: visibility, CreatedAt: occurredAt,
+	}
+	event.AgentID = ownedItemEventAgentID(objective.Owner, actor)
+	if objective.Owner.Type == OwnerTypeTeam {
+		event.TeamID = objective.Owner.ID
+	}
+	return event
+}
+
+// ownedItemEventAgentID is the Agent an owned item's activity belongs to: the
+// owning Agent, or the Team member that acted on a Team-owned item.
+func ownedItemEventAgentID(owner ObjectiveOwner, actor ActivityActor) string {
+	switch owner.Type {
+	case OwnerTypeAgent:
+		return owner.ID
+	case OwnerTypeTeam:
+		if actor.Type == "agent" {
+			return actor.ID
+		}
+	}
+	return ""
+}
+
+func CanTransitionObjective(from, to ObjectiveStatus) bool {
+	allowed := map[ObjectiveStatus]map[ObjectiveStatus]bool{
+		ObjectiveStatusDraft:  {ObjectiveStatusActive: true, ObjectiveStatusRetired: true},
+		ObjectiveStatusActive: {ObjectiveStatusPaused: true, ObjectiveStatusSatisfied: true, ObjectiveStatusFailed: true, ObjectiveStatusRetired: true},
+		ObjectiveStatusPaused: {ObjectiveStatusActive: true, ObjectiveStatusFailed: true, ObjectiveStatusRetired: true},
+	}
+	return allowed[from][to]
 }

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // turn_report_progress (SPEC §5.3): a deliberate public update while the Run
@@ -61,7 +63,7 @@ func (reportProgressHandler) spec(a ControlAuthority) ControlToolSpec {
 }
 
 func (reportProgressHandler) decode(raw json.RawMessage) (interface{}, error) {
-	return decodeControlInto[reportProgressArgs](raw)
+	return models.DecodeControlInto[reportProgressArgs](raw)
 }
 
 func (reportProgressHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {

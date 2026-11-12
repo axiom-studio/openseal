@@ -703,3 +703,290 @@ func pageObjectives(values []*models.Objective, offset, limit int) []*models.Obj
 func normalizeRunSkillDependencyError(err error) error {
 	return models.NormalizeRunSkillDependencyError(err)
 }
+
+// cloneBudgetUsage forwards to models.CloneBudgetUsage.
+func cloneBudgetUsage(usage *models.BudgetUsage) *models.BudgetUsage {
+	return models.CloneBudgetUsage(usage)
+}
+
+// canTransitionAgentRun forwards to models.CanTransitionAgentRun.
+func canTransitionAgentRun(from, to models.AgentRunStatus) bool {
+	return models.CanTransitionAgentRun(from, to)
+}
+
+// isWaitingRunStatus forwards to models.IsWaitingRunStatus.
+func isWaitingRunStatus(status models.AgentRunStatus) bool {
+	return models.IsWaitingRunStatus(status)
+}
+
+// terminalCreditError forwards to models.TerminalCreditError.
+func terminalCreditError(status models.AgentRunStatus, failure *models.RunFailureExplanation) *models.RunCreditError {
+	return models.TerminalCreditError(status, failure)
+}
+
+// projectActivityEvent forwards to models.ProjectActivityEvent.
+func projectActivityEvent(event *models.ActivityEvent, includeDetails bool) ActivityProjection {
+	return models.ProjectActivityEvent(event, includeDetails)
+}
+
+// encodeActivityFeedCursor forwards to models.EncodeActivityFeedCursor.
+func encodeActivityFeedCursor(event *models.ActivityEvent) (string, error) {
+	return models.EncodeActivityFeedCursor(event)
+}
+
+// decodeActivityFeedCursor forwards to models.DecodeActivityFeedCursor.
+func decodeActivityFeedCursor(value string) (*models.ActivityFeedCursor, error) {
+	return models.DecodeActivityFeedCursor(value)
+}
+
+const agentProfileResourceType = models.AgentProfileResourceType
+
+const agentBehaviorResourceType = models.AgentBehaviorResourceType
+
+// normalizedActionStrings forwards to models.TrimmedUniqueStrings.
+func normalizedActionStrings(values []string) []string {
+	return models.TrimmedUniqueStrings(values)
+}
+
+// isAgentManagementAction forwards to models.IsAgentManagementAction.
+func isAgentManagementAction(bound *skill.BoundAction) bool {
+	return models.IsAgentManagementAction(bound)
+}
+
+// canonicalActionReview forwards to models.CanonicalActionReview.
+func canonicalActionReview(definition *skill.Definition, action skill.Action) skill.Action {
+	return models.CanonicalActionReview(definition, action)
+}
+
+const maxAgentDisplayNameRunes = models.MaxAgentDisplayNameRunes
+
+const maxAgentBuilderSkillGrants = models.MaxAgentBuilderSkillGrants
+
+const maxAgentBuilderConnections = models.MaxAgentBuilderConnections
+
+const maxAgentTrialMessageRunes = models.MaxAgentTrialMessageRunes
+
+type agentProfileArguments = models.AgentProfileArguments
+
+type agentCreateArguments = models.AgentCreateArguments
+
+type agentUpdateArguments = models.AgentUpdateArguments
+
+type agentTryArguments = models.AgentTryArguments
+
+type agentListArguments = models.AgentListArguments
+
+// normalizedAgentName forwards to models.NormalizedAgentName.
+func normalizedAgentName(name string) string {
+	return models.NormalizedAgentName(name)
+}
+
+// validateAgentProfileText forwards to models.ValidateAgentProfileText.
+func validateAgentProfileText(profile agentProfileArguments) error {
+	return models.ValidateAgentProfileText(profile)
+}
+
+// validateAgentProfileFields forwards to models.ValidateAgentProfileFields.
+func validateAgentProfileFields(profile agentProfileArguments, fields map[string]bool) error {
+	return models.ValidateAgentProfileFields(profile, fields)
+}
+
+// validateAgentDisplayName forwards to models.ValidateAgentDisplayName.
+func validateAgentDisplayName(name string) error {
+	return models.ValidateAgentDisplayName(name)
+}
+
+// agentBuilderScope forwards to models.ScopeReference.
+func agentBuilderScope(scope models.Scope) capability.ScopeReference {
+	return models.ScopeReference(scope)
+}
+
+// toolOutputPreviewText forwards to models.ToolOutputPreviewText.
+func toolOutputPreviewText(content []models.ContentPart) string {
+	return models.ToolOutputPreviewText(content)
+}
+
+// compactToolResultContent forwards to models.CompactToolResultContent.
+func compactToolResultContent(content []models.ContentPart, total int, reason string) []models.ContentPart {
+	return models.CompactToolResultContent(content, total, reason)
+}
+
+// normalizeArtifact forwards to models.NormalizeArtifact.
+func normalizeArtifact(artifact *models.Artifact) {
+	models.NormalizeArtifact(artifact)
+}
+
+// runContextConversationID forwards to models.RunContextConversationID.
+func runContextConversationID(run *models.AgentRun) string {
+	return models.RunContextConversationID(run)
+}
+
+// markRunFiles forwards to models.MarkRunFiles.
+func markRunFiles(ctx context.Context, store models.ArtifactStore, scope models.Scope, saved []savedArtifact, handedOver []models.ConversationReference) error {
+	return models.MarkRunFiles(ctx, store, scope, saved, handedOver)
+}
+
+const maximumAskUserQuestionBytes = models.MaximumAskUserQuestionBytes
+
+type askUserArgs = models.AskUserArgs
+
+// parseAskUserArgs forwards to models.ParseAskUserArgs.
+func parseAskUserArgs(raw json.RawMessage) (*askUserArgs, error) {
+	return models.ParseAskUserArgs(raw)
+}
+
+// askUserEntryArgs forwards to models.AskUserEntryArgs.
+func askUserEntryArgs(entry *models.SessionEntry) *askUserArgs {
+	return models.AskUserEntryArgs(entry)
+}
+
+// askUserQuestion forwards to models.AskUserEntryQuestion.
+func askUserQuestion(entry *models.SessionEntry) string {
+	return models.AskUserEntryQuestion(entry)
+}
+
+// validateConversationTaskStartAuthority forwards to models.ValidateConversationTaskStartAuthority.
+func validateConversationTaskStartAuthority(run *models.AgentRun, taskContext *HostedConversationTaskContext) error {
+	return models.ValidateConversationTaskStartAuthority(run, taskContext)
+}
+
+const maximumStartTaskGoalBytes = models.MaximumStartTaskGoalBytes
+
+const maximumStartTaskAcknowledgmentBytes = models.MaximumStartTaskAcknowledgmentBytes
+
+type startTaskArgs = models.StartTaskArgs
+
+// parseStartTaskArgs forwards to models.ParseStartTaskArgs.
+func parseStartTaskArgs(raw json.RawMessage) (*startTaskArgs, error) {
+	return models.ParseStartTaskArgs(raw)
+}
+
+// startTaskArguments forwards to models.StartTaskEntryArgs.
+func startTaskArguments(entry *models.SessionEntry) *startTaskArgs {
+	return models.StartTaskEntryArgs(entry)
+}
+
+// startTaskKey forwards to models.StartTaskKey.
+func startTaskKey(entryID string) string {
+	return models.StartTaskKey(entryID)
+}
+
+// decodeControlArguments forwards to models.DecodeControlArguments.
+func decodeControlArguments(raw json.RawMessage, target interface{}) error {
+	return models.DecodeControlArguments(raw, target)
+}
+
+type agentRunReader = models.AgentRunReader
+
+// inheritRoutineEventBatch forwards to models.InheritRoutineEventBatch.
+func inheritRoutineEventBatch(source *models.AgentRun, context map[string]interface{}) map[string]interface{} {
+	return models.InheritRoutineEventBatch(source, context)
+}
+
+// routineEventBatchOf forwards to models.RoutineEventBatchID.
+func routineEventBatchOf(run *models.AgentRun) string {
+	return models.RoutineEventBatchID(run)
+}
+
+type savedArtifact = models.SavedArtifact
+
+// teamRoster forwards to models.TeamRoster.
+func teamRoster(ctx context.Context, teams models.TeamRosterReader, scope models.Scope, teamID string) ([]string, bool, error) {
+	return models.TeamRoster(ctx, teams, scope, teamID)
+}
+
+// canEnterDependencyWait forwards to models.CanEnterDependencyWait.
+func canEnterDependencyWait(run *models.AgentRun) bool {
+	return models.CanEnterDependencyWait(run)
+}
+
+// sameDependencyGroupRequest forwards to models.SameDependencyGroupRequest.
+func sameDependencyGroupRequest(group *models.RunDependencyGroup, edges []*models.RunDependency, req CreateRunDependencyGroupRequest) bool {
+	return models.SameDependencyGroupRequest(group, edges, req)
+}
+
+// sourceLabel forwards to models.ExternalSourceLabel.
+func sourceLabel(value string, max int) string {
+	return models.ExternalSourceLabel(value, max)
+}
+
+// externalOperationReceiptComplete forwards to models.ExternalOperationReceiptComplete.
+func externalOperationReceiptComplete(status models.ActionCallStatus) bool {
+	return models.ExternalOperationReceiptComplete(status)
+}
+
+const maxModelStepMediaBytes = models.MaxModelStepMediaBytes
+
+// validModelStepToolName forwards to models.ValidModelStepToolName.
+func validModelStepToolName(name string) bool {
+	return models.ValidModelStepToolName(name)
+}
+
+// objectiveActivityEvent forwards to models.ObjectiveActivityEvent.
+func objectiveActivityEvent(objective *models.Objective, actor models.ActivityActor, visibility models.ActivityVisibility, eventType, summary string, occurredAt time.Time, payload map[string]interface{}) *models.ActivityEvent {
+	return models.ObjectiveActivityEvent(objective, actor, visibility, eventType, summary, occurredAt, payload)
+}
+
+// canTransitionObjective forwards to models.CanTransitionObjective.
+func canTransitionObjective(from, to models.ObjectiveStatus) bool {
+	return models.CanTransitionObjective(from, to)
+}
+
+// routineUngrantableSkill forwards to models.RoutineUngrantableSkill.
+func routineUngrantableSkill(skillID string) bool {
+	return models.RoutineUngrantableSkill(skillID)
+}
+
+// routineGrantIdentity forwards to models.RoutineGrantIdentity.
+func routineGrantIdentity(skillID, action string) string {
+	return models.RoutineGrantIdentity(skillID, action)
+}
+
+// routineRecipientKey forwards to models.IsRoutineRecipientKey.
+func routineRecipientKey(name string) bool {
+	return models.IsRoutineRecipientKey(name)
+}
+
+// routineActionDestinationKeys forwards to models.RoutineActionDestinationKeys.
+func routineActionDestinationKeys(schema map[string]interface{}) []string {
+	return models.RoutineActionDestinationKeys(schema)
+}
+
+// routineActionPostsToDestination forwards to models.RoutineActionPostsToDestination.
+func routineActionPostsToDestination(action skill.Action) bool {
+	return models.RoutineActionPostsToDestination(action)
+}
+
+type routineGrantStore = models.RoutineGrantStore
+
+// routineOwner forwards to models.RoutineOwner.
+func routineOwner(activation *models.RunbookActivation) (models.ConversationParticipant, error) {
+	return models.RoutineOwner(activation)
+}
+
+// resolveRoutineGrant forwards to models.ResolveRoutineGrant.
+func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routineGrantStore, owners RoutineOwnerAddressResolver, run *models.AgentRun, bound *skill.BoundAction, arguments map[string]interface{}) (*models.RoutineGrant, error) {
+	return models.ResolveRoutineGrant(ctx, runs, store, owners, run, bound, arguments)
+}
+
+const scheduledTaskContextKey = models.ScheduledTaskContextKey
+
+// agentsInSpace forwards to models.CheckAgentsInSpace.
+func agentsInSpace(space *models.Space, members []*models.SpaceMember, agentIDs []string) error {
+	return models.CheckAgentsInSpace(space, members, agentIDs)
+}
+
+// boundStepNarration forwards to models.BoundStepNarration.
+func boundStepNarration(text string) string {
+	return models.BoundStepNarration(text)
+}
+
+// normalizeModelIdentity forwards to models.NormalizeModelIdentity.
+func normalizeModelIdentity(provider, model string) (string, string, error) {
+	return models.NormalizeModelIdentity(provider, model)
+}
+
+// projectTurnAnswerPreview forwards to models.ProjectTurnAnswerPreview.
+func projectTurnAnswerPreview(event *models.ActivityEvent) *TurnAnswerPreview {
+	return models.ProjectTurnAnswerPreview(event)
+}

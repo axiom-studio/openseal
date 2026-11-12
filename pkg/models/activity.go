@@ -173,3 +173,41 @@ func ValidateObjectiveActivity(objective *Objective, event *ActivityEvent) error
 	}
 	return nil
 }
+
+func CloneBudgetUsage(usage *BudgetUsage) *BudgetUsage {
+	if usage == nil {
+		return nil
+	}
+	cloned := *usage
+	return &cloned
+}
+
+func CanTransitionAgentRun(from, to AgentRunStatus) bool {
+	allowed := map[AgentRunStatus]map[AgentRunStatus]bool{
+		AgentRunStatusQueued:               {AgentRunStatusPlanning: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusCanceled: true},
+		AgentRunStatusPlanning:             {AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusRunning:              {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusSleeping: true, AgentRunStatusWaitingForDependency: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusWaitingForEvent: true, AgentRunStatusCompleted: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusPaused:               {AgentRunStatusQueued: true, AgentRunStatusSleeping: true, AgentRunStatusWaitingForDependency: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusWaitingForEvent: true, AgentRunStatusCanceled: true},
+		AgentRunStatusSleeping:             {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusCanceled: true},
+		AgentRunStatusWaitingForDependency: {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusWaitingForAgent:      {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusWaitingForApproval:   {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusWaitingForEvent:      {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+	}
+	return allowed[from][to]
+}
+
+func IsWaitingRunStatus(status AgentRunStatus) bool {
+	return status == AgentRunStatusSleeping || status == AgentRunStatusWaitingForDependency ||
+		status == AgentRunStatusWaitingForAgent || status == AgentRunStatusWaitingForApproval ||
+		status == AgentRunStatusWaitingForEvent
+}
+
+// terminalCreditError reads the kernel-classified cause of a failed Run, never
+// provider text, so only a Workspace credit refusal yields a credit error.
+func TerminalCreditError(status AgentRunStatus, failure *RunFailureExplanation) *RunCreditError {
+	if status != AgentRunStatusFailed || failure == nil || failure.Code != RunCreditErrorWorkspaceCreditsExhausted {
+		return nil
+	}
+	return &RunCreditError{Code: RunCreditErrorWorkspaceCreditsExhausted}
+}

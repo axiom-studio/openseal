@@ -98,3 +98,7 @@ func cloneRoutineEventTrigger(t *RoutineEventTrigger) *RoutineEventTrigger {
 	}
 	return &copy
 }
+
+const (
+	ScheduledTaskContextKey = "scheduledAgentTask"
+)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -942,7 +943,7 @@ func runbookKernelSpec(description string) ControlToolSpec {
 }
 
 func decodeRunbookKernelArgs(raw json.RawMessage) (interface{}, error) {
-	value, err := decodeControlInto[runbookKernelArgs](raw)
+	value, err := models.DecodeControlInto[runbookKernelArgs](raw)
 	if err != nil {
 		return nil, err
 	}

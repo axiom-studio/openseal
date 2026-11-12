@@ -1041,7 +1041,7 @@ func sharedAgentProfileArguments(profile SharedAgentProfile) agentProfileArgumen
 	return agentProfileArguments{
 		DisplayName: profile.DisplayName, Purpose: profile.Purpose, SystemPrompt: profile.SystemPrompt,
 		Personality: profile.Personality, OperatingPrinciples: profile.OperatingPrinciples,
-	}.normalized()
+	}.Normalized()
 }
 
 func sharedAgentReference(source SharedAgentSource) string {

@@ -41,11 +41,11 @@ func TestAskUserOptionsDecodeLimits(t *testing.T) {
 	want := &ChannelQuestion{AllowMultiple: true, AllowOther: true, Options: []ChannelQuestionOption{
 		{ID: "o1", Label: "A", Description: "first"}, {ID: "o2", Label: strings.Repeat("b", 80)},
 	}}
-	if got := args.channelQuestion(); !reflect.DeepEqual(got, want) {
+	if got := args.ChannelQuestion(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("question = %#v", got)
 	}
 	if plain, err := (askUserHandler{}).decode(json.RawMessage(`{"question":"Which?","options":[]}`)); err != nil ||
-		plain.(*askUserArgs).channelQuestion() != nil {
+		plain.(*askUserArgs).ChannelQuestion() != nil {
 		t.Fatalf("empty options = %#v %v", plain, err)
 	}
 	spec := (askUserHandler{}).spec(ControlAuthority{})

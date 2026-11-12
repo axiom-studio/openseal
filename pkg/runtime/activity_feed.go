@@ -2,15 +2,10 @@ package runtime
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
 	"time"
-
-	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -35,40 +30,10 @@ type ActivityFeedRequest struct {
 	IncludeDetails bool
 }
 
-type ActivityProjection struct {
-	AnswerPreview    *TurnAnswerPreview        `json:"answerPreview,omitempty"`
-	ID               string                    `json:"id"`
-	Sequence         int64                     `json:"sequence"`
-	EventType        string                    `json:"eventType"`
-	Category         string                    `json:"category"`
-	Severity         models.ActivitySeverity   `json:"severity"`
-	Visibility       models.ActivityVisibility `json:"visibility"`
-	AgentID          string                    `json:"agentId,omitempty"`
-	ObjectiveID      string                    `json:"objectiveId,omitempty"`
-	RunID            string                    `json:"runId,omitempty"`
-	TurnID           string                    `json:"turnId,omitempty"`
-	ParentRunID      string                    `json:"parentRunId,omitempty"`
-	TeamID           string                    `json:"teamId,omitempty"`
-	Actor            models.ActivityActor      `json:"actor"`
-	Summary          string                    `json:"summary"`
-	UsageDelta       *models.BudgetUsage       `json:"usageDelta,omitempty"`
-	CreatedAt        time.Time                 `json:"createdAt"`
-	DetailAvailable  bool                      `json:"detailAvailable"`
-	Payload          map[string]interface{}    `json:"payload,omitempty"`
-	ConversationRefs []string                  `json:"conversationRefs,omitempty"`
-	CorrelationID    string                    `json:"correlationId,omitempty"`
-	CausationID      string                    `json:"causationId,omitempty"`
-}
-
 type ActivityFeedPage struct {
 	Items      []ActivityProjection `json:"items"`
 	NextCursor string               `json:"nextCursor,omitempty"`
 	HasMore    bool                 `json:"hasMore"`
-}
-
-type activityFeedCursor struct {
-	CreatedAt time.Time `json:"createdAt"`
-	ID        string    `json:"id"`
 }
 
 // ListActivityFeed returns a stable newest-first projection. Payload and
@@ -126,52 +91,4 @@ func (s *RunActivityService) ListActivityFeed(ctx context.Context, request Activ
 		}
 	}
 	return page, nil
-}
-
-func projectActivityEvent(event *models.ActivityEvent, includeDetails bool) ActivityProjection {
-	projection := ActivityProjection{
-		ID: event.ID, Sequence: event.Sequence, EventType: event.EventType, Category: activityCategory(event.EventType),
-		Severity: event.Severity, Visibility: event.Visibility, AgentID: event.AgentID, ObjectiveID: event.ObjectiveID,
-		RunID: event.RunID, TurnID: event.TurnID, ParentRunID: event.ParentRunID, TeamID: event.TeamID,
-		Actor: event.Actor, Summary: event.Summary, UsageDelta: cloneBudgetUsage(event.UsageDelta), CreatedAt: event.CreatedAt,
-		DetailAvailable: len(event.Payload) > 0 || len(event.ConversationRefs) > 0 || event.CorrelationID != "" || event.CausationID != "",
-	}
-	if includeDetails {
-		projection.Payload = maps.Clone(event.Payload)
-		projection.ConversationRefs = append([]string(nil), event.ConversationRefs...)
-		projection.CorrelationID = event.CorrelationID
-		projection.CausationID = event.CausationID
-	}
-	projection.AnswerPreview = projectTurnAnswerPreview(event)
-	return projection
-}
-
-func activityCategory(eventType string) string {
-	prefix, _, _ := strings.Cut(strings.TrimSpace(eventType), ".")
-	switch prefix {
-	case "run", "turn", "action", "approval", "skill", "artifact", "handoff", "objective", "message", "system":
-		return prefix
-	default:
-		return "activity"
-	}
-}
-
-func encodeActivityFeedCursor(event *models.ActivityEvent) (string, error) {
-	encoded, err := json.Marshal(activityFeedCursor{CreatedAt: event.CreatedAt.UTC(), ID: event.ID})
-	if err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(encoded), nil
-}
-
-func decodeActivityFeedCursor(value string) (*activityFeedCursor, error) {
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(value))
-	if err != nil {
-		return nil, errors.New("invalid activity feed cursor")
-	}
-	var cursor activityFeedCursor
-	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.CreatedAt.IsZero() || strings.TrimSpace(cursor.ID) == "" {
-		return nil, errors.New("invalid activity feed cursor")
-	}
-	return &cursor, nil
 }

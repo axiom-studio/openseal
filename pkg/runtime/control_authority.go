@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -124,22 +123,4 @@ func controlFinalMode(run *AgentRun) FinalAnswerMode {
 		return FinalModeSpoken
 	}
 	return FinalModeDefault
-}
-
-// validateConversationTaskStartAuthority reports whether run is a foreground
-// conversation Run allowed to start independent work in taskContext's
-// conversation and thread.
-func validateConversationTaskStartAuthority(run *models.AgentRun, taskContext *HostedConversationTaskContext) error {
-	if run == nil || run.Kind != models.RunKindConversation || strings.TrimSpace(run.ParentRunID) != "" ||
-		run.Context[models.ConversationTaskContextKey] != nil || taskContext == nil || !taskContext.CanStart || !models.IsValidOpaqueIdentifier(taskContext.ConversationID, 256) {
-		return errors.New("independent task admission is not available to this Run")
-	}
-	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
-	triggerID, _ := run.Context[models.ConversationRunTriggerIDContextKey].(string)
-	threadRootID, _ := run.Context["threadRootMessageId"].(string)
-	if strings.TrimSpace(conversationID) != taskContext.ConversationID || !models.IsValidOpaqueIdentifier(triggerID, 256) ||
-		strings.TrimSpace(threadRootID) != strings.TrimSpace(taskContext.ThreadRootID) {
-		return errors.New("task context does not match the foreground conversation")
-	}
-	return nil
 }

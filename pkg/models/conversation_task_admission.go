@@ -261,3 +261,21 @@ type ConversationTaskProofStore interface {
 	GetChannelMessage(context.Context, Scope, string, string) (*ChannelMessage, error)
 	FindParticipationRoundByIdempotencyKey(context.Context, Scope, string, string) (*ParticipationRoundResult, error)
 }
+
+// validateConversationTaskStartAuthority reports whether run is a foreground
+// conversation Run allowed to start independent work in taskContext's
+// conversation and thread.
+func ValidateConversationTaskStartAuthority(run *AgentRun, taskContext *HostedConversationTaskContext) error {
+	if run == nil || run.Kind != RunKindConversation || strings.TrimSpace(run.ParentRunID) != "" ||
+		run.Context[ConversationTaskContextKey] != nil || taskContext == nil || !taskContext.CanStart || !IsValidOpaqueIdentifier(taskContext.ConversationID, 256) {
+		return errors.New("independent task admission is not available to this Run")
+	}
+	conversationID, _ := run.Context[ConversationRunConversationIDContextKey].(string)
+	triggerID, _ := run.Context[ConversationRunTriggerIDContextKey].(string)
+	threadRootID, _ := run.Context["threadRootMessageId"].(string)
+	if strings.TrimSpace(conversationID) != taskContext.ConversationID || !IsValidOpaqueIdentifier(triggerID, 256) ||
+		strings.TrimSpace(threadRootID) != strings.TrimSpace(taskContext.ThreadRootID) {
+		return errors.New("task context does not match the foreground conversation")
+	}
+	return nil
+}

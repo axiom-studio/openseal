@@ -9,6 +9,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -77,7 +78,7 @@ func operationDescriptionLine(op HostedRunbookOperation) string {
 }
 
 func (operationHandler) decode(raw json.RawMessage) (interface{}, error) {
-	value, err := decodeControlInto[operationArgs](raw)
+	value, err := models.DecodeControlInto[operationArgs](raw)
 	if err != nil {
 		return nil, err
 	}

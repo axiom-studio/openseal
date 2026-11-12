@@ -8,20 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
-
-type ActionCredentialLeaseSignature struct {
-	Algorithm string `json:"algorithm"`
-	KeyID     string `json:"keyId"`
-	Value     []byte `json:"value"`
-}
-
-type SignedActionCredentialLease struct {
-	Lease     models.ActionCredentialLease   `json:"lease"`
-	Signature ActionCredentialLeaseSignature `json:"signature"`
-}
 
 type ActionCredentialLeaseSigner interface {
 	SignActionCredentialLease(context.Context, []byte) (ActionCredentialLeaseSignature, error)

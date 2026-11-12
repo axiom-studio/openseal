@@ -1,4 +1,4 @@
-package runtime
+package models
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -25,7 +24,7 @@ type umbrellaAgentStore interface {
 	GetDeployment(context.Context, capability.ScopeReference, string) (*kernelagent.AgentDeployment, error)
 }
 
-func umbrellaAgentDeployment(ctx context.Context, roster models.TeamRosterReader, scope capability.ScopeReference, id string) (*kernelagent.AgentDeployment, bool, error) {
+func umbrellaAgentDeployment(ctx context.Context, roster TeamRosterReader, scope capability.ScopeReference, id string) (*kernelagent.AgentDeployment, bool, error) {
 	if agents, ok := roster.(umbrellaAgentReader); ok {
 		deployment, err := agents.GetAgentDeployment(ctx, scope, id)
 		return deployment, true, err
@@ -42,57 +41,57 @@ func umbrellaAgentDeployment(ctx context.Context, roster models.TeamRosterReader
 // It fails closed. An Agent umbrella must be the run's assigned Agent. A Team
 // umbrella must be an active Team whose roster holds the assigned Agent; when
 // roster also reads Agent deployments, that member must be active too.
-func RunUmbrella(ctx context.Context, roster models.TeamRosterReader, run *models.AgentRun) (models.ObjectiveOwner, error) {
+func RunUmbrella(ctx context.Context, roster TeamRosterReader, run *AgentRun) (ObjectiveOwner, error) {
 	if run == nil || run.Owner.Validate() != nil || run.AssignedAgentID == "" {
-		return models.ObjectiveOwner{}, fmt.Errorf("%w: run has no owner and acting Agent", ErrRunUmbrellaUnavailable)
+		return ObjectiveOwner{}, fmt.Errorf("%w: run has no owner and acting Agent", ErrRunUmbrellaUnavailable)
 	}
 	switch run.Owner.Type {
-	case models.OwnerTypeAgent:
+	case OwnerTypeAgent:
 		if run.Owner.ID != run.AssignedAgentID {
-			return models.ObjectiveOwner{}, fmt.Errorf("%w: Agent run acts for another Agent", ErrRunUmbrellaUnavailable)
+			return ObjectiveOwner{}, fmt.Errorf("%w: Agent run acts for another Agent", ErrRunUmbrellaUnavailable)
 		}
 		return run.Owner, nil
-	case models.OwnerTypeTeam:
+	case OwnerTypeTeam:
 		member, err := AgentOnChatRoster(ctx, roster, run.Scope, run.Owner, run.AssignedAgentID)
 		if err != nil {
-			return models.ObjectiveOwner{}, err
+			return ObjectiveOwner{}, err
 		}
 		if !member {
-			return models.ObjectiveOwner{}, fmt.Errorf("%w: %s is not on the active Team %s", ErrRunUmbrellaUnavailable, run.AssignedAgentID, run.Owner.ID)
+			return ObjectiveOwner{}, fmt.Errorf("%w: %s is not on the active Team %s", ErrRunUmbrellaUnavailable, run.AssignedAgentID, run.Owner.ID)
 		}
 		deployment, readable, err := umbrellaAgentDeployment(ctx, roster, capability.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, run.AssignedAgentID)
 		if readable {
 			if errors.Is(err, kernelagent.ErrDeploymentNotFound) || err == nil && (deployment == nil || deployment.RolloutStatus != kernelagent.RolloutActive) {
-				return models.ObjectiveOwner{}, fmt.Errorf("%w: Team member %s is not active", ErrRunUmbrellaUnavailable, run.AssignedAgentID)
+				return ObjectiveOwner{}, fmt.Errorf("%w: Team member %s is not active", ErrRunUmbrellaUnavailable, run.AssignedAgentID)
 			}
 			if err != nil {
-				return models.ObjectiveOwner{}, err
+				return ObjectiveOwner{}, err
 			}
 		}
 		return run.Owner, nil
 	}
-	return models.ObjectiveOwner{}, ErrRunUmbrellaUnavailable
+	return ObjectiveOwner{}, ErrRunUmbrellaUnavailable
 }
 
 // ConversationUmbrella is the umbrella of every run in conversation.
-func ConversationUmbrella(conversation *models.Conversation) models.ObjectiveOwner {
+func ConversationUmbrella(conversation *Conversation) ObjectiveOwner {
 	if conversation == nil {
-		return models.ObjectiveOwner{}
+		return ObjectiveOwner{}
 	}
 	return conversation.Owner
 }
 
 // TaskUmbrella returns a task's umbrella and its acting member.
-func TaskUmbrella(task *models.ConversationTask) (models.ObjectiveOwner, string) {
+func TaskUmbrella(task *ConversationTask) (ObjectiveOwner, string) {
 	if task == nil {
-		return models.ObjectiveOwner{}, ""
+		return ObjectiveOwner{}, ""
 	}
 	return task.Owner, task.TargetAgentID
 }
 
 // OwnerOfSkillUmbrella converts the skill package's umbrella to an owner.
-func OwnerOfSkillUmbrella(umbrella skill.Umbrella) models.ObjectiveOwner {
-	return models.ObjectiveOwner{Type: models.OwnerType(umbrella.Kind), ID: umbrella.ID}
+func OwnerOfSkillUmbrella(umbrella skill.Umbrella) ObjectiveOwner {
+	return ObjectiveOwner{Type: OwnerType(umbrella.Kind), ID: umbrella.ID}
 }
 
 // InteractionRunResumable reports whether a settled setup, connection or
@@ -101,7 +100,7 @@ func OwnerOfSkillUmbrella(umbrella skill.Umbrella) models.ObjectiveOwner {
 // chat for a request it made for another Agent). A member removed from its
 // Team, or a Team that is no longer active, makes the request settle without
 // resuming anything.
-func InteractionRunResumable(ctx context.Context, roster models.TeamRosterReader, run *models.AgentRun, owner models.ObjectiveOwner, agentID string) (bool, error) {
+func InteractionRunResumable(ctx context.Context, roster TeamRosterReader, run *AgentRun, owner ObjectiveOwner, agentID string) (bool, error) {
 	if run == nil || run.AssignedAgentID != agentID {
 		return false, nil
 	}
@@ -109,5 +108,5 @@ func InteractionRunResumable(ctx context.Context, roster models.TeamRosterReader
 	if errors.Is(err, ErrRunUmbrellaUnavailable) {
 		return false, nil
 	}
-	return err == nil && umbrella == models.InteractionChatOwner(owner, agentID), err
+	return err == nil && umbrella == InteractionChatOwner(owner, agentID), err
 }

@@ -1,6 +1,11 @@
 package models
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+)
 
 const (
 	MinimumAskUserOptions                = 2
@@ -47,4 +52,31 @@ func ControlJSONResult(status ToolResultStatus, value map[string]interface{}) *T
 		Status: status, IsError: status != ToolResultSucceeded,
 		Content: []ContentPart{{Type: ContentPartJSON, Value: encoded}},
 	}
+}
+
+// decodeControlArguments decodes raw strictly: unknown fields are refused and
+// raw must hold exactly one JSON value. Empty input decodes as {}.
+func DecodeControlArguments(raw json.RawMessage, target interface{}) error {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		raw = json.RawMessage(`{}`)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("arguments must be one JSON object")
+	}
+	return nil
+}
+
+// decodeControlInto is the decode of a handler whose arguments are T.
+func DecodeControlInto[T any](raw json.RawMessage) (interface{}, error) {
+	var value T
+	if err := DecodeControlArguments(raw, &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
 }

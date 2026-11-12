@@ -1,12 +1,10 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"time"
 )
@@ -771,33 +769,6 @@ func controlSettleEntry(entries []*SessionEntry) *SessionEntry {
 
 // ---------------------------------------------------------------------------
 // Arguments and results on the wire (§3.3)
-
-// decodeControlArguments decodes raw strictly: unknown fields are refused and
-// raw must hold exactly one JSON value. Empty input decodes as {}.
-func decodeControlArguments(raw json.RawMessage, target interface{}) error {
-	if len(bytes.TrimSpace(raw)) == 0 {
-		raw = json.RawMessage(`{}`)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return errors.New("arguments must be one JSON object")
-	}
-	return nil
-}
-
-// decodeControlInto is the decode of a handler whose arguments are T.
-func decodeControlInto[T any](raw json.RawMessage) (interface{}, error) {
-	var value T
-	if err := decodeControlArguments(raw, &value); err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
 
 func controlArgumentsInvalid(message string) *ToolResult {
 	return controlErrorResult(ToolResultFailed, controlArgumentsInvalidCode, message, nil)

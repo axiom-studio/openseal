@@ -5,11 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
-	"unicode/utf8"
-
-	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ask_user (section 04 §10.2): a settle-phase control tool that posts one
@@ -20,50 +16,10 @@ import (
 // consumeSteering never turns that intervention into a user entry (SPEC §3.4).
 
 const (
-	maximumAskUserQuestionBytes        = 4096
 	conversationClarificationKeyPrefix = "conversation-clarification:"
 	askUserWaitReason                  = "question"
 	askUserParkSummary                 = "Asked a question"
 )
-
-type askUserArgs struct {
-	Question      string          `json:"question"`
-	Options       []askUserOption `json:"options,omitempty"`
-	AllowMultiple bool            `json:"allowMultiple,omitempty"`
-	// AllowOther lets the person answer in their own words alongside the options.
-	AllowOther bool `json:"allowOther,omitempty"`
-}
-
-type askUserOption struct {
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-}
-
-// askUserOptionID is the kernel-assigned id of the index-th option ("o1".."o6").
-func askUserOptionID(index int) string { return fmt.Sprintf("o%d", index+1) }
-
-// channelQuestion is the posted shape of the options (nil without options).
-func (a *askUserArgs) channelQuestion() *models.ChannelQuestion {
-	if a == nil || len(a.Options) == 0 {
-		return nil
-	}
-	question := &models.ChannelQuestion{AllowMultiple: a.AllowMultiple, AllowOther: a.AllowOther}
-	for index, option := range a.Options {
-		question.Options = append(question.Options, models.ChannelQuestionOption{ID: askUserOptionID(index), Label: option.Label, Description: option.Description})
-	}
-	return question
-}
-
-// selectedLabels maps chosen option ids to their labels, in option order.
-func (a *askUserArgs) selectedLabels(ids []string) []string {
-	labels := []string{}
-	for index, option := range a.Options {
-		if slices.Contains(ids, askUserOptionID(index)) {
-			labels = append(labels, option.Label)
-		}
-	}
-	return labels
-}
 
 type askUserHandler struct{}
 
@@ -103,69 +59,6 @@ func (askUserHandler) decode(raw json.RawMessage) (interface{}, error) {
 		return nil, err
 	}
 	return args, nil
-}
-
-// parseAskUserArgs strictly decodes and checks the arguments of an ask_user
-// call: a trimmed question and, when given, distinct trimmed options.
-func parseAskUserArgs(raw json.RawMessage) (*askUserArgs, error) {
-	args := &askUserArgs{}
-	if err := decodeControlArguments(raw, args); err != nil {
-		return nil, err
-	}
-	question := strings.TrimSpace(args.Question)
-	if question == "" {
-		return nil, errors.New("question must not be empty")
-	}
-	if len(question) > maximumAskUserQuestionBytes || !utf8.ValidString(question) {
-		return nil, fmt.Errorf("question must be valid text of at most %d bytes", maximumAskUserQuestionBytes)
-	}
-	args.Question = question
-	if len(args.Options) == 0 {
-		args.Options = nil
-		if args.AllowMultiple || args.AllowOther {
-			return nil, errors.New("allowMultiple and allowOther need options")
-		}
-		return args, nil
-	}
-	if len(args.Options) < models.MinimumAskUserOptions || len(args.Options) > models.MaximumAskUserOptions {
-		return nil, fmt.Errorf("options must list %d to %d choices", models.MinimumAskUserOptions, models.MaximumAskUserOptions)
-	}
-	seen := make(map[string]struct{}, len(args.Options))
-	for index := range args.Options {
-		option := &args.Options[index]
-		option.Label = strings.TrimSpace(option.Label)
-		option.Description = strings.TrimSpace(option.Description)
-		if err := models.ValidateChannelQuestionOptionText(option.Label, option.Description); err != nil {
-			return nil, err
-		}
-		if _, exists := seen[option.Label]; exists {
-			return nil, fmt.Errorf("option label %q is listed twice", option.Label)
-		}
-		seen[option.Label] = struct{}{}
-	}
-	return args, nil
-}
-
-// askUserEntryArgs decodes an ask_user entry's arguments (nil when the entry
-// is not a valid ask_user call).
-func askUserEntryArgs(entry *models.SessionEntry) *askUserArgs {
-	if entry == nil || entry.Type != models.SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(models.ControlToolAskUser) {
-		return nil
-	}
-	args, err := parseAskUserArgs(entry.Tool.Arguments)
-	if err != nil {
-		return nil
-	}
-	return args
-}
-
-// askUserQuestion is the posted text of an ask_user entry: its trimmed
-// question argument ("" when the entry is not an ask_user call).
-func askUserQuestion(entry *models.SessionEntry) string {
-	if args := askUserEntryArgs(entry); args != nil {
-		return args.Question
-	}
-	return ""
 }
 
 // conversationClarificationKey is the idempotency key of the question message
@@ -297,7 +190,7 @@ func conversationQuestionPostRequest(run *AgentRun, conversation *Conversation, 
 	return PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: ConversationRunAgentID(conversation, run)},
-		Intent: MessageIntentQuestion, Content: args.Question, Question: args.channelQuestion(), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Intent: MessageIntentQuestion, Content: args.Question, Question: args.ChannelQuestion(), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 		ReplyToMessageID: trigger.ID, RequiresResponse: true, References: conversationClarificationReferences(run),
 		IdempotencyKey: key,
 	}
@@ -342,7 +235,7 @@ func (askUserHandler) resume(ctx context.Context, x *ControlExecutor, cc Control
 			"status": "answered", "answer": truncateControlText(answer.AnswerContent, cc.Run.ID), "messageId": answer.AnswerMessageID,
 		}
 		if len(args.Options) > 0 {
-			value["selectedOptions"] = args.selectedLabels(answer.SelectedOptionIDs)
+			value["selectedOptions"] = args.SelectedLabels(answer.SelectedOptionIDs)
 		}
 		result := controlJSONResult(ToolResultSucceeded, value)
 		entry, err := x.transitionControlEntry(ctx, cc, ToolEntryCompleted, nil, result, nil)

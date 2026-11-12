@@ -70,7 +70,7 @@ func ValidateModelStepResult(req ModelStepRequest, res ModelStepResult) error {
 		if strings.TrimSpace(a.Text) == "" {
 			return invalidModelStepResult("summary step returned no summary text")
 		}
-	case req.Purpose.toolFree():
+	case req.Purpose.ToolFree():
 		if len(a.ToolCalls) > 0 {
 			return invalidModelStepResult("%s step returned tool calls", req.Purpose)
 		}
@@ -189,19 +189,6 @@ type retryableTurnHostError struct{ cause error }
 func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavailable.Error() }
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
-
-// HostedSkillPrompt is an immutable, already-authorized prompt projection. It
-// contains no binding configuration or credential value.
-type HostedSkillPrompt struct {
-	SkillID         string `json:"skillId"`
-	Version         string `json:"version"`
-	BindingID       string `json:"bindingId,omitempty"`
-	BindingRevision int64  `json:"bindingRevision,omitempty"`
-	Reference       string `json:"reference"`
-	Name            string `json:"name"`
-	Description     string `json:"description,omitempty"`
-	Instructions    string `json:"instructions"`
-}
 
 // HostedAgentTarget is one active, same-scope Agent deployment eligible for
 // bounded delegation. ID is the only durable identity; DisplayName and Purpose

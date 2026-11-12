@@ -1,4 +1,4 @@
-package runtime
+package models
 
 import (
 	"encoding/base64"
@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ModelStep wire types: one request is one model call. The kernel renders the
@@ -48,7 +47,7 @@ func (p ModelStepPurpose) Valid() bool {
 }
 
 // toolFree reports whether the purpose sends no tools.
-func (p ModelStepPurpose) toolFree() bool {
+func (p ModelStepPurpose) ToolFree() bool {
 	return p == ModelStepPurposeExplanation || p == ModelStepPurposeAcknowledgement
 }
 
@@ -60,7 +59,7 @@ var ErrInvalidModelStepRequest = errors.New("invalid model step request")
 type ModelStepRequest struct {
 	APIVersion        string                          `json:"apiVersion"`
 	Purpose           ModelStepPurpose                `json:"purpose"`
-	Scope             models.Scope                    `json:"scope"`
+	Scope             Scope                           `json:"scope"`
 	RunID             string                          `json:"runId"`
 	StepID            string                          `json:"stepId"`
 	Attempt           int                             `json:"attempt"` // 0-based; forced-compaction retry = 1; logs only
@@ -71,7 +70,7 @@ type ModelStepRequest struct {
 	ModelCredential   *capability.CredentialReference `json:"modelCredential,omitempty"`
 	Model             string                          `json:"model,omitempty"` // requested model; the binding may resolve another
 	System            ModelStepSystem                 `json:"system"`
-	Tools             []models.ModelStepTool          `json:"tools"`
+	Tools             []ModelStepTool                 `json:"tools"`
 	Entries           []SessionEntryView              `json:"entries"`
 	MaxOutputTokens   int64                           `json:"maxOutputTokens,omitempty"` // per-step reservation; 0 = no Run limit
 	Stream            ModelStepStream                 `json:"stream"`
@@ -109,16 +108,16 @@ type ModelStepStream struct {
 // render order: the latest compaction (if any), its kept tail by sequence,
 // then every later entry by sequence.
 type SessionEntryView struct {
-	ID          string                   `json:"id"`
-	Sequence    int64                    `json:"sequence"`
-	Type        models.SessionEntryType  `json:"type"`
-	CreatedAt   time.Time                `json:"createdAt"`
-	User        *UserEntryView           `json:"user,omitempty"`
-	Assistant   *models.AssistantEntry   `json:"assistant,omitempty"` // Limits is nil in a view
-	Tool        *ToolEntryView           `json:"tool,omitempty"`
-	Compaction  *CompactionEntryView     `json:"compaction,omitempty"`
-	Note        *NoteEntryView           `json:"note,omitempty"`
-	ModelChange *models.ModelChangeEntry `json:"modelChange,omitempty"`
+	ID          string               `json:"id"`
+	Sequence    int64                `json:"sequence"`
+	Type        SessionEntryType     `json:"type"`
+	CreatedAt   time.Time            `json:"createdAt"`
+	User        *UserEntryView       `json:"user,omitempty"`
+	Assistant   *AssistantEntry      `json:"assistant,omitempty"` // Limits is nil in a view
+	Tool        *ToolEntryView       `json:"tool,omitempty"`
+	Compaction  *CompactionEntryView `json:"compaction,omitempty"`
+	Note        *NoteEntryView       `json:"note,omitempty"`
+	ModelChange *ModelChangeEntry    `json:"modelChange,omitempty"`
 	// Surfaces names, in order, the tools that became callable after this
 	// entry (each listed tool has Surface == this entry's id). Only a
 	// completed tool entry carries it.
@@ -137,22 +136,22 @@ type EntryAuthor struct {
 }
 
 type UserEntryView struct {
-	Author  *EntryAuthor         `json:"author,omitempty"` // nil = the Run's requester
-	Content []models.ContentPart `json:"content"`
+	Author  *EntryAuthor  `json:"author,omitempty"` // nil = the Run's requester
+	Content []ContentPart `json:"content"`
 }
 
 type ToolEntryView struct {
-	CallID       string                `json:"callId"`
-	Name         string                `json:"name"`
-	Arguments    json.RawMessage       `json:"arguments"`
-	State        models.ToolEntryState `json:"state"` // always terminal
-	Result       ToolResultView        `json:"result"`
-	ActionCallID string                `json:"actionCallId,omitempty"`
+	CallID       string          `json:"callId"`
+	Name         string          `json:"name"`
+	Arguments    json.RawMessage `json:"arguments"`
+	State        ToolEntryState  `json:"state"` // always terminal
+	Result       ToolResultView  `json:"result"`
+	ActionCallID string          `json:"actionCallId,omitempty"`
 }
 
 type ToolResultView struct {
-	Content []models.ContentPart `json:"content"`
-	IsError bool                 `json:"isError,omitempty"`
+	Content []ContentPart `json:"content"`
+	IsError bool          `json:"isError,omitempty"`
 }
 
 type CompactionEntryView struct {
@@ -170,9 +169,9 @@ type NoteEntryView struct {
 // Result
 
 type ModelStepResult struct {
-	APIVersion string                `json:"apiVersion"`
-	StepID     string                `json:"stepId"`
-	Assistant  models.AssistantEntry `json:"assistant"` // summary: Text is the summary, no tool calls
+	APIVersion string         `json:"apiVersion"`
+	StepID     string         `json:"stepId"`
+	Assistant  AssistantEntry `json:"assistant"` // summary: Text is the summary, no tool calls
 	// Narration is the text before the first tool call; "" when there are none.
 	Narration string              `json:"narration,omitempty"`
 	Model     ModelStepModelInfo  `json:"model"`
@@ -180,11 +179,11 @@ type ModelStepResult struct {
 }
 
 type ModelStepModelInfo struct {
-	Provider         models.ModelStepProvider `json:"provider"`
-	Model            string                   `json:"model"`
-	ContextTokens    int64                    `json:"contextTokens,omitempty"`    // 0 = unknown
-	InputLimitTokens int64                    `json:"inputLimitTokens,omitempty"` // 0 = unknown
-	MaxOutputTokens  int64                    `json:"maxOutputTokens,omitempty"`  // effective per-call cap used
+	Provider         ModelStepProvider `json:"provider"`
+	Model            string            `json:"model"`
+	ContextTokens    int64             `json:"contextTokens,omitempty"`    // 0 = unknown
+	InputLimitTokens int64             `json:"inputLimitTokens,omitempty"` // 0 = unknown
+	MaxOutputTokens  int64             `json:"maxOutputTokens,omitempty"`  // effective per-call cap used
 }
 
 type ModelStepRenderInfo struct {
@@ -199,7 +198,7 @@ type ModelStepRenderInfo struct {
 // Validation
 
 // maxModelStepMediaBytes is the decoded cap of one view image (1 MiB).
-const maxModelStepMediaBytes = 1 << 20
+const MaxModelStepMediaBytes = 1 << 20
 
 var (
 	modelStepToolNamePattern  = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
@@ -208,7 +207,7 @@ var (
 
 // validModelStepToolName reports whether name is a tool name every model
 // provider accepts.
-func validModelStepToolName(name string) bool {
+func ValidModelStepToolName(name string) bool {
 	return modelStepToolNamePattern.MatchString(name)
 }
 
@@ -285,13 +284,13 @@ func (r ModelStepRequest) validateIdentity() error {
 }
 
 func (r ModelStepRequest) validateTools() error {
-	if r.Purpose.toolFree() && len(r.Tools) > 0 {
+	if r.Purpose.ToolFree() && len(r.Tools) > 0 {
 		return invalidModelStep("a %s step sends no tools", r.Purpose)
 	}
 	names := make(map[string]bool, len(r.Tools))
 	lastRank := 0
 	for i, tool := range r.Tools {
-		if !validModelStepToolName(tool.Name) {
+		if !ValidModelStepToolName(tool.Name) {
 			return invalidModelStep("tool %d has invalid name %q", i, tool.Name)
 		}
 		if names[tool.Name] {
@@ -322,17 +321,17 @@ func (r ModelStepRequest) validateTools() error {
 // within the loaded group the tools callable from the start come first, then
 // the surfaced tools in (entry position, index in Surfaces) order.
 func (r ModelStepRequest) validateSurfaces() error {
-	tools := make(map[string]models.ModelStepTool, len(r.Tools))
+	tools := make(map[string]ModelStepTool, len(r.Tools))
 	var surfaced []string
 	for _, tool := range r.Tools {
 		tools[tool.Name] = tool
 		if tool.Surface == "" {
-			if len(surfaced) > 0 && tool.Group == models.ModelStepToolLoaded {
+			if len(surfaced) > 0 && tool.Group == ModelStepToolLoaded {
 				return invalidModelStep("tool %q is callable from the start but follows surfaced tools", tool.Name)
 			}
 			continue
 		}
-		if tool.Group != models.ModelStepToolLoaded {
+		if tool.Group != ModelStepToolLoaded {
 			return invalidModelStep("tool %q (group %s) has a surface; only loaded tools do", tool.Name, tool.Group)
 		}
 		surfaced = append(surfaced, tool.Name)
@@ -344,7 +343,7 @@ func (r ModelStepRequest) validateSurfaces() error {
 		if len(entry.Surfaces) == 0 {
 			continue
 		}
-		if entry.Type != models.SessionEntryTool || entry.Tool.State != models.ToolEntryCompleted {
+		if entry.Type != SessionEntryTool || entry.Tool.State != ToolEntryCompleted {
 			return invalidModelStep("entry %s surfaces tools but is not a completed tool entry", entry.ID)
 		}
 		for _, name := range entry.Surfaces {
@@ -400,17 +399,17 @@ func (v *SessionEntryView) payloadCount() int {
 
 func (v *SessionEntryView) payloadMatchesType() bool {
 	switch v.Type {
-	case models.SessionEntryUser:
+	case SessionEntryUser:
 		return v.User != nil
-	case models.SessionEntryAssistant:
+	case SessionEntryAssistant:
 		return v.Assistant != nil
-	case models.SessionEntryTool:
+	case SessionEntryTool:
 		return v.Tool != nil
-	case models.SessionEntryCompaction:
+	case SessionEntryCompaction:
 		return v.Compaction != nil
-	case models.SessionEntryNote:
+	case SessionEntryNote:
 		return v.Note != nil
-	case models.SessionEntryModelChange:
+	case SessionEntryModelChange:
 		return v.ModelChange != nil
 	}
 	return false
@@ -442,7 +441,7 @@ func (r ModelStepRequest) validateEntries() (bool, error) {
 		if entry.payloadCount() != 1 || !entry.payloadMatchesType() {
 			return false, invalidModelStep("entry %s needs exactly the %s payload", entry.ID, entry.Type)
 		}
-		if entry.Type == models.SessionEntryCompaction {
+		if entry.Type == SessionEntryCompaction {
 			if i != 0 {
 				return false, invalidModelStep("compaction entry %s must be the first entry", entry.ID)
 			}
@@ -457,7 +456,7 @@ func (r ModelStepRequest) validateEntries() (bool, error) {
 	if compacted {
 		rest = r.Entries[1:]
 	}
-	if len(rest) > 0 && rest[0].Type == models.SessionEntryTool {
+	if len(rest) > 0 && rest[0].Type == SessionEntryTool {
 		return false, invalidModelStep("entry %s: the path cannot start with a tool entry", rest[0].ID)
 	}
 	if compacted {
@@ -499,7 +498,7 @@ func (r ModelStepRequest) validateEntries() (bool, error) {
 // checked later (validateContent).
 func (v *SessionEntryView) validatePayload() error {
 	switch v.Type {
-	case models.SessionEntryUser:
+	case SessionEntryUser:
 		if author := v.User.Author; author != nil {
 			if author.Kind != EntryAuthorPerson && author.Kind != EntryAuthorAgent {
 				return invalidModelStep("entry %s: unknown author kind %q", v.ID, author.Kind)
@@ -511,39 +510,39 @@ func (v *SessionEntryView) validatePayload() error {
 		if len(v.User.Content) == 0 {
 			return invalidModelStep("user entry %s has no content", v.ID)
 		}
-	case models.SessionEntryAssistant:
+	case SessionEntryAssistant:
 		if v.Assistant.Limits != nil {
 			return invalidModelStep("assistant entry %s: limits are kernel-only and not sent", v.ID)
 		}
 		if err := v.Assistant.Validate(); err != nil {
 			return invalidModelStep("assistant entry %s: %v", v.ID, err)
 		}
-	case models.SessionEntryTool:
+	case SessionEntryTool:
 		tool := v.Tool
 		if strings.TrimSpace(tool.CallID) == "" || strings.TrimSpace(tool.Name) == "" {
 			return invalidModelStep("tool entry %s needs callId and name", v.ID)
 		}
-		if err := models.ValidateToolArguments("tool entry "+v.ID+" arguments", tool.Arguments); err != nil {
+		if err := ValidateToolArguments("tool entry "+v.ID+" arguments", tool.Arguments); err != nil {
 			return invalidModelStep("%v", err)
 		}
 		if !tool.State.Terminal() {
 			return invalidModelStep("tool entry %s is %q; only finished tool entries are sent", v.ID, tool.State)
 		}
-		if tool.Result.IsError == (tool.State == models.ToolEntryCompleted) {
+		if tool.Result.IsError == (tool.State == ToolEntryCompleted) {
 			return invalidModelStep("tool entry %s: isError disagrees with state %s", v.ID, tool.State)
 		}
-	case models.SessionEntryCompaction:
+	case SessionEntryCompaction:
 		if strings.TrimSpace(v.Compaction.Summary) == "" {
 			return invalidModelStep("compaction entry %s needs a summary", v.ID)
 		}
 		if v.Compaction.TokensBefore < 0 {
 			return invalidModelStep("compaction entry %s has negative tokensBefore", v.ID)
 		}
-	case models.SessionEntryNote:
+	case SessionEntryNote:
 		if strings.TrimSpace(v.Note.Text) == "" {
 			return invalidModelStep("note entry %s needs text", v.ID)
 		}
-	case models.SessionEntryModelChange:
+	case SessionEntryModelChange:
 		if strings.TrimSpace(v.ModelChange.Provider) == "" || strings.TrimSpace(v.ModelChange.Model) == "" {
 			return invalidModelStep("model_change entry %s needs provider and model", v.ID)
 		}
@@ -574,13 +573,13 @@ func validateModelStepToolPairing(entries []SessionEntryView, compacted bool) er
 	for i := range entries {
 		entry := &entries[i]
 		switch entry.Type {
-		case models.SessionEntryAssistant:
+		case SessionEntryAssistant:
 			if err := closeAssistant(); err != nil {
 				return err
 			}
 			assistant = entry
 			answered = make(map[string]bool, len(entry.Assistant.ToolCalls))
-		case models.SessionEntryTool:
+		case SessionEntryTool:
 			callID := entry.Tool.CallID
 			if assistant == nil || !assistantHasCall(assistant.Assistant, callID) {
 				return invalidModelStep("tool entry %s answers no call of the preceding assistant entry", entry.ID)
@@ -594,7 +593,7 @@ func validateModelStepToolPairing(entries []SessionEntryView, compacted bool) er
 	return closeAssistant()
 }
 
-func assistantHasCall(a *models.AssistantEntry, callID string) bool {
+func assistantHasCall(a *AssistantEntry, callID string) bool {
 	for _, call := range a.ToolCalls {
 		if call.ID == callID {
 			return true
@@ -607,20 +606,20 @@ func (r ModelStepRequest) validateContent() error {
 	for i := range r.Entries {
 		entry := &r.Entries[i]
 		var (
-			parts  []models.ContentPart
-			limits models.ContentPartLimits
+			parts  []ContentPart
+			limits ContentPartLimits
 		)
 		switch entry.Type {
-		case models.SessionEntryUser:
+		case SessionEntryUser:
 			parts = entry.User.Content
-			limits = models.ContentPartLimits{Field: "user entry " + entry.ID + " content", MaxParts: models.MaxUserEntryParts, MaxContent: models.MaxUserEntryContentBytes, MaxFileParts: models.MaxUserEntryFileParts, AllowDataBytes: true}
-		case models.SessionEntryTool:
+			limits = ContentPartLimits{Field: "user entry " + entry.ID + " content", MaxParts: MaxUserEntryParts, MaxContent: MaxUserEntryContentBytes, MaxFileParts: MaxUserEntryFileParts, AllowDataBytes: true}
+		case SessionEntryTool:
 			parts = entry.Tool.Result.Content
-			limits = models.ContentPartLimits{Field: "tool entry " + entry.ID + " result", MaxParts: models.MaxToolResultParts, MaxContent: models.MaxToolResultContentBytes, AllowDataBytes: true}
+			limits = ContentPartLimits{Field: "tool entry " + entry.ID + " result", MaxParts: MaxToolResultParts, MaxContent: MaxToolResultContentBytes, AllowDataBytes: true}
 		default:
 			continue
 		}
-		if _, err := models.ValidateContentParts(parts, limits); err != nil {
+		if _, err := ValidateContentParts(parts, limits); err != nil {
 			return invalidModelStep("%v", err)
 		}
 		for j, part := range parts {
@@ -634,8 +633,8 @@ func (r ModelStepRequest) validateContent() error {
 
 // validateModelStepMedia applies the host media rules to a view part: only
 // image parts carry bytes, and every view image carries 1 byte .. 1 MiB.
-func validateModelStepMedia(part models.ContentPart) error {
-	if part.Type != models.ContentPartImage {
+func validateModelStepMedia(part ContentPart) error {
+	if part.Type != ContentPartImage {
 		if part.DataBase64 != "" {
 			return errors.New("only image parts carry dataBase64")
 		}
@@ -645,8 +644,21 @@ func validateModelStepMedia(part models.ContentPart) error {
 	if err != nil || len(decoded) == 0 {
 		return errors.New("image needs base64 data")
 	}
-	if len(decoded) > maxModelStepMediaBytes {
-		return fmt.Errorf("image is %d bytes (max %d)", len(decoded), maxModelStepMediaBytes)
+	if len(decoded) > MaxModelStepMediaBytes {
+		return fmt.Errorf("image is %d bytes (max %d)", len(decoded), MaxModelStepMediaBytes)
 	}
 	return nil
+}
+
+// HostedSkillPrompt is an immutable, already-authorized prompt projection. It
+// contains no binding configuration or credential value.
+type HostedSkillPrompt struct {
+	SkillID         string `json:"skillId"`
+	Version         string `json:"version"`
+	BindingID       string `json:"bindingId,omitempty"`
+	BindingRevision int64  `json:"bindingRevision,omitempty"`
+	Reference       string `json:"reference"`
+	Name            string `json:"name"`
+	Description     string `json:"description,omitempty"`
+	Instructions    string `json:"instructions"`
 }

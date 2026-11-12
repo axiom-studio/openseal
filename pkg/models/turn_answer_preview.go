@@ -1,12 +1,10 @@
-package runtime
+package models
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"unicode/utf8"
-
-	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // TurnAnswerPreview is a provisional snapshot, never a validated run output.
@@ -55,8 +53,8 @@ func (preview TurnAnswerPreview) Validate() error {
 // projectTurnAnswerPreview exposes only the typed public preview of a
 // turn.answer_preview event, never arbitrary payload fields. It also
 // reconstructs snapshots after a database JSON round-trip.
-func projectTurnAnswerPreview(event *models.ActivityEvent) *TurnAnswerPreview {
-	if event.EventType != "turn.answer_preview" || event.Visibility == models.ActivityVisibilityPrivate {
+func ProjectTurnAnswerPreview(event *ActivityEvent) *TurnAnswerPreview {
+	if event.EventType != "turn.answer_preview" || event.Visibility == ActivityVisibilityPrivate {
 		return nil
 	}
 	data, err := json.Marshal(map[string]interface{}{

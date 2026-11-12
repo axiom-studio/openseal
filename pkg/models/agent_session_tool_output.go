@@ -1,4 +1,4 @@
-package runtime
+package models
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
 
@@ -48,17 +47,17 @@ var toolOutputCompactLevels = []toolOutputCompactLevel{
 // is; a larger one is compacted to fit and marked truncated, or, when the
 // keeper failed or there is no action call id, refused. File and image parts
 // are always kept as they are.
-func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation ToolInvocation, result models.ToolResult) (models.ToolResult, error) {
-	var content, others []models.ContentPart
+func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation ToolInvocation, result ToolResult) (ToolResult, error) {
+	var content, others []ContentPart
 	total := 0
 	for _, part := range result.Content {
 		switch part.Type {
-		case models.ContentPartText:
+		case ContentPartText:
 			content = append(content, part)
 			total += len(part.Text)
-		case models.ContentPartJSON:
+		case ContentPartJSON:
 			content = append(content, part)
-			total += models.JSONPartBytes(part.Value)
+			total += JSONPartBytes(part.Value)
 		default:
 			others = append(others, part)
 		}
@@ -66,7 +65,7 @@ func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation To
 	if total <= toolOutputInlineBytes {
 		return result, nil
 	}
-	fits := total <= models.MaxToolResultContentBytes
+	fits := total <= MaxToolResultContentBytes
 
 	reason := "this work has no chat to keep the full output in"
 	if keeper != nil {
@@ -74,7 +73,7 @@ func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation To
 			if fits {
 				return result, nil
 			}
-			return models.ToolResult{}, errors.New("bound tool result: the invocation has no action call id to keep its output under")
+			return ToolResult{}, errors.New("bound tool result: the invocation has no action call id to keep its output under")
 		}
 		payload := toolOutputPayload(content)
 		paths, err := keeper.KeepToolOutput(ctx, invocation, []toolfile.Payload{payload})
@@ -84,12 +83,12 @@ func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation To
 			if fits {
 				return result, nil
 			}
-			return models.ToolResult{}, fmt.Errorf("keep tool output: %w", err)
+			return ToolResult{}, fmt.Errorf("keep tool output: %w", err)
 		case len(paths) > 0 && paths[0] != "":
-			preview := models.TruncateUTF8(toolOutputPreviewText(content), toolOutputPreviewBytes)
-			kept := []models.ContentPart{
-				{Type: models.ContentPartText, Text: preview + fmt.Sprintf("\n… (%s in total; the full output is in %s)", formatToolOutputSize(len(payload.Data)), paths[0])},
-				{Type: models.ContentPartFile, Path: paths[0], MimeType: payload.MimeType, SizeBytes: int64(len(payload.Data))},
+			preview := TruncateUTF8(ToolOutputPreviewText(content), toolOutputPreviewBytes)
+			kept := []ContentPart{
+				{Type: ContentPartText, Text: preview + fmt.Sprintf("\n… (%s in total; the full output is in %s)", formatToolOutputSize(len(payload.Data)), paths[0])},
+				{Type: ContentPartFile, Path: paths[0], MimeType: payload.MimeType, SizeBytes: int64(len(payload.Data))},
 			}
 			return withToolResultContent(result, append(kept, others...)), nil
 		default:
@@ -99,28 +98,28 @@ func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation To
 	if fits {
 		return result, nil
 	}
-	return withToolResultContent(result, append(compactToolResultContent(content, total, reason), others...)), nil
+	return withToolResultContent(result, append(CompactToolResultContent(content, total, reason), others...)), nil
 }
 
-func withToolResultContent(result models.ToolResult, content []models.ContentPart) models.ToolResult {
+func withToolResultContent(result ToolResult, content []ContentPart) ToolResult {
 	result.Content = content
 	return result
 }
 
 // toolOutputPayload is the file that holds the full text/json content: plain
 // text for exactly one text part, otherwise the parts as json.
-func toolOutputPayload(content []models.ContentPart) toolfile.Payload {
-	if len(content) == 1 && content[0].Type == models.ContentPartText {
+func toolOutputPayload(content []ContentPart) toolfile.Payload {
+	if len(content) == 1 && content[0].Type == ContentPartText {
 		return toolfile.Payload{Name: "output.txt", MimeType: "text/plain", Data: []byte(content[0].Text)}
 	}
 	data, _ := json.Marshal(content)
 	return toolfile.Payload{Name: "output.json", MimeType: "application/json", Data: data}
 }
 
-func toolOutputPreviewText(content []models.ContentPart) string {
+func ToolOutputPreviewText(content []ContentPart) string {
 	pieces := make([]string, 0, len(content))
 	for _, part := range content {
-		if part.Type == models.ContentPartText {
+		if part.Type == ContentPartText {
 			pieces = append(pieces, part.Text)
 		} else {
 			pieces = append(pieces, string(part.Value))
@@ -133,21 +132,21 @@ func toolOutputPreviewText(content []models.ContentPart) string {
 // MaxToolResultContentBytes. Json parts are compacted down the level ladder and
 // wrapped as {"truncated":true,...}; text parts share what is left. When nothing
 // fits, the content is one text part saying it could not be shortened.
-func compactToolResultContent(content []models.ContentPart, total int, reason string) []models.ContentPart {
+func CompactToolResultContent(content []ContentPart, total int, reason string) []ContentPart {
 	decoded := make([]interface{}, len(content))
 	decodedOK := make([]bool, len(content))
 	for i, part := range content {
-		if part.Type == models.ContentPartJSON {
+		if part.Type == ContentPartJSON {
 			decodedOK[i] = json.Unmarshal(part.Value, &decoded[i]) == nil
 		}
 	}
 	for _, level := range toolOutputCompactLevels {
-		out := make([]models.ContentPart, len(content))
+		out := make([]ContentPart, len(content))
 		used := 0
 		var texts []int
 		ok := true
 		for i, part := range content {
-			if part.Type == models.ContentPartText {
+			if part.Type == ContentPartText {
 				texts = append(texts, i)
 				continue
 			}
@@ -156,18 +155,18 @@ func compactToolResultContent(content []models.ContentPart, total int, reason st
 				ok = false
 				break
 			}
-			out[i] = models.ContentPart{Type: models.ContentPartJSON, Value: value}
+			out[i] = ContentPart{Type: ContentPartJSON, Value: value}
 			used += len(value)
 		}
-		if !ok || used > models.MaxToolResultContentBytes {
+		if !ok || used > MaxToolResultContentBytes {
 			continue
 		}
-		if !fitToolResultTexts(content, texts, out, models.MaxToolResultContentBytes-used, reason) {
+		if !fitToolResultTexts(content, texts, out, MaxToolResultContentBytes-used, reason) {
 			continue
 		}
 		return out
 	}
-	return []models.ContentPart{{Type: models.ContentPartText, Text: fmt.Sprintf("The tool output (%s) could not be shortened to fit the tool result limit, and %s.", formatToolOutputSize(total), reason)}}
+	return []ContentPart{{Type: ContentPartText, Text: fmt.Sprintf("The tool output (%s) could not be shortened to fit the tool result limit, and %s.", formatToolOutputSize(total), reason)}}
 }
 
 // compactToolResultJSONPart returns the part's value unchanged when compacting
@@ -194,7 +193,7 @@ func compactToolResultJSONPart(raw json.RawMessage, value interface{}, decoded b
 // fitToolResultTexts gives text parts their share of budget: a part that fits
 // its share is kept whole and its unused share goes to the others; the rest are
 // cut with a marker saying so.
-func fitToolResultTexts(content []models.ContentPart, texts []int, out []models.ContentPart, budget int, reason string) bool {
+func fitToolResultTexts(content []ContentPart, texts []int, out []ContentPart, budget int, reason string) bool {
 	if budget < 0 {
 		return false
 	}
@@ -204,7 +203,7 @@ func fitToolResultTexts(content []models.ContentPart, texts []int, out []models.
 		var rest []int
 		for _, i := range pending {
 			if len(content[i].Text) <= share {
-				out[i] = models.ContentPart{Type: models.ContentPartText, Text: content[i].Text}
+				out[i] = ContentPart{Type: ContentPartText, Text: content[i].Text}
 				budget -= len(content[i].Text)
 			} else {
 				rest = append(rest, i)
@@ -217,7 +216,7 @@ func fitToolResultTexts(content []models.ContentPart, texts []int, out []models.
 				if keep < 0 {
 					return false
 				}
-				out[i] = models.ContentPart{Type: models.ContentPartText, Text: models.TruncateUTF8(content[i].Text, keep) + marker}
+				out[i] = ContentPart{Type: ContentPartText, Text: TruncateUTF8(content[i].Text, keep) + marker}
 			}
 			return true
 		}
@@ -259,7 +258,7 @@ func compactToolResultValue(value interface{}, depth, entries, text int) interfa
 		if len(typed) <= text {
 			return typed
 		}
-		return models.TruncateUTF8(typed, text) + "… (shortened)"
+		return TruncateUTF8(typed, text) + "… (shortened)"
 	default:
 		return typed
 	}

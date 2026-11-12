@@ -8,6 +8,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Interaction control tools (section 04 §10): react (inline) and wait
@@ -37,7 +39,7 @@ func (reactControlHandler) spec(ControlAuthority) ControlToolSpec {
 }
 
 func (reactControlHandler) decode(raw json.RawMessage) (interface{}, error) {
-	return decodeControlInto[reactControlArgs](raw)
+	return models.DecodeControlInto[reactControlArgs](raw)
 }
 
 func (reactControlHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
@@ -153,7 +155,7 @@ func (waitControlHandler) spec(ControlAuthority) ControlToolSpec {
 }
 
 func (waitControlHandler) decode(raw json.RawMessage) (interface{}, error) {
-	value, err := decodeControlInto[waitControlArgs](raw)
+	value, err := models.DecodeControlInto[waitControlArgs](raw)
 	if err != nil {
 		return nil, err
 	}

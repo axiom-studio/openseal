@@ -8,19 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/models"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
-)
-
-// A Space groups a scope's agents, teams and conversations under a name and a
-// look. Nothing creates a space but CreateSpace. The first space an owner
-// creates in a scope is that owner's default space: it cannot be deleted and
-// receives the conversations of the other spaces the owner deletes.
-var (
-	// ErrTeamAgentOutsideSpace refuses a Team roster Agent that is not in
-	// every space the Team is in.
-	ErrTeamAgentOutsideSpace = errors.New("a team's agents must be in its space")
 )
 
 type CreateSpaceRequest struct {
@@ -396,17 +385,6 @@ func (s *SpaceService) CheckTeamAgents(ctx context.Context, scope Scope, teamID 
 		}
 		if err := agentsInSpace(space, members, agentIDs); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-func agentsInSpace(space *models.Space, members []*models.SpaceMember, agentIDs []string) error {
-	for _, agentID := range agentIDs {
-		if !slices.ContainsFunc(members, func(member *models.SpaceMember) bool {
-			return member.Type == models.SpaceMemberAgent && member.ID == agentID
-		}) {
-			return fmt.Errorf("%w: agent %q is not in space %q", ErrTeamAgentOutsideSpace, agentID, space.Name)
 		}
 	}
 	return nil

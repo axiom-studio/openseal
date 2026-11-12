@@ -20,7 +20,6 @@ const (
 	RunbookActionList       = "list"
 	RunbookActionSetStatus  = "set_status"
 	RunbookActionSetScript  = "set_script"
-	scheduledTaskContextKey = "scheduledAgentTask"
 )
 
 func activationGoal(a *RunbookActivation, o *Objective) string {

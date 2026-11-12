@@ -6,8 +6,6 @@ import (
 	"net/url"
 	"strings"
 	"unicode"
-
-	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ExternalOperationIdentity is the stable, capability-independent identity of
@@ -104,8 +102,4 @@ func computeExternalOperationDigest(scope Scope, owner ObjectiveOwner, objective
 		ownerKey = string(owner.Type) + "\x00" + strings.TrimSpace(owner.ID)
 	}
 	return hashString(scope.Kind + "\x00" + scope.ID + "\x00" + ownerKey + "\x00" + resource + "\x00" + operation + "\x00" + occurrence), nil
-}
-
-func externalOperationReceiptComplete(status models.ActionCallStatus) bool {
-	return status == models.ActionCallStatusSucceeded || status == models.ActionCallStatusCompensated
 }

@@ -123,26 +123,3 @@ func TestRoutineRunsPostOnlyToPinnedDestinationsWithoutAsking(t *testing.T) {
 		t.Fatalf("unpinned posting grant applied: %#v %v", grant, err)
 	}
 }
-
-func TestRoutineDestinationsPinned(t *testing.T) {
-	keys := []string{"channel", "channels"}
-	pinned := []string{"ai-news", "C1"}
-	for name, tc := range map[string]struct {
-		arguments map[string]interface{}
-		want      bool
-	}{
-		"name":          {map[string]interface{}{"channel": "#ai-news"}, true},
-		"id":            {map[string]interface{}{"channel": " C1 "}, true},
-		"list":          {map[string]interface{}{"channels": []interface{}{"C1", "ai-news"}}, true},
-		"list with one": {map[string]interface{}{"channels": []interface{}{"C1", "C2"}}, false},
-		"both keys":     {map[string]interface{}{"channel": "C1", "channels": []interface{}{"C9"}}, false},
-		"non string":    {map[string]interface{}{"channel": 7}, false},
-		"object":        {map[string]interface{}{"channel": map[string]interface{}{"id": "C1"}}, false},
-		"none":          {map[string]interface{}{"message": "hi"}, false},
-		"blank":         {map[string]interface{}{"channel": " "}, false},
-	} {
-		if got := routineDestinationsPinned(tc.arguments, keys, pinned); got != tc.want {
-			t.Fatalf("%s: got %v", name, got)
-		}
-	}
-}
