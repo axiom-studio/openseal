@@ -142,11 +142,16 @@ func claimedBindingRun(t *testing.T, store *sqlite.Store, run *AgentRun) *AgentR
 // prepareBindingStep is the model request of the binding's first step.
 func prepareBindingStep(t *testing.T, binding *TurnRunnerBinding, run *AgentRun) ModelStepRequest {
 	t.Helper()
-	producer, ok := binding.Producer.(*ModelStepProducer)
-	if !ok {
+	if _, ok := binding.Producer.(*ModelStepProducer); !ok {
 		t.Fatalf("binding producer = %T, want the model step producer", binding.Producer)
 	}
-	req, err := producer.preparer.PrepareModelStep(t.Context(), StepInput{
+	// The compactor builds its summary requests with the producer's own
+	// preparer, so it prepares the step the producer would.
+	compactor, ok := binding.Compactor.(*LoopCompactor)
+	if !ok {
+		t.Fatalf("binding compactor = %T, want the loop compactor", binding.Compactor)
+	}
+	req, err := compactor.Requests.PrepareModelStep(t.Context(), StepInput{
 		Run: run, Step: &AgentTurn{ID: "step-1", RunID: run.ID, Sequence: 1}, Session: binding.Session, Binding: binding, Mode: StepModeNormal,
 	})
 	if err != nil {
@@ -415,6 +420,10 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	}
 }
 
+// progressAcknowledgementInstruction is the system instruction of every
+// progress acknowledgement step.
+const progressAcknowledgementInstruction = "Produce only a brief progress acknowledgement in the Agent's configured personality. Use only the verified facts in the user message. Write at most two short sentences and 100 characters. Do not claim completion, expose hidden reasoning, propose actions, call tools, or add unrelated explanation."
+
 func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "11"}
 	catalog := &resolverCatalog{
@@ -446,7 +455,7 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 	}
 	if ack := stepHost.requests[0]; ack.Tools != nil || ack.SessionID != "" || ack.Purpose != ModelStepPurposeAcknowledgement || len(ack.System.SkillPrompts) != 0 ||
 		!slices.Contains(ack.System.AgentInstructions, "Work carefully.") ||
-		!slices.Contains(ack.System.AgentInstructions, runProgressAcknowledgementSystemInstruction) {
+		!slices.Contains(ack.System.AgentInstructions, progressAcknowledgementInstruction) {
 		t.Fatalf("progress acknowledgement request = %#v", ack)
 	}
 	req := prepareBindingStep(t, binding, run)

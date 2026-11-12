@@ -71,7 +71,7 @@ func startAgentTrial(t *testing.T, f *agentBuilderDispatchFixture, callID string
 		t.Fatal(err)
 	}
 	childID, _ := output["trialRunId"].(string)
-	if output["resourceType"] != "agent_trial" || output["status"] != "running" || childID != agentTrialRunID(f.run.ID, callID) {
+	if output["resourceType"] != "agent_trial" || output["status"] != "running" || childID == "" {
 		t.Fatalf("try_agent output = %#v", output)
 	}
 	call := &ActionCall{
@@ -90,6 +90,9 @@ func TestAgentTrialStartsChildWithoutDefinition(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, child := startAgentTrial(t, f, "trial-call")
+	if child.ID != agentTrialRunID(f.run.ID, "trial-call") {
+		t.Fatalf("trial child id = %q", child.ID)
+	}
 
 	if _, err := f.agents.GetDefinition(ctx, agentBuilderResourceID("agent-definition", f.scope, "trial-call"), agentBuilderDefinitionVersion); !errors.Is(err, kernelagent.ErrDefinitionNotFound) {
 		t.Fatalf("try_agent registered a definition: %v", err)
@@ -151,7 +154,7 @@ func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := child.CreatedAt.Add(agentTrialTimeout)
+	deadline := child.CreatedAt.Add(5 * time.Minute) // the trial timeout
 	if wake == nil || wake.Type != AgentTrialWakeType || wake.Reference != child.ID || wake.WakeAt == nil ||
 		!wake.WakeAt.Equal(deadline) || summary != "Trying the draft" {
 		t.Fatalf("wake = %#v %q", wake, summary)
@@ -179,11 +182,16 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skillScope, DeploymentID: "finn"},
 	}
 	store := newTestKernelStore(t)
-	parent := putAgentTrialRun(t, store, &AgentRun{
+	parent := &AgentRun{
 		ID: "parent", Scope: scope, Kind: RunKindConversation, RootRunID: "parent", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
 		AssignedAgentID: "finn", Goal: "Build an Agent", Status: AgentRunStatusRunning, Revision: 1, CreatedAt: time.Now().UTC(),
-	})
-	trial, err := agentTrialContextMap(AgentTrialContext{
+	}
+	if err := store.CreateAgentRun(t.Context(), cloneAgentRun(parent)); err != nil {
+		t.Fatal(err)
+	}
+	// The trial context is stored on the child as the JSON object of an
+	// AgentTrialContext.
+	encoded, err := json.Marshal(AgentTrialContext{
 		Profile: agentProfileArguments{
 			DisplayName: "Inbox Triage", Purpose: "Sort the support inbox.", SystemPrompt: "Sort mail by urgency.",
 			Personality: "Friendly", OperatingPrinciples: []string{"Flag anything legal."},
@@ -191,6 +199,10 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 		ParentRunID: parent.ID, ActionCallID: "trial-call",
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	var trial map[string]interface{}
+	if err := json.Unmarshal(encoded, &trial); err != nil {
 		t.Fatal(err)
 	}
 	child := claimedBindingRun(t, store, &AgentRun{
@@ -375,11 +387,12 @@ func TestAgentTrialResumeRendersFailure(t *testing.T) {
 
 func TestAgentTrialResumeReadsMissedChild(t *testing.T) {
 	f := newAgentTrialFinalizerFixture(t, AgentRunStatusRunning)
-	f.endChild(t, AgentRunStatusCompleted, map[string]interface{}{finalOutputReportKey: strings.Repeat("a", agentTrialReplyBytes+100)}, "")
+	const replyLimit = 8 << 10 // the trial reply bound
+	f.endChild(t, AgentRunStatusCompleted, map[string]interface{}{finalOutputReportKey: strings.Repeat("a", replyLimit+100)}, "")
 	outcome := settleAgentTrialCall(t, f, f.parent, nil, time.Now())
 	output := agentTrialResultOutput(t, outcome)
 	reply, _ := output["reply"].(string)
-	if output["status"] != AgentTrialStatusCompleted || len(reply) > agentTrialReplyBytes || !strings.Contains(reply, "truncated") {
+	if output["status"] != AgentTrialStatusCompleted || len(reply) > replyLimit || !strings.Contains(reply, "truncated") {
 		t.Fatalf("output status=%v reply=%d bytes", output["status"], len(reply))
 	}
 }
