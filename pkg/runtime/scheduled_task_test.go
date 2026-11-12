@@ -22,6 +22,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -406,7 +407,7 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 	run := runs[0]
 	c := &bindingCatalog{deployment: &kernelagent.AgentDeployment{ID: run.AssignedAgentID, DefinitionID: "researcher", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}, definition: &kernelagent.AgentDefinition{ID: "researcher", Version: "1", Purpose: "Research", SystemPrompt: "Use current tools"}, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, DeploymentID: run.AssignedAgentID, Skills: []skill.ActivatedSkill{{SkillID: "browser", SkillVersion: "1", Actions: []capability.ModelAction{{Name: "browser.read", SkillID: "browser", Version: "1", Action: "read"}}}}}}
 	config := bindingTestConfig(t, store, &modelsteptest.RecordingStepHost{})
-	b, err := ResolveLoopBinding(t.Context(), c, run, config)
+	b, err := runworker.ResolveLoopBinding(t.Context(), c, run, config)
 	if err != nil || len(b.ModelActions) != 1 {
 		t.Fatalf("live authority=%#v,%v", b, err)
 	}
@@ -414,12 +415,12 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 		t.Fatalf("task did not use the model step producer: %T", b.Producer)
 	}
 	c.activation.Skills = nil // Revoked permission is not resurrected by persisted schedule.
-	b, err = ResolveLoopBinding(t.Context(), c, run, config)
+	b, err = runworker.ResolveLoopBinding(t.Context(), c, run, config)
 	if err != nil || len(b.ModelActions) != 0 {
 		t.Fatalf("revoked authority=%#v,%v", b, err)
 	}
 	c.deployment.RolloutStatus = kernelagent.RolloutPaused
-	if _, err := ResolveLoopBinding(t.Context(), c, run, config); err == nil {
+	if _, err := runworker.ResolveLoopBinding(t.Context(), c, run, config); err == nil {
 		t.Fatal("paused Agent executed task")
 	}
 }

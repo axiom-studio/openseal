@@ -21,6 +21,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
+	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -87,13 +88,13 @@ func (c *bindingCatalog) GetActionCall(context.Context, models.Scope, string) (*
 
 // bindingTestConfig is the minimal LoopBindingConfig of a test: the
 // store's sessions, steps and calls and a tool dispatcher over them.
-func bindingTestConfig(t testing.TB, store models.KernelStore, host agentrun.StepHost) LoopBindingConfig {
+func bindingTestConfig(t testing.TB, store models.KernelStore, host agentrun.StepHost) runworker.LoopBindingConfig {
 	t.Helper()
 	tools, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return LoopBindingConfig{Host: host, Store: store, Tools: tools}
+	return runworker.LoopBindingConfig{Host: host, Store: store, Tools: tools}
 }
 
 // timerStepProducer sleeps once on a timer, then finishes the Run.

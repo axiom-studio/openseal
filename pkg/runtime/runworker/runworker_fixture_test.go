@@ -1,4 +1,4 @@
-package runtime
+package runworker
 
 // Copies of runtime's base test fixtures for the run worker tests, so they
 // can move with the run worker code: the stored Run reader and SQLite file

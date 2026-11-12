@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -33,11 +34,11 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				FailureExplanation: &RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "action_failed", Message: "The image service rejected the request."},
 			}
 			config := bindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{})
-			config.SkillHosts = SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {
+			config.SkillHosts = runworker.SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {
 				t.Fatal("failure explanation attempted runtime preparation")
 				return nil, nil
 			})
-			binding, err := ResolveLoopBinding(t.Context(), catalog, run, config)
+			binding, err := runworker.ResolveLoopBinding(t.Context(), catalog, run, config)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -52,12 +53,12 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				t.Fatalf("failure explanation producer = %T", binding.Producer)
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutPaused
-			if _, err := ResolveLoopBinding(t.Context(), catalog, run, config); err == nil {
+			if _, err := runworker.ResolveLoopBinding(t.Context(), catalog, run, config); err == nil {
 				t.Fatal("inactive Agent identity bypassed for final answer")
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutActive
 			config.Host = nil
-			if _, err := ResolveLoopBinding(t.Context(), catalog, run, config); !errors.Is(err, modelstep.ErrTurnHostUnavailable) {
+			if _, err := runworker.ResolveLoopBinding(t.Context(), catalog, run, config); !errors.Is(err, modelstep.ErrTurnHostUnavailable) {
 				t.Fatalf("explanation without a model host = %v", err)
 			}
 		})

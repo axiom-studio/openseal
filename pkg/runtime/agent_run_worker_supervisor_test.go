@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"go.uber.org/zap"
 )
 
@@ -61,7 +62,7 @@ func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testi
 		return &agentrun.TurnRunnerBinding{Producer: &timerStepProducer{}}, nil
 	})
 	source := &mutableWorkerScopeSource{scopes: []Scope{scope2, scope1, scope1}}
-	supervisor, err := NewAgentRunWorkerSupervisor(store, resolver, source, zap.NewNop().Sugar(), DynamicAgentRunWorkerConfig{
+	supervisor, err := runworker.NewAgentRunWorkerSupervisor(store, resolver, source, zap.NewNop().Sugar(), runworker.DynamicAgentRunWorkerConfig{
 		Kind: RunKindConversation, Concurrency: 1, PollInterval: 5 * time.Millisecond,
 		ReconcileInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
 		WorkerIDPrefix: "conversation",

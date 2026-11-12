@@ -1,4 +1,4 @@
-package runtime
+package runworker
 
 // Worker pool scenarios (run-loop section 12, tests-T17a): the pool claims a
 // Run, resolves its binding and drives the RunLoop until the Run is at rest
