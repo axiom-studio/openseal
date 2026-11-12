@@ -6,22 +6,14 @@ import (
 	"reflect"
 	"testing"
 	"time"
-)
 
-func conversationReadSQLRun(id string, scope Scope, owner ObjectiveOwner, kind RunKind, status AgentRunStatus, at time.Time) *AgentRun {
-	run := &AgentRun{ID: id, Scope: scope, Owner: owner, Kind: kind, RootRunID: id, AssignedAgentID: owner.ID,
-		Goal: "Conversation read fixture", Source: RunSourceChat, Status: status, Priority: 10, AvailableAt: at, QueueEnteredAt: at,
-		Revision: 1, CreatedAt: at, UpdatedAt: at}
-	if isTerminalAgentRunStatus(status) {
-		run.CompletedAt = &at
-	}
-	return run
-}
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
+)
 
 func seedConversationReadSQLHistory(t *testing.T, store conversationTaskSQLTestStore, scope Scope, owner ObjectiveOwner, conversationID string) {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	run := conversationReadSQLRun("history", scope, owner, RunKindConversation, AgentRunStatusCompleted, now)
+	run := storetest.ConversationReadRun("history", scope, owner, RunKindConversation, AgentRunStatusCompleted, now)
 	run.Context = map[string]interface{}{conversationRunContextConversationID: conversationID}
 	if err := run.Validate(); err != nil {
 		t.Fatal(err)
@@ -74,14 +66,14 @@ func TestConversationActiveRunsSQLFindsOldRootAndTracksCanonicalMembership(t *te
 		scope := Scope{Kind: "tenant", ID: "legacy-read"}
 		owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "legacy-agent"}
 		old := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
-		root := conversationReadSQLRun("old-root", scope, owner, RunKindConversation, AgentRunStatusCompleted, old)
+		root := storetest.ConversationReadRun("old-root", scope, owner, RunKindConversation, AgentRunStatusCompleted, old)
 		root.Context = map[string]interface{}{conversationRunContextConversationID: "legacy-conversation"}
 		if err := fixture.store.CreateAgentRun(t.Context(), root); err != nil {
 			t.Fatal(err)
 		}
 		children := make([]*AgentRun, 0, 2)
 		for _, id := range []string{"old-child-a", "old-child-b"} {
-			child := conversationReadSQLRun(id, scope, owner, RunKindAgentWork, AgentRunStatusQueued, old)
+			child := storetest.ConversationReadRun(id, scope, owner, RunKindAgentWork, AgentRunStatusQueued, old)
 			child.RootRunID, child.ParentRunID = root.ID, root.ID
 			if err := fixture.store.CreateAgentRun(t.Context(), child); err != nil {
 				t.Fatal(err)
@@ -109,10 +101,10 @@ func TestConversationActiveRunsSQLFindsOldRootAndTracksCanonicalMembership(t *te
 			t.Fatalf("bounded active page = %#v, %v", page, err)
 		}
 		for _, unrelated := range []*AgentRun{
-			conversationReadSQLRun("independent-task", scope, owner, RunKindAgentWork, AgentRunStatusQueued, old),
-			conversationReadSQLRun("foreign-owner-child", scope, ObjectiveOwner{Type: OwnerTypeAgent, ID: "other-agent"}, RunKindAgentWork, AgentRunStatusQueued, old),
-			conversationReadSQLRun("foreign-scope-child", Scope{Kind: scope.Kind, ID: "other-tenant"}, owner, RunKindAgentWork, AgentRunStatusQueued, old),
-			conversationReadSQLRun("conversation-child", scope, owner, RunKindConversation, AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("independent-task", scope, owner, RunKindAgentWork, AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("foreign-owner-child", scope, ObjectiveOwner{Type: OwnerTypeAgent, ID: "other-agent"}, RunKindAgentWork, AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("foreign-scope-child", Scope{Kind: scope.Kind, ID: "other-tenant"}, owner, RunKindAgentWork, AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("conversation-child", scope, owner, RunKindConversation, AgentRunStatusQueued, old),
 		} {
 			unrelated.Context = map[string]interface{}{conversationRunContextConversationID: "legacy-conversation"}
 			if unrelated.ID != "independent-task" {
@@ -185,7 +177,7 @@ func TestConversationForegroundRunsSQLIncludesExactLegacyAndThreadRoots(t *testi
 			{"missing-thread", "conversation:thread:thread-message:agent:foreground-agent", "conversation", "", RunKindConversation},
 			{"work-root", "conversation", "conversation", "", RunKindAgentWork},
 		} {
-			run := conversationReadSQLRun(testCase.id, scope, owner, testCase.kind, AgentRunStatusCompleted, at)
+			run := storetest.ConversationReadRun(testCase.id, scope, owner, testCase.kind, AgentRunStatusCompleted, at)
 			run.ConcurrencyKey = testCase.key
 			run.Context = map[string]interface{}{conversationRunContextConversationID: testCase.conversation, "threadRootMessageId": testCase.thread}
 			if err := fixture.store.CreateAgentRun(t.Context(), run); err != nil {

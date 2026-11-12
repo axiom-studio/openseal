@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // This benchmark uses production admission and canonical Run mutation during
@@ -89,7 +91,7 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 				if err != nil {
 					b.Fatal(err)
 				}
-				conversationTaskBenchmarkComplete(b, store, result.WorkRun)
+				storetest.CompleteRun(b, store, result.WorkRun)
 			}
 			snapshotRecord := conversationTaskBenchmarkRecord(b, store, "snapshot", time.Now().UTC())
 			conversationTaskBenchmarkPost(b, kernel, snapshotRecord.Task.SourceMessageID, "thread", snapshotRecord.Task.CreatedAt)
@@ -152,7 +154,7 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 				}
 			})
 			for _, run := range active {
-				conversationTaskBenchmarkComplete(b, store, run)
+				storetest.CompleteRun(b, store, run)
 			}
 			b.Run("foreground_idle_context", func(b *testing.B) {
 				b.ReportAllocs()
@@ -182,17 +184,6 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 				}
 			})
 		})
-	}
-}
-
-func conversationTaskBenchmarkComplete(t testing.TB, store conversationTaskSQLTestStore, old *AgentRun) {
-	t.Helper()
-	run := cloneAgentRun(old)
-	now := run.UpdatedAt.Add(time.Second)
-	run.Status, run.CompletedAt, run.UpdatedAt, run.Revision = AgentRunStatusCompleted, &now, now, run.Revision+1
-	event := &ActivityEvent{ID: "benchmark-complete-" + run.ID, Scope: run.Scope, RunID: run.ID, EventType: "run.updated", Summary: "Completed task benchmark fixture", Actor: ActivityActor{Type: "user", ID: "requester"}, Visibility: ActivityVisibilityScope, CreatedAt: now}
-	if _, err := store.UpdateAgentRunWithEvent(context.Background(), run, old.Revision, event, nil); err != nil {
-		t.Fatal(err)
 	}
 }
 
