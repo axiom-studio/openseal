@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -169,7 +170,7 @@ func TestSQLiteCredentialRedemptionOfHostBindings(t *testing.T) {
 			}
 			sqlDB := openTestSQLiteDB(t, path)
 			defer store.Close()
-			request, binding := createSQLiteActionCredentialLeaseFixture(t, ctx, store, "nonce-host-binding-0001")
+			request, binding := storetest.ActionCredentialLeaseFixture(t, ctx, store, "nonce-host-binding-0001")
 			if !test.keepRow {
 				if _, err := sqlDB.ExecContext(ctx, `DELETE FROM skill_bindings WHERE id = ?`, binding.ID); err != nil {
 					t.Fatal(err)

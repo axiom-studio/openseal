@@ -8,14 +8,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // Store test: the SQLite store's lease clock resolution
 // (canonicalSQLiteLeaseTime), so this file moves to store/sqlite with
-// action_credential_lease_sqlite.go (U2.9). Its expiry case seeds through
-// createSQLiteActionCredentialLeaseFixture, which issues the lease with
-// runtime's NewActionCredentialLease; the move needs that fixture on the
-// store side first.
+// action_credential_lease_sqlite.go (U2.9).
 
 func TestSQLiteActionCredentialLeaseClockResolutionAndExpiry(t *testing.T) {
 	t.Run("canonicalizes sub-millisecond issuance", func(t *testing.T) {
@@ -34,7 +32,7 @@ func TestSQLiteActionCredentialLeaseClockResolutionAndExpiry(t *testing.T) {
 		}
 		defer store.Close()
 		db := openTestSQLiteDB(t, path)
-		request, _ := createSQLiteActionCredentialLeaseFixture(t, ctx, store, "nonce-sqlite-expired-0001")
+		request, _ := storetest.ActionCredentialLeaseFixture(t, ctx, store, "nonce-sqlite-expired-0001")
 		request.Lease.IssuedAt = time.Now().UTC().Add(-2 * time.Minute)
 		request.Lease.ExpiresAt = time.Now().UTC().Add(-time.Minute)
 
