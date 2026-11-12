@@ -45,7 +45,7 @@ func (s fixtureNoteSessions) GetActionCall(context.Context, Scope, string) (*Act
 // note the step's path needs, and reports whether it appended one.
 func (f *prepareFixture) ensureNote(step string) bool {
 	f.t.Helper()
-	host := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult { return progressAckResult(req, "Done.") }}
+	host := &modelsteptest.RecordingStepHost{Reply: func(req ModelStepRequest) ModelStepResult { return modelsteptest.StepResult(req, "Done.") }}
 	producer, err := modelstep.NewModelStepProducer(host, f.preparer, fixtureNoteSessions{fixtureNoteAppender{f.render}})
 	if err != nil {
 		f.t.Fatal(err)

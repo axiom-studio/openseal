@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -168,35 +169,6 @@ func TestRenderedRunProgressAcknowledgementIsBounded(t *testing.T) {
 	}
 }
 
-type progressAckStepHost struct {
-	requests []models.ModelStepRequest
-	reply    func(models.ModelStepRequest) models.ModelStepResult
-}
-
-func (h *progressAckStepHost) ExecuteModelStep(_ context.Context, req models.ModelStepRequest) (models.ModelStepResult, error) {
-	h.requests = append(h.requests, req)
-	return h.reply(req), nil
-}
-
-func (h *progressAckStepHost) ExecuteHostTool(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
-	return models.HostToolResult{}, models.ErrHostToolUnsupported
-}
-
-func progressAckResult(req models.ModelStepRequest, text string, calls ...models.ModelToolCall) models.ModelStepResult {
-	stop := models.ModelStopEnd
-	if len(calls) > 0 {
-		stop = models.ModelStopToolCalls
-	}
-	return models.ModelStepResult{
-		APIVersion: models.ModelStepAPIVersion, StepID: req.StepID,
-		Assistant: models.AssistantEntry{
-			Provider: models.ModelStepProviderAnthropic, Model: "test-model", SystemDigest: "sys", ToolsDigest: "tools",
-			Text: text, ToolCalls: calls, StopReason: stop,
-		},
-		Model: models.ModelStepModelInfo{Provider: models.ModelStepProviderAnthropic, Model: "test-model"},
-	}
-}
-
 func progressAckRequest() agentrun.RunProgressAcknowledgementRequest {
 	return agentrun.RunProgressAcknowledgementRequest{
 		Snapshot: agentrun.RunProgressSnapshot{
@@ -209,8 +181,8 @@ func progressAckRequest() agentrun.RunProgressAcknowledgementRequest {
 }
 
 func TestProgressAckIsSessionlessToolFreeModelStep(t *testing.T) {
-	host := &progressAckStepHost{reply: func(req models.ModelStepRequest) models.ModelStepResult {
-		return progressAckResult(req, "  Looking at the deployment now.  ")
+	host := &modelsteptest.RecordingStepHost{Reply: func(req models.ModelStepRequest) models.ModelStepResult {
+		return modelsteptest.StepResult(req, "  Looking at the deployment now.  ")
 	}}
 	renderer := &modelStepProgressAcknowledgementRenderer{
 		host: host, agentID: "agent-1", definitionID: "def", definitionVersion: "1",
@@ -223,10 +195,10 @@ func TestProgressAckIsSessionlessToolFreeModelStep(t *testing.T) {
 	if text != "Looking at the deployment now." {
 		t.Fatalf("text = %q", text)
 	}
-	if len(host.requests) != 1 {
-		t.Fatalf("requests = %d", len(host.requests))
+	if len(host.Requests) != 1 {
+		t.Fatalf("requests = %d", len(host.Requests))
 	}
-	req := host.requests[0]
+	req := host.Requests[0]
 	if req.SessionID != "" || req.Tools != nil || req.Purpose != models.ModelStepPurposeAcknowledgement {
 		t.Fatalf("request is not a sessionless tool-free acknowledgement: session=%q tools=%v purpose=%q", req.SessionID, req.Tools, req.Purpose)
 	}
@@ -262,20 +234,20 @@ func TestProgressAckIsSessionlessToolFreeModelStep(t *testing.T) {
 func TestProgressAckRejectsToolCallsAndOverlongText(t *testing.T) {
 	for name, reply := range map[string]func(models.ModelStepRequest) models.ModelStepResult{
 		"tool call": func(req models.ModelStepRequest) models.ModelStepResult {
-			return progressAckResult(req, "On it.", models.ModelToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{}`)})
+			return modelsteptest.StepResult(req, "On it.", models.ModelToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{}`)})
 		},
 		"overlong": func(req models.ModelStepRequest) models.ModelStepResult {
-			return progressAckResult(req, strings.Repeat("a", 101))
+			return modelsteptest.StepResult(req, strings.Repeat("a", 101))
 		},
 		"too many sentences": func(req models.ModelStepRequest) models.ModelStepResult {
-			return progressAckResult(req, "One. Two. Three.")
+			return modelsteptest.StepResult(req, "One. Two. Three.")
 		},
 		"empty": func(req models.ModelStepRequest) models.ModelStepResult {
-			return progressAckResult(req, "  ")
+			return modelsteptest.StepResult(req, "  ")
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			renderer := &modelStepProgressAcknowledgementRenderer{host: &progressAckStepHost{reply: reply}, agentID: "agent-1"}
+			renderer := &modelStepProgressAcknowledgementRenderer{host: &modelsteptest.RecordingStepHost{Reply: reply}, agentID: "agent-1"}
 			text, err := renderer.RenderRunProgressAcknowledgement(context.Background(), progressAckRequest())
 			if err == nil {
 				t.Fatalf("accepted %q", text)
@@ -287,8 +259,10 @@ func TestProgressAckRejectsToolCallsAndOverlongText(t *testing.T) {
 	}
 	other := progressAckRequest()
 	other.Snapshot.AgentID = "agent-2"
-	host := &progressAckStepHost{reply: func(req models.ModelStepRequest) models.ModelStepResult { return progressAckResult(req, "Fine.") }}
-	if _, err := (&modelStepProgressAcknowledgementRenderer{host: host, agentID: "agent-1"}).RenderRunProgressAcknowledgement(context.Background(), other); err == nil || len(host.requests) != 0 {
-		t.Fatalf("rendered for another Agent: err=%v requests=%d", err, len(host.requests))
+	host := &modelsteptest.RecordingStepHost{Reply: func(req models.ModelStepRequest) models.ModelStepResult {
+		return modelsteptest.StepResult(req, "Fine.")
+	}}
+	if _, err := (&modelStepProgressAcknowledgementRenderer{host: host, agentID: "agent-1"}).RenderRunProgressAcknowledgement(context.Background(), other); err == nil || len(host.Requests) != 0 {
+		t.Fatalf("rendered for another Agent: err=%v requests=%d", err, len(host.Requests))
 	}
 }

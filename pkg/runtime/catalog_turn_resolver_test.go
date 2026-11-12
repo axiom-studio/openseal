@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -235,7 +236,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			run.ID, run.Scope, run.Kind = fmt.Sprintf("run-%d", index), scope, RunKindAgentWork
 			run.Owner, run.AssignedAgentID = ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, "agent"
 			claimed := claimedBindingRun(t, store, &run)
-			config := loopBindingTestConfig(t, store, &progressAckStepHost{})
+			config := loopBindingTestConfig(t, store, &modelsteptest.RecordingStepHost{})
 			config.ChatWorkspaces = bindingTestChatWorkspaces{}
 			binding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(claimed), config)
 			if err != nil {
@@ -353,7 +354,7 @@ func TestDecisionRunOffersOnlyDecisionToolViaBinding(t *testing.T) {
 				Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reviewer"}, AssignedAgentID: "reviewer",
 				Goal: "Evaluate incoming work", Context: map[string]interface{}{tc.key: tc.value, conversationRunContextConversationID: "chat-1"},
 			})
-			config := loopBindingTestConfig(t, store, &progressAckStepHost{})
+			config := loopBindingTestConfig(t, store, &modelsteptest.RecordingStepHost{})
 			config.ChatWorkspaces = bindingTestChatWorkspaces{}
 			binding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(run), config)
 			if err != nil {
@@ -417,7 +418,7 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	if !errors.Is(err, modelstep.ErrTurnHostUnavailable) {
 		t.Fatalf("unhosted prompt work error = %v", err)
 	}
-	if _, err := ResolveLoopBinding(t.Context(), catalog, base, LoopBindingConfig{Host: &progressAckStepHost{}}); err == nil {
+	if _, err := ResolveLoopBinding(t.Context(), catalog, base, LoopBindingConfig{Host: &modelsteptest.RecordingStepHost{}}); err == nil {
 		t.Fatal("binding without a kernel store and tool dispatcher was accepted")
 	}
 }
@@ -441,7 +442,7 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 		ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coding-agent"},
 		AssignedAgentID: "coding-agent", Goal: "Inspect the repository",
 	})
-	stepHost := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult { return progressAckResult(req, "done") }}
+	stepHost := &modelsteptest.RecordingStepHost{Reply: func(req ModelStepRequest) ModelStepResult { return modelsteptest.StepResult(req, "done") }}
 	config := loopBindingTestConfig(t, store, stepHost)
 	config.ChatWorkspaces = bindingTestChatWorkspaces{}
 	binding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(run), config)
@@ -452,10 +453,10 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 		Snapshot:     agentrun.RunProgressSnapshot{RunID: run.ID, Scope: run.Scope, AgentID: run.AssignedAgentID, Goal: run.Goal, Status: AgentRunStatusRunning, Revision: 1},
 		MaxSentences: 2, MaxCharacters: 100,
 	})
-	if err != nil || progress != "done" || len(stepHost.requests) != 1 {
-		t.Fatalf("progress=%q requests=%d error=%v", progress, len(stepHost.requests), err)
+	if err != nil || progress != "done" || len(stepHost.Requests) != 1 {
+		t.Fatalf("progress=%q requests=%d error=%v", progress, len(stepHost.Requests), err)
 	}
-	if ack := stepHost.requests[0]; ack.Tools != nil || ack.SessionID != "" || ack.Purpose != ModelStepPurposeAcknowledgement || len(ack.System.SkillPrompts) != 0 ||
+	if ack := stepHost.Requests[0]; ack.Tools != nil || ack.SessionID != "" || ack.Purpose != ModelStepPurposeAcknowledgement || len(ack.System.SkillPrompts) != 0 ||
 		!slices.Contains(ack.System.AgentInstructions, "Work carefully.") ||
 		!slices.Contains(ack.System.AgentInstructions, progressAcknowledgementInstruction) {
 		t.Fatalf("progress acknowledgement request = %#v", ack)
@@ -531,7 +532,7 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "analyst"},
 	}
 	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "analyst"}, AssignedAgentID: "analyst", Goal: "Analyze", Context: map[string]interface{}{}}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,7 +579,7 @@ func TestCatalogTurnResolverHidesOriginatingRunbookFromDelegatedAgent(t *testing
 			"runbookDefinitionId": "daily-browser-task", "runbookDefinitionVersion": "1.2.3",
 		}},
 	}
-	config := loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{})
+	config := loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{})
 	binding, err := ResolveLoopBinding(t.Context(), catalog, run, config)
 	if err != nil {
 		t.Fatal(err)
@@ -634,7 +635,7 @@ func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(
 		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "community-agent"}, AssignedAgentID: "community-agent",
 		Goal: "Run it now", Context: map[string]interface{}{},
 	}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +695,7 @@ func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.
 		Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: current.ID,
 		Goal: "Delegate a release review", Context: map[string]interface{}{},
 	}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -725,7 +726,7 @@ func TestCatalogTurnResolverDoesNotProjectTenantDirectoryIntoStandaloneAgent(t *
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID},
 	}
 	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: current.ID}, AssignedAgentID: current.ID, Goal: "Answer concisely", Context: map[string]interface{}{}}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -759,7 +760,7 @@ func TestCatalogTurnResolverSeparatesAcceptedRequestExecutionFromIntake(t *testi
 		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
 		Goal: "Perform the accepted request", Context: map[string]interface{}{"collaboration": map[string]interface{}{"requestId": "request"}},
 	}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +802,7 @@ func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRun
 			}}},
 		},
 	}
-	config := loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{})
+	config := loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{})
 	teamRun := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "review-team"}, AssignedAgentID: "reviewer-agent", Goal: "Enable the reviewer", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}}
 	binding, err := ResolveLoopBinding(t.Context(), catalog, teamRun, config)
 	if err != nil {
@@ -988,7 +989,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 		Owner: parent.Owner, AssignedAgentID: "finn", Goal: "Hello there", Source: RunSourceHandoff,
 		Context: map[string]interface{}{AgentTrialContextKey: trial, AgentTrialModelContextKey: "gpt-6-luna"},
 	})
-	config := loopBindingTestConfig(t, store, &progressAckStepHost{})
+	config := loopBindingTestConfig(t, store, &modelsteptest.RecordingStepHost{})
 	config.ChatWorkspaces = bindingTestChatWorkspaces{}
 	binding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(child), config)
 	if err != nil {

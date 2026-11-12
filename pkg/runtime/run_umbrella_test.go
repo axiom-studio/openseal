@@ -8,6 +8,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -80,7 +81,7 @@ func newUmbrellaFixture(t *testing.T) (*umbrellaCatalog, Scope) {
 
 func umbrellaRunActions(t *testing.T, catalog *umbrellaCatalog, run *AgentRun) []string {
 	t.Helper()
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
