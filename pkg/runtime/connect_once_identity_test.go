@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -131,7 +132,7 @@ func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := t.Context()
-	run, catalog, bound, args := scheduledTaskFixture(t, store)
+	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 	conversationID := run.Context[conversationRunContextConversationID].(string)
 	files := &routineScriptFiles{}
 	files.write(conversationID, "scripts/weekly.py", routineScriptDigestOf("a"))
@@ -234,7 +235,7 @@ func TestRoutineRunsActForTheirCreatorOnlyWithATask(t *testing.T) {
 	// always scheduled; its scheduled occurrences are checked in
 	// TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores.)
 	store := newTestKernelStore(t)
-	run, _, bound, args := scheduledTaskFixture(t, store)
+	run, _, bound, args := routinetest.ScheduledTask(t, store)
 	activation := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*RunbookActivation)
 	started, err := routine.StartRunbookActivation(t.Context(), store, run.Scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "start-now", Actor: ActivityActor{Type: "user", ID: "user"}})
 	if err != nil || started.Run.ActingUser != "user" {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"maps"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -353,15 +351,4 @@ func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 	if err == nil {
 		t.Fatal("foreign Runbook activation was accepted")
 	}
-}
-
-// routineTestStore is a SQLite kernel store for routine action tests.
-func routineTestStore(t *testing.T, kind string) KernelStore {
-	t.Helper()
-	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "routines.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store
 }

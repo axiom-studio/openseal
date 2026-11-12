@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
 )
 
 // countingRoutineEventStore fails the test on any store call: an offer for
@@ -105,82 +106,82 @@ func BenchmarkRoutineEventOfferUnbound(b *testing.B) {
 }
 
 func TestRoutineEventTenantRunCap(t *testing.T) {
-	h := newRoutineEventHarness(t)
+	h := routinetest.NewEventHarness(t)
 	routines := make([]*RunbookActivation, 0, 12)
 	for i := 0; i < 12; i++ {
-		activation := h.routine(fmt.Sprintf("r%02d", i), nil)
-		h.offer(activation, 1)
+		activation := h.Routine(fmt.Sprintf("r%02d", i), nil)
+		h.Offer(activation, 1)
 		routines = append(routines, activation)
 	}
-	result := h.pass()
-	if result.Started != routine.RoutineEventTenantRunCap || result.TenantCapped != 1 || h.activeEventRuns() != routine.RoutineEventTenantRunCap {
-		t.Fatalf("first pass = %#v, active %d", result, h.activeEventRuns())
+	result := h.Pass()
+	if result.Started != routine.RoutineEventTenantRunCap || result.TenantCapped != 1 || h.ActiveEventRuns() != routine.RoutineEventTenantRunCap {
+		t.Fatalf("first pass = %#v, active %d", result, h.ActiveEventRuns())
 	}
-	if result := h.pass(); result.Started != 0 || h.activeEventRuns() != routine.RoutineEventTenantRunCap {
-		t.Fatalf("second pass = %#v, active %d", result, h.activeEventRuns())
+	if result := h.Pass(); result.Started != 0 || h.ActiveEventRuns() != routine.RoutineEventTenantRunCap {
+		t.Fatalf("second pass = %#v, active %d", result, h.ActiveEventRuns())
 	}
 	// Finish three Runs: the two waiting routines start, and no more.
 	finished := 0
 	for _, activation := range routines {
-		for _, run := range h.eventRuns(activation) {
+		for _, run := range h.EventRuns(activation) {
 			if finished < 3 && !isTerminalAgentRunStatus(run.Status) {
-				h.finishRun(run)
+				h.FinishRun(run)
 				finished++
 			}
 		}
 	}
-	if result := h.pass(); result.Started != 2 || h.activeEventRuns() != 9 {
-		t.Fatalf("pass after three finished = %#v, active %d", result, h.activeEventRuns())
+	if result := h.Pass(); result.Started != 2 || h.ActiveEventRuns() != 9 {
+		t.Fatalf("pass after three finished = %#v, active %d", result, h.ActiveEventRuns())
 	}
 	for _, activation := range routines {
-		if runs := h.eventRuns(activation); len(runs) != 1 {
+		if runs := h.EventRuns(activation); len(runs) != 1 {
 			t.Fatalf("routine %s has %d runs", activation.ID, len(runs))
 		}
 	}
 	// A smaller cap set on the dispatcher applies.
-	h.dispatcher.TenantRunCap = 8
-	h.finishRun(h.eventRuns(routines[3])[0])
-	h.offer(routines[3], 1)
-	if result := h.pass(); result.Started != 0 || result.TenantCapped != 1 || h.activeEventRuns() != 8 {
-		t.Fatalf("pass under cap 8 = %#v, active %d", result, h.activeEventRuns())
+	h.Dispatcher.TenantRunCap = 8
+	h.FinishRun(h.EventRuns(routines[3])[0])
+	h.Offer(routines[3], 1)
+	if result := h.Pass(); result.Started != 0 || result.TenantCapped != 1 || h.ActiveEventRuns() != 8 {
+		t.Fatalf("pass under cap 8 = %#v, active %d", result, h.ActiveEventRuns())
 	}
 }
 
 // TestRoutineEventBurstRespectsCaps sends 1 000 events to 20 routines of one
 // tenant (520 to one of them, so it overflows) while Runs finish over time.
 func TestRoutineEventBurstRespectsCaps(t *testing.T) {
-	h, db := newRoutineEventRowsHarness(t)
+	h, db := routinetest.NewEventRowsHarness(t)
 	const maxPerHour = 3
 	routines := make([]*RunbookActivation, 0, 20)
 	for i := 0; i < 20; i++ {
-		routines = append(routines, h.routine(fmt.Sprintf("burst%02d", i), func(trigger *RoutineEventTrigger) { trigger.MaxPerHour = maxPerHour }))
+		routines = append(routines, h.Routine(fmt.Sprintf("burst%02d", i), func(trigger *RoutineEventTrigger) { trigger.MaxPerHour = maxPerHour }))
 	}
 	for i := 0; i < 520; i++ {
-		h.offer(routines[0], 1)
+		h.Offer(routines[0], 1)
 	}
 	for i := 0; i < 480; i++ {
-		h.offer(routines[1+i%19], 1)
+		h.Offer(routines[1+i%19], 1)
 	}
 	starts := map[string][]time.Time{}
 	runStartedAt := map[string]time.Time{}
 	for minute := 0; minute < 180; minute++ {
-		h.pass()
-		if active := h.activeEventRuns(); active > routine.RoutineEventTenantRunCap {
+		h.Pass()
+		if active := h.ActiveEventRuns(); active > routine.RoutineEventTenantRunCap {
 			t.Fatalf("minute %d: %d event Runs are not finished", minute, active)
 		}
 		for _, activation := range routines {
-			for _, run := range h.eventRuns(activation) {
+			for _, run := range h.EventRuns(activation) {
 				if _, ok := runStartedAt[run.ID]; !ok {
-					runStartedAt[run.ID] = h.now
-					starts[activation.ID] = append(starts[activation.ID], h.now)
+					runStartedAt[run.ID] = h.Now
+					starts[activation.ID] = append(starts[activation.ID], h.Now)
 				}
 				// Each Run takes three minutes.
-				if !isTerminalAgentRunStatus(run.Status) && h.now.Sub(runStartedAt[run.ID]) >= 3*time.Minute {
-					h.finishRun(run)
+				if !isTerminalAgentRunStatus(run.Status) && h.Now.Sub(runStartedAt[run.ID]) >= 3*time.Minute {
+					h.FinishRun(run)
 				}
 			}
 		}
-		h.advance(time.Minute)
+		h.Advance(time.Minute)
 	}
 	for id, values := range starts {
 		for i := range values {
@@ -197,8 +198,8 @@ func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, activation := range routines {
-		for _, run := range h.eventRuns(activation) {
-			batch, _ := h.batchOf(run)
+		for _, run := range h.EventRuns(activation) {
+			batch, _ := h.BatchOf(run)
 			if len(batch.EventIDs) > RoutineEventMaxBatchEvents {
 				t.Fatalf("batch %s holds %d events", batch.ID, len(batch.EventIDs))
 			}
@@ -212,7 +213,7 @@ func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 		}
 	}
 	overflow := 0
-	for _, record := range listRoutineEventRows(t, db, h.scope) {
+	for _, record := range routinetest.ListEventRows(t, db, h.Scope) {
 		if record.State == RoutineEventDropped && record.DroppedReason == RoutineEventDroppedOverflow {
 			overflow++
 			if record.KeepsData {

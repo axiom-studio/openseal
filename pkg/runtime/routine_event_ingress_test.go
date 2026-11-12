@@ -11,13 +11,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // routineConnectionFixture is a Slack or Telegram endpoint in the harness
 // store, owned by the harness owner, on installation T123 and channel C123.
-func routineConnectionFixture(t *testing.T, h *routineEventHarness, provider string, selection ExternalConversationMessageSelection) (*skill.Catalog, *ExternalConversationEndpoint) {
+func routineConnectionFixture(t *testing.T, h *routinetest.EventHarness, provider string, selection ExternalConversationMessageSelection) (*skill.Catalog, *ExternalConversationEndpoint) {
 	t.Helper()
 	catalog := skill.NewCatalog()
 	definition := skillbindingtest.SlackConversationSkillDefinition()
@@ -27,26 +28,26 @@ func routineConnectionFixture(t *testing.T, h *routineEventHarness, provider str
 	adapter.Transport.IngressEndpoint = provider + ".conversation.ingress"
 	adapter.Transport.DeliveryEndpoint = provider + ".conversation.deliver"
 	definition.ConversationAdapters["conversations"] = adapter
-	if err := catalog.Register(h.ctx, definition); err != nil {
+	if err := catalog.Register(h.Ctx, definition); err != nil {
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: provider}
 	binding := &skill.Binding{
-		ID: provider, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: h.owner.ID,
+		ID: provider, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: h.Owner.ID,
 		SkillID: definition.ID, SkillVersion: definition.Version,
 		EnabledConversationAdapters: []string{"conversations"}, MaximumRisk: skill.RiskLevelRead, Revision: 1,
 		Credentials: map[string]skill.CredentialReference{"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant/" + provider}},
 	}
-	if err := catalog.Bind(h.ctx, binding); err != nil {
+	if err := catalog.Bind(h.Ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := externalconversation.NewExternalConversationEndpointService(h.store, catalog).Create(h.ctx, externalconversation.CreateExternalConversationEndpointRequest{
-		ID: provider + "-endpoint", Scope: scope, Owner: h.owner, DeploymentID: h.owner.ID, Name: provider + " endpoint",
+	endpoint, err := externalconversation.NewExternalConversationEndpointService(h.Store, catalog).Create(h.Ctx, externalconversation.CreateExternalConversationEndpointRequest{
+		ID: provider + "-endpoint", Scope: scope, Owner: h.Owner, DeploymentID: h.Owner.ID, Name: provider + " endpoint",
 		Adapter: ExternalConversationAdapterReference{
 			SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
 		},
 		Mode: capability.ConversationEndpointChannel, Address: "C123", InstallationID: "T123", ApplicationID: "A123",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: h.owner.ID},
+		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: h.Owner.ID},
 		Policy:  ExternalConversationPolicy{MessageSelection: selection, ReplyMode: ExternalConversationReplyThread, IgnoreBots: true},
 		Status:  ExternalConversationEndpointActive,
 	})
@@ -54,16 +55,16 @@ func routineConnectionFixture(t *testing.T, h *routineEventHarness, provider str
 		t.Fatal(err)
 	}
 	// The routine's chat lives in the endpoint's scope.
-	h.scope = endpoint.Scope
-	seedTestSpace(h.t, h.store, h.scope)
-	h.conversation, h.message = h.chat(provider + " routines")
+	h.Scope = endpoint.Scope
+	seedTestSpace(h.T, h.Store, h.Scope)
+	h.Conversation, h.Message = h.Chat(provider + " routines")
 	return catalog, endpoint
 }
 
 // conversationRoutine creates an active routine on the endpoint's connection
 // that listens to channel C123.
-func conversationRoutine(h *routineEventHarness, endpoint *ExternalConversationEndpoint, kind RoutineEventKind, field string) *RunbookActivation {
-	return h.routine(string(kind), func(trigger *RoutineEventTrigger) {
+func conversationRoutine(h *routinetest.EventHarness, endpoint *ExternalConversationEndpoint, kind RoutineEventKind, field string) *RunbookActivation {
+	return h.Routine(string(kind), func(trigger *RoutineEventTrigger) {
 		*trigger = RoutineEventTrigger{
 			Kind:        kind,
 			SourceRef:   RoutineConversationSourceRef(endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID, endpoint.InstallationID),
@@ -75,16 +76,16 @@ func conversationRoutine(h *routineEventHarness, endpoint *ExternalConversationE
 
 // waitingRoutineEvents claims the routine's waiting events as one batch and
 // returns their records in order.
-func waitingRoutineEvents(t *testing.T, h *routineEventHarness, activation *RunbookActivation) []*RoutineEventRecord {
+func waitingRoutineEvents(t *testing.T, h *routinetest.EventHarness, activation *RunbookActivation) []*RoutineEventRecord {
 	t.Helper()
-	batch, err := h.store.ClaimRoutineEventBatch(h.ctx, h.scope, activation.ID, RoutineEventMaxBatchEvents, h.now)
+	batch, err := h.Store.ClaimRoutineEventBatch(h.Ctx, h.Scope, activation.ID, RoutineEventMaxBatchEvents, h.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if batch == nil {
 		return nil
 	}
-	_, records, err := h.store.GetRoutineEventBatch(h.ctx, h.scope, batch.ID)
+	_, records, err := h.Store.GetRoutineEventBatch(h.Ctx, h.Scope, batch.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,16 +110,16 @@ func slackRoutineMessage(id, participant, name, text string, bot bool) Normalize
 }
 
 func TestSlackMessageOffersRoutineEvent(t *testing.T) {
-	h := newRoutineEventHarness(t)
+	h := routinetest.NewEventHarness(t)
 	// The endpoint answers only mentions, so these messages get no chat
 	// reply; the routine hears them anyway (E14).
 	catalog, endpoint := routineConnectionFixture(t, h, "slack", ExternalConversationSelectMentions)
 	activation := conversationRoutine(h, endpoint, RoutineEventSlackMessage, "channel")
-	gateways := externalconversation.NewExternalConversationGatewayService(h.store, nil)
-	registration := externalconversationtest.CreateActiveGateway(t, h.ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
+	gateways := externalconversation.NewExternalConversationGatewayService(h.Store, nil)
+	registration := externalconversationtest.CreateActiveGateway(t, h.Ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "acme-slack", Name: "Acme Slack", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "pinned tenant gateway",
 		Gateway: ExternalConversationIngressGateway{
-			Scope: endpoint.Scope, Owner: h.owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter,
+			Scope: endpoint.Scope, Owner: h.Owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter,
 			Provider: "slack", InstallationID: "T123", ApplicationID: "A123",
 		},
 	})
@@ -131,17 +132,17 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 			{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: bot},
 		},
 	}}
-	service := externalconversation.NewExternalConversationTransportService(h.store, catalog)
-	service.SetRoutineEventOfferer(h.matcher)
+	service := externalconversation.NewExternalConversationTransportService(h.Store, catalog)
+	service.SetRoutineEventOfferer(h.Matcher)
 
-	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.ctx, externalconversation.ExternalConversationPublicIngressRequest{
+	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.Ctx, externalconversation.ExternalConversationPublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"team_id":"T123"}`),
 	}, host)
 	if err != nil || len(result.Received) != 2 || result.Received[0].Accepted || result.Received[1].Accepted {
 		t.Fatalf("gateway ingress = %#v err=%v", result, err)
 	}
 
-	stats := h.matcher.RoutineEventStats()
+	stats := h.Matcher.RoutineEventStats()
 	if stats.In[RoutineEventSlackMessage] != 2 || stats.Matched[RoutineEventSlackMessage] != 1 {
 		t.Fatalf("slack stats in=%d matched=%d, want 2 and 1 (bot excluded)", stats.In[RoutineEventSlackMessage], stats.Matched[RoutineEventSlackMessage])
 	}
@@ -165,18 +166,18 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	}
 
 	// A retry of the same provider request is absorbed by dedupe.
-	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.ctx, externalconversation.ExternalConversationPublicIngressRequest{
+	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.Ctx, externalconversation.ExternalConversationPublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"team_id":"T123"}`),
 	}, host); err != nil {
 		t.Fatal(err)
 	}
-	if pending, err := h.store.CountPendingRoutineEvents(h.ctx, h.scope, activation.ID); err != nil || pending != 1 {
+	if pending, err := h.Store.CountPendingRoutineEvents(h.Ctx, h.Scope, activation.ID); err != nil || pending != 1 {
 		t.Fatalf("pending after retry = %d err=%v", pending, err)
 	}
 }
 
 func TestSlackRoutineIgnoresDirectMessages(t *testing.T) {
-	h := newRoutineEventHarness(t)
+	h := routinetest.NewEventHarness(t)
 	catalog, endpoint := routineConnectionFixture(t, h, "slack", ExternalConversationSelectAllMessages)
 	activation := conversationRoutine(h, endpoint, RoutineEventSlackMessage, "channel")
 	direct := slackRoutineMessage("172.001", "U1", "Ana Ruiz", "private note", false)
@@ -184,20 +185,20 @@ func TestSlackRoutineIgnoresDirectMessages(t *testing.T) {
 	host := &externalconversationtest.IngressHostStub{Result: &externalconversation.ExternalConversationIngressHostResult{
 		StatusCode: http.StatusOK, Events: []NormalizedExternalConversationEvent{direct},
 	}}
-	service := externalconversation.NewExternalConversationTransportService(h.store, catalog)
-	service.SetRoutineEventOfferer(h.matcher)
+	service := externalconversation.NewExternalConversationTransportService(h.Store, catalog)
+	service.SetRoutineEventOfferer(h.Matcher)
 	request := externalconversation.ExternalConversationIngressRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: http.MethodPost, Body: []byte(`{}`)}
 
-	if _, err := service.NormalizeExternalConversationIngress(h.ctx, request, host); err != nil {
+	if _, err := service.NormalizeExternalConversationIngress(h.Ctx, request, host); err != nil {
 		t.Fatal(err)
 	}
-	if stats := h.matcher.RoutineEventStats(); stats.In[RoutineEventSlackMessage] != 0 {
+	if stats := h.Matcher.RoutineEventStats(); stats.In[RoutineEventSlackMessage] != 0 {
 		t.Fatalf("a direct message reached the matcher: in=%d", stats.In[RoutineEventSlackMessage])
 	}
 
 	// The same endpoint path offers a channel message.
 	host.Result.Events = []NormalizedExternalConversationEvent{slackRoutineMessage("172.002", "U1", "Ana Ruiz", "in the channel", false)}
-	if _, err := service.NormalizeExternalConversationIngress(h.ctx, request, host); err != nil {
+	if _, err := service.NormalizeExternalConversationIngress(h.Ctx, request, host); err != nil {
 		t.Fatal(err)
 	}
 	records := waitingRoutineEvents(t, h, activation)
@@ -207,7 +208,7 @@ func TestSlackRoutineIgnoresDirectMessages(t *testing.T) {
 }
 
 func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
-	h := newRoutineEventHarness(t)
+	h := routinetest.NewEventHarness(t)
 	catalog, endpoint := routineConnectionFixture(t, h, "telegram", ExternalConversationSelectAllMessages)
 	activation := conversationRoutine(h, endpoint, RoutineEventTelegramMessage, "chat")
 	message := NormalizedExternalConversationEvent{
@@ -219,21 +220,21 @@ func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
 		Attributes:  map[string]interface{}{"chatTitle": "Support desk", "participantUsername": "ana_r"},
 	}
 	// An unpinned gateway: authority comes from each mapped endpoint.
-	gateways := externalconversation.NewExternalConversationGatewayService(h.store, nil)
-	registration := externalconversationtest.CreateActiveGateway(t, h.ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
+	gateways := externalconversation.NewExternalConversationGatewayService(h.Store, nil)
+	registration := externalconversationtest.CreateActiveGateway(t, h.Ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "telegram-bot", Name: "Telegram bot", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "unpinned gateway",
 		Gateway: ExternalConversationIngressGateway{
-			Scope: endpoint.Scope, Owner: h.owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: "telegram",
+			Scope: endpoint.Scope, Owner: h.Owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: "telegram",
 		},
 	})
 	host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{
 		StatusCode: http.StatusOK,
 		Events:     []externalconversation.ExternalConversationGatewayEvent{{InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: message}},
 	}}
-	service := externalconversation.NewExternalConversationTransportService(h.store, catalog)
-	service.SetRoutineEventOfferer(h.matcher)
+	service := externalconversation.NewExternalConversationTransportService(h.Store, catalog)
+	service.SetRoutineEventOfferer(h.Matcher)
 
-	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.ctx, externalconversation.ExternalConversationPublicIngressRequest{
+	result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(h.Ctx, externalconversation.ExternalConversationPublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"update_id":991}`),
 	}, host)
 	if err != nil || len(result.Received) != 1 {
@@ -263,22 +264,22 @@ func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
 }
 
 func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
-	h := newRoutineEventHarness(t)
-	h.createCallbackRegistration("repo", h.owner.ID, CallbackRegistrationActive)
-	h.createCallbackRegistration("quiet", h.owner.ID, CallbackRegistrationActive)
-	activation := h.routine("github", func(trigger *RoutineEventTrigger) {
+	h := routinetest.NewEventHarness(t)
+	h.CreateCallbackRegistration("repo", h.Owner.ID, CallbackRegistrationActive)
+	h.CreateCallbackRegistration("quiet", h.Owner.ID, CallbackRegistrationActive)
+	activation := h.Routine("github", func(trigger *RoutineEventTrigger) {
 		*trigger = RoutineEventTrigger{Kind: RoutineEventGitHub, SourceRef: RoutineCallbackSourceRef("callback-repo"), SourceLabel: "acme/api (GitHub)", MaxPerHour: 20,
 			Filter: []RoutineEventCondition{{Field: "event", Op: RoutineFilterEquals, Value: "issues.opened"}}}
 	})
-	registration, err := h.store.GetCallbackRegistration(h.ctx, h.scope, "callback-repo")
+	registration, err := h.Store.GetCallbackRegistration(h.Ctx, h.Scope, "callback-repo")
 	if err != nil || registration == nil {
 		t.Fatalf("registration = %#v err=%v", registration, err)
 	}
 	// The shape the GitHub skill's callback adapter emits, reloaded from the
 	// receipt with json.Number.
 	issue := EventEnvelope{
-		ID: "github:delivery-1", Scope: h.scope, Type: "github.issues.opened", Source: "github", Subject: "acme/api#12",
-		OccurredAt: h.now, Actor: ActivityActor{Type: "callback", ID: registration.ID},
+		ID: "github:delivery-1", Scope: h.Scope, Type: "github.issues.opened", Source: "github", Subject: "acme/api#12",
+		OccurredAt: h.Now, Actor: ActivityActor{Type: "callback", ID: registration.ID},
 		Attributes: map[string]interface{}{"owner": "acme", "repository": "api", "action": "opened", "number": json.Number("12")},
 		Payload: map[string]interface{}{
 			"repository": map[string]interface{}{"owner": "acme", "name": "api", "fullName": "acme/api"},
@@ -289,25 +290,25 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 			},
 		},
 	}
-	offered := &recordingRoutineOfferer{RoutineEventOfferer: h.matcher}
+	offered := &recordingRoutineOfferer{RoutineEventOfferer: h.Matcher}
 	consumer := externalconversation.NewRoutineCallbackConsumer(offered)
 	subscription := CallbackSubscription{EventType: "github.issues.opened", Consumer: "routines"}
 
-	if err := consumer.ConsumeCallbackEvent(h.ctx, registration, subscription, issue); err != nil {
+	if err := consumer.ConsumeCallbackEvent(h.Ctx, registration, subscription, issue); err != nil {
 		t.Fatal(err)
 	}
 	// A registration no routine listens to is skipped before any mapping.
-	quiet, _ := h.store.GetCallbackRegistration(h.ctx, h.scope, "callback-quiet")
-	if err := consumer.ConsumeCallbackEvent(h.ctx, quiet, subscription, issue); err != nil {
+	quiet, _ := h.Store.GetCallbackRegistration(h.Ctx, h.Scope, "callback-quiet")
+	if err := consumer.ConsumeCallbackEvent(h.Ctx, quiet, subscription, issue); err != nil {
 		t.Fatal(err)
 	}
 	// Other providers are not routine events.
 	other := *registration
 	other.Provider = "gitlab"
-	if err := consumer.ConsumeCallbackEvent(h.ctx, &other, subscription, issue); err != nil {
+	if err := consumer.ConsumeCallbackEvent(h.Ctx, &other, subscription, issue); err != nil {
 		t.Fatal(err)
 	}
-	if stats := h.matcher.RoutineEventStats(); stats.In[RoutineEventGitHub] != 1 || stats.Matched[RoutineEventGitHub] != 1 {
+	if stats := h.Matcher.RoutineEventStats(); stats.In[RoutineEventGitHub] != 1 || stats.Matched[RoutineEventGitHub] != 1 {
 		t.Fatalf("github stats in=%d matched=%d", stats.In[RoutineEventGitHub], stats.Matched[RoutineEventGitHub])
 	}
 	records := waitingRoutineEvents(t, h, activation)
@@ -340,7 +341,7 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 		"repository":  map[string]interface{}{"fullName": "acme/api"},
 		"workflowRun": map[string]interface{}{"name": "CI", "branch": "main", "conclusion": "failure"},
 	}
-	if err := consumer.ConsumeCallbackEvent(h.ctx, registration, CallbackSubscription{EventType: run.Type, Consumer: "routines"}, run); err != nil {
+	if err := consumer.ConsumeCallbackEvent(h.Ctx, registration, CallbackSubscription{EventType: run.Type, Consumer: "routines"}, run); err != nil {
 		t.Fatal(err)
 	}
 	mapped := offered.events[len(offered.events)-1]
@@ -351,7 +352,7 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 	if err := mapped.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if stats := h.matcher.RoutineEventStats(); stats.In[RoutineEventGitHub] != 2 || stats.Matched[RoutineEventGitHub] != 1 {
+	if stats := h.Matcher.RoutineEventStats(); stats.In[RoutineEventGitHub] != 2 || stats.Matched[RoutineEventGitHub] != 1 {
 		t.Fatalf("github stats in=%d matched=%d", stats.In[RoutineEventGitHub], stats.Matched[RoutineEventGitHub])
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -41,7 +42,7 @@ type routineGrantFixtureState struct {
 func routineGrantFixture(t *testing.T) *routineGrantFixtureState {
 	t.Helper()
 	store := newTestKernelStore(t)
-	run, catalog, bound, args := scheduledTaskFixture(t, store)
+	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 	recipients := map[string]interface{}{"type": "string"}
 	mail := &skill.Definition{
 		ID: "mail", Version: "1.0.0", Name: "Mail", Transport: skill.TransportReference{Kind: "http", Endpoint: "https://mail.invalid"},

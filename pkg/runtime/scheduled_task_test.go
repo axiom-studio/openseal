@@ -17,69 +17,15 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
-
-func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ...*skill.Definition) (*AgentRun, *skill.Catalog, *skill.BoundAction, map[string]interface{}) {
-	t.Helper()
-	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: "task-test"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}
-	reader := store.(ConversationStore)
-	service := conversation.NewConversationService(reader)
-	seedTestSpace(t, store.(SpaceStore), scope)
-	c, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	posted, err := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{Scope: scope, ConversationID: c.ID, ExpectedRevision: c.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion, Content: "Check the public forecast every thirty minutes", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "user-request"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: owner.ID, ActingUser: "user", Goal: "Handle request", Source: RunSourceChat, Context: map[string]interface{}{conversationRunContextConversationID: c.ID, conversationRunContextTriggerID: posted.Message.ID}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	registryStore, ok := store.(kernelagent.Store)
-	if !ok {
-		registryStore = kernelagent.NewMemoryStore()
-	}
-	registry := kernelagent.NewRegistryWithStore(registryStore)
-	definition := sqliteAgentDefinition("1.0.0")
-	if _, err := registry.RegisterDefinition(ctx, definition); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{ID: owner.ID, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: definition.ID, ActiveVersion: definition.Version, RolloutStatus: kernelagent.RolloutActive, Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}}, "user", "user", "test"); err != nil {
-		t.Fatal(err)
-	}
-	catalog := skill.NewCatalog()
-	def := routine.RunbookManagementSkill()
-	if len(runbookDefinitions) == 1 {
-		def = runbookDefinitions[0]
-	}
-	if err := catalog.Register(ctx, def); err != nil {
-		t.Fatal(err)
-	}
-	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: owner.ID, SkillID: def.ID, SkillVersion: def.Version, AllowedActions: []string{action.RunbookActionCreateTask, action.RunbookActionList, action.RunbookActionSetStatus, routine.RunbookActionStart, routine.RunbookActionReplaceSchedule, routine.RunbookActionEventSources, routine.RunbookActionSendTestEvent}, MaximumRisk: skill.RiskLevelWrite}
-	if err := catalog.Bind(ctx, binding); err != nil {
-		t.Fatal(err)
-	}
-	bound, err := catalog.Resolve(ctx, binding.Scope, owner.ID, def.ID, def.Version, action.RunbookActionCreateTask)
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := map[string]interface{}{"title": "Forecast update", "goal": "Use the browser to read the current public forecast and summarize it with its source.",
-		"trigger": map[string]interface{}{"schedule": map[string]interface{}{"cron": "0 */30 * * * *", "timezone": "Asia/Kolkata", "maximumOccurrences": float64(2)}},
-		"brief":   map[string]interface{}{"summary": "Reads the public forecast every thirty minutes and posts a summary here.", "grants": []interface{}{}}}
-	return run, catalog, bound, args
-}
 
 // withScheduleArgument returns a copy of create_task arguments whose
 // trigger.schedule sets key to value, or drops key when drop is true.
@@ -136,7 +82,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 					defer s.Close()
 					store = s
 				}
-				run, catalog, bound, args := scheduledTaskFixture(t, store)
+				run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 				occurrences, maximum, status := 2, int64(2), RunbookActivationRetired
 				if limit != "bounded" {
 					occurrences, maximum, status = 3, 0, RunbookActivationActive
@@ -233,7 +179,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 }
 func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion(t *testing.T) {
 	store := newTestKernelStore(t)
-	run, _, bound, args := scheduledTaskFixture(t, store)
+	run, _, bound, args := routinetest.ScheduledTask(t, store)
 	v, _ := routine.NewRunbookActionValidator(store)
 	for _, change := range []string{"scope", "owner", "background", "conversation", "binding", "cron", "timezone", "foreign-input"} {
 		t.Run(change, func(t *testing.T) {
@@ -270,8 +216,8 @@ func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion
 func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 	for _, kind := range []string{"sqlite"} {
 		t.Run(kind, func(t *testing.T) {
-			store := routineTestStore(t, kind)
-			run, catalog, bound, args := scheduledTaskFixture(t, store)
+			store := routinetest.NewFileStore(t, kind)
+			run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 			now := time.Now().Add(time.Second)
 			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 			if err != nil || claimed == nil {
@@ -327,7 +273,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 }
 func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *testing.T) {
 	store := newTestKernelStore(t)
-	run, catalog, bound, args := scheduledTaskFixture(t, store)
+	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 	a := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*RunbookActivation)
 	statusBound, err := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, action.RunbookActionSetStatus)
 	if err != nil {
@@ -386,7 +332,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 	for _, limit := range []string{"bounded", "omitted", "null"} {
 		t.Run(limit, func(t *testing.T) {
 			store := newTestKernelStore(t)
-			run, catalog, bound, args := scheduledTaskFixture(t, store)
+			run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 			if limit != "bounded" {
 				args = withScheduleArgument(args, "maximumOccurrences", nil, limit == "omitted")
 			}
@@ -428,7 +374,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 // so a member accepts their own routine in any space they belong to.
 func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
 	store := newTestKernelStore(t)
-	run, catalog, bound, args := scheduledTaskFixture(t, store)
+	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 	now := time.Now().Add(time.Second)
 	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil {
@@ -450,7 +396,7 @@ func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
 
 func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 	store := newTestKernelStore(t)
-	source, _, bound, args := scheduledTaskFixture(t, store)
+	source, _, bound, args := routinetest.ScheduledTask(t, store)
 	a := dispatchTaskForTest(t, store, source, bound, args, "create")["activation"].(*RunbookActivation)
 	scheduler := routine.NewRunbookScheduler(store, models.WithClock(func() time.Time { return a.NextRunAt.Add(time.Second) }))
 	if _, err := scheduler.ReconcileScope(t.Context(), source.Scope, 10); err != nil {
@@ -480,7 +426,7 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 
 func TestScheduledTaskSurvivesAgentDefinitionSynchronization(t *testing.T) {
 	store := newTestKernelStore(t)
-	run, _, bound, args := scheduledTaskFixture(t, store)
+	run, _, bound, args := routinetest.ScheduledTask(t, store)
 	first := dispatchTaskForTest(t, store, run, bound, args, "task-one")["activation"].(*RunbookActivation)
 	second := dispatchTaskForTest(t, store, run, bound, args, "task-two")["activation"].(*RunbookActivation)
 	// Both tasks share the portable schedule trigger name. An unrelated Agent

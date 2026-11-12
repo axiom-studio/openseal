@@ -6,6 +6,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
 )
 
 // A routine may keep an app from its own chat up to date; each occurrence is
@@ -13,8 +14,8 @@ import (
 func TestScheduledTaskKeepsOnlyItsChatsAppUpToDate(t *testing.T) {
 	for _, kind := range []string{"sqlite"} {
 		t.Run(kind, func(t *testing.T) {
-			store := routineTestStore(t, kind)
-			run, _, _, args := scheduledTaskFixture(t, store)
+			store := routinetest.NewFileStore(t, kind)
+			run, _, _, args := routinetest.ScheduledTask(t, store)
 			conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 			register := func(id string, owner models.ObjectiveOwner, conversation, artifactType string) {
 				t.Helper()
