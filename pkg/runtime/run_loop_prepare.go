@@ -75,7 +75,7 @@ func newCatalogModelStepPreparer(config catalogModelStepPreparerConfig) *catalog
 // loopControlRegistry is every control tool a Run loop runs: the built-in
 // tools and the kernel-only runbook tools.
 func loopControlRegistry() control.Registry {
-	return control.NewRegistry(append(control.BuiltinTools(), runbookControlTools()...)...)
+	return control.NewRegistry(append(control.BuiltinTools(), RunbookControlTools()...)...)
 }
 
 // ModelCredential is a copy of the model credential the prepared steps send

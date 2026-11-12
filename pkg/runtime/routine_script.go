@@ -159,7 +159,7 @@ func routineScriptMap(script *models.RoutineScript) map[string]interface{} {
 	return values
 }
 
-func decodeRoutineScript(value interface{}) (*models.RoutineScript, error) {
+func DecodeScript(value interface{}) (*models.RoutineScript, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
@@ -294,7 +294,7 @@ type scheduledTaskSetScriptArguments struct {
 }
 
 // ownedScriptRoutine loads a script routine the run's owner owns.
-func ownedScriptRoutine(ctx context.Context, store runbookActionStore, run *models.AgentRun, id string) (*models.RunbookActivation, error) {
+func ownedScriptRoutine(ctx context.Context, store RunbookActionStore, run *models.AgentRun, id string) (*models.RunbookActivation, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, errors.New("changing a routine's script requires its activationId")
 	}
@@ -316,7 +316,7 @@ func ownedScriptRoutine(ctx context.Context, store runbookActionStore, run *mode
 
 // pinRoutineScriptRepinArguments writes the routine's chat file's current
 // version into proposed set_script arguments, replacing any model value.
-func pinRoutineScriptRepinArguments(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *models.AgentRun, arguments map[string]interface{}) error {
+func pinRoutineScriptRepinArguments(ctx context.Context, store RunbookActionStore, files ChatFileResolver, run *models.AgentRun, arguments map[string]interface{}) error {
 	id, _ := arguments["activationId"].(string)
 	a, err := ownedScriptRoutine(ctx, store, run, id)
 	if err != nil {
@@ -335,7 +335,7 @@ func pinRoutineScriptRepinArguments(ctx context.Context, store runbookActionStor
 
 // resolveOwnedTaskScript returns the routine and the script version the
 // set_script arguments pin.
-func resolveOwnedTaskScript(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *models.AgentRun, arguments map[string]interface{}) (*scheduledTaskSetScriptArguments, *models.RunbookActivation, *models.RoutineScript, error) {
+func resolveOwnedTaskScript(ctx context.Context, store RunbookActionStore, files ChatFileResolver, run *models.AgentRun, arguments map[string]interface{}) (*scheduledTaskSetScriptArguments, *models.RunbookActivation, *models.RoutineScript, error) {
 	var args scheduledTaskSetScriptArguments
 	if err := decodeScheduledTaskArguments(arguments, &args); err != nil {
 		return nil, nil, nil, err
@@ -363,7 +363,7 @@ func resolveOwnedTaskScript(ctx context.Context, store runbookActionStore, files
 
 // routineScriptChangePreview is the brief the user approves again before a
 // routine runs a new version of its script.
-func routineScriptChangePreview(ctx context.Context, store runbookActionStore, a *models.RunbookActivation, script *models.RoutineScript) (map[string]interface{}, error) {
+func routineScriptChangePreview(ctx context.Context, store RunbookActionStore, a *models.RunbookActivation, script *models.RoutineScript) (map[string]interface{}, error) {
 	preview := map[string]interface{}{
 		"resourceType": runbookActivationResourceType, "operation": action.RunbookActionSetScript, "activationId": a.ID,
 		"goal": a.Task.Goal, "conversationId": a.Task.ConversationID,

@@ -38,13 +38,13 @@ type routineEventSeedStore interface {
 	GetRunbookActivation(ctx context.Context, scope models.Scope, id string) (*models.RunbookActivation, error)
 }
 
-// loopRunSessionSeedEntries are the first entries of a model Run's fresh run
+// SessionSeedEntries are the first entries of a model Run's fresh run
 // session: the brief seed (loopRunSessionSeed) and, for an event routine
 // occurrence, the entry holding its batch of events (SPEC §6.1). Other Runs
 // get only the brief seed: a delegated, collaboration or forked child
 // inherits routineEventBatchId only to keep the manual approval mode, never
 // the events themselves.
-func loopRunSessionSeedEntries(ctx context.Context, store routineEventSeedStore, keeper RoutineEventFileKeeper, logger *zap.SugaredLogger, run *models.AgentRun) ([]*models.SessionEntry, error) {
+func SessionSeedEntries(ctx context.Context, store routineEventSeedStore, keeper RoutineEventFileKeeper, logger *zap.SugaredLogger, run *models.AgentRun) ([]*models.SessionEntry, error) {
 	var entries []*models.SessionEntry
 	seed, err := loopRunSessionSeed(run)
 	if err != nil {

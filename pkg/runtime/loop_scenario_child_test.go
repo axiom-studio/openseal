@@ -367,7 +367,7 @@ func (c *childFixture) runSession(run *AgentRun, seeded bool) *AgentSession {
 	}
 	var initial []*SessionEntry
 	if seeded {
-		entries, err := loopRunSessionSeedEntries(c.ctx, c.store, nil, nil, run)
+		entries, err := SessionSeedEntries(c.ctx, c.store, nil, nil, run)
 		if err != nil {
 			c.t.Fatal(err)
 		}

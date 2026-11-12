@@ -31,7 +31,7 @@ var (
 	ErrRoutineEventsWaitingIsFull = errors.New("too many events are already waiting for this routine")
 )
 
-type routineEventMatcherStore interface {
+type RoutineEventMatcherStore interface {
 	models.RoutineEventStore
 	GetRunbookActivation(context.Context, models.Scope, string) (*models.RunbookActivation, error)
 }
@@ -44,7 +44,7 @@ type routineCallbackRegistrationReader interface {
 // the dispatcher. It never starts a Run or calls a provider. An event whose
 // (scope, kind, SourceRef) has no active routine costs one map lookup.
 type RoutineEventMatcher struct {
-	store      routineEventMatcherStore
+	store      RoutineEventMatcherStore
 	index      routineEventIndexHolder
 	stats      routineEventStatsCounters
 	nudge      chan struct{}
@@ -63,7 +63,7 @@ var _ externalconversation.RoutineEventOfferer = (*RoutineEventMatcher)(nil)
 // same store value, so the host must pass the store its
 // RunbookActivationService writes to (not a wrapper of it). A store that
 // cannot be a map key could never be followed, so it panics here.
-func NewRoutineEventMatcher(store routineEventMatcherStore, opts ...models.ServiceOption) *RoutineEventMatcher {
+func NewRoutineEventMatcher(store RoutineEventMatcherStore, opts ...models.ServiceOption) *RoutineEventMatcher {
 	if _, ok := routineActivationObserverKey(store); !ok {
 		panic("routine event matcher needs a comparable store (a pointer) so activation writes refresh its index")
 	}

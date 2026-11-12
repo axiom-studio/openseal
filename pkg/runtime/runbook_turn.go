@@ -926,8 +926,8 @@ type runbookForkHandler struct{}
 
 type runbookDelegateHandler struct{}
 
-// runbookControlTools are the kernel-only control tools of runbook Runs.
-func runbookControlTools() []control.Tool {
+// RunbookControlTools are the kernel-only control tools of runbook Runs.
+func RunbookControlTools() []control.Tool {
 	return []control.Tool{
 		control.NewTool(models.ControlToolRunbookFork, runbookForkHandler{}),
 		control.NewTool(models.ControlToolRunbookDelegate, runbookDelegateHandler{}),

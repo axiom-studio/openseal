@@ -356,7 +356,7 @@ func (d *drive) fillStepApplication(req *RunTransitionRequest, run *AgentRun, st
 		if current := runbookCurrentStep(st.kernelState); current != "" {
 			req.Payload["runbookStep"] = current
 		}
-		if delta := runbookTraceDelta(run.Checkpoint, st.kernelState); len(delta) > 0 {
+		if delta := RunbookTraceDelta(run.Checkpoint, st.kernelState); len(delta) > 0 {
 			req.Payload["runbookTraceDelta"] = delta
 		}
 	}

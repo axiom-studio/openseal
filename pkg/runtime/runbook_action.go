@@ -120,7 +120,7 @@ type runbookReplaceScheduleArguments struct {
 	Reason             string `json:"reason"`
 }
 
-type runbookActionStore interface {
+type RunbookActionStore interface {
 	models.KernelStore
 	models.ConversationStore
 }
@@ -129,7 +129,7 @@ type runbookActionStore interface {
 // Objective channel, then proves that the activation is active and belongs to
 // the conversation owner before policy evaluation or approval persistence.
 type RunbookActionValidator struct {
-	store          runbookActionStore
+	store          RunbookActionStore
 	routineTeams   collaboration.RoutineTeamCatalog
 	grantCatalog   RoutineGrantCatalog
 	ownerAddresses models.RoutineOwnerAddressResolver
@@ -176,7 +176,7 @@ func (v *RunbookActionValidator) SetRoutineTeams(teams collaboration.RoutineTeam
 	}
 }
 
-func NewRunbookActionValidator(store runbookActionStore) (*RunbookActionValidator, error) {
+func NewRunbookActionValidator(store RunbookActionStore) (*RunbookActionValidator, error) {
 	if store == nil {
 		return nil, errors.New("Runbook action store is required")
 	}
@@ -305,7 +305,7 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 }
 
 type RunbookActionDispatcher struct {
-	store             runbookActionStore
+	store             RunbookActionStore
 	fallback          agentrun.ActionDispatcher
 	routineTeams      collaboration.RoutineTeamCatalog
 	executionPreparer models.AcceptedRunExecutionPreparer
@@ -341,7 +341,7 @@ func (d *RunbookActionDispatcher) SetRoutineTeams(teams collaboration.RoutineTea
 	}
 }
 
-func NewRunbookActionDispatcher(store runbookActionStore, fallback agentrun.ActionDispatcher) (*RunbookActionDispatcher, error) {
+func NewRunbookActionDispatcher(store RunbookActionStore, fallback agentrun.ActionDispatcher) (*RunbookActionDispatcher, error) {
 	if store == nil {
 		return nil, errors.New("Runbook action store is required")
 	}
@@ -418,7 +418,7 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input agen
 	}, nil
 }
 
-func resolveRunbookScheduleReplacement(ctx context.Context, store runbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookReplaceScheduleArguments, *models.RunbookActivation, *models.Objective, *runbook.Schedule, error) {
+func resolveRunbookScheduleReplacement(ctx context.Context, store RunbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookReplaceScheduleArguments, *models.RunbookActivation, *models.Objective, *runbook.Schedule, error) {
 	var args runbookReplaceScheduleArguments
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
@@ -498,7 +498,7 @@ func selectLatestRunbookLineage(activations []*models.RunbookActivation) (*model
 	return selected, nil
 }
 
-func resolveRunbookStart(ctx context.Context, store runbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookStartArguments, *models.RunbookActivation, *models.Objective, error) {
+func resolveRunbookStart(ctx context.Context, store RunbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookStartArguments, *models.RunbookActivation, *models.Objective, error) {
 	var args runbookStartArguments
 	encoded, err := json.Marshal(arguments)
 	if err != nil {

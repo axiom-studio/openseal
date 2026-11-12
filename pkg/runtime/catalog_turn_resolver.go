@@ -303,7 +303,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 	for _, action := range actions {
 		if action.SkillID == RunbookManagementSkillID && action.Action == runtimeaction.RunbookActionCreateTask {
 			prompt.AgentInstructions = append(prompt.AgentInstructions, RoutineTimezoneInstruction, RoutineDeliveryInstruction)
-			if instruction := routineBindingToolGrantInstruction(actions); instruction != "" {
+			if instruction := BindingToolGrantInstruction(actions); instruction != "" {
 				prompt.AgentInstructions = append(prompt.AgentInstructions, instruction)
 			}
 			break
@@ -461,7 +461,7 @@ func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*Agen
 	}
 	var initial []*SessionEntry
 	if seeded {
-		entries, err := loopRunSessionSeedEntries(ctx, r.config.Store, r.config.RoutineEventFiles, r.config.Logger, run)
+		entries, err := SessionSeedEntries(ctx, r.config.Store, r.config.RoutineEventFiles, r.config.Logger, run)
 		if err != nil {
 			return nil, err
 		}

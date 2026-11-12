@@ -203,10 +203,10 @@ func TestRoutineGrantPinsTheApprovedTool(t *testing.T) {
 }
 
 func TestRoutineBindingToolGrantInstruction(t *testing.T) {
-	if instruction := routineBindingToolGrantInstruction([]skill.ModelAction{{Name: "mail.send", SkillID: "mail", Action: "send"}}); instruction != "" {
+	if instruction := BindingToolGrantInstruction([]skill.ModelAction{{Name: "mail.send", SkillID: "mail", Action: "send"}}); instruction != "" {
 		t.Fatalf("instruction without binding tools = %q", instruction)
 	}
-	instruction := routineBindingToolGrantInstruction([]skill.ModelAction{
+	instruction := BindingToolGrantInstruction([]skill.ModelAction{
 		{Name: "mail.send", SkillID: "mail", Action: "send"},
 		{Name: "mcp.github.create_issue", SkillID: "openseal.connector", Action: "call", BindingTool: &skill.ModelActionBindingTool{Name: "create_issue"}},
 	})

@@ -14,10 +14,7 @@ import (
 
 const MaximumRoutineTestEventPayload = maximumRoutineTestEventPayload
 
-type (
-	RoutineEventActions = routineEventActions
-	RunbookActionStore  = runbookActionStore
-)
+type RoutineEventActions = routineEventActions
 
 func RoutineEventIdempotencyKey(batchID string) string {
 	return routineEventIdempotencyKey(batchID)
@@ -27,7 +24,7 @@ func StartActivationOccurrence(ctx context.Context, store models.RunCommandStore
 	return startActivationOccurrence(ctx, store, reportingStore, activation, objective, source, idempotencyKey, extraContext, actor, visibility, preparer)
 }
 
-func ResolveRunbookScheduleReplacement(ctx context.Context, store runbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookReplaceScheduleArguments, *models.RunbookActivation, *models.Objective, *runbook.Schedule, error) {
+func ResolveRunbookScheduleReplacement(ctx context.Context, store RunbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (runbookReplaceScheduleArguments, *models.RunbookActivation, *models.Objective, *runbook.Schedule, error) {
 	return resolveRunbookScheduleReplacement(ctx, store, run, arguments)
 }
 
@@ -35,7 +32,7 @@ func RoutineEventPreview(trigger *models.RoutineEventTrigger) map[string]interfa
 	return routineEventPreview(trigger)
 }
 
-func ResolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, files ChatFileResolver, events routineEventActions, run *models.AgentRun, activationID string, args map[string]interface{}) (*scheduledTaskCreateArguments, *models.ScheduledAgentTask, *runbook.Schedule, error) {
+func ResolveScheduledTaskCreate(ctx context.Context, store RunbookActionStore, files ChatFileResolver, events routineEventActions, run *models.AgentRun, activationID string, args map[string]interface{}) (*scheduledTaskCreateArguments, *models.ScheduledAgentTask, *runbook.Schedule, error) {
 	return resolveScheduledTaskCreate(ctx, store, files, events, run, activationID, args)
 }
 

@@ -18,11 +18,11 @@ const RoutineTimezoneInstruction = "A routine runs in the IANA timezone you pass
 // and how a brief grants posting anywhere else (create_task 1.7.0).
 const RoutineDeliveryInstruction = "Each run of a routine posts its result automatically as a new message in the chat it was created from (for a Slack conversation, a new top-level message there), so a routine that reports here, including one asked to post in this same channel, needs no send grant. To post to another channel, grant that sending action in brief.grants with toDestinations listing each channel exactly as the runs will pass it (its channel ID, or #name), and name the channel in the label, for example \"Post to #ai-news\". Posts to any other channel still ask first."
 
-// routineBindingToolGrantInstruction tells the Agent how a routine brief
+// BindingToolGrantInstruction tells the Agent how a routine brief
 // grants a connected tool, or is empty when no binding tool is offered. A
 // connected tool is granted by its own action name; the action it runs
 // through is never grantable.
-func routineBindingToolGrantInstruction(actions []skill.ModelAction) string {
+func BindingToolGrantInstruction(actions []skill.ModelAction) string {
 	for _, action := range actions {
 		if action.BindingTool != nil {
 			return "To let a routine use a connected tool without asking, list that tool in brief.grants by its own exact action name, for example " + action.Name +

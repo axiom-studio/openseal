@@ -48,7 +48,7 @@ func routineTestEventAction() skill.Action {
 // resolveRoutineTestEvent returns the active event routine of this chat the
 // test goes to and the payload to send. The acting person must be the
 // routine's recorded creator; an empty creator is never adopted here.
-func resolveRoutineTestEvent(ctx context.Context, store runbookActionStore, events routineEventActions, run *models.AgentRun, arguments map[string]interface{}) (*models.RunbookActivation, json.RawMessage, error) {
+func resolveRoutineTestEvent(ctx context.Context, store RunbookActionStore, events routineEventActions, run *models.AgentRun, arguments map[string]interface{}) (*models.RunbookActivation, json.RawMessage, error) {
 	if events.offerer == nil {
 		return nil, nil, ErrRoutineEventsUnavailable
 	}
@@ -90,7 +90,7 @@ func resolveRoutineTestEvent(ctx context.Context, store runbookActionStore, even
 	return a, payload, nil
 }
 
-func dispatchRoutineTestEvent(ctx context.Context, store runbookActionStore, events routineEventActions, run *models.AgentRun, arguments map[string]interface{}) (map[string]interface{}, error) {
+func dispatchRoutineTestEvent(ctx context.Context, store RunbookActionStore, events routineEventActions, run *models.AgentRun, arguments map[string]interface{}) (map[string]interface{}, error) {
 	a, payload, err := resolveRoutineTestEvent(ctx, store, events, run, arguments)
 	if err != nil {
 		return nil, err

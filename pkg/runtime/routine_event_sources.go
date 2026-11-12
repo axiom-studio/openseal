@@ -379,7 +379,7 @@ func listRoutineEventSources(ctx context.Context, store interface{}, events rout
 	return result, nil
 }
 
-func dispatchRoutineEventSources(ctx context.Context, store runbookActionStore, events routineEventActions, run *models.AgentRun, arguments map[string]interface{}) (map[string]interface{}, error) {
+func dispatchRoutineEventSources(ctx context.Context, store RunbookActionStore, events routineEventActions, run *models.AgentRun, arguments map[string]interface{}) (map[string]interface{}, error) {
 	var args struct {
 		Kind models.RoutineEventKind `json:"kind"`
 	}

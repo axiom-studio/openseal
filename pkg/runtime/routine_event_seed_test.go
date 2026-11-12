@@ -98,7 +98,7 @@ const routineEventSeedSilent = "\nIf nothing here needs the person's attention a
 
 func routineEventSeedEntriesFor(t *testing.T, run *models.AgentRun, store routineEventSeedStore, keeper RoutineEventFileKeeper) []*models.SessionEntry {
 	t.Helper()
-	entries, err := loopRunSessionSeedEntries(t.Context(), store, keeper, nil, run)
+	entries, err := SessionSeedEntries(t.Context(), store, keeper, nil, run)
 	if err != nil {
 		t.Fatalf("seed entries: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestRoutineEventSeedEntries(t *testing.T) {
 	t.Run("missing batch", func(t *testing.T) {
 		run, store := routineEventSeedFixture(1, 0)
 		run.Context[models.RoutineEventBatchContextKey] = "reb-gone"
-		if _, err := loopRunSessionSeedEntries(t.Context(), store, nil, nil, run); !errors.Is(err, models.ErrRoutineEventBatchNotFound) {
+		if _, err := SessionSeedEntries(t.Context(), store, nil, nil, run); !errors.Is(err, models.ErrRoutineEventBatchNotFound) {
 			t.Fatalf("want ErrRoutineEventBatchNotFound, got %v", err)
 		}
 	})
@@ -444,7 +444,7 @@ func TestRoutineEventSeedOnlyForOccurrenceRoot(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			run, store := routineEventSeedFixture(2, 0)
 			mutate(run)
-			entries, err := loopRunSessionSeedEntries(t.Context(), store, nil, nil, run)
+			entries, err := SessionSeedEntries(t.Context(), store, nil, nil, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -458,37 +458,37 @@ func TestRoutineEventSeedOnlyForOccurrenceRoot(t *testing.T) {
 	t.Run("batch of another routine", func(t *testing.T) {
 		run, store := routineEventSeedFixture(2, 0)
 		run.Context["runbookActivationId"] = "act-other"
-		if _, err := loopRunSessionSeedEntries(t.Context(), store, nil, nil, run); !errors.Is(err, models.ErrRoutineEventBatchNotFound) {
+		if _, err := SessionSeedEntries(t.Context(), store, nil, nil, run); !errors.Is(err, models.ErrRoutineEventBatchNotFound) {
 			t.Fatalf("want ErrRoutineEventBatchNotFound, got %v", err)
 		}
 	})
 }
 
 func TestLoopRunSessionSeed(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "seed"}
-	plain := &AgentRun{Scope: scope, ID: "run-plain", Goal: "Send the weekly summary."}
-	entries, err := loopRunSessionSeedEntries(t.Context(), nil, nil, nil, plain)
+	scope := models.Scope{Kind: "tenant", ID: "seed"}
+	plain := &models.AgentRun{Scope: scope, ID: "run-plain", Goal: "Send the weekly summary."}
+	entries, err := SessionSeedEntries(t.Context(), nil, nil, nil, plain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].SourceKey != GoalSourceKey(plain.ID) || entries[0].User.GoalKind != "routine" {
+	if len(entries) != 1 || entries[0].SourceKey != models.GoalSourceKey(plain.ID) || entries[0].User.GoalKind != "routine" {
 		t.Fatalf("a non-routine Run gets one brief seed, got %+v", entries)
 	}
 	if err := entries[0].Validate(); err != nil {
 		t.Fatal(err)
 	}
 
-	empty := &AgentRun{Scope: scope, ID: "run-empty"}
-	if entries, err := loopRunSessionSeedEntries(t.Context(), nil, nil, nil, empty); err != nil || len(entries) != 0 {
+	empty := &models.AgentRun{Scope: scope, ID: "run-empty"}
+	if entries, err := SessionSeedEntries(t.Context(), nil, nil, nil, empty); err != nil || len(entries) != 0 {
 		t.Fatalf("a Run without a goal gets no seed, got %d entries, %v", len(entries), err)
 	}
 
 	occurrence, store := routineEventSeedFixture(2, 0)
-	entries, err = loopRunSessionSeedEntries(t.Context(), store, nil, nil, occurrence)
+	entries, err = SessionSeedEntries(t.Context(), store, nil, nil, occurrence)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 || entries[0].SourceKey != GoalSourceKey(occurrence.ID) || entries[1].SourceKey != RoutineEventEntrySourceKey(occurrence.ID) {
+	if len(entries) != 2 || entries[0].SourceKey != models.GoalSourceKey(occurrence.ID) || entries[1].SourceKey != models.RoutineEventEntrySourceKey(occurrence.ID) {
 		t.Fatalf("an event occurrence gets the brief then its events, got %+v", entries)
 	}
 	if entries[0].ID == entries[1].ID {

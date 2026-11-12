@@ -59,7 +59,7 @@ func prepareLoopRoutineScript(run *AgentRun, hostTools []modelstep.HostToolSpec)
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	script, err := decodeRoutineScript(raw)
+	script, err := DecodeScript(raw)
 	if err != nil {
 		return nil, fmt.Errorf("routine script in Run context is invalid: %w", err)
 	}

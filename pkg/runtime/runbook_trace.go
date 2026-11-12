@@ -315,7 +315,7 @@ func pendingRunbookStepTrace(checkpoint map[string]interface{}, stepID string) (
 	return 0, errors.New("pending Runbook trace entry is not found")
 }
 
-func runbookTraceDelta(before, after map[string]interface{}) []RunbookStepTrace {
+func RunbookTraceDelta(before, after map[string]interface{}) []RunbookStepTrace {
 	previous, previousErr := RunbookTraceFromCheckpoint(before)
 	current, currentErr := RunbookTraceFromCheckpoint(after)
 	if previousErr != nil || currentErr != nil {

@@ -311,7 +311,7 @@ func decodeScheduledTaskArguments(arguments map[string]interface{}, target inter
 // routine's task with its schedule, or with Task.Event set for an event
 // routine (then the schedule is nil). activationID is the routine's ID when
 // it is known (dispatch); a webhook routine's hook is named after it.
-func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, files ChatFileResolver, events routineEventActions, run *models.AgentRun, activationID string, args map[string]interface{}) (*scheduledTaskCreateArguments, *models.ScheduledAgentTask, *runbook.Schedule, error) {
+func resolveScheduledTaskCreate(ctx context.Context, store RunbookActionStore, files ChatFileResolver, events routineEventActions, run *models.AgentRun, activationID string, args map[string]interface{}) (*scheduledTaskCreateArguments, *models.ScheduledAgentTask, *runbook.Schedule, error) {
 	var a scheduledTaskCreateArguments
 	if err := decodeScheduledTaskArguments(args, &a); err != nil {
 		return nil, nil, nil, err
@@ -401,7 +401,7 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 	}
 	return &a, task, schedule, nil
 }
-func resolveOwnedTaskStatus(ctx context.Context, store runbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (*scheduledTaskStatusArguments, *models.RunbookActivation, error) {
+func resolveOwnedTaskStatus(ctx context.Context, store RunbookActionStore, run *models.AgentRun, arguments map[string]interface{}) (*scheduledTaskStatusArguments, *models.RunbookActivation, error) {
 	var args scheduledTaskStatusArguments
 	if err := decodeScheduledTaskArguments(arguments, &args); err != nil {
 		return nil, nil, err
@@ -456,7 +456,7 @@ func routineChangeCreator(a *models.RunbookActivation, run *models.AgentRun) str
 	}
 	return run.ActingUser
 }
-func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams collaboration.RoutineTeamCatalog, events routineEventActions, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+func validateScheduledTaskAction(ctx context.Context, store RunbookActionStore, files ChatFileResolver, teams collaboration.RoutineTeamCatalog, events routineEventActions, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if err := runbookActionOwner(ctx, teams, input.Run, input.Bound); err != nil {
 		return nil, err
 	}
@@ -512,7 +512,7 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	}
 	return nil, errors.New("unsupported scheduled task action")
 }
-func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams collaboration.RoutineTeamCatalog, events routineEventActions, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+func dispatchScheduledTaskAction(ctx context.Context, store RunbookActionStore, files ChatFileResolver, teams collaboration.RoutineTeamCatalog, events routineEventActions, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	run, err := store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil {
 		return nil, err
@@ -650,7 +650,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 
 // validateScheduledTaskApp proves the app exists, belongs to the routine's
 // owner and was made in the routine's conversation.
-func validateScheduledTaskApp(ctx context.Context, store runbookActionStore, run *models.AgentRun, task *models.ScheduledAgentTask) error {
+func validateScheduledTaskApp(ctx context.Context, store RunbookActionStore, run *models.AgentRun, task *models.ScheduledAgentTask) error {
 	artifacts, ok := store.(interface {
 		GetArtifact(context.Context, models.Scope, string, int64) (*models.Artifact, error)
 	})
