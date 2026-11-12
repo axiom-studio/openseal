@@ -14,46 +14,24 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun/agentruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
 
-type dependencyRetirementStore interface {
-	models.KernelStore
-	models.DependencyKernelStore
-	models.RunDependencyReconciliationStore
-}
-
-type dependencyRetirementFixture struct {
-	store    dependencyRetirementStore
-	scope    models.Scope
-	groupID  string
-	sourceID string
-	childIDs map[string]string
-	now      time.Time
-}
-
-type dependencyRetirementSnapshot struct {
-	group    *models.RunDependencyGroup
-	edges    []*models.RunDependency
-	source   *models.AgentRun
-	children map[string]*models.AgentRun
-	events   []*models.ActivityEvent
-}
-
 func TestDependencyRetirementTerminalSourceDoesNotReviveOrCancelChildren(t *testing.T) {
 	for _, status := range []models.AgentRunStatus{models.AgentRunStatusCanceled, models.AgentRunStatusFailed, models.AgentRunStatusCompleted} {
 		t.Run(string(status), func(t *testing.T) {
-			forDependencyRetirementBackends(t, func(t *testing.T, store dependencyRetirementStore, backend actiontest.Backend) {
-				fixture := newDependencyRetirementFixture(t, store)
-				completed := fixture.finishChild(t, "alpha", models.AgentRunStatusCompleted)
-				fixture.resolveChild(t, "alpha", completed)
-				fixture.terminateSource(t, status)
-				fixture.assertWaitingWork(t, 1, true)
-				before := fixture.snapshot(t)
-				request := fixture.request(t)
-				result, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), request)
+			forDependencyRetirementBackends(t, func(t *testing.T, store agentruntest.DependencyStore, backend actiontest.Backend) {
+				fixture := agentruntest.NewDependencyFixture(t, store)
+				completed := fixture.FinishChild(t, "alpha", models.AgentRunStatusCompleted)
+				fixture.ResolveChild(t, "alpha", completed)
+				fixture.TerminateSource(t, status)
+				fixture.AssertWaitingWork(t, 1, true)
+				before := fixture.Snapshot(t)
+				request := fixture.Request(t)
+				result, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), request)
 				if err != nil || result == nil || result.Replayed {
 					t.Fatalf("retire = %#v, %v", result, err)
 				}
@@ -63,22 +41,22 @@ func TestDependencyRetirementTerminalSourceDoesNotReviveOrCancelChildren(t *test
 				if err := result.Group.Validate(); err != nil {
 					t.Fatalf("retired group is invalid: %v", err)
 				}
-				after := fixture.snapshot(t)
-				if !reflect.DeepEqual(before.source, after.source) || !reflect.DeepEqual(before.children, after.children) {
+				after := fixture.Snapshot(t)
+				if !reflect.DeepEqual(before.Source, after.Source) || !reflect.DeepEqual(before.Children, after.Children) {
 					t.Fatalf("retirement changed source or independently executing targets: before=%#v after=%#v", before, after)
 				}
-				if !reflect.DeepEqual(dependencyRetirementEdge(t, before.edges, "alpha"), dependencyRetirementEdge(t, after.edges, "alpha")) {
+				if !reflect.DeepEqual(agentruntest.DependencyEdge(t, before.Edges, "alpha"), agentruntest.DependencyEdge(t, after.Edges, "alpha")) {
 					t.Fatal("retirement replaced an already committed child outcome")
 				}
-				unresolved := dependencyRetirementEdge(t, after.edges, "beta")
+				unresolved := agentruntest.DependencyEdge(t, after.Edges, "beta")
 				if unresolved.State != models.RunDependencyStateCanceled || unresolved.ResolvedAt == nil || len(unresolved.Result) != 0 || len(unresolved.Artifacts) != 0 {
 					t.Fatalf("unresolved edge was not retired without inventing a child result: %#v", unresolved)
 				}
-				fixture.assertWaitingWork(t, 0)
-				fixture.assertReplayUnchanged(t, request, after)
-				fixture.store = reopenDependencyRetirementStore(t, backend)
-				fixture.assertReplayUnchanged(t, request, fixture.snapshot(t))
-				fixture.assertWaitingWork(t, 0)
+				fixture.AssertWaitingWork(t, 0)
+				fixture.AssertReplayUnchanged(t, request, after)
+				fixture.Store = reopenDependencyRetirementStore(t, backend)
+				fixture.AssertReplayUnchanged(t, request, fixture.Snapshot(t))
+				fixture.AssertWaitingWork(t, 0)
 			})
 		})
 	}
@@ -87,31 +65,31 @@ func TestDependencyRetirementTerminalSourceDoesNotReviveOrCancelChildren(t *test
 func TestDependencyRetirementReadsOnlyExactDurableChildOutcome(t *testing.T) {
 	for _, status := range []models.AgentRunStatus{models.AgentRunStatusCompleted, models.AgentRunStatusFailed, models.AgentRunStatusCanceled} {
 		t.Run(string(status), func(t *testing.T) {
-			forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-				fixture := newDependencyRetirementFixture(t, store)
-				child := fixture.finishChild(t, "alpha", status)
-				fixture.assertWaitingWork(t, 1, true)
-				before := fixture.snapshot(t)
-				result, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.request(t))
+			forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+				fixture := agentruntest.NewDependencyFixture(t, store)
+				child := fixture.FinishChild(t, "alpha", status)
+				fixture.AssertWaitingWork(t, 1, true)
+				before := fixture.Snapshot(t)
+				result, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.Request(t))
 				if err != nil || result == nil || result.Replayed {
 					t.Fatalf("reconcile child outcome = %#v, %v", result, err)
 				}
-				after := fixture.snapshot(t)
-				edge := dependencyRetirementEdge(t, after.edges, "alpha")
-				if edge.State != dependencyRetirementState(status) || !reflect.DeepEqual(edge.Result, dependencyRetirementChildResult(edge.ID, child)) || edge.Error != child.Error {
+				after := fixture.Snapshot(t)
+				edge := agentruntest.DependencyEdge(t, after.Edges, "alpha")
+				if edge.State != agentruntest.DependencyState(status) || !reflect.DeepEqual(edge.Result, agentruntest.DependencyChildResult(edge.ID, child)) || edge.Error != child.Error {
 					t.Fatalf("edge does not match its authoritative child: edge=%#v child=%#v", edge, child)
 				}
-				if after.group.Status != models.RunDependencyGroupWaiting || after.source.Status != models.AgentRunStatusWaitingForDependency || result.Evaluation.Wake {
+				if after.Group.Status != models.RunDependencyGroupWaiting || after.Source.Status != models.AgentRunStatusWaitingForDependency || result.Evaluation.Wake {
 					t.Fatalf("partial all-branches join woke before the remaining target finished: %#v", result)
 				}
-				if !reflect.DeepEqual(before.children, after.children) || !reflect.DeepEqual(dependencyRetirementEdge(t, before.edges, "beta"), dependencyRetirementEdge(t, after.edges, "beta")) {
+				if !reflect.DeepEqual(before.Children, after.Children) || !reflect.DeepEqual(agentruntest.DependencyEdge(t, before.Edges, "beta"), agentruntest.DependencyEdge(t, after.Edges, "beta")) {
 					t.Fatal("reading one terminal child changed another target, lease, or edge")
 				}
-				fixture.assertReplayUnchanged(t, fixture.request(t), after)
-				fixture.assertWaitingWork(t, 1, false)
-				fixture.finishChild(t, "beta", models.AgentRunStatusCompleted)
-				request := fixture.request(t)
-				joined, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), request)
+				fixture.AssertReplayUnchanged(t, fixture.Request(t), after)
+				fixture.AssertWaitingWork(t, 1, false)
+				fixture.FinishChild(t, "beta", models.AgentRunStatusCompleted)
+				request := fixture.Request(t)
+				joined, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), request)
 				expected := models.RunDependencyGroupSatisfied
 				if status != models.AgentRunStatusCompleted {
 					expected = models.RunDependencyGroupFailed
@@ -119,8 +97,8 @@ func TestDependencyRetirementReadsOnlyExactDurableChildOutcome(t *testing.T) {
 				if err != nil || joined == nil || joined.Group.Status != expected || joined.Source.Status != models.AgentRunStatusQueued || !joined.Evaluation.Wake {
 					t.Fatalf("completed all-branches join = %#v, %v", joined, err)
 				}
-				fixture.assertReplayUnchanged(t, request, fixture.snapshot(t))
-				fixture.assertWaitingWork(t, 0)
+				fixture.AssertReplayUnchanged(t, request, fixture.Snapshot(t))
+				fixture.AssertWaitingWork(t, 0)
 			})
 		})
 	}
@@ -139,35 +117,35 @@ func TestDependencyRetirementHonorsAnyQuorumAndFailFastWithoutChangingTargets(t 
 		{name: "fail_fast", policy: models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast}, firstStatus: models.AgentRunStatusFailed, expectedStatus: models.RunDependencyGroupFailed},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-				fixture := newDependencyRetirementFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, testCase.policy)
-				fixture.finishChild(t, "alpha", testCase.firstStatus)
+			forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+				fixture := agentruntest.NewDependencyFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, testCase.policy)
+				fixture.FinishChild(t, "alpha", testCase.firstStatus)
 				if testCase.needsSecond {
-					partial, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.request(t))
+					partial, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.Request(t))
 					if err != nil || partial == nil || partial.Group.Status != models.RunDependencyGroupWaiting || partial.Source.Status != models.AgentRunStatusWaitingForDependency || partial.Evaluation.Wake {
 						t.Fatalf("quorum woke before its threshold: %#v, %v", partial, err)
 					}
-					fixture.finishChild(t, "beta", models.AgentRunStatusCompleted)
+					fixture.FinishChild(t, "beta", models.AgentRunStatusCompleted)
 				}
-				before := fixture.snapshot(t)
-				request := fixture.request(t)
-				result, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), request)
+				before := fixture.Snapshot(t)
+				request := fixture.Request(t)
+				result, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), request)
 				if err != nil || result == nil || result.Replayed || result.Group.Status != testCase.expectedStatus || result.Source.Status != models.AgentRunStatusQueued || !result.Evaluation.Wake || result.Source.LastWakeSignalID != result.Group.WakeSignalID {
 					t.Fatalf("policy fan-in did not commit one exact wake: %#v, %v", result, err)
 				}
-				after := fixture.snapshot(t)
-				if !reflect.DeepEqual(before.children, after.children) {
+				after := fixture.Snapshot(t)
+				if !reflect.DeepEqual(before.Children, after.Children) {
 					t.Fatal("early fan-in changed independently progressing targets or their leases")
 				}
 				activeBranch := "beta"
 				if testCase.needsSecond {
 					activeBranch = "gamma"
 				}
-				if after.children[activeBranch].Status != models.AgentRunStatusRunning || !reflect.DeepEqual(dependencyRetirementEdge(t, before.edges, activeBranch), dependencyRetirementEdge(t, after.edges, activeBranch)) {
+				if after.Children[activeBranch].Status != models.AgentRunStatusRunning || !reflect.DeepEqual(agentruntest.DependencyEdge(t, before.Edges, activeBranch), agentruntest.DependencyEdge(t, after.Edges, activeBranch)) {
 					t.Fatalf("policy reconciliation changed a still-running target's edge: %#v", after)
 				}
-				fixture.assertReplayUnchanged(t, request, after)
-				fixture.assertWaitingWork(t, 0)
+				fixture.AssertReplayUnchanged(t, request, after)
+				fixture.AssertWaitingWork(t, 0)
 			})
 		})
 	}
@@ -180,20 +158,20 @@ func TestDependencyRetirementPausedSourceKeepsResultsUntilNormalResume(t *testin
 			name = "direct_resolution"
 		}
 		t.Run(name, func(t *testing.T) {
-			forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-				fixture := newDependencyRetirementFixture(t, store)
-				fixture.command(t, agentrun.AgentRunCommandPause)
-				fixture.assertWaitingWork(t, 1, false)
-				paused := fixture.snapshot(t).source
+			forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+				fixture := agentruntest.NewDependencyFixture(t, store)
+				fixture.Command(t, agentrun.AgentRunCommandPause)
+				fixture.AssertWaitingWork(t, 1, false)
+				paused := fixture.Snapshot(t).Source
 				for _, branch := range []string{"alpha", "beta"} {
-					child := fixture.finishChild(t, branch, models.AgentRunStatusCompleted)
-					fixture.assertWaitingWork(t, 1, true)
+					child := fixture.FinishChild(t, branch, models.AgentRunStatusCompleted)
+					fixture.AssertWaitingWork(t, 1, true)
 					var result *models.RunDependencyResult
 					var err error
 					if direct {
-						result = fixture.resolveChild(t, branch, child)
+						result = fixture.ResolveChild(t, branch, child)
 					} else {
-						result, err = fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.request(t))
+						result, err = fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.Request(t))
 					}
 					if err != nil || result == nil || result.Source.Status != models.AgentRunStatusPaused || result.Evaluation.Wake {
 						t.Fatalf("paused result resumed work: %#v, %v", result, err)
@@ -202,39 +180,39 @@ func TestDependencyRetirementPausedSourceKeepsResultsUntilNormalResume(t *testin
 						t.Fatalf("partial paused join lost its remaining dependency: %#v", result.Source)
 					}
 					if branch == "alpha" {
-						fixture.assertWaitingWork(t, 1, false)
+						fixture.AssertWaitingWork(t, 1, false)
 					}
 				}
-				joined := fixture.snapshot(t)
-				if joined.group.Status != models.RunDependencyGroupSatisfied || joined.source.PausedFrom != models.AgentRunStatusQueued || joined.source.PausedWakeCondition != nil || joined.source.WakeCondition != nil {
+				joined := fixture.Snapshot(t)
+				if joined.Group.Status != models.RunDependencyGroupSatisfied || joined.Source.PausedFrom != models.AgentRunStatusQueued || joined.Source.PausedWakeCondition != nil || joined.Source.WakeCondition != nil {
 					t.Fatalf("completed paused join is not ready for normal resume: %#v", joined)
 				}
-				if !reflect.DeepEqual(paused.Checkpoint, joined.source.Checkpoint) || !reflect.DeepEqual(paused.Budget, joined.source.Budget) || joined.source.BudgetUsage != paused.BudgetUsage {
+				if !reflect.DeepEqual(paused.Checkpoint, joined.Source.Checkpoint) || !reflect.DeepEqual(paused.Budget, joined.Source.Budget) || joined.Source.BudgetUsage != paused.BudgetUsage {
 					t.Fatal("dependency completion replaced unrelated paused state or spent the parent budget")
 				}
-				for _, edge := range joined.edges {
-					if !reflect.DeepEqual(edge.Result, dependencyRetirementChildResult(edge.ID, joined.children[edge.ID])) {
+				for _, edge := range joined.Edges {
+					if !reflect.DeepEqual(edge.Result, agentruntest.DependencyChildResult(edge.ID, joined.Children[edge.ID])) {
 						t.Fatalf("paused join lost child result: %#v", edge)
 					}
 				}
-				request := fixture.request(t)
-				fixture.command(t, agentrun.AgentRunCommandResume)
-				resumed := fixture.snapshot(t)
-				if resumed.source.Status != models.AgentRunStatusQueued || resumed.source.WakeCondition != nil || resumed.source.PausedWakeCondition != nil || !reflect.DeepEqual(resumed.source.Output, joined.source.Output) {
-					t.Fatalf("normal resume restored a completed wait or lost output: %#v", resumed.source)
+				request := fixture.Request(t)
+				fixture.Command(t, agentrun.AgentRunCommandResume)
+				resumed := fixture.Snapshot(t)
+				if resumed.Source.Status != models.AgentRunStatusQueued || resumed.Source.WakeCondition != nil || resumed.Source.PausedWakeCondition != nil || !reflect.DeepEqual(resumed.Source.Output, joined.Source.Output) {
+					t.Fatalf("normal resume restored a completed wait or lost output: %#v", resumed.Source)
 				}
-				fixture.assertReplayUnchanged(t, request, resumed)
+				fixture.AssertReplayUnchanged(t, request, resumed)
 			})
 		})
 	}
 }
 
 func TestDependencyRetirementFencesGroupSourceAndTenantBeforeWrites(t *testing.T) {
-	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-		fixture := newDependencyRetirementFixture(t, store)
-		fixture.finishChild(t, "alpha", models.AgentRunStatusCompleted)
-		before := fixture.snapshot(t)
-		request := fixture.request(t)
+	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+		fixture := agentruntest.NewDependencyFixture(t, store)
+		fixture.FinishChild(t, "alpha", models.AgentRunStatusCompleted)
+		before := fixture.Snapshot(t)
+		request := fixture.Request(t)
 		for _, testCase := range []struct {
 			name     string
 			mutate   func(*portfolio.ReconcileRunDependencyGroupRequest)
@@ -247,42 +225,42 @@ func TestDependencyRetirementFencesGroupSourceAndTenantBeforeWrites(t *testing.T
 			t.Run(testCase.name, func(t *testing.T) {
 				invalid := request
 				testCase.mutate(&invalid)
-				if _, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), invalid); !errors.Is(err, testCase.expected) {
+				if _, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), invalid); !errors.Is(err, testCase.expected) {
 					t.Fatalf("reconcile error = %v, want %v", err, testCase.expected)
 				}
-				fixture.assertSnapshot(t, before)
+				fixture.AssertSnapshot(t, before)
 			})
 		}
-		if result, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), request); err != nil || result == nil || result.Replayed {
+		if result, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), request); err != nil || result == nil || result.Replayed {
 			t.Fatalf("valid reconciliation after rejected writes = %#v, %v", result, err)
 		}
 	})
 }
 
 func TestDependencyRetirementIdleJoinDoesNotWrite(t *testing.T) {
-	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-		fixture := newDependencyRetirementFixture(t, store)
-		before := fixture.snapshot(t)
-		fixture.assertReplayUnchanged(t, fixture.request(t), before)
-		fixture.assertWaitingWork(t, 1)
+	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+		fixture := agentruntest.NewDependencyFixture(t, store)
+		before := fixture.Snapshot(t)
+		fixture.AssertReplayUnchanged(t, fixture.Request(t), before)
+		fixture.AssertWaitingWork(t, 1)
 	})
 }
 
 func TestDependencyRetirementWaitingScanIsBoundedScopedAndUsesExactKeyset(t *testing.T) {
-	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
+	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
 		scope := models.Scope{Kind: "tenant", ID: uuid.NewString()}
-		fixtures := make([]*dependencyRetirementFixture, 0, 3)
+		fixtures := make([]*agentruntest.DependencyFixture, 0, 3)
 		want := make([]models.RunDependencyGroupWork, 0, 3)
 		for range 3 {
-			fixture := newDependencyRetirementFixtureInScope(t, store, scope)
+			fixture := agentruntest.NewDependencyFixtureInScope(t, store, scope)
 			fixtures = append(fixtures, fixture)
-			snapshot := fixture.snapshot(t)
-			want = append(want, models.RunDependencyGroupWork{Scope: scope, GroupID: fixture.groupID, GroupRevision: snapshot.group.Revision, SourceRunID: fixture.sourceID, SourceRevision: snapshot.source.Revision})
+			snapshot := fixture.Snapshot(t)
+			want = append(want, models.RunDependencyGroupWork{Scope: scope, GroupID: fixture.GroupID, GroupRevision: snapshot.Group.Revision, SourceRunID: fixture.SourceID, SourceRevision: snapshot.Source.Revision})
 		}
-		foreign := newDependencyRetirementFixture(t, store)
-		foreignBefore := foreign.snapshot(t)
+		foreign := agentruntest.NewDependencyFixture(t, store)
+		foreignBefore := foreign.Snapshot(t)
 		sort.Slice(want, func(i, j int) bool { return want[i].GroupID < want[j].GroupID })
-		coordinator := fixtures[0].coordinator()
+		coordinator := fixtures[0].Coordinator()
 		first, err := coordinator.ListWaitingRunDependencyGroups(t.Context(), scope, "", 2)
 		if err != nil || !reflect.DeepEqual(first, want[:2]) {
 			t.Fatalf("first keyset page = %#v, %v; want %#v", first, err, want[:2])
@@ -304,8 +282,8 @@ func TestDependencyRetirementWaitingScanIsBoundedScopedAndUsesExactKeyset(t *tes
 			}
 		}
 		retired := fixtures[1]
-		retired.command(t, agentrun.AgentRunCommandCancel)
-		if _, err := retired.coordinator().ReconcileRunDependencyGroup(t.Context(), retired.request(t)); err != nil {
+		retired.Command(t, agentrun.AgentRunCommandCancel)
+		if _, err := retired.Coordinator().ReconcileRunDependencyGroup(t.Context(), retired.Request(t)); err != nil {
 			t.Fatal(err)
 		}
 		remaining, err := coordinator.ListWaitingRunDependencyGroups(t.Context(), scope, "", 100)
@@ -313,12 +291,12 @@ func TestDependencyRetirementWaitingScanIsBoundedScopedAndUsesExactKeyset(t *tes
 			t.Fatalf("retired group remained in indexed waiting scan = %#v, %v", remaining, err)
 		}
 		for _, work := range remaining {
-			if work.GroupID == retired.groupID || work.Scope != scope {
+			if work.GroupID == retired.GroupID || work.Scope != scope {
 				t.Fatalf("waiting scan returned retired or foreign work: %#v", work)
 			}
 		}
-		foreign.assertWaitingWork(t, 1)
-		foreign.assertSnapshot(t, foreignBefore)
+		foreign.AssertWaitingWork(t, 1)
+		foreign.AssertSnapshot(t, foreignBefore)
 	})
 }
 
@@ -329,16 +307,16 @@ func TestDependencyRetirementConcurrentReconciliationCommitsOnce(t *testing.T) {
 			name = "source_canceled"
 		}
 		t.Run(name, func(t *testing.T) {
-			forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-				fixture := newDependencyRetirementFixture(t, store)
+			forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+				fixture := agentruntest.NewDependencyFixture(t, store)
 				if terminalSource {
-					fixture.terminateSource(t, models.AgentRunStatusCanceled)
+					fixture.TerminateSource(t, models.AgentRunStatusCanceled)
 				} else {
-					fixture.finishChild(t, "alpha", models.AgentRunStatusCompleted)
-					fixture.finishChild(t, "beta", models.AgentRunStatusCompleted)
+					fixture.FinishChild(t, "alpha", models.AgentRunStatusCompleted)
+					fixture.FinishChild(t, "beta", models.AgentRunStatusCompleted)
 				}
-				before := fixture.snapshot(t)
-				request := fixture.request(t)
+				before := fixture.Snapshot(t)
+				request := fixture.Request(t)
 				start := make(chan struct{})
 				results := make(chan *models.RunDependencyResult, 2)
 				errs := make(chan error, 2)
@@ -348,7 +326,7 @@ func TestDependencyRetirementConcurrentReconciliationCommitsOnce(t *testing.T) {
 					go func() {
 						defer workers.Done()
 						<-start
-						result, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), request)
+						result, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), request)
 						results <- result
 						errs <- err
 					}()
@@ -371,25 +349,25 @@ func TestDependencyRetirementConcurrentReconciliationCommitsOnce(t *testing.T) {
 				if writes != 1 {
 					t.Fatalf("concurrent reconciliation committed %d times", writes)
 				}
-				after := fixture.snapshot(t)
-				if !reflect.DeepEqual(before.children, after.children) {
+				after := fixture.Snapshot(t)
+				if !reflect.DeepEqual(before.Children, after.Children) {
 					t.Fatal("concurrent reconciliation changed child execution records")
 				}
-				if terminalSource && !reflect.DeepEqual(before.source, after.source) {
+				if terminalSource && !reflect.DeepEqual(before.Source, after.Source) {
 					t.Fatal("concurrent retirement revived or rewrote terminal source")
 				}
-				if !terminalSource && (after.source.Status != models.AgentRunStatusQueued || after.source.LastWakeSignalID == "" || after.source.LastWakeSignalID != after.group.WakeSignalID) {
+				if !terminalSource && (after.Source.Status != models.AgentRunStatusQueued || after.Source.LastWakeSignalID == "" || after.Source.LastWakeSignalID != after.Group.WakeSignalID) {
 					t.Fatalf("fan-in lacks its one durable wake: %#v", after)
 				}
-				fixture.assertReplayUnchanged(t, request, after)
-				fixture.assertWaitingWork(t, 0)
+				fixture.AssertReplayUnchanged(t, request, after)
+				fixture.AssertWaitingWork(t, 0)
 			})
 		})
 	}
 }
 
 type dependencyRetirementCancelBeforeStore struct {
-	dependencyRetirementStore
+	agentruntest.DependencyStore
 	before func()
 }
 
@@ -399,26 +377,26 @@ func (s *dependencyRetirementCancelBeforeStore) ReconcileRunDependencyGroup(ctx 
 		s.before = nil
 		before()
 	}
-	return s.dependencyRetirementStore.ReconcileRunDependencyGroup(ctx, record)
+	return s.DependencyStore.ReconcileRunDependencyGroup(ctx, record)
 }
 
 func TestDependencyRetirementSourceCancellationBetweenReadAndCommitIsFenced(t *testing.T) {
-	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-		fixture := newDependencyRetirementFixture(t, store)
-		fixture.finishChild(t, "alpha", models.AgentRunStatusCompleted)
-		request := fixture.request(t)
+	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+		fixture := agentruntest.NewDependencyFixture(t, store)
+		fixture.FinishChild(t, "alpha", models.AgentRunStatusCompleted)
+		request := fixture.Request(t)
 		var canceled *models.AgentRun
-		var before dependencyRetirementSnapshot
-		wrapped := &dependencyRetirementCancelBeforeStore{dependencyRetirementStore: store, before: func() {
-			canceled = fixture.command(t, agentrun.AgentRunCommandCancel)
-			before = fixture.snapshot(t)
+		var before agentruntest.DependencySnapshot
+		wrapped := &dependencyRetirementCancelBeforeStore{DependencyStore: store, before: func() {
+			canceled = fixture.Command(t, agentrun.AgentRunCommandCancel)
+			before = fixture.Snapshot(t)
 		}}
-		coordinator := portfolio.NewDependencyCoordinator(wrapped, models.WithClock(func() time.Time { return fixture.now.Add(10 * time.Second) }))
+		coordinator := portfolio.NewDependencyCoordinator(wrapped, models.WithClock(func() time.Time { return fixture.Now.Add(10 * time.Second) }))
 		if _, err := coordinator.ReconcileRunDependencyGroup(t.Context(), request); !errors.Is(err, models.ErrRevisionConflict) {
 			t.Fatalf("stale source accepted across cancellation: %v", err)
 		}
-		fixture.assertSnapshot(t, before)
-		result, err := fixture.coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.request(t))
+		fixture.AssertSnapshot(t, before)
+		result, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.Request(t))
 		if err != nil || result == nil || result.Group.Status != models.RunDependencyGroupCanceled || result.Group.WakeSignalID != "" || !reflect.DeepEqual(canceled, result.Source) {
 			t.Fatalf("retry did not retire the canceled source: %#v, %v", result, err)
 		}
@@ -431,30 +409,30 @@ func TestDependencyRetirementSourceCancellationBetweenReadAndCommitIsFenced(t *t
 }
 
 func TestDependencyRetirementDirectResolutionCannotReviveCanceledSource(t *testing.T) {
-	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
-		fixture := newDependencyRetirementFixture(t, store)
-		child := fixture.finishChild(t, "alpha", models.AgentRunStatusCompleted)
-		fixture.command(t, agentrun.AgentRunCommandCancel)
-		before := fixture.snapshot(t)
-		result := fixture.resolveChild(t, "alpha", child)
-		after := fixture.snapshot(t)
-		if result.Group.Status != models.RunDependencyGroupCanceled || result.Group.WakeSignalID != "" || result.Evaluation.Wake || !reflect.DeepEqual(before.source, after.source) || !reflect.DeepEqual(before.children, after.children) {
+	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+		fixture := agentruntest.NewDependencyFixture(t, store)
+		child := fixture.FinishChild(t, "alpha", models.AgentRunStatusCompleted)
+		fixture.Command(t, agentrun.AgentRunCommandCancel)
+		before := fixture.Snapshot(t)
+		result := fixture.ResolveChild(t, "alpha", child)
+		after := fixture.Snapshot(t)
+		if result.Group.Status != models.RunDependencyGroupCanceled || result.Group.WakeSignalID != "" || result.Evaluation.Wake || !reflect.DeepEqual(before.Source, after.Source) || !reflect.DeepEqual(before.Children, after.Children) {
 			t.Fatalf("late direct resolution changed canceled work: %#v", result)
 		}
-		for _, edge := range after.edges {
+		for _, edge := range after.Edges {
 			if edge.State != models.RunDependencyStateCanceled || len(edge.Result) != 0 || len(edge.Artifacts) != 0 {
 				t.Fatalf("late direct resolution stored caller-supplied results while retiring canceled work: %#v", edge)
 			}
 		}
-		fixture.assertWaitingWork(t, 0)
-		fixture.assertReplayUnchanged(t, fixture.request(t), after)
+		fixture.AssertWaitingWork(t, 0)
+		fixture.AssertReplayUnchanged(t, fixture.Request(t), after)
 	})
 }
 
 func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(t *testing.T) {
 	for _, authority := range []string{"maintenance", "revoked_binding"} {
 		t.Run(authority, func(t *testing.T) {
-			forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
+			forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
 				catalog, scope, binding := runSkillDependencyFixture(t, store)
 				now := time.Now().UTC().Round(0)
 				portfolioService := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
@@ -471,7 +449,7 @@ func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(
 				if err != nil {
 					t.Fatal(err)
 				}
-				fixture := &dependencyRetirementFixture{store: store, scope: scope, groupID: group.Group.ID, sourceID: source.ID, childIDs: map[string]string{"branch": child.ID}, now: now}
+				fixture := &agentruntest.DependencyFixture{Store: store, Scope: scope, GroupID: group.Group.ID, SourceID: source.ID, ChildIDs: map[string]string{"branch": child.ID}, Now: now}
 				// The source ends before mutable executable authority is replaced;
 				// this is cleanup of history, not admission of new execution.
 				runActivity := activity.NewRunActivityService(store, store, models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
@@ -498,38 +476,38 @@ func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(
 				if run, err := portfolioService.CreateAgentRun(t.Context(), runSkillDependencyRequest(scope)); run != nil || !errors.Is(err, expectedAdmissionError) {
 					t.Fatalf("fresh typed work bypassed changed authority: %#v, %v", run, err)
 				}
-				before := fixture.snapshot(t)
-				if before.source.Context[models.CapabilityInvocationContextKey] == nil || before.children["branch"].Status != models.AgentRunStatusQueued {
+				before := fixture.Snapshot(t)
+				if before.Source.Context[models.CapabilityInvocationContextKey] == nil || before.Children["branch"].Status != models.AgentRunStatusQueued {
 					t.Fatal("fixture lost historical typed intent or active independent child")
 				}
-				edge := before.edges[0]
-				result, err := coordinator.ResolveRunDependency(t.Context(), portfolio.ResolveRunDependencyRequest{Scope: scope, GroupID: fixture.groupID, DependencyID: edge.ID, ExpectedDependencyRevision: edge.Revision, State: models.RunDependencyStateSatisfied, Result: map[string]interface{}{"callerClaim": "must not become child truth"}, Actor: models.ActivityActor{Type: "worker", ID: "dependency-reconciler"}})
+				edge := before.Edges[0]
+				result, err := coordinator.ResolveRunDependency(t.Context(), portfolio.ResolveRunDependencyRequest{Scope: scope, GroupID: fixture.GroupID, DependencyID: edge.ID, ExpectedDependencyRevision: edge.Revision, State: models.RunDependencyStateSatisfied, Result: map[string]interface{}{"callerClaim": "must not become child truth"}, Actor: models.ActivityActor{Type: "worker", ID: "dependency-reconciler"}})
 				if err != nil || result == nil || result.Group.Status != models.RunDependencyGroupCanceled || result.Group.WakeSignalID != "" || result.Evaluation.Wake {
 					t.Fatalf("historical relationship cleanup required fresh executable authority: %#v, %v", result, err)
 				}
-				after := fixture.snapshot(t)
-				if !reflect.DeepEqual(before.source, after.source) || !reflect.DeepEqual(before.children, after.children) {
+				after := fixture.Snapshot(t)
+				if !reflect.DeepEqual(before.Source, after.Source) || !reflect.DeepEqual(before.Children, after.Children) {
 					t.Fatal("cleanup rewrote historical source identity or independently progressing child")
 				}
-				if after.edges[0].State != models.RunDependencyStateCanceled || len(after.edges[0].Result) != 0 || len(after.edges[0].Artifacts) != 0 {
-					t.Fatalf("cleanup stored untrusted completion intent: %#v", after.edges[0])
+				if after.Edges[0].State != models.RunDependencyStateCanceled || len(after.Edges[0].Result) != 0 || len(after.Edges[0].Artifacts) != 0 {
+					t.Fatalf("cleanup stored untrusted completion intent: %#v", after.Edges[0])
 				}
-				fixture.assertReplayUnchanged(t, fixture.request(t), after)
-				fixture.assertWaitingWork(t, 0)
+				fixture.AssertReplayUnchanged(t, fixture.Request(t), after)
+				fixture.AssertWaitingWork(t, 0)
 			})
 		})
 	}
 }
 
-func forDependencyRetirementStores(t *testing.T, test func(*testing.T, dependencyRetirementStore)) {
+func forDependencyRetirementStores(t *testing.T, test func(*testing.T, agentruntest.DependencyStore)) {
 	t.Helper()
-	forDependencyRetirementBackends(t, func(t *testing.T, store dependencyRetirementStore, _ actiontest.Backend) { test(t, store) })
+	forDependencyRetirementBackends(t, func(t *testing.T, store agentruntest.DependencyStore, _ actiontest.Backend) { test(t, store) })
 }
 
-func forDependencyRetirementBackends(t *testing.T, test func(*testing.T, dependencyRetirementStore, actiontest.Backend)) {
+func forDependencyRetirementBackends(t *testing.T, test func(*testing.T, agentruntest.DependencyStore, actiontest.Backend)) {
 	t.Helper()
 	actiontest.ForEachBackend(t, func(t *testing.T, kernel models.KernelStore, backend actiontest.Backend) {
-		store, ok := kernel.(dependencyRetirementStore)
+		store, ok := kernel.(agentruntest.DependencyStore)
 		if !ok {
 			t.Fatalf("%T does not implement atomic dependency reconciliation", kernel)
 		}
@@ -537,273 +515,11 @@ func forDependencyRetirementBackends(t *testing.T, test func(*testing.T, depende
 	})
 }
 
-func newDependencyRetirementFixture(t *testing.T, store dependencyRetirementStore) *dependencyRetirementFixture {
-	t.Helper()
-	return newDependencyRetirementFixtureInScope(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()})
-}
-
-func newDependencyRetirementFixtureInScope(t *testing.T, store dependencyRetirementStore, scope models.Scope) *dependencyRetirementFixture {
-	t.Helper()
-	return newDependencyRetirementFixtureWithPolicy(t, store, scope, models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureWait})
-}
-
-func newDependencyRetirementFixtureWithPolicy(t *testing.T, store dependencyRetirementStore, scope models.Scope, policy models.RunDependencyPolicy) *dependencyRetirementFixture {
-	t.Helper()
-	fixture := &dependencyRetirementFixture{store: store, scope: scope, childIDs: make(map[string]string), now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
-	portfolioService := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return fixture.now }))
-	source, err := portfolioService.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: fixture.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead", Goal: "Join two independently running branches", Source: models.RunSourceManual, Checkpoint: map[string]interface{}{"committed": "preserve"}, Budget: &models.BudgetPolicy{MaxTurns: 10}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture.sourceID = source.ID
-	schedulerClock := func() time.Time { return fixture.now.Add(time.Second) }
-	scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return schedulerClock() }))
-	claimed, err := scheduler.ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: fixture.scope, WorkerID: "source-worker", LeaseDuration: time.Minute})
-	if err != nil || claimed == nil || claimed.ID != source.ID {
-		t.Fatalf("claim source=%#v, %v", claimed, err)
-	}
-	forks := agentrun.NewRunForkCoordinator(store, models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
-	branches := []agentrun.RunForkBranch{
-		{ID: "alpha", Goal: "Branch alpha", Checkpoint: map[string]interface{}{"branch": "alpha"}, Budget: &models.BudgetPolicy{MaxTurns: 2}},
-		{ID: "beta", Goal: "Branch beta", Checkpoint: map[string]interface{}{"branch": "beta"}, Budget: &models.BudgetPolicy{MaxTurns: 2}},
-	}
-	if policy.Mode == models.FanInModeQuorum {
-		branches = append(branches, agentrun.RunForkBranch{ID: "gamma", Goal: "Branch gamma", Checkpoint: map[string]interface{}{"branch": "gamma"}, Budget: &models.BudgetPolicy{MaxTurns: 2}})
-	}
-	var group *models.RunDependencyResult
-	if policy.Mode == models.FanInModeQuorum {
-		// Forks expose all/any today. The general dependency coordinator owns
-		// quorum groups and accepts normally created independent target Runs.
-		dependencies := make([]models.RunDependencySpec, 0, len(branches))
-		for _, branch := range branches {
-			child, err := portfolioService.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
-				Scope: fixture.scope, ParentRunID: source.ID, Owner: source.Owner, AssignedAgentID: source.AssignedAgentID,
-				Goal: branch.Goal, Source: models.RunSourceRequest, Checkpoint: branch.Checkpoint, Budget: branch.Budget,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			dependencies = append(dependencies, models.RunDependencySpec{ID: branch.ID, TargetRunID: child.ID, Kind: models.RunDependencyKindRun})
-		}
-		coordinator := portfolio.NewDependencyCoordinator(store, models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
-		group, err = coordinator.CreateRunDependencyGroup(t.Context(), models.CreateRunDependencyGroupRequest{
-			Scope: fixture.scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision,
-			Policy: policy, Dependencies: dependencies, Actor: models.ActivityActor{Type: "worker", ID: "source-worker"},
-		})
-	} else {
-		var created *agentrun.RunForkResult
-		created, err = forks.Create(t.Context(), agentrun.CreateRunForkRequest{
-			Scope: fixture.scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision, WorkerID: "source-worker", ForkID: "retirement-wave",
-			Policy: policy, Branches: branches, ContinuationCheckpoint: map[string]interface{}{"committed": "preserve", "continuation": "join"},
-		})
-		if err == nil {
-			group = created.DependencyGroup
-		}
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture.groupID = group.Group.ID
-	for _, edge := range group.Dependencies {
-		fixture.childIDs[edge.ID] = edge.TargetRunID
-	}
-	if len(fixture.childIDs) != len(branches) || fixture.childIDs["alpha"] == "" || fixture.childIDs["beta"] == "" {
-		t.Fatalf("fork edges=%#v", group.Dependencies)
-	}
-	schedulerClock = func() time.Time { return fixture.now.Add(3 * time.Second) }
-	for range len(branches) {
-		child, err := scheduler.ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: fixture.scope, WorkerID: "child-worker", LeaseDuration: time.Minute})
-		if err != nil || child == nil || child.ParentRunID != source.ID {
-			t.Fatalf("claim child=%#v, %v", child, err)
-		}
-	}
-	return fixture
-}
-
-func (f *dependencyRetirementFixture) coordinator() *portfolio.DependencyCoordinator {
-	coordinator := portfolio.NewDependencyCoordinator(f.store, models.WithClock(func() time.Time { return f.now.Add(10 * time.Second) }))
-	return coordinator
-}
-
-func (f *dependencyRetirementFixture) request(t *testing.T) portfolio.ReconcileRunDependencyGroupRequest {
-	t.Helper()
-	snapshot := f.snapshot(t)
-	return portfolio.ReconcileRunDependencyGroupRequest{Scope: f.scope, GroupID: f.groupID, ExpectedGroupRevision: snapshot.group.Revision, ExpectedSourceRevision: snapshot.source.Revision, Actor: models.ActivityActor{Type: "worker", ID: "dependency-reconciler"}, Visibility: models.ActivityVisibilityScope}
-}
-
-func (f *dependencyRetirementFixture) snapshot(t *testing.T) dependencyRetirementSnapshot {
-	t.Helper()
-	group, err := f.store.GetRunDependencyGroup(t.Context(), f.scope, f.groupID)
-	if err != nil || group == nil {
-		t.Fatalf("get group=%#v, %v", group, err)
-	}
-	edges, err := f.store.ListRunDependencies(t.Context(), f.scope, f.groupID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
-	source, err := f.store.GetAgentRun(t.Context(), f.scope, f.sourceID)
-	if err != nil || source == nil {
-		t.Fatalf("get source=%#v, %v", source, err)
-	}
-	children := make(map[string]*models.AgentRun, len(f.childIDs))
-	for branch, id := range f.childIDs {
-		child, err := f.store.GetAgentRun(t.Context(), f.scope, id)
-		if err != nil || child == nil {
-			t.Fatalf("get child=%#v, %v", child, err)
-		}
-		children[branch] = child
-	}
-	events, err := f.store.ListActivity(t.Context(), models.ActivityFilter{Scope: f.scope, Limit: 100})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sort.Slice(events, func(i, j int) bool { return events[i].ID < events[j].ID })
-	return dependencyRetirementSnapshot{group: group, edges: edges, source: source, children: children, events: events}
-}
-
-func (f *dependencyRetirementFixture) finishChild(t *testing.T, branch string, status models.AgentRunStatus) *models.AgentRun {
-	t.Helper()
-	child, err := f.store.GetAgentRun(t.Context(), f.scope, f.childIDs[branch])
-	if err != nil || child == nil {
-		t.Fatalf("get child=%#v, %v", child, err)
-	}
-	service := activity.NewRunActivityService(f.store, f.store, models.WithClock(func() time.Time { return f.now.Add(4 * time.Second) }))
-	errorText := ""
-	if status != models.AgentRunStatusCompleted {
-		errorText = "durable " + string(status) + " child outcome"
-	}
-	_, _, err = service.TransitionRun(t.Context(), f.scope, child.ID, activity.RunTransitionRequest{ExpectedRevision: child.Revision, Status: status, Actor: models.ActivityActor{Type: "worker", ID: "child-worker"}, LeaseOwner: "child-worker", Checkpoint: map[string]interface{}{"branch": branch, "committed": "terminal"}, Output: map[string]interface{}{"message": "actual " + branch + " result", "nested": map[string]interface{}{"verified": true}}, Error: errorText, BudgetUsageDelta: &models.BudgetUsage{Turns: 1}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	child, err = f.store.GetAgentRun(t.Context(), f.scope, child.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return child
-}
-
-func (f *dependencyRetirementFixture) resolveChild(t *testing.T, branch string, child *models.AgentRun) *models.RunDependencyResult {
-	t.Helper()
-	edge := dependencyRetirementEdge(t, f.snapshot(t).edges, branch)
-	result, err := f.coordinator().ResolveRunDependency(t.Context(), portfolio.ResolveRunDependencyRequest{Scope: f.scope, GroupID: f.groupID, DependencyID: edge.ID, ExpectedDependencyRevision: edge.Revision, State: dependencyRetirementState(child.Status), Result: dependencyRetirementChildResult(edge.ID, child), Error: child.Error, Actor: models.ActivityActor{Type: "worker", ID: "dependency-reconciler"}})
-	if err != nil || result == nil {
-		t.Fatalf("resolve child=%#v, %v", result, err)
-	}
-	return result
-}
-
-func (f *dependencyRetirementFixture) command(t *testing.T, kind agentrun.AgentRunCommandKind) *models.AgentRun {
-	t.Helper()
-	source, err := f.store.GetAgentRun(t.Context(), f.scope, f.sourceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now.Add(5 * time.Second) }))
-	result, err := commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: f.scope, RunID: f.sourceID, ExpectedRevision: source.Revision, Kind: kind, Actor: models.ActivityActor{Type: "user", ID: "operator"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Fetch the backend's canonical JSON representation for cross-store oracles.
-	source, err = f.store.GetAgentRun(t.Context(), f.scope, result.Run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return source
-}
-
-func (f *dependencyRetirementFixture) terminateSource(t *testing.T, status models.AgentRunStatus) {
-	t.Helper()
-	if status == models.AgentRunStatusCanceled {
-		f.command(t, agentrun.AgentRunCommandCancel)
-		return
-	}
-	service := activity.NewRunActivityService(f.store, f.store, models.WithClock(func() time.Time { return f.now.Add(5 * time.Second) }))
-	source := f.snapshot(t).source
-	if status == models.AgentRunStatusCompleted {
-		var err error
-		source, _, err = service.TransitionRun(t.Context(), f.scope, source.ID, activity.RunTransitionRequest{ExpectedRevision: source.Revision, Status: models.AgentRunStatusRunning, Actor: models.ActivityActor{Type: "user", ID: "operator"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	errorText := ""
-	if status == models.AgentRunStatusFailed {
-		errorText = "parent execution failed"
-	}
-	if _, _, err := service.TransitionRun(t.Context(), f.scope, source.ID, activity.RunTransitionRequest{ExpectedRevision: source.Revision, Status: status, Actor: models.ActivityActor{Type: "user", ID: "operator"}, Error: errorText}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func (f *dependencyRetirementFixture) assertSnapshot(t *testing.T, want dependencyRetirementSnapshot) {
-	t.Helper()
-	if got := f.snapshot(t); !reflect.DeepEqual(got, want) {
-		t.Fatalf("reconciliation mutated durable facts on rejection or replay:\nwant=%#v\ngot=%#v", want, got)
-	}
-}
-
-func (f *dependencyRetirementFixture) assertReplayUnchanged(t *testing.T, request portfolio.ReconcileRunDependencyGroupRequest, want dependencyRetirementSnapshot) {
-	t.Helper()
-	for range 3 {
-		result, err := f.coordinator().ReconcileRunDependencyGroup(t.Context(), request)
-		if err != nil || result == nil || !result.Replayed || len(result.Events) != 0 || result.Evaluation.Wake {
-			t.Fatalf("replay made work or emitted a wake: %#v, %v", result, err)
-		}
-		f.assertSnapshot(t, want)
-	}
-}
-
-func (f *dependencyRetirementFixture) assertWaitingWork(t *testing.T, want int, ready ...bool) {
-	t.Helper()
-	work, err := f.store.ListWaitingRunDependencyGroups(t.Context(), f.scope, "", 100)
-	if err != nil || len(work) != want {
-		t.Fatalf("waiting work=%#v, %v; want %d", work, err, want)
-	}
-	if want == 1 {
-		snapshot := f.snapshot(t)
-		wantReady := false
-		if len(ready) != 0 {
-			wantReady = ready[0]
-		}
-		if work[0].GroupID != f.groupID || work[0].SourceRunID != f.sourceID || work[0].GroupRevision != snapshot.group.Revision || work[0].SourceRevision != snapshot.source.Revision || work[0].Scope != f.scope || work[0].Ready != wantReady {
-			t.Fatalf("waiting projection is not exact: %#v", work[0])
-		}
-	}
-}
-
-func dependencyRetirementEdge(t *testing.T, edges []*models.RunDependency, id string) *models.RunDependency {
-	t.Helper()
-	for _, edge := range edges {
-		if edge.ID == id {
-			return edge
-		}
-	}
-	t.Fatalf("dependency %s not found in %#v", id, edges)
-	return nil
-}
-
-func dependencyRetirementState(status models.AgentRunStatus) models.RunDependencyState {
-	switch status {
-	case models.AgentRunStatusCompleted:
-		return models.RunDependencyStateSatisfied
-	case models.AgentRunStatusFailed:
-		return models.RunDependencyStateFailed
-	default:
-		return models.RunDependencyStateCanceled
-	}
-}
-
-func dependencyRetirementChildResult(branch string, child *models.AgentRun) map[string]interface{} {
-	return map[string]interface{}{"branchId": branch, "checkpoint": child.Checkpoint, "output": child.Output}
-}
-
 // reopenDependencyRetirementStore opens the store again on backend's data, as
 // a restart would.
-func reopenDependencyRetirementStore(t *testing.T, backend actiontest.Backend) dependencyRetirementStore {
+func reopenDependencyRetirementStore(t *testing.T, backend actiontest.Backend) agentruntest.DependencyStore {
 	t.Helper()
-	return backend.Reopen(t).(dependencyRetirementStore)
+	return backend.Reopen(t).(agentruntest.DependencyStore)
 }
 
 // cloneRetirementBinding deep-copies a Skill binding through JSON, as the
