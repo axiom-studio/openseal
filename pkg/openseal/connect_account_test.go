@@ -10,8 +10,8 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -27,7 +27,7 @@ func (f availabilityCheck) CheckCredentialAvailability(ctx context.Context, req 
 func connectAccountEngine(t *testing.T) (context.Context, *sqlite.Store, *Engine, *atomic.Bool, *[]CredentialAvailabilityRequest) {
 	t.Helper()
 	ctx := context.Background()
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	e, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

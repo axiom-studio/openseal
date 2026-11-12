@@ -8,13 +8,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	home := seedSpace(t, store, models.Scope{Kind: "tenant", ID: "one"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	createBody := `{
@@ -163,7 +163,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 }
 
 func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(models.Scope{Kind: "local", ID: "default"})
@@ -214,7 +214,7 @@ func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
 }
 
 func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(models.Scope{Kind: "local", ID: "default"})
@@ -278,7 +278,7 @@ func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) 
 }
 
 func TestDesktopReadPositionsBindLocalReaderAndPreserveMonotonicHistory(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(models.Scope{Kind: "local", ID: "default"})
@@ -330,7 +330,7 @@ func TestConversationWithNoSpaceUsesTheLocalOperatorsDefaultSpace(t *testing.T) 
 		return `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"` + title + `"}`
 	}
 
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	// Another owner's default space is older and first by position.
 	seedSpace(t, store, scope, "someone-else")
 	home := seedSpace(t, store, scope, localOperatorID)
@@ -353,7 +353,7 @@ func TestConversationWithNoSpaceUsesTheLocalOperatorsDefaultSpace(t *testing.T) 
 	}
 
 	// No space for the local operator: nothing is created, not even a space.
-	bare := runtimetest.NewKernelStore(t)
+	bare := kerneltest.NewStore(t)
 	seedSpace(t, bare, scope, "someone-else")
 	refused := performAgentRunRequest(t, NewServer(bare, zap.NewNop().Sugar()).Handler(), http.MethodPost, "/api/v1/conversations", body("Nowhere"), "create-nowhere")
 	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), models.ErrNoDefaultSpace.Error()) {

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -20,7 +20,7 @@ import (
 
 func TestPublicAgentConversationReservesEveryStepAndPreservesDirectWork(t *testing.T) {
 	t.Parallel()
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := Scope{Kind: "tenant", ID: "bounded-agent-conversation"}
 	budget := BudgetPolicy{MaxAttempts: 4, MaxTurns: 4, MaxInputTokens: 200000, MaxOutputTokens: 4096}
 	var engine *Engine
@@ -90,7 +90,7 @@ func TestPublicAgentConversationReservesEveryStepAndPreservesDirectWork(t *testi
 
 func TestPublicAgentConversationPausesBeforeAnUnfundedStep(t *testing.T) {
 	t.Parallel()
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := Scope{Kind: "tenant", ID: "unfunded-agent-conversation"}
 	budget := BudgetPolicy{MaxAttempts: 4, MaxTurns: 4, MaxInputTokens: 1, MaxOutputTokens: 4096}
 	var engine *Engine

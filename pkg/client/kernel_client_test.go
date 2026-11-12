@@ -25,8 +25,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -643,7 +643,7 @@ func TestKernelHTTPClientListsExactAgentSkillActions(t *testing.T) {
 }
 
 func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
@@ -896,7 +896,7 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 }
 
 func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	contentStore, err := artifactstore.NewLocalStore(t.TempDir())
 	if err != nil {

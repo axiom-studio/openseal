@@ -11,12 +11,12 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"go.uber.org/zap"
 )
 
 func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := conversation.NewConversationService(store)
 	scope := models.Scope{Kind: "local", ID: "default"}
 	seedSpace(t, store, scope, "")
@@ -72,7 +72,7 @@ func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.
 }
 
 func TestChannelPostDispatchRunsAfterDesktopAuth(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := conversation.NewConversationService(store)
 	scope := models.Scope{Kind: "local", ID: "default"}
 	seedSpace(t, store, scope, "")

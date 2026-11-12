@@ -9,12 +9,12 @@ import (
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"go.uber.org/zap"
 )
 
 func TestObjectiveAPIExposesIdempotentPortfolioLifecycleAndRuns(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetAgentRunCreationDispatcher(agentrun.NewRunCommandService(store).CreateAgentRun)
 	body := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"team","id":"gtm"},"title":"Launch","goal":"Create demand","status":"active","budget":{"maxAttempts":5,"maxTurns":10,"maxTotalTokens":1000,"maxDurationMs":120000}}`
@@ -69,7 +69,7 @@ func TestObjectiveAPIExposesIdempotentPortfolioLifecycleAndRuns(t *testing.T) {
 }
 
 func TestObjectiveAPIRejectsInvalidLifecycleTransition(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/objectives", `{"scope":{"kind":"local","id":"default"},"owner":{"type":"agent","id":"one"},"title":"Done","goal":"Finish","status":"satisfied"}`, "done")
 	if created.Code != http.StatusCreated {

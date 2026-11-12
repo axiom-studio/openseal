@@ -9,8 +9,8 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -33,7 +33,7 @@ func waitingCredentialRequestFixture(t *testing.T) (context.Context, *sqlite.Sto
 func runningCredentialRequestFixture(t *testing.T) (context.Context, *sqlite.Store, *Engine, *models.AgentRun, *CredentialRequest) {
 	t.Helper()
 	ctx := context.Background()
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	e, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

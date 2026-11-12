@@ -6,12 +6,12 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"go.uber.org/zap"
 )
 
 func TestChannelTimelineQueryRejectsAmbiguousValues(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := conversation.NewConversationService(store)
 	seedSpace(t, store, models.Scope{Kind: "tenant", ID: "one"}, "")
 	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{

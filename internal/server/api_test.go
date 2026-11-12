@@ -5,12 +5,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"go.uber.org/zap"
 )
 
 func TestServerExposesKernelAPIWithoutBrowserFallback(t *testing.T) {
-	server := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
+	server := NewServer(kerneltest.NewStore(t), zap.NewNop().Sugar())
 
 	health := httptest.NewRecorder()
 	server.Handler().ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
@@ -26,7 +26,7 @@ func TestServerExposesKernelAPIWithoutBrowserFallback(t *testing.T) {
 }
 
 func TestServerDoesNotExposeLegacyWorkflowRuntime(t *testing.T) {
-	api := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
+	api := NewServer(kerneltest.NewStore(t), zap.NewNop().Sugar())
 	for _, route := range []struct {
 		method string
 		path   string

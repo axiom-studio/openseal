@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
@@ -129,7 +129,7 @@ func TestEngineWorkQueueRelaysOutboxSchedulesDeadlinesAndRoutesDeliveries(t *tes
 	defer cancel()
 	scope := Scope{Kind: "local", ID: "queue"}
 	other := Scope{Kind: "local", ID: "elsewhere"}
-	store := &outboxStore{Store: runtimetest.NewKernelStore(t), committed: make(chan struct{}, 1)}
+	store := &outboxStore{Store: kerneltest.NewStore(t), committed: make(chan struct{}, 1)}
 	store.pending = []models.WorkItem{{Family: models.WorkFamilyAction, Scope: other, DueAt: time.Now()}}
 	queue := &scriptedQueue{signals: make(chan workqueue.WorkSignal)}
 	engine, err := New(

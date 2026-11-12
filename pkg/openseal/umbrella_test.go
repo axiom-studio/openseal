@@ -11,8 +11,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -174,7 +174,7 @@ func ensureTestAgent(t *testing.T, engine *Engine, scope capability.ScopeReferen
 func teamRequestFixture(t *testing.T) (context.Context, *sqlite.Store, *Engine, *models.AgentRun, *CredentialRequest, ObjectiveOwner) {
 	t.Helper()
 	ctx := context.Background()
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	engine, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

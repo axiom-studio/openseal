@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -38,7 +38,7 @@ func TestNewOpensAndClosesStoreOnlyWithoutStoreOption(t *testing.T) {
 		t.Fatal("Close kept the in-memory store")
 	}
 
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	engine, err = New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestWithStoreRejectsNil(t *testing.T) {
 type kernelOnlyStore struct{ models.KernelStore }
 
 func TestPartialStoreKeepsRegistriesInMemory(t *testing.T) {
-	store := kernelOnlyStore{runtimetest.NewKernelStore(t)}
+	store := kernelOnlyStore{kerneltest.NewStore(t)}
 	engine, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestPartialStoreKeepsRegistriesInMemory(t *testing.T) {
 func TestSkillCatalogOptionWinsOverStoreInAnyOrder(t *testing.T) {
 	for _, catalogFirst := range []bool{true, false} {
 		catalog := skill.NewCatalog()
-		options := []Option{WithStore(runtimetest.NewKernelStore(t)), WithSkillCatalog(catalog)}
+		options := []Option{WithStore(kerneltest.NewStore(t)), WithSkillCatalog(catalog)}
 		if catalogFirst {
 			options[0], options[1] = options[1], options[0]
 		}

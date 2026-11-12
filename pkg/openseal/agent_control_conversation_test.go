@@ -7,7 +7,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -24,7 +24,7 @@ func (s *conversationWriteCountingStore) CreateConversation(ctx context.Context,
 
 func controlConversationFixture(t *testing.T) (*Engine, *conversationWriteCountingStore, SkillScope, *AgentDefinition) {
 	t.Helper()
-	store := &conversationWriteCountingStore{Store: runtimetest.NewKernelStore(t)}
+	store := &conversationWriteCountingStore{Store: kerneltest.NewStore(t)}
 	engine, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

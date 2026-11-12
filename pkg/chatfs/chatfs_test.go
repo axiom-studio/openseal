@@ -11,8 +11,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/artifact"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -40,7 +40,7 @@ func newTestStore(t *testing.T) (*Store, Chat, Author) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kernel := runtimetest.NewKernelStore(t)
+	kernel := kerneltest.NewStore(t)
 	chat := Chat{Scope: models.Scope{Kind: "tenant", ID: "1"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}, ConversationID: "c1"}
 	author := Author{Producer: models.ActivityActor{Type: "agent", ID: "finn"}, RunID: "run-1"}
 	return NewStore(catalog{artifactcatalog.NewArtifactCatalog(kernel), kernel}, content), chat, author

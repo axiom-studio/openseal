@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 var localScope = models.Scope{Kind: "local", ID: "default"}
@@ -36,7 +36,7 @@ func newTestPublisher(t *testing.T) (*TaskArtifactPublisher, models.ArtifactCont
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: artifactcatalog.NewArtifactCatalog(runtimetest.NewKernelStore(t))}, content
+	return &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: artifactcatalog.NewArtifactCatalog(kerneltest.NewStore(t))}, content
 }
 
 func twoFiles(t *testing.T) map[string]json.RawMessage {

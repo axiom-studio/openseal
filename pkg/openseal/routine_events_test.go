@@ -10,7 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 // routineEventFixture is an Engine scope with a chat, one request message in
@@ -88,7 +88,7 @@ func (f *routineEventFixture) setStatus(activation *RunbookActivation, status mo
 }
 
 func TestEngineRoutineEventEndToEnd(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := Scope{Kind: "tenant", ID: "routines-e2e"}
 	var engine *Engine
 	host := &loopStepHost{decide: func(context.Context, ModelStepRequest) (loopReply, error) {
@@ -183,7 +183,7 @@ func (c routineGoogleSignIns) ListRoutineEventSources(context.Context, Scope, Ob
 }
 
 func TestEngineRoutineCreateListensAtOnce(t *testing.T) {
-	engine, err := New(WithStore(runtimetest.NewKernelStore(t)))
+	engine, err := New(WithStore(kerneltest.NewStore(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func (p *recordingIndexPublisher) PublishRoutineIndexChange(scope Scope) {
 }
 
 func TestEngineRoutineIndexPublisher(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	engine, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)

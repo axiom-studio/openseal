@@ -29,9 +29,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -2295,7 +2295,7 @@ func TestTeamChannelCreateAndQuestionPostPreserveIdempotency(t *testing.T) {
 }
 
 func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	// The daemon creates the local operator's space at start; the server
 	// puts a channel made with no space there.
 	if _, err := portfolio.NewSpaceService(store).CreateSpace(t.Context(), portfolio.CreateSpaceRequest{
@@ -2346,7 +2346,7 @@ func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 }
 
 func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
@@ -2417,7 +2417,7 @@ func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *tes
 }
 
 func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
@@ -2510,7 +2510,7 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 }
 
 func TestActivityWorkspaceFlowsThroughPublicHTTPKernelBoundary(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "local", ID: "activity-http"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}
 	portfolio := portfolio.NewPortfolioService(store)

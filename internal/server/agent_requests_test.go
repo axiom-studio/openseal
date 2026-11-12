@@ -11,14 +11,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 	t.Parallel()
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "local", ID: "workspace"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
@@ -94,7 +94,7 @@ func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 
 func TestAgentRequestAPIRejectsUnsafeSharedContext(t *testing.T) {
 	t.Parallel()
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "local", ID: "workspace"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",

@@ -10,13 +10,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"go.uber.org/zap"
 )
 
 func TestChannelListReadPositionsAreScopedOptionalAndReadOnly(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := conversation.NewConversationService(store)
 	local := models.Scope{Kind: "local", ID: "default"}
 	reader := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "local-operator"}
@@ -82,7 +82,7 @@ func (s failingReadSummaryStore) GetConversationCursor(context.Context, models.S
 	return nil, errors.New("read storage unavailable")
 }
 func TestChannelListDoesNotInventUnreadCountsOnCursorFailure(t *testing.T) {
-	store := failingReadSummaryStore{runtimetest.NewKernelStore(t)}
+	store := failingReadSummaryStore{kerneltest.NewStore(t)}
 	service := conversation.NewConversationService(store)
 	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, "")
 	if _, _, err := service.CreateConversation(context.Background(), conversation.CreateConversationRequest{Scope: models.Scope{Kind: "local", ID: "default"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"}); err != nil {

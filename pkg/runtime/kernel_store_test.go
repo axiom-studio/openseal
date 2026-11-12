@@ -11,7 +11,7 @@ import (
 )
 
 // newTestKernelStore returns an empty in-memory kernel store that is closed
-// when the test ends. runtimetest.NewKernelStore, skillbindingtest.NewStore,
+// when the test ends. kerneltest.NewStore, skillbindingtest.NewStore,
 // actiontest.NewStore, conversationtest.NewStore and the openers in the
 // store/sqlite, callback, skillbinding, action and conversation tests are
 // its copies for other packages (importing runtimetest here would be a

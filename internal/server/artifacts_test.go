@@ -15,12 +15,12 @@ import (
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"go.uber.org/zap"
 )
 
 func TestArtifactRoutesAreStrictScopedVersionedAndCapabilityAdvertised(t *testing.T) {
-	server := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
+	server := NewServer(kerneltest.NewStore(t), zap.NewNop().Sugar())
 	body := `{
 		"artifact": {
 			"id":"report","version":1,"scope":{"kind":"tenant","id":"one"},
@@ -87,7 +87,7 @@ func TestArtifactRoutesAreStrictScopedVersionedAndCapabilityAdvertised(t *testin
 }
 
 func TestArtifactContentRoutesStreamOnlyConfiguredOperations(t *testing.T) {
-	server := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
+	server := NewServer(kerneltest.NewStore(t), zap.NewNop().Sugar())
 	contentStore, err := artifactstore.NewLocalStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func (r *testArtifactResolver) Resolve(_ context.Context, request artifactcatalo
 }
 
 func TestArtifactListFiltersBySpaceAndChat(t *testing.T) {
-	server := NewServer(runtimetest.NewKernelStore(t), zap.NewNop().Sugar())
+	server := NewServer(kerneltest.NewStore(t), zap.NewNop().Sugar())
 	for index, provenance := range []string{
 		`"conversationId":"chat-sales","spaceId":"space-sales"`,
 		`"conversationId":"chat-design","spaceId":"space-design"`,

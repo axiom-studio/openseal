@@ -8,13 +8,13 @@ import (
 	"github.com/axiom-studio/openseal/internal/server"
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestKernelHTTPClientChannelTimelineRoundTrip(t *testing.T) {
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	scope := models.Scope{Kind: "tenant", ID: "timeline"}
 	// The kernel creates no space: a conversation made with no person goes

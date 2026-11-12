@@ -10,8 +10,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
@@ -147,7 +147,7 @@ func TestEngineStartRunsCutoverBeforeWorkers(t *testing.T) {
 	t.Run("adopts and cancels before the first claim", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		store := &cutoverOrderStore{Store: runtimetest.NewKernelStore(t)}
+		store := &cutoverOrderStore{Store: kerneltest.NewStore(t)}
 		running := oldEngineRun(t, store.Store, "running", true)
 		queued := oldEngineRun(t, store.Store, "queued", false)
 		resolved := make(chan *models.AgentRun, 4)
@@ -199,7 +199,7 @@ func TestEngineStartRunsCutoverBeforeWorkers(t *testing.T) {
 	t.Run("fails closed", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		store := &cutoverOrderStore{Store: runtimetest.NewKernelStore(t), failList: true}
+		store := &cutoverOrderStore{Store: kerneltest.NewStore(t), failList: true}
 		oldEngineRun(t, store.Store, "queued", false)
 		resolved := make(chan *models.AgentRun, 1)
 		engine := newEngine(t, store, resolved)

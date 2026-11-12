@@ -12,8 +12,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
-	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -21,7 +21,7 @@ import (
 
 func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *testing.T) {
 	t.Parallel()
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	proposal := createActionApprovalFixture(t, store)
 	api := NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
@@ -176,7 +176,7 @@ func approvalFixtureRunEvent(scope models.Scope, runID, id string, now time.Time
 func TestDesktopApprovalDecisionsUseCanonicalStateAndReplay(t *testing.T) {
 	for _, decision := range []models.ApprovalDecision{models.ApprovalDecisionApprove, models.ApprovalDecisionReject, models.ApprovalDecisionRequestChanges} {
 		t.Run(string(decision), func(t *testing.T) {
-			store := runtimetest.NewKernelStore(t)
+			store := kerneltest.NewStore(t)
 			fixture := createActionApprovalFixture(t, store)
 			// The fixture names Alice; desktop ownership must not grant her authority.
 			api := NewServer(store, zap.NewNop().Sugar())
@@ -232,7 +232,7 @@ type desktopEligibleFixture struct {
 
 func createDesktopEligibleApprovalFixture(t *testing.T) desktopEligibleFixture {
 	// A separate store helper keeps both fixtures on the normal proposal transaction.
-	store := runtimetest.NewKernelStore(t)
+	store := kerneltest.NewStore(t)
 	return desktopEligibleFixture{store: store, proposal: createActionApprovalFixtureWithApprover(t, store, models.ApprovalPrincipal{Type: "role", ID: "operator"})}
 }
 
