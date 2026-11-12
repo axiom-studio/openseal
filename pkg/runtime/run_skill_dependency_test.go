@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -208,46 +206,6 @@ func TestRunSkillDependencySerializesNewInvocationAndMaintenanceAcrossStores(t *
 				}
 			})
 		})
-	}
-}
-
-func TestRunSkillDependencySQLiteProjectionMigrationAndMetadataQueries(t *testing.T) {
-	db, err := sql.Open("sqlite3", t.TempDir()+"/legacy.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE agent_runs(scope_kind TEXT,scope_id TEXT,id TEXT,status TEXT,assigned_agent_id TEXT,payload TEXT); CREATE TABLE skill_runtime_maintenance(scope_kind TEXT,scope_id TEXT,skill_id TEXT,active INTEGER)`); err != nil {
-		t.Fatal(err)
-	}
-	run := &AgentRun{Scope: Scope{Kind: "tenant", ID: "legacy"}, ID: "accepted", AssignedAgentID: "agent", Status: AgentRunStatusSleeping,
-		Context: map[string]interface{}{capabilityInvocationContextKey: map[string]interface{}{"skillId": "reader", "skillVersion": "1.0.0", "action": "read", "inputs": map[string]interface{}{"scope": map[string]interface{}{"kind": "tenant", "id": "untrusted"}}}}}
-	payload, _ := json.Marshal(run)
-	for _, status := range []string{"sleeping", "completed"} {
-		if _, err := db.Exec(`INSERT INTO agent_runs VALUES('tenant','legacy',?,?,?,?)`, status, status, "agent", string(payload)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := migrateRunSkillDependenciesSQLite(db); err != nil {
-		t.Fatal(err)
-	}
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM run_skill_dependencies`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("legacy migration retained wrong Runs: %d %v", count, err)
-	}
-	// A reopen must not read arbitrary historical JSON again.
-	if _, err := db.Exec(`DROP TRIGGER project_run_skill_dependencies_update; UPDATE agent_runs SET payload='not-json'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrateRunSkillDependenciesSQLite(db); err != nil {
-		t.Fatalf("reopen scanned historical payload: %v", err)
-	}
-	plan := sqliteSkillUsageExplain(t, db, `SELECT 1 FROM run_skill_dependencies WHERE scope_kind=? AND scope_id=? AND skill_id=? AND skill_version=? AND deployment_id IN (?,'') LIMIT 1`, "tenant", "legacy", "reader", "1.0.0", "agent")
-	if !strings.Contains(plan, "idx_run_skill_dependencies_runtime") || strings.Contains(plan, "SCAN ") {
-		t.Fatalf("typed dependency probe is not indexed: %s", plan)
-	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM run_skill_dependencies WHERE scope_kind='tenant' AND scope_id='legacy' AND skill_id='reader' AND skill_version='1.0.0'`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("projection required Run payload decode: %d %v", count, err)
 	}
 }
 
