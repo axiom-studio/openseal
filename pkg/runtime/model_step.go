@@ -102,7 +102,7 @@ const (
 	ModelStepToolLoaded  ModelStepToolGroup = "loaded"  // capabilities loaded during the session: carried, then surfaced in path order
 )
 
-func (g ModelStepToolGroup) rank() int {
+func (g ModelStepToolGroup) Rank() int {
 	switch g {
 	case ModelStepToolHarness:
 		return 1
@@ -329,7 +329,7 @@ func (r ModelStepRequest) validateTools() error {
 			return invalidModelStep("duplicate tool name %q", tool.Name)
 		}
 		names[tool.Name] = true
-		rank := tool.Group.rank()
+		rank := tool.Group.Rank()
 		if rank == 0 {
 			return invalidModelStep("tool %q has unknown group %q", tool.Name, tool.Group)
 		}
@@ -467,7 +467,7 @@ func (r ModelStepRequest) validateEntries() (bool, error) {
 		if entry.Sequence <= 0 {
 			return false, invalidModelStep("entry %s needs a positive sequence", entry.ID)
 		}
-		if !entry.Type.valid() {
+		if !entry.Type.Valid() {
 			return false, invalidModelStep("entry %s has unknown type %q", entry.ID, entry.Type)
 		}
 		if entry.payloadCount() != 1 || !entry.payloadMatchesType() {
@@ -546,7 +546,7 @@ func (v *SessionEntryView) validatePayload() error {
 		if v.Assistant.Limits != nil {
 			return invalidModelStep("assistant entry %s: limits are kernel-only and not sent", v.ID)
 		}
-		if err := v.Assistant.validate(); err != nil {
+		if err := v.Assistant.Validate(); err != nil {
 			return invalidModelStep("assistant entry %s: %v", v.ID, err)
 		}
 	case SessionEntryTool:
@@ -644,10 +644,10 @@ func (r ModelStepRequest) validateContent() error {
 		switch entry.Type {
 		case SessionEntryUser:
 			parts = entry.User.Content
-			limits = contentPartLimits{field: "user entry " + entry.ID + " content", maxParts: MaxUserEntryParts, maxContent: MaxUserEntryContentBytes, maxFileParts: MaxUserEntryFileParts, allowDataBytes: true}
+			limits = contentPartLimits{Field: "user entry " + entry.ID + " content", MaxParts: MaxUserEntryParts, MaxContent: MaxUserEntryContentBytes, MaxFileParts: MaxUserEntryFileParts, AllowDataBytes: true}
 		case SessionEntryTool:
 			parts = entry.Tool.Result.Content
-			limits = contentPartLimits{field: "tool entry " + entry.ID + " result", maxParts: MaxToolResultParts, maxContent: MaxToolResultContentBytes, allowDataBytes: true}
+			limits = contentPartLimits{Field: "tool entry " + entry.ID + " result", MaxParts: MaxToolResultParts, MaxContent: MaxToolResultContentBytes, AllowDataBytes: true}
 		default:
 			continue
 		}
@@ -656,7 +656,7 @@ func (r ModelStepRequest) validateContent() error {
 		}
 		for j, part := range parts {
 			if err := validateModelStepMedia(part); err != nil {
-				return invalidModelStep("%s part %d: %v", limits.field, j, err)
+				return invalidModelStep("%s part %d: %v", limits.Field, j, err)
 			}
 		}
 	}

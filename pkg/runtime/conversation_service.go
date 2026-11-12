@@ -526,7 +526,7 @@ func (s *ConversationService) validateSelectedOptions(ctx context.Context, req P
 		return fmt.Errorf("%w: selected options answer a message that offers none", ErrInvalidConversation)
 	}
 	for _, id := range ids {
-		if !question.Question.hasOption(id) {
+		if !question.Question.HasOption(id) {
 			return fmt.Errorf("%w: %q is not an option of that question", ErrInvalidConversation, id)
 		}
 	}
@@ -707,7 +707,7 @@ func (s *ConversationService) redactUnviewableQuotes(ctx context.Context, scope 
 		out[i] = message
 		if message != nil && message.Quote != nil && !message.Quote.Unavailable && !CanViewChannelMessage(quoted[message.Quote.MessageID], viewer) {
 			redacted := cloneChannelMessage(message)
-			redacted.Quote = message.Quote.unavailable()
+			redacted.Quote = message.Quote.Redacted()
 			out[i] = redacted
 		}
 	}
@@ -1030,7 +1030,7 @@ func answerNeedsQuote(triggerID string, answerer ConversationParticipant, recent
 }
 
 func stableConversationID(scope Scope, key, suffix string) string {
-	seed := strings.Join([]string{"openseal", "conversation", scope.key(), strings.TrimSpace(key), strings.TrimSpace(suffix)}, ":")
+	seed := strings.Join([]string{"openseal", "conversation", scope.Key(), strings.TrimSpace(key), strings.TrimSpace(suffix)}, ":")
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(seed)).String()
 }
 

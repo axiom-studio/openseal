@@ -299,7 +299,7 @@ func (s *ConversationTaskService) SetAcceptedRunExecutionPreparer(preparer Accep
 }
 
 func conversationTaskID(scope Scope, sourceRunID, key string) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("openseal:conversation-task:"+scope.key()+":"+sourceRunID+":"+key)).String()
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("openseal:conversation-task:"+scope.Key()+":"+sourceRunID+":"+key)).String()
 }
 
 // Start is a kernel boundary, not a public caller-identity API. It derives

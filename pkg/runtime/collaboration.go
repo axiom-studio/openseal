@@ -2730,7 +2730,7 @@ func sameBudgetPolicy(left, right *BudgetPolicy) bool {
 }
 
 func stableCollaborationID(scope Scope, key, suffix string) string {
-	seed := strings.Join([]string{"openseal", "collaboration", scope.key(), strings.TrimSpace(key), strings.TrimSpace(suffix)}, ":")
+	seed := strings.Join([]string{"openseal", "collaboration", scope.Key(), strings.TrimSpace(key), strings.TrimSpace(suffix)}, ":")
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(seed)).String()
 }
 

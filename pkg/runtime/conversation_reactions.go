@@ -127,7 +127,7 @@ func ValidateReactionEmoji(emoji string) error {
 	return nil
 }
 
-func (r MessageReactionRecord) validate() error {
+func (r MessageReactionRecord) Validate() error {
 	if err := r.Scope.Validate(); err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func (s *ConversationService) changeMessageReaction(ctx context.Context, req Mes
 		Scope: req.Scope, ConversationID: strings.TrimSpace(req.ConversationID), MessageID: strings.TrimSpace(req.MessageID),
 		Actor: req.Actor, Emoji: req.Emoji, CreatedAt: s.now().UTC(),
 	}
-	if err := record.validate(); err != nil {
+	if err := record.Validate(); err != nil {
 		return nil, err
 	}
 	viewer := ConversationViewer{Participant: req.Actor, Roles: append([]string(nil), req.ActorRoles...)}

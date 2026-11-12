@@ -289,7 +289,7 @@ func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish 
 			return 0, err
 		}
 		removed++
-		key := workItemKey{family: WorkFamily(family), scope: Scope{Kind: kind, ID: id}}
+		key := workItemKey{Family: WorkFamily(family), Scope: Scope{Kind: kind, ID: id}}
 		if current, ok := earliest[key]; !ok || due.Before(current) {
 			earliest[key] = due.UTC()
 		}
@@ -305,7 +305,7 @@ func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish 
 	}
 	items := make([]WorkItem, 0, len(earliest))
 	for key, due := range earliest {
-		items = append(items, WorkItem{Family: key.family, Scope: key.scope, DueAt: due})
+		items = append(items, WorkItem{Family: key.Family, Scope: key.Scope, DueAt: due})
 	}
 	if err := publish(ctx, items); err != nil {
 		return 0, err

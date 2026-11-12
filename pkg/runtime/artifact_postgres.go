@@ -148,7 +148,7 @@ func (s *PostgresStore) ListArtifacts(ctx context.Context, filter ArtifactFilter
 		if filter.LatestOnly && artifact.Version != latest[artifact.ID] {
 			continue
 		}
-		if matchesArtifactFilter(artifact, filter) && filter.Files.keeps(working[artifact.ID]) {
+		if matchesArtifactFilter(artifact, filter) && filter.Files.Keeps(working[artifact.ID]) {
 			result = append(result, artifact)
 		}
 	}

@@ -1121,4 +1121,4 @@ func objectiveCreationFingerprint(req CreateObjectiveRequest) (string, error) {
 	return hashBytes(encoded), nil
 }
 
-func (s Scope) key() string { return fmt.Sprintf("%s:%s", s.Kind, s.ID) }
+func (s Scope) Key() string { return fmt.Sprintf("%s:%s", s.Kind, s.ID) }

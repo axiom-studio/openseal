@@ -43,8 +43,8 @@ func (m ConversationApprovalMode) Valid() bool {
 	return false
 }
 
-// rank orders modes from strictest to loosest.
-func (m ConversationApprovalMode) rank() int {
+// Rank orders modes from strictest to loosest.
+func (m ConversationApprovalMode) Rank() int {
 	switch m {
 	case ConversationApprovalAuto:
 		return 1
@@ -313,7 +313,7 @@ func (s *ConversationApprovalModeService) SetApprovalMode(ctx context.Context, r
 		result.Conversation, result.Changed, result.Event = committed, true, persisted
 	}
 	// Tightening never touches pending approvals: they already require review.
-	if req.Mode.rank() < previous.rank() {
+	if req.Mode.Rank() < previous.Rank() {
 		return result, nil
 	}
 	approved, incomplete := s.sweepPendingApprovals(ctx, req.Scope, result.Conversation.ID, req.Mode, req.CorrelationID)

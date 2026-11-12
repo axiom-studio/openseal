@@ -186,7 +186,7 @@ func (i *SurfaceInteraction) Validate() error {
 	return nil
 }
 
-func (f SurfaceInteractionFilter) validate() error {
+func (f SurfaceInteractionFilter) Validate() error {
 	if err := f.Scope.Validate(); err != nil {
 		return err
 	}
@@ -205,14 +205,14 @@ func (f SurfaceInteractionFilter) validate() error {
 	return nil
 }
 
-func (f SurfaceInteractionFilter) limit() int {
+func (f SurfaceInteractionFilter) EffectiveLimit() int {
 	if f.Limit == 0 {
 		return defaultSurfaceInteractionLimit
 	}
 	return f.Limit
 }
 
-func (f LatestSurfaceInteractionFilter) validate() error {
+func (f LatestSurfaceInteractionFilter) Validate() error {
 	if err := f.Scope.Validate(); err != nil {
 		return err
 	}
@@ -391,7 +391,7 @@ func (s *ConversationService) ListSurfaceInteractions(ctx context.Context, filte
 	viewer := *filter.Viewer
 	scan := filter
 	scan.Viewer = nil
-	desired := scan.limit()
+	desired := scan.EffectiveLimit()
 	result := make([]*SurfaceInteraction, 0)
 	for len(result) < desired {
 		raw, err := s.store.ListSurfaceInteractions(ctx, scan)
@@ -407,7 +407,7 @@ func (s *ConversationService) ListSurfaceInteractions(ctx context.Context, filte
 		}
 		result = append(result, visible...)
 		scan.AfterSequence = raw[len(raw)-1].Sequence
-		if len(raw) < scan.limit() {
+		if len(raw) < scan.EffectiveLimit() {
 			break
 		}
 	}
@@ -429,7 +429,7 @@ func (s *ConversationService) ListLatestSurfaceInteractions(ctx context.Context,
 	viewer := *filter.Viewer
 	scan := filter
 	scan.Viewer = nil
-	if err := scan.validate(); err != nil {
+	if err := scan.Validate(); err != nil {
 		return nil, err
 	}
 	page := SurfaceInteractionFilter{Scope: filter.Scope, ConversationID: filter.ConversationID, SurfaceID: filter.SurfaceID, Limit: maximumSurfaceInteractionLimit}

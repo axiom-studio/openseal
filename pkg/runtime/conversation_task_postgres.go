@@ -93,7 +93,7 @@ func (s *PostgresStore) CreateConversationTask(ctx context.Context, record Conve
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`,
-		"openseal:conversation-task:"+record.Task.Scope.key()+":"+record.Task.SourceRunID+":"+record.Task.TaskKey); err != nil {
+		"openseal:conversation-task:"+record.Task.Scope.Key()+":"+record.Task.SourceRunID+":"+record.Task.TaskKey); err != nil {
 		return nil, err
 	}
 	existing, err := s.getPostgresConversationTask(ctx, tx, record.Task.Scope, record.Task.ID, "", "", true)

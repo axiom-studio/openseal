@@ -69,8 +69,8 @@ func surfacedTool(capabilityID string, tool ModelStepTool) SurfacedTool {
 	}
 }
 
-// modelStepTool is the loaded-group declaration of a frozen tool.
-func (t SurfacedTool) modelStepTool(surface string) ModelStepTool {
+// ModelStepTool is the loaded-group declaration of a frozen tool.
+func (t SurfacedTool) ModelStepTool(surface string) ModelStepTool {
 	tool := ModelStepTool{
 		Name: t.Name, Description: t.Description, InputSchema: cloneJSONObject(t.InputSchema),
 		Group: ModelStepToolLoaded, Surface: surface,
@@ -236,7 +236,7 @@ func applySurfaces(base []ModelStepTool, path *AgentSessionPath, entries []Sessi
 	for _, tool := range carried {
 		if !taken[tool.Name] {
 			taken[tool.Name] = true
-			tools = append(tools, tool.modelStepTool(""))
+			tools = append(tools, tool.ModelStepTool(""))
 		}
 	}
 	for _, load := range surfacing {
@@ -246,7 +246,7 @@ func applySurfaces(base []ModelStepTool, path *AgentSessionPath, entries []Sessi
 				continue
 			}
 			taken[tool.Name] = true
-			tools = append(tools, tool.modelStepTool(load.EntryID))
+			tools = append(tools, tool.ModelStepTool(load.EntryID))
 			entries[at].Surfaces = append(entries[at].Surfaces, tool.Name)
 		}
 	}

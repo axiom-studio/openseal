@@ -40,7 +40,7 @@ func (k *fakeToolOutputKeeper) KeepToolOutput(_ context.Context, invocation Tool
 func requireToolResultFitsCap(t *testing.T, result ToolResult) {
 	t.Helper()
 	if _, err := validateContentParts(result.Content, contentPartLimits{
-		field: "tool result", maxParts: MaxToolResultParts, maxContent: MaxToolResultContentBytes,
+		Field: "tool result", MaxParts: MaxToolResultParts, MaxContent: MaxToolResultContentBytes,
 	}); err != nil {
 		t.Fatalf("bounded result does not fit the cap: %v", err)
 	}

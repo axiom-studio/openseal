@@ -69,7 +69,7 @@ func withRepeatKernelFields(req ToolEntryTransitionRequest) ToolEntryTransitionR
 		patch.ResultDigest = toolResultDigest(req.Result)
 		changed = true
 	}
-	if req.From.awaiting() && patch.Parked == nil {
+	if req.From.Awaiting() && patch.Parked == nil {
 		parked := true
 		patch.Parked = &parked
 		changed = true

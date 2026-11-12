@@ -450,7 +450,7 @@ func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim
 		if err := s.preparePostgresConversationTaskAdmission(ctx, tx, &claim, []*AgentRun{selected}); err != nil {
 			return nil, err
 		}
-		if !claim.invalidConversationTaskRuns[selected.ID] {
+		if !claim.InvalidConversationTaskRuns[selected.ID] {
 			break
 		}
 		provenanceBlocks = append(provenanceBlocks, AgentRunAdmissionBlock{RunID: selected.ID, ObjectiveID: selected.ObjectiveID,

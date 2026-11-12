@@ -36,7 +36,7 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 		return err
 	}
 	// Every binding the upgrade moves is locked and checked before any write.
-	members := application.members()
+	members := application.Members()
 	for _, member := range members {
 		var bindingPayload string
 		if err = conn.QueryRowContext(ctx, `SELECT payload FROM skill_bindings

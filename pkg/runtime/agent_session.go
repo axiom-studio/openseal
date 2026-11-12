@@ -151,12 +151,12 @@ func (s *AgentSession) Validate() error {
 
 // ConversationAgentSessionID is the stable id of the session of a conversation lane.
 func ConversationAgentSessionID(scope Scope, laneKey string) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("agent-session:conversation:"+scope.key()+":"+laneKey)).String()
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("agent-session:conversation:"+scope.Key()+":"+laneKey)).String()
 }
 
 // RunAgentSessionID is the stable id of the session owned by one Run.
 func RunAgentSessionID(scope Scope, ownerRunID string) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("agent-session:run:"+scope.key()+":"+ownerRunID)).String()
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("agent-session:run:"+scope.Key()+":"+ownerRunID)).String()
 }
 
 var agentSessionEntryNS = uuid.NewSHA1(uuid.NameSpaceOID, []byte("openseal.agent-session-entry"))
@@ -192,7 +192,7 @@ const (
 	SessionEntryModelChange SessionEntryType = "model_change"
 )
 
-func (t SessionEntryType) valid() bool {
+func (t SessionEntryType) Valid() bool {
 	switch t {
 	case SessionEntryUser, SessionEntryAssistant, SessionEntryTool, SessionEntryCompaction, SessionEntryNote, SessionEntryModelChange:
 		return true
@@ -241,7 +241,7 @@ func (s ToolEntryState) Terminal() bool {
 // Open is a known, non-terminal state.
 func (s ToolEntryState) Open() bool { return s.Valid() && !s.Terminal() }
 
-func (s ToolEntryState) awaiting() bool {
+func (s ToolEntryState) Awaiting() bool {
 	return s == ToolEntryAwaitingApproval || s == ToolEntryAwaitingChild || s == ToolEntryAwaitingEvent
 }
 
@@ -614,7 +614,7 @@ func (e *SessionEntry) Validate() error {
 	if strings.TrimSpace(e.ID) == "" {
 		return invalidEntry("id is required")
 	}
-	if !e.Type.valid() {
+	if !e.Type.Valid() {
 		return invalidEntry("unknown type %q", e.Type)
 	}
 	if e.payloadCount() != 1 {
@@ -640,7 +640,7 @@ func (e *SessionEntry) Validate() error {
 		if strings.TrimSpace(e.StepID) == "" {
 			return invalidEntry("assistant entry %s needs stepId", e.ID)
 		}
-		err = e.Assistant.validate()
+		err = e.Assistant.Validate()
 	case SessionEntryTool:
 		if e.Tool == nil {
 			return invalidEntry("tool entry %s has no tool payload", e.ID)
@@ -678,70 +678,70 @@ func (e *SessionEntry) Validate() error {
 }
 
 type contentPartLimits struct {
-	field          string
-	maxParts       int
-	maxContent     int // text + json bytes
-	maxFileParts   int // 0 = no extra file cap
-	allowDataBytes bool
+	Field          string
+	MaxParts       int
+	MaxContent     int // text + json bytes
+	MaxFileParts   int // 0 = no extra file cap
+	AllowDataBytes bool
 }
 
 // validateContentParts checks part shapes and caps. Image and file parts are
 // references and do not count toward maxContent.
 func validateContentParts(parts []ContentPart, limits contentPartLimits) (images int, err error) {
-	if limits.maxParts > 0 && len(parts) > limits.maxParts {
-		return 0, entryTooLarge("%s has %d parts (max %d)", limits.field, len(parts), limits.maxParts)
+	if limits.MaxParts > 0 && len(parts) > limits.MaxParts {
+		return 0, entryTooLarge("%s has %d parts (max %d)", limits.Field, len(parts), limits.MaxParts)
 	}
 	contentBytes, files := 0, 0
 	for i, part := range parts {
-		if part.DataBase64 != "" && !limits.allowDataBytes {
-			return 0, invalidEntry("%s part %d carries dataBase64; persisted parts are references", limits.field, i)
+		if part.DataBase64 != "" && !limits.AllowDataBytes {
+			return 0, invalidEntry("%s part %d carries dataBase64; persisted parts are references", limits.Field, i)
 		}
 		switch part.Type {
 		case ContentPartText:
 			contentBytes += len(part.Text)
 		case ContentPartJSON:
 			if len(part.Value) == 0 || !json.Valid(part.Value) {
-				return 0, invalidEntry("%s part %d: json part needs a valid value", limits.field, i)
+				return 0, invalidEntry("%s part %d: json part needs a valid value", limits.Field, i)
 			}
 			contentBytes += jsonPartBytes(part.Value)
 		case ContentPartFile:
 			if part.Path == "" && part.URI == "" && part.Note == "" {
-				return 0, invalidEntry("%s part %d: file part needs path, uri or note", limits.field, i)
+				return 0, invalidEntry("%s part %d: file part needs path, uri or note", limits.Field, i)
 			}
 			if part.SizeBytes < 0 {
-				return 0, invalidEntry("%s part %d: negative size", limits.field, i)
+				return 0, invalidEntry("%s part %d: negative size", limits.Field, i)
 			}
 			files++
 		case ContentPartImage:
 			switch part.MediaType {
 			case "image/png", "image/jpeg", "image/webp":
 			default:
-				return 0, invalidEntry("%s part %d: unsupported image media type %q", limits.field, i, part.MediaType)
+				return 0, invalidEntry("%s part %d: unsupported image media type %q", limits.Field, i, part.MediaType)
 			}
 			switch part.Detail {
 			case "", "auto", "low", "high":
 			default:
-				return 0, invalidEntry("%s part %d: unknown image detail %q", limits.field, i, part.Detail)
+				return 0, invalidEntry("%s part %d: unknown image detail %q", limits.Field, i, part.Detail)
 			}
-			if part.ArtifactID == "" && part.ActionCallID == "" && !(limits.allowDataBytes && part.DataBase64 != "") {
-				return 0, invalidEntry("%s part %d: image part needs artifactId or actionCallId", limits.field, i)
+			if part.ArtifactID == "" && part.ActionCallID == "" && !(limits.AllowDataBytes && part.DataBase64 != "") {
+				return 0, invalidEntry("%s part %d: image part needs artifactId or actionCallId", limits.Field, i)
 			}
 			if part.ArtifactID != "" && part.ActionCallID != "" {
-				return 0, invalidEntry("%s part %d: image part names both an artifact and an action call; it needs exactly one source", limits.field, i)
+				return 0, invalidEntry("%s part %d: image part names both an artifact and an action call; it needs exactly one source", limits.Field, i)
 			}
 			images++
 		default:
-			return 0, invalidEntry("%s part %d: unknown part type %q", limits.field, i, part.Type)
+			return 0, invalidEntry("%s part %d: unknown part type %q", limits.Field, i, part.Type)
 		}
 	}
-	if limits.maxContent > 0 && contentBytes > limits.maxContent {
-		return 0, entryTooLarge("%s text and json are %d bytes (max %d)", limits.field, contentBytes, limits.maxContent)
+	if limits.MaxContent > 0 && contentBytes > limits.MaxContent {
+		return 0, entryTooLarge("%s text and json are %d bytes (max %d)", limits.Field, contentBytes, limits.MaxContent)
 	}
-	if limits.maxFileParts > 0 && files > limits.maxFileParts {
-		return 0, entryTooLarge("%s has %d file parts (max %d)", limits.field, files, limits.maxFileParts)
+	if limits.MaxFileParts > 0 && files > limits.MaxFileParts {
+		return 0, entryTooLarge("%s has %d file parts (max %d)", limits.Field, files, limits.MaxFileParts)
 	}
 	if images > MaxSessionEntryImageParts {
-		return 0, entryTooLarge("%s has %d image parts (max %d)", limits.field, images, MaxSessionEntryImageParts)
+		return 0, entryTooLarge("%s has %d image parts (max %d)", limits.Field, images, MaxSessionEntryImageParts)
 	}
 	return images, nil
 }
@@ -775,7 +775,7 @@ func (u *UserEntry) validate() error {
 		return invalidEntry("negative message sequence")
 	}
 	_, err := validateContentParts(u.Content, contentPartLimits{
-		field: "user content", maxParts: MaxUserEntryParts, maxContent: MaxUserEntryContentBytes, maxFileParts: MaxUserEntryFileParts,
+		Field: "user content", MaxParts: MaxUserEntryParts, MaxContent: MaxUserEntryContentBytes, MaxFileParts: MaxUserEntryFileParts,
 	})
 	return err
 }
@@ -794,7 +794,7 @@ func validateToolArguments(field string, args json.RawMessage) error {
 	return nil
 }
 
-func (a *AssistantEntry) validate() error {
+func (a *AssistantEntry) Validate() error {
 	if !a.Provider.Valid() {
 		return invalidEntry("unknown assistant provider %q", a.Provider)
 	}
@@ -861,7 +861,7 @@ func (e *SessionEntry) validateTool() error {
 			return invalidEntry("tool entry %s %s is not JSON", e.ID, field)
 		}
 	}
-	if (t.Wait != nil) != e.State.awaiting() {
+	if (t.Wait != nil) != e.State.Awaiting() {
 		return invalidEntry("tool entry %s: wait is set exactly in awaiting states", e.ID)
 	}
 	if (t.Result != nil) != e.State.Terminal() {
@@ -902,7 +902,7 @@ func validateToolResultForState(state ToolEntryState, result *ToolResult, kind e
 		return fmt.Errorf("%w: %s is not terminal", kind, state)
 	}
 	_, err := validateContentParts(result.Content, contentPartLimits{
-		field: "tool result", maxParts: MaxToolResultParts, maxContent: MaxToolResultContentBytes,
+		Field: "tool result", MaxParts: MaxToolResultParts, MaxContent: MaxToolResultContentBytes,
 	})
 	return err
 }
@@ -1472,7 +1472,7 @@ func validateToolEntryTransitionRequest(req ToolEntryTransitionRequest) error {
 	if req.ExpectedRevision < 0 || req.Tokens < 0 {
 		return fmt.Errorf("%w: negative revision or tokens", ErrInvalidToolEntryTransition)
 	}
-	if (req.Wait != nil) != req.To.awaiting() {
+	if (req.Wait != nil) != req.To.Awaiting() {
 		return fmt.Errorf("%w: wait is required exactly for awaiting states", ErrInvalidToolEntryTransition)
 	}
 	if (req.Result != nil) != req.To.Terminal() {
@@ -1577,7 +1577,7 @@ func normalizeSessionEntryFilter(filter SessionEntryFilter) (SessionEntryFilter,
 		return filter, invalidEntry("negative afterSequence or limit")
 	}
 	for _, kind := range filter.Types {
-		if !kind.valid() {
+		if !kind.Valid() {
 			return filter, invalidEntry("unknown type %q", kind)
 		}
 	}

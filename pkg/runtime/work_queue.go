@@ -44,8 +44,8 @@ type WorkScopeChecker interface {
 
 // workItemKey identifies the family and scope an item schedules.
 type workItemKey struct {
-	family WorkFamily
-	scope  Scope
+	Family WorkFamily
+	Scope  Scope
 }
 
 // workPublisher coalesces scheduled items in process and publishes them in
@@ -69,7 +69,7 @@ func (p *workPublisher) schedule(item WorkItem) {
 	if p == nil || item.Family == "" || item.Scope.Validate() != nil {
 		return
 	}
-	key := workItemKey{family: item.Family, scope: item.Scope}
+	key := workItemKey{Family: item.Family, Scope: item.Scope}
 	p.mu.Lock()
 	if current, ok := p.items[key]; !ok || item.DueAt.Before(current) {
 		p.items[key] = item.DueAt
@@ -86,7 +86,7 @@ func (p *workPublisher) take() []WorkItem {
 	defer p.mu.Unlock()
 	items := make([]WorkItem, 0, len(p.items))
 	for key, due := range p.items {
-		items = append(items, WorkItem{Family: key.family, Scope: key.scope, DueAt: due})
+		items = append(items, WorkItem{Family: key.Family, Scope: key.Scope, DueAt: due})
 	}
 	clear(p.items)
 	return items
@@ -149,7 +149,7 @@ func (q *MemoryWorkQueue) PublishWork(_ context.Context, items []WorkItem) error
 		if item.Family == "" || item.Scope.Validate() != nil {
 			continue
 		}
-		key := workItemKey{family: item.Family, scope: item.Scope}
+		key := workItemKey{Family: item.Family, Scope: item.Scope}
 		if entry, ok := q.index[key]; ok {
 			if item.DueAt.Before(entry.due) {
 				entry.due = item.DueAt
@@ -193,7 +193,7 @@ func (q *MemoryWorkQueue) ConsumeWork(ctx context.Context, handle func(WorkSigna
 		}
 		q.mu.Unlock()
 		for _, key := range ready {
-			handle(WorkSignal{Kind: WorkSignalChanged, Family: key.family, Scope: key.scope})
+			handle(WorkSignal{Kind: WorkSignalChanged, Family: key.Family, Scope: key.Scope})
 		}
 		if len(ready) > 0 {
 			continue

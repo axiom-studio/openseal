@@ -254,7 +254,7 @@ func assertCutoverLeafDrafts(t *testing.T, drafts []AgentBuilderCutoverDraft) {
 		!reflect.DeepEqual(request.Parameters.Draft, &AgentBuilderDraftProfile{Purpose: "Plans trips end to end", SystemPrompt: "Plan trips carefully.", Personality: "Warm", OperatingPrinciples: []string{"Ask first"}}) {
 		t.Fatalf("amend parameters = %#v draft %#v", request.Parameters, request.Parameters.Draft)
 	}
-	if err := request.Parameters.validate(); err != nil {
+	if err := request.Parameters.Validate(); err != nil {
 		t.Fatalf("amend parameters refused: %v", err)
 	}
 	if strings.Contains(request.Prompt, "Friendly trip planner") || strings.Contains(request.Prompt, "gpt-6-luna") {
@@ -285,7 +285,7 @@ func TestAgentBuilderCutoverStartRequestFitsParameters(t *testing.T) {
 		!reflect.DeepEqual(parameters.Draft.OperatingPrinciples, []string{"Be kind"}) {
 		t.Fatalf("draft = %#v", parameters.Draft)
 	}
-	if err := parameters.validate(); err != nil {
+	if err := parameters.Validate(); err != nil {
 		t.Fatalf("fitted parameters refused: %v", err)
 	}
 	if bare := (AgentBuilderCutoverDraft{ID: "cs-2", Prompt: "x"}).StartRequest("", ""); bare.Parameters.Draft != nil || bare.Parameters.Name != "" {

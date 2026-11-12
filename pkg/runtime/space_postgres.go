@@ -97,7 +97,7 @@ func scanPostgresSpace(row interface{ Scan(...interface{}) error }) (*Space, err
 }
 
 func (s *PostgresStore) spacesLock(ctx context.Context, tx *sql.Tx, scope Scope) error {
-	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:spaces:"+scope.key())
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:spaces:"+scope.Key())
 	return err
 }
 

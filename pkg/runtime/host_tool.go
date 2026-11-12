@@ -170,9 +170,9 @@ func (r HostToolResult) Validate(request HostToolRequest) error {
 		return fmt.Errorf("host tool result has no content")
 	}
 	if _, err := validateContentParts(r.Content, contentPartLimits{
-		field:      "host tool result",
-		maxParts:   MaxToolResultParts,
-		maxContent: MaxToolResultContentBytes,
+		Field:      "host tool result",
+		MaxParts:   MaxToolResultParts,
+		MaxContent: MaxToolResultContentBytes,
 	}); err != nil {
 		return fmt.Errorf("host tool result: %w", err)
 	}

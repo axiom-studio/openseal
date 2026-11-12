@@ -86,7 +86,7 @@ func (s *SQLiteStore) RemoveMessageReaction(ctx context.Context, record MessageR
 }
 
 func (s *SQLiteStore) changeSQLiteReaction(ctx context.Context, record MessageReactionRecord, add bool) (*ConversationReactionEvent, error) {
-	if err := record.validate(); err != nil {
+	if err := record.Validate(); err != nil {
 		return nil, err
 	}
 	conn, err := beginImmediateSQLite(ctx, s.db)
@@ -219,7 +219,7 @@ func (s *PostgresStore) RemoveMessageReaction(ctx context.Context, record Messag
 }
 
 func (s *PostgresStore) changePostgresReaction(ctx context.Context, record MessageReactionRecord, add bool) (*ConversationReactionEvent, error) {
-	if err := record.validate(); err != nil {
+	if err := record.Validate(); err != nil {
 		return nil, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)

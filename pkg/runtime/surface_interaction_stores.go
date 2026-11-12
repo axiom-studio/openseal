@@ -115,7 +115,7 @@ func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction 
 }
 
 func (s *SQLiteStore) ListSurfaceInteractions(ctx context.Context, filter SurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
-	if err := filter.validate(); err != nil {
+	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
 	if conversation, err := getSQLiteConversation(ctx, s.db, filter.Scope, filter.ConversationID); err != nil {
@@ -129,7 +129,7 @@ func (s *SQLiteStore) ListSurfaceInteractions(ctx context.Context, filter Surfac
 		query += ` AND surface_id = ?`
 		args = append(args, filter.SurfaceID)
 	}
-	rows, err := s.db.QueryContext(ctx, query+` ORDER BY sequence ASC LIMIT ?`, append(args, filter.limit())...)
+	rows, err := s.db.QueryContext(ctx, query+` ORDER BY sequence ASC LIMIT ?`, append(args, filter.EffectiveLimit())...)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func (s *SQLiteStore) ListSurfaceInteractions(ctx context.Context, filter Surfac
 }
 
 func (s *SQLiteStore) ListLatestSurfaceInteractions(ctx context.Context, filter LatestSurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
-	if err := filter.validate(); err != nil {
+	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
 	if conversation, err := getSQLiteConversation(ctx, s.db, filter.Scope, filter.ConversationID); err != nil {
@@ -268,7 +268,7 @@ func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interactio
 }
 
 func (s *PostgresStore) ListSurfaceInteractions(ctx context.Context, filter SurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
-	if err := filter.validate(); err != nil {
+	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
 	if conversation, err := s.getPostgresConversation(ctx, s.db, filter.Scope, filter.ConversationID, false); err != nil {
@@ -283,7 +283,7 @@ func (s *PostgresStore) ListSurfaceInteractions(ctx context.Context, filter Surf
 		args = append(args, filter.SurfaceID)
 	}
 	query += fmt.Sprintf(` ORDER BY sequence ASC LIMIT $%d`, len(args)+1)
-	rows, err := s.db.QueryContext(ctx, query, append(args, filter.limit())...)
+	rows, err := s.db.QueryContext(ctx, query, append(args, filter.EffectiveLimit())...)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +291,7 @@ func (s *PostgresStore) ListSurfaceInteractions(ctx context.Context, filter Surf
 }
 
 func (s *PostgresStore) ListLatestSurfaceInteractions(ctx context.Context, filter LatestSurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
-	if err := filter.validate(); err != nil {
+	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
 	if conversation, err := s.getPostgresConversation(ctx, s.db, filter.Scope, filter.ConversationID, false); err != nil {

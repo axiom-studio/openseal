@@ -78,7 +78,7 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 		creationKey = record.Group.ID
 	}
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`,
-		"openseal:dependency-group:"+record.Group.Scope.key()+":"+creationKey); err != nil {
+		"openseal:dependency-group:"+record.Group.Scope.Key()+":"+creationKey); err != nil {
 		return nil, err
 	}
 	existingGroupID := record.Group.ID

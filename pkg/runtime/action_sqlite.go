@@ -197,7 +197,7 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 			call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, string(ActionOriginVM)).Scan(&state.TotalCalls, &state.UnfinishedCalls); err != nil {
 			return nil, err
 		}
-		if err := proposal.Nested.admit(call, state); err != nil {
+		if err := proposal.Nested.Admit(call, state); err != nil {
 			return nil, err
 		}
 	} else {
@@ -587,7 +587,7 @@ func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*
 		ORDER BY c.available_at, c.created_at, c.id LIMIT 1`, claim.Scope.Kind, claim.Scope.ID,
 		ActionCallStatusReady, claim.Now, ActionCallStatusRunning, claim.Now,
 		claim.OwnActionID, claim.OwnActionID, string(ActionExecutionHost), string(ActionExecutionLoop),
-		string(ActionExecutionHost), ActionCallStatusReady, claim.hostReadyCutoff(),
+		string(ActionExecutionHost), ActionCallStatusReady, claim.HostReadyCutoff(),
 		string(ActionExecutionLoop)).Scan(&selectedPayload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {

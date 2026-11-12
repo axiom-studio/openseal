@@ -229,7 +229,7 @@ func renderAgentBuilderParameters(parameters *AgentBuilderParameters) []string {
 		fields = append(fields, "model "+parameters.Model)
 	}
 	lines := []string{"Builder parameters (set in the form): " + strings.Join(fields, "; ")}
-	if draft := parameters.Draft; draft != nil && !draft.empty() {
+	if draft := parameters.Draft; draft != nil && !draft.IsEmpty() {
 		var parts []string
 		if draft.Purpose != "" {
 			parts = append(parts, "purpose "+draft.Purpose)

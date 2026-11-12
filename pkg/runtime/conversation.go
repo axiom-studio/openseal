@@ -441,7 +441,7 @@ func (q *ChannelQuestion) validate() error {
 	return nil
 }
 
-func (q *ChannelQuestion) hasOption(id string) bool {
+func (q *ChannelQuestion) HasOption(id string) bool {
 	for _, option := range q.Options {
 		if option.ID == id {
 			return true
@@ -493,14 +493,14 @@ type AgentBuilderDraftProfile struct {
 
 // empty reports parameters that set nothing beyond their kind.
 func (p *AgentBuilderParameters) empty() bool {
-	return p.Name == "" && p.Model == "" && (p.Draft == nil || p.Draft.empty())
+	return p.Name == "" && p.Model == "" && (p.Draft == nil || p.Draft.IsEmpty())
 }
 
-func (d *AgentBuilderDraftProfile) empty() bool {
+func (d *AgentBuilderDraftProfile) IsEmpty() bool {
 	return d.Purpose == "" && d.SystemPrompt == "" && d.Personality == "" && len(d.OperatingPrinciples) == 0
 }
 
-func (p *AgentBuilderParameters) validate() error {
+func (p *AgentBuilderParameters) Validate() error {
 	if p == nil {
 		return nil
 	}
@@ -602,7 +602,7 @@ func newChannelMessageQuote(message *ChannelMessage) *ChannelMessageQuote {
 	return &ChannelMessageQuote{MessageID: message.ID, Sender: &sender, SenderDisplayName: message.SenderDisplayName, Excerpt: excerpt}
 }
 
-func (q *ChannelMessageQuote) unavailable() *ChannelMessageQuote {
+func (q *ChannelMessageQuote) Redacted() *ChannelMessageQuote {
 	return &ChannelMessageQuote{MessageID: q.MessageID, Unavailable: true}
 }
 
@@ -674,7 +674,7 @@ func (m *ChannelMessage) Validate() error {
 		if m.Sender.Type != ConversationParticipantUser {
 			return fmt.Errorf("%w: only a person's message can carry builder parameters", ErrInvalidConversation)
 		}
-		if err := m.BuilderParameters.validate(); err != nil {
+		if err := m.BuilderParameters.Validate(); err != nil {
 			return err
 		}
 	}

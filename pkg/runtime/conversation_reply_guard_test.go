@@ -244,7 +244,7 @@ func TestGuardedReplyLocksRunBeforeConversation(t *testing.T) {
 	}
 	var free bool
 	if err := probe.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtext($1))`,
-		"openseal:conversation:"+f.scope.key()+":message:"+record.Message.ConversationID+":"+record.Message.IdempotencyKey).Scan(&free); err != nil {
+		"openseal:conversation:"+f.scope.Key()+":message:"+record.Message.ConversationID+":"+record.Message.IdempotencyKey).Scan(&free); err != nil {
 		t.Fatal(err)
 	}
 	if !free {

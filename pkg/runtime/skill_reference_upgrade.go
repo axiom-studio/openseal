@@ -194,8 +194,8 @@ type skillReferenceUpgradeMember struct {
 	ExpectedRevision int64
 }
 
-// members lists the primary binding and its siblings in plan order.
-func (m *SkillReferenceUpgradeMutation) members() []skillReferenceUpgradeMember {
+// Members lists the primary binding and its siblings in plan order.
+func (m *SkillReferenceUpgradeMutation) Members() []skillReferenceUpgradeMember {
 	members := []skillReferenceUpgradeMember{{Binding: m.Binding, ExpectedRevision: m.Plan.ExpectedBindingRevision}}
 	for index, sibling := range m.Siblings {
 		members = append(members, skillReferenceUpgradeMember{Binding: sibling, ExpectedRevision: m.Plan.Siblings[index].ExpectedRevision})

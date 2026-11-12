@@ -452,7 +452,7 @@ func containsConversationDeliveryOperation(values []capability.ConversationDeliv
 }
 
 func stableExternalConversationID(scope Scope, endpointID, kind, key string) string {
-	seed := strings.Join([]string{"openseal", "external-conversation", scope.key(), endpointID, kind, key}, ":")
+	seed := strings.Join([]string{"openseal", "external-conversation", scope.Key(), endpointID, kind, key}, ":")
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(seed)).String()
 }
 

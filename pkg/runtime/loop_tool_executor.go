@@ -1070,7 +1070,7 @@ func (r *stepToolRun) applyGoverned(ctx context.Context, i int, outcome Governed
 		r.mu.Unlock()
 		return nil
 	}
-	if entry.State == state && state.awaiting() {
+	if entry.State == state && state.Awaiting() {
 		// Still waiting on the same target: nothing to write.
 		r.recordAwaiting(outcome)
 		return nil
@@ -1091,7 +1091,7 @@ func (r *stepToolRun) applyGoverned(ctx context.Context, i int, outcome Governed
 	if err := r.transition(ctx, i, state, result, outcome.Wait, outcome.ActionCallID, nil, true); err != nil {
 		return err
 	}
-	if state.awaiting() {
+	if state.Awaiting() {
 		r.recordAwaiting(outcome)
 		return nil
 	}

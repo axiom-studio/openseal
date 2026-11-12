@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func portfolioKey(scope Scope, id string) string { return scope.key() + ":" + id }
+func portfolioKey(scope Scope, id string) string { return scope.Key() + ":" + id }
 
 func matchesObjectiveFilter(objective *Objective, filter ObjectiveFilter) bool {
 	if filter.Owner != nil && objective.Owner != *filter.Owner {

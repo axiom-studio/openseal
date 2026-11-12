@@ -245,7 +245,7 @@ func (f *sessionConformance) transitionReq(entryID, runID string, from, to ToolE
 	switch {
 	case to.Terminal():
 		req.Result = conformanceResult(to)
-	case to.awaiting():
+	case to.Awaiting():
 		req.Wait = &ToolEntryWait{ApprovalID: "ap1"}
 	}
 	return req

@@ -80,7 +80,7 @@ func StartAgentBuilderConversation(ctx context.Context, writer AgentBuilderConve
 	}
 	parameters.Name = strings.TrimSpace(parameters.Name)
 	parameters.Model = strings.TrimSpace(parameters.Model)
-	if err := parameters.validate(); err != nil {
+	if err := parameters.Validate(); err != nil {
 		return nil, err
 	}
 	conversation, conversationReplayed, err := writer.CreateConversation(ctx, CreateConversationRequest{

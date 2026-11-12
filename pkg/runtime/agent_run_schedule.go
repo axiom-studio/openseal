@@ -25,8 +25,11 @@ type AgentRunClaim struct {
 	// to canonical conversation task work. Zero preserves ordinary admission.
 	ConversationTaskForegroundReserve int
 	conversationTaskRuns              map[string]bool
-	conversationTaskActiveRuns        map[string]bool
-	invalidConversationTaskRuns       map[string]bool
+	// ActiveConversationTaskRuns and InvalidConversationTaskRuns are computed
+	// by conversation task admission while a claim is evaluated; callers
+	// leave them empty. They are never encoded.
+	ActiveConversationTaskRuns  map[string]bool `json:"-"`
+	InvalidConversationTaskRuns map[string]bool `json:"-"`
 }
 
 func (c AgentRunClaim) Validate() error {
@@ -241,9 +244,9 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 			return nil, errors.New("conversation task admission proof is unavailable")
 		}
 		if err := prepareConversationTaskAdmission(ctx, &claim, runs, conversationTaskAdmissionLookup{
-			task: tasks.FindConversationTaskByWorkRunID, run: portfolio.GetAgentRun,
-			conversation: conversations.GetConversation, message: conversations.GetChannelMessage,
-			request: func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
+			Task: tasks.FindConversationTaskByWorkRunID, Run: portfolio.GetAgentRun,
+			Conversation: conversations.GetConversation, Message: conversations.GetChannelMessage,
+			Request: func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
 				if requests, ok := s.store.(interface {
 					GetAgentRequest(context.Context, Scope, string) (*AgentRequest, error)
 				}); ok {
@@ -251,7 +254,7 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 				}
 				return nil, nil
 			},
-			round: func(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
+			Round: func(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
 				result, err := conversations.FindParticipationRoundByIdempotencyKey(ctx, scope, conversationID, key)
 				if err != nil || result == nil {
 					return nil, err
@@ -316,7 +319,7 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 			continue
 		}
 		activeByAgent[run.AssignedAgentID]++
-		if claim.conversationTaskActiveRuns[run.ID] {
+		if claim.ActiveConversationTaskRuns[run.ID] {
 			activeTasksByAgent[run.AssignedAgentID]++
 		}
 		activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
@@ -353,7 +356,7 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 		if !agentRunEligible(run, claim) {
 			continue
 		}
-		if claim.invalidConversationTaskRuns[run.ID] {
+		if claim.InvalidConversationTaskRuns[run.ID] {
 			block := base
 			block.Reason = AgentRunAdmissionReasonTaskProvenance
 			decision.Blocks = append(decision.Blocks, block)

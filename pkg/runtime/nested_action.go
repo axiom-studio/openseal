@@ -102,7 +102,7 @@ type nestedActionTurnState struct {
 	UnfinishedCalls int
 }
 
-func (f *NestedActionFence) admit(call *ActionCall, state nestedActionTurnState) error {
+func (f *NestedActionFence) Admit(call *ActionCall, state nestedActionTurnState) error {
 	turn := state.Turn
 	if state.RunStatus != AgentRunStatusRunning || state.RunLeaseOwner != f.WorkerID || state.RunLeaseExpiry == nil || !state.RunLeaseExpiry.After(f.Now) ||
 		turn == nil || turn.RunID != call.RunID || turn.Status != AgentTurnStatusRunning || turn.LeaseOwner != f.WorkerID ||

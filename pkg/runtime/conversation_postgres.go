@@ -826,7 +826,7 @@ type postgresConversationQueryer interface {
 }
 
 func postgresConversationAdvisoryLock(ctx context.Context, tx *sql.Tx, scope Scope, key string) error {
-	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:conversation:"+scope.key()+":"+key)
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:conversation:"+scope.Key()+":"+key)
 	return err
 }
 

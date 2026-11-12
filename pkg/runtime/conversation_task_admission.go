@@ -19,26 +19,26 @@ func validateConversationTaskForegroundReserve(reserve, maximum int) error {
 // These lookups must share the claim's store lock or transaction. Neither a
 // caller's context hint nor a root id alone grants task admission authority.
 type conversationTaskAdmissionLookup struct {
-	task         func(context.Context, Scope, string) (*ConversationTask, error)
-	run          func(context.Context, Scope, string) (*AgentRun, error)
-	conversation func(context.Context, Scope, string) (*Conversation, error)
-	message      func(context.Context, Scope, string, string) (*ChannelMessage, error)
-	request      func(context.Context, Scope, string) (*AgentRequest, error)
-	round        func(context.Context, Scope, string, string) (*ParticipationRound, error)
+	Task         func(context.Context, Scope, string) (*ConversationTask, error)
+	Run          func(context.Context, Scope, string) (*AgentRun, error)
+	Conversation func(context.Context, Scope, string) (*Conversation, error)
+	Message      func(context.Context, Scope, string, string) (*ChannelMessage, error)
+	Request      func(context.Context, Scope, string) (*AgentRequest, error)
+	Round        func(context.Context, Scope, string, string) (*ParticipationRound, error)
 }
 
 func prepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim, runs []*AgentRun, lookup conversationTaskAdmissionLookup) error {
 	claim.conversationTaskRuns = nil
-	claim.invalidConversationTaskRuns = nil
+	claim.InvalidConversationTaskRuns = nil
 	if claim.ConversationTaskForegroundReserve == 0 {
-		claim.conversationTaskActiveRuns = nil
+		claim.ActiveConversationTaskRuns = nil
 		return nil
 	}
-	if claim.conversationTaskActiveRuns == nil {
-		claim.conversationTaskActiveRuns = make(map[string]bool)
+	if claim.ActiveConversationTaskRuns == nil {
+		claim.ActiveConversationTaskRuns = make(map[string]bool)
 	}
 	claim.conversationTaskRuns = make(map[string]bool)
-	claim.invalidConversationTaskRuns = make(map[string]bool)
+	claim.InvalidConversationTaskRuns = make(map[string]bool)
 	tasks := make(map[string]*ConversationTask)
 	checked := make(map[string]bool)
 	persistedRuns := make(map[string]*AgentRun)
@@ -51,7 +51,7 @@ func prepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim,
 		if run, ok := persistedRuns[id]; ok {
 			return run, nil
 		}
-		run, err := lookup.run(ctx, claim.Scope, id)
+		run, err := lookup.Run(ctx, claim.Scope, id)
 		if errors.Is(err, ErrRunNotFound) {
 			err = nil
 		}
@@ -65,7 +65,7 @@ func prepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim,
 			continue
 		}
 		if candidate.Status == AgentRunStatusRunning && candidate.LeaseExpiresAt != nil && candidate.LeaseExpiresAt.After(claim.Now) {
-			if _, known := claim.conversationTaskActiveRuns[candidate.ID]; known {
+			if _, known := claim.ActiveConversationTaskRuns[candidate.ID]; known {
 				continue // PostgreSQL diagnostics batch this metadata in SQL.
 			}
 		} else if !agentRunEligible(candidate, *claim) {
@@ -76,7 +76,7 @@ func prepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim,
 			rootID = candidate.ID
 		}
 		if !checked[rootID] {
-			task, err := lookup.task(ctx, claim.Scope, rootID)
+			task, err := lookup.Task(ctx, claim.Scope, rootID)
 			if err != nil {
 				return err
 			}
@@ -86,7 +86,7 @@ func prepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim,
 		_, hint := candidate.Context[ConversationTaskContextKey]
 		taskLike := hint || strings.HasPrefix(candidate.ConcurrencyKey, "task:") || task != nil
 		if candidate.Status == AgentRunStatusRunning && candidate.LeaseExpiresAt != nil && candidate.LeaseExpiresAt.After(claim.Now) {
-			claim.conversationTaskActiveRuns[candidate.ID] = taskLike
+			claim.ActiveConversationTaskRuns[candidate.ID] = taskLike
 			continue // Counting a reserved marker can only restrict admission.
 		}
 		if !taskLike {
@@ -106,17 +106,17 @@ func prepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim,
 			if err != nil {
 				return err
 			}
-			conversation, err := lookup.conversation(ctx, claim.Scope, task.ConversationID)
+			conversation, err := lookup.Conversation(ctx, claim.Scope, task.ConversationID)
 			if err != nil {
 				return err
 			}
-			message, err := lookup.message(ctx, claim.Scope, task.ConversationID, task.SourceMessageID)
+			message, err := lookup.Message(ctx, claim.Scope, task.ConversationID, task.SourceMessageID)
 			if err != nil {
 				return err
 			}
 			var round *ParticipationRound
-			if conversationTaskContinuationNeedsAssignmentProof(task, source) && lookup.round != nil {
-				round, err = lookup.round(ctx, claim.Scope, task.ConversationID, conversationTaskLedgerParticipationRoundKey(task))
+			if conversationTaskContinuationNeedsAssignmentProof(task, source) && lookup.Round != nil {
+				round, err = lookup.Round(ctx, claim.Scope, task.ConversationID, conversationTaskLedgerParticipationRoundKey(task))
 				if err != nil {
 					return err
 				}
@@ -125,7 +125,7 @@ func prepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim,
 		}
 		if valid {
 			var err error
-			valid, err = conversationTaskAdmissionLineage(ctx, claim.Scope, task, candidate, getRun, lookup.request)
+			valid, err = conversationTaskAdmissionLineage(ctx, claim.Scope, task, candidate, getRun, lookup.Request)
 			if err != nil {
 				return err
 			}
@@ -133,7 +133,7 @@ func prepareConversationTaskAdmission(ctx context.Context, claim *AgentRunClaim,
 		if valid {
 			claim.conversationTaskRuns[candidate.ID] = true
 		} else {
-			claim.invalidConversationTaskRuns[candidate.ID] = true
+			claim.InvalidConversationTaskRuns[candidate.ID] = true
 		}
 	}
 	return nil
@@ -362,7 +362,7 @@ func persistedConversationTaskSchedulingOrigin(ctx context.Context, store Portfo
 
 func (s *SQLiteStore) prepareConversationTaskAdmissionConn(ctx context.Context, conn *sql.Conn, claim *AgentRunClaim, runs []*AgentRun) error {
 	return prepareConversationTaskAdmission(ctx, claim, runs, conversationTaskAdmissionLookup{
-		task: func(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
+		Task: func(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
 			var payload string
 			err := conn.QueryRowContext(ctx, `SELECT payload FROM conversation_tasks WHERE scope_kind = ? AND scope_id = ? AND work_run_id = ?`, scope.Kind, scope.ID, id).Scan(&payload)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -373,16 +373,16 @@ func (s *SQLiteStore) prepareConversationTaskAdmissionConn(ctx context.Context, 
 			}
 			return decodeConversationTaskSQL(payload)
 		},
-		run: func(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
+		Run: func(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
 			return getSQLiteAgentRun(ctx, conn, scope, id)
 		},
-		conversation: func(ctx context.Context, scope Scope, id string) (*Conversation, error) {
+		Conversation: func(ctx context.Context, scope Scope, id string) (*Conversation, error) {
 			return getSQLiteConversation(ctx, conn, scope, id)
 		},
-		message: func(ctx context.Context, scope Scope, conversationID, id string) (*ChannelMessage, error) {
+		Message: func(ctx context.Context, scope Scope, conversationID, id string) (*ChannelMessage, error) {
 			return getSQLiteChannelMessage(ctx, conn, scope, conversationID, id)
 		},
-		request: func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
+		Request: func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
 			var payload string
 			err := conn.QueryRowContext(ctx, `SELECT payload FROM agent_requests WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -393,7 +393,7 @@ func (s *SQLiteStore) prepareConversationTaskAdmissionConn(ctx context.Context, 
 			}
 			return decodeAgentRequest(payload)
 		},
-		round: func(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
+		Round: func(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
 			return getSQLiteParticipationRoundByKey(ctx, conn, scope, conversationID, key)
 		},
 	})
@@ -411,7 +411,7 @@ func (s *PostgresStore) conversationTaskLikeSQL(alias string) string {
 
 func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Context, tx *sql.Tx, claim *AgentRunClaim, runs []*AgentRun) error {
 	return prepareConversationTaskAdmission(ctx, claim, runs, conversationTaskAdmissionLookup{
-		task: func(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
+		Task: func(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
 			var payload string
 			err := tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("conversation_tasks")+` WHERE scope_kind = $1 AND scope_id = $2 AND work_run_id = $3`, scope.Kind, scope.ID, id).Scan(&payload)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -422,16 +422,16 @@ func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Con
 			}
 			return decodeConversationTaskSQL(payload)
 		},
-		run: func(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
+		Run: func(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
 			return s.getPostgresAgentRunTx(ctx, tx, scope, id, true)
 		},
-		conversation: func(ctx context.Context, scope Scope, id string) (*Conversation, error) {
+		Conversation: func(ctx context.Context, scope Scope, id string) (*Conversation, error) {
 			return s.getPostgresConversation(ctx, tx, scope, id, false)
 		},
-		message: func(ctx context.Context, scope Scope, conversationID, id string) (*ChannelMessage, error) {
+		Message: func(ctx context.Context, scope Scope, conversationID, id string) (*ChannelMessage, error) {
 			return s.getPostgresChannelMessage(ctx, tx, scope, conversationID, id, false)
 		},
-		request: func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
+		Request: func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
 			var payload string
 			err := tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_requests")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, id).Scan(&payload)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -442,7 +442,7 @@ func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Con
 			}
 			return decodeAgentRequest(payload)
 		},
-		round: func(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
+		Round: func(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
 			return s.getPostgresParticipationRoundByKey(ctx, tx, scope, conversationID, key, false)
 		},
 	})
@@ -492,7 +492,7 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	claim.conversationTaskActiveRuns = make(map[string]bool)
+	claim.ActiveConversationTaskRuns = make(map[string]bool)
 	runs := append([]*AgentRun(nil), candidates...)
 	rows, err = tx.QueryContext(ctx, `SELECT active.payload, (`+s.conversationTaskLikeSQL("active")+`) FROM `+s.table("agent_runs")+` AS active
 		WHERE active.scope_kind = $1 AND active.scope_id = $2 AND active.status = $3 AND active.lease_expires_at > $4
@@ -517,7 +517,7 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 			return nil, err
 		}
 		heldIDs[run.ID] = true
-		claim.conversationTaskActiveRuns[run.ID] = taskLike
+		claim.ActiveConversationTaskRuns[run.ID] = taskLike
 		runs = append(runs, run)
 	}
 	if err := rows.Err(); err != nil {

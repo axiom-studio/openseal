@@ -155,7 +155,7 @@ func (d AgentBuilderCutoverDraft) StartRequest(model, spaceID string) StartAgent
 			seen[fitted] = struct{}{}
 			draft.OperatingPrinciples = append(draft.OperatingPrinciples, fitted)
 		}
-		if !draft.empty() {
+		if !draft.IsEmpty() {
 			parameters.Draft = draft
 		}
 	}

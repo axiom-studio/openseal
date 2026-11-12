@@ -228,7 +228,7 @@ func (s *RunbookScheduler) advance(ctx context.Context, activation *RunbookActiv
 }
 
 func runbookTriggerKey(activation *RunbookActivation) string {
-	return activation.Scope.key() + ":" + activation.ID + ":" + activation.TriggerID + ":" + fmt.Sprint(activation.Revision)
+	return activation.Scope.Key() + ":" + activation.ID + ":" + activation.TriggerID + ":" + fmt.Sprint(activation.Revision)
 }
 
 func runbookScheduleVisibility(activation *RunbookActivation) ActivityVisibility {

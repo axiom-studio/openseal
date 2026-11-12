@@ -500,9 +500,9 @@ func (c ActionClaim) Validate() error {
 	return nil
 }
 
-// hostReadyCutoff is the latest time a ready host call became available for
+// HostReadyCutoff is the latest time a ready host call became available for
 // an action worker to recover it.
-func (c ActionClaim) hostReadyCutoff() time.Time {
+func (c ActionClaim) HostReadyCutoff() time.Time {
 	return c.Now.Add(-NestedHostActionReadyGrace)
 }
 

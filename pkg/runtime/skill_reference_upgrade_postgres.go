@@ -33,7 +33,7 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 		return err
 	}
 	// Every binding the upgrade moves is locked and checked before any write.
-	members := application.members()
+	members := application.Members()
 	for _, member := range members {
 		var bindingPayload string
 		if err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_bindings")+`

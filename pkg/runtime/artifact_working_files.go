@@ -29,7 +29,7 @@ func (f ArtifactFiles) Valid() bool {
 	return f == ArtifactFilesAll || f == ArtifactFilesResults || f == ArtifactFilesWorking
 }
 
-func (f ArtifactFiles) keeps(working bool) bool {
+func (f ArtifactFiles) Keeps(working bool) bool {
 	switch f {
 	case ArtifactFilesResults:
 		return !working

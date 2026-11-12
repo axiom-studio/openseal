@@ -45,7 +45,7 @@ func testToolEntry(id, stepID, callID string, state ToolEntryState) *SessionEntr
 			status = ToolResultInterrupted
 		}
 		entry.Tool.Result = &ToolResult{Status: status, IsError: status != ToolResultSucceeded, Content: []ContentPart{testTextPart("done")}}
-	case state.awaiting():
+	case state.Awaiting():
 		entry.Tool.Wait = &ToolEntryWait{ApprovalID: "ap1"}
 	}
 	return entry

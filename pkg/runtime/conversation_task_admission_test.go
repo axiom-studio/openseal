@@ -324,7 +324,7 @@ func TestConversationTaskForegroundReservePreservesOrdinaryAndDefaultPolicy(t *t
 
 func TestConversationTaskForegroundReserveZeroDoesNotReadTaskProof(t *testing.T) {
 	claim := conversationTaskAdmissionClaim(time.Now(), 0)
-	lookup := conversationTaskAdmissionLookup{task: func(context.Context, Scope, string) (*ConversationTask, error) { panic("zero reserve read task proof") }}
+	lookup := conversationTaskAdmissionLookup{Task: func(context.Context, Scope, string) (*ConversationTask, error) { panic("zero reserve read task proof") }}
 	if err := prepareConversationTaskAdmission(t.Context(), &claim, []*AgentRun{{ID: "plain", Scope: claim.Scope, Status: AgentRunStatusQueued}}, lookup); err != nil {
 		t.Fatal(err)
 	}

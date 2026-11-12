@@ -164,7 +164,7 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 			call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, string(ActionOriginVM)).Scan(&state.TotalCalls, &state.UnfinishedCalls); err != nil {
 			return nil, err
 		}
-		if err := proposal.Nested.admit(call, state); err != nil {
+		if err := proposal.Nested.Admit(call, state); err != nil {
 			return nil, err
 		}
 	} else {
@@ -519,7 +519,7 @@ func (s *PostgresStore) ClaimNextAction(ctx context.Context, claim ActionClaim) 
 					WHERE r2.scope_kind=c.scope_kind AND r2.scope_id=c.scope_id AND r2.id=c.run_id
 					AND r2.status NOT IN ('completed','failed','canceled'))) END)
 		ORDER BY c.available_at, c.created_at, c.id FOR UPDATE OF c SKIP LOCKED LIMIT 1`, claim.Scope.Kind, claim.Scope.ID,
-		ActionCallStatusReady, ActionCallStatusRunning, claim.Now, claim.OwnActionID, string(ActionExecutionHost), claim.hostReadyCutoff(),
+		ActionCallStatusReady, ActionCallStatusRunning, claim.Now, claim.OwnActionID, string(ActionExecutionHost), claim.HostReadyCutoff(),
 		string(ActionExecutionLoop)).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
