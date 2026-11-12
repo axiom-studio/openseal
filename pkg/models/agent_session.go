@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -213,13 +214,19 @@ const (
 	ToolEntryInterrupted      ToolEntryState = "interrupted"
 )
 
+// toolEntryStates lists every state, open ones first.
+var toolEntryStates = []ToolEntryState{
+	ToolEntryPending, ToolEntryAwaitingApproval, ToolEntryAwaitingChild, ToolEntryAwaitingEvent,
+	ToolEntryRunning, ToolEntryCompleted, ToolEntryError, ToolEntryInterrupted,
+}
+
+// ToolEntryStateValues returns a fresh copy of every state, open ones first.
+func ToolEntryStateValues() []ToolEntryState {
+	return slices.Clone(toolEntryStates)
+}
+
 func (s ToolEntryState) Valid() bool {
-	switch s {
-	case ToolEntryPending, ToolEntryAwaitingApproval, ToolEntryAwaitingChild, ToolEntryAwaitingEvent,
-		ToolEntryRunning, ToolEntryCompleted, ToolEntryError, ToolEntryInterrupted:
-		return true
-	}
-	return false
+	return slices.Contains(toolEntryStates, s)
 }
 
 // Terminal is completed, error or interrupted.
