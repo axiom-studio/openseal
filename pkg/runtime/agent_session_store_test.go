@@ -98,6 +98,52 @@ func testAppend(store *SQLiteStore, sessionID, runID string, entries ...*Session
 	})
 }
 
+// forkTestSession creates the queued Run session.OwnerRunID under the source
+// Run and the Run's session in one dependency-group create, the store command
+// a delegation's same-Agent fork goes through. The source must own
+// session.ParentSessionID. The new Run is the one putTestSessionRun writes,
+// with the source as its parent. Only same-Agent children fork a session,
+// so both Runs are recorded as assigned to session.AgentID.
+func forkTestSession(t *testing.T, store *SQLiteStore, sourceRunID string, session CreateRunAgentSessionTxRequest) (*AgentSession, error) {
+	t.Helper()
+	source := testStoredSessionRun(t, store, sourceRunID)
+	expires := testSessionNow.Add(time.Minute)
+	child := &AgentRun{
+		ID: session.OwnerRunID, Scope: testSessionScope, ParentRunID: source.ID, RootRunID: source.RootRunID,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: session.AgentID, Goal: "session test", Status: AgentRunStatusQueued, Revision: 1,
+		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: testSessionNow, UpdatedAt: testSessionNow,
+	}
+	groupID := "fork-" + child.ID
+	waiting := cloneAgentRun(source)
+	waiting.AssignedAgentID = session.AgentID
+	waiting.Status = AgentRunStatusWaitingForDependency
+	waiting.WakeCondition = &WakeCondition{Type: "run_dependencies", Reference: groupID}
+	waiting.Revision++
+	waiting.UpdatedAt = testSessionNow
+	sealed := testSessionNow
+	result, err := store.CreateRunDependencyGroup(context.Background(), RunDependencyGroupCreateRecord{
+		Group: &RunDependencyGroup{
+			ID: groupID, Scope: testSessionScope, SourceRunID: source.ID, Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+			ExpectedCount: 1, Status: RunDependencyGroupWaiting, Revision: 1, CreatedAt: testSessionNow, UpdatedAt: testSessionNow, SealedAt: &sealed,
+		},
+		Dependencies: []*RunDependency{{
+			ID: "branch-" + child.ID, Scope: testSessionScope, GroupID: groupID, SourceRunID: source.ID, TargetRunID: child.ID,
+			Kind: RunDependencyKindRun, State: RunDependencyStateRunning, Required: true, Revision: 1, CreatedAt: testSessionNow, UpdatedAt: testSessionNow,
+		}},
+		TargetRuns: []*AgentRun{child}, SourceRun: waiting, ExpectedSourceRevision: source.Revision,
+		Event: &ActivityEvent{
+			ID: uuid.NewString(), Scope: testSessionScope, RunID: source.ID, EventType: "run.forked", Severity: ActivitySeverityInfo,
+			Summary: "Forked a child Run", Actor: ActivityActor{Type: "worker", ID: "w1"}, Visibility: ActivityVisibilityScope,
+			CorrelationID: groupID, CreatedAt: testSessionNow,
+		},
+		ChildSessions: []CreateRunAgentSessionTxRequest{session},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.ChildSessions[0], nil
+}
+
 func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
 	store, db := newTestSQLiteStore(t)
 	putTestSessionRun(t, store, "r1", "other-session", AgentRunStatusRunning, 0)
@@ -330,29 +376,28 @@ func TestCreateRunSessionBindsRunAndForks(t *testing.T) {
 	}
 
 	// Same-Agent fork in the child-creating transaction, before p3.
-	putTestSessionRun(t, store, "child", "", AgentRunStatusQueued, 0)
-	_, err = createSQLiteRunSessionInOwnTx(context.Background(), store, CreateRunAgentSessionTxRequest{
+	_, err = forkTestSession(t, store, "r1", CreateRunAgentSessionTxRequest{
 		Scope: testSessionScope, OwnerRunID: "child", AgentID: "agent-a", ParentSessionID: parent.ID, ForkSequence: 5,
 	})
 	if !errors.Is(err, ErrInvalidAgentSession) {
 		t.Fatalf("fork past the leaf = %v, want ErrInvalidAgentSession", err)
 	}
-	fork, err := createSQLiteRunSessionInOwnTx(context.Background(), store, CreateRunAgentSessionTxRequest{
+	fork, err := forkTestSession(t, store, "r1", CreateRunAgentSessionTxRequest{
 		Scope: testSessionScope, OwnerRunID: "child", AgentID: "agent-a", ParentSessionID: parent.ID, ForkSequence: 2, Now: testSessionNow,
 	})
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
-	if fork.Session.Depth != 1 || fork.Session.ForkEntryID != "p2" || fork.Session.RootSessionID != parent.ID || fork.Session.ConversationID != "c1" {
-		t.Fatalf("fork session = %+v", fork.Session)
+	if fork.Depth != 1 || fork.ForkEntryID != "p2" || fork.RootSessionID != parent.ID || fork.ConversationID != "c1" {
+		t.Fatalf("fork session = %+v", fork)
 	}
-	if run := testStoredSessionRun(t, store, "child"); run.SessionID != fork.Session.ID {
+	if run := testStoredSessionRun(t, store, "child"); run.SessionID != fork.ID {
 		t.Fatalf("child binding = %q", run.SessionID)
 	}
-	if _, err := testAppend(store, fork.Session.ID, "child", storetest.UserSessionEntry("c1", "child")); err != nil {
+	if _, err := testAppend(store, fork.ID, "child", storetest.UserSessionEntry("c1", "child")); err != nil {
 		t.Fatal(err)
 	}
-	path, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, fork.Session.ID)
+	path, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, fork.ID)
 	if err != nil || storetest.PathEntryIDs(path) != "p1,p2,c1" || len(path.Chain) != 2 {
 		t.Fatalf("fork path = %v, %v", path, err)
 	}
@@ -366,10 +411,10 @@ func TestCreateRunSessionBindsRunAndForks(t *testing.T) {
 func TestForkDepthLimit(t *testing.T) {
 	store := newTestKernelStore(t)
 	parent := openTestConversationSession(t, store, "r0")
+	sourceRunID := "r0"
 	for depth := 1; depth <= MaxAgentSessionDepth+1; depth++ {
 		runID := "d" + string(rune('0'+depth))
-		putTestSessionRun(t, store, runID, "", AgentRunStatusQueued, 0)
-		result, err := createSQLiteRunSessionInOwnTx(context.Background(), store, CreateRunAgentSessionTxRequest{
+		session, err := forkTestSession(t, store, sourceRunID, CreateRunAgentSessionTxRequest{
 			Scope: testSessionScope, OwnerRunID: runID, AgentID: "agent-a", ParentSessionID: parent.ID,
 		})
 		if depth > MaxAgentSessionDepth {
@@ -381,7 +426,7 @@ func TestForkDepthLimit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("depth %d: %v", depth, err)
 		}
-		parent = result.Session
+		parent, sourceRunID = session, runID
 	}
 }
 

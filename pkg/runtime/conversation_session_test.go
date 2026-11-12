@@ -147,7 +147,6 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 	if _, err := testAppend(store, parent.ID, "r1", storetest.UserSessionEntry("p1", "a"), storetest.UserSessionEntry("p2", "b"), storetest.UserSessionEntry("p3", "c")); err != nil {
 		t.Fatal(err)
 	}
-	putTestSessionRun(t, store, "child", "", AgentRunStatusQueued, 0)
 	seed, err := childSessionSeed(testSessionScope, "child", "task", conversationTaskBrief("  draft the launch note "))
 	if err != nil {
 		t.Fatal(err)
@@ -159,11 +158,10 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := createSQLiteRunSessionInOwnTx(t.Context(), store, txReq)
+	session, err := forkTestSession(t, store, "r1", txReq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := created.Session
 	if session.ID != RunAgentSessionID(testSessionScope, "child") ||
 		session.ParentSessionID != parent.ID || session.ForkSequence != 2 || session.ForkEntryID != "p2" ||
 		session.ConversationID != "c1" || session.NextSequence != 2 {

@@ -47,7 +47,6 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 
 	// The child session made from the ref renders the parent up to, not
 	// including, the forking assistant entry, then its seed.
-	putTestSessionRun(t, store, "child", "", AgentRunStatusQueued, 0)
 	child := &AgentRun{
 		ID: "child", Scope: testSessionScope, Goal: "Compare the two vendors", Source: RunSourceFork,
 		Checkpoint: map[string]interface{}{"forkChild": map[string]interface{}{"sourceRunId": "r1"}},
@@ -60,14 +59,14 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := createSQLiteRunSessionInOwnTx(t.Context(), store, txReq)
+	created, err := forkTestSession(t, store, "r1", txReq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Session.ForkEntryID != "p2" || created.Session.ForkSequence != 2 {
-		t.Fatalf("child session = %+v", created.Session)
+	if created.ForkEntryID != "p2" || created.ForkSequence != 2 {
+		t.Fatalf("child session = %+v", created)
 	}
-	childPath, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, created.Session.ID)
+	childPath, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
