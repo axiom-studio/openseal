@@ -222,6 +222,12 @@ func ToolEntryStateValues() []ToolEntryState {
 	return slices.Clone(toolEntryStates)
 }
 
+// OpenToolEntryStateValues returns a fresh copy of the non-terminal states,
+// the filter a Run uses to find tool entries it must resume or close.
+func OpenToolEntryStateValues() []ToolEntryState {
+	return []ToolEntryState{ToolEntryPending, ToolEntryAwaitingApproval, ToolEntryAwaitingChild, ToolEntryAwaitingEvent, ToolEntryRunning}
+}
+
 func (s ToolEntryState) Valid() bool {
 	return slices.Contains(toolEntryStates, s)
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Terminal close (loop-16): once a Run is terminal, nothing of it may stay
@@ -128,7 +130,7 @@ func closeTerminalRunToolEntries(ctx context.Context, sessions AgentSessionStore
 	result := terminalRunToolResult(run.Status)
 	for stalled := 0; ; {
 		open, err := sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-			Scope: run.Scope, RunID: run.ID, States: OpenToolEntryStates, Limit: maxSessionEntryListLimit,
+			Scope: run.Scope, RunID: run.ID, States: models.OpenToolEntryStateValues(), Limit: maxSessionEntryListLimit,
 		})
 		if err != nil {
 			return err

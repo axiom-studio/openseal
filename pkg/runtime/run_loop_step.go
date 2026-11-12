@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // One step of the loop (SPEC §3.1 phases 0-11).
@@ -380,7 +382,7 @@ func (d *drive) resumeOpenTools(ctx context.Context, st *stepState) (stepResult,
 		return stepResult{}, false
 	}
 	open, err := d.l.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: d.run.Scope, RunID: d.run.ID, States: OpenToolEntryStates, Limit: openToolEntryPage,
+		Scope: d.run.Scope, RunID: d.run.ID, States: models.OpenToolEntryStateValues(), Limit: openToolEntryPage,
 	})
 	if err != nil {
 		return d.storeError(ctx, st, err, StepFailurePreparationFailed), true

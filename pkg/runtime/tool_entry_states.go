@@ -7,6 +7,4 @@ import "github.com/axiom-studio/openseal/pkg/models"
 var ToolEntryStates = models.ToolEntryStateValues()
 
 // OpenToolEntryStates lists the non-terminal states (D14 resume filter).
-var OpenToolEntryStates = []models.ToolEntryState{
-	models.ToolEntryPending, models.ToolEntryAwaitingApproval, models.ToolEntryAwaitingChild, models.ToolEntryAwaitingEvent, models.ToolEntryRunning,
-}
+var OpenToolEntryStates = models.OpenToolEntryStateValues()
