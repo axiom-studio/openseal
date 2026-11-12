@@ -47,7 +47,7 @@ func TestSkillUpgradeCompatibilityIncludesExecutableAdapterContracts(t *testing.
 		}, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			target := cloneUpgradeTestDefinition(t, base)
+			target := cloneUpgradeDefinition(t, base)
 			test.change(target)
 			findings := append(compareUpgradeContracts(base, target, binding.AllowedActions, nil), compareUpgradeAdapterContracts(base, target, binding)...)
 			if test.code == "" {
@@ -65,7 +65,7 @@ func TestSkillUpgradeCompatibilityIncludesExecutableAdapterContracts(t *testing.
 			}
 		})
 	}
-	unchanged := cloneUpgradeTestDefinition(t, base)
+	unchanged := cloneUpgradeDefinition(t, base)
 	if !reflect.DeepEqual(base, unchanged) {
 		t.Fatal("comparison mutated original")
 	}

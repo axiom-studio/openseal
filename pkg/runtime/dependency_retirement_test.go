@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
 
@@ -485,7 +487,7 @@ func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(
 					}
 					expectedAdmissionError = models.ErrSkillRuntimeMaintenance
 				} else {
-					revoked := cloneUpgradeBinding(binding)
+					revoked := cloneRetirementBinding(binding)
 					revoked.Disabled, revoked.Revision, revoked.UpdatedAt = true, binding.Revision+1, now.Add(3*time.Second)
 					if err := catalog.Bind(t.Context(), revoked); err != nil {
 						t.Fatal(err)
@@ -801,4 +803,13 @@ func dependencyRetirementChildResult(branch string, child *models.AgentRun) map[
 func reopenDependencyRetirementStore(t *testing.T, backend actionLifecycleBackend) dependencyRetirementStore {
 	t.Helper()
 	return backend.reopen(t).(dependencyRetirementStore)
+}
+
+// cloneRetirementBinding deep-copies a Skill binding through JSON, as the
+// skill reference upgrade does before it changes one.
+func cloneRetirementBinding(value *skill.Binding) *skill.Binding {
+	payload, _ := json.Marshal(value)
+	var copy skill.Binding
+	_ = json.Unmarshal(payload, &copy)
+	return &copy
 }

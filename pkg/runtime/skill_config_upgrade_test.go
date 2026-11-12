@@ -64,7 +64,7 @@ func TestSkillUpgradeConfigContractFindings(t *testing.T) {
 		{"became required", func(d *skill.Definition) { d.Config.Fields[2].Default, d.Config.Fields[2].Required = nil, true }, "fallbackToYahoo", "", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			target := cloneUpgradeTestDefinition(t, base)
+			target := cloneUpgradeDefinition(t, base)
 			target.Version = "1.1.0"
 			test.change(target)
 			findings := compareUpgradeContracts(base, target, []string{"search"}, nil)
@@ -101,7 +101,7 @@ func TestSkillUpgradeConfigCompatibleChangesNeedNoApproval(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			target := cloneUpgradeTestDefinition(t, base)
+			target := cloneUpgradeDefinition(t, base)
 			target.Version = "1.1.0"
 			change(target)
 			if findings := compareUpgradeContracts(base, target, []string{"search"}, nil); len(findings) != 0 {
@@ -117,14 +117,14 @@ func TestSkillUpgradeFirstConfigDeclarationNeedsNoApproval(t *testing.T) {
 	// A required field without a default would need review between two
 	// config-declaring versions; as part of the first declaration it does not.
 	target.Config.Fields = append(target.Config.Fields, skill.SkillConfigField{Key: "region", Label: "Region", Type: "string", Required: true})
-	previous := cloneUpgradeTestDefinition(t, target)
+	previous := cloneUpgradeDefinition(t, target)
 	previous.Version = "1.0.0"
 	previous.Config = nil
 	if findings := compareUpgradeContracts(previous, target, []string{"search"}, nil); len(findings) != 0 {
 		t.Fatalf("first config declaration requires approval: %#v", findings)
 	}
 	// Non-config contract changes alongside the first declaration still count.
-	riskier := cloneUpgradeTestDefinition(t, target)
+	riskier := cloneUpgradeDefinition(t, target)
 	search := riskier.Actions["search"]
 	search.Risk = skill.RiskLevelWrite
 	riskier.Actions["search"] = search
@@ -151,7 +151,7 @@ func TestSkillConfigPersistsWithDefinitionAcrossStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			// JSON storage decodes numbers as float64; compare through a clone.
-			if !reflect.DeepEqual(restored.Config, cloneUpgradeTestDefinition(t, definition).Config) {
+			if !reflect.DeepEqual(restored.Config, cloneUpgradeDefinition(t, definition).Config) {
 				t.Fatalf("config did not round-trip:\n%#v\n%#v", restored.Config, definition.Config)
 			}
 		})
