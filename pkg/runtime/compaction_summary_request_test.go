@@ -96,7 +96,7 @@ func addSurfacingLoad(f *renderFixture, step, call, capabilityID, name string) *
 // the rendered entries, and the base tools with the loaded group of the path.
 func surfacedModelStep(t *testing.T, path *models.AgentSessionPath) models.ModelStepRequest {
 	t.Helper()
-	step := validModelStepRequest()
+	step := validStepRequest()
 	entries, err := projectSessionPath(context.Background(), path, sessionRenderOptions{})
 	if err != nil {
 		t.Fatal(err)

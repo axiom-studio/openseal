@@ -128,7 +128,7 @@ type compactionFixture struct {
 
 func newCompactionFixture(t *testing.T) *compactionFixture {
 	t.Helper()
-	store := newTestKernelStore(t)
+	store := newModelStepTestStore(t)
 	f := &storetest.SessionFixture{
 		T: t, Ctx: context.Background(), Store: store,
 		Scope: models.Scope{Kind: "tenant", ID: "compact-" + uuid.NewString()[:8]},

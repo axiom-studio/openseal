@@ -31,7 +31,7 @@ func newRenderFixture(t *testing.T, session string) *renderFixture {
 }
 
 func (f *renderFixture) add(e *models.SessionEntry) *models.SessionEntry {
-	e.Scope = testSessionScope
+	e.Scope = stepTestScope
 	e.SessionID = f.session
 	e.Sequence = int64(len(f.entries) + 1)
 	e.ID = f.session + "-" + fmt.Sprint(e.Sequence)
@@ -49,7 +49,7 @@ func (f *renderFixture) user(run, text string, parts ...models.ContentPart) *mod
 }
 
 func (f *renderFixture) assistant(run, step string, calls ...string) *models.SessionEntry {
-	a := modelStepTestAssistant(calls...)
+	a := stepTestAssistant(calls...)
 	a.Limits = &models.AssistantModelLimits{ContextTokens: 200000, PromptTokens: 1200}
 	return f.add(&models.SessionEntry{RunID: run, StepID: step, Type: models.SessionEntryAssistant, Assistant: a})
 }
@@ -85,7 +85,7 @@ func (f *renderFixture) compaction(run, firstKept string) *models.SessionEntry {
 }
 
 func (f *renderFixture) agentSession(parent *models.AgentSession, forkSequence int64) *models.AgentSession {
-	s := &models.AgentSession{ID: f.session, Scope: testSessionScope, NextSequence: int64(len(f.entries) + 1)}
+	s := &models.AgentSession{ID: f.session, Scope: stepTestScope, NextSequence: int64(len(f.entries) + 1)}
 	if parent != nil {
 		s.ParentSessionID, s.ForkSequence, s.Depth = parent.ID, forkSequence, parent.Depth+1
 	}
@@ -124,7 +124,7 @@ func requireRenderOrder(t *testing.T, views []models.SessionEntryView, want ...s
 
 func requireRenderedStep(t *testing.T, views []models.SessionEntryView) {
 	t.Helper()
-	req := validModelStepRequest()
+	req := validStepRequest()
 	req.Entries = views
 	if err := req.Validate(); err != nil {
 		t.Fatalf("Validate() = %v", err)
@@ -213,12 +213,12 @@ func newRenderImageSources() *renderImageSources {
 	return &renderImageSources{
 		photo: photo, shot: shot,
 		artifacts: &renderArtifacts{artifacts: map[string]*models.Artifact{
-			"photo@2": {ID: "photo", Version: 2, Scope: testSessionScope, MediaType: "image/png", ContentRef: "ref-photo",
+			"photo@2": {ID: "photo", Version: 2, Scope: stepTestScope, MediaType: "image/png", ContentRef: "ref-photo",
 				SizeBytes: int64(len(photo)), Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(photo))},
 		}},
 		content: renderContent{"ref-photo": photo},
 		calls: &renderCalls{calls: map[string]*models.ActionCall{
-			"ac-shot": {ID: "ac-shot", Scope: testSessionScope, Status: models.ActionCallStatusSucceeded, Output: map[string]interface{}{
+			"ac-shot": {ID: "ac-shot", Scope: stepTestScope, Status: models.ActionCallStatusSucceeded, Output: map[string]interface{}{
 				"url": "https://example.test",
 				"modelMedia": map[string]interface{}{
 					"mediaType": "image/jpeg", "detail": "high", "contentBase64": base64.StdEncoding.EncodeToString(shot),
@@ -352,11 +352,11 @@ func TestRenderImageRefResolvesBytes(t *testing.T) {
 
 func TestRenderUnavailableImageBecomesText(t *testing.T) {
 	src := newRenderImageSources()
-	src.calls.calls["ac-big"] = &models.ActionCall{ID: "ac-big", Scope: testSessionScope, Output: map[string]interface{}{
+	src.calls.calls["ac-big"] = &models.ActionCall{ID: "ac-big", Scope: stepTestScope, Output: map[string]interface{}{
 		"modelMedia": map[string]interface{}{"mediaType": "image/png",
 			"contentBase64": base64.StdEncoding.EncodeToString(make([]byte, models.MaxModelStepMediaBytes+1))},
 	}}
-	src.artifacts.artifacts["tampered@1"] = &models.Artifact{ID: "tampered", Version: 1, Scope: testSessionScope, MediaType: "image/png",
+	src.artifacts.artifacts["tampered@1"] = &models.Artifact{ID: "tampered", Version: 1, Scope: stepTestScope, MediaType: "image/png",
 		ContentRef: "ref-photo", SizeBytes: int64(len(src.photo)), Digest: "sha256:00"}
 	f := newRenderFixture(t, "lane")
 	u := f.user("run-a", "pictures",
